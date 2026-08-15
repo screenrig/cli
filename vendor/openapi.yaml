@@ -1,0 +1,1175 @@
+openapi: 3.1.0
+info:
+  title: ScreenRig API
+  version: 0.2.0
+  description: Agent-operated digital signage control and runtime API.
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+servers:
+  - url: https://api.screenrig.ai
+    description: Control-plane origin
+security: []
+paths:
+  /.health:
+    get:
+      operationId: getHealth
+      responses:
+        "200": { description: Alive, content: { application/json: { schema: { $ref: "#/components/schemas/HealthResponse" } } } }
+  /.ready:
+    get:
+      operationId: getReadiness
+      responses:
+        "200": { description: Ready, content: { application/json: { schema: { $ref: "#/components/schemas/ReadyResponse" } } } }
+        "503": { $ref: "#/components/responses/Problem" }
+  /.version:
+    get:
+      operationId: getVersion
+      responses:
+        "200": { description: Version, content: { application/json: { schema: { $ref: "#/components/schemas/VersionResponse" } } } }
+  /api/v1/capabilities:
+    get:
+      operationId: getCapabilities
+      responses:
+        "200": { description: Capability and archive limits, content: { application/json: { schema: { $ref: "#/components/schemas/Capabilities" } } } }
+  /api/v1/enrollments:
+    post:
+      operationId: enrollCLI
+      description: Internal bundled-CLI first-use enrollment. Persist client_id and Idempotency-Key before sending; an exact retry redelivers the same permanent credential from its encrypted issuance for ten minutes without creating another account. After that delivery window the durable idempotency result returns credential_issuance_expired; no follow-up mutation is required or supported.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CLIEnrollmentRequest" } } } }
+      responses:
+        "201": { description: "Anonymous account and permanent bearer credential. Persist and verify the token, then resume the original command. The credential has no scheduled expiry but its encrypted exact-retry delivery envelope exists only until issuance_expires_at.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/CLIEnrollment" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "410": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/account:
+    get:
+      operationId: getAccount
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Account, content: { application/json: { schema: { $ref: "#/components/schemas/Account" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/applications:
+    get:
+      operationId: listApplications
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Applications, content: { application/json: { schema: { $ref: "#/components/schemas/ApplicationList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: uploadApplication
+      description: Streams one CLI-produced tar.gz directly into bounded durable staging. Metadata is carried in headers so the archive is never base64-wrapped or materialized as JSON by the server.
+      security: [{ accountBearer: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/ArchiveSHA256" }
+        - { $ref: "#/components/parameters/ExpandedBytes" }
+        - { $ref: "#/components/parameters/FileCount" }
+        - { $ref: "#/components/parameters/SDKVersion" }
+        - { $ref: "#/components/parameters/ApplicationName" }
+      requestBody: { required: true, content: { application/gzip: { schema: { type: string, contentMediaType: application/gzip, contentEncoding: binary, maxLength: 104857600 } } } }
+      responses:
+        "202": { description: Upload accepted, content: { application/json: { schema: { $ref: "#/components/schemas/OperationAccepted" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/applications/{id}:
+    get:
+      operationId: getApplication
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Application, content: { application/json: { schema: { $ref: "#/components/schemas/Application" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/operations/{id}:
+    get:
+      operationId: getOperation
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Operation, content: { application/json: { schema: { $ref: "#/components/schemas/Operation" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/operations/{id}/cancel:
+    post:
+      operationId: cancelOperation
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Cancelled durable operation. A current worker fence can no longer finalize it., content: { application/json: { schema: { $ref: "#/components/schemas/Operation" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/playlists:
+    get:
+      operationId: listPlaylists
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Playlists, content: { application/json: { schema: { $ref: "#/components/schemas/PlaylistList" } } } }
+    post:
+      operationId: createPlaylist
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PlaylistWrite" } } } }
+      responses:
+        "201": { description: Playlist, content: { application/json: { schema: { $ref: "#/components/schemas/Playlist" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/playlists/{id}:
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    get:
+      operationId: getPlaylist
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Playlist, content: { application/json: { schema: { $ref: "#/components/schemas/Playlist" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: updatePlaylist
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PlaylistWrite" } } } }
+      responses:
+        "200": { description: Playlist, content: { application/json: { schema: { $ref: "#/components/schemas/Playlist" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deletePlaylist
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "204": { description: Deleted }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens:
+    get:
+      operationId: listScreens
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Screens, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/account/browser-links/claim:
+    post:
+      operationId: claimBrowserLink
+      description: Claims one browser-link code for the authenticated account and atomically creates exactly one first pairing_pending screen plus its existing browser provisioning grant. Enrollment remains account-only. The response is safe metadata only and never contains a provisioning token, fragment URL, cookie, or proof.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserLinkClaimRequest" } } } }
+      responses:
+        "201": { description: Exact replay-safe fragment-free browser-link claim., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserLinkClaim" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "410": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/pair:
+    post:
+      operationId: pairScreen
+      description: Claims one fleet-global six-character Player pairing session. Exact Idempotency-Key retries return the durable original result without consuming quota again.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PairScreen" } } } }
+      responses:
+        "201": { description: Durable pairing_pending screen claim., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/PairingClaim" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/provision:
+    post:
+      operationId: provisionScreen
+      description: Optional browser-only new-screen provisioning. Always creates one new quota-counted pairing_pending screen; exact retries redeliver the same fragment token for ten minutes. Six-character pairing remains the default and only recovery flow.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ProvisionScreen" } } } }
+      responses:
+        "201": { description: New browser provisioning link., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenProvisioning" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "410": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/{id}:
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    get:
+      operationId: getScreen
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Screen, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    patch:
+      operationId: updateScreen
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenPatch" } } } }
+      responses:
+        "200": { description: Screen, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteScreen
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "204": { description: Deleted }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/{id}/public-id/rotate:
+    post:
+      operationId: rotateScreenPublicId
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Public URL credential rotated; paired device credential preserved and all prior runtime/content grants revoked., content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/{id}/credential/revoke:
+    post:
+      operationId: revokeScreenCredential
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Paired device credential revoked; public URL preserved and all prior runtime/content grants revoked., content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/events:
+    get:
+      operationId: listEvents
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/AfterCursor" }]
+      responses:
+        "200": { description: Durable events, content: { application/json: { schema: { $ref: "#/components/schemas/EventList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/events/stream:
+    get:
+      operationId: streamEvents
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/AfterCursor" }, { $ref: "#/components/parameters/LastEventID" }]
+      responses:
+        "200": { description: "Replayable SSE stream. The query cursor takes precedence over Last-Event-ID. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close.", content: { text/event-stream: { schema: { type: string } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/applications/{application_id}/kv:
+    get:
+      operationId: listKV
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ApplicationID" }]
+      responses:
+        "200": { description: KV entries, content: { application/json: { schema: { $ref: "#/components/schemas/KVList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/applications/{application_id}/kv/{key}:
+    parameters: [{ $ref: "#/components/parameters/ApplicationID" }, { name: key, in: path, required: true, schema: { type: string } }]
+    get:
+      operationId: getKV
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: KV entry, content: { application/json: { schema: { $ref: "#/components/schemas/KVEntry" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: putKV
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/OptionalIfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/KVWrite" } } } }
+      responses:
+        "200": { description: KV entry, content: { application/json: { schema: { $ref: "#/components/schemas/KVEntry" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteKV
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "204": { description: Deleted }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/media:
+    get:
+      operationId: listMedia
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Media, content: { application/json: { schema: { $ref: "#/components/schemas/MediaList" } } } }
+  /api/v1/media/uploads:
+    post:
+      operationId: createMediaUpload
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MediaUploadDeclaration" } } } }
+      responses:
+        "201": { description: Short-lived signed authorization for exactly one private object PUT. Send the returned method and every returned header verbatim., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/MediaUploadSession" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/media/uploads/{id}/commit:
+    post:
+      operationId: commitMediaUpload
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MediaCommit" } } } }
+      responses:
+        "202": { description: Exact declaration persisted for asynchronous verification and immutable private publication., content: { application/json: { schema: { $ref: "#/components/schemas/Operation" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/media/{id}:
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    get:
+      operationId: getMedia
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Ready private media metadata. Bytes remain available only through a runtime manifest grant., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Media" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteMedia
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "204": { description: Tombstoned. Referenced desired or active grants cannot be deleted. }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/pairing-sessions:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    post:
+      operationId: startPairingSession
+      description: Creates one fleet-global expiring pairing session and sets the temporary HttpOnly Secure SameSite=Strict pairing cookie. An untrusted Origin or cross-site browser request is rejected with forbidden before rate-limit or pairing state is created.
+      responses:
+        "201": { description: Exact six-character pairing code and expiry., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/PairingSession" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/pairing-events:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    get:
+      operationId: streamPairingEvents
+      security: [{ pairingCookie: [] }]
+      responses:
+        "200": { description: Authenticated temporary pairing SSE. The terminal pairing.claimed data is PairingClaimedEvent and contains only a non-secret completion nonce., headers: { Cache-Control: { schema: { type: string, enum: ["no-cache, no-store, no-transform"] } }, X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/pairing-sessions/complete:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    post:
+      operationId: completePairingSession
+      security: [{ pairingCookie: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PairingComplete" } } } }
+      responses:
+        "200": { description: Paired-device cookie issued; the Player next creates the ordinary paired runtime session., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/PairingCompletion" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/sessions:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    post:
+      operationId: createAnonymousRuntimeSession
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeSessionRequest" } } } }
+      responses:
+        "201": { description: Read-only runtime session cookie, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeSession" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/device-sessions:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    post:
+      operationId: createDeviceRuntimeSession
+      security: [{ pairedDeviceCookie: [] }]
+      requestBody: { required: false, content: { application/json: { schema: { $ref: "#/components/schemas/DeviceSessionRequest" } } } }
+      responses:
+        "201": { description: Paired runtime session, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeSession" } } } }
+        "409": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/browser-provisioning/exchanges:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted browser Player origin }]
+    post:
+      operationId: exchangeBrowserProvisioning
+      description: Browser-only same-origin exchange. Atomically binds the one-time token to exchange_id and sets only the normal host-only HttpOnly Secure SameSite=Strict paired-device cookie. Android and Qt never consume this grant.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserProvisioningExchange" } } } }
+      responses:
+        "201": { description: Paired-device cookie issued without a runtime cookie or credential in the body., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserProvisioningCompletion" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "410": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/browser-links:
+    servers: [{ url: https://screenrig.ai, description: HTTPS apex browser-link origin }]
+    post:
+      operationId: startBrowserLink
+      description: Strict same-origin no-JavaScript-compatible POST that creates or reuses a ten-minute browser-link session. It sets exactly the apex host-only Secure HttpOnly SameSite=Strict Path=/ __Host-screenrig-browser-link cookie with no Domain. JSON clients receive 201; Accept text/html receives a bodyless 303 to /setup. No insecure localhost fallback exists; development requires the configured HTTPS loopback origin.
+      responses:
+        "201": { description: Safe browser-link code/status metadata., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, Set-Cookie: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserLinkSession" } } } }
+        "303": { description: No-JavaScript form continuation to the read-only setup page., headers: { Location: { schema: { type: string, enum: [/setup] } }, Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, Set-Cookie: { schema: { type: string } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: getBrowserLinkStatus
+      description: Read-only polling fallback authenticated only by the owning apex browser-link cookie. It returns safe status metadata and the fixed continuation path, never a provisioning URL or token.
+      security: [{ browserLinkCookie: [] }]
+      responses:
+        "200": { description: Claimed safe status., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserLinkStatus" } } } }
+        "202": { description: Browser link exists but is not claimed yet., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserLinkStatus" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "410": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/browser-links/events:
+    servers: [{ url: https://screenrig.ai, description: HTTPS apex browser-link origin }]
+    get:
+      operationId: streamBrowserLinkEvents
+      description: Owning-cookie-only replayable SSE with Last-Event-ID. Event data contains safe status fields only. It never contains a provisioning URL/token and does not use the account event stream.
+      security: [{ browserLinkCookie: [] }]
+      parameters: [{ $ref: "#/components/parameters/LastEventID" }]
+      responses:
+        "200": { description: Browser-link issued/claimed status SSE., headers: { Cache-Control: { schema: { type: string, enum: ["no-cache, no-store, no-transform"] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string, description: Data payloads conform to BrowserLinkEvent and contain no continuation secret. } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "410": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/browser-links/continue:
+    servers: [{ url: https://screenrig.ai, description: HTTPS apex browser-link origin }]
+    get:
+      operationId: continueBrowserLink
+      description: Navigation-only owning-cookie-authenticated GET. After claim it returns a bodyless 303 whose sensitive Location is the exact Player /s/<public_id>#provision=<token> URL. The Location is never exposed through CORS, JSON, SSE, polling, logs, traces, metrics, analytics, events, or errors and is idempotent only during the short delivery repair window.
+      security: [{ browserLinkCookie: [] }]
+      responses:
+        "303": { description: Bodyless redirect to the Player provisioning fragment., headers: { Location: { schema: { type: string, pattern: "^https://play\\.screenrig\\.ai/s/[^#]+#provision=[A-Za-z0-9_-]{43}$" } }, Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "410": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /setup:
+    servers: [{ url: https://screenrig.ai, description: HTTPS apex browser-link origin }]
+    get:
+      operationId: getBrowserLinkSetupPage
+      description: Read-only no-JavaScript setup page authenticated by the owning browser-link cookie. It contains code/status instructions only and never a provisioning URL or token.
+      security: [{ browserLinkCookie: [] }]
+      responses:
+        "200": { description: Safe noindex setup HTML., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Robots-Tag: { schema: { type: string, enum: ["noindex, nofollow"] } } }, content: { text/html: { schema: { type: string } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "410": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /ABC-234:
+    servers: [{ url: https://screenrig.ai, description: HTTPS apex browser-link origin }]
+    get:
+      operationId: getDashedBrowserLinkLocator
+      description: Representative dashed public handoff-code locator. Production accepts every canonical ambiguity-safe XXX-XXX code. The route is side-effect-free and reveals only generic locator instructions.
+      responses:
+        "200": { description: Public locator instructions., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Robots-Tag: { schema: { type: string, enum: ["noindex, nofollow"] } } }, content: { text/html: { schema: { type: string } }, text/markdown: { schema: { type: string } } } }
+        "404": { description: Generic unknown-or-expired locator response with no existence oracle., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Robots-Tag: { schema: { type: string, enum: ["noindex, nofollow"] } } }, content: { text/html: { schema: { type: string } }, text/markdown: { schema: { type: string } } } }
+  /ABC234:
+    servers: [{ url: https://screenrig.ai, description: HTTPS apex browser-link origin }]
+    get:
+      operationId: getUndashedBrowserLinkLocator
+      description: Representative undashed public handoff-code locator equivalent to /ABC-234. The route is side-effect-free and reveals only generic locator instructions.
+      responses:
+        "200": { description: Public locator instructions., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Robots-Tag: { schema: { type: string, enum: ["noindex, nofollow"] } } }, content: { text/html: { schema: { type: string } }, text/markdown: { schema: { type: string } } } }
+        "404": { description: Generic unknown-or-expired locator response with no existence oracle., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Robots-Tag: { schema: { type: string, enum: ["noindex, nofollow"] } } }, content: { text/html: { schema: { type: string } }, text/markdown: { schema: { type: string } } } }
+  /runtime/v1/native/pairing-sessions:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    post:
+      operationId: startNativePairingSession
+      description: Creates a native-only expiring pairing session from an empty request. Cookies, query credentials, cross-site origins, and Authorization are rejected. Exact Idempotency-Key replay precedes new abuse admission. The response never sets a cookie.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "201": { description: Native pairing code plus temporary ScreenRig-Pairing credential; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingSession" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/native/pairing-events:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    get:
+      operationId: streamNativePairingEvents
+      description: Native-only pairing SSE authenticated by exactly one ScreenRig-Pairing Authorization header. Cookies and query credentials are rejected. The terminal event contains only the non-secret completion nonce.
+      security: [{ nativePairingAuthorization: [] }]
+      responses:
+        "200": { description: Authenticated native pairing SSE whose terminal data is PairingClaimedEvent., headers: { Cache-Control: { schema: { type: string, enum: ["no-cache, no-store, no-transform"] } }, X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/native/pairing-sessions/complete:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    post:
+      operationId: completeNativePairingSession
+      description: Delivers the native device credential once, with exact same-pairing and nonce repair only until the first device-authenticated activation. No cookie is accepted or set.
+      security: [{ nativePairingAuthorization: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PairingComplete" } } } }
+      responses:
+        "200": { description: Native pairing completion containing the durable ScreenRig-Device credential; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingCompletion" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/native/device-sessions:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    post:
+      operationId: createNativeDeviceRuntimeSession
+      description: Exchanges exactly one ScreenRig-Device Authorization credential and an empty body for a signed 30-minute native runtime credential. Cookies are neither accepted nor set. Exact Idempotency-Key replay precedes new abuse admission.
+      security: [{ nativeDeviceAuthorization: [] }]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "201": { description: Paired native runtime session; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativeRuntimeSession" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/manifest:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    get:
+      operationId: getRuntimeManifest
+      security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
+      responses:
+        "200": { description: Resolved player manifest, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeManifest" } } } }
+        "304": { description: Manifest unchanged }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/events:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    get:
+      operationId: streamRuntimeEvents
+      security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/AfterCursor" }
+        - { $ref: "#/components/parameters/LastEventID" }
+      responses:
+        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/reports:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    post:
+      operationId: createRuntimeReport
+      security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeReport" } } } }
+      responses:
+        "202": { description: Accepted. manifest.activated is committed before this response and is idempotent for the current active revision. }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/manifests/{manifest_revision}/releases/{release_id}/launch:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    post:
+      operationId: launchApplicationRelease
+      security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
+      parameters:
+        - { name: manifest_revision, in: path, required: true, schema: { type: string } }
+        - { name: release_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "201": { description: Single-use 30-second exact-release-host launch ticket, headers: { Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ReleaseLaunch" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /content/v1/manifests/{manifest_revision}/media/{media_id}:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    get:
+      operationId: getProtectedMedia
+      security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
+      parameters:
+        - { name: manifest_revision, in: path, required: true, schema: { type: string } }
+        - { name: media_id, in: path, required: true, schema: { type: string } }
+        - { $ref: "#/components/parameters/Range" }
+        - { $ref: "#/components/parameters/SecFetchSite" }
+        - { $ref: "#/components/parameters/SecFetchMode" }
+        - { $ref: "#/components/parameters/SecFetchDest" }
+      responses:
+        "200": { description: Session-authorized complete private media. Browser Fetch Metadata must describe trusted-player same-origin media/image/video use; authenticated native clients may omit it., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } }, Content-Disposition: { schema: { type: string } } } }
+        "206": { description: One standards-correct byte range., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } }, Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } } } }
+        "416": { description: "Unsatisfiable, multiple, or malformed range.", headers: { Content-Range: { schema: { type: string } }, Accept-Ranges: { schema: { type: string, enum: [bytes] } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "429": { description: "Per-client, screen, or account protected-media egress limit exceeded.", headers: { Retry-After: { schema: { type: integer, minimum: 1 } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /content/v1/manifests/{manifest_revision}/releases/{release_id}/package:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    parameters:
+      - { name: manifest_revision, in: path, required: true, schema: { type: string, pattern: "^man_" } }
+      - { name: release_id, in: path, required: true, schema: { type: string, pattern: "^rel_" } }
+      - { $ref: "#/components/parameters/Range" }
+      - { $ref: "#/components/parameters/SecFetchSite" }
+      - { $ref: "#/components/parameters/SecFetchMode" }
+      - { $ref: "#/components/parameters/SecFetchDest" }
+    get:
+      operationId: getNativeWebappPackage
+      description: >-
+        Retrieves the normalized immutable package for one uploaded application release so a paired native player
+        can retain its authorized last-known-good release across process restart and temporary network loss. The
+        paired-device cookie, exact screen grant, manifest revision, content-access generation, release membership,
+        and ready package metadata are checked on every request. Account tokens, anonymous runtime cookies, release
+        cookies, external iframe placements, and direct object-storage access never authorize package bytes.
+      security: [{ pairedDeviceCookie: [] }, { nativeDeviceAuthorization: [] }]
+      responses:
+        "200":
+          description: Complete normalized private package.
+          headers:
+            Accept-Ranges: { schema: { type: string, enum: [bytes] } }
+            Content-Length: { schema: { type: integer } }
+            Content-Type: { schema: { type: string, enum: [application/vnd.screenrig.webapp-package+tar+gzip] } }
+            Content-Disposition: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, enum: ["private, max-age=31536000, immutable"] } }
+            ETag: { schema: { type: string } }
+            Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }
+            Cross-Origin-Resource-Policy: { schema: { type: string, enum: [same-origin] } }
+            X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
+            Vary: { schema: { type: string, enum: ["Cookie, Authorization"] } }
+        "206":
+          description: One standards-correct byte range from the same immutable package.
+          headers:
+            Accept-Ranges: { schema: { type: string, enum: [bytes] } }
+            Content-Range: { schema: { type: string } }
+            Content-Length: { schema: { type: integer } }
+            Content-Type: { schema: { type: string, enum: [application/vnd.screenrig.webapp-package+tar+gzip] } }
+            Content-Disposition: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, enum: ["private, max-age=31536000, immutable"] } }
+            ETag: { schema: { type: string } }
+            Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }
+            Cross-Origin-Resource-Policy: { schema: { type: string, enum: [same-origin] } }
+            X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
+            Vary: { schema: { type: string, enum: ["Cookie, Authorization"] } }
+        "416": { description: "Unsatisfiable, multiple, or malformed range.", headers: { Content-Range: { schema: { type: string } }, Accept-Ranges: { schema: { type: string, enum: [bytes] } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+    head:
+      operationId: headNativeWebappPackage
+      description: Returns the same authorization and immutable identity headers as GET without package bytes.
+      security: [{ pairedDeviceCookie: [] }, { nativeDeviceAuthorization: [] }]
+      responses:
+        "200":
+          description: Authorized normalized package metadata.
+          headers:
+            Accept-Ranges: { schema: { type: string, enum: [bytes] } }
+            Content-Length: { schema: { type: integer } }
+            Content-Type: { schema: { type: string, enum: [application/vnd.screenrig.webapp-package+tar+gzip] } }
+            Content-Disposition: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, enum: ["private, max-age=31536000, immutable"] } }
+            ETag: { schema: { type: string } }
+            Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }
+            Cross-Origin-Resource-Policy: { schema: { type: string, enum: [same-origin] } }
+            X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
+            Vary: { schema: { type: string, enum: ["Cookie, Authorization"] } }
+        "206":
+          description: Authorized metadata for one byte range.
+          headers:
+            Accept-Ranges: { schema: { type: string, enum: [bytes] } }
+            Content-Range: { schema: { type: string } }
+            Content-Length: { schema: { type: integer } }
+            Content-Type: { schema: { type: string, enum: [application/vnd.screenrig.webapp-package+tar+gzip] } }
+            Content-Disposition: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, enum: ["private, max-age=31536000, immutable"] } }
+            ETag: { schema: { type: string } }
+            Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }
+            Cross-Origin-Resource-Policy: { schema: { type: string, enum: [same-origin] } }
+            X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
+            Vary: { schema: { type: string, enum: ["Cookie, Authorization"] } }
+        "416": { description: "Unsatisfiable, multiple, or malformed range.", headers: { Content-Range: { schema: { type: string } }, Accept-Ranges: { schema: { type: string, enum: [bytes] } } } }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /{asset_path}:
+    servers:
+      - url: https://r-{release_host_label}.apps.screenrig.ai
+        variables:
+          release_host_label: { default: 0123456789abcdef0123456789abcdef01234567, description: Domain-separated 160-bit lowercase hexadecimal digest label derived deterministically from the immutable prefixed release ID. }
+    get:
+      operationId: consumeLaunchTicketOrGetReleaseAsset
+      description: >-
+        Exact-release-host operation. With a ticket query, atomically consumes the single-use 30-second ticket,
+        binds Host/release/screen/content-generation/manifest/grant, sets only the exact-host release-grant cookie,
+        and redirects to the same path without the ticket. Without a ticket, validates that cookie on every GET/HEAD.
+        The asset_path parameter is greedy (x-screenrig-greedy-path) and is resolved only beneath the ready release root.
+        Runtime/account/device cookies and account bearer tokens never authorize this operation.
+      x-screenrig-greedy-path: true
+      security:
+        - releaseLaunchTicket: []
+        - releaseGrantCookie: []
+      parameters:
+        - { name: asset_path, in: path, required: true, schema: { type: string } }
+        - { $ref: "#/components/parameters/SecFetchSite" }
+        - { $ref: "#/components/parameters/SecFetchMode" }
+        - { $ref: "#/components/parameters/SecFetchDest" }
+      responses:
+        "200": { description: Exact-host grant-authorized immutable asset., headers: { Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }, ETag: { schema: { type: string } } } }
+        "302": { description: Ticket consumed once; release-grant cookie issued; ticket removed from Location., headers: { Location: { schema: { type: string } }, Set-Cookie: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } } }
+        "403": { description: "Wrong Host/release/screen/generation/grant, stale/replayed ticket, invalid cookie, contradictory Fetch Metadata, or disallowed method.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "404": { description: Asset absent without exposing release filesystem shape., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /runtime/v1/apps/{application_id}/kv:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    get:
+      operationId: listRuntimeKV
+      description: >-
+        Lists metadata for the application placement named by the current manifest. Requires the HttpOnly runtime
+        session and the parent-only ScreenRig-Placement-Capability handle issued on the application placement.
+        Handles expire after five minutes and are refreshed by fetching the current runtime manifest; uploaded frames
+        never receive the handle and must use the validated parent SDK bridge.
+      security: [{ runtimeCookie: [], placementCapability: [] }, { nativeSessionAuthorization: [], placementCapability: [] }]
+      parameters: [{ $ref: "#/components/parameters/ApplicationID" }]
+      responses:
+        "200": { description: Manifest-authorized application KV, content: { application/json: { schema: { $ref: "#/components/schemas/KVList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/apps/{application_id}/kv/{key}:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    parameters: [{ $ref: "#/components/parameters/ApplicationID" }, { name: key, in: path, required: true, schema: { type: string } }]
+    get:
+      operationId: getRuntimeKV
+      security: [{ runtimeCookie: [], placementCapability: [] }, { nativeSessionAuthorization: [], placementCapability: [] }]
+      responses:
+        "200": { description: Manifest-authorized application KV value, content: { application/json: { schema: { $ref: "#/components/schemas/KVEntry" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: putRuntimeKV
+      security: [{ pairedRuntimeCookie: [], placementCapability: [] }, { nativeSessionAuthorization: [], placementCapability: [] }]
+      parameters: [{ $ref: "#/components/parameters/OptionalIfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/KVWrite" } } } }
+      responses:
+        "200": { description: Paired-device KV mutation, content: { application/json: { schema: { $ref: "#/components/schemas/KVEntry" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteRuntimeKV
+      security: [{ pairedRuntimeCookie: [], placementCapability: [] }, { nativeSessionAuthorization: [], placementCapability: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "204": { description: Paired-device KV deletion }
+        default: { $ref: "#/components/responses/Problem" }
+components:
+  parameters:
+    ResourceID: { name: id, in: path, required: true, schema: { type: string } }
+    ApplicationID: { name: application_id, in: path, required: true, schema: { type: string } }
+    IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 8, maxLength: 200 } }
+    ArchiveSHA256: { name: ScreenRig-Archive-SHA256, in: header, required: true, schema: { type: string, pattern: "^[0-9a-f]{64}$" } }
+    ExpandedBytes: { name: ScreenRig-Expanded-Bytes, in: header, required: true, schema: { type: integer, minimum: 1, maximum: 262144000 } }
+    FileCount: { name: ScreenRig-File-Count, in: header, required: true, schema: { type: integer, minimum: 1, maximum: 5000 } }
+    SDKVersion: { name: ScreenRig-SDK-Version, in: header, required: false, schema: { type: string, maxLength: 64 } }
+    ApplicationName: { name: ScreenRig-Application-Name, in: header, required: false, schema: { type: string, maxLength: 120 } }
+    IfMatch: { name: If-Match, in: header, required: true, schema: { type: string } }
+    OptionalIfMatch: { name: If-Match, in: header, required: false, schema: { type: string }, description: Omit only when creating a new key; updates require the current quoted revision. }
+    AfterCursor: { name: after, in: query, required: false, schema: { type: string } }
+    LastEventID: { name: Last-Event-ID, in: header, required: false, schema: { type: string }, description: Durable cursor used when after is absent. }
+    Range: { name: Range, in: header, required: false, schema: { type: string, pattern: "^bytes=[0-9]*-[0-9]*$" }, description: V1 accepts one byte range only. }
+    SecFetchSite: { name: Sec-Fetch-Site, in: header, required: false, schema: { type: string, enum: [same-origin, same-site, cross-site, none] } }
+    SecFetchMode: { name: Sec-Fetch-Mode, in: header, required: false, schema: { type: string } }
+    SecFetchDest: { name: Sec-Fetch-Dest, in: header, required: false, schema: { type: string } }
+  securitySchemes:
+    accountBearer: { type: http, scheme: bearer, bearerFormat: sr_live }
+    nativePairingAuthorization:
+      type: http
+      scheme: ScreenRig-Pairing
+      description: Native-only temporary pairing authorization. The credential is exactly srp_ plus 43 base64url characters and is never sent in a cookie, URL, or query.
+    nativeDeviceAuthorization:
+      type: http
+      scheme: ScreenRig-Device
+      description: Native-only durable device authorization. The credential is exactly srd_ plus a 22-character base64url lookup ID, underscore, and 43-character base64url secret.
+    nativeSessionAuthorization:
+      type: http
+      scheme: ScreenRig-Session
+      description: Native-only signed 30-minute runtime authorization. The credential is exactly srs_ plus an opaque signed base64url value.
+    runtimeCookie: { type: apiKey, in: cookie, name: __Host-screenrig-runtime }
+    pairedRuntimeCookie: { type: apiKey, in: cookie, name: __Host-screenrig-runtime, description: Signed runtime session with paired-device mutation profile. }
+    pairedDeviceCookie: { type: apiKey, in: cookie, name: __Host-screenrig-device }
+    pairingCookie: { type: apiKey, in: cookie, name: __Host-screenrig-pairing, description: "Signed ten-minute pairing session; never grants account, content, or runtime authority." }
+    browserLinkCookie: { type: apiKey, in: cookie, name: __Host-screenrig-browser-link, description: "Apex host-only Secure HttpOnly SameSite=Strict Path=/ ten-minute browser-link owner session; no Domain and never accepted as a Player cookie." }
+    placementCapability:
+      type: apiKey
+      in: header
+      name: ScreenRig-Placement-Capability
+      description: >-
+        Parent-only signed five-minute placement capability bound to the runtime
+        session, screen, application release, placement, manifest revision,
+        content-access generation, and allowed KV operations. Refresh by fetching
+        the current manifest.
+    releaseGrantCookie: { type: apiKey, in: cookie, name: __Host-screenrig-release, description: Exact-host release/screen/generation/grant cookie; never valid on runtime or account routes. }
+    releaseLaunchTicket: { type: apiKey, in: query, name: ticket, description: Random single-use 30-second ticket consumed only on its exact release host. }
+    operatorBearer: { type: http, scheme: bearer }
+  responses:
+    Problem:
+      description: Stable RFC 9457 problem response.
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
+    RateLimitedProblem:
+      description: Stable rate_limited problem. Retry only after the declared interval.
+      headers: { Retry-After: { required: true, schema: { type: integer, minimum: 1 } } }
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
+  schemas:
+    HealthResponse: { type: object, additionalProperties: false, required: [status], properties: { status: { type: string, enum: [alive] } } }
+    ReadyResponse: { type: object, additionalProperties: false, required: [status, degraded], properties: { status: { type: string, enum: [ready] }, degraded: { type: array, items: { type: string } } } }
+    VersionResponse: { type: object, additionalProperties: false, required: [version, commit, api_version, protocol_version], properties: { version: { type: string }, commit: { type: string }, api_version: { type: string }, protocol_version: { type: string } } }
+    Capabilities:
+      type: object
+      additionalProperties: false
+      required: [api_version, protocol_version, application_compressed_bytes, application_expanded_bytes, application_package_bytes, application_file_count, application_file_bytes, application_path_depth, application_path_bytes, playlist_max_pages, playlist_max_items_per_page, transition_max_duration_ms, screens_per_account, account_content_bytes, features]
+      properties:
+        api_version: { type: string }
+        protocol_version: { type: string }
+        application_compressed_bytes: { type: integer, enum: [104857600] }
+        application_expanded_bytes: { type: integer, enum: [262144000] }
+        application_package_bytes: { type: integer, enum: [272629760], description: Maximum normalized immutable webapp package size available to paired native players. }
+        application_file_count: { type: integer, enum: [5000] }
+        application_file_bytes: { type: integer, enum: [33554432] }
+        application_path_depth: { type: integer, enum: [16] }
+        application_path_bytes: { type: integer, enum: [255] }
+        playlist_max_pages: { type: integer, enum: [100] }
+        playlist_max_items_per_page: { type: integer, enum: [24] }
+        transition_max_duration_ms: { type: integer, enum: [60000] }
+        screens_per_account: { type: integer, enum: [50] }
+        account_content_bytes: { type: integer, enum: [1073741824] }
+        features: { type: object, additionalProperties: { type: boolean } }
+    CLIEnrollmentRequest: { type: object, additionalProperties: false, required: [client_id], properties: { client_id: { type: string, pattern: "^cli_[A-Za-z0-9_-]{43}$", description: "Stable anonymous installation identity generated from 32 CSPRNG bytes and persisted before the first request. It is rate-limit material, not an account credential." } } }
+    Account: { type: object, additionalProperties: false, required: [id, revision, status, used_bytes, reserved_bytes, screen_count, content_limit_bytes, screen_limit, created_at, updated_at], properties: { id: { type: string }, revision: { type: integer }, status: { type: string, enum: [active] }, used_bytes: { type: integer }, reserved_bytes: { type: integer }, screen_count: { type: integer }, content_limit_bytes: { type: integer }, screen_limit: { type: integer }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    CLIEnrollment: { type: object, additionalProperties: false, required: [account, token, issuance_id, issuance_expires_at], properties: { account: { $ref: "#/components/schemas/Account" }, token: { type: string, minLength: 32, description: Permanent account bearer credential. It has no scheduled expiry and is redelivered only through this short-lived encrypted issuance envelope. }, issuance_id: { type: string, description: Opaque identifier for the encrypted exact-retry delivery envelope. }, issuance_expires_at: { type: string, format: date-time, description: Exact-retry redelivery deadline for this credential issuance; ten minutes after first enrollment. Later exact retries return credential_issuance_expired while the permanent token remains valid. } } }
+    Application: { type: object, additionalProperties: true, required: [id, name, revision, state], properties: { id: { type: string }, name: { type: string }, revision: { type: integer }, state: { type: string }, release_id: { type: string } } }
+    ApplicationList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Application" } } } }
+    OperationAccepted: { type: object, additionalProperties: false, required: [id, operation_id], properties: { id: { type: string }, operation_id: { type: string } } }
+    Operation: { type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: { id: { type: string }, kind: { type: string }, state: { type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the bounded upload body is still being durably staged. Terminal values are succeeded, failed, and cancelled." }, request_id: { type: string }, created_at: { type: string }, updated_at: { type: string }, result: { type: object, additionalProperties: true }, error: { type: object, additionalProperties: true } } }
+    PlaylistWrite:
+      type: object
+      additionalProperties: false
+      required: [name, pages]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        pages: { type: array, minItems: 1, maxItems: 100, items: { $ref: "#/components/schemas/PlaylistPageWrite" } }
+    Playlist:
+      type: object
+      additionalProperties: false
+      required: [id, name, revision, pages]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        revision: { type: integer }
+        pages: { type: array, minItems: 1, maxItems: 100, items: { $ref: "#/components/schemas/PlaylistPage" } }
+    PlaylistPageWrite:
+      type: object
+      additionalProperties: false
+      required: [id, canvas, transition, advance, placements]
+      properties:
+        id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }
+        canvas: { $ref: "#/components/schemas/PlaylistCanvas" }
+        transition: { $ref: "#/components/schemas/PlaylistTransition" }
+        advance: { $ref: "#/components/schemas/PlaylistAdvanceWrite" }
+        placements: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/PlaylistPlacementWrite" } }
+    PlaylistPage:
+      type: object
+      additionalProperties: false
+      required: [id, canvas, transition, advance, placements]
+      properties:
+        id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }
+        canvas: { $ref: "#/components/schemas/PlaylistCanvas" }
+        transition: { $ref: "#/components/schemas/PlaylistTransition" }
+        advance: { $ref: "#/components/schemas/PlaylistAdvance" }
+        placements: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/PlaylistPlacement" } }
+    PlaylistCanvas:
+      type: object
+      additionalProperties: false
+      required: [width, height, background]
+      properties:
+        width: { type: number, exclusiveMinimum: 0 }
+        height: { type: number, exclusiveMinimum: 0 }
+        viewport_fit: { type: string, enum: [contain, cover, fill], default: contain }
+        background: { type: string, pattern: "^#[0-9A-F]{8}$", description: Canonical uppercase RRGGBBAA color. }
+    PlaylistRect:
+      type: object
+      additionalProperties: false
+      required: [x, y, width, height]
+      properties:
+        x: { type: number }
+        y: { type: number }
+        width: { type: number, exclusiveMinimum: 0 }
+        height: { type: number, exclusiveMinimum: 0 }
+    PlaylistTransition:
+      type: object
+      additionalProperties: false
+      required: [type, duration_ms]
+      properties:
+        type: { type: string, enum: [crossfade] }
+        duration_ms: { type: integer, minimum: 0, maximum: 60000 }
+    PlaylistAdvanceWrite:
+      oneOf:
+        - { $ref: "#/components/schemas/PlaylistDurationAdvance" }
+        - { $ref: "#/components/schemas/PlaylistApplicationAdvance" }
+        - { $ref: "#/components/schemas/PlaylistVideoEndAdvanceWrite" }
+      discriminator: { propertyName: mode }
+    PlaylistAdvance:
+      oneOf:
+        - { $ref: "#/components/schemas/PlaylistDurationAdvance" }
+        - { $ref: "#/components/schemas/PlaylistApplicationAdvance" }
+        - { $ref: "#/components/schemas/PlaylistVideoEndAdvance" }
+      discriminator: { propertyName: mode }
+    PlaylistDurationAdvance: { type: object, additionalProperties: false, required: [mode, after_ms], properties: { mode: { type: string, enum: [duration] }, after_ms: { type: integer, minimum: 1000, maximum: 86400000 } } }
+    PlaylistApplicationAdvance: { type: object, additionalProperties: false, required: [mode, max_ms], properties: { mode: { type: string, enum: [application] }, max_ms: { type: integer, minimum: 1000, maximum: 86400000 } } }
+    PlaylistVideoEndAdvanceWrite: { type: object, additionalProperties: false, required: [mode], properties: { mode: { type: string, enum: [video_end] }, max_ms: { type: integer, minimum: 1000, maximum: 86400000, description: Optional client safety hint; the server resolves the authoritative deadline from verified media duration. } } }
+    PlaylistVideoEndAdvance: { type: object, additionalProperties: false, required: [mode, max_ms], properties: { mode: { type: string, enum: [video_end] }, max_ms: { type: integer, minimum: 1000, maximum: 86400000 } } }
+    PlaylistPlacementWrite:
+      oneOf:
+        - { $ref: "#/components/schemas/PlaylistApplicationPlacementWrite" }
+        - { $ref: "#/components/schemas/PlaylistImagePlacementWrite" }
+        - { $ref: "#/components/schemas/PlaylistVideoPlacementWrite" }
+        - { $ref: "#/components/schemas/PlaylistIframePlacementWrite" }
+    PlaylistPlacement:
+      oneOf:
+        - { $ref: "#/components/schemas/PlaylistApplicationPlacement" }
+        - { $ref: "#/components/schemas/PlaylistImagePlacement" }
+        - { $ref: "#/components/schemas/PlaylistVideoPlacement" }
+        - { $ref: "#/components/schemas/PlaylistIframePlacement" }
+    PlaylistApplicationPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistApplicationContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, default: false } } }
+    PlaylistImagePlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistImageContentWrite" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] } } }
+    PlaylistVideoPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistVideoContentWrite" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] } } }
+    PlaylistIframePlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistIframeContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] } } }
+    PlaylistApplicationPlacement: { allOf: [{ $ref: "#/components/schemas/PlaylistApplicationPlacementWrite" }] }
+    PlaylistImagePlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistImageContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] } } }
+    PlaylistVideoPlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistVideoContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] } } }
+    PlaylistIframePlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistIframeContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, enum: [false] } } }
+    PlaylistApplicationContent: { type: object, additionalProperties: false, required: [type, release_id], properties: { type: { type: string, enum: [application] }, application_id: { type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id. }, release_id: { type: string } } }
+    PlaylistImageContentWrite: { type: object, additionalProperties: false, required: [type, media_id], properties: { type: { type: string, enum: [image] }, media_id: { type: string }, alt: { type: string, maxLength: 300 } } }
+    PlaylistVideoContentWrite: { type: object, additionalProperties: false, required: [type, media_id], properties: { type: { type: string, enum: [video] }, media_id: { type: string }, muted: { type: boolean, enum: [true], default: true }, loop: { type: boolean, default: false } } }
+    PlaylistImageContent: { type: object, additionalProperties: false, required: [type, media_id, intrinsic_size], properties: { type: { type: string, enum: [image] }, media_id: { type: string }, alt: { type: string, maxLength: 300 }, intrinsic_size: { $ref: "#/components/schemas/PlaylistIntrinsicSize" } } }
+    PlaylistVideoContent: { type: object, additionalProperties: false, required: [type, media_id, intrinsic_size, muted, loop], properties: { type: { type: string, enum: [video] }, media_id: { type: string }, intrinsic_size: { $ref: "#/components/schemas/PlaylistIntrinsicSize" }, muted: { type: boolean, enum: [true] }, loop: { type: boolean } } }
+    PlaylistIframeContent: { type: object, additionalProperties: false, required: [type, src, title], properties: { type: { type: string, enum: [iframe] }, src: { type: string, format: uri, pattern: "^https://" }, title: { type: string, minLength: 1, maxLength: 200 } } }
+    PlaylistIntrinsicSize: { type: object, additionalProperties: false, required: [width, height], properties: { width: { type: number, exclusiveMinimum: 0 }, height: { type: number, exclusiveMinimum: 0 } } }
+    PlaylistList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Playlist" } } } }
+    ScreenPatch: { type: object, additionalProperties: false, minProperties: 1, properties: { name: { type: string, minLength: 1, maxLength: 120 }, playlist_id: { type: string } } }
+    PairScreen: { type: object, additionalProperties: false, required: [code], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, label: { type: string, minLength: 1, maxLength: 120 } } }
+    ProvisionScreen: { type: object, additionalProperties: false, properties: { label: { type: string, minLength: 1, maxLength: 120 } } }
+    ScreenProvisioning: { type: object, additionalProperties: false, required: [screen, public_url, provisioning_url, expires_at], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri }, provisioning_url: { type: string, pattern: "^https?://[^#]+/s/[^#]+#provision=[A-Za-z0-9_-]{43}$" }, expires_at: { type: string, format: date-time } } }
+    Screen: { type: object, additionalProperties: false, required: [id, public_id, label, revision, manifest_revision, content_access_generation, state, created_at, updated_at], properties: { id: { type: string }, public_id: { type: string }, label: { type: string }, playlist_id: { type: string }, revision: { type: integer }, manifest_revision: { type: integer }, content_access_generation: { type: integer }, state: { type: string, enum: [pairing_pending, active] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    ScreenList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Screen" } } } }
+    Event: { type: object, additionalProperties: true, required: [cursor, sequence, type, severity, message, at], properties: { cursor: { type: string }, sequence: { type: integer }, type: { type: string }, severity: { type: string }, request_id: { type: string }, operation_id: { type: string }, message: { type: string }, resource: { type: object, additionalProperties: true }, details: { type: object, additionalProperties: true }, at: { type: string } } }
+    EventList: { type: object, additionalProperties: false, required: [items, next_cursor], properties: { items: { type: array, items: { $ref: "#/components/schemas/Event" } }, next_cursor: { type: string } } }
+    KVWrite: { type: object, additionalProperties: false, required: [value_base64, content_type], properties: { value_base64: { type: string, contentEncoding: base64, maxLength: 1398104 }, content_type: { type: string, minLength: 1, maxLength: 127 } } }
+    KVEntry: { type: object, additionalProperties: false, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, value_base64: { type: string, contentEncoding: base64 }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer } } }
+    KVSummary: { type: object, additionalProperties: false, required: [application_id, key, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string }, updated_at: { type: string } } }
+    KVList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/KVSummary" } } } }
+    MediaUploadDeclaration: { type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], properties: { filename: { type: string, minLength: 1, maxLength: 255 }, content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
+    MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
+    MediaUploadSession: { type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: { id: { type: string }, operation: { $ref: "#/components/schemas/Operation" }, upload_url: { type: string, format: uri }, method: { type: string, enum: [PUT] }, headers: { type: object, additionalProperties: { type: string }, description: Exact signed request headers; clients must send every field verbatim. }, expires_at: { type: string, format: date-time } } }
+    Media: { type: object, additionalProperties: false, required: [id, filename, kind, content_type, operation_id, sha256, bytes, width, height, revision, state, created_at, updated_at], properties: { id: { type: string }, filename: { type: string }, kind: { type: string, enum: [image, video] }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: Verified immutable intrinsic width in pixels. }, height: { type: integer, minimum: 1, description: Verified immutable intrinsic height in pixels. }, duration_ms: { type: integer, minimum: 1, description: "Verified container duration; present for ready video media." }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Media" } } } }
+    PairingSession: { type: object, additionalProperties: false, required: [code, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, expires_at: { type: string, format: date-time } } }
+    NativePairingSession: { type: object, additionalProperties: false, required: [code, pairing_credential, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, pairing_credential: { type: string, pattern: "^srp_[A-Za-z0-9_-]{43}$" }, expires_at: { type: string, format: date-time } } }
+    PairingClaimedEvent: { type: object, additionalProperties: false, required: [type, completion_nonce], properties: { type: { type: string, enum: [pairing.claimed] }, completion_nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
+    PairingClaim: { type: object, additionalProperties: false, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri } } }
+    PairingComplete: { type: object, additionalProperties: false, required: [completion_nonce], properties: { completion_nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
+    PairingCompletion: { type: object, additionalProperties: false, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri } } }
+    NativePairingCompletion: { type: object, additionalProperties: false, required: [screen, public_url, device_credential], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri }, device_credential: { type: string, pattern: "^srd_[A-Za-z0-9_-]{22}_[A-Za-z0-9_-]{43}$" } } }
+    BrowserProvisioningExchange: { type: object, additionalProperties: false, required: [provisioning_token, exchange_id], properties: { provisioning_token: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }, exchange_id: { type: string, pattern: "^xchg_[A-Za-z0-9_-]{43}$" } } }
+    BrowserProvisioningCompletion: { type: object, additionalProperties: false, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri } } }
+    BrowserLinkSession: { type: object, additionalProperties: false, required: [session_id, code, display_code, status, expires_at], properties: { session_id: { type: string, pattern: "^blink_" }, code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, display_code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{3}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{3}$" }, status: { type: string, enum: [waiting, claimed] }, expires_at: { type: string, format: date-time } } }
+    BrowserLinkStatus: { type: object, additionalProperties: false, required: [session_id, code, display_code, status, continuation_path, expires_at], properties: { session_id: { type: string, pattern: "^blink_" }, code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, display_code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{3}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{3}$" }, status: { type: string, enum: [waiting, claimed] }, continuation_path: { type: string, enum: [/runtime/v1/browser-links/continue] }, expires_at: { type: string, format: date-time } } }
+    BrowserLinkEvent: { type: object, additionalProperties: false, required: [session_id, status, event_id, expires_at], properties: { session_id: { type: string, pattern: "^blink_" }, status: { type: string, enum: [waiting, claimed] }, event_id: { type: string, enum: ["1", "2"] }, expires_at: { type: string, format: date-time } } }
+    BrowserLinkClaimRequest: { type: object, additionalProperties: false, required: [code], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{3}-?[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{3}$" } } }
+    BrowserLinkClaimScreen: { type: object, additionalProperties: false, required: [id, public_id, state, public_url], properties: { id: { type: string }, public_id: { type: string }, state: { type: string, enum: [pairing_pending] }, public_url: { type: string, format: uri, pattern: "^[^#]+$" } } }
+    BrowserLinkClaim: { type: object, additionalProperties: false, required: [session_id, status, screen], properties: { session_id: { type: string, pattern: "^blink_" }, status: { type: string, enum: [claimed] }, screen: { $ref: "#/components/schemas/BrowserLinkClaimScreen" } } }
+    RuntimeSessionRequest: { type: object, additionalProperties: false, required: [public_id], properties: { public_id: { type: string } } }
+    DeviceSessionRequest: { type: object, additionalProperties: false, properties: { public_id: { type: string, minLength: 1 } } }
+    RuntimeSession: { type: object, additionalProperties: false, required: [paired, capabilities, event_cursor, public_url], properties: { paired: { type: boolean }, capabilities: { type: array, items: { type: string, enum: [manifest.read, events.read, content.read, kv.read, kv.write, runtime.report, presence.write] } }, event_cursor: { type: string }, public_url: { type: string, format: uri } } }
+    NativeRuntimeSession: { type: object, additionalProperties: false, required: [paired, capabilities, event_cursor, public_url, runtime_credential], properties: { paired: { type: boolean, enum: [true] }, capabilities: { type: array, items: { type: string, enum: [manifest.read, events.read, content.read, kv.read, kv.write, runtime.report, presence.write] } }, event_cursor: { type: string }, public_url: { type: string, format: uri }, runtime_credential: { type: string, pattern: "^srs_[A-Za-z0-9_-]+$" } } }
+    RuntimeManifest:
+      type: object
+      additionalProperties: false
+      description: Immutable runtime manifest using the deterministic screenrig.canvas/v1 canvas, rectangle, fit, and source-order contract.
+      required: [schemaVersion, manifestRevision, grantId, contentGeneration, screenId, screenLabel, playlistRevision, generatedAt, pages]
+      properties:
+        schemaVersion: { type: integer, enum: [2] }
+        manifestRevision: { type: string }
+        grantId: { type: string }
+        contentGeneration: { type: integer }
+        screenId: { type: string }
+        screenLabel: { type: string }
+        playlistId: { type: string }
+        playlistRevision: { type: integer }
+        generatedAt: { type: string }
+        pages: { type: array, items: { $ref: "#/components/schemas/RuntimePage" } }
+    RuntimePage:
+      type: object
+      additionalProperties: false
+      required: [contractVersion, id, canvas, transition, advance, placements]
+      properties:
+        contractVersion: { type: string, enum: [screenrig.canvas/v1] }
+        id: { type: string }
+        canvas: { $ref: "#/components/schemas/RuntimeCanvas" }
+        transition: { $ref: "#/components/schemas/RuntimeTransition" }
+        advance: { $ref: "#/components/schemas/RuntimeAdvance" }
+        placements: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/RuntimePlacement" }, description: Source array order is the deterministic tie-breaker for equal layers. }
+    RuntimeCanvas:
+      type: object
+      additionalProperties: false
+      required: [width, height, viewportFit, background]
+      properties:
+        width: { type: number, exclusiveMinimum: 0 }
+        height: { type: number, exclusiveMinimum: 0 }
+        viewportFit: { type: string, enum: [contain, cover, fill] }
+        background: { type: string, pattern: "^#[0-9A-F]{8}$", description: Canonical uppercase RRGGBBAA color. }
+    RuntimeRect:
+      type: object
+      additionalProperties: false
+      required: [x, y, width, height]
+      properties:
+        x: { type: number }
+        y: { type: number }
+        width: { type: number, exclusiveMinimum: 0 }
+        height: { type: number, exclusiveMinimum: 0 }
+    RuntimeIntrinsicSize:
+      type: object
+      additionalProperties: false
+      required: [width, height]
+      properties:
+        width: { type: number, exclusiveMinimum: 0 }
+        height: { type: number, exclusiveMinimum: 0 }
+    RuntimeTransition:
+      type: object
+      additionalProperties: false
+      required: [type, durationMs]
+      properties:
+        type: { type: string, enum: [crossfade] }
+        durationMs: { type: integer }
+    RuntimeAdvance:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      properties:
+        mode: { type: string, enum: [duration, application, video_end] }
+        afterMs: { type: integer }
+        maxMs: { type: integer }
+    RuntimePlacement:
+      oneOf:
+        - { $ref: "#/components/schemas/RuntimeApplicationPlacement" }
+        - { $ref: "#/components/schemas/RuntimeImagePlacement" }
+        - { $ref: "#/components/schemas/RuntimeVideoPlacement" }
+        - { $ref: "#/components/schemas/RuntimeIframePlacement" }
+    RuntimeApplicationPlacement:
+      type: object
+      additionalProperties: false
+      required: [id, content, rect, layer, contentFit, capabilityHandle, capabilityExpiresAt]
+      properties:
+        id: { type: string }
+        content: { $ref: "#/components/schemas/RuntimeApplicationContent" }
+        rect: { $ref: "#/components/schemas/RuntimeRect" }
+        layer: { type: integer, minimum: 0, maximum: 1024 }
+        contentFit: { type: string, enum: [fill] }
+        controller: { type: boolean }
+        capabilityHandle: { type: string, minLength: 32, description: Opaque parent-only capability; never forward it into the uploaded iframe. }
+        capabilityExpiresAt: { type: string, format: date-time, description: Five-minute expiry. Refresh the manifest before this time to obtain a replacement handle. }
+    RuntimeImagePlacement:
+      type: object
+      additionalProperties: false
+      required: [id, content, rect, layer, contentFit]
+      properties:
+        id: { type: string }
+        content: { $ref: "#/components/schemas/RuntimeImageContent" }
+        rect: { $ref: "#/components/schemas/RuntimeRect" }
+        layer: { type: integer, minimum: 0, maximum: 1024 }
+        contentFit: { type: string, enum: [contain, cover, fill] }
+    RuntimeVideoPlacement:
+      type: object
+      additionalProperties: false
+      required: [id, content, rect, layer, contentFit]
+      properties:
+        id: { type: string }
+        content: { $ref: "#/components/schemas/RuntimeVideoContent" }
+        rect: { $ref: "#/components/schemas/RuntimeRect" }
+        layer: { type: integer, minimum: 0, maximum: 1024 }
+        contentFit: { type: string, enum: [contain, cover, fill] }
+    RuntimeIframePlacement:
+      type: object
+      additionalProperties: false
+      required: [id, content, rect, layer, contentFit]
+      properties:
+        id: { type: string }
+        content: { $ref: "#/components/schemas/RuntimeIframeContent" }
+        rect: { $ref: "#/components/schemas/RuntimeRect" }
+        layer: { type: integer, minimum: 0, maximum: 1024 }
+        contentFit: { type: string, enum: [fill] }
+    RuntimeContent:
+      oneOf:
+        - { $ref: "#/components/schemas/RuntimeApplicationContent" }
+        - { $ref: "#/components/schemas/RuntimeImageContent" }
+        - { $ref: "#/components/schemas/RuntimeVideoContent" }
+        - { $ref: "#/components/schemas/RuntimeIframeContent" }
+      discriminator: { propertyName: type }
+    RuntimeApplicationContent:
+      type: object
+      additionalProperties: false
+      required: [type, applicationId, releaseId, launchUrl, origin, protocol, grantId, package]
+      properties:
+        type: { type: string, enum: [application] }
+        applicationId: { type: string }
+        releaseId: { type: string }
+        launchUrl: { type: string }
+        origin: { type: string }
+        protocol: { type: string, enum: ["1"] }
+        grantId: { type: string }
+        package: { $ref: "#/components/schemas/RuntimeApplicationPackage" }
+    RuntimeApplicationPackage:
+      type: object
+      additionalProperties: false
+      description: >-
+        Immutable normalized package built only from the independently validated application tree. Native players
+        verify bytes and SHA-256 before atomically retaining this release for offline last-known-good restoration.
+        The URL is an authorization-bound transport reference, not a public or durable object URL.
+      required: [version, url, bytes, sha256, entrypoint, contentType]
+      properties:
+        version: { type: string, enum: ["screenrig.webapp-package/v1"] }
+        url: { type: string, format: uri, description: "Same-origin protected path under /content/v1/manifests/{manifest_revision}/releases/{release_id}/package; production uses https://play.screenrig.ai." }
+        bytes: { type: integer, minimum: 1, maximum: 272629760 }
+        sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        entrypoint: { type: string, enum: [index.html] }
+        contentType: { type: string, enum: ["application/vnd.screenrig.webapp-package+tar+gzip"] }
+    RuntimeImageContent:
+      type: object
+      additionalProperties: false
+      required: [type, mediaId, src, intrinsicSize, grantId, sha256, bytes, contentType]
+      properties:
+        type: { type: string, enum: [image] }
+        mediaId: { type: string }
+        src: { type: string }
+        alt: { type: string }
+        intrinsicSize: { $ref: "#/components/schemas/RuntimeIntrinsicSize" }
+        grantId: { type: string }
+        sha256: { type: string, pattern: "^[a-f0-9]{64}$", description: Immutable content digest for integrity and optional native caching; not an authorization capability. }
+        bytes: { type: integer, minimum: 1, maximum: 1073741824 }
+        contentType: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif] }
+    RuntimeVideoContent:
+      type: object
+      additionalProperties: false
+      required: [type, mediaId, src, intrinsicSize, muted, loop, grantId, sha256, bytes, contentType]
+      properties:
+        type: { type: string, enum: [video] }
+        mediaId: { type: string }
+        src: { type: string }
+        intrinsicSize: { $ref: "#/components/schemas/RuntimeIntrinsicSize" }
+        muted: { type: boolean }
+        loop: { type: boolean }
+        grantId: { type: string }
+        sha256: { type: string, pattern: "^[a-f0-9]{64}$", description: Immutable content digest for integrity and optional native caching; not an authorization capability. }
+        bytes: { type: integer, minimum: 1, maximum: 1073741824 }
+        contentType: { type: string, enum: [video/mp4, video/webm] }
+    RuntimeIframeContent:
+      type: object
+      additionalProperties: false
+      required: [type, src, title]
+      properties:
+        type: { type: string, enum: [iframe] }
+        src: { type: string }
+        title: { type: string }
+    RuntimeReport:
+      oneOf:
+        - { $ref: "#/components/schemas/ManifestActivatedReport" }
+        - { $ref: "#/components/schemas/RuntimeConditionReport" }
+    ManifestActivatedReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [manifest.activated] }, context: { $ref: "#/components/schemas/ManifestActivatedContext" } } }
+    ManifestActivatedContext: { type: object, additionalProperties: false, required: [manifest_revision], properties: { manifest_revision: { type: string, pattern: "^man_" } } }
+    RuntimeConditionReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info, warning, error] }, code: { type: string, pattern: "^[a-z0-9._-]{1,80}$", not: { const: manifest.activated } }, context: { type: object, additionalProperties: true } } }
+    ReleaseLaunch: { type: object, additionalProperties: false, required: [launch_url, expires_at], properties: { launch_url: { type: string }, expires_at: { type: string } } }
+    ProblemField: { type: object, additionalProperties: false, required: [field, code, detail], properties: { field: { type: string }, code: { type: string }, detail: { type: string } } }
+    NextAction: { type: object, additionalProperties: false, required: [command, reason], properties: { command: { type: string }, reason: { type: string } } }
+    Problem:
+      type: object
+      additionalProperties: true
+      required: [type, title, status, detail, instance, code, request_id, errors]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        request_id: { type: string }
+        trace_id: { type: string }
+        current_revision: { type: integer }
+        errors: { type: array, items: { $ref: "#/components/schemas/ProblemField" } }
+        next: { $ref: "#/components/schemas/NextAction" }
+x-problem-registry: ./problems.yaml
+x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_account_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, rate_limited, dependency_unavailable, schema_incompatible, not_ready]

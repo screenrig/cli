@@ -1,0 +1,85 @@
+{
+  "name": "screenrig",
+  "version": "0.1.0",
+  "private": false,
+  "description": "ScreenRig control-plane CLI for agent-driven digital signage and kiosk operations.",
+  "homepage": "https://screenrig.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/screenrig/cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/screenrig/cli/issues"
+  },
+  "type": "module",
+  "bin": {
+    "screenrig": "./dist/bin.js"
+  },
+  "main": "./dist/main.js",
+  "types": "./dist/main.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/main.d.ts",
+      "import": "./dist/main.js"
+    }
+  },
+  "files": [
+    "assets/screenrig.runtime.js",
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts.map",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "!dist/**/*.test.js.map",
+    "!dist/**/*.test.d.ts.map",
+    "!dist/test-temp.js",
+    "!dist/test-temp.d.ts",
+    "!dist/test-temp.js.map",
+    "!dist/test-temp.d.ts.map",
+    "!dist/localhost-smoke.js",
+    "!dist/localhost-smoke.d.ts",
+    "!dist/localhost-smoke.js.map",
+    "!dist/localhost-smoke.d.ts.map",
+    "!dist/server-smoke.js",
+    "!dist/server-smoke.d.ts",
+    "!dist/server-smoke.js.map",
+    "!dist/server-smoke.d.ts.map",
+    "!dist/transport/fake.js",
+    "!dist/transport/fake.d.ts",
+    "!dist/transport/fake.js.map",
+    "!dist/transport/fake.d.ts.map"
+  ],
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "clean": "node scripts/clean-dist.mjs",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "sync:sdk": "node scripts/sync-contract-snapshots.mjs --sync",
+    "vendor:sync": "node scripts/sync-contract-snapshots.mjs --sync",
+    "vendor:check": "node scripts/sync-contract-snapshots.mjs --check",
+    "smoke": "npm run smoke:mock",
+    "smoke:mock": "npm run build && node dist/localhost-smoke.js",
+    "smoke:server": "npm run build && node dist/server-smoke.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run vendor:check && npm run build && node --test $(find dist -name '*.test.js')",
+    "test:extractor": "npm run build && node --test dist/extractor.integration.test.js",
+    "pack:dry": "npm pack --dry-run",
+    "check:public": "python3 scripts/check-public-repo.py"
+  },
+  "keywords": [
+    "screenrig",
+    "digital-signage"
+  ],
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "devDependencies": {
+    "@types/node": "^24.2.0",
+    "typescript": "^5.9.2"
+  }
+}

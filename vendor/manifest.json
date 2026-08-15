@@ -1,0 +1,24 @@
+{
+  "schema": "screenrig.vendor-snapshot/v1",
+  "purpose": "cli-contract-and-sdk-inputs",
+  "files": [
+    {
+      "path": "vendor/protocol/openapi.gen.ts",
+      "source": "packages/protocol/src/openapi.gen.ts",
+      "bytes": 15564,
+      "sha256": "38ad0104b0430dc8fb61d01e552ac5a3169dab43467a952dbbbe3092ca717a6c"
+    },
+    {
+      "path": "vendor/openapi.yaml",
+      "source": "api/openapi.yaml",
+      "bytes": 97982,
+      "sha256": "4b0be190c4347c6af73e2a6767666ca08d2cc3443c81b5f18fbee28c1a650062"
+    },
+    {
+      "path": "assets/screenrig.runtime.js",
+      "source": "packages/sdk/dist/screenrig.runtime.js",
+      "bytes": 26628,
+      "sha256": "481ec4aa3626c6742f12484173b41b5efe464dd635cd1aaba5111cc227d0e11e"
+    }
+  ]
+}
