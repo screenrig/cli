@@ -12,7 +12,7 @@ temporary="$(mktemp -d "${TMPDIR:-/tmp}/screenrig-cli-release.XXXXXX")"
 trap 'rm -rf -- "${temporary}"' EXIT
 export NPM_CONFIG_CACHE="${temporary}/npm-cache"
 
-archive="$(cd "${root}" && npm pack --offline --silent --pack-destination "${temporary}")"
+archive="$(cd "${root}" && npm pack --silent --pack-destination "${temporary}")"
 install -d "${temporary}/normalized"
 tar --extract --gzip --file "${temporary}/${archive}" --directory "${temporary}/normalized"
 
