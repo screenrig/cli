@@ -39,9 +39,7 @@ jobs:
       - name: Audit locked dependencies
         run: npm audit --audit-level=high --package-lock-only
       - name: Build npm artifact
-        run: |
-          archive="$(npm pack --silent)"
-          mv "${archive}" "${RUNNER_TEMP}/screenrig-cli.tgz"
+        run: bash scripts/package-release.sh "${RUNNER_TEMP}/screenrig-cli.tgz"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: screenrig-cli

@@ -67,6 +67,7 @@
     "test": "npm run vendor:check && npm run build && node --test $(find dist -name '*.test.js')",
     "test:extractor": "npm run build && node --test dist/extractor.integration.test.js",
     "pack:dry": "npm pack --dry-run",
+    "pack:release": "bash scripts/package-release.sh screenrig-cli.tgz",
     "check:public": "python3 scripts/check-public-repo.py"
   },
   "keywords": [
