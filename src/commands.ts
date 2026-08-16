@@ -2,6 +2,7 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   limitsFromCapabilities,
+  TEMPORARY_PROTOCOL_VERSION,
   type AccountEvent,
   type Capabilities,
   type CLIEnrollment,
@@ -186,7 +187,7 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
   }
   if (flagBool(args.flags, "version") || group === "version") {
     return {
-      envelope: successEnvelope({ version: CLI_VERSION, protocol_adapter: "screenrig.cli.adapter/0" }),
+      envelope: successEnvelope({ version: CLI_VERSION, protocol_adapter: TEMPORARY_PROTOCOL_VERSION }),
       exitCode: ExitCode.Success,
       human: `screenrig ${CLI_VERSION}`,
     };
