@@ -51,6 +51,16 @@ paths:
       responses:
         "200": { description: Account, content: { application/json: { schema: { $ref: "#/components/schemas/Account" } } } }
         default: { $ref: "#/components/responses/Problem" }
+  /api/v1/account/credential/revoke:
+    post:
+      operationId: revokeCurrentAccountCredential
+      description: Revokes exactly the calling account bearer and issues no replacement. The account, screens, and content remain. Repeating this request with the same cryptographically valid already-revoked bearer returns 204 only on this endpoint, allowing safe repair of an ambiguous response; every other account route rejects that bearer. This operation is intrinsically idempotent and does not use an Idempotency-Key.
+      security: [{ accountBearer: [] }]
+      responses:
+        "204": { description: "The calling credential is revoked. It cannot be recovered, and no replacement token was issued.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
   /api/v1/applications:
     get:
       operationId: listApplications
@@ -390,7 +400,7 @@ paths:
     servers: [{ url: https://screenrig.ai, description: HTTPS apex browser-link origin }]
     post:
       operationId: startBrowserLink
-      description: Strict same-origin no-JavaScript-compatible POST that creates or reuses a ten-minute browser-link session. It sets exactly the apex host-only Secure HttpOnly SameSite=Strict Path=/ __Host-screenrig-browser-link cookie with no Domain. JSON clients receive 201; Accept text/html receives a bodyless 303 to /setup. No insecure localhost fallback exists; development requires the configured HTTPS loopback origin.
+      description: Strict same-origin no-JavaScript-compatible POST that creates or reuses a thirty-minute unclaimed browser-link session. Claiming within that window creates a fresh, independent ten-minute protected provisioning-delivery window; ordinary Player pairing remains ten minutes. It sets exactly the apex host-only Secure HttpOnly SameSite=Strict Path=/ __Host-screenrig-browser-link cookie with no Domain. JSON clients receive 201; Accept text/html receives a bodyless 303 to /setup. No insecure localhost fallback exists; development requires the configured HTTPS loopback origin.
       responses:
         "201": { description: Safe browser-link code/status metadata., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, Set-Cookie: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserLinkSession" } } } }
         "303": { description: No-JavaScript form continuation to the read-only setup page., headers: { Location: { schema: { type: string, enum: [/setup] } }, Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, Set-Cookie: { schema: { type: string } } } }
@@ -449,9 +459,9 @@ paths:
     servers: [{ url: https://screenrig.ai, description: HTTPS apex browser-link origin }]
     get:
       operationId: getDashedBrowserLinkLocator
-      description: Representative dashed public handoff-code locator. Production accepts every canonical ambiguity-safe XXX-XXX code. The route is side-effect-free and reveals only generic locator instructions.
+      description: Representative dashed public handoff-code locator. Production accepts every canonical ambiguity-safe XXX-XXX code. The route is side-effect-free and reveals only generic locator instructions. Accept text/markdown negotiates Markdown; Link metadata identifies canonical HTML, the explicit .md alternate, and /llms.txt.
       responses:
-        "200": { description: Public locator instructions., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Robots-Tag: { schema: { type: string, enum: ["noindex, nofollow"] } } }, content: { text/html: { schema: { type: string } }, text/markdown: { schema: { type: string } } } }
+        "200": { description: Public locator instructions., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Robots-Tag: { schema: { type: string, enum: ["noindex, nofollow"] } }, Vary: { schema: { type: string, enum: [Accept] } }, Link: { schema: { type: string } } }, content: { text/html: { schema: { type: string } }, text/markdown: { schema: { type: string } } } }
         "404": { description: Generic unknown-or-expired locator response with no existence oracle., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Robots-Tag: { schema: { type: string, enum: ["noindex, nofollow"] } } }, content: { text/html: { schema: { type: string } }, text/markdown: { schema: { type: string } } } }
   /ABC234:
     servers: [{ url: https://screenrig.ai, description: HTTPS apex browser-link origin }]
@@ -459,8 +469,24 @@ paths:
       operationId: getUndashedBrowserLinkLocator
       description: Representative undashed public handoff-code locator equivalent to /ABC-234. The route is side-effect-free and reveals only generic locator instructions.
       responses:
-        "200": { description: Public locator instructions., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Robots-Tag: { schema: { type: string, enum: ["noindex, nofollow"] } } }, content: { text/html: { schema: { type: string } }, text/markdown: { schema: { type: string } } } }
+        "200": { description: Public locator instructions., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Robots-Tag: { schema: { type: string, enum: ["noindex, nofollow"] } }, Vary: { schema: { type: string, enum: [Accept] } }, Link: { schema: { type: string } } }, content: { text/html: { schema: { type: string } }, text/markdown: { schema: { type: string } } } }
         "404": { description: Generic unknown-or-expired locator response with no existence oracle., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Robots-Tag: { schema: { type: string, enum: ["noindex, nofollow"] } } }, content: { text/html: { schema: { type: string } }, text/markdown: { schema: { type: string } } } }
+  /ABC-234.md:
+    servers: [{ url: https://screenrig.ai, description: HTTPS apex browser-link origin }]
+    get:
+      operationId: getDashedBrowserLinkLocatorMarkdown
+      description: Side-effect-free explicit Markdown alias for the representative dashed public handoff-code locator. Production also accepts the undashed .md form. It returns the same public-only instructions and generic no-oracle 404 policy as the canonical locator.
+      responses:
+        "200": { description: Public locator Markdown instructions., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Robots-Tag: { schema: { type: string, enum: ["noindex, nofollow"] } }, Vary: { schema: { type: string, enum: [Accept] } }, Link: { schema: { type: string } } }, content: { text/markdown: { schema: { type: string } } } }
+        "404": { description: Generic unknown-or-expired locator response with no existence oracle., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Robots-Tag: { schema: { type: string, enum: ["noindex, nofollow"] } } }, content: { text/markdown: { schema: { type: string } } } }
+  /ABC-234/index.md:
+    servers: [{ url: https://screenrig.ai, description: HTTPS apex browser-link origin }]
+    get:
+      operationId: getDashedBrowserLinkLocatorIndexMarkdown
+      description: Side-effect-free directory-style Markdown alias for the representative dashed public handoff-code locator. Production also accepts the undashed /index.md form. Its canonical and alternate Link metadata point to /ABC-234 and /ABC-234.md.
+      responses:
+        "200": { description: Public locator Markdown instructions., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Robots-Tag: { schema: { type: string, enum: ["noindex, nofollow"] } }, Vary: { schema: { type: string, enum: [Accept] } }, Link: { schema: { type: string } } }, content: { text/markdown: { schema: { type: string } } } }
+        "404": { description: Generic unknown-or-expired locator response with no existence oracle., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Robots-Tag: { schema: { type: string, enum: ["noindex, nofollow"] } } }, content: { text/markdown: { schema: { type: string } } } }
   /runtime/v1/native/pairing-sessions:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
@@ -747,7 +773,7 @@ components:
     SecFetchMode: { name: Sec-Fetch-Mode, in: header, required: false, schema: { type: string } }
     SecFetchDest: { name: Sec-Fetch-Dest, in: header, required: false, schema: { type: string } }
   securitySchemes:
-    accountBearer: { type: http, scheme: bearer, bearerFormat: sr_live }
+    accountBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: Active account bearer. The credential-revocation operation alone may reverify the same already-revoked bearer to return its idempotent 204 result. }
     nativePairingAuthorization:
       type: http
       scheme: ScreenRig-Pairing
@@ -764,7 +790,7 @@ components:
     pairedRuntimeCookie: { type: apiKey, in: cookie, name: __Host-screenrig-runtime, description: Signed runtime session with paired-device mutation profile. }
     pairedDeviceCookie: { type: apiKey, in: cookie, name: __Host-screenrig-device }
     pairingCookie: { type: apiKey, in: cookie, name: __Host-screenrig-pairing, description: "Signed ten-minute pairing session; never grants account, content, or runtime authority." }
-    browserLinkCookie: { type: apiKey, in: cookie, name: __Host-screenrig-browser-link, description: "Apex host-only Secure HttpOnly SameSite=Strict Path=/ ten-minute browser-link owner session; no Domain and never accepted as a Player cookie." }
+    browserLinkCookie: { type: apiKey, in: cookie, name: __Host-screenrig-browser-link, description: "Apex host-only Secure HttpOnly SameSite=Strict Path=/ browser-link owner cookie; it authenticates a thirty-minute unclaimed locator and, when claimed near the boundary, its fresh ten-minute protected delivery window. It has no Domain and is never accepted as a Player cookie." }
     placementCapability:
       type: apiKey
       in: header

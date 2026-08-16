@@ -128,6 +128,151 @@ test("existing credential skips enrollment and directly runs the original comman
   await rm(configDir, { recursive: true, force: true });
 });
 
+test("auth revoke requires explicit confirmation and never auto-enrolls", async () => {
+  const transport = new FakeTransport();
+  const configDir = await testTemp("revoke-confirm-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const configPath = path.join(configDir, "screenrig", "config.json");
+  const original = { api_url: "https://api.screenrig.ai", token: "sr_live_current_private_secret", account_id: "acc_current" };
+  await writeConfigAtomic(configPath, original, fsLike);
+
+  let result = await withRuntime(["--json", "auth", "revoke"], transport, { fs: fsLike });
+  assert.equal(result.code, ExitCode.Usage);
+  assert.match((JSON.parse(result.stdout) as { error: { detail: string } }).error.detail, /requires --yes/);
+  assert.deepEqual(await readConfigFile(configPath, fsLike), original);
+  assert.equal(transport.calls.length, 0);
+
+  await rm(configPath, { force: true });
+  result = await withRuntime(["--json", "auth", "revoke", "--yes"], transport, { fs: fsLike });
+  assert.equal(result.code, ExitCode.Usage);
+  assert.match((JSON.parse(result.stdout) as { error: { detail: string } }).error.detail, /No stored ScreenRig account credential/);
+  assert.equal(transport.calls.length, 0);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("auth revoke confirms server success before atomically removing all local credential state", async () => {
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/v1/account/credential/revoke", () => ({
+    status: 204,
+    headers: { "cache-control": "private, no-store", "x-request-id": "req_revokeAAAAAAAAAAAAAAAA" },
+    body: undefined,
+  }));
+  const configDir = await testTemp("revoke-success-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const configPath = path.join(configDir, "screenrig", "config.json");
+  const token = "sr_live_current_private_secret";
+  await writeConfigAtomic(configPath, {
+    api_url: "https://api.screenrig.ai",
+    token,
+    account_id: "acc_current",
+    enrollment: { client_id: `cli_${"a".repeat(43)}`, idempotency_key: "enrollment-retry-key" },
+    screen_provision: { idempotency_key: "screen-provision-key", label: "Demo" },
+    browser_setup: { idempotency_key: "browser-setup-key", code: "ABC234" },
+  }, fsLike);
+
+  const result = await withRuntime(["--json", "auth", "revoke", "--yes"], transport, { fs: fsLike });
+  assert.equal(result.code, 0, result.stdout);
+  const envelope = JSON.parse(result.stdout) as { ok: true; data: Record<string, unknown> };
+  assert.deepEqual(envelope.data, {
+    revoked: true,
+    local_credential_removed: true,
+    account_preserved: true,
+    screens_preserved: true,
+    recoverable: false,
+  });
+  assert.doesNotMatch(result.stdout, /current_private_secret|acc_current|enrollment-retry-key|browser-setup-key/);
+  assert.equal(transport.calls.length, 1);
+  assert.equal(transport.calls[0]?.path, "/api/v1/account/credential/revoke");
+  assert.equal(transport.calls[0]?.headers?.authorization, `Bearer ${token}`);
+  assert.equal(transport.calls[0]?.headers?.["idempotency-key"], undefined);
+  assert.deepEqual(await readConfigFile(configPath, fsLike), {
+    api_url: "https://api.screenrig.ai",
+    updated_at: "2026-08-14T17:00:00.000Z",
+  });
+  assert.equal((await stat(configPath)).mode & 0o777, 0o600);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("auth revoke retains local state on a server failure and gives a safe retry", async () => {
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/v1/account/credential/revoke", () => ({
+    status: 503,
+    headers: { "content-type": "application/problem+json" },
+    body: {
+      type: "https://screenrig.ai/problems/dependency-unavailable",
+      title: "Required dependency is unavailable",
+      status: 503,
+      detail: "Credential revocation is temporarily unavailable.",
+      code: "dependency_unavailable",
+    },
+  }));
+  const configDir = await testTemp("revoke-failure-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const configPath = path.join(configDir, "screenrig", "config.json");
+  const original = {
+    api_url: "https://api.screenrig.ai",
+    token: "sr_live_current_private_secret",
+    account_id: "acc_current",
+    browser_setup: { idempotency_key: "browser-setup-key", code: "ABC234" },
+  };
+  await writeConfigAtomic(configPath, original, fsLike);
+
+  const result = await withRuntime(["--json", "auth", "revoke", "--yes"], transport, { fs: fsLike });
+  assert.equal(result.code, ExitCode.Server);
+  const envelope = JSON.parse(result.stdout) as { error: { code: string; next: { command: string; reason: string } } };
+  assert.equal(envelope.error.code, "dependency_unavailable");
+  assert.equal(envelope.error.next.command, "screenrig auth revoke --yes");
+  assert.match(envelope.error.next.reason, /Local credential state was retained/);
+  assert.deepEqual(await readConfigFile(configPath, fsLike), original);
+  assert.doesNotMatch(result.stdout, /current_private_secret|browser-setup-key/);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("auth revoke retries the exact revoked bearer after cleanup failure and completes local cleanup", async () => {
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/v1/account/credential/revoke", () => ({
+    status: 204,
+    headers: { "cache-control": "private, no-store" },
+    body: undefined,
+  }));
+  const configDir = await testTemp("revoke-cleanup-failure-");
+  const configPath = path.join(configDir, "screenrig", "config.json");
+  const realFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const original = {
+    api_url: "https://api.screenrig.ai",
+    token: "sr_live_current_private_secret",
+    account_id: "acc_current",
+  };
+  await writeConfigAtomic(configPath, original, realFs);
+  const interruptedFs: ConfigFs = {
+    ...realFs,
+    rename: async (from, to) => {
+      if (to === configPath) {
+        throw new Error("simulated cleanup failure sr_live_current_private_secret");
+      }
+      await rename(from, to);
+    },
+  };
+
+  const result = await withRuntime(["--json", "auth", "revoke", "--yes"], transport, { fs: interruptedFs });
+  assert.equal(result.code, ExitCode.Config);
+  const envelope = JSON.parse(result.stdout) as { error: { detail: string; next: { command: string } } };
+  assert.match(envelope.error.detail, /server revoked.*atomic local cleanup failed/i);
+  assert.equal(envelope.error.next.command, "screenrig auth revoke --yes");
+  assert.doesNotMatch(result.stdout, /current_private_secret/);
+  assert.deepEqual(await readConfigFile(configPath, realFs), original);
+
+  const retry = await withRuntime(["--json", "auth", "revoke", "--yes"], transport, { fs: realFs });
+  assert.equal(retry.code, 0, retry.stdout);
+  assert.equal(transport.calls.length, 2);
+  assert.equal(transport.calls[1]?.headers?.authorization, `Bearer ${original.token}`);
+  assert.deepEqual(await readConfigFile(configPath, realFs), {
+    api_url: "https://api.screenrig.ai",
+    updated_at: "2026-08-14T17:00:00.000Z",
+  });
+  await rm(configDir, { recursive: true, force: true });
+});
+
 test("screen pair normalizes safe lowercase input and reports canonical uppercase", async () => {
   const transport = memoryBackend();
   const result = await withRuntime(["screen", "pair", "abc234", "--label", "Lobby"], transport);

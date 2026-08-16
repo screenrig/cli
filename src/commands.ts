@@ -20,11 +20,17 @@ import {
 import { SDK_PROTOCOL_VERSION } from "./adapters/sdk-injection.js";
 import { flagBool, flagNumber, flagString, type ParsedArgs } from "./argv.js";
 import { ApiClient, requireToken } from "./client.js";
-import { resolveConfig, describeToken } from "./config.js";
+import {
+  resolveConfig,
+  describeToken,
+  readConfigFile,
+  withConfigLock,
+  writeConfigAtomic,
+} from "./config.js";
 import { ensureCredential } from "./enrollment.js";
 import { successEnvelope } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
-import { CliError, usageError } from "./problems.js";
+import { CliError, configError, usageError } from "./problems.js";
 import { packDirectory } from "./pack/index.js";
 import type { CliRuntime } from "./runtime.js";
 import { FetchTransport } from "./transport/http.js";
@@ -49,6 +55,7 @@ import {
   clearBrowserSetupRetryState,
   normalizeBrowserSetupCode,
 } from "./browser-setup.js";
+import { redactText } from "./redact.js";
 
 export const CLI_VERSION = "0.1.0";
 
@@ -62,6 +69,7 @@ Usage:
 Commands:
   account show
   auth status
+  auth revoke --yes
   app pack <directory> [--output FILE]
   app upload <directory>
   app list
@@ -168,6 +176,9 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
   if (group === "app" && action === "pack") {
     return appPack(args, runtime);
   }
+  if (group === "auth" && action === "revoke") {
+    return authRevoke(args, runtime, resolved);
+  }
   if (isAuthenticatedCommand(group, action)) {
     resolved = await enrollForCommand(args, runtime, resolved);
   }
@@ -222,6 +233,115 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
     command: "screenrig --help",
     reason: "List implemented commands.",
   });
+}
+
+async function authRevoke(
+  args: ParsedArgs,
+  runtime: CliRuntime,
+  resolved: Awaited<ReturnType<typeof resolveConfig>>,
+): Promise<CommandResult> {
+  if (args.positionals.length !== 2) {
+    throw usageError("auth revoke does not accept positional arguments.");
+  }
+  if (!flagBool(args.flags, "yes")) {
+    throw usageError(
+      "auth revoke requires --yes. The account, screens, and content will remain, but this anonymous account credential cannot be recovered; a later enrollment creates a separate account.",
+      {
+        command: "screenrig auth revoke --yes",
+        reason: "Run only after explicitly accepting permanent loss of CLI access to the current anonymous account.",
+      },
+    );
+  }
+  if (!resolved.token) {
+    throw usageError("No stored ScreenRig account credential exists; nothing was changed.");
+  }
+
+  const fsLike = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
+  const requestedTimeout = flagNumber(args.flags, "timeout");
+  const lockStaleMs = Math.max(60_000, (requestedTimeout && requestedTimeout > 0 ? requestedTimeout : 30_000) + 30_000);
+  const result = await withConfigLock(
+    resolved.configPath,
+    fsLike,
+    { sleep: runtime.sleep, now: () => runtime.now().getTime(), staleMs: lockStaleMs },
+    async () => {
+      const current = await readConfigFile(resolved.configPath, fsLike);
+      if (!current?.token || current.token !== resolved.token) {
+        throw configError(
+          "The stored ScreenRig credential changed before revocation; nothing was sent or removed.",
+          {
+            command: "screenrig auth revoke --yes",
+            reason: "Re-read the current private config and explicitly retry the revocation.",
+          },
+        );
+      }
+      const client = clientFor(runtime, args, resolved.apiUrl, current.token);
+      let response;
+      try {
+        response = await client.call({
+          method: "POST",
+          path: "/api/v1/account/credential/revoke",
+        });
+      } catch (err) {
+        if (err instanceof CliError) {
+          throw new CliError({
+            ...err.problem,
+            next: {
+              command: "screenrig auth revoke --yes",
+              reason: "Local credential state was retained. Retrying the exact revocation is safe after an ambiguous response.",
+            },
+          }, err.exitCode);
+        }
+        throw err;
+      }
+      if (response.status !== 204 || response.body !== undefined) {
+        throw configError(
+          "The revocation endpoint did not return the required empty 204 response; local credential state was retained.",
+          {
+            command: "screenrig auth revoke --yes",
+            reason: "Retry after the service contract is healthy; exact revocation replays are safe.",
+          },
+        );
+      }
+      if (response.headers["cache-control"] !== "private, no-store") {
+        throw configError(
+          "The revocation endpoint did not return the required private, no-store cache policy; local credential state was retained.",
+        );
+      }
+      try {
+        await writeConfigAtomic(resolved.configPath, {
+          api_url: current.api_url,
+          updated_at: runtime.now().toISOString(),
+        }, fsLike);
+      } catch (err) {
+        throw configError(
+          `The server revoked the account credential, but atomic local cleanup failed: ${redactText(err instanceof Error ? err.message : "unknown filesystem error")}. The retained local credential no longer authorizes account operations.`,
+          {
+            command: "screenrig auth revoke --yes",
+            reason: "Retrying with the retained exact credential safely completes local cleanup.",
+          },
+        );
+      }
+      return { requestId: client.requestId };
+    },
+  );
+
+  const data = {
+    revoked: true,
+    local_credential_removed: true,
+    account_preserved: true,
+    screens_preserved: true,
+    recoverable: false,
+  };
+  return {
+    envelope: successEnvelope(data, { request_id: result.requestId }),
+    exitCode: ExitCode.Success,
+    human: humanLines("Account credential revoked", [
+      ["local_credential", "removed"],
+      ["account_and_screens", "preserved"],
+      ["recovery", "unavailable; the next account-scoped command enrolls a separate account"],
+      ["request_id", result.requestId],
+    ]),
+  };
 }
 
 function isAuthenticatedCommand(group: string, action: string | undefined): boolean {
