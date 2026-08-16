@@ -122,7 +122,7 @@ Commands:
   operations get <id>
   operations wait <id>
   operations cancel <id>
-  events list [--after CURSOR]
+  events list [--after CURSOR] [--limit N]
   events follow [--after CURSOR]
   feedback bug <title> (--body TEXT | --body-file FILE)
                        [--command "GROUP ACTION"] [--no-context]
@@ -1311,6 +1311,7 @@ async function eventsList(args: ParsedArgs, runtime: CliRuntime, resolved: Await
     path: "/api/v1/events",
     query: {
       after: flagString(args.flags, "after") ?? flagString(args.flags, "cursor"),
+      limit: flagString(args.flags, "limit"),
     },
   });
   const page = response.body as EventPage;

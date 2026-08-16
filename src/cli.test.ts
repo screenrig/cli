@@ -607,6 +607,34 @@ test("operations wait polls until a terminal success", async () => {
   await rm(configDir, { recursive: true, force: true });
 });
 
+test("events list sends after and limit when the user supplies them", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("ev-list-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+
+  const limited = await withRuntime(
+    ["--json", "events", "list", "--after", "ev1_0", "--limit", "25"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(limited.code, 0, limited.stdout);
+  const limitedCall = transport.calls.find((call) => call.path === "/api/v1/events");
+  assert.equal(limitedCall?.query?.after, "ev1_0");
+  assert.equal(limitedCall?.query?.limit, "25");
+
+  const unscoped = await withRuntime(["--json", "events", "list"], transport, { fs: fsLike });
+  assert.equal(unscoped.code, 0, unscoped.stdout);
+  const defaultCall = transport.calls.filter((call) => call.path === "/api/v1/events").at(-1);
+  assert.equal(defaultCall?.query?.after, undefined);
+  assert.equal(defaultCall?.query?.limit, undefined);
+  await rm(configDir, { recursive: true, force: true });
+});
+
 test("events follow parses SSE frames from the transport stream", async () => {
   const transport = memoryBackend();
   transport.pushStream(
