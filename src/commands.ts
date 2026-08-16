@@ -43,6 +43,7 @@ import type { Transport } from "./transport/types.js";
 import { parseSse } from "./sse.js";
 import { kvWriteFromArgs } from "./kv-write.js";
 import { quotedRevision } from "./if-match.js";
+import { lowInformationFilenameWarning } from "./media-filename.js";
 import {
   deriveCommitIdempotencyKey,
   performSignedMediaPut,
@@ -784,6 +785,8 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
         : { applied: false, reason: "--no-transcode uploaded the source bytes unchanged" },
     };
     const warnings = (transcode?.warnings ?? []).map((message) => ({ code: "transcode_warning", message }));
+    const filenameWarning = lowInformationFilenameWarning(prepared.declaration.filename);
+    if (filenameWarning) warnings.push({ code: "generic_filename", message: filenameWarning });
     return {
       envelope: successEnvelope(data, {
         request_id: client.requestId,

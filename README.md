@@ -98,6 +98,11 @@ the encoder each profile needs. `screenrig doctor` reports the resolved binaries
 and versions, the `libx265`, `libx264`, and `libwebp` encoders, and whether the
 build carries the `zscale` and `tonemap` filters that HDR tone mapping needs.
 
+The command also checks the filename. A low-information name such as
+`video.mp4` or `IMG_1234.jpg` adds an advisory `generic_filename` warning to
+the envelope. The upload still succeeds; the warning never changes the exit
+code.
+
 Video becomes an MP4:
 
 - H.264 by default (`libx264`, High profile, level 4.2), or H.265 with

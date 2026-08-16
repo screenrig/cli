@@ -1035,6 +1035,41 @@ test("media upload validates transcode flags even when transcoding is off", asyn
   }
 });
 
+test("media upload warns on a low-information filename without blocking the upload", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("media-filename-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const file = path.join(configDir, "video.mp4");
+  await writeFile(file, Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
+  try {
+    const result = await withRuntime(
+      ["--json", "media", "upload", file, "--no-transcode"],
+      transport,
+      {
+        fs: fsLike,
+        signedRawPut: async () => ({ status: 200 }),
+      },
+    );
+    assert.equal(result.code, 0, result.stdout);
+    const envelope = JSON.parse(result.stdout) as {
+      ok: boolean;
+      warnings: Array<{ code: string; message: string }>;
+    };
+    assert.equal(envelope.ok, true);
+    const warning = envelope.warnings.find((item) => item.code === "generic_filename");
+    assert.ok(warning, result.stdout);
+    assert.match(warning.message, /video\.mp4/);
+    assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 1);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
 test("control-plane KV writes use binary-safe OpenAPI payloads and idempotency", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("kv-contract-");
