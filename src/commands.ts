@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   limitsFromCapabilities,
@@ -7,6 +7,11 @@ import {
   type CLIEnrollment,
   type CLIEnrollmentRequest,
   type EventPage,
+  type FeedbackContext,
+  type FeedbackKind,
+  type FeedbackList,
+  type FeedbackSubmission,
+  type FeedbackWrite,
   type KVEntry,
   type Operation,
   type OperationAccepted,
@@ -56,6 +61,18 @@ import {
   normalizeBrowserSetupCode,
 } from "./browser-setup.js";
 import { redactText } from "./redact.js";
+import { ffmpegLookup, resolveFfmpegToolchain } from "./media/ffmpeg.js";
+import { createProgressReporter, silentProgressReporter, type ProgressReporter } from "./media/progress.js";
+import {
+  DEFAULT_CODEC,
+  DEFAULT_MAX_FPS,
+  DEFAULT_WEBP_QUALITY,
+  MAX_EDGE,
+  transcodeForUpload,
+  type TranscodeCodec,
+  type TranscodeOptions,
+  type TranscodeResult,
+} from "./media/transcode.js";
 
 export const CLI_VERSION = "0.1.0";
 
@@ -75,6 +92,8 @@ Commands:
   app list
   app show <id>
   media upload <file> [--content-type TYPE] [--no-wait]
+                      [--no-transcode] [--codec h264|hevc] [--max-fps N]
+                      [--max-edge PIXELS] [--webp-quality 1-100] [--no-progress]
   media show <id>
   media list
   media delete <id> --if-match REVISION
@@ -104,6 +123,11 @@ Commands:
   operations cancel <id>
   events list [--after CURSOR]
   events follow [--after CURSOR]
+  feedback bug <title> (--body TEXT | --body-file FILE)
+                       [--command "GROUP ACTION"] [--no-context]
+  feedback feature <title> (--body TEXT | --body-file FILE)
+                       [--command "GROUP ACTION"] [--no-context]
+  feedback list [--kind bug|feature]
   doctor [--repair-config]
   version
 `;
@@ -228,6 +252,9 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
   }
   if (group === "events" && action === "follow") {
     return eventsFollow(args, runtime, resolved);
+  }
+  if (group === "feedback") {
+    return feedbackCommand(args, runtime, resolved, action);
   }
   throw usageError(`Unknown command: ${args.positionals.join(" ")}`, {
     command: "screenrig --help",
@@ -356,6 +383,7 @@ function isAuthenticatedCommand(group: string, action: string | undefined): bool
     kv: new Set(["get", "set", "delete", "list"]),
     operations: new Set(["get", "wait", "cancel"]),
     events: new Set(["list", "follow"]),
+    feedback: new Set(["bug", "feature", "list"]),
   };
   return actions[group]?.has(action) ?? false;
 }
@@ -635,9 +663,78 @@ async function mediaCommand(
     return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted media ${id}` };
   }
   if (action === "upload") {
-    const file = args.positionals[2];
-    if (!file) throw usageError("media upload requires a file.");
-    const prepared = await prepareMediaUpload(path.resolve(runtime.cwd(), file), flagString(args.flags, "content-type"));
+    return mediaUpload(args, runtime, client);
+  }
+  throw usageError("Unknown media command.");
+}
+
+/** Flags that shape the pre-upload transcode. */
+export function transcodeOptionsFromArgs(args: ParsedArgs): TranscodeOptions {
+  const codecFlag = flagString(args.flags, "codec")?.toLowerCase();
+  let codec: TranscodeCodec = DEFAULT_CODEC;
+  if (codecFlag !== undefined) {
+    if (codecFlag === "hevc" || codecFlag === "h265") {
+      codec = "hevc";
+    } else if (codecFlag === "h264" || codecFlag === "avc") {
+      codec = "h264";
+    } else {
+      throw usageError("--codec accepts hevc or h264.");
+    }
+  }
+
+  const maxFps = flagNumber(args.flags, "max-fps") ?? DEFAULT_MAX_FPS;
+  if (!(maxFps > 0) || maxFps > 240) {
+    throw usageError("--max-fps must be greater than 0 and at most 240.");
+  }
+  const maxEdge = flagNumber(args.flags, "max-edge") ?? MAX_EDGE;
+  if (!Number.isInteger(maxEdge) || maxEdge < 16 || maxEdge > MAX_EDGE) {
+    throw usageError(`--max-edge must be a whole number between 16 and ${MAX_EDGE}.`);
+  }
+  const webpQuality = flagNumber(args.flags, "webp-quality") ?? DEFAULT_WEBP_QUALITY;
+  if (!Number.isInteger(webpQuality) || webpQuality < 1 || webpQuality > 100) {
+    throw usageError("--webp-quality must be a whole number between 1 and 100.");
+  }
+  return { codec, maxFps, maxEdge, webpQuality };
+}
+
+function progressReporterFor(args: ParsedArgs, runtime: CliRuntime): ProgressReporter {
+  if (flagBool(args.flags, "no-progress")) {
+    return silentProgressReporter();
+  }
+  const json = flagBool(args.flags, "json");
+  return createProgressReporter({
+    stderr: runtime.stderr,
+    json,
+    tty: !json && runtime.isStderrTty?.() === true,
+    now: () => runtime.now().getTime(),
+  });
+}
+
+async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiClient): Promise<CommandResult> {
+  const file = args.positionals[2];
+  if (!file) throw usageError("media upload requires a file.");
+  const sourcePath = path.resolve(runtime.cwd(), file);
+  const explicitContentType = flagString(args.flags, "content-type");
+
+  // Validate unconditionally so a typo such as --webp-quality 500 is rejected
+  // whether or not transcoding runs. The result is unused under --no-transcode.
+  const transcodeOptions = transcodeOptionsFromArgs(args);
+
+  let transcode: TranscodeResult | undefined;
+  if (!flagBool(args.flags, "no-transcode")) {
+    transcode = await transcodeForUpload({
+      runtime,
+      filePath: sourcePath,
+      explicitContentType,
+      options: transcodeOptions,
+      reporter: progressReporterFor(args, runtime),
+    });
+  }
+
+  try {
+    const prepared = transcode
+      ? await prepareMediaUpload(transcode.filePath, transcode.contentType)
+      : await prepareMediaUpload(sourcePath, explicitContentType);
     const declarationResponse = await client.call({
       method: "POST",
       path: "/api/v1/media/uploads",
@@ -672,19 +769,207 @@ async function mediaCommand(
         bytes: prepared.declaration.bytes,
         sha256: prepared.declaration.sha256,
       },
+      transcode: transcode
+        ? {
+            applied: !transcode.passthrough,
+            stage: transcode.stage,
+            reason: transcode.reason,
+            source_bytes: transcode.sourceBytes,
+            output_bytes: transcode.outputBytes,
+            width: transcode.width,
+            height: transcode.height,
+            dimensions_measured: transcode.dimensionsMeasured,
+            duration_ms: transcode.durationMs,
+          }
+        : { applied: false, reason: "--no-transcode uploaded the source bytes unchanged" },
     };
+    const warnings = (transcode?.warnings ?? []).map((message) => ({ code: "transcode_warning", message }));
     return {
-      envelope: successEnvelope(data, { request_id: client.requestId, operation_id: operation.id }),
+      envelope: successEnvelope(data, {
+        request_id: client.requestId,
+        operation_id: operation.id,
+        warnings,
+      }),
       exitCode: ExitCode.Success,
       human: humanLines(flagBool(args.flags, "no-wait") ? "Media upload committed" : "Media uploaded", [
         ["operation_id", operation.id],
         ["state", operation.state],
         ["filename", prepared.declaration.filename],
+        ["content_type", prepared.declaration.content_type],
+        ["transcode", transcode ? `${transcode.reason} in ${transcode.durationMs} ms` : "skipped"],
         ["sha256", prepared.declaration.sha256],
+        ...warnings.map((warning): [string, string] => ["warning", warning.message]),
       ]),
     };
+  } finally {
+    if (transcode?.cleanupDir) {
+      await rm(transcode.cleanupDir, { recursive: true, force: true });
+    }
   }
-  throw usageError("Unknown media command.");
+}
+
+/**
+ * The submission kind comes from the route, never from the request body, so the
+ * CLI action selects the path and nothing in the payload can contradict it.
+ */
+const FEEDBACK_PATHS: Record<FeedbackKind, string> = {
+  bug: "/api/v1/feedback/bugs",
+  feature: "/api/v1/feedback/features",
+};
+
+/**
+ * Exactly the contract pattern for `FeedbackContext.command`: up to four
+ * lowercase words. It admits no flag, no uppercase, no separator, and no
+ * punctuation, so an argument value cannot survive it.
+ */
+const FEEDBACK_COMMAND_PATTERN = /^[a-z][a-z0-9-]{0,31}( [a-z][a-z0-9-]{0,31}){0,3}$/;
+const FEEDBACK_TITLE_MAX = 120;
+const FEEDBACK_BODY_MAX = 4000;
+
+/**
+ * Built from the resolved command surface only. Nothing here is derived from
+ * raw argv, so no argument value, path, identifier, or credential can reach the
+ * server through the diagnostic envelope.
+ */
+export function feedbackContextFromArgs(
+  args: ParsedArgs,
+  platform: string,
+): FeedbackContext | undefined {
+  if (flagBool(args.flags, "no-context")) {
+    return undefined;
+  }
+  const context: FeedbackContext = { cli_version: CLI_VERSION };
+  if (/^[a-z0-9]{1,16}\/[a-z0-9_]{1,16}$/.test(platform)) {
+    context.platform = platform;
+  }
+  // `--command --json` parses as a valueless flag. Fail rather than silently
+  // dropping the context the caller asked for.
+  if (args.flags.command === true) {
+    throw usageError('--command requires a value, such as --command "media upload".');
+  }
+  // Validated exactly as supplied. Normalizing first would let an uppercase
+  // argument value such as "screen pair ABC234" be lowercased into a shape the
+  // pattern accepts, which is precisely the leak the closed envelope prevents.
+  const command = flagString(args.flags, "command")?.trim();
+  if (command !== undefined) {
+    if (!FEEDBACK_COMMAND_PATTERN.test(command)) {
+      throw usageError(
+        "--command accepts a command path only, as up to four lowercase words such as " +
+          '"media upload". Option flags, identifiers, file paths, and argument values are rejected ' +
+          "by the server and must not be placed here.",
+      );
+    }
+    context.command = command;
+  }
+  return context;
+}
+
+async function readFeedbackBody(args: ParsedArgs, runtime: CliRuntime): Promise<string> {
+  const inline = flagString(args.flags, "body");
+  const file = flagString(args.flags, "body-file");
+  if (inline !== undefined && file !== undefined) {
+    throw usageError("Pass either --body or --body-file, not both.");
+  }
+  if (inline !== undefined) {
+    return inline;
+  }
+  if (file === undefined) {
+    throw usageError("feedback requires --body TEXT or --body-file FILE.");
+  }
+  try {
+    return await readFile(path.resolve(runtime.cwd(), file), "utf8");
+  } catch (error) {
+    throw usageError(`Cannot read --body-file: ${error instanceof Error ? error.message : "read failed"}`);
+  }
+}
+
+async function feedbackCommand(
+  args: ParsedArgs,
+  runtime: CliRuntime,
+  resolved: Awaited<ReturnType<typeof resolveConfig>>,
+  action: string | undefined,
+): Promise<CommandResult> {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  if (action === "list") {
+    return feedbackList(args, client);
+  }
+  if (action !== "bug" && action !== "feature") {
+    throw usageError("Unknown feedback command; use feedback bug, feedback feature, or feedback list.");
+  }
+
+  const title = args.positionals[2]?.trim();
+  if (!title) {
+    throw usageError(`feedback ${action} requires a title.`);
+  }
+  if (title.length > FEEDBACK_TITLE_MAX) {
+    throw usageError(`A feedback title is at most ${FEEDBACK_TITLE_MAX} characters.`);
+  }
+  const body = (await readFeedbackBody(args, runtime)).trim();
+  if (!body) {
+    throw usageError("A feedback body must not be empty.");
+  }
+  if (body.length > FEEDBACK_BODY_MAX) {
+    throw usageError(`A feedback body is at most ${FEEDBACK_BODY_MAX} characters.`);
+  }
+
+  const context = feedbackContextFromArgs(args, `${process.platform}/${process.arch}`);
+  const payload: FeedbackWrite = { title, body, ...(context ? { context } : {}) };
+
+  // Submissions are immutable and the server deduplicates an exact retry under
+  // the same key for 24 hours, so the ordinary idempotency key is what makes a
+  // retry safe rather than duplicating a report.
+  const response = await client.call({
+    method: "POST",
+    path: FEEDBACK_PATHS[action],
+    idempotent: true,
+    body: payload,
+  });
+  const submission = response.body as FeedbackSubmission;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: humanLines(action === "bug" ? "Bug report submitted" : "Feature request submitted", [
+      ["id", submission?.id],
+      ["kind", submission?.kind],
+      ["title", submission?.title],
+      ["created_at", submission?.created_at],
+      ["note", "Submissions are immutable; send a new one to correct or add detail."],
+    ]),
+  };
+}
+
+async function feedbackList(args: ParsedArgs, client: ApiClient): Promise<CommandResult> {
+  const kindFlag = flagString(args.flags, "kind")?.toLowerCase();
+  if (kindFlag !== undefined && kindFlag !== "bug" && kindFlag !== "feature") {
+    throw usageError("--kind accepts bug or feature.");
+  }
+  const kinds: FeedbackKind[] = kindFlag ? [kindFlag as FeedbackKind] : ["bug", "feature"];
+
+  const items: FeedbackSubmission[] = [];
+  for (const kind of kinds) {
+    const response = await client.call({ method: "GET", path: FEEDBACK_PATHS[kind] });
+    const page = (response.body ?? {}) as FeedbackList;
+    // The route already fixes the kind; keep it on each item so a merged list
+    // stays unambiguous even when the server omits it.
+    for (const item of page.items ?? []) {
+      items.push({ ...item, kind: item.kind ?? kind });
+    }
+  }
+  items.sort((left, right) => (left.created_at < right.created_at ? 1 : left.created_at > right.created_at ? -1 : 0));
+
+  return {
+    envelope: successEnvelope({ items }, { request_id: client.requestId }),
+    exitCode: ExitCode.Success,
+    human:
+      items.length === 0
+        ? "No feedback submissions"
+        : [
+            `Feedback submissions (${items.length})`,
+            ...items.map((item) => `${item.created_at}  ${item.kind.padEnd(7)}  ${item.id}  ${item.title}`),
+          ].join("\n"),
+  };
 }
 
 async function playlistCommand(
@@ -1122,12 +1407,62 @@ async function doctor(
     status: resolved.apiUrl.startsWith("https://") || resolved.apiUrl.startsWith("http://127.") || resolved.apiUrl.includes("localhost") ? "pass" : "fail",
     detail: resolved.apiUrl,
   });
+  const lookup = ffmpegLookup(runtime.env);
+  try {
+    const toolchain = await resolveFfmpegToolchain(runtime);
+    checks.push({
+      name: "ffmpeg",
+      status: "pass",
+      detail: `${toolchain.ffmpeg} ${toolchain.ffmpegVersion}${lookup.ffmpegFromEnv ? " (SCREENRIG_FFMPEG)" : ""}`,
+    });
+    checks.push({
+      name: "ffprobe",
+      status: "pass",
+      detail: `${toolchain.ffprobe} ${toolchain.ffprobeVersion}${lookup.ffprobeFromEnv ? " (SCREENRIG_FFPROBE)" : ""}`,
+    });
+    for (const [name, encoder] of [
+      ["encoder_libx265", "libx265"],
+      ["encoder_libx264", "libx264"],
+      ["encoder_libwebp", "libwebp"],
+    ] as const) {
+      checks.push({
+        name,
+        status: toolchain.encoders.has(encoder) ? "pass" : "fail",
+        detail: toolchain.encoders.has(encoder) ? `${encoder} available` : `${encoder} missing from this ffmpeg build`,
+      });
+    }
+    const tonemap = toolchain.filters.has("zscale") && toolchain.filters.has("tonemap");
+    checks.push({
+      name: "filter_hdr_tonemap",
+      status: tonemap ? "pass" : "fail",
+      detail: tonemap
+        ? "zscale and tonemap available"
+        : "zscale or tonemap missing; HDR sources convert without tone mapping",
+    });
+  } catch (err) {
+    const detail = err instanceof CliError ? err.problem.detail : err instanceof Error ? redactText(err.message) : "ffmpeg probe failed";
+    checks.push({ name: "ffmpeg", status: "fail", detail });
+  }
+
   const client = clientFor(runtime, args, resolved.apiUrl, resolved.token);
   for (const route of ["/.health", "/.ready", "/.version", "/api/v1/capabilities"] as const) {
     try {
       const response = await client.call({ method: "GET", path: route });
       const name = route === "/api/v1/capabilities" ? "capabilities" : route.slice(2);
       checks.push({ name, status: "pass", detail: `status ${response.status}` });
+      if (route === "/api/v1/capabilities") {
+        // Probe feedback support from the advertised feature map rather than
+        // assuming the routes exist on every deployment.
+        const features = ((response.body ?? {}) as Capabilities).features ?? {};
+        const supported = features.feedback === true;
+        checks.push({
+          name: "feedback",
+          status: supported ? "pass" : "fail",
+          detail: supported
+            ? "server advertises feedback support"
+            : "server does not advertise feedback support; feedback commands are unavailable",
+        });
+      }
     } catch (err) {
       const detail = err instanceof CliError ? err.problem.detail : err instanceof Error ? err.message : `${route} failed`;
       const name = route === "/api/v1/capabilities" ? "capabilities" : route.slice(2);

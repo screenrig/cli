@@ -51,6 +51,14 @@ const VALUE_FLAGS = new Set([
   "label",
   "content-type",
   "code",
+  "codec",
+  "max-fps",
+  "max-edge",
+  "webp-quality",
+  "body",
+  "body-file",
+  "command",
+  "kind",
 ]);
 
 export function parseArgv(argv: string[]): ParsedArgs {

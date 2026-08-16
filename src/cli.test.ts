@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
-import { mkdir, open, rename, chmod, stat, writeFile, rm } from "node:fs/promises";
+import { mkdir, open, readFile, rename, chmod, stat, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import { run, type CliRuntime } from "./main.js";
@@ -11,6 +11,7 @@ import { isWorldOrGroupReadable, writeConfigAtomic, readConfigFile } from "./con
 import type { Operation } from "./adapters/protocol.js";
 import { SDK_PROTOCOL_VERSION } from "./adapters/sdk-injection.js";
 import { testTemp } from "./test-temp.js";
+import { resetFfmpegToolchainCache } from "./media/ffmpeg.js";
 
 function collect(stream: PassThrough): Promise<string> {
   return new Promise((resolve) => {
@@ -706,6 +707,334 @@ test("media upload returns usage error and makes no /media/uploads call", async 
   await rm(configDir, { recursive: true, force: true });
 });
 
+test("media upload transcodes before declaring, and uploads only the transcoded bytes", async () => {
+  resetFfmpegToolchainCache();
+  const transport = memoryBackend();
+  const configDir = await testTemp("media-transcode-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const source = path.join(configDir, "poster.png");
+  const sourceBytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3]);
+  await writeFile(source, sourceBytes);
+
+  const encoded = Buffer.from("RIFF----WEBPtranscoded", "utf8");
+  let encodeArgs: string[] = [];
+  let temporaryOutput = "";
+  const runProcess = async (request: { command: string; args: string[]; onStdoutLine?: (line: string) => void }) => {
+    if (request.args.includes("-version")) {
+      return { code: 0, signal: null, stdout: `${path.basename(request.command)} version n8.1.2\n`, stderrTail: "" };
+    }
+    if (request.args.includes("-encoders")) {
+      return { code: 0, signal: null, stdout: " V....D libwebp              libwebp WebP image\n", stderrTail: "" };
+    }
+    if (request.args.includes("-filters")) {
+      return { code: 0, signal: null, stdout: " .S scale            V->V       Scale.\n", stderrTail: "" };
+    }
+    if (request.command.endsWith("ffprobe")) {
+      // The CLI measures the produced file after the encode, so the probe of the
+      // temporary output must report what ffmpeg actually wrote.
+      const measuring = temporaryOutput !== "" && request.args.at(-1) === temporaryOutput;
+      return {
+        code: 0,
+        signal: null,
+        stdout: JSON.stringify(
+          measuring
+            ? {
+                streams: [{ codec_type: "video", codec_name: "webp", width: 3840, height: 1920, pix_fmt: "yuv420p", nb_frames: "1", avg_frame_rate: "0/0" }],
+                format: { duration: "0", format_name: "webp_pipe" },
+              }
+            : {
+                streams: [{ codec_type: "video", codec_name: "png", width: 8000, height: 4000, pix_fmt: "rgb24", nb_frames: "1", avg_frame_rate: "0/0" }],
+                format: { duration: "0", format_name: "png_pipe" },
+              },
+        ),
+        stderrTail: "",
+      };
+    }
+    encodeArgs = request.args;
+    temporaryOutput = request.args[request.args.length - 1] as string;
+    request.onStdoutLine?.("progress=end");
+    await writeFile(temporaryOutput, encoded);
+    return { code: 0, signal: null, stdout: "", stderrTail: "" };
+  };
+
+  let signedRequest: Record<string, unknown> | undefined;
+  const result = await withRuntime(["--json", "media", "upload", source], transport, {
+    fs: fsLike,
+    runProcess: runProcess as unknown as NonNullable<CliRuntime["runProcess"]>,
+    signedRawPut: async (request) => {
+      signedRequest = request as unknown as Record<string, unknown>;
+      return { status: 200 };
+    },
+  });
+
+  try {
+    assert.equal(result.code, 0, result.stdout);
+    assert.match(String(encodeArgs[encodeArgs.indexOf("-vf") + 1]), /min\(3840,iw\)/);
+    assert.equal(encodeArgs[encodeArgs.indexOf("-c:v") + 1], "libwebp");
+
+    const declare = transport.calls.find((call) => call.path === "/api/v1/media/uploads");
+    assert.deepEqual((declare?.body as { filename: string; content_type: string; bytes: number }).content_type, "image/webp");
+    assert.equal((declare?.body as { filename: string }).filename, "poster.webp");
+    assert.equal((declare?.body as { bytes: number }).bytes, encoded.length);
+    assert.deepEqual(signedRequest?.body, encoded, "the source bytes must never reach the signed PUT");
+
+    const envelope = JSON.parse(result.stdout) as {
+      data: {
+        upload: { content_type: string };
+        transcode: { applied: boolean; width: number; height: number; dimensions_measured: boolean };
+      };
+    };
+    assert.equal(envelope.data.upload.content_type, "image/webp");
+    assert.equal(envelope.data.transcode.applied, true);
+    assert.equal(envelope.data.transcode.width, 3840);
+    assert.equal(envelope.data.transcode.height, 1920);
+    assert.equal(
+      envelope.data.transcode.dimensions_measured,
+      true,
+      "reported dimensions must be read back from the produced file",
+    );
+
+    await assert.rejects(() => stat(temporaryOutput), "the temporary transcode directory must be removed");
+    assert.deepEqual(await readFile(source), sourceBytes, "the source file must be left untouched");
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("feedback takes its kind from the route, carries no argv, and stays idempotent", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("feedback-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+
+  try {
+    const bug = await withRuntime(
+      ["--json", "feedback", "bug", "Playlist stalls after pairing", "--body", "The screen shows the first page then freezes.", "--command", "screen pair"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(bug.code, 0, bug.stdout);
+
+    const post = transport.calls.find((call) => call.path === "/api/v1/feedback/bugs" && call.method === "POST");
+    assert.ok(post, "the bug route must be selected by the command action");
+    const body = post.body as { title: string; body: string; kind?: string; context?: Record<string, string> };
+    assert.equal(body.kind, undefined, "the kind comes from the route, never the body");
+    assert.equal(body.title, "Playlist stalls after pairing");
+    assert.equal(body.context?.command, "screen pair");
+    assert.equal(body.context?.cli_version, "0.1.0");
+    assert.match(String(body.context?.platform), /^[a-z0-9]{1,16}\/[a-z0-9_]{1,16}$/);
+    assert.deepEqual(Object.keys(body.context ?? {}).sort(), ["cli_version", "command", "platform"]);
+    assert.ok(post.headers?.["idempotency-key"], "a write must carry an idempotency key");
+
+    const envelope = JSON.parse(bug.stdout) as { ok: boolean; data: { id: string; kind: string } };
+    assert.equal(envelope.ok, true);
+    assert.equal(envelope.data.kind, "bug");
+
+    // The feature action must select the other route with the same body shape.
+    const feature = await withRuntime(
+      ["--json", "feedback", "feature", "Add a dry-run flag", "--body", "It would help to preview a playlist change."],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(feature.code, 0, feature.stdout);
+    const featurePost = transport.calls.find((call) => call.path === "/api/v1/feedback/features" && call.method === "POST");
+    assert.ok(featurePost);
+    assert.equal((featurePost.body as { context?: Record<string, string> }).context?.command, undefined);
+
+    // Listing merges both routes newest-first and keeps each item's kind.
+    const list = await withRuntime(["--json", "feedback", "list"], transport, { fs: fsLike });
+    assert.equal(list.code, 0, list.stdout);
+    const listed = JSON.parse(list.stdout) as { data: { items: Array<{ kind: string; id: string }> } };
+    assert.deepEqual(listed.data.items.map((item) => item.kind).sort(), ["bug", "feature"]);
+
+    const narrowed = await withRuntime(["--json", "feedback", "list", "--kind", "bug"], transport, { fs: fsLike });
+    const narrowedItems = (JSON.parse(narrowed.stdout) as { data: { items: Array<{ kind: string }> } }).data.items;
+    assert.deepEqual(narrowedItems.map((item) => item.kind), ["bug"]);
+
+    // No update or delete surface exists for an immutable submission.
+    for (const argv of [["feedback", "update", "fb_x"], ["feedback", "delete", "fb_x"]]) {
+      const rejected = await withRuntime(["--json", ...argv], transport, { fs: fsLike });
+      assert.equal(rejected.code, 2, rejected.stdout);
+    }
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("feedback refuses a --command that could carry an argument value", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("feedback-command-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  try {
+    for (const value of [
+      "media upload ./poster.png",
+      "screen pair ABC234",
+      "media show med_AAAAAAAAAAAAAAAAAAAAAAAA",
+      "auth revoke --token=sr_live_a_b",
+    ]) {
+      const result = await withRuntime(
+        ["--json", "feedback", "bug", "Title", "--body", "Body", `--command=${value}`],
+        transport,
+        { fs: fsLike },
+      );
+      assert.equal(result.code, 2, `${value} must be rejected: ${result.stdout}`);
+      assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/v1/feedback")).length, 0);
+      const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string } };
+      assert.equal(envelope.error.code, "usage_error");
+      assert.match(envelope.error.detail, /command path only/);
+      assert.ok(!envelope.error.detail.includes("sr_live"), "the rejected value must not be echoed back");
+    }
+
+    // A valueless --command must fail rather than quietly dropping the context.
+    const valueless = await withRuntime(
+      ["--json", "feedback", "bug", "Title", "--body", "Body", "--command", "--json"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(valueless.code, 2, valueless.stdout);
+    assert.match(JSON.parse(valueless.stdout).error.detail as string, /--command requires a value/);
+
+    // --no-context suppresses the diagnostic envelope entirely.
+    const quiet = await withRuntime(
+      ["--json", "feedback", "bug", "Title", "--body", "Body", "--no-context"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(quiet.code, 0, quiet.stdout);
+    const post = transport.calls.find((call) => call.path === "/api/v1/feedback/bugs" && call.method === "POST");
+    assert.equal((post?.body as { context?: unknown }).context, undefined);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("a rate-limited submission surfaces Retry-After instead of a bare 429", async () => {
+  // A bare transport, because the first registered route wins in the fake and
+  // memoryBackend() already binds a successful feedback route.
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/v1/feedback/bugs", () => ({
+    status: 429,
+    headers: { "retry-after": "180", "content-type": "application/problem+json" },
+    body: {
+      type: "https://screenrig.ai/problems/rate-limited",
+      title: "Rate limited",
+      status: 429,
+      detail: "This account reached the feedback submission limit.",
+      code: "rate_limited",
+    },
+  }));
+  const configDir = await testTemp("feedback-429-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  try {
+    const result = await withRuntime(
+      ["--json", "feedback", "bug", "Title", "--body", "Body"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(result.code, 7, `rate limiting must use the RateLimited exit code: ${result.stdout}`);
+    const envelope = JSON.parse(result.stdout) as {
+      error: { code: string; detail: string; retry_after_seconds: number; next?: { reason: string } };
+    };
+    assert.equal(envelope.error.code, "rate_limited");
+    assert.equal(envelope.error.retry_after_seconds, 180);
+    assert.match(envelope.error.detail, /Retry-After is 180 seconds/);
+    assert.match(String(envelope.error.next?.reason), /Wait 3 minutes/);
+
+    const human = await withRuntime(["feedback", "bug", "Title", "--body", "Body"], transport, { fs: fsLike });
+    assert.match(human.stderr, /retry_after_seconds: 180/);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("an account quota rejection explains itself and points at the remaining allowance", async () => {
+  // The plan quota is smaller than the 1 GiB transport ceiling and is checked
+  // first, so this is the limit a user actually meets.
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/v1/media/uploads", () => ({
+    status: 413,
+    headers: { "content-type": "application/problem+json" },
+    body: {
+      type: "https://screenrig.ai/problems/quota-exceeded",
+      title: "Account content quota is exceeded",
+      status: 413,
+      detail: "This upload would exceed the account storage quota.",
+      code: "quota_exceeded",
+    },
+  }));
+  const configDir = await testTemp("media-quota-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const file = path.join(configDir, "pixel.png");
+  await writeFile(file, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3]));
+  try {
+    const result = await withRuntime(
+      ["--json", "media", "upload", file, "--no-transcode"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(result.code, 8, `413 maps to the Client exit code: ${result.stdout}`);
+    const envelope = JSON.parse(result.stdout) as {
+      error: { code: string; status: number; next?: { command: string; reason: string } };
+    };
+    assert.equal(envelope.error.code, "quota_exceeded");
+    assert.equal(envelope.error.status, 413);
+    assert.match(String(envelope.error.next?.command), /account show/);
+    assert.match(String(envelope.error.next?.reason), /content_limit_bytes/);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("media upload validates transcode flags even when transcoding is off", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("media-flags-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const file = path.join(configDir, "pixel.png");
+  await writeFile(file, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3]));
+  try {
+    for (const bad of [["--webp-quality", "500"], ["--codec", "vp9"], ["--max-edge", "99999"], ["--max-fps", "0"]]) {
+      const result = await withRuntime(
+        ["--json", "media", "upload", file, "--no-transcode", ...bad],
+        transport,
+        { fs: fsLike },
+      );
+      assert.equal(result.code, 2, `${bad.join(" ")} must be rejected under --no-transcode: ${result.stdout}`);
+      assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 0);
+    }
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
 test("control-plane KV writes use binary-safe OpenAPI payloads and idempotency", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("kv-contract-");
@@ -790,7 +1119,8 @@ test("media, operation, screen credential, and K/V revision commands bind the fr
     },
   };
   try {
-    let result = await withRuntime(["--json", "media", "upload", file], transport, runtimeExtra);
+    // --no-transcode keeps this a pure route/idempotency/signed-PUT assertion.
+    let result = await withRuntime(["--json", "media", "upload", file, "--no-transcode"], transport, runtimeExtra);
     assert.equal(result.code, 0, result.stdout);
     assert.equal(signedRequest?.method, "PUT");
     assert.equal(signedRequest?.credentials, "omit");

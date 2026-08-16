@@ -327,6 +327,68 @@ paths:
       responses:
         "204": { description: Tombstoned. Referenced desired or active grants cannot be deleted. }
         default: { $ref: "#/components/responses/Problem" }
+  /api/v1/feedback/bugs:
+    get:
+      operationId: listBugReports
+      description: >-
+        Returns the calling account's own bug reports, newest first, up to one
+        hundred. Another account's submissions are never returned and are not
+        addressable by identifier. There is no pagination cursor in v1.
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Bug reports owned by the calling account., content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: reportBug
+      description: >-
+        Records one immutable bug report against the calling account. A submission
+        cannot be updated or deleted; a correction is a new submission. An exact
+        retry carrying the same Idempotency-Key returns the original submission for
+        twenty-four hours instead of creating a duplicate, and a different body under
+        that key returns idempotency_mismatch. Never place credentials, cookies,
+        Authorization headers, completion nonces, signed URLs, or object keys in
+        title, body, or context; recognizable ScreenRig credential material is
+        rejected with invalid_request and is not stored.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackWrite" } } } }
+      responses:
+        "201": { description: "Stored bug report. An exact idempotent retry returns this same submission.", content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackSubmission" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/feedback/features:
+    get:
+      operationId: listFeatureRequests
+      description: >-
+        Returns the calling account's own feature requests, newest first, up to one
+        hundred. Another account's submissions are never returned and are not
+        addressable by identifier. There is no pagination cursor in v1.
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Feature requests owned by the calling account., content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: requestFeature
+      description: >-
+        Records one immutable feature request against the calling account. A
+        submission cannot be updated or deleted; a correction is a new submission. An
+        exact retry carrying the same Idempotency-Key returns the original submission
+        for twenty-four hours instead of creating a duplicate, and a different body
+        under that key returns idempotency_mismatch. Never place credentials,
+        cookies, Authorization headers, completion nonces, signed URLs, or object
+        keys in title, body, or context; recognizable ScreenRig credential material
+        is rejected with invalid_request and is not stored.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackWrite" } } } }
+      responses:
+        "201": { description: "Stored feature request. An exact idempotent retry returns this same submission.", content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackSubmission" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/pairing-sessions:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
@@ -832,11 +894,11 @@ components:
         playlist_max_pages: { type: integer, enum: [100] }
         playlist_max_items_per_page: { type: integer, enum: [24] }
         transition_max_duration_ms: { type: integer, enum: [60000] }
-        screens_per_account: { type: integer, enum: [50] }
-        account_content_bytes: { type: integer, enum: [1073741824] }
+        screens_per_account: { type: integer, enum: [50], description: "Screen limit of the default plan. Paired and pairing-pending screens both count." }
+        account_content_bytes: { type: integer, enum: [104857600], description: "Storage limit of the default plan, counting committed media, expanded application release trees, and application key/value entries together. Bytes reserved by an upload in flight count while reserved. This is the limit that binds in practice; the per-request ceilings above are plan-independent transport bounds and are larger." }
         features: { type: object, additionalProperties: { type: boolean } }
     CLIEnrollmentRequest: { type: object, additionalProperties: false, required: [client_id], properties: { client_id: { type: string, pattern: "^cli_[A-Za-z0-9_-]{43}$", description: "Stable anonymous installation identity generated from 32 CSPRNG bytes and persisted before the first request. It is rate-limit material, not an account credential." } } }
-    Account: { type: object, additionalProperties: false, required: [id, revision, status, used_bytes, reserved_bytes, screen_count, content_limit_bytes, screen_limit, created_at, updated_at], properties: { id: { type: string }, revision: { type: integer }, status: { type: string, enum: [active] }, used_bytes: { type: integer }, reserved_bytes: { type: integer }, screen_count: { type: integer }, content_limit_bytes: { type: integer }, screen_limit: { type: integer }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    Account: { type: object, additionalProperties: false, required: [id, revision, status, used_bytes, reserved_bytes, screen_count, content_limit_bytes, screen_limit, created_at, updated_at], properties: { id: { type: string }, revision: { type: integer }, status: { type: string, enum: [active] }, used_bytes: { type: integer, description: "Durable bytes the account owns across media, expanded application release trees, and application key/value entries." }, reserved_bytes: { type: integer, description: "Bytes held by uploads in flight. They count against the limit until the upload commits or its reservation is released." }, screen_count: { type: integer }, content_limit_bytes: { type: integer, description: "Storage limit the account's plan allows, covering used_bytes and reserved_bytes together." }, screen_limit: { type: integer, description: "Screen limit the account's plan allows." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     CLIEnrollment: { type: object, additionalProperties: false, required: [account, token, issuance_id, issuance_expires_at], properties: { account: { $ref: "#/components/schemas/Account" }, token: { type: string, minLength: 32, description: Permanent account bearer credential. It has no scheduled expiry and is redelivered only through this short-lived encrypted issuance envelope. }, issuance_id: { type: string, description: Opaque identifier for the encrypted exact-retry delivery envelope. }, issuance_expires_at: { type: string, format: date-time, description: Exact-retry redelivery deadline for this credential issuance; ten minutes after first enrollment. Later exact retries return credential_issuance_expired while the permanent token remains valid. } } }
     Application: { type: object, additionalProperties: true, required: [id, name, revision, state], properties: { id: { type: string }, name: { type: string }, revision: { type: integer }, state: { type: string }, release_id: { type: string } } }
     ApplicationList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Application" } } } }
@@ -925,12 +987,18 @@ components:
         - { $ref: "#/components/schemas/PlaylistImagePlacementWrite" }
         - { $ref: "#/components/schemas/PlaylistVideoPlacementWrite" }
         - { $ref: "#/components/schemas/PlaylistIframePlacementWrite" }
+        - { $ref: "#/components/schemas/PlaylistTextPlacementWrite" }
+        - { $ref: "#/components/schemas/PlaylistBoxPlacementWrite" }
+        - { $ref: "#/components/schemas/PlaylistLinePlacementWrite" }
     PlaylistPlacement:
       oneOf:
         - { $ref: "#/components/schemas/PlaylistApplicationPlacement" }
         - { $ref: "#/components/schemas/PlaylistImagePlacement" }
         - { $ref: "#/components/schemas/PlaylistVideoPlacement" }
         - { $ref: "#/components/schemas/PlaylistIframePlacement" }
+        - { $ref: "#/components/schemas/PlaylistTextPlacement" }
+        - { $ref: "#/components/schemas/PlaylistBoxPlacement" }
+        - { $ref: "#/components/schemas/PlaylistLinePlacement" }
     PlaylistApplicationPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistApplicationContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, default: false } } }
     PlaylistImagePlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistImageContentWrite" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] } } }
     PlaylistVideoPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistVideoContentWrite" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] } } }
@@ -945,6 +1013,56 @@ components:
     PlaylistImageContent: { type: object, additionalProperties: false, required: [type, media_id, intrinsic_size], properties: { type: { type: string, enum: [image] }, media_id: { type: string }, alt: { type: string, maxLength: 300 }, intrinsic_size: { $ref: "#/components/schemas/PlaylistIntrinsicSize" } } }
     PlaylistVideoContent: { type: object, additionalProperties: false, required: [type, media_id, intrinsic_size, muted, loop], properties: { type: { type: string, enum: [video] }, media_id: { type: string }, intrinsic_size: { $ref: "#/components/schemas/PlaylistIntrinsicSize" }, muted: { type: boolean, enum: [true] }, loop: { type: boolean } } }
     PlaylistIframeContent: { type: object, additionalProperties: false, required: [type, src, title], properties: { type: { type: string, enum: [iframe] }, src: { type: string, format: uri, pattern: "^https://" }, title: { type: string, minLength: 1, maxLength: 200 } } }
+    PlaylistTextPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistTextContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] } } }
+    PlaylistBoxPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistBoxContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] } } }
+    PlaylistLinePlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistLineContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] } } }
+    PlaylistTextPlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistTextContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, enum: [false] } } }
+    PlaylistBoxPlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistBoxContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, enum: [false] } } }
+    PlaylistLinePlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistLineContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, enum: [false] } } }
+    PlaylistCornerRadius: { type: object, additionalProperties: false, required: [top_left, top_right, bottom_right, bottom_left], properties: { top_left: { $ref: "#/components/schemas/CanvasLength" }, top_right: { $ref: "#/components/schemas/CanvasLength" }, bottom_right: { $ref: "#/components/schemas/CanvasLength" }, bottom_left: { $ref: "#/components/schemas/CanvasLength" } } }
+    CanvasLength: { type: number, minimum: 0, maximum: 100000, description: "Canvas units, like every length in screenrig.canvas/v1. Never pixels and never a percentage." }
+    CanvasColor: { type: string, pattern: "^#[0-9A-F]{8}$", description: Canonical uppercase sRGB RRGGBBAA. }
+    PlaylistTextContent:
+      type: object
+      additionalProperties: false
+      required: [type, text, font_family, font_weight, italic, font_size, line_height, color, align, vertical_align]
+      description: >-
+        One text item styled as a whole, with no per-run spans. Lines are separated
+        only by a literal line feed; there is no automatic wrapping, because line
+        breaking diverges between Blink, the Qt scene graph, and Android Minikin.
+        Text that exceeds its placement clips.
+      properties:
+        type: { type: string, enum: [text] }
+        text: { type: string, minLength: 1, maxLength: 4000, description: "Line feed separates lines. Every other control character is rejected." }
+        font_family: { type: string, enum: [sans, serif, mono], description: "Closed set of bundled families. An unknown family is rejected; no renderer substitutes a system face." }
+        font_weight: { type: integer, enum: [400, 700], description: "Only real bundled faces exist. Synthesis is forbidden, so no other weight is available." }
+        italic: { type: boolean, default: false, description: Selects the true italic face; never an oblique slant. }
+        font_size: { $ref: "#/components/schemas/PositiveCanvasLength" }
+        line_height: { $ref: "#/components/schemas/PositiveCanvasLength" }
+        color: { $ref: "#/components/schemas/CanvasColor" }
+        align: { type: string, enum: [left, center, right] }
+        vertical_align: { type: string, enum: [top, middle, bottom] }
+    PositiveCanvasLength: { type: number, exclusiveMinimum: 0, maximum: 100000, description: "Canvas units, like every length in screenrig.canvas/v1. Never pixels and never a percentage." }
+    PlaylistBoxContent:
+      type: object
+      additionalProperties: false
+      required: [type, fill, border_width, border_color, corner_radius]
+      description: A filled rectangle with per-corner radii. The border always draws inside the bounds. An outline is a border over a fully transparent fill; there is no separate outline type.
+      properties:
+        type: { type: string, enum: [box] }
+        fill: { $ref: "#/components/schemas/CanvasColor" }
+        border_width: { $ref: "#/components/schemas/CanvasLength" }
+        border_color: { $ref: "#/components/schemas/CanvasColor" }
+        corner_radius: { $ref: "#/components/schemas/PlaylistCornerRadius" }
+    PlaylistLineContent:
+      type: object
+      additionalProperties: false
+      required: [type, orientation, color]
+      description: "An axis-aligned rule. Thickness is the rectangle's thin axis, so there is no thickness field: a horizontal rule uses rect.height and a vertical rule uses rect.width. Diagonals are excluded from v1."
+      properties:
+        type: { type: string, enum: [line] }
+        orientation: { type: string, enum: [horizontal, vertical] }
+        color: { $ref: "#/components/schemas/CanvasColor" }
     PlaylistIntrinsicSize: { type: object, additionalProperties: false, required: [width, height], properties: { width: { type: number, exclusiveMinimum: 0 }, height: { type: number, exclusiveMinimum: 0 } } }
     PlaylistList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Playlist" } } } }
     ScreenPatch: { type: object, additionalProperties: false, minProperties: 1, properties: { name: { type: string, minLength: 1, maxLength: 120 }, playlist_id: { type: string } } }
@@ -959,11 +1077,46 @@ components:
     KVEntry: { type: object, additionalProperties: false, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, value_base64: { type: string, contentEncoding: base64 }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer } } }
     KVSummary: { type: object, additionalProperties: false, required: [application_id, key, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string }, updated_at: { type: string } } }
     KVList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/KVSummary" } } } }
-    MediaUploadDeclaration: { type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], properties: { filename: { type: string, minLength: 1, maxLength: 255 }, content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
-    MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
+    MediaUploadDeclaration: { type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size: the account's plan storage limit is checked first and is smaller, so a declaration the plan cannot hold is rejected with quota_exceeded before any byte is transferred. Read account_content_bytes from the capabilities document, or content_limit_bytes on the account, to know what is actually available.", properties: { filename: { type: string, minLength: 1, maxLength: 255 }, content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
+    MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], description: "Declares only what the server can re-verify against the stored object byte for byte. Codec identity is not declared here: the server derives it from the container during asynchronous verification, so a client cannot assert a codec that drives player behaviour.", properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
     MediaUploadSession: { type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: { id: { type: string }, operation: { $ref: "#/components/schemas/Operation" }, upload_url: { type: string, format: uri }, method: { type: string, enum: [PUT] }, headers: { type: object, additionalProperties: { type: string }, description: Exact signed request headers; clients must send every field verbatim. }, expires_at: { type: string, format: date-time } } }
-    Media: { type: object, additionalProperties: false, required: [id, filename, kind, content_type, operation_id, sha256, bytes, width, height, revision, state, created_at, updated_at], properties: { id: { type: string }, filename: { type: string }, kind: { type: string, enum: [image, video] }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: Verified immutable intrinsic width in pixels. }, height: { type: integer, minimum: 1, description: Verified immutable intrinsic height in pixels. }, duration_ms: { type: integer, minimum: 1, description: "Verified container duration; present for ready video media." }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    Media: { type: object, additionalProperties: false, required: [id, filename, kind, content_type, operation_id, sha256, bytes, width, height, revision, state, created_at, updated_at], properties: { id: { type: string }, filename: { type: string }, kind: { type: string, enum: [image, video] }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: Verified immutable intrinsic width in pixels. }, height: { type: integer, minimum: 1, description: Verified immutable intrinsic height in pixels. }, duration_ms: { type: integer, minimum: 1, description: "Verified container duration; present for ready video media." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Absent for images, which have no codec." }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Media" } } } }
+    FeedbackWrite:
+      type: object
+      additionalProperties: false
+      required: [title, body]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 120, description: "Single-line summary. Leading and trailing whitespace is trimmed, and control characters are rejected." }
+        body: { type: string, minLength: 1, maxLength: 4000, description: "Full description. Line feed and tab are the only accepted control characters." }
+        context: { $ref: "#/components/schemas/FeedbackContext" }
+    FeedbackContext:
+      type: object
+      additionalProperties: false
+      description: >-
+        Closed diagnostic envelope. Every member is an optional constrained scalar,
+        nesting is structurally impossible, and an unknown member is rejected with
+        invalid_request. The shape exists so a client cannot persist argument values,
+        credentials, or free-form environment data through it.
+      properties:
+        cli_version: { type: string, maxLength: 64, pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]{1,40})?$", description: "Semantic version of the calling client." }
+        command: { type: string, maxLength: 128, pattern: "^[a-z][a-z0-9-]{0,31}( [a-z][a-z0-9-]{0,31}){0,3}$", description: "Command path only, as up to four lowercase words. Option flags and argument values are rejected." }
+        platform: { type: string, maxLength: 40, pattern: "^[a-z0-9]{1,16}/[a-z0-9_]{1,16}$", description: "Operating system and architecture, for example linux/x64." }
+    FeedbackSubmission:
+      type: object
+      additionalProperties: false
+      required: [id, kind, title, body, created_at]
+      description: >-
+        One immutable account-scoped submission. It has no revision because it never
+        changes after it is written.
+      properties:
+        id: { type: string, pattern: "^fb_[A-Za-z0-9_-]{24}$" }
+        kind: { type: string, enum: [bug, feature] }
+        title: { type: string, maxLength: 120 }
+        body: { type: string, maxLength: 4000 }
+        context: { $ref: "#/components/schemas/FeedbackContext" }
+        created_at: { type: string, format: date-time }
+    FeedbackList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/FeedbackSubmission" } } } }
     PairingSession: { type: object, additionalProperties: false, required: [code, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, expires_at: { type: string, format: date-time } } }
     NativePairingSession: { type: object, additionalProperties: false, required: [code, pairing_credential, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, pairing_credential: { type: string, pattern: "^srp_[A-Za-z0-9_-]{43}$" }, expires_at: { type: string, format: date-time } } }
     PairingClaimedEvent: { type: object, additionalProperties: false, required: [type, completion_nonce], properties: { type: { type: string, enum: [pairing.claimed] }, completion_nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
@@ -1056,6 +1209,9 @@ components:
         - { $ref: "#/components/schemas/RuntimeImagePlacement" }
         - { $ref: "#/components/schemas/RuntimeVideoPlacement" }
         - { $ref: "#/components/schemas/RuntimeIframePlacement" }
+        - { $ref: "#/components/schemas/RuntimeTextPlacement" }
+        - { $ref: "#/components/schemas/RuntimeBoxPlacement" }
+        - { $ref: "#/components/schemas/RuntimeLinePlacement" }
     RuntimeApplicationPlacement:
       type: object
       additionalProperties: false
@@ -1099,12 +1255,45 @@ components:
         rect: { $ref: "#/components/schemas/RuntimeRect" }
         layer: { type: integer, minimum: 0, maximum: 1024 }
         contentFit: { type: string, enum: [fill] }
+    RuntimeTextPlacement:
+      type: object
+      additionalProperties: false
+      required: [id, content, rect, layer, contentFit]
+      properties:
+        id: { type: string }
+        content: { $ref: "#/components/schemas/RuntimeTextContent" }
+        rect: { $ref: "#/components/schemas/RuntimeRect" }
+        layer: { type: integer, minimum: 0, maximum: 1024 }
+        contentFit: { type: string, enum: [fill] }
+    RuntimeBoxPlacement:
+      type: object
+      additionalProperties: false
+      required: [id, content, rect, layer, contentFit]
+      properties:
+        id: { type: string }
+        content: { $ref: "#/components/schemas/RuntimeBoxContent" }
+        rect: { $ref: "#/components/schemas/RuntimeRect" }
+        layer: { type: integer, minimum: 0, maximum: 1024 }
+        contentFit: { type: string, enum: [fill] }
+    RuntimeLinePlacement:
+      type: object
+      additionalProperties: false
+      required: [id, content, rect, layer, contentFit]
+      properties:
+        id: { type: string }
+        content: { $ref: "#/components/schemas/RuntimeLineContent" }
+        rect: { $ref: "#/components/schemas/RuntimeRect" }
+        layer: { type: integer, minimum: 0, maximum: 1024 }
+        contentFit: { type: string, enum: [fill] }
     RuntimeContent:
       oneOf:
         - { $ref: "#/components/schemas/RuntimeApplicationContent" }
         - { $ref: "#/components/schemas/RuntimeImageContent" }
         - { $ref: "#/components/schemas/RuntimeVideoContent" }
         - { $ref: "#/components/schemas/RuntimeIframeContent" }
+        - { $ref: "#/components/schemas/RuntimeTextContent" }
+        - { $ref: "#/components/schemas/RuntimeBoxContent" }
+        - { $ref: "#/components/schemas/RuntimeLineContent" }
       discriminator: { propertyName: type }
     RuntimeApplicationContent:
       type: object
@@ -1163,6 +1352,64 @@ components:
         sha256: { type: string, pattern: "^[a-f0-9]{64}$", description: Immutable content digest for integrity and optional native caching; not an authorization capability. }
         bytes: { type: integer, minimum: 1, maximum: 1073741824 }
         contentType: { type: string, enum: [video/mp4, video/webm] }
+        codecs: { $ref: "#/components/schemas/RuntimeCodecs" }
+    RuntimeCodecs:
+      type: string
+      maxLength: 128
+      pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$"
+      description: >-
+        Server-derived RFC 6381 codec list for this exact rendition, never
+        client-declared. It is a sibling of contentType, not a parameter inside
+        it; a player composes a capability query as contentType, a semicolon, and
+        codecs="VALUE". Every stored ready video carries a derived codec, because
+        video whose codec cannot be established is rejected at upload rather than
+        stored without it. This property is optional for one reason only: runtime
+        content schemas are additionalProperties:false, so emission stays off
+        until every player pinned in components.lock.json accepts the field. It
+        becomes required once that rollout completes. A player must not read an
+        absent value as an unsupported codec. This release emits exactly one
+        video-track entry; the comma-separated grammar is published now so a later
+        audio entry is additive.
+    RuntimeCornerRadius: { type: object, additionalProperties: false, required: [topLeft, topRight, bottomRight, bottomLeft], properties: { topLeft: { $ref: "#/components/schemas/CanvasLength" }, topRight: { $ref: "#/components/schemas/CanvasLength" }, bottomRight: { $ref: "#/components/schemas/CanvasLength" }, bottomLeft: { $ref: "#/components/schemas/CanvasLength" } } }
+    RuntimeTextContent:
+      type: object
+      additionalProperties: false
+      required: [type, text, fontFamily, fontWeight, italic, fontSize, lineHeight, color, align, verticalAlign]
+      description: >-
+        Canvas-unit text. The player resolves the line box and baselines through
+        screenrig.canvas/v1, which pins the per-family metrics every renderer
+        computes from. Readiness for this kind is fontReady.
+      properties:
+        type: { type: string, enum: [text] }
+        text: { type: string, minLength: 1, maxLength: 4000 }
+        fontFamily: { type: string, enum: [sans, serif, mono] }
+        fontWeight: { type: integer, enum: [400, 700] }
+        italic: { type: boolean }
+        fontSize: { $ref: "#/components/schemas/PositiveCanvasLength" }
+        lineHeight: { $ref: "#/components/schemas/PositiveCanvasLength" }
+        color: { $ref: "#/components/schemas/CanvasColor" }
+        align: { type: string, enum: [left, center, right] }
+        verticalAlign: { type: string, enum: [top, middle, bottom] }
+    RuntimeBoxContent:
+      type: object
+      additionalProperties: false
+      required: [type, fill, borderWidth, borderColor, cornerRadius]
+      description: Canvas-unit box. Radii clamp to half the width and half the height after transform, and the border draws inside the bounds. Readiness for this kind is vectorReady.
+      properties:
+        type: { type: string, enum: [box] }
+        fill: { $ref: "#/components/schemas/CanvasColor" }
+        borderWidth: { $ref: "#/components/schemas/CanvasLength" }
+        borderColor: { $ref: "#/components/schemas/CanvasColor" }
+        cornerRadius: { $ref: "#/components/schemas/RuntimeCornerRadius" }
+    RuntimeLineContent:
+      type: object
+      additionalProperties: false
+      required: [type, orientation, color]
+      description: Canvas-unit rule. The resolver applies the hairline floor so a sub-pixel thickness becomes one device-independent pixel instead of vanishing. Readiness for this kind is vectorReady.
+      properties:
+        type: { type: string, enum: [line] }
+        orientation: { type: string, enum: [horizontal, vertical] }
+        color: { $ref: "#/components/schemas/CanvasColor" }
     RuntimeIframeContent:
       type: object
       additionalProperties: false

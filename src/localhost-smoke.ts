@@ -66,8 +66,8 @@ async function main(): Promise<void> {
   await writeFile(media, mediaBytes);
 
   const env = { ...process.env, XDG_CONFIG_HOME: path.join(temp, "config"), HOME: temp };
-  const run = async (...args: string[]) => {
-    const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+  const invoke = (args: string[]) =>
+    new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
       const child = spawn(process.execPath, [path.join(packageRoot, "dist", "bin.js"), "--json", ...args], { cwd: packageRoot, env });
       let stdout = "";
       let stderr = "";
@@ -75,10 +75,33 @@ async function main(): Promise<void> {
       child.stderr.on("data", (chunk) => { stderr += String(chunk); });
       child.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
     });
+  const run = async (...args: string[]) => {
+    const result = await invoke(args);
     assert.equal(result.code, 0, `${args.join(" ")} failed: ${result.stderr || result.stdout}`);
     const envelope = JSON.parse(result.stdout) as { ok: boolean; data?: unknown };
     assert.equal(envelope.ok, true, result.stdout);
     return envelope;
+  };
+
+  // `doctor` reports the external ffmpeg toolchain that `media upload` needs.
+  // This smoke runs against a mock control plane and must stay independent of
+  // whether the host has ffmpeg, so it asserts only the control-plane checks.
+  const TOOLCHAIN_CHECKS = new Set([
+    "ffmpeg", "ffprobe", "encoder_libx265", "encoder_libx264", "encoder_libwebp", "filter_hdr_tonemap",
+  ]);
+  const runDoctor = async () => {
+    const result = await invoke(["doctor"]);
+    const envelope = JSON.parse(result.stdout) as {
+      ok: boolean;
+      data?: { checks?: Array<{ name: string; status: string; detail: string }> };
+    };
+    assert.equal(envelope.ok, true, result.stdout);
+    const checks = envelope.data?.checks ?? [];
+    assert.ok(checks.length > 0, result.stdout);
+    for (const check of checks) {
+      if (TOOLCHAIN_CHECKS.has(check.name)) continue;
+      assert.equal(check.status, "pass", `doctor check ${check.name} failed: ${check.detail}`);
+    }
   };
 
   try {
@@ -87,7 +110,7 @@ async function main(): Promise<void> {
     assert.equal(pairingData.screen?.id, "scr_PAIRINGAAAAAAAAAAAAAAAA");
     assert.equal(pairingData.public_url, "https://play.screenrig.ai/s/scr_public_pairing");
     await run("auth", "status");
-    await run("doctor");
+    await runDoctor();
     await run("app", "pack", app);
     await run("app", "upload", app, "--poll-ms", "1");
     await run("app", "list");
@@ -99,7 +122,12 @@ async function main(): Promise<void> {
     await run("screen", "list");
     await run("screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA");
     await run("screen", "update", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "1");
-    const mediaUpload = await run("media", "upload", media, "--poll-ms", "1");
+    // `pixel.png` is a synthetic 12-byte stand-in, not a decodable image, and this
+    // smoke must not require a real ffmpeg on the host. `--no-transcode` keeps the
+    // assertion on what this smoke owns: the declare, signed PUT, and commit route
+    // carry the source bytes through unchanged. The transcode path is covered by
+    // src/media/transcode.test.ts and src/cli.test.ts with a fake process runner.
+    const mediaUpload = await run("media", "upload", media, "--no-transcode", "--poll-ms", "1");
     assert.deepEqual(signedUploadBytes, mediaBytes);
     const mediaOperation = (mediaUpload.data as { operation?: { result?: { media_id?: string } } }).operation;
     const mediaId = mediaOperation?.result?.media_id ?? "med_AAAAAAAAAAAAAAAAAAAAAAAA";
@@ -109,6 +137,14 @@ async function main(): Promise<void> {
     await run("kv", "get", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA");
     await run("kv", "list", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA");
     await run("kv", "set", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", "{\"message\":\"updated\"}", "--if-match", "1");
+    const bug = await run("feedback", "bug", "Smoke bug", "--body", "Recorded by the localhost smoke.", "--command", "media upload");
+    assert.equal((bug.data as { kind?: string }).kind, "bug");
+    await run("feedback", "feature", "Smoke feature", "--body", "Recorded by the localhost smoke.");
+    const feedbackList = await run("feedback", "list");
+    assert.deepEqual(
+      ((feedbackList.data as { items?: Array<{ kind?: string }> }).items ?? []).map((item) => item.kind).sort(),
+      ["bug", "feature"],
+    );
     await run("events", "list", "--after", "ev1_0");
     await run("events", "follow", "--after", "ev1_0");
     await run("operations", "wait", "op_AAAAAAAAAAAAAAAAAAAAAAAA", "--poll-ms", "1");

@@ -13,6 +13,8 @@ export interface NormalizedProblem {
   request_id?: string;
   operation_id?: string;
   current_revision?: number;
+  /** Present only on 429, taken from the server's Retry-After header. */
+  retry_after_seconds?: number;
   errors: unknown[];
   next?: ProblemNext;
 }

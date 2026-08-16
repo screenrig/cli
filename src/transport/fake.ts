@@ -3,6 +3,9 @@ import type {
   Account,
   AccountEvent,
   Capabilities,
+  FeedbackKind,
+  FeedbackSubmission,
+  FeedbackWrite,
   KVEntry,
   KVSummary,
   KVWrite,
@@ -78,7 +81,7 @@ export function memoryBackend(): FakeTransport {
   const operations = new Map<string, Operation>();
   const events: AccountEvent[] = [];
   let account: Account = {
-    content_limit_bytes: 1073741824,
+    content_limit_bytes: 104857600,
     created_at: "2026-08-14T17:00:00.000Z",
     id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
     reserved_bytes: 0,
@@ -103,7 +106,7 @@ export function memoryBackend(): FakeTransport {
     status: 200,
     headers: { "x-request-id": "req_AAAAAAAAAAAAAAAAAAAAAAAA" },
     body: {
-      account_content_bytes: 1073741824,
+      account_content_bytes: 104857600,
       api_version: "0.2.0",
       application_compressed_bytes: 104857600,
       application_expanded_bytes: 262144000,
@@ -111,7 +114,7 @@ export function memoryBackend(): FakeTransport {
       application_file_count: 5000,
       application_path_bytes: 255,
       application_path_depth: 16,
-      features: {},
+      features: { feedback: true },
       playlist_max_items_per_page: 24,
       playlist_max_pages: 100,
       protocol_version: "1",
@@ -480,6 +483,39 @@ export function memoryBackend(): FakeTransport {
     kv.delete(`${parts[4]}:${decodeURIComponent(parts[6] ?? "")}`);
     return { status: 204, headers: {}, body: undefined };
   });
+
+  // Feedback: account-scoped, immutable, and keyed by route rather than body.
+  let feedbackSequence = 0;
+  const submitFeedback = (kind: FeedbackKind) => (req: { body?: unknown }) => {
+    const write = (req.body ?? {}) as FeedbackWrite;
+    feedbackSequence += 1;
+    const submission: FeedbackSubmission = {
+      id: `fb_${String(feedbackSequence).padStart(24, "A")}`,
+      kind,
+      title: write.title,
+      body: write.body,
+      ...(write.context ? { context: write.context } : {}),
+      created_at: `2026-08-16T09:0${feedbackSequence % 10}:00.000Z`,
+    };
+    feedback.get(kind)?.unshift(submission);
+    return { status: 201, headers: {}, body: submission as unknown as Record<string, unknown> };
+  };
+  const feedback = new Map<FeedbackKind, FeedbackSubmission[]>([
+    ["bug", []],
+    ["feature", []],
+  ]);
+  transport.on("POST", "/api/v1/feedback/bugs", submitFeedback("bug"));
+  transport.on("POST", "/api/v1/feedback/features", submitFeedback("feature"));
+  transport.on("GET", "/api/v1/feedback/bugs", () => ({
+    status: 200,
+    headers: {},
+    body: { items: feedback.get("bug") ?? [] },
+  }));
+  transport.on("GET", "/api/v1/feedback/features", () => ({
+    status: 200,
+    headers: {},
+    body: { items: feedback.get("feature") ?? [] },
+  }));
 
   return transport;
 }

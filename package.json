@@ -59,6 +59,7 @@
     "sync:sdk": "node scripts/sync-contract-snapshots.mjs --sync",
     "vendor:sync": "node scripts/sync-contract-snapshots.mjs --sync",
     "vendor:check": "node scripts/sync-contract-snapshots.mjs --check",
+    "vendor:check:drift": "node scripts/sync-contract-snapshots.mjs --check --source-root",
     "smoke": "npm run smoke:mock",
     "smoke:mock": "npm run build && node dist/localhost-smoke.js",
     "smoke:server": "npm run build && node dist/server-smoke.js",

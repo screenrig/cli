@@ -72,7 +72,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "screens_per_account",
     "transition_max_duration_ms",
   ]);
-  assert.match(capabilities, /"account_content_bytes": 1073741824/);
+  assert.match(capabilities, /"account_content_bytes": 104857600/);
   assert.match(capabilities, /"application_compressed_bytes": 104857600/);
   assert.match(capabilities, /"application_expanded_bytes": 262144000/);
   assert.match(capabilities, /"application_file_bytes": 33554432/);
@@ -103,6 +103,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   ]);
   assert.deepEqual(quotedProperties(interfaceBody(source, "Media")), [
     "bytes",
+    "codecs",
     "content_type",
     "created_at",
     "duration_ms",
@@ -183,8 +184,31 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "name",
     "playlist_id",
   ]);
+  assert.deepEqual(quotedProperties(interfaceBody(source, "FeedbackWrite")), [
+    "body",
+    "context",
+    "title",
+  ]);
+  assert.deepEqual(quotedProperties(interfaceBody(source, "FeedbackContext")), [
+    "cli_version",
+    "command",
+    "platform",
+  ]);
+  const submission = interfaceBody(source, "FeedbackSubmission");
+  assert.deepEqual(quotedProperties(submission), [
+    "body",
+    "context",
+    "created_at",
+    "id",
+    "kind",
+    "title",
+  ]);
+  assert.match(submission, /"kind": "bug" \| "feature"/);
+  // Submissions are immutable, so the contract must never grow a revision.
+  assert.doesNotMatch(submission, /revision/);
+  assert.deepEqual(quotedProperties(interfaceBody(source, "FeedbackList")), ["items"]);
   const capabilitiesFromContract: Capabilities = {
-    account_content_bytes: 1073741824,
+    account_content_bytes: 104857600,
     api_version: "0.2.0",
     application_compressed_bytes: 104857600,
     application_expanded_bytes: 262144000,
@@ -203,6 +227,63 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   assert.equal(limits.application_archive_bytes, capabilitiesFromContract.application_compressed_bytes);
   assert.equal(limits.application_archive_bytes, DEFAULT_ARCHIVE_LIMITS.application_archive_bytes);
   assert.deepEqual(limits, DEFAULT_ARCHIVE_LIMITS);
+});
+
+test("feedback contract is account-scoped, immutable, idempotent, and closed to argument values", () => {
+  const source = readFileSync(OPENAPI_CONTRACT, "utf8");
+
+  // The kind is carried by the route, so there are exactly two write paths and
+  // neither takes a kind in the body.
+  for (const route of ["/api/v1/feedback/bugs:", "/api/v1/feedback/features:"]) {
+    assert.ok(source.includes(route), `missing feedback route ${route}`);
+  }
+  assert.match(source, /FeedbackWrite:[\s\S]*?required: \[title, body\]/);
+  assert.doesNotMatch(source.slice(source.indexOf("FeedbackWrite:"), source.indexOf("FeedbackContext:")), /kind/);
+
+  // Writes require Idempotency-Key so an exact retry cannot duplicate a report.
+  const bugs = source.slice(source.indexOf("/api/v1/feedback/bugs:"), source.indexOf("/api/v1/feedback/features:"));
+  assert.match(bugs, /parameters: \[\{ \$ref: "#\/components\/parameters\/IdempotencyKey" \}\]/);
+  assert.match(bugs, /"429": \{ \$ref: "#\/components\/responses\/RateLimitedProblem" \}/);
+  assert.match(source, /RateLimitedProblem:[\s\S]*?Retry-After: \{ required: true/);
+
+  // Submissions are immutable: no PATCH, PUT, or DELETE, and no revision.
+  const features = source.slice(source.indexOf("/api/v1/feedback/features:"), source.indexOf("/runtime/v1/pairing-sessions:"));
+  for (const verb of ["patch:", "put:", "delete:"]) {
+    assert.ok(!bugs.includes(verb), `feedback bugs must not expose ${verb}`);
+    assert.ok(!features.includes(verb), `feedback features must not expose ${verb}`);
+  }
+
+  // The diagnostic envelope is closed and cannot carry argument values.
+  const context = source.slice(source.indexOf("FeedbackContext:"), source.indexOf("FeedbackSubmission:"));
+  assert.match(context, /additionalProperties: false/);
+  assert.match(context, /command: \{ type: string, maxLength: 128, pattern: "\^\[a-z\]\[a-z0-9-\]\{0,31\}\( \[a-z\]\[a-z0-9-\]\{0,31\}\)\{0,3\}\$"/);
+  assert.deepEqual(
+    [...context.matchAll(/^ {8}([a-z_]+):/gm)].map((match) => match[1]),
+    ["cli_version", "command", "platform"],
+  );
+});
+
+test("the feedback command pattern rejects every shape an argument value takes", () => {
+  // Mirrors FeedbackContext.command in the vendored contract exactly.
+  const pattern = /^[a-z][a-z0-9-]{0,31}( [a-z][a-z0-9-]{0,31}){0,3}$/;
+  for (const accepted of ["doctor", "media upload", "screen pair", "kv set", "screen rotate-public-id"]) {
+    assert.ok(pattern.test(accepted), `${accepted} must be accepted`);
+  }
+  for (const rejected of [
+    "--json",                                   // option flag
+    "media upload --codec hevc",                // flag with a value
+    "media upload ./poster.png",                // file path
+    "media upload /home/someone/poster.png",    // absolute path
+    "screen pair ABC234",                       // uppercase argument value
+    "media show med_AAAAAAAAAAAAAAAAAAAAAAAA",  // identifier with underscores
+    "auth revoke --token=sr_live_x_y",          // credential-shaped argument
+    "kv set greeting --json-value {\"a\":1}",   // JSON payload
+    "a b c d e",                                // more than four words
+    "media  upload",                            // doubled separator
+    "MEDIA UPLOAD",                             // uppercase
+  ]) {
+    assert.ok(!pattern.test(rejected), `${rejected} must be rejected`);
+  }
 });
 
 test("control-plane KV adapter follows the authoritative binary-safe OpenAPI schema", () => {

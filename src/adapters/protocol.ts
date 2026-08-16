@@ -74,7 +74,8 @@ export interface EventPage {
 }
 
 export interface Capabilities {
-  account_content_bytes: 1073741824;
+  /** Plan storage quota. Smaller than the per-upload transport ceiling, and checked first. */
+  account_content_bytes: 104857600;
   api_version: string;
   application_compressed_bytes: 104857600;
   application_expanded_bytes: 262144000;
@@ -138,6 +139,13 @@ export interface ApplicationRelease {
   operation_id?: string;
 }
 
+/**
+ * `pages` stays opaque on purpose. The CLI forwards author-supplied playlist
+ * JSON verbatim and never constructs a page, so the contract's page, placement,
+ * and content schemas — including the `text`, `box`, and `line` vector
+ * placements — are deliberately not mirrored here. Mirror a schema only when
+ * the CLI builds or reads its fields.
+ */
 export interface Playlist {
   id: string;
   revision: number;
@@ -203,6 +211,11 @@ export interface BrowserLinkClaim {
 
 export interface Media {
   bytes: number;
+  /**
+   * RFC 6381 codec list derived server-side from the stored bytes, never
+   * declared by the client. Present for ready video, absent for images.
+   */
+  codecs?: string;
   content_type: string;
   created_at: string;
   duration_ms?: number;
@@ -265,6 +278,40 @@ export interface KVEntry extends KVMetadata {
 
 export interface KVList {
   items: KVSummary[];
+}
+
+export type FeedbackKind = "bug" | "feature";
+
+/**
+ * Closed diagnostic envelope. Every member is an optional constrained scalar and
+ * the server rejects an unknown member, so nothing free-form can be persisted
+ * through it. `command` is a command path only; the pattern rejects flags and
+ * argument values.
+ */
+export interface FeedbackContext {
+  cli_version?: string;
+  command?: string;
+  platform?: string;
+}
+
+export interface FeedbackWrite {
+  title: string;
+  body: string;
+  context?: FeedbackContext;
+}
+
+/** Immutable once written, which is why it carries no revision. */
+export interface FeedbackSubmission {
+  id: string;
+  kind: FeedbackKind;
+  title: string;
+  body: string;
+  context?: FeedbackContext;
+  created_at: string;
+}
+
+export interface FeedbackList {
+  items: FeedbackSubmission[];
 }
 
 export const TEMPORARY_PROTOCOL_VERSION = "screenrig.cli.adapter/0";

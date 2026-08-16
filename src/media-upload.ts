@@ -59,7 +59,15 @@ export async function prepareMediaUpload(filePath: string, explicitContentType?:
     throw usageError(`Cannot read media file: ${error instanceof Error ? error.message : "read failed"}`);
   }
   if (bytes.length < 1) throw usageError("Media file must not be empty.");
-  if (bytes.length > 1_073_741_824) throw usageError("Media file exceeds the 1 GiB OpenAPI limit.");
+  // 1 GiB is the plan-independent transport ceiling, not an achievable size.
+  // The account's plan storage quota is smaller and the server checks it first,
+  // so most oversize uploads are rejected with quota_exceeded well below this.
+  if (bytes.length > 1_073_741_824) {
+    throw usageError(
+      "Media file exceeds the 1 GiB per-upload transport ceiling. The account storage quota is " +
+        "smaller than this and is checked first; run screenrig account show to see what remains.",
+    );
+  }
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   const commit: MediaCommit = { content_type: contentType, bytes: bytes.length, sha256 };
   return { bytes, commit, declaration: { filename, ...commit } };

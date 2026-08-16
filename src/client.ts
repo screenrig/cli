@@ -2,7 +2,16 @@ import type { Envelope } from "./envelope.js";
 import { errorEnvelope, successEnvelope } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
 import { isValidIdempotencyKey, isValidRequestId, newIdempotencyKey, newRequestId } from "./ids.js";
-import { CliError, makeProblem, normalizeProblem, timeoutError, usageError } from "./problems.js";
+import {
+  CliError,
+  makeProblem,
+  normalizeProblem,
+  parseRetryAfter,
+  timeoutError,
+  usageError,
+  withQuotaGuidance,
+  withRetryAfter,
+} from "./problems.js";
 import type { Transport, TransportRequest, TransportResponse } from "./transport/types.js";
 import type { Operation } from "./adapters/protocol.js";
 
@@ -65,7 +74,11 @@ export class ApiClient {
         request_id: response.headers["x-request-id"] ?? this.requestId,
         bodyText: typeof response.rawText === "string" ? response.rawText : undefined,
       });
-      throw new CliError(problem);
+      throw new CliError(
+        withQuotaGuidance(
+          withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
+        ),
+      );
     }
     return response;
   }
