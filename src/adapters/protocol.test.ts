@@ -115,6 +115,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "revision",
     "sha256",
     "state",
+    "tag",
     "updated_at",
     "width",
   ]);
@@ -123,6 +124,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "content_type",
     "filename",
     "sha256",
+    "tag",
   ]);
   assert.deepEqual(quotedProperties(interfaceBody(source, "MediaUploadSession")), [
     "expires_at",
@@ -136,6 +138,9 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "bytes",
     "content_type",
     "sha256",
+  ]);
+  assert.deepEqual(quotedProperties(interfaceBody(source, "MediaTagPatch")), [
+    "tag",
   ]);
   assert.deepEqual(quotedProperties(interfaceBody(source, "Account")), [
     "content_limit_bytes",
