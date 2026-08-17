@@ -182,7 +182,10 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "issuance_id",
     "token",
   ]);
-  assert.deepEqual(quotedProperties(interfaceBody(source, "CLIEnrollmentRequest")), ["client_id"]);
+  const enrollmentRequest = interfaceBody(source, "CLIEnrollmentRequest");
+  assert.deepEqual(quotedProperties(enrollmentRequest), ["beta_key", "client_id"]);
+  assert.match(enrollmentRequest, /"beta_key"\?: string/);
+  assert.match(enrollmentRequest, /"client_id": string/);
   assert.deepEqual(quotedProperties(interfaceBody(source, "PairScreen")), ["code", "label"]);
   assert.deepEqual(quotedProperties(interfaceBody(source, "PairingClaim")), ["public_url", "screen"]);
   assert.deepEqual(quotedProperties(interfaceBody(source, "ProvisionScreen")), ["label"]);
@@ -266,7 +269,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   assert.deepEqual(limits, DEFAULT_ARCHIVE_LIMITS);
 });
 
-test("local enrollment request adapter accepts optional beta_key ahead of vendor refresh", () => {
+test("local enrollment request adapter accepts optional beta_key", () => {
   const source = readFileSync(
     join(dirname(fileURLToPath(import.meta.url)), "../../src/adapters/protocol.ts"),
     "utf8",
