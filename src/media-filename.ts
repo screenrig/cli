@@ -117,8 +117,6 @@ export const P_PREFIX_MIN_DIGITS = 7;
 /** Allowed in a device-prefix remainder as part of a time phrase (`at 10.14.22`). */
 export const REMAINDER_TIME_WORDS = ["at"] as const;
 
-export const SEPARATOR_PATTERN = /[-_.+\s]+/u;
-
 function separators(): RegExp {
   return /[-_.+\s]+/gu;
 }

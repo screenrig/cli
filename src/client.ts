@@ -1,5 +1,3 @@
-import type { Envelope } from "./envelope.js";
-import { errorEnvelope, successEnvelope } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
 import { isValidIdempotencyKey, isValidRequestId, newIdempotencyKey, newRequestId } from "./ids.js";
 import {
@@ -121,10 +119,6 @@ export class ApiClient {
   }
 }
 
-export function envelopeFromUnknown<T>(data: T, requestId?: string, operationId?: string): Envelope<T> {
-  return successEnvelope(data, { request_id: requestId, operation_id: operationId });
-}
-
 export function requireToken(token: string | undefined): string {
   if (!token) {
     throw new CliError(
@@ -139,5 +133,3 @@ export function requireToken(token: string | undefined): string {
   }
   return token;
 }
-
-export { errorEnvelope };

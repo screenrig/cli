@@ -165,10 +165,6 @@ export function isBuiltinIgnored(posixPath: string, isDir: boolean): boolean {
   return builtinMatcher(posixPath, isDir);
 }
 
-export function joinPosix(...parts: string[]): string {
-  return posixNormalize(parts.filter(Boolean).join("/"));
-}
-
 export function toPosixRelative(root: string, absolute: string): string {
   return posixNormalize(path.relative(root, absolute));
 }

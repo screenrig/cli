@@ -120,38 +120,13 @@ export function limitsFromCapabilities(capabilities: Capabilities): ArchiveLimit
   };
 }
 
-export interface Application {
-  id: string;
-  name: string;
-  revision: number;
-  state: string;
-  release_id?: string;
-  [key: string]: unknown;
-}
-
-export interface ApplicationRelease {
-  id: string;
-  application_id: string;
-  sha256: string;
-  compressed_bytes: number;
-  expanded_bytes: number;
-  file_count: number;
-  operation_id?: string;
-}
-
 /**
- * `pages` stays opaque on purpose. The CLI forwards author-supplied playlist
- * JSON verbatim and never constructs a page, so the contract's page, placement,
- * and content schemas — including the `text`, `box`, and `line` vector
- * placements — are deliberately not mirrored here. Mirror a schema only when
- * the CLI builds or reads its fields.
+ * Playlist pages stay opaque on purpose. The CLI forwards author-supplied
+ * playlist JSON verbatim and never constructs a page, so the contract's page,
+ * placement, and content schemas — including the `text`, `box`, and `line`
+ * vector placements — are deliberately not mirrored here. Mirror a schema only
+ * when the CLI builds or reads its fields.
  */
-export interface Playlist {
-  id: string;
-  revision: number;
-  name: string;
-  pages: Array<Record<string, unknown>>;
-}
 
 export interface Screen {
   content_access_generation: number;
@@ -164,11 +139,6 @@ export interface Screen {
   revision: number;
   state: "pairing_pending" | "active";
   updated_at: string;
-}
-
-export interface ScreenPatch {
-  name?: string;
-  playlist_id?: string;
 }
 
 export interface PairScreen {
@@ -226,28 +196,6 @@ export interface BrowserLinkClaim {
   screen: BrowserLinkClaimScreen;
 }
 
-export interface Media {
-  bytes: number;
-  /**
-   * RFC 6381 codec list derived server-side from the stored bytes, never
-   * declared by the client. Present for ready video, absent for images.
-   */
-  codecs?: string;
-  content_type: string;
-  created_at: string;
-  duration_ms?: number;
-  filename: string;
-  height: number;
-  id: string;
-  kind: "image" | "video";
-  operation_id: string;
-  revision: number;
-  sha256: string;
-  state: "ready";
-  updated_at: string;
-  width: number;
-}
-
 export interface MediaCommit {
   bytes: number;
   content_type: "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "video/mp4" | "video/webm";
@@ -291,10 +239,6 @@ export interface KVSummary extends KVMetadata {
 
 export interface KVEntry extends KVMetadata {
   value_base64: string;
-}
-
-export interface KVList {
-  items: KVSummary[];
 }
 
 export type FeedbackKind = "bug" | "feature";
