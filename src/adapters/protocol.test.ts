@@ -71,6 +71,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "playlist_max_pages",
     "protocol_version",
     "screens_per_account",
+    "transition_max_duration_ms",
   ]);
   assert.match(capabilities, /"account_content_bytes": 104857600/);
   assert.match(capabilities, /"application_compressed_bytes": 104857600/);
@@ -84,6 +85,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   assert.match(capabilities, /"playlist_max_media_per_selector": 32/);
   assert.match(capabilities, /"playlist_max_pages": 100/);
   assert.match(capabilities, /"screens_per_account": 50/);
+  assert.match(capabilities, /"transition_max_duration_ms": 60000/);
   assert.doesNotMatch(capabilities, /limits/);
   assert.doesNotMatch(capabilities, /application_archive_bytes/);
 

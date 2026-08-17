@@ -946,6 +946,7 @@ components:
         playlist_max_pages: { type: integer, enum: [100] }
         playlist_max_items_per_page: { type: integer, enum: [24] }
         playlist_max_media_per_selector: { type: integer, enum: [32], description: Maximum ready media objects one image or video selector may resolve to. }
+        transition_max_duration_ms: { type: integer, enum: [60000] }
         screens_per_account: { type: integer, enum: [50], description: "Screen limit of the default plan. Paired and pairing-pending screens both count." }
         account_content_bytes: { type: integer, enum: [104857600], description: "Storage limit of the default plan, counting committed media, expanded application release trees, and application key/value entries together. Bytes reserved by an upload in flight count while reserved. This is the limit that binds in practice; the per-request ceilings above are plan-independent transport bounds and are larger." }
         features: { type: object, additionalProperties: { type: boolean } }
