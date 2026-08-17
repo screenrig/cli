@@ -122,6 +122,16 @@ async function main(): Promise<void> {
     await run("screen", "list");
     await run("screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA");
     await run("screen", "update", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "1");
+    const toast = await run(
+      "screen",
+      "toast",
+      "scr_PAIRINGAAAAAAAAAAAAAAAA",
+      "--level",
+      "info",
+      "--text",
+      "Lobby closed",
+    );
+    assert.ok((toast.data as { expires_at?: string }).expires_at);
     // `pixel.png` is a synthetic 12-byte stand-in, not a decodable image, and this
     // smoke must not require a real ffmpeg on the host. `--no-transcode` keeps the
     // assertion on what this smoke owns: the declare, signed PUT, and commit route

@@ -6,10 +6,12 @@
   var DEFAULT_PLAYER_ORIGIN = "https://play.screenrig.ai";
   var MAX_MESSAGE_BYTES = 65536;
   var MAX_LOG_MESSAGE_BYTES = 2048;
+  var MAX_CLIENT_LOGS = 32;
   var MESSAGE_KINDS = [
     "context",
     "ready",
     "log",
+    "event.emit",
     "page.advance",
     "viewport.changed",
     "kv.get",
@@ -461,7 +463,7 @@
     }
     report(level, code, message) {
       this.reports += 1;
-      if (this.reports > 32 || this.readyState === "inert") {
+      if (this.reports > MAX_CLIENT_LOGS || this.readyState === "inert") {
         return;
       }
       try {
@@ -503,6 +505,23 @@
           kind: "log",
           placement_id: context.placement_id,
           payload: { level, code, message, generation: context.generation, nonce: context.nonce }
+        },
+        false
+      );
+    }
+    emit(code) {
+      const context = this.requireActive();
+      const sanitized = code.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 64);
+      if (!sanitized) {
+        throw new SdkValidationError("invalid_event", "Invalid event code");
+      }
+      void this.post(
+        {
+          protocol: PROTOCOL,
+          message_id: this.idFactory(),
+          kind: "event.emit",
+          placement_id: context.placement_id,
+          payload: { code: sanitized, generation: context.generation, nonce: context.nonce }
         },
         false
       );

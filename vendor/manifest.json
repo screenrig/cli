@@ -5,20 +5,20 @@
     {
       "path": "vendor/protocol/openapi.gen.ts",
       "source": "packages/protocol/src/openapi.gen.ts",
-      "bytes": 19694,
-      "sha256": "8e7eeac8b498dc906de0ea5629f687f7e2489c3ecde0a9ef8ed9b78e2407dec2"
+      "bytes": 20932,
+      "sha256": "372b04cf9ce9a3e68d5167c537fc7dafdf3cd788c035bc90cd4d52bbdf8d7ea8"
     },
     {
       "path": "vendor/openapi.yaml",
       "source": "api/openapi.yaml",
-      "bytes": 122567,
-      "sha256": "ba3858d02d49a2c310a3cf12fcc02d887338411c07322c3467a36fad2dc0dd33"
+      "bytes": 129781,
+      "sha256": "69e5021b72f0f973901919a299415a471918a8c0dc5e1e0206a9fd65358cf8c9"
     },
     {
       "path": "assets/screenrig.runtime.js",
       "source": "packages/sdk/dist/screenrig.runtime.js",
-      "bytes": 26628,
-      "sha256": "481ec4aa3626c6742f12484173b41b5efe464dd635cd1aaba5111cc227d0e11e"
+      "bytes": 27243,
+      "sha256": "52e856795f813ee69440ed3a249238c9caab7edba0d03e7c37417d79f20a2946"
     }
   ]
 }

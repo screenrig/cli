@@ -187,6 +187,23 @@ export interface ScreenProvisioning {
   expires_at: string;
 }
 
+export type ScreenToastLevel = "error" | "alert" | "info";
+
+/**
+ * Write body for POST /api/v1/screens/{id}/toast. Colours are player chrome
+ * and are never sent. duration_ms is omitted so the server can default it.
+ */
+export interface ScreenToastWrite {
+  level: ScreenToastLevel;
+  text: string;
+  duration_ms?: number;
+}
+
+/** Accepted toast write. The toast itself lives on the durable screen.toast event. */
+export interface ScreenToastAccepted {
+  expires_at: string;
+}
+
 export interface PairingClaim {
   public_url: string;
   screen: Screen;

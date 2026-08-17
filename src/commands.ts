@@ -22,6 +22,9 @@ import {
   type BrowserLinkClaimRequest,
   type ProvisionScreen,
   type ScreenProvisioning,
+  type ScreenToastAccepted,
+  type ScreenToastLevel,
+  type ScreenToastWrite,
 } from "./adapters/protocol.js";
 import { SDK_PROTOCOL_VERSION } from "./adapters/sdk-injection.js";
 import { flagBool, flagNumber, flagString, type ParsedArgs } from "./argv.js";
@@ -114,6 +117,7 @@ Commands:
   screen delete <id> --if-match REVISION
   screen rotate-public-id <id> --if-match REVISION
   screen revoke-credential <id> --if-match REVISION
+  screen toast <id> --level error|alert|info --text TEXT [--duration-ms MS]
   kv get --application-id ID <key>
   kv set --application-id ID <key> --json-value JSON [--if-match REVISION]
   kv set --application-id ID <key> --file FILE --content-type TYPE
@@ -380,7 +384,7 @@ function isAuthenticatedCommand(group: string, action: string | undefined): bool
     app: new Set(["upload", "list", "show"]),
     media: new Set(["upload", "show", "list", "delete"]),
     playlist: new Set(["create", "update", "show", "get", "list", "delete"]),
-    screen: new Set(["pair", "provision", "update", "list", "show", "assign", "delete", "rotate-public-id", "revoke-credential"]),
+    screen: new Set(["pair", "provision", "update", "list", "show", "assign", "delete", "rotate-public-id", "revoke-credential", "toast"]),
     browser: new Set(["setup"]),
     kv: new Set(["get", "set", "delete", "list"]),
     operations: new Set(["get", "wait", "cancel"]),
@@ -830,6 +834,40 @@ const FEEDBACK_COMMAND_PATTERN = /^[a-z][a-z0-9-]{0,31}( [a-z][a-z0-9-]{0,31}){0
 const FEEDBACK_TITLE_MAX = 120;
 const FEEDBACK_BODY_MAX = 4000;
 
+const TOAST_LEVELS = new Set<ScreenToastLevel>(["error", "alert", "info"]);
+const TOAST_TEXT_MAX = 120;
+const TOAST_MAX_LINES = 3;
+const TOAST_DURATION_MIN = 2000;
+const TOAST_DURATION_MAX = 60000;
+
+function isScreenToastLevel(value: string): value is ScreenToastLevel {
+  return TOAST_LEVELS.has(value as ScreenToastLevel);
+}
+
+function trimToastText(value: string): string {
+  return value.replace(/^[ \t\r\n]+/, "").replace(/[ \t\r\n]+$/, "");
+}
+
+function toastTextHasDisallowedControl(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    if (character === "\n") {
+      continue;
+    }
+    if (code < 0x20 || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function toastLineCount(value: string): number {
+  if (value === "") {
+    return 0;
+  }
+  return value.split("\n").length;
+}
+
 /**
  * Built from the resolved command surface only. Nothing here is derived from
  * raw argv, so no argument value, path, identifier, or credential can reach the
@@ -1192,7 +1230,72 @@ async function screenCommand(
       human: action === "rotate-public-id" ? `Rotated public id for ${id}` : `Revoked device credential for ${id}`,
     };
   }
+  if (action === "toast") {
+    return screenToast(args, client);
+  }
   throw usageError("Unknown screen command.");
+}
+
+async function screenToast(args: ParsedArgs, client: ApiClient): Promise<CommandResult> {
+  const id = args.positionals[2];
+  if (args.flags.level === true) {
+    throw usageError("--level requires a value, such as --level info.");
+  }
+  if (args.flags.text === true) {
+    throw usageError("--text requires a value.");
+  }
+  if (args.flags["duration-ms"] === true) {
+    throw usageError("--duration-ms requires a value.");
+  }
+  const level = flagString(args.flags, "level");
+  const rawText = flagString(args.flags, "text");
+  if (!id || !level || rawText === undefined) {
+    throw usageError("screen toast requires <id>, --level error|alert|info, and --text TEXT.");
+  }
+  if (!isScreenToastLevel(level)) {
+    throw usageError("--level must be error, alert, or info.");
+  }
+  const text = trimToastText(rawText);
+  const textLength = [...text].length;
+  if (
+    textLength < 1
+    || textLength > TOAST_TEXT_MAX
+    || toastTextHasDisallowedControl(text)
+    || toastLineCount(text) > TOAST_MAX_LINES
+  ) {
+    throw usageError(
+      "Toast text must be 1 to 120 characters, use only line feed as a line break, and have at most three lines.",
+    );
+  }
+  const body: ScreenToastWrite = { level, text };
+  if (args.flags["duration-ms"] !== undefined) {
+    const durationMs = flagNumber(args.flags, "duration-ms");
+    if (
+      durationMs === undefined
+      || !Number.isInteger(durationMs)
+      || durationMs < TOAST_DURATION_MIN
+      || durationMs > TOAST_DURATION_MAX
+    ) {
+      throw usageError("--duration-ms must be an integer between 2000 and 60000.");
+    }
+    body.duration_ms = durationMs;
+  }
+  const response = await client.call({
+    method: "POST",
+    path: `/api/v1/screens/${id}/toast`,
+    idempotent: true,
+    body,
+  });
+  const accepted = (response.body ?? {}) as ScreenToastAccepted;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: humanLines("Toast accepted", [
+      ["screen_id", id],
+      ["level", level],
+      ["expires_at", accepted.expires_at],
+    ]),
+  };
 }
 
 async function kvCommand(

@@ -116,6 +116,23 @@ installation, players, backend services, the site, or production deployment.
 - Probe support through `capabilities.features.feedback` rather than assuming
   the routes exist. `doctor` reports it.
 
+## Toast
+
+- `screen toast <id> --level error|alert|info --text TEXT [--duration-ms MS]`
+  binds `POST /api/v1/screens/{id}/toast`. A toast is stage chrome, not a
+  placement: no canvas slot, no layer, no readiness or crossfade.
+- Latest-wins. Do not add a queue, a cancel command, or a colour field.
+  Player chrome chooses the fill; the API never carries one.
+- Text is 1 to 120 characters, line feed is the only accepted line break, and
+  at most three lines are accepted. `duration_ms` is omitted so the server can
+  default it to 10000; when supplied it must be an integer from 2000 to 60000.
+- Writes carry `Idempotency-Key`. An exact retry returns the original
+  `expires_at` for twenty-four hours. The accepted body is `{ expires_at }`
+  only; do not echo the submitted text in the human report or invent an id.
+- Do not add client-side scrubbing of toast text. The server rejects
+  recognizable ScreenRig credential material and other control characters;
+  render its problem so the operator can rewrite and resend.
+
 ## Product and security boundaries
 
 - Package metadata requires Node.js 20.11+. The plugin's package-relative

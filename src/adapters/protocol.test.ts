@@ -184,6 +184,15 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "name",
     "playlist_id",
   ]);
+  const toastWrite = interfaceBody(source, "ScreenToastWrite");
+  assert.deepEqual(quotedProperties(toastWrite), ["duration_ms", "level", "text"]);
+  assert.match(toastWrite, /"level": "error" \| "alert" \| "info"/);
+  assert.deepEqual(quotedProperties(interfaceBody(source, "ScreenToastAccepted")), ["expires_at"]);
+  const toastDetails = interfaceBody(source, "ScreenToastDetails");
+  assert.deepEqual(quotedProperties(toastDetails), ["duration_ms", "expires_at", "level", "text"]);
+  assert.match(toastDetails, /"level": "error" \| "alert" \| "info"/);
+  assert.doesNotMatch(toastWrite, /color/);
+  assert.doesNotMatch(toastDetails, /color/);
   assert.deepEqual(quotedProperties(interfaceBody(source, "FeedbackWrite")), [
     "body",
     "context",
@@ -227,6 +236,30 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   assert.equal(limits.application_archive_bytes, capabilitiesFromContract.application_compressed_bytes);
   assert.equal(limits.application_archive_bytes, DEFAULT_ARCHIVE_LIMITS.application_archive_bytes);
   assert.deepEqual(limits, DEFAULT_ARCHIVE_LIMITS);
+});
+
+test("toast contract is a closed POST with idempotency, no queue, and no colour fields", () => {
+  const source = readFileSync(OPENAPI_CONTRACT, "utf8");
+  const start = source.indexOf("/api/v1/screens/{id}/toast:");
+  const end = source.indexOf("/api/v1/events:");
+  assert.notEqual(start, -1, "missing toast route");
+  const route = source.slice(start, end);
+  assert.match(route, /post:/);
+  assert.doesNotMatch(route, /get:/);
+  assert.doesNotMatch(route, /patch:/);
+  assert.doesNotMatch(route, /put:/);
+  assert.doesNotMatch(route, /delete:/);
+  assert.match(route, /IdempotencyKey/);
+  assert.match(route, /"202":/);
+  assert.match(route, /RateLimitedProblem/);
+  assert.match(route, /not a placement/);
+  assert.match(route, /screen\.toast/);
+  assert.match(route, /expires_at/);
+  assert.doesNotMatch(route, /color/);
+  assert.match(source, /ScreenToastWrite:[\s\S]*?required: \[level, text\]/);
+  assert.match(source, /level: \{ type: string, enum: \[error, alert, info\]/);
+  assert.match(source, /duration_ms: \{ type: integer, minimum: 2000, maximum: 60000, default: 10000/);
+  assert.doesNotMatch(source.slice(source.indexOf("ScreenToastWrite:"), source.indexOf("ScreenToastAccepted:")), /color/);
 });
 
 test("feedback contract is account-scoped, immutable, idempotent, and closed to argument values", () => {

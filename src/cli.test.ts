@@ -1161,6 +1161,140 @@ test("control-plane KV writes use binary-safe OpenAPI payloads and idempotency",
   }
 });
 
+test("screen toast posts the closed write body and does not echo the text", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("toast-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  try {
+    const result = await withRuntime(
+      ["--json", "screen", "toast", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--level", "info", "--text", "Lobby closed"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(result.code, 0, result.stdout);
+    const post = transport.calls.find((call) => call.path === "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/toast");
+    assert.ok(post, "must bind POST /api/v1/screens/{id}/toast");
+    assert.equal(post.method, "POST");
+    assert.ok(post.headers?.["idempotency-key"], "a toast write must carry an idempotency key");
+    assert.deepEqual(post.body, { level: "info", text: "Lobby closed" });
+    const envelope = JSON.parse(result.stdout) as { ok: boolean; data: { expires_at?: string; text?: string; level?: string } };
+    assert.equal(envelope.ok, true);
+    assert.equal(envelope.data.expires_at, "2026-08-14T17:00:10.000Z");
+    assert.equal(envelope.data.text, undefined, "the accepted body is expiry only");
+    assert.equal(envelope.data.level, undefined);
+
+    const withDuration = await withRuntime(
+      [
+        "--json",
+        "screen",
+        "toast",
+        "scr_PAIRINGAAAAAAAAAAAAAAAA",
+        "--level",
+        "alert",
+        "--text",
+        "Doors locked",
+        "--duration-ms",
+        "5000",
+      ],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(withDuration.code, 0, withDuration.stdout);
+    const durationPost = transport.calls.at(-1);
+    assert.deepEqual(durationPost?.body, { level: "alert", text: "Doors locked", duration_ms: 5000 });
+    assert.equal(
+      (JSON.parse(withDuration.stdout) as { data: { expires_at: string } }).data.expires_at,
+      "2026-08-14T17:00:05.000Z",
+    );
+
+    const human = await withRuntime(
+      ["screen", "toast", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--level", "error", "--text", "Offline"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(human.code, 0, human.stdout);
+    assert.match(human.stdout, /Toast accepted/);
+    assert.match(human.stdout, /expires_at:/);
+    assert.doesNotMatch(human.stdout, /Offline/);
+
+    // The CLI does not scrub toast text. Credential-shaped content is sent
+    // verbatim so the server can reject it; the accepted envelope still
+    // returns only expires_at.
+    const credentialText = "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr";
+    const forwarded = await withRuntime(
+      ["--json", "screen", "toast", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--level", "info", "--text", credentialText],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(forwarded.code, 0, forwarded.stdout);
+    assert.deepEqual(transport.calls.at(-1)?.body, { level: "info", text: credentialText });
+    assert.ok(!forwarded.stdout.includes(credentialText));
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("screen toast rejects invalid level, text, and duration before calling the server", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("toast-usage-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const toastCalls = () => transport.calls.filter((call) => String(call.path).endsWith("/toast"));
+  try {
+    for (const [argv, detail] of [
+      [["screen", "toast"], /requires <id>/],
+      [["screen", "toast", "scr_1", "--text", "Lobby closed"], /requires <id>/],
+      [["screen", "toast", "scr_1", "--level", "info"], /requires <id>/],
+      [["screen", "toast", "scr_1", "--level", "INFO", "--text", "Lobby closed"], /error, alert, or info/],
+      [["screen", "toast", "scr_1", "--level", "warn", "--text", "Lobby closed"], /error, alert, or info/],
+      [["screen", "toast", "scr_1", "--level", "info", "--text", "a\n\n\nb"], /1 to 120 characters/],
+      [["screen", "toast", "scr_1", "--level", "info", "--text", "bad\tline"], /1 to 120 characters/],
+      [["screen", "toast", "scr_1", "--level", "info", "--text", "x".repeat(121)], /1 to 120 characters/],
+      [["screen", "toast", "scr_1", "--level", "info", "--text", "Lobby closed", "--duration-ms", "1999"], /2000 and 60000/],
+      [["screen", "toast", "scr_1", "--level", "info", "--text", "Lobby closed", "--duration-ms", "60001"], /2000 and 60000/],
+      [["screen", "toast", "scr_1", "--level", "info", "--text", "Lobby closed", "--duration-ms", "2500.5"], /2000 and 60000/],
+    ] as Array<[string[], RegExp]>) {
+      const result = await withRuntime(["--json", ...argv], transport, { fs: fsLike });
+      assert.equal(result.code, ExitCode.Usage, `${argv.join(" ")}: ${result.stdout}`);
+      const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string } };
+      assert.equal(envelope.error.code, "usage_error");
+      assert.match(envelope.error.detail, detail);
+    }
+    assert.equal(toastCalls().length, 0, "invalid toasts must not reach the server");
+
+    const valuelessLevel = await withRuntime(
+      ["--json", "screen", "toast", "scr_1", "--level", "--text", "Lobby closed"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(valuelessLevel.code, ExitCode.Usage);
+    assert.match(JSON.parse(valuelessLevel.stdout).error.detail as string, /--level requires a value/);
+
+    const valuelessText = await withRuntime(
+      ["--json", "screen", "toast", "scr_1", "--level", "info", "--text", "--json"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(valuelessText.code, ExitCode.Usage);
+    assert.match(JSON.parse(valuelessText.stdout).error.detail as string, /--text requires a value/);
+
+    const cancel = await withRuntime(["--json", "screen", "toast-cancel", "scr_1"], transport, { fs: fsLike });
+    assert.equal(cancel.code, ExitCode.Usage);
+    assert.equal(toastCalls().length, 0);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
 test("media, operation, screen credential, and K/V revision commands bind the frozen routes", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("parity-");
@@ -1218,6 +1352,15 @@ test("media, operation, screen credential, and K/V revision commands bind the fr
     const rotated = (JSON.parse(result.stdout) as { data: { revision: number } }).data;
     result = await withRuntime(["--json", "screen", "revoke-credential", paired.id, "--if-match", String(rotated.revision)], transport, runtimeExtra);
     assert.equal(result.code, 0, result.stdout);
+
+    result = await withRuntime(
+      ["--json", "screen", "toast", paired.id, "--level", "info", "--text", "Lobby closed"],
+      transport,
+      runtimeExtra,
+    );
+    assert.equal(result.code, 0, result.stdout);
+    assert.equal(transport.calls.at(-1)?.path, `/api/v1/screens/${paired.id}/toast`);
+    assert.ok(transport.calls.at(-1)?.headers?.["idempotency-key"]);
 
     result = await withRuntime(["--json", "kv", "set", "settings", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":1}'], transport, runtimeExtra);
     assert.equal(result.code, 0, result.stdout);

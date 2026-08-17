@@ -59,6 +59,9 @@ const VALUE_FLAGS = new Set([
   "body-file",
   "command",
   "kind",
+  "level",
+  "text",
+  "duration-ms",
 ]);
 
 export function parseArgv(argv: string[]): ParsedArgs {

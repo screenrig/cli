@@ -241,6 +241,33 @@ paths:
       responses:
         "200": { description: Paired device credential revoked; public URL preserved and all prior runtime/content grants revoked., content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
         default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/{id}/toast:
+    post:
+      operationId: postScreenToast
+      description: >-
+        Posts one transient stage-chrome toast to the named screen. A toast is
+        not a placement: it does not occupy a canvas slot, has no layer, and
+        never participates in readiness or crossfade. The durable event type is
+        screen.toast on the existing runtime SSE stream. Runtime scan never
+        delivers a toast after expires_at, so a persisted cursor cannot replay
+        it later. Level colours are player chrome and are not API fields.
+        Text is 1 to 120 characters, line feed is the only accepted line break,
+        and at most three lines are accepted. Recognizable ScreenRig credential
+        material and other control characters are rejected. duration_ms defaults
+        to 10000 and must be between 2000 and 60000 inclusive. An exact
+        Idempotency-Key retry returns the original expires_at for twenty-four
+        hours. Latest-wins: there is no queue and no cancel verb.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenToastWrite" } } } }
+      responses:
+        "202": { description: "Accepted. The toast is durable until expires_at. An exact idempotent retry returns this same expiry.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenToastAccepted" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
   /api/v1/events:
     get:
       operationId: listEvents
@@ -256,6 +283,17 @@ paths:
       parameters: [{ $ref: "#/components/parameters/AfterCursor" }, { $ref: "#/components/parameters/LastEventID" }]
       responses:
         "200": { description: "Replayable SSE stream. The query cursor takes precedence over Last-Event-ID. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close.", content: { text/event-stream: { schema: { type: string } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/playback:
+    get:
+      operationId: listPlaybackAggregates
+      security: [{ accountBearer: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/PlaybackScreenID" }
+        - { $ref: "#/components/parameters/PlaybackMediaID" }
+        - { $ref: "#/components/parameters/PlaybackDay" }
+      responses:
+        "200": { description: "Daily playback aggregates for the calling account. One row per screen, media, and UTC day. Newest days first. Identifiers filter the caller's own rows and are never a cross-account lookup.", content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackAggregateList" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/applications/{application_id}/kv:
     get:
@@ -627,7 +665,7 @@ paths:
         - { $ref: "#/components/parameters/AfterCursor" }
         - { $ref: "#/components/parameters/LastEventID" }
       responses:
-        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
+        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast is a runtime audience event; scan never delivers one past details.expires_at.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/reports:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -636,7 +674,7 @@ paths:
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeReport" } } } }
       responses:
-        "202": { description: Accepted. manifest.activated is committed before this response and is idempotent for the current active revision. }
+        "202": { description: Accepted. manifest.activated is committed before this response and is idempotent for the current active revision. playback.video_started upserts the daily aggregate before this response. application.event appends a durable account event before this response. }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/manifests/{manifest_revision}/releases/{release_id}/launch:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -829,6 +867,9 @@ components:
     IfMatch: { name: If-Match, in: header, required: true, schema: { type: string } }
     OptionalIfMatch: { name: If-Match, in: header, required: false, schema: { type: string }, description: Omit only when creating a new key; updates require the current quoted revision. }
     AfterCursor: { name: after, in: query, required: false, schema: { type: string } }
+    PlaybackScreenID: { name: screen_id, in: query, required: false, schema: { type: string, pattern: "^scr_" } }
+    PlaybackMediaID: { name: media_id, in: query, required: false, schema: { type: string, pattern: "^med_" } }
+    PlaybackDay: { name: day, in: query, required: false, schema: { type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, description: UTC calendar day of the aggregate. }
     LastEventID: { name: Last-Event-ID, in: header, required: false, schema: { type: string }, description: Durable cursor used when after is absent. }
     Range: { name: Range, in: header, required: false, schema: { type: string, pattern: "^bytes=[0-9]*-[0-9]*$" }, description: V1 accepts one byte range only. }
     SecFetchSite: { name: Sec-Fetch-Site, in: header, required: false, schema: { type: string, enum: [same-origin, same-site, cross-site, none] } }
@@ -1071,8 +1112,47 @@ components:
     ScreenProvisioning: { type: object, additionalProperties: false, required: [screen, public_url, provisioning_url, expires_at], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri }, provisioning_url: { type: string, pattern: "^https?://[^#]+/s/[^#]+#provision=[A-Za-z0-9_-]{43}$" }, expires_at: { type: string, format: date-time } } }
     Screen: { type: object, additionalProperties: false, required: [id, public_id, label, revision, manifest_revision, content_access_generation, state, created_at, updated_at], properties: { id: { type: string }, public_id: { type: string }, label: { type: string }, playlist_id: { type: string }, revision: { type: integer }, manifest_revision: { type: integer }, content_access_generation: { type: integer }, state: { type: string, enum: [pairing_pending, active] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     ScreenList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Screen" } } } }
+    ScreenToastWrite:
+      type: object
+      additionalProperties: false
+      required: [level, text]
+      properties:
+        level: { type: string, enum: [error, alert, info], description: Closed severity token. Player chrome chooses the fill; the API never carries a colour. }
+        text: { type: string, minLength: 1, maxLength: 120, description: "1 to 120 characters. Line feed is the only accepted line break. At most three lines. Other control characters and recognizable ScreenRig credential material are rejected." }
+        duration_ms: { type: integer, minimum: 2000, maximum: 60000, default: 10000, description: Visible duration in milliseconds. Omitted values default to 10000. }
+    ScreenToastAccepted:
+      type: object
+      additionalProperties: false
+      required: [expires_at]
+      properties:
+        expires_at: { type: string, format: date-time, description: Instant after which runtime scan must not deliver the toast. }
+    ScreenToastDetails:
+      type: object
+      additionalProperties: false
+      required: [level, text, duration_ms, expires_at]
+      description: details object on a durable screen.toast event. Colours are not present.
+      properties:
+        level: { type: string, enum: [error, alert, info] }
+        text: { type: string, maxLength: 120 }
+        duration_ms: { type: integer, minimum: 2000, maximum: 60000 }
+        expires_at: { type: string, format: date-time }
     Event: { type: object, additionalProperties: true, required: [cursor, sequence, type, severity, message, at], properties: { cursor: { type: string }, sequence: { type: integer }, type: { type: string }, severity: { type: string }, request_id: { type: string }, operation_id: { type: string }, message: { type: string }, resource: { type: object, additionalProperties: true }, details: { type: object, additionalProperties: true }, at: { type: string } } }
     EventList: { type: object, additionalProperties: false, required: [items, next_cursor], properties: { items: { type: array, items: { $ref: "#/components/schemas/Event" } }, next_cursor: { type: string } } }
+    PlaybackAggregate:
+      type: object
+      additionalProperties: false
+      required: [screen_id, media_id, filename, day, play_count, last_page_id, last_manifest_revision, first_started_at, last_started_at]
+      properties:
+        screen_id: { type: string }
+        media_id: { type: string }
+        filename: { type: string, description: "Server-resolved media filename at the last upsert. Never client-supplied." }
+        day: { type: string, format: date, description: UTC calendar day of the aggregate. }
+        play_count: { type: integer, minimum: 1, description: "Starts counted for this screen, media, and UTC day. A start is one page appearance." }
+        last_page_id: { type: string }
+        last_manifest_revision: { type: string }
+        first_started_at: { type: string, format: date-time }
+        last_started_at: { type: string, format: date-time }
+    PlaybackAggregateList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/PlaybackAggregate" } } } }
     KVWrite: { type: object, additionalProperties: false, required: [value_base64, content_type], properties: { value_base64: { type: string, contentEncoding: base64, maxLength: 1398104 }, content_type: { type: string, minLength: 1, maxLength: 127 } } }
     KVEntry: { type: object, additionalProperties: false, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, value_base64: { type: string, contentEncoding: base64 }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer } } }
     KVSummary: { type: object, additionalProperties: false, required: [application_id, key, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string }, updated_at: { type: string } } }
@@ -1421,10 +1501,16 @@ components:
     RuntimeReport:
       oneOf:
         - { $ref: "#/components/schemas/ManifestActivatedReport" }
+        - { $ref: "#/components/schemas/PlaybackVideoStartedReport" }
+        - { $ref: "#/components/schemas/ApplicationEventReport" }
         - { $ref: "#/components/schemas/RuntimeConditionReport" }
     ManifestActivatedReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [manifest.activated] }, context: { $ref: "#/components/schemas/ManifestActivatedContext" } } }
     ManifestActivatedContext: { type: object, additionalProperties: false, required: [manifest_revision], properties: { manifest_revision: { type: string, pattern: "^man_" } } }
-    RuntimeConditionReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info, warning, error] }, code: { type: string, pattern: "^[a-z0-9._-]{1,80}$", not: { const: manifest.activated } }, context: { type: object, additionalProperties: true } } }
+    PlaybackVideoStartedReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [playback.video_started] }, context: { $ref: "#/components/schemas/PlaybackVideoStartedContext" } } }
+    PlaybackVideoStartedContext: { type: object, additionalProperties: false, required: [media_id, manifest_revision, page_id], properties: { media_id: { type: string, pattern: "^med_" }, manifest_revision: { type: string, pattern: "^man_" }, page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" } } }
+    ApplicationEventReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [application.event] }, context: { $ref: "#/components/schemas/ApplicationEventContext" } } }
+    ApplicationEventContext: { type: object, additionalProperties: false, required: [placement_id, code], properties: { placement_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, code: { type: string, pattern: "^[A-Za-z0-9._-]{1,64}$" } } }
+    RuntimeConditionReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info, warning, error] }, code: { type: string, pattern: "^[a-z0-9._-]{1,80}$", not: { enum: [manifest.activated, playback.video_started, application.event] } }, context: { type: object, additionalProperties: true } } }
     ReleaseLaunch: { type: object, additionalProperties: false, required: [launch_url, expires_at], properties: { launch_url: { type: string }, expires_at: { type: string } } }
     ProblemField: { type: object, additionalProperties: false, required: [field, code, detail], properties: { field: { type: string }, code: { type: string }, detail: { type: string } } }
     NextAction: { type: object, additionalProperties: false, required: [command, reason], properties: { command: { type: string }, reason: { type: string } } }

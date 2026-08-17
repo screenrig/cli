@@ -85,6 +85,32 @@ next-action guidance naming the wait, rather than as a bare status.
 `screenrig doctor` reports a `feedback` check from the server's advertised
 capability map, so support is probed rather than assumed.
 
+## Screen toast
+
+A toast is transient stage chrome on one screen, not a placement. It occupies
+no canvas slot, has no layer, and never participates in readiness or
+crossfade. Latest-wins: there is no queue and the CLI exposes no cancel
+command. Level colours are player chrome and are not API fields.
+
+```sh
+screenrig --json screen toast scr_01 --level info --text "Lobby closed"
+screenrig --json screen toast scr_01 --level alert --text "Doors locked" --duration-ms 5000
+```
+
+`--level` is one of `error`, `alert`, or `info`. `--text` is 1 to 120
+characters, accepts line feed as the only line break, and allows at most
+three lines. `--duration-ms` is optional, defaults to 10000 on the server, and
+must be between 2000 and 60000 inclusive when supplied.
+
+The write is idempotent. An exact retry under the same `--idempotency-key`
+returns the original `expires_at` for twenty-four hours. Runtime scan never
+delivers a toast after that instant, so a persisted cursor cannot replay it.
+
+The accepted envelope is `{ expires_at }` only. The CLI does not scrub toast
+text; the server rejects recognizable ScreenRig credential material and other
+control characters. Do not put credentials, cookies, Authorization headers,
+completion nonces, signed URLs, or object keys in the text.
+
 ## Media transcoding
 
 `media upload` transcodes the source before it declares the upload, so the

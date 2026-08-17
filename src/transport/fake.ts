@@ -350,6 +350,20 @@ export function memoryBackend(): FakeTransport {
     screens.set(id, item);
     return { status: 200, headers: {}, body: item };
   });
+  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/toast$/, (req) => {
+    const body = (req.body ?? {}) as { duration_ms?: number };
+    const durationMs = body.duration_ms ?? 10_000;
+    return {
+      status: 202,
+      headers: {
+        "cache-control": "no-store",
+        "x-request-id": req.headers?.["x-request-id"] ?? "req_toast",
+      },
+      body: {
+        expires_at: new Date(Date.parse("2026-08-14T17:00:00.000Z") + durationMs).toISOString(),
+      },
+    };
+  });
   transport.on("DELETE", /^\/api\/v1\/screens\/[^/]+$/, (req) => {
     screens.delete(req.path.split("/").pop() ?? "");
     return { status: 204, headers: {}, body: undefined };
