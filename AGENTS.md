@@ -57,9 +57,10 @@ installation, players, backend services, the site, or production deployment.
   `libwebp` encoders, and the `zscale` / `tonemap` filters.
 - Delivery profiles are fixed. Video defaults to H.264 (`libx264`, High, level
   4.2, `-preset fast -crf 23 -maxrate 8M -bufsize 16M`, `-bf 2`, GOP two
-  seconds, `yuv420p`, Rec. 709 limited range, AAC 192 kbit/s 48 kHz stereo,
-  `+faststart`), with H.265 (`libx265`, `hvc1`, Main, CRF 28) under
-  `--codec hevc`. Images are WebP quality 90, `yuva420p` when the source has
+  seconds, `yuv420p`, Rec. 709 limited range, AAC 192 kbit/s 48 kHz stereo),
+  with H.265 (`libx265`, `hvc1`, Main, CRF 28) under `--codec hevc`. Players
+  play from a complete cached file, so the encode does not remux for
+  progressive download (`+faststart`). Images are WebP quality 90, `yuva420p` when the source has
   alpha, `libwebp_anim` for animation. Both bound **each** edge to 3840 px,
   preserve aspect, and never upscale. HDR is tone mapped to Rec. 709, with a
   warning-and-fallback path when the build has no libzimg. Do not retune these

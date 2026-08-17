@@ -337,7 +337,8 @@ test("video transcode defaults to the universally playable H.264 profile and rep
     assert.equal(valueAfter("-crf"), "23");
     assert.ok(!args.includes("-tag:v"), "the H.264 profile carries no hvc1 tag");
     assert.equal(valueAfter("-pix_fmt"), "yuv420p");
-    assert.equal(valueAfter("-movflags"), "+faststart");
+    assert.ok(!args.includes("-movflags"), "cached playback does not remux for progressive download");
+    assert.ok(!args.includes("+faststart"));
     assert.equal(valueAfter("-r"), "30");
     assert.equal(valueAfter("-c:a"), "aac");
     assert.equal(valueAfter("-colorspace"), "bt709");
@@ -390,10 +391,12 @@ test("--codec hevc opts in to the H.265 delivery profile", async () => {
     assert.equal(valueAfter("-profile:v"), "main");
     assert.equal(valueAfter("-crf"), "28");
     assert.equal(valueAfter("-pix_fmt"), "yuv420p");
-    assert.equal(valueAfter("-movflags"), "+faststart");
+    assert.ok(!args.includes("-movflags"), "cached playback does not remux for progressive download");
+    assert.ok(!args.includes("+faststart"));
     assert.equal(valueAfter("-r"), "30");
     assert.match(String(valueAfter("-x265-params")), /min-keyint=60/);
     assert.match(result.reason, /H\.265/);
+    assert.doesNotMatch(result.reason, /faststart/);
   } finally {
     await rm(dir, { recursive: true, force: true });
     if (result.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });

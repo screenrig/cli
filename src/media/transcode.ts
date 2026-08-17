@@ -277,9 +277,9 @@ async function measureOutput(
 }
 
 /**
- * Video is always re-encoded so every upload has the same codec, colour space,
- * and faststart layout. Only an already-conforming WebP still is passed through,
- * because re-encoding it would lose quality for no delivery benefit.
+ * Video is always re-encoded so every upload has the same codec and colour
+ * space. Only an already-conforming WebP still is passed through, because
+ * re-encoding it would lose quality for no delivery benefit.
  */
 function passthroughReason(kind: SourceKind, probe: MediaProbe, options: TranscodeOptions): string | undefined {
   if (kind !== "image") {
@@ -487,13 +487,13 @@ function planVideo(
     );
   }
 
+  // Players play a complete cached file, so a faststart remux is wasted work.
   args.push(
     "-avoid_negative_ts", "make_zero",
     "-c:a", "aac",
     "-b:a", "192k",
     "-ar", "48000",
     "-ac", "2",
-    "-movflags", "+faststart",
     "-write_tmcd", "0",
     "-threads", "0",
     "-progress", "pipe:1",
@@ -507,7 +507,7 @@ function planVideo(
     target: options.codec === "hevc" ? "H.265 MP4" : "H.264 MP4",
     reason:
       `re-encoded to ${options.codec === "hevc" ? "H.265" : "H.264"} MP4, bounded to ${options.maxEdge}px ` +
-      `on both edges, capped at ${options.maxFps} fps, faststart`,
+      `on both edges, capped at ${options.maxFps} fps`,
     progressDurationSeconds: probe.durationSeconds,
     outputWidth: size.width,
     outputHeight: size.height,

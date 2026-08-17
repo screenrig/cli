@@ -139,7 +139,8 @@ Video becomes an MP4:
   to Rec. 709 through `zscale` and `tonemap`. An ffmpeg build without those
   filters converts without tone mapping and the envelope carries a warning.
 - Audio, where the source has any, is AAC at 192 kbit/s, 48 kHz, stereo.
-  `+faststart` writes the index at the front of the file.
+  Players play from a complete cached file, so the encode does not remux
+  for progressive download.
 - The frame rate is capped at 30 fps by default.
 
 Images become WebP at quality 90, in `yuva420p` when the source carries an
