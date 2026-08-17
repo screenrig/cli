@@ -330,6 +330,7 @@ paths:
     get:
       operationId: listMedia
       security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/MediaTagQuery" }, { $ref: "#/components/parameters/MediaKindQuery" }]
       responses:
         "200": { description: Media, content: { application/json: { schema: { $ref: "#/components/schemas/MediaList" } } } }
   /api/v1/media/uploads:
@@ -357,6 +358,14 @@ paths:
       security: [{ accountBearer: [] }]
       responses:
         "200": { description: Ready private media metadata. Bytes remain available only through a runtime manifest grant., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Media" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    patch:
+      operationId: patchMedia
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MediaTagPatch" } } } }
+      responses:
+        "200": { description: Ready media with the updated tag. Matching by:tag playlists rematerialize in the same transaction., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Media" } } } }
         default: { $ref: "#/components/responses/Problem" }
     delete:
       operationId: deleteMedia
@@ -869,6 +878,8 @@ components:
     AfterCursor: { name: after, in: query, required: false, schema: { type: string } }
     PlaybackScreenID: { name: screen_id, in: query, required: false, schema: { type: string, pattern: "^scr_" } }
     PlaybackMediaID: { name: media_id, in: query, required: false, schema: { type: string, pattern: "^med_" } }
+    MediaTagQuery: { name: tag, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, description: Exact media tag. Untagged objects are omitted when this filter is present. }
+    MediaKindQuery: { name: kind, in: query, required: false, schema: { type: string, enum: [image, video] } }
     PlaybackDay: { name: day, in: query, required: false, schema: { type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, description: UTC calendar day of the aggregate. }
     LastEventID: { name: Last-Event-ID, in: header, required: false, schema: { type: string }, description: Durable cursor used when after is absent. }
     Range: { name: Range, in: header, required: false, schema: { type: string, pattern: "^bytes=[0-9]*-[0-9]*$" }, description: V1 accepts one byte range only. }
@@ -921,7 +932,7 @@ components:
     Capabilities:
       type: object
       additionalProperties: false
-      required: [api_version, protocol_version, application_compressed_bytes, application_expanded_bytes, application_package_bytes, application_file_count, application_file_bytes, application_path_depth, application_path_bytes, playlist_max_pages, playlist_max_items_per_page, transition_max_duration_ms, screens_per_account, account_content_bytes, features]
+      required: [api_version, protocol_version, application_compressed_bytes, application_expanded_bytes, application_package_bytes, application_file_count, application_file_bytes, application_path_depth, application_path_bytes, playlist_max_pages, playlist_max_items_per_page, playlist_max_media_per_selector, transition_max_duration_ms, screens_per_account, account_content_bytes, features]
       properties:
         api_version: { type: string }
         protocol_version: { type: string }
@@ -934,7 +945,7 @@ components:
         application_path_bytes: { type: integer, enum: [255] }
         playlist_max_pages: { type: integer, enum: [100] }
         playlist_max_items_per_page: { type: integer, enum: [24] }
-        transition_max_duration_ms: { type: integer, enum: [60000] }
+        playlist_max_media_per_selector: { type: integer, enum: [32], description: Maximum ready media objects one image or video selector may resolve to. }
         screens_per_account: { type: integer, enum: [50], description: "Screen limit of the default plan. Paired and pairing-pending screens both count." }
         account_content_bytes: { type: integer, enum: [104857600], description: "Storage limit of the default plan, counting committed media, expanded application release trees, and application key/value entries together. Bytes reserved by an upload in flight count while reserved. This is the limit that binds in practice; the per-request ceilings above are plan-independent transport bounds and are larger." }
         features: { type: object, additionalProperties: { type: boolean } }
@@ -1010,18 +1021,18 @@ components:
       oneOf:
         - { $ref: "#/components/schemas/PlaylistDurationAdvance" }
         - { $ref: "#/components/schemas/PlaylistApplicationAdvance" }
-        - { $ref: "#/components/schemas/PlaylistVideoEndAdvanceWrite" }
+        - { $ref: "#/components/schemas/PlaylistMediaEndAdvanceWrite" }
       discriminator: { propertyName: mode }
     PlaylistAdvance:
       oneOf:
         - { $ref: "#/components/schemas/PlaylistDurationAdvance" }
         - { $ref: "#/components/schemas/PlaylistApplicationAdvance" }
-        - { $ref: "#/components/schemas/PlaylistVideoEndAdvance" }
+        - { $ref: "#/components/schemas/PlaylistMediaEndAdvance" }
       discriminator: { propertyName: mode }
     PlaylistDurationAdvance: { type: object, additionalProperties: false, required: [mode, after_ms], properties: { mode: { type: string, enum: [duration] }, after_ms: { type: integer, minimum: 1000, maximum: 86400000 } } }
     PlaylistApplicationAdvance: { type: object, additionalProperties: false, required: [mode, max_ms], properties: { mode: { type: string, enum: [application] }, max_ms: { type: integer, minimum: 1000, maximum: 86400000 } } }
-    PlaylistVideoEndAdvanceWrite: { type: object, additionalProperties: false, required: [mode], properties: { mode: { type: string, enum: [video_end] }, max_ms: { type: integer, minimum: 1000, maximum: 86400000, description: Optional client safety hint; the server resolves the authoritative deadline from verified media duration. } } }
-    PlaylistVideoEndAdvance: { type: object, additionalProperties: false, required: [mode, max_ms], properties: { mode: { type: string, enum: [video_end] }, max_ms: { type: integer, minimum: 1000, maximum: 86400000 } } }
+    PlaylistMediaEndAdvanceWrite: { type: object, additionalProperties: false, required: [mode], properties: { mode: { type: string, enum: [media_end] }, max_ms: { type: integer, minimum: 1000, maximum: 86400000, description: Optional client safety hint; the server resolves the authoritative deadline from resolved item lengths. } } }
+    PlaylistMediaEndAdvance: { type: object, additionalProperties: false, required: [mode, max_ms], properties: { mode: { type: string, enum: [media_end] }, max_ms: { type: integer, minimum: 1000, maximum: 86400000 } } }
     PlaylistPlacementWrite:
       oneOf:
         - { $ref: "#/components/schemas/PlaylistApplicationPlacementWrite" }
@@ -1049,10 +1060,22 @@ components:
     PlaylistVideoPlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistVideoContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] } } }
     PlaylistIframePlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistIframeContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, enum: [false] } } }
     PlaylistApplicationContent: { type: object, additionalProperties: false, required: [type, release_id], properties: { type: { type: string, enum: [application] }, application_id: { type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id. }, release_id: { type: string } } }
-    PlaylistImageContentWrite: { type: object, additionalProperties: false, required: [type, media_id], properties: { type: { type: string, enum: [image] }, media_id: { type: string }, alt: { type: string, maxLength: 300 } } }
-    PlaylistVideoContentWrite: { type: object, additionalProperties: false, required: [type, media_id], properties: { type: { type: string, enum: [video] }, media_id: { type: string }, muted: { type: boolean, enum: [true], default: true }, loop: { type: boolean, default: false } } }
-    PlaylistImageContent: { type: object, additionalProperties: false, required: [type, media_id, intrinsic_size], properties: { type: { type: string, enum: [image] }, media_id: { type: string }, alt: { type: string, maxLength: 300 }, intrinsic_size: { $ref: "#/components/schemas/PlaylistIntrinsicSize" } } }
-    PlaylistVideoContent: { type: object, additionalProperties: false, required: [type, media_id, intrinsic_size, muted, loop], properties: { type: { type: string, enum: [video] }, media_id: { type: string }, intrinsic_size: { $ref: "#/components/schemas/PlaylistIntrinsicSize" }, muted: { type: boolean, enum: [true] }, loop: { type: boolean } } }
+    PlaylistMediaSelector:
+      oneOf:
+        - { $ref: "#/components/schemas/PlaylistMediaSelectorByID" }
+        - { $ref: "#/components/schemas/PlaylistMediaSelectorByIDs" }
+        - { $ref: "#/components/schemas/PlaylistMediaSelectorByAll" }
+        - { $ref: "#/components/schemas/PlaylistMediaSelectorByTag" }
+      discriminator: { propertyName: by }
+    PlaylistMediaSelectorByID: { type: object, additionalProperties: false, required: [by, media_id], properties: { by: { type: string, enum: [id] }, media_id: { type: string, pattern: "^med_" }, one_at_a_time: { type: boolean, enum: [false], default: false } } }
+    PlaylistMediaSelectorByIDs: { type: object, additionalProperties: false, required: [by, media_ids], properties: { by: { type: string, enum: [ids] }, media_ids: { type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^med_" } }, one_at_a_time: { type: boolean, default: false } } }
+    PlaylistMediaSelectorByAll: { type: object, additionalProperties: false, required: [by], properties: { by: { type: string, enum: [all] }, one_at_a_time: { type: boolean, default: false } } }
+    PlaylistMediaSelectorByTag: { type: object, additionalProperties: false, required: [by, tag], properties: { by: { type: string, enum: [tag] }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, one_at_a_time: { type: boolean, default: false } } }
+    PlaylistMediaItem: { type: object, additionalProperties: false, required: [media_id, intrinsic_size], properties: { media_id: { type: string, pattern: "^med_" }, intrinsic_size: { $ref: "#/components/schemas/PlaylistIntrinsicSize" } } }
+    PlaylistImageContentWrite: { type: object, additionalProperties: false, required: [type, selector], properties: { type: { type: string, enum: [image] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, alt: { type: string, maxLength: 300 }, dwell_ms: { type: integer, minimum: 1000, maximum: 86400000, description: Required on media_end image placements. Forbidden on duration and application pages. } } }
+    PlaylistVideoContentWrite: { type: object, additionalProperties: false, required: [type, selector], properties: { type: { type: string, enum: [video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, muted: { type: boolean, enum: [true], default: true }, loop: { type: boolean, default: false } } }
+    PlaylistImageContent: { type: object, additionalProperties: false, required: [type, selector, items], properties: { type: { type: string, enum: [image] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, items: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistMediaItem" }, description: Server-resolved matches. Clients must not send this field. }, alt: { type: string, maxLength: 300 }, dwell_ms: { type: integer, minimum: 1000, maximum: 86400000 } } }
+    PlaylistVideoContent: { type: object, additionalProperties: false, required: [type, selector, items, muted, loop], properties: { type: { type: string, enum: [video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, items: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistMediaItem" }, description: Server-resolved matches. Clients must not send this field. }, muted: { type: boolean, enum: [true] }, loop: { type: boolean } } }
     PlaylistIframeContent: { type: object, additionalProperties: false, required: [type, src, title], properties: { type: { type: string, enum: [iframe] }, src: { type: string, format: uri, pattern: "^https://" }, title: { type: string, minLength: 1, maxLength: 200 } } }
     PlaylistTextPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistTextContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] } } }
     PlaylistBoxPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistBoxContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] } } }
@@ -1147,7 +1170,7 @@ components:
         media_id: { type: string }
         filename: { type: string, description: "Server-resolved media filename at the last upsert. Never client-supplied." }
         day: { type: string, format: date, description: UTC calendar day of the aggregate. }
-        play_count: { type: integer, minimum: 1, description: "Starts counted for this screen, media, and UTC day. A start is one page appearance." }
+        play_count: { type: integer, minimum: 1, description: "Starts counted for this screen, media, and UTC day. A start is one visible start of that media." }
         last_page_id: { type: string }
         last_manifest_revision: { type: string }
         first_started_at: { type: string, format: date-time }
@@ -1157,10 +1180,11 @@ components:
     KVEntry: { type: object, additionalProperties: false, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, value_base64: { type: string, contentEncoding: base64 }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer } } }
     KVSummary: { type: object, additionalProperties: false, required: [application_id, key, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string }, updated_at: { type: string } } }
     KVList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/KVSummary" } } } }
-    MediaUploadDeclaration: { type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size: the account's plan storage limit is checked first and is smaller, so a declaration the plan cannot hold is rejected with quota_exceeded before any byte is transferred. Read account_content_bytes from the capabilities document, or content_limit_bytes on the account, to know what is actually available.", properties: { filename: { type: string, minLength: 1, maxLength: 255 }, content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
+    MediaUploadDeclaration: { type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size: the account's plan storage limit is checked first and is smaller, so a declaration the plan cannot hold is rejected with quota_exceeded before any byte is transferred. Read account_content_bytes from the capabilities document, or content_limit_bytes on the account, to know what is actually available. An optional tag is stored on the ready media object and is not redeclared at commit.", properties: { filename: { type: string, minLength: 1, maxLength: 255 }, content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } } }
+    MediaTagPatch: { type: object, additionalProperties: false, required: [tag], properties: { tag: { oneOf: [{ type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, { type: "null" }], description: "Replacement tag or null to clear it." } } }
     MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], description: "Declares only what the server can re-verify against the stored object byte for byte. Codec identity is not declared here: the server derives it from the container during asynchronous verification, so a client cannot assert a codec that drives player behaviour.", properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
     MediaUploadSession: { type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: { id: { type: string }, operation: { $ref: "#/components/schemas/Operation" }, upload_url: { type: string, format: uri }, method: { type: string, enum: [PUT] }, headers: { type: object, additionalProperties: { type: string }, description: Exact signed request headers; clients must send every field verbatim. }, expires_at: { type: string, format: date-time } } }
-    Media: { type: object, additionalProperties: false, required: [id, filename, kind, content_type, operation_id, sha256, bytes, width, height, revision, state, created_at, updated_at], properties: { id: { type: string }, filename: { type: string }, kind: { type: string, enum: [image, video] }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: Verified immutable intrinsic width in pixels. }, height: { type: integer, minimum: 1, description: Verified immutable intrinsic height in pixels. }, duration_ms: { type: integer, minimum: 1, description: "Verified container duration; present for ready video media." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Absent for images, which have no codec." }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    Media: { type: object, additionalProperties: false, required: [id, filename, kind, content_type, operation_id, sha256, bytes, width, height, revision, state, created_at, updated_at], properties: { id: { type: string }, filename: { type: string }, kind: { type: string, enum: [image, video] }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: Verified immutable intrinsic width in pixels. }, height: { type: integer, minimum: 1, description: Verified immutable intrinsic height in pixels. }, duration_ms: { type: integer, minimum: 1, description: "Verified container duration; present for ready video media." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable query tag. Absent when the object is untagged. }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Media" } } } }
     FeedbackWrite:
       type: object
@@ -1280,7 +1304,7 @@ components:
       additionalProperties: false
       required: [mode]
       properties:
-        mode: { type: string, enum: [duration, application, video_end] }
+        mode: { type: string, enum: [duration, application, media_end] }
         afterMs: { type: integer }
         maxMs: { type: integer }
     RuntimePlacement:
@@ -1406,29 +1430,44 @@ components:
     RuntimeImageContent:
       type: object
       additionalProperties: false
-      required: [type, mediaId, src, intrinsicSize, grantId, sha256, bytes, contentType]
+      required: [type, items, oneAtATime, grantId]
       properties:
         type: { type: string, enum: [image] }
+        items: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/RuntimeImageItem" } }
+        oneAtATime: { type: boolean }
+        grantId: { type: string }
+        alt: { type: string }
+        dwellMs: { type: integer, minimum: 1000, maximum: 86400000 }
+    RuntimeImageItem:
+      type: object
+      additionalProperties: false
+      required: [mediaId, src, intrinsicSize, sha256, bytes, contentType]
+      properties:
         mediaId: { type: string }
         src: { type: string }
-        alt: { type: string }
         intrinsicSize: { $ref: "#/components/schemas/RuntimeIntrinsicSize" }
-        grantId: { type: string }
         sha256: { type: string, pattern: "^[a-f0-9]{64}$", description: Immutable content digest for integrity and optional native caching; not an authorization capability. }
         bytes: { type: integer, minimum: 1, maximum: 1073741824 }
         contentType: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif] }
     RuntimeVideoContent:
       type: object
       additionalProperties: false
-      required: [type, mediaId, src, intrinsicSize, muted, loop, grantId, sha256, bytes, contentType]
+      required: [type, items, oneAtATime, muted, loop, grantId]
       properties:
         type: { type: string, enum: [video] }
-        mediaId: { type: string }
-        src: { type: string }
-        intrinsicSize: { $ref: "#/components/schemas/RuntimeIntrinsicSize" }
+        items: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/RuntimeVideoItem" } }
+        oneAtATime: { type: boolean }
         muted: { type: boolean }
         loop: { type: boolean }
         grantId: { type: string }
+    RuntimeVideoItem:
+      type: object
+      additionalProperties: false
+      required: [mediaId, src, intrinsicSize, sha256, bytes, contentType]
+      properties:
+        mediaId: { type: string }
+        src: { type: string }
+        intrinsicSize: { $ref: "#/components/schemas/RuntimeIntrinsicSize" }
         sha256: { type: string, pattern: "^[a-f0-9]{64}$", description: Immutable content digest for integrity and optional native caching; not an authorization capability. }
         bytes: { type: integer, minimum: 1, maximum: 1073741824 }
         contentType: { type: string, enum: [video/mp4, video/webm] }

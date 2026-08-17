@@ -67,10 +67,10 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "application_path_depth",
     "features",
     "playlist_max_items_per_page",
+    "playlist_max_media_per_selector",
     "playlist_max_pages",
     "protocol_version",
     "screens_per_account",
-    "transition_max_duration_ms",
   ]);
   assert.match(capabilities, /"account_content_bytes": 104857600/);
   assert.match(capabilities, /"application_compressed_bytes": 104857600/);
@@ -81,9 +81,9 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   assert.match(capabilities, /"application_path_bytes": 255/);
   assert.match(capabilities, /"application_path_depth": 16/);
   assert.match(capabilities, /"playlist_max_items_per_page": 24/);
+  assert.match(capabilities, /"playlist_max_media_per_selector": 32/);
   assert.match(capabilities, /"playlist_max_pages": 100/);
   assert.match(capabilities, /"screens_per_account": 50/);
-  assert.match(capabilities, /"transition_max_duration_ms": 60000/);
   assert.doesNotMatch(capabilities, /limits/);
   assert.doesNotMatch(capabilities, /application_archive_bytes/);
 
@@ -227,6 +227,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     application_path_depth: 16,
     features: {},
     playlist_max_items_per_page: 24,
+    playlist_max_media_per_selector: 32,
     playlist_max_pages: 100,
     protocol_version: "1",
     screens_per_account: 50,
@@ -236,6 +237,40 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   assert.equal(limits.application_archive_bytes, capabilitiesFromContract.application_compressed_bytes);
   assert.equal(limits.application_archive_bytes, DEFAULT_ARCHIVE_LIMITS.application_archive_bytes);
   assert.deepEqual(limits, DEFAULT_ARCHIVE_LIMITS);
+});
+
+test("playlist writes send a media selector and media_end, not a singular media_id or video_end", () => {
+  const generated = readFileSync(GENERATED_CONTRACT, "utf8");
+  const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
+
+  const imageWrite = interfaceBody(generated, "PlaylistImageContentWrite");
+  assert.deepEqual(quotedProperties(imageWrite), ["alt", "dwell_ms", "selector", "type"]);
+  assert.match(imageWrite, /"type": "image"/);
+  assert.doesNotMatch(imageWrite, /"media_id"/);
+
+  const videoWrite = interfaceBody(generated, "PlaylistVideoContentWrite");
+  assert.deepEqual(quotedProperties(videoWrite), ["loop", "muted", "selector", "type"]);
+  assert.match(videoWrite, /"type": "video"/);
+  assert.doesNotMatch(videoWrite, /"media_id"/);
+
+  const selectorById = interfaceBody(generated, "PlaylistMediaSelectorByID");
+  assert.deepEqual(quotedProperties(selectorById), ["by", "media_id", "one_at_a_time"]);
+  assert.match(selectorById, /"by": "id"/);
+
+  const mediaEndWrite = interfaceBody(generated, "PlaylistMediaEndAdvanceWrite");
+  assert.deepEqual(quotedProperties(mediaEndWrite), ["max_ms", "mode"]);
+  assert.match(mediaEndWrite, /"mode": "media_end"/);
+
+  const runtimeAdvance = interfaceBody(generated, "RuntimeAdvance");
+  assert.match(runtimeAdvance, /"mode": "duration" \| "application" \| "media_end"/);
+
+  assert.doesNotMatch(generated, /PlaylistVideoEndAdvance/);
+  assert.doesNotMatch(generated, /video_end/);
+  assert.match(openapi, /PlaylistImageContentWrite:[\s\S]*?required: \[type, selector\]/);
+  assert.match(openapi, /PlaylistVideoContentWrite:[\s\S]*?required: \[type, selector\]/);
+  assert.match(openapi, /PlaylistMediaEndAdvanceWrite:[\s\S]*?enum: \[media_end\]/);
+  assert.doesNotMatch(openapi, /PlaylistVideoEndAdvance/);
+  assert.doesNotMatch(openapi, /enum: \[video_end\]/);
 });
 
 test("toast contract is a closed POST with idempotency, no queue, and no colour fields", () => {

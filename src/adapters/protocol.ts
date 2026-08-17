@@ -85,6 +85,7 @@ export interface Capabilities {
   application_path_depth: 16;
   features: Record<string, unknown>;
   playlist_max_items_per_page: 24;
+  playlist_max_media_per_selector: 32;
   playlist_max_pages: 100;
   protocol_version: string;
   screens_per_account: 50;

@@ -116,6 +116,7 @@ export function memoryBackend(): FakeTransport {
       application_path_depth: 16,
       features: { feedback: true },
       playlist_max_items_per_page: 24,
+      playlist_max_media_per_selector: 32,
       playlist_max_pages: 100,
       protocol_version: "1",
       screens_per_account: 50,

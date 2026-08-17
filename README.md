@@ -19,6 +19,12 @@ removing local credential, enrollment, and transient authenticated-operation
 state. A failed or ambiguous server result retains local state for an exact
 retry.
 
+Playlist create and update send the supplied JSON file verbatim. Image and
+video placements write a `selector` (`by` is `id`, `ids`, `all`, or `tag`).
+Do not put `media_id` on the content object, and do not send server-resolved
+`items`. Page advance uses `duration`, `application`, or `media_end`. There
+is no `video_end` mode.
+
 The ordinary pair command currently accepts six canonical characters:
 
 ```sh
