@@ -59,13 +59,14 @@ export async function prepareMediaUpload(filePath: string, explicitContentType?:
     throw usageError(`Cannot read media file: ${error instanceof Error ? error.message : "read failed"}`);
   }
   if (bytes.length < 1) throw usageError("Media file must not be empty.");
-  // 1 GiB is the plan-independent transport ceiling, not an achievable size.
-  // The account's plan storage quota is smaller and the server checks it first,
-  // so most oversize uploads are rejected with quota_exceeded well below this.
+  // 1 GiB is a plan-independent transport ceiling. The default plan has no
+  // product storage cap. A custom ceiling, when present, is checked first and
+  // rejected with quota_exceeded. Remaining prepaid credit of zero rejects
+  // declare and commit with payment_required.
   if (bytes.length > 1_073_741_824) {
     throw usageError(
-      "Media file exceeds the 1 GiB per-upload transport ceiling. The account storage quota is " +
-        "smaller than this and is checked first; run screenrig account show to see what remains.",
+      "Media file exceeds the 1 GiB per-upload transport ceiling. Run screenrig account show " +
+        "to inspect used_bytes, any content_limit_bytes ceiling, and credit_remaining_mcr.",
     );
   }
   const sha256 = createHash("sha256").update(bytes).digest("hex");

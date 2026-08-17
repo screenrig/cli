@@ -73,7 +73,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "screens_per_account",
     "transition_max_duration_ms",
   ]);
-  assert.match(capabilities, /"account_content_bytes": 104857600/);
+  assert.match(capabilities, /"account_content_bytes": 0/);
   assert.match(capabilities, /"application_compressed_bytes": 104857600/);
   assert.match(capabilities, /"application_expanded_bytes": 262144000/);
   assert.match(capabilities, /"application_file_bytes": 33554432/);
@@ -84,7 +84,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   assert.match(capabilities, /"playlist_max_items_per_page": 24/);
   assert.match(capabilities, /"playlist_max_media_per_selector": 32/);
   assert.match(capabilities, /"playlist_max_pages": 100/);
-  assert.match(capabilities, /"screens_per_account": 50/);
+  assert.match(capabilities, /"screens_per_account": 100/);
   assert.match(capabilities, /"transition_max_duration_ms": 60000/);
   assert.doesNotMatch(capabilities, /limits/);
   assert.doesNotMatch(capabilities, /application_archive_bytes/);
@@ -144,9 +144,11 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   assert.deepEqual(quotedProperties(interfaceBody(source, "MediaTagPatch")), [
     "tag",
   ]);
-  assert.deepEqual(quotedProperties(interfaceBody(source, "Account")), [
+  const account = interfaceBody(source, "Account");
+  assert.deepEqual(quotedProperties(account), [
     "content_limit_bytes",
     "created_at",
+    "credit_remaining_mcr",
     "id",
     "reserved_bytes",
     "revision",
@@ -156,6 +158,24 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "updated_at",
     "used_bytes",
   ]);
+  assert.match(account, /"status": "active" \| "cancelled" \| "deleted"/);
+  assert.deepEqual(quotedProperties(interfaceBody(source, "AccountAccountings")), ["hours"]);
+  assert.deepEqual(quotedProperties(interfaceBody(source, "CreditAccountingHour")), [
+    "bandwidth_mcr",
+    "bandwidth_mcr_per_gb",
+    "gb_bytes",
+    "hour",
+    "in_bytes",
+    "month_hours",
+    "out_bytes",
+    "storage_mcr",
+    "storage_mcr_per_gb_month",
+    "used_bytes",
+  ]);
+  const chrome = interfaceBody(source, "RuntimeChrome");
+  assert.deepEqual(quotedProperties(chrome), ["banner", "schema_version"]);
+  assert.match(chrome, /"banner": null/);
+  assert.match(chrome, /"schema_version": 1/);
   assert.deepEqual(quotedProperties(interfaceBody(source, "CLIEnrollment")), [
     "account",
     "issuance_expires_at",
@@ -224,7 +244,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   assert.doesNotMatch(submission, /revision/);
   assert.deepEqual(quotedProperties(interfaceBody(source, "FeedbackList")), ["items"]);
   const capabilitiesFromContract: Capabilities = {
-    account_content_bytes: 104857600,
+    account_content_bytes: 0,
     api_version: "0.2.0",
     application_compressed_bytes: 104857600,
     application_expanded_bytes: 262144000,
@@ -237,13 +257,60 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     playlist_max_media_per_selector: 32,
     playlist_max_pages: 100,
     protocol_version: "1",
-    screens_per_account: 50,
+    screens_per_account: 100,
     transition_max_duration_ms: 60000,
   };
   const limits = limitsFromCapabilities(capabilitiesFromContract);
   assert.equal(limits.application_archive_bytes, capabilitiesFromContract.application_compressed_bytes);
   assert.equal(limits.application_archive_bytes, DEFAULT_ARCHIVE_LIMITS.application_archive_bytes);
   assert.deepEqual(limits, DEFAULT_ARCHIVE_LIMITS);
+});
+
+test("local enrollment request adapter accepts optional beta_key ahead of vendor refresh", () => {
+  const source = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../src/adapters/protocol.ts"),
+    "utf8",
+  );
+  assert.match(source, /export interface CLIEnrollmentRequest \{[\s\S]*?beta_key\?: string;/);
+});
+
+test("published problem codes include payment_required at 402", () => {
+  const source = readFileSync(OPENAPI_CONTRACT, "utf8");
+  const listed = source.match(/x-problem-codes: \[([^\]]+)\]/);
+  assert.ok(listed?.[1], "missing x-problem-codes");
+  assert.deepEqual(listed[1].split(", ").map((code) => code.trim()), [
+    "internal_error",
+    "invalid_request",
+    "unauthorized",
+    "forbidden",
+    "not_found",
+    "method_not_allowed",
+    "idempotency_mismatch",
+    "credential_issuance_expired",
+    "provisioning_invalid",
+    "provisioning_expired",
+    "provisioning_consumed",
+    "provisioning_exchange_mismatch",
+    "browser_already_paired",
+    "handoff_code_invalid",
+    "handoff_code_expired",
+    "handoff_session_rate_limited",
+    "handoff_session_conflict",
+    "browser_link_not_claimed",
+    "browser_link_account_mismatch",
+    "origin_not_allowed",
+    "resource_conflict",
+    "revision_conflict",
+    "invalid_range",
+    "quota_exceeded",
+    "payment_required",
+    "rate_limited",
+    "dependency_unavailable",
+    "schema_incompatible",
+    "not_ready",
+  ]);
+  assert.match(source, /payment_required/);
+  assert.doesNotMatch(source, /stripe|x402/i);
 });
 
 test("playlist writes send a media selector and media_end, not a singular media_id or video_end", () => {

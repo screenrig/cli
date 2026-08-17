@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   limitsFromCapabilities,
   TEMPORARY_PROTOCOL_VERSION,
+  type Account,
   type AccountEvent,
   type Capabilities,
   type CLIEnrollment,
@@ -86,6 +87,7 @@ export const USAGE = `screenrig — ScreenRig localhost v1 control-plane CLI
 Usage:
   screenrig [--json] [--api-url URL] [--config PATH]
             [--request-id ID] [--idempotency-key KEY] [--timeout MS]
+            [--beta-key KEY]
             <command> [args]
 
 Commands:
@@ -142,6 +144,10 @@ export interface CommandResult {
   envelope: ReturnType<typeof successEnvelope<unknown>>;
   exitCode: ExitCode;
   human: string;
+}
+
+function nonemptyEnv(value: string | undefined): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function transportFor(runtime: CliRuntime, apiUrl: string, token?: string): Transport {
@@ -488,7 +494,11 @@ async function enrollForCommand(
     },
     enroll: async (state) => {
       const client = clientFor(runtime, args, resolved.apiUrl);
-      const request: CLIEnrollmentRequest = { client_id: state.clientId };
+      const betaKey = flagString(args.flags, "beta-key") ?? nonemptyEnv(runtime.env.SCREENRIG_BETA_KEY);
+      const request: CLIEnrollmentRequest = {
+        client_id: state.clientId,
+        ...(betaKey !== undefined ? { beta_key: betaKey } : {}),
+      };
       const response = await client.call({
         method: "POST",
         path: "/api/v1/enrollments",
@@ -522,13 +532,14 @@ async function accountShow(args: ParsedArgs, runtime: CliRuntime, resolved: Awai
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const response = await client.call({ method: "GET", path: "/api/v1/account" });
   const envelope = jsonBody(response, client.requestId, { token_lookup: describeToken(token) });
-  const account = response.body as { id?: string; revision?: number };
+  const account = response.body as Account;
   return {
     envelope,
     exitCode: ExitCode.Success,
     human: humanLines("Account", [
       ["id", account.id],
       ["revision", account.revision !== undefined ? String(account.revision) : undefined],
+      ["credit_remaining_mcr", account.credit_remaining_mcr !== undefined ? String(account.credit_remaining_mcr) : undefined],
       ["token", describeToken(token)],
       ["request_id", client.requestId],
     ]),

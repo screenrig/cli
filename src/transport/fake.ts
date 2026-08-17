@@ -81,13 +81,14 @@ export function memoryBackend(): FakeTransport {
   const operations = new Map<string, Operation>();
   const events: AccountEvent[] = [];
   let account: Account = {
-    content_limit_bytes: 104857600,
+    content_limit_bytes: 0,
     created_at: "2026-08-14T17:00:00.000Z",
+    credit_remaining_mcr: 0,
     id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
     reserved_bytes: 0,
     revision: 1,
     screen_count: 0,
-    screen_limit: 50,
+    screen_limit: 100,
     status: "active",
     updated_at: "2026-08-14T17:00:00.000Z",
     used_bytes: 0,
@@ -106,7 +107,7 @@ export function memoryBackend(): FakeTransport {
     status: 200,
     headers: { "x-request-id": "req_AAAAAAAAAAAAAAAAAAAAAAAA" },
     body: {
-      account_content_bytes: 104857600,
+      account_content_bytes: 0,
       api_version: "0.2.0",
       application_compressed_bytes: 104857600,
       application_expanded_bytes: 262144000,
@@ -119,7 +120,7 @@ export function memoryBackend(): FakeTransport {
       playlist_max_media_per_selector: 32,
       playlist_max_pages: 100,
       protocol_version: "1",
-      screens_per_account: 50,
+      screens_per_account: 100,
       transition_max_duration_ms: 60000,
     } satisfies Capabilities,
   }));

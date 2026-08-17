@@ -13,12 +13,13 @@ export type OperationState = "queued" | "running" | "succeeded" | "failed" | "ca
 export interface Account {
   content_limit_bytes: number;
   created_at: string;
+  credit_remaining_mcr: number;
   id: string;
   reserved_bytes: number;
   revision: number;
   screen_count: number;
   screen_limit: number;
-  status: "active";
+  status: "active" | "cancelled" | "deleted";
   updated_at: string;
   used_bytes: number;
 }
@@ -32,6 +33,8 @@ export interface CLIEnrollment {
 
 export interface CLIEnrollmentRequest {
   client_id: string;
+  /** Present only when the operator supplies --beta-key or SCREENRIG_BETA_KEY. */
+  beta_key?: string;
 }
 
 export interface Operation {
@@ -74,8 +77,8 @@ export interface EventPage {
 }
 
 export interface Capabilities {
-  /** Plan storage quota. Smaller than the per-upload transport ceiling, and checked first. */
-  account_content_bytes: 104857600;
+  /** Default-plan storage cap. Zero means no product storage cap. */
+  account_content_bytes: 0;
   api_version: string;
   application_compressed_bytes: 104857600;
   application_expanded_bytes: 262144000;
@@ -88,7 +91,7 @@ export interface Capabilities {
   playlist_max_media_per_selector: 32;
   playlist_max_pages: 100;
   protocol_version: string;
-  screens_per_account: 50;
+  screens_per_account: 100;
   transition_max_duration_ms: 60000;
 }
 

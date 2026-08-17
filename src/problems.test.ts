@@ -5,6 +5,7 @@ import { normalizeProblem, renderProblem } from "./problems.js";
 
 test("maps HTTP statuses onto explicit exit codes", () => {
   assert.equal(exitCodeForStatus(401), ExitCode.Auth);
+  assert.equal(exitCodeForStatus(402), ExitCode.Client);
   assert.equal(exitCodeForStatus(404), ExitCode.NotFound);
   assert.equal(exitCodeForStatus(409), ExitCode.Conflict);
   assert.equal(exitCodeForStatus(412), ExitCode.Precondition);

@@ -141,6 +141,8 @@ installation, players, backend services, the site, or production deployment.
   dependency the launcher does not provide.
 - The first authenticated command persists replay state, enrolls automatically,
   verifies the issued credential, and resumes the original command.
+  `--beta-key` and `SCREENRIG_BETA_KEY` are sent as `beta_key` on
+  `POST /api/v1/enrollments` when present, and omitted when unset.
 - `auth revoke --yes` is server-first and retains local state after failed or
   ambiguous server results.
 - `screen pair` currently accepts exactly six canonical undashed characters.
@@ -160,10 +162,14 @@ installation, players, backend services, the site, or production deployment.
 - `Media.codecs` is server-derived from the stored bytes and never
   client-declared. The CLI must not send, infer, or validate it. `--codec hevc`
   simply causes the server to derive `hvc1.*` instead.
-- The account plan quota (`account_content_bytes`, `content_limit_bytes`) is
-  smaller than the 1 GiB per-upload transport ceiling and the server checks it
-  first. Keep the 1 GiB local check as a plan-independent bound, and keep the
-  `quota_exceeded` guidance pointing at `account show`.
+- The default plan has no product storage cap (`account_content_bytes` and
+  `content_limit_bytes` are 0). A custom storage ceiling, when present, is
+  checked first and rejected with `quota_exceeded`. Remaining prepaid credit of
+  zero rejects declare and commit with `payment_required`. Keep the 1 GiB local
+  check as a plan-independent transport bound. Keep `quota_exceeded` and
+  `payment_required` guidance pointing at `account show`. `account show` may
+  print remaining mcr; optional kCr display is later. Do not add pay, Stripe,
+  or x402 commands.
 - Screenshotting is outside v1; do not add or document screenshot commands.
 
 ## Verification

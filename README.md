@@ -14,6 +14,14 @@ the request, stores the issued credential in user-private configuration outside
 the replaceable plugin directory, verifies it, and resumes the original
 command.
 
+If the server asks for a beta key, pass `--beta-key` with the key the operator
+gave you, or set `SCREENRIG_BETA_KEY`. The CLI sends that value as `beta_key`
+on `POST /api/v1/enrollments` and omits the field when it is unset.
+
+```sh
+screenrig --json --beta-key screenrig-beta-program account show
+```
+
 `auth revoke --yes` revokes the calling credential on the server before
 removing local credential, enrollment, and transient authenticated-operation
 state. A failed or ambiguous server result retains local state for an exact

@@ -7,6 +7,7 @@ import {
   parseRetryAfter,
   timeoutError,
   usageError,
+  withPaymentGuidance,
   withQuotaGuidance,
   withRetryAfter,
 } from "./problems.js";
@@ -73,8 +74,10 @@ export class ApiClient {
         bodyText: typeof response.rawText === "string" ? response.rawText : undefined,
       });
       throw new CliError(
-        withQuotaGuidance(
-          withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
+        withPaymentGuidance(
+          withQuotaGuidance(
+            withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
+          ),
         ),
       );
     }

@@ -84,7 +84,9 @@ test("first authenticated use enrolls, persists, verifies, resumes, and pairs th
   ]);
   assert.ok(transport.calls[0]?.headers?.["idempotency-key"]);
   assert.ok(transport.calls[0]?.headers?.["x-request-id"]);
-  assert.match((transport.calls[0]?.body as { client_id: string }).client_id, /^cli_[A-Za-z0-9_-]{43}$/);
+  const enrollBody = transport.calls[0]?.body as { client_id?: string; beta_key?: string };
+  assert.match(enrollBody.client_id ?? "", /^cli_[A-Za-z0-9_-]{43}$/);
+  assert.deepEqual(Object.keys(enrollBody).sort(), ["client_id"]);
   const verification = transport.calls.find((call) => call.path === "/api/v1/account");
   assert.match(verification?.headers?.authorization ?? "", /^Bearer sr_live_/);
   const pairing = transport.calls.find((call) => call.path === "/api/v1/screens/pair");
@@ -110,6 +112,68 @@ test("first authenticated use enrolls, persists, verifies, resumes, and pairs th
   assert.ok(config?.token);
   assert.equal(config?.enrollment, undefined);
   assert.ok(!JSON.stringify(config).includes("pairing"));
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("first-use enroll includes beta_key when --beta-key is set", async () => {
+  const transport = memoryBackend();
+  const { code, stdout, configDir } = await withRuntime(
+    ["--json", "--beta-key", "screenrig-beta-program", "account", "show"],
+    transport,
+  );
+  assert.equal(code, 0, stdout);
+  const enroll = transport.calls.find((call) => call.path === "/api/v1/enrollments");
+  const body = enroll?.body as { client_id?: string; beta_key?: string };
+  assert.match(body.client_id ?? "", /^cli_[A-Za-z0-9_-]{43}$/);
+  assert.equal(body.beta_key, "screenrig-beta-program");
+  assert.deepEqual(Object.keys(body).sort(), ["beta_key", "client_id"]);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("first-use enroll includes beta_key from SCREENRIG_BETA_KEY when the flag is unset", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("enroll-beta-env-");
+  const fsLike = {
+    mkdir,
+    open,
+    rename,
+    rm,
+    chmod,
+    stat,
+    homedir: () => configDir,
+    env: { XDG_CONFIG_HOME: configDir, SCREENRIG_BETA_KEY: "screenrig-beta-program" },
+  };
+  const result = await withRuntime(["--json", "account", "show"], transport, { fs: fsLike });
+  assert.equal(result.code, 0, result.stdout);
+  const enroll = transport.calls.find((call) => call.path === "/api/v1/enrollments");
+  assert.deepEqual(enroll?.body, {
+    client_id: (enroll?.body as { client_id: string }).client_id,
+    beta_key: "screenrig-beta-program",
+  });
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("first-use enroll prefers --beta-key over SCREENRIG_BETA_KEY", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("enroll-beta-flag-wins-");
+  const fsLike = {
+    mkdir,
+    open,
+    rename,
+    rm,
+    chmod,
+    stat,
+    homedir: () => configDir,
+    env: { XDG_CONFIG_HOME: configDir, SCREENRIG_BETA_KEY: "from-env" },
+  };
+  const result = await withRuntime(
+    ["--json", "--beta-key", "from-flag", "account", "show"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(result.code, 0, result.stdout);
+  const enroll = transport.calls.find((call) => call.path === "/api/v1/enrollments");
+  assert.equal((enroll?.body as { beta_key?: string }).beta_key, "from-flag");
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -994,9 +1058,34 @@ test("a rate-limited submission surfaces Retry-After instead of a bare 429", asy
   }
 });
 
+test("account show reports remaining prepaid credit in mcr", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("account-show-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  try {
+    const json = await withRuntime(["--json", "account", "show"], transport, { fs: fsLike });
+    assert.equal(json.code, 0, json.stdout);
+    const envelope = JSON.parse(json.stdout) as { ok: boolean; data: { credit_remaining_mcr: number } };
+    assert.equal(envelope.ok, true);
+    assert.equal(envelope.data.credit_remaining_mcr, 0);
+    assert.doesNotMatch(json.stdout, /kCr|stripe|x402|\$/i);
+
+    const human = await withRuntime(["account", "show"], transport, { fs: fsLike });
+    assert.equal(human.code, 0, human.stdout);
+    assert.match(human.stdout, /credit_remaining_mcr: 0/);
+    assert.doesNotMatch(human.stdout, /kCr|stripe|x402|\$/i);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
 test("an account quota rejection explains itself and points at the remaining allowance", async () => {
-  // The plan quota is smaller than the 1 GiB transport ceiling and is checked
-  // first, so this is the limit a user actually meets.
+  // A custom storage ceiling is checked before the 1 GiB transport bound.
   const transport = new FakeTransport();
   transport.on("POST", "/api/v1/media/uploads", () => ({
     status: 413,
@@ -1032,6 +1121,48 @@ test("an account quota rejection explains itself and points at the remaining all
     assert.equal(envelope.error.status, 413);
     assert.match(String(envelope.error.next?.command), /account show/);
     assert.match(String(envelope.error.next?.reason), /content_limit_bytes/);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("a payment_required rejection points at remaining prepaid credit", async () => {
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/v1/media/uploads", () => ({
+    status: 402,
+    headers: { "content-type": "application/problem+json" },
+    body: {
+      type: "https://screenrig.ai/problems/payment-required",
+      title: "Prepaid credit is required",
+      status: 402,
+      detail: "Prepaid credit remaining is zero.",
+      code: "payment_required",
+    },
+  }));
+  const configDir = await testTemp("media-payment-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const file = path.join(configDir, "pixel.png");
+  await writeFile(file, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3]));
+  try {
+    const result = await withRuntime(
+      ["--json", "media", "upload", file, "--no-transcode"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(result.code, 8, `402 maps to the Client exit code: ${result.stdout}`);
+    const envelope = JSON.parse(result.stdout) as {
+      error: { code: string; status: number; next?: { command: string; reason: string } };
+    };
+    assert.equal(envelope.error.code, "payment_required");
+    assert.equal(envelope.error.status, 402);
+    assert.match(String(envelope.error.next?.command), /account show/);
+    assert.match(String(envelope.error.next?.reason), /credit_remaining_mcr/);
+    assert.doesNotMatch(result.stdout, /stripe|x402|pay |kCr|\$/i);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
