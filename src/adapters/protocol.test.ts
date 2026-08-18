@@ -323,6 +323,7 @@ test("published problem codes include payment_required at 402", () => {
     "dependency_unavailable",
     "schema_incompatible",
     "not_ready",
+    "screenshot_unavailable",
   ]);
   assert.match(source, /payment_required/);
   assert.doesNotMatch(source, /stripe|x402/i);
@@ -413,7 +414,7 @@ test("page visibility is a scheduling sibling of advance and needs a screen time
 test("toast contract is a closed POST with idempotency, no queue, and no colour fields", () => {
   const source = readFileSync(OPENAPI_CONTRACT, "utf8");
   const start = source.indexOf("/api/v1/screens/{id}/toast:");
-  const end = source.indexOf("/api/v1/events:");
+  const end = source.indexOf("/api/v1/screens/{id}/screenshot:");
   assert.notEqual(start, -1, "missing toast route");
   const route = source.slice(start, end);
   assert.match(route, /post:/);
@@ -432,6 +433,41 @@ test("toast contract is a closed POST with idempotency, no queue, and no colour 
   assert.match(source, /level: \{ type: string, enum: \[error, alert, info\]/);
   assert.match(source, /duration_ms: \{ type: integer, minimum: 2000, maximum: 60000, default: 10000/);
   assert.doesNotMatch(source.slice(source.indexOf("ScreenToastWrite:"), source.indexOf("ScreenToastAccepted:")), /color/);
+});
+
+test("screenshot contract is latest-wins POST, status GET, and binary WebP GET", () => {
+  const source = readFileSync(OPENAPI_CONTRACT, "utf8");
+  const start = source.indexOf("/api/v1/screens/{id}/screenshot:");
+  const end = source.indexOf("/api/v1/events:");
+  assert.notEqual(start, -1, "missing screenshot route");
+  const route = source.slice(start, end);
+  assert.match(route, /operationId: requestScreenScreenshot/);
+  assert.match(route, /operationId: getScreenScreenshot/);
+  assert.match(route, /operationId: getScreenScreenshotStatus/);
+  assert.match(route, /IdempotencyKey/);
+  assert.match(route, /Latest-wins/);
+  assert.match(route, /image\/webp/);
+  assert.match(route, /screenshot_unavailable/);
+  assert.match(route, /resource_conflict/);
+  assert.match(source, /ScreenshotCaptureID: \{ type: string, pattern: "\^shot_\[A-Za-z0-9_-\]\{16,64\}\$"/);
+  assert.match(source, /x-problem-codes: \[[^\]]+screenshot_unavailable\]/);
+  const generated = readFileSync(GENERATED_CONTRACT, "utf8");
+  assert.deepEqual(quotedProperties(interfaceBody(generated, "ScreenScreenshotAccepted")), [
+    "capture_id",
+    "expires_at",
+  ]);
+  assert.deepEqual(quotedProperties(interfaceBody(generated, "ScreenScreenshotStatus")), [
+    "bytes",
+    "capture_id",
+    "captured_at",
+    "expires_at",
+    "height",
+    "sha256",
+    "state",
+    "width",
+  ]);
+  assert.match(interfaceBody(generated, "ScreenScreenshotStatus"), /"idle" \| "pending" \| "ready" \| "timed_out"/);
+  assert.doesNotMatch(interfaceBody(generated, "ScreenScreenshotStatus"), /pixels|base64|object_key/);
 });
 
 test("feedback contract is account-scoped, immutable, idempotent, and closed to argument values", () => {

@@ -27,7 +27,9 @@ removing local credential, enrollment, and transient authenticated-operation
 state. A failed or ambiguous server result retains local state for an exact
 retry.
 
-Playlist create and update send the supplied JSON file verbatim. Image and
+Playlist create and update expand any templated page (`template` + `slots`)
+into an ordinary page and send that. A page without `template` is forwarded
+unchanged. `playlist templates` prints the closed catalog. Image and
 video placements write a `selector` (`by` is `id`, `ids`, `all`, or `tag`).
 Do not put `media_id` on the content object, and do not send server-resolved
 `items`. Page advance uses `duration`, `application`, or `media_end`. There
@@ -55,8 +57,9 @@ Application packing accepts an already-built static directory. It produces
 deterministic bounded archives, injects the pinned browser SDK runtime, and
 never builds or executes uploaded source. Runtime pages use
 `screenrig.canvas/v1`; protected content and `screenrig.webapp-package/v1`
-delivery are backend/player concerns. Screenshotting is not part of v1 and the
-CLI exposes no screenshot command.
+delivery are backend/player concerns. `screen screenshot <id>` requests one
+still WebP of an active screen, waits until it is ready, and writes a file.
+It does not print image bytes.
 
 ## Feedback
 
@@ -149,6 +152,27 @@ The accepted envelope is `{ expires_at }` only. The CLI does not scrub toast
 text; the server rejects recognizable ScreenRig credential material and other
 control characters. Do not put credentials, cookies, Authorization headers,
 completion nonces, signed URLs, or object keys in the text.
+
+## Screen screenshot
+
+`screen screenshot <id>` requests one still WebP of an active screen. It
+blocks until the image is on disk. There is no `--no-wait`. Latest-wins: a
+later request replaces the in-flight `capture_id`.
+
+```sh
+screenrig --json screen screenshot scr_01
+screenrig --json screen screenshot scr_01 --output ./lobby.webp
+```
+
+`<id>` must match `scr_` plus URL-safe characters. `--output` is a file path,
+not a directory. The default is `./<id>.webp` in the current working
+directory. An existing file is overwritten without a prompt. `--timeout`
+defaults to 35000 ms and `--poll-ms` defaults to 500 ms.
+
+The success envelope is `screen_id`, `capture_id`, `path`, `bytes`, `sha256`,
+`width`, and `height` only. A matching `timed_out` status or a wait deadline
+is `screenshot_unavailable`. A later `capture_id` is `resource_conflict`. The
+CLI never prints image bytes, hex, or base64.
 
 ## Media transcoding
 

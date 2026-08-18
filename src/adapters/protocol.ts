@@ -132,16 +132,17 @@ export function limitsFromCapabilities(capabilities: Capabilities): ArchiveLimit
 }
 
 /**
- * Playlist pages stay opaque on purpose. The CLI forwards author-supplied
- * playlist JSON verbatim and never constructs a page, so the contract's page,
- * placement, and content schemas — including the `text`, `box`, and `line`
- * vector placements — are deliberately not mirrored here. Mirror a schema only
- * when the CLI builds or reads its fields.
+ * Full playlist pages stay opaque: the CLI forwards author-supplied playlist
+ * JSON unchanged. Templated pages are the exception — the CLI expands
+ * `template` + `slots` into an ordinary write page in `playlist-templates.ts`
+ * and never sends `template` to the server. The contract's page, placement,
+ * and content schemas are still not mirrored here except for the fields that
+ * expander writes. Mirror a schema only when the CLI builds or reads its
+ * fields.
  *
- * Page `visibility` is the one exception the CLI inspects, and it inspects only
- * whether the key is present. That is exactly what decides whether a playlist
- * needs the target screen to carry a timezone, so no member of the schedule
- * object is mirrored either.
+ * Page `visibility` is inspected only for key presence. That is exactly what
+ * decides whether a playlist needs the target screen to carry a timezone, so
+ * no member of the schedule object is mirrored either.
  */
 
 export interface Screen {
@@ -204,6 +205,29 @@ export interface ScreenToastWrite {
 /** Accepted toast write. The toast itself lives on the durable screen.toast event. */
 export interface ScreenToastAccepted {
   expires_at: string;
+}
+
+/** shot_ plus 16 to 64 unpadded base64url characters. */
+export type ScreenshotCaptureID = string;
+
+/** Accepted POST /api/v1/screens/{id}/screenshot. */
+export interface ScreenScreenshotAccepted {
+  capture_id: ScreenshotCaptureID;
+  expires_at: string;
+}
+
+export type ScreenScreenshotState = "idle" | "pending" | "ready" | "timed_out";
+
+/** GET /api/v1/screens/{id}/screenshot/status. Image bytes are never present. */
+export interface ScreenScreenshotStatus {
+  bytes?: number;
+  capture_id?: ScreenshotCaptureID;
+  captured_at?: string;
+  expires_at?: string;
+  height?: number;
+  sha256?: string;
+  state: ScreenScreenshotState;
+  width?: number;
 }
 
 export interface PairingClaim {

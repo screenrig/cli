@@ -3,6 +3,7 @@ import { PassThrough } from "node:stream";
 import { mkdir, open, readFile, rename, chmod, stat, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
+import { formatEventLine } from "./commands.js";
 import { run, type CliRuntime } from "./main.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import { ExitCode } from "./exit-codes.js";
@@ -693,9 +694,125 @@ test("events list sends after and limit when the user supplies them", async () =
 
   const unscoped = await withRuntime(["--json", "events", "list"], transport, { fs: fsLike });
   assert.equal(unscoped.code, 0, unscoped.stdout);
+  const emptyPage = JSON.parse(unscoped.stdout) as { ok: true; data: { items: unknown[] } };
+  assert.deepEqual(emptyPage.data.items, []);
   const defaultCall = transport.calls.filter((call) => call.path === "/api/v1/events").at(-1);
   assert.equal(defaultCall?.query?.after, undefined);
   assert.equal(defaultCall?.query?.limit, undefined);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("formatEventLine prints at, type, and scalar details, never canned messages", () => {
+  assert.equal(
+    formatEventLine({
+      cursor: "ev1_1",
+      sequence: 1,
+      type: "application.event",
+      severity: "info",
+      message: "Application emitted an event",
+      details: { extra: { nested: true }, count: 2, placement_id: "weather", code: "cta.pressed" },
+      at: "2026-08-14T17:00:00.000Z",
+    }),
+    "2026-08-14T17:00:00.000Z application.event code=cta.pressed placement_id=weather count=2",
+  );
+  assert.equal(
+    formatEventLine({
+      cursor: "ev1_2",
+      sequence: 2,
+      type: "runtime.reported",
+      severity: "warning",
+      message: "Runtime reported a bounded condition",
+      details: { code: "decoder.stalled" },
+      at: "2026-08-14T17:00:01.000Z",
+    }),
+    "2026-08-14T17:00:01.000Z runtime.reported code=decoder.stalled",
+  );
+  assert.equal(
+    formatEventLine({
+      cursor: "ev1_3",
+      sequence: 3,
+      type: "account.created",
+      severity: "info",
+      message: "created",
+      at: "2026-08-14T17:00:02.000Z",
+    }),
+    "2026-08-14T17:00:02.000Z account.created",
+  );
+  assert.equal(
+    formatEventLine({
+      cursor: "ev1_4",
+      sequence: 4,
+      type: "",
+      severity: "info",
+      message: "Application emitted an event",
+      at: "",
+    }),
+    undefined,
+  );
+});
+
+test("events list prints data or silence", async () => {
+  const transport = new FakeTransport();
+  transport.on("GET", "/api/v1/events", () => ({
+    status: 200,
+    headers: { "x-request-id": "req_events" },
+    body: {
+      items: [
+        {
+          cursor: "ev1_1",
+          sequence: 1,
+          type: "application.event",
+          severity: "info",
+          message: "Application emitted an event",
+          details: { code: "cta.pressed", placement_id: "weather" },
+          at: "2026-08-14T17:00:00.000Z",
+        },
+        {
+          cursor: "ev1_2",
+          sequence: 2,
+          type: "runtime.reported",
+          severity: "warning",
+          message: "Runtime reported a bounded condition",
+          details: { code: "decoder.stalled" },
+          at: "2026-08-14T17:00:01.000Z",
+        },
+        {
+          cursor: "ev1_3",
+          sequence: 3,
+          type: "",
+          severity: "info",
+          message: "Application emitted an event",
+          at: "",
+        },
+      ],
+      next_cursor: "ev1_3",
+    },
+  }));
+  const configDir = await testTemp("ev-list-human-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const printed = await withRuntime(["events", "list"], transport, { fs: fsLike });
+  assert.equal(printed.code, 0, printed.stdout);
+  assert.equal(
+    printed.stdout,
+    "2026-08-14T17:00:00.000Z application.event code=cta.pressed placement_id=weather\n2026-08-14T17:00:01.000Z runtime.reported code=decoder.stalled\n",
+  );
+  assert.ok(!printed.stdout.includes("Application emitted an event"));
+  assert.ok(!printed.stdout.includes("Runtime reported a bounded condition"));
+
+  const emptyTransport = new FakeTransport();
+  emptyTransport.on("GET", "/api/v1/events", () => ({
+    status: 200,
+    headers: { "x-request-id": "req_events_empty" },
+    body: { items: [], next_cursor: "" },
+  }));
+  const silent = await withRuntime(["events", "list"], emptyTransport, { fs: fsLike });
+  assert.equal(silent.code, 0, silent.stdout);
+  assert.equal(silent.stdout, "");
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -704,20 +821,134 @@ test("events follow parses SSE frames from the transport stream", async () => {
   transport.pushStream(
     "id: ev1_1\nevent: message\ndata: {\"cursor\":\"ev1_1\",\"type\":\"account.created\",\"severity\":\"info\",\"message\":\"created\",\"at\":\"2026-08-14T17:00:00.000Z\"}\n\n",
   );
+  transport.pushStream(
+    "id: ev1_2\nevent: message\ndata: {\"cursor\":\"ev1_2\",\"type\":\"screen.paired\",\"severity\":\"info\",\"message\":\"paired\",\"at\":\"2026-08-14T17:00:01.000Z\"}\n\n",
+  );
   const configDir = await testTemp("ev-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
-    { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } },
+    fsLike,
   );
   const { code, stdout } = await withRuntime(["--json", "events", "follow", "--cursor", "ev1_0"], transport, {
-    fs: { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } },
+    fs: fsLike,
   });
   assert.equal(code, 0);
-  const envelope = JSON.parse(stdout) as { ok: true; data: { items: Array<{ type: string }> } };
-  assert.equal(envelope.data.items[0]?.type, "account.created");
+  const lines = stdout.split("\n").filter((line) => line.length > 0);
+  assert.equal(lines.length, 2, stdout);
+  const first = JSON.parse(lines[0] ?? "") as { ok: true; data: { type: string } };
+  const second = JSON.parse(lines[1] ?? "") as { ok: true; data: { type: string } };
+  assert.equal(first.data.type, "account.created");
+  assert.equal(second.data.type, "screen.paired");
   assert.equal(transport.calls.at(-1)?.query?.after, "ev1_0");
   assert.equal(transport.calls.at(-1)?.query?.cursor, undefined);
+
+  const human = await withRuntime(["events", "follow"], transport, { fs: fsLike });
+  assert.equal(human.code, 0, human.stdout);
+  assert.equal(
+    human.stdout,
+    "2026-08-14T17:00:00.000Z account.created\n2026-08-14T17:00:01.000Z screen.paired\n",
+  );
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("events follow writes a human line before the stream closes", async () => {
+  const transport = memoryBackend();
+  transport.pushStream(
+    "id: ev1_1\nevent: message\ndata: {\"cursor\":\"ev1_1\",\"type\":\"account.created\",\"severity\":\"info\",\"message\":\"created\",\"at\":\"2026-08-14T17:00:00.000Z\"}\n\n",
+  );
+  const writes: string[] = [];
+  let wroteBeforeClose = false;
+  transport.afterStreamChunks = async (req) => {
+    wroteBeforeClose = writes.some((chunk) => chunk.includes("account.created"));
+    await new Promise<void>((resolve) => {
+      if (req.signal?.aborted) {
+        resolve();
+        return;
+      }
+      req.signal?.addEventListener("abort", () => resolve(), { once: true });
+    });
+  };
+  const configDir = await testTemp("ev-live-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const stdout = new PassThrough();
+  const origWrite = stdout.write.bind(stdout);
+  stdout.write = ((chunk: unknown, encoding?: BufferEncoding | ((error?: Error | null) => void), cb?: (error?: Error | null) => void) => {
+    writes.push(String(chunk));
+    return origWrite(chunk as string | Buffer, encoding as BufferEncoding, cb);
+  }) as typeof stdout.write;
+  const code = await run({
+    argv: ["events", "follow", "--timeout", "50"],
+    env: fsLike.env,
+    stdout,
+    stderr: new PassThrough(),
+    now: () => new Date("2026-08-14T17:00:00.000Z"),
+    sleep: async () => undefined,
+    homedir: fsLike.homedir,
+    cwd: () => process.cwd(),
+    fs: fsLike,
+    transport,
+  });
+  assert.equal(code, 0);
+  assert.equal(wroteBeforeClose, true, `stdout before abort: ${JSON.stringify(writes)}`);
+  assert.equal(writes.join(""), "2026-08-14T17:00:00.000Z account.created\n");
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("events follow is silent when no events arrive", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("ev-empty-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const human = await withRuntime(["events", "follow"], transport, { fs: fsLike });
+  assert.equal(human.code, 0, human.stdout);
+  assert.equal(human.stdout, "");
+  const json = await withRuntime(["--json", "events", "follow"], transport, { fs: fsLike });
+  assert.equal(json.code, 0, json.stdout);
+  const lines = json.stdout.split("\n").filter((line) => line.length > 0);
+  assert.equal(lines.length, 1, json.stdout);
+  const envelope = JSON.parse(lines[0] ?? "") as { ok: true; data: { items: unknown[] } };
+  assert.deepEqual(envelope.data.items, []);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("events follow prints scalar details and skips empty frames", async () => {
+  const transport = memoryBackend();
+  transport.pushStream(
+    "id: ev1_1\nevent: message\ndata: {\"cursor\":\"ev1_1\",\"type\":\"application.event\",\"severity\":\"info\",\"message\":\"Application emitted an event\",\"details\":{\"code\":\"cta.pressed\",\"placement_id\":\"weather\"},\"at\":\"2026-08-14T17:00:00.000Z\"}\n\n",
+  );
+  transport.pushStream(
+    "id: ev1_2\nevent: message\ndata: {\"cursor\":\"ev1_2\",\"type\":\"runtime.reported\",\"severity\":\"warning\",\"message\":\"Runtime reported a bounded condition\",\"details\":{\"code\":\"decoder.stalled\"},\"at\":\"2026-08-14T17:00:01.000Z\"}\n\n",
+  );
+  transport.pushStream("id: ev1_3\nevent: message\ndata: not-json\n\n");
+  transport.pushStream(
+    "id: ev1_4\nevent: message\ndata: {\"cursor\":\"ev1_4\",\"type\":\"\",\"severity\":\"info\",\"message\":\"Application emitted an event\",\"at\":\"\"}\n\n",
+  );
+  const configDir = await testTemp("ev-details-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const { code, stdout } = await withRuntime(["events", "follow"], transport, { fs: fsLike });
+  assert.equal(code, 0, stdout);
+  assert.equal(
+    stdout,
+    "2026-08-14T17:00:00.000Z application.event code=cta.pressed placement_id=weather\n2026-08-14T17:00:01.000Z runtime.reported code=decoder.stalled\n",
+  );
+  assert.ok(!stdout.includes("Application emitted an event"));
+  assert.ok(!stdout.includes("Runtime reported a bounded condition"));
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -1798,5 +2029,109 @@ test("app upload reports the release id a playlist placement needs", async () =>
   // reading the operation result.
   assert.equal(envelope.data.application.release_id, "rel_AAAAAAAAAAAAAAAAAAAAAAAA");
   assert.equal(envelope.data.operation.state, "succeeded");
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("playlist templates --json lists the fifteen closed ids without enrolling", async () => {
+  const transport = memoryBackend();
+  const { code, stdout, configDir } = await withRuntime(["--json", "playlist", "templates"], transport);
+  assert.equal(code, ExitCode.Success, stdout);
+  const envelope = JSON.parse(stdout) as { ok: true; data: { templates: Array<{ id: string }> } };
+  assert.deepEqual(envelope.data.templates.map((template) => template.id), [
+    "slide-intro",
+    "slide-text-only-1",
+    "slide-text-only-2",
+    "slide-text-photo-1",
+    "slide-text-photo-2",
+    "slide-text-photo-3",
+    "slide-half-bleed-1",
+    "slide-half-bleed-2",
+    "slide-quote",
+    "slide-callout",
+    "slide-bullets",
+    "slide-stat-grid",
+    "slide-three-up",
+    "slide-photo",
+    "slide-full-bleed",
+  ]);
+  assert.equal(transport.calls.length, 0);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("playlist create expands a templated page and forwards a full page unchanged", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("playlist-templates-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_existing_secret" },
+    fsLike,
+  );
+  const fullPage = {
+    id: "poster",
+    canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
+    transition: { type: "crossfade", duration_ms: 200 },
+    advance: { mode: "duration", after_ms: 8000 },
+    placements: [
+      {
+        id: "hero",
+        content: { type: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
+        rect: { x: 0, y: 0, width: 1920, height: 1080 },
+        layer: 0,
+        content_fit: "contain",
+      },
+    ],
+  };
+  const file = path.join(configDir, "playlist.json");
+  await writeFile(
+    file,
+    JSON.stringify({
+      name: "Lobby",
+      pages: [
+        { id: "intro", template: "slide-intro", slots: { title: { text: "Welcome" } } },
+        fullPage,
+      ],
+    }),
+  );
+  const result = await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  const posted = transport.calls.find((call) => call.method === "POST" && call.path === "/api/v1/playlists");
+  const body = posted?.body as { pages: Array<Record<string, unknown>> };
+  assert.equal(body.pages.length, 2);
+  assert.equal("template" in body.pages[0]!, false);
+  assert.equal("slots" in body.pages[0]!, false);
+  const introPlacements = body.pages[0]!.placements as Array<{ id: string; content: { type: string; text?: string } }>;
+  assert.deepEqual(introPlacements.map((placement) => placement.id), ["bar", "title"]);
+  const title = introPlacements.find((placement) => placement.id === "title");
+  assert.equal(title?.content.type, "text");
+  assert.equal(title?.content.text, "Welcome");
+  assert.equal(introPlacements.find((placement) => placement.id === "bar")?.content.type, "line");
+  assert.deepEqual(body.pages[1], fullPage);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("playlist create refuses a mixed template-and-placements page before the write", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("playlist-mixed-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_existing_secret" },
+    fsLike,
+  );
+  const file = path.join(configDir, "playlist.json");
+  await writeFile(
+    file,
+    JSON.stringify({
+      name: "Lobby",
+      pages: [{ id: "intro", template: "slide-intro", slots: { title: { text: "Welcome" } }, placements: [] }],
+    }),
+  );
+  const result = await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
+  assert.equal(result.code, ExitCode.Usage, result.stdout);
+  const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string } };
+  assert.equal(envelope.error.code, "usage_error");
+  assert.match(envelope.error.detail, /mixes template and placements/);
+  assert.equal(transport.calls.some((call) => call.method === "POST" && call.path === "/api/v1/playlists"), false);
   await rm(configDir, { recursive: true, force: true });
 });

@@ -9,6 +9,17 @@ function headerMap(headers: Headers): Record<string, string> {
   return out;
 }
 
+function decodeTextBody(text: string, contentType: string): unknown {
+  if (text && (contentType.includes("json") || text.startsWith("{") || text.startsWith("["))) {
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return text;
+    }
+  }
+  return text || undefined;
+}
+
 function buildUrl(base: string, path: string, query?: Record<string, string | undefined>): string {
   const url = new URL(path, base.endsWith("/") ? base : `${base}/`);
   if (query) {
@@ -30,7 +41,7 @@ export class FetchTransport implements Transport {
 
   private headers(req: TransportRequest): Record<string, string> {
     const headers: Record<string, string> = {
-      accept: req.json === false ? "*/*" : "application/json",
+      accept: req.binary ? "image/webp" : req.json === false ? "*/*" : "application/json",
       ...req.headers,
     };
     if (this.token && !headers.authorization) {
@@ -70,19 +81,16 @@ export class FetchTransport implements Transport {
         signal: req.signal ?? controller.signal,
       });
       const headers = headerMap(response.headers);
-      const text = await response.text();
-      let body: unknown = text;
-      const contentType = headers["content-type"] ?? "";
-      if (text && (contentType.includes("json") || text.startsWith("{") || text.startsWith("["))) {
-        try {
-          body = JSON.parse(text) as unknown;
-        } catch {
-          body = text;
+      if (req.binary) {
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (response.status >= 400) {
+          const text = new TextDecoder().decode(bytes);
+          return { status: response.status, headers, body: decodeTextBody(text, headers["content-type"] ?? ""), rawText: text };
         }
-      } else if (!text) {
-        body = undefined;
+        return { status: response.status, headers, body: bytes };
       }
-      return { status: response.status, headers, body, rawText: text };
+      const text = await response.text();
+      return { status: response.status, headers, body: decodeTextBody(text, headers["content-type"] ?? ""), rawText: text };
     } catch (err) {
       if ((err as Error).name === "AbortError") {
         throw timeoutError("API request timed out", req.headers?.["x-request-id"]);

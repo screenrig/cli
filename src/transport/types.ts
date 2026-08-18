@@ -7,6 +7,8 @@ export interface TransportRequest {
   headers?: Record<string, string>;
   body?: unknown;
   json?: boolean;
+  /** Read the response as bytes. Success bodies stay off `rawText`. */
+  binary?: boolean;
   timeout_ms?: number;
   signal?: AbortSignal;
 }

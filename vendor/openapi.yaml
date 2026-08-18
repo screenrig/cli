@@ -276,6 +276,77 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/{id}/screenshot:
+    post:
+      operationId: requestScreenScreenshot
+      description: >-
+        Requests one still screenshot of the named active screen. Latest-wins:
+        a new request replaces any in-flight capture_id and does not 409. The
+        current ready slot is kept until a later upload succeeds. capture_id is
+        shot_ plus 16 to 64 base64url characters. expires_at is thirty seconds
+        after accept. The durable event type is screen.screenshot_requested on
+        the existing runtime SSE stream; runtime scan never delivers it after
+        expires_at. Event details name capture_id, expires_at, max_width_divisor
+        2, max_height_divisor 2, format image/webp, quality 80, and max_bytes
+        2097152. Image bytes never appear on SSE. Prepaid remaining credit is
+        not a gate. An exact Idempotency-Key retry returns the original
+        capture_id and expires_at for twenty-four hours.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "202": { description: "Accepted. The request is durable until expires_at. An exact idempotent retry returns this same capture_id and expiry.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenScreenshotAccepted" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: getScreenScreenshot
+      description: >-
+        Returns the current ready still WebP for the named screen. Optional
+        capture_id must match that ready slot. A named capture_id that expired
+        with no upload is screenshot_unavailable. A named capture_id replaced
+        by a later request is resource_conflict. Image bytes are never a signed
+        URL or object key. Range is not accepted.
+      security: [{ accountBearer: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ResourceID" }
+        - { $ref: "#/components/parameters/ScreenshotCaptureID" }
+      responses:
+        "200":
+          description: Current ready still WebP.
+          headers:
+            Content-Type: { schema: { type: string, enum: [image/webp] } }
+            Content-Length: { schema: { type: integer } }
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            Content-Disposition: { schema: { type: string } }
+          content: { image/webp: { schema: { type: string, format: binary } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/{id}/screenshot/status:
+    get:
+      operationId: getScreenScreenshotStatus
+      description: >-
+        Returns the screenshot state machine for the named screen when it
+        exists for this account. idle has no request and no ready slot.
+        pending is the current capture_id before expires_at with no upload.
+        ready means the last successful upload matches the current capture_id.
+        timed_out means the current id reached expires_at with no upload.
+        Timeout is lazy: the first status GET or next POST after expiry records
+        it and appends screen.screenshot_failed once with reason expired.
+        A timed-out request does not delete an older ready slot.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Screenshot status for this account's screen., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenScreenshotStatus" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
   /api/v1/events:
     get:
       operationId: listEvents
@@ -691,7 +762,7 @@ paths:
         - { $ref: "#/components/parameters/AfterCursor" }
         - { $ref: "#/components/parameters/LastEventID" }
       responses:
-        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast is a runtime audience event; scan never delivers one past details.expires_at. account.suspended and account.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
+        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. account.suspended and account.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/reports:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -701,6 +772,33 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeReport" } } } }
       responses:
         "202": { description: Accepted. manifest.activated is committed before this response and is idempotent for the current active revision. playback.video_started upserts the daily aggregate before this response. application.event appends a durable account event before this response. }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/screenshot:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    put:
+      operationId: putRuntimeScreenshot
+      description: >-
+        Uploads the current pending still WebP for the session screen. Path
+        does not name screen_id; the paired runtime session binds it. Header
+        ScreenRig-Capture-Id must be the current pending capture_id. Content-Type
+        is exactly image/webp. Body is raw WebP, not empty, at most 2097152
+        bytes. The server validates RIFF/WEBP magic, decodes one still frame,
+        and stores the uploaded bytes unchanged. Animated WebP is
+        invalid_request. Missing, unknown, expired, or non-current capture_id
+        is resource_conflict. Unpaired sessions are forbidden. Prepaid remaining
+        credit is not a gate and these bytes are not counted in used_bytes.
+        One slot per screen is replaced. screen.screenshot_ready details name
+        capture_id, bytes, width, height, and sha256; they never include pixels
+        or an object key.
+      security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
+      parameters: [{ $ref: "#/components/parameters/ScreenshotCaptureIDHeader" }]
+      requestBody: { required: true, content: { image/webp: { schema: { type: string, format: binary } } } }
+      responses:
+        "204": { description: Still WebP stored as the current slot., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/manifests/{manifest_revision}/releases/{release_id}/launch:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -900,6 +998,8 @@ components:
     PlaybackDay: { name: day, in: query, required: false, schema: { type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, description: UTC calendar day of the aggregate. }
     LastEventID: { name: Last-Event-ID, in: header, required: false, schema: { type: string }, description: Durable cursor used when after is absent. }
     Range: { name: Range, in: header, required: false, schema: { type: string, pattern: "^bytes=[0-9]*-[0-9]*$" }, description: V1 accepts one byte range only. }
+    ScreenshotCaptureID: { name: capture_id, in: query, required: false, schema: { $ref: "#/components/schemas/ScreenshotCaptureID" } }
+    ScreenshotCaptureIDHeader: { name: ScreenRig-Capture-Id, in: header, required: true, schema: { $ref: "#/components/schemas/ScreenshotCaptureID" } }
     SecFetchSite: { name: Sec-Fetch-Site, in: header, required: false, schema: { type: string, enum: [same-origin, same-site, cross-site, none] } }
     SecFetchMode: { name: Sec-Fetch-Mode, in: header, required: false, schema: { type: string } }
     SecFetchDest: { name: Sec-Fetch-Dest, in: header, required: false, schema: { type: string } }
@@ -1212,6 +1312,59 @@ components:
         text: { type: string, maxLength: 120 }
         duration_ms: { type: integer, minimum: 2000, maximum: 60000 }
         expires_at: { type: string, format: date-time }
+    ScreenshotCaptureID: { type: string, pattern: "^shot_[A-Za-z0-9_-]{16,64}$", description: "shot_ plus 16 to 64 unpadded base64url characters. Never cap_." }
+    ScreenScreenshotAccepted:
+      type: object
+      additionalProperties: false
+      required: [capture_id, expires_at]
+      properties:
+        capture_id: { $ref: "#/components/schemas/ScreenshotCaptureID" }
+        expires_at: { type: string, format: date-time, description: Instant after which runtime scan must not deliver screen.screenshot_requested and a pending upload is no longer accepted. }
+    ScreenScreenshotStatus:
+      type: object
+      additionalProperties: false
+      required: [state]
+      properties:
+        capture_id: { $ref: "#/components/schemas/ScreenshotCaptureID" }
+        state: { type: string, enum: [idle, pending, ready, timed_out] }
+        expires_at: { type: string, format: date-time }
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+        bytes: { type: integer, minimum: 1, maximum: 2097152 }
+        sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        captured_at: { type: string, format: date-time }
+    ScreenScreenshotRequestedDetails:
+      type: object
+      additionalProperties: false
+      required: [capture_id, expires_at, max_width_divisor, max_height_divisor, format, quality, max_bytes]
+      description: details object on a durable screen.screenshot_requested event. Image bytes and object keys are not present.
+      properties:
+        capture_id: { $ref: "#/components/schemas/ScreenshotCaptureID" }
+        expires_at: { type: string, format: date-time }
+        max_width_divisor: { type: integer, enum: [2] }
+        max_height_divisor: { type: integer, enum: [2] }
+        format: { type: string, enum: [image/webp] }
+        quality: { type: integer, enum: [80] }
+        max_bytes: { type: integer, enum: [2097152] }
+    ScreenScreenshotReadyDetails:
+      type: object
+      additionalProperties: false
+      required: [capture_id, bytes, width, height, sha256]
+      description: details object on a durable screen.screenshot_ready event. Pixels and object keys are not present.
+      properties:
+        capture_id: { $ref: "#/components/schemas/ScreenshotCaptureID" }
+        bytes: { type: integer, minimum: 1, maximum: 2097152 }
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+        sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+    ScreenScreenshotFailedDetails:
+      type: object
+      additionalProperties: false
+      required: [capture_id, reason]
+      description: details object on a durable screen.screenshot_failed event.
+      properties:
+        capture_id: { $ref: "#/components/schemas/ScreenshotCaptureID" }
+        reason: { type: string, enum: [expired] }
     Event: { type: object, additionalProperties: true, required: [cursor, sequence, type, severity, message, at], properties: { cursor: { type: string }, sequence: { type: integer }, type: { type: string }, severity: { type: string }, request_id: { type: string }, operation_id: { type: string }, message: { type: string }, resource: { type: object, additionalProperties: true }, details: { type: object, additionalProperties: true }, at: { type: string } } }
     EventList: { type: object, additionalProperties: false, required: [items, next_cursor], properties: { items: { type: array, items: { $ref: "#/components/schemas/Event" } }, next_cursor: { type: string } } }
     PlaybackAggregate:
@@ -1625,4 +1778,4 @@ components:
         errors: { type: array, items: { $ref: "#/components/schemas/ProblemField" } }
         next: { $ref: "#/components/schemas/NextAction" }
 x-problem-registry: ./problems.yaml
-x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_account_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, schema_incompatible, not_ready]
+x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_account_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, schema_incompatible, not_ready, screenshot_unavailable]

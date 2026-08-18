@@ -134,6 +134,24 @@ installation, players, backend services, the site, or production deployment.
   recognizable ScreenRig credential material and other control characters;
   render its problem so the operator can rewrite and resend.
 
+## Screenshot
+
+- `screen screenshot <id> [--output FILE]` binds
+  `POST /api/v1/screens/{id}/screenshot`, polls
+  `GET /api/v1/screens/{id}/screenshot/status`, then downloads
+  `GET /api/v1/screens/{id}/screenshot?capture_id=...` as `image/webp`. It
+  blocks until the still WebP is on disk. There is no `--no-wait`.
+- `<id>` must match `^scr_[A-Za-z0-9_-]+$`. `--output` is a file path, not a
+  directory. The default is `./<id>.webp` in the current working directory.
+  The file is overwritten without a prompt.
+- `--timeout` (default 35000 ms) and `--poll-ms` (default 500 ms) are the
+  existing global wait flags. A matching `timed_out` status or a wait deadline
+  is `screenshot_unavailable`. A later `capture_id` is `resource_conflict`.
+- Writes carry `Idempotency-Key`. The download uses the binary transport path;
+  never put image bytes in `rawText`, JSON, the envelope, or human output.
+  The success envelope is `screen_id`, `capture_id`, `path`, `bytes`, `sha256`,
+  `width`, and `height` only.
+
 ## Page scheduling
 
 - `visibility` on a playlist page is optional playback orchestration and a
@@ -181,10 +199,12 @@ installation, players, backend services, the site, or production deployment.
 - Transcoded bytes live in a `mkdtemp` directory the caller removes. Every
   failure path after that directory exists must remove it.
 - The contract carries `text`, `box`, and `line` vector placements in
-  `screenrig.canvas/v1`, plus their playlist authoring schemas. **Do not
-  encourage authoring them.** The server rejects a page containing one until
-  `SCREENRIG__RUNTIME__ACCEPT_VECTOR_PLACEMENTS` is enabled, which waits on every
-  player being pinned. No example, doc, fixture, or smoke may author one.
+  `screenrig.canvas/v1`. The CLI emits them only by expanding the closed slide
+  templates in `src/playlist-templates.ts`. Do not hand-author free vector
+  geometry, and do not add a template outside that catalog. The server may
+  still reject a page that contains one until every player is pinned; if it
+  does, surface the
+  problem and stop. Do not invent an image fallback.
 - `Media.codecs` is server-derived from the stored bytes and never
   client-declared. The CLI must not send, infer, or validate it. `--codec hevc`
   simply causes the server to derive `hvc1.*` instead.
@@ -196,7 +216,8 @@ installation, players, backend services, the site, or production deployment.
   `payment_required` guidance pointing at `account show`. `account show` may
   print remaining mcr; optional kCr display is later. Do not add pay, Stripe,
   or x402 commands.
-- Screenshotting is outside v1; do not add or document screenshot commands.
+- Screenshotting is in v1. `screen screenshot <id>` blocks on a still WebP and
+  writes a file. Do not print pixels.
 
 ## Verification
 

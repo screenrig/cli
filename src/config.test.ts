@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, open, readdir, readFile, rename, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import {
@@ -89,7 +89,7 @@ test("default credential location survives replacement of a plugin cache", async
   const firstPlugin = path.join(home, ".cache", "codex", "screenrig", "old");
   const replacementPlugin = path.join(home, ".cache", "codex", "screenrig", "new");
   await mkdir(firstPlugin, { recursive: true });
-  const configPath = defaultConfigPath(fsLike);
+  const configPath = await defaultConfigPath(fsLike);
   await writeConfigAtomic(
     configPath,
     { api_url: "https://api.screenrig.ai", token: "sr_live_persisted_secret" },
@@ -97,7 +97,7 @@ test("default credential location survives replacement of a plugin cache", async
   );
   await rm(firstPlugin, { recursive: true, force: true });
   await mkdir(replacementPlugin, { recursive: true });
-  assert.equal(defaultConfigPath(fsLike), configPath);
+  assert.equal(await defaultConfigPath(fsLike), configPath);
   assert.equal((await readConfigFile(configPath, fsLike))?.token, "sr_live_persisted_secret");
   assert.equal(configPath.startsWith(path.join(home, ".cache")), false);
   await rm(home, { recursive: true, force: true });
@@ -110,5 +110,59 @@ test("token paste branches are rejected instead of overriding durable credential
     resolveConfig({ flags: {}, fs: fsLike }),
     /Token flags and SCREENRIG_TOKEN are not supported/,
   );
+  await rm(home, { recursive: true, force: true });
+});
+
+test("default config path is config.json when SCREENRIG_CONFIG is unset and local-dev is absent", async () => {
+  const home = await testTemp("config-default-json-");
+  const fsLike = realFs(home);
+  assert.equal(await defaultConfigPath(fsLike), path.join(home, "screenrig", "config.json"));
+  await rm(home, { recursive: true, force: true });
+});
+
+test("default config path is config.local-dev.json when that file exists", async () => {
+  const home = await testTemp("config-local-dev-");
+  const fsLike = realFs(home);
+  const dir = path.join(home, "screenrig");
+  await mkdir(dir, { recursive: true });
+  const localDev = path.join(dir, "config.local-dev.json");
+  await writeFile(localDev, "{}\n");
+  assert.equal(await defaultConfigPath(fsLike), localDev);
+  await rm(home, { recursive: true, force: true });
+});
+
+test("SCREENRIG_CONFIG wins even when config.local-dev.json exists", async () => {
+  const home = await testTemp("config-env-override-");
+  const override = path.join(home, "override.json");
+  const fsLike = realFs(home, { XDG_CONFIG_HOME: home, SCREENRIG_CONFIG: override });
+  const dir = path.join(home, "screenrig");
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, "config.local-dev.json"), "{}\n");
+  assert.equal(await defaultConfigPath(fsLike), override);
+  await rm(home, { recursive: true, force: true });
+});
+
+test("default config directory follows XDG_CONFIG_HOME", async () => {
+  const home = await testTemp("config-xdg-");
+  const xdg = path.join(home, "xdg");
+  const fsLike = realFs(home, { XDG_CONFIG_HOME: xdg });
+  assert.equal(await defaultConfigPath(fsLike), path.join(xdg, "screenrig", "config.json"));
+  const dir = path.join(xdg, "screenrig");
+  await mkdir(dir, { recursive: true });
+  const localDev = path.join(dir, "config.local-dev.json");
+  await writeFile(localDev, "{}\n");
+  assert.equal(await defaultConfigPath(fsLike), localDev);
+  await rm(home, { recursive: true, force: true });
+});
+
+test("default config directory falls back to homedir/.config/screenrig when XDG is unset", async () => {
+  const home = await testTemp("config-homedir-");
+  const fsLike = realFs(home, {});
+  assert.equal(await defaultConfigPath(fsLike), path.join(home, ".config", "screenrig", "config.json"));
+  const dir = path.join(home, ".config", "screenrig");
+  await mkdir(dir, { recursive: true });
+  const localDev = path.join(dir, "config.local-dev.json");
+  await writeFile(localDev, "{}\n");
+  assert.equal(await defaultConfigPath(fsLike), localDev);
   await rm(home, { recursive: true, force: true });
 });

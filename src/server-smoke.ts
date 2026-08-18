@@ -224,11 +224,17 @@ async function main(): Promise<void> {
     kvRevision = undefined;
     await run(["kv", "delete", "smoke-binary", "--application-id", applicationId, "--if-match", String(kvBinaryRevision)]);
     kvBinaryRevision = undefined;
-    const followedEvents = await run(["events", "follow", "--after", cursor, "--timeout", "1500"]);
-    const followedItems = followedEvents.data?.items;
-    assert.ok(Array.isArray(followedItems) && followedItems.some((event) => (
-      typeof event === "object" && event !== null && (event as Record<string, unknown>).type === "kv.deleted"
-    )), "events follow must observe a durable kv.deleted event after the supplied cursor");
+    const followed = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+      const child = spawn(process.execPath, [path.join(packageRoot, "dist", "bin.js"), "--json", "events", "follow", "--after", cursor, "--timeout", "1500"], { cwd: packageRoot, env });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+      child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+      child.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    });
+    assert.equal(followed.code, 0, `events follow failed: ${followed.stderr || followed.stdout}`);
+    const followedEvents = followed.stdout.split("\n").filter((line) => line.length > 0).map((line) => JSON.parse(line) as JsonEnvelope);
+    assert.ok(followedEvents.some((envelope) => envelope.data?.type === "kv.deleted"), "events follow must observe a durable kv.deleted event after the supplied cursor");
     let rotated: JsonEnvelope | undefined;
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const screenBeforeRotation = await run(["screen", "show", screenId]);

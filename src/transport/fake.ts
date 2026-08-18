@@ -33,6 +33,8 @@ export class FakeTransport implements Transport {
   readonly calls: TransportRequest[] = [];
   private readonly routes: FakeRoute[] = [];
   private readonly streamChunks: string[] = [];
+  /** Test hook: awaited after pushed chunks so callers can observe incremental writes. */
+  afterStreamChunks?: (req: TransportRequest) => Promise<void>;
 
   on(method: string, path: string | RegExp, handler: FakeRoute["handler"]): this {
     this.routes.push({ method, path, handler });
@@ -66,11 +68,13 @@ export class FakeTransport implements Transport {
   async stream(req: TransportRequest): Promise<TransportStream> {
     this.calls.push(req);
     const chunks = [...this.streamChunks];
+    const after = this.afterStreamChunks;
     return {
       async *[Symbol.asyncIterator]() {
         for (const chunk of chunks) {
           yield chunk;
         }
+        if (after) await after(req);
       },
     };
   }
@@ -392,6 +396,41 @@ export function memoryBackend(): FakeTransport {
       },
     };
   });
+  const screenshotBytes = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0x08, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]);
+  const screenshotSha256 = createHash("sha256").update(screenshotBytes).digest("hex");
+  const screenshotCaptureId = "shot_AAAAAAAAAAAAAAAA";
+  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/screenshot$/, (req) => ({
+    status: 202,
+    headers: {
+      "cache-control": "no-store",
+      "x-request-id": req.headers?.["x-request-id"] ?? "req_screenshot",
+    },
+    body: {
+      capture_id: screenshotCaptureId,
+      expires_at: "2026-08-14T17:00:30.000Z",
+    },
+  }));
+  transport.on("GET", /^\/api\/v1\/screens\/[^/]+\/screenshot\/status$/, () => ({
+    status: 200,
+    headers: { "cache-control": "no-store" },
+    body: {
+      state: "ready",
+      capture_id: screenshotCaptureId,
+      bytes: screenshotBytes.byteLength,
+      sha256: screenshotSha256,
+      width: 480,
+      height: 270,
+    },
+  }));
+  transport.on("GET", /^\/api\/v1\/screens\/[^/]+\/screenshot$/, () => ({
+    status: 200,
+    headers: {
+      "content-type": "image/webp",
+      "content-length": String(screenshotBytes.byteLength),
+      "cache-control": "private, no-store",
+    },
+    body: screenshotBytes,
+  }));
   transport.on("DELETE", /^\/api\/v1\/screens\/[^/]+$/, (req) => {
     screens.delete(req.path.split("/").pop() ?? "");
     return { status: 204, headers: {}, body: undefined };
