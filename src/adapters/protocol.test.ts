@@ -99,10 +99,17 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "state",
     "updated_at",
   ]);
-  assert.deepEqual(quotedProperties(interfaceBody(source, "OperationAccepted")), [
+  // release_id is required, not optional. The server has always returned it and
+  // it is the only handle a playlist placement accepts, so a caller must never
+  // have to poll the operation to learn it.
+  const operationAccepted = interfaceBody(source, "OperationAccepted");
+  assert.deepEqual(quotedProperties(operationAccepted), [
     "id",
     "operation_id",
+    "release_id",
   ]);
+  assert.match(operationAccepted, /"release_id": string/);
+  assert.doesNotMatch(operationAccepted, /"release_id"\?/);
   assert.deepEqual(quotedProperties(interfaceBody(source, "Media")), [
     "bytes",
     "codecs",
@@ -206,13 +213,18 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "public_id",
     "revision",
     "state",
+    "timezone",
     "updated_at",
   ]);
   assert.match(screen, /"state": "pairing_pending" \| "active"/);
+  // A screen has no timezone until one is set, so it must stay optional. The
+  // local schedule preflight reads exactly this member.
+  assert.match(screen, /"timezone"\?: string/);
   assert.doesNotMatch(source, /Bootstrap/);
   assert.deepEqual(quotedProperties(interfaceBody(source, "ScreenPatch")), [
     "name",
     "playlist_id",
+    "timezone",
   ]);
   const toastWrite = interfaceBody(source, "ScreenToastWrite");
   assert.deepEqual(quotedProperties(toastWrite), ["duration_ms", "level", "text"]);
@@ -348,6 +360,54 @@ test("playlist writes send a media selector and media_end, not a singular media_
   assert.match(openapi, /PlaylistMediaEndAdvanceWrite:[\s\S]*?enum: \[media_end\]/);
   assert.doesNotMatch(openapi, /PlaylistVideoEndAdvance/);
   assert.doesNotMatch(openapi, /enum: \[video_end\]/);
+});
+
+test("an application carries no state of its own and reports its newest ready release", () => {
+  const generated = readFileSync(GENERATED_CONTRACT, "utf8");
+  const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
+
+  // Publish state lives on the operation and the release, never on the
+  // application. Anything that wants a placeable handle reads
+  // latest_ready_release, which is absent until a first publish is ready.
+  const application = interfaceBody(generated, "Application");
+  assert.deepEqual(quotedProperties(application), [
+    "created_at",
+    "id",
+    "latest_ready_release",
+    "name",
+    "revision",
+    "updated_at",
+  ]);
+  assert.match(application, /"latest_ready_release"\?: string/);
+  assert.doesNotMatch(application, /"state"/);
+  assert.doesNotMatch(application, /"release_id"/);
+  assert.match(openapi, /Application: \{ type: object, additionalProperties: false/);
+});
+
+test("page visibility is a scheduling sibling of advance and needs a screen timezone", () => {
+  const generated = readFileSync(GENERATED_CONTRACT, "utf8");
+  const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
+
+  // The CLI never builds a schedule; it only detects the key, so presence on
+  // both the write and read page shapes is the whole dependency.
+  assert.match(interfaceBody(generated, "PlaylistPageWrite"), /"visibility"\?: PageVisibility/);
+  assert.match(interfaceBody(generated, "PlaylistPage"), /"visibility"\?: PageVisibility/);
+
+  // visibility is a sibling of advance. It is deliberately not part of
+  // screenrig.canvas/v1, so it must never appear inside the canvas schema.
+  assert.match(openapi, /PageVisibility:[\s\S]*?required: \[enabled\]/);
+  assert.match(openapi, /at least one page with no visibility field/);
+
+  // A civil rule needs a zone, so the schedule and the screen timezone ship
+  // together. Both stay optional; a screen has none until one is set.
+  const visibility = interfaceBody(generated, "PageVisibility");
+  assert.deepEqual(quotedProperties(visibility), ["enabled", "from", "until", "windows"]);
+  assert.match(visibility, /"enabled": boolean/);
+  const window = interfaceBody(generated, "PageVisibilityWindow");
+  assert.deepEqual(quotedProperties(window), ["days", "end", "start"]);
+  assert.match(window, /"mon" \| "tue" \| "wed" \| "thu" \| "fri" \| "sat" \| "sun"/);
+  assert.match(interfaceBody(generated, "ScreenPatch"), /"timezone"\?: string/);
+  assert.match(interfaceBody(generated, "RuntimeManifest"), /"timezone"\?: string/);
 });
 
 test("toast contract is a closed POST with idempotency, no queue, and no colour fields", () => {

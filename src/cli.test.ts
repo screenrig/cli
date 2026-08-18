@@ -1532,3 +1532,271 @@ test("readConfigFile can repair permissions", async () => {
   assert.equal(st.mode & 0o777, 0o600);
   await rm(configDir, { recursive: true, force: true });
 });
+
+/**
+ * Page visibility is a civil rule, so it is meaningless without a zone. The
+ * server refuses assignment, playlist update, and manifest resolution while a
+ * scheduled playlist points at a screen with no timezone. These tests cover the
+ * local refusal that turns that rejection into an actionable message.
+ */
+async function scheduledPlaylistFixture(scheduled: boolean, dir: string) {
+  const configDir = await testTemp(dir);
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_existing_secret" },
+    fsLike,
+  );
+  const page = (id: string, visibility?: unknown) => ({
+    id,
+    canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
+    transition: { type: "crossfade", duration_ms: 200 },
+    advance: { mode: "duration", duration_ms: 8000 },
+    ...(visibility ? { visibility } : {}),
+    placements: [
+      {
+        id: "poster",
+        content: { type: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
+        rect: { x: 0, y: 0, width: 1920, height: 1080 },
+        layer: 0,
+        content_fit: "contain",
+      },
+    ],
+  });
+  // Every playlist keeps one page with no visibility field at all, so eligible
+  // content always exists. The scheduled variant adds a second, bounded page.
+  const pages = scheduled
+    ? [page("always"), page("evenings", { enabled: true, windows: [{ days: ["fri", "sat"], start: "18:00", end: "02:00" }] })]
+    : [page("always")];
+  const file = path.join(configDir, "playlist.json");
+  await writeFile(file, JSON.stringify({ name: "Lobby", pages }));
+  return { configDir, fsLike, file };
+}
+
+test("screen set-timezone patches only the timezone and carries the revision", async () => {
+  const transport = memoryBackend();
+  const { configDir, fsLike } = await scheduledPlaylistFixture(false, "tz-set-");
+  const result = await withRuntime(
+    ["--json", "screen", "set-timezone", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--timezone", "America/Los_Angeles", "--if-match", "1"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  const patch = transport.calls.find((call) => call.method === "PATCH");
+  assert.deepEqual(patch?.body, { timezone: "America/Los_Angeles" });
+  assert.equal(patch?.headers?.["if-match"], '"1"');
+  const envelope = JSON.parse(result.stdout) as { ok: true; data: { timezone?: string } };
+  assert.equal(envelope.data.timezone, "America/Los_Angeles");
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen set-timezone forwards the identifier unchanged and never carries a zone list", async () => {
+  const transport = memoryBackend();
+  const { configDir, fsLike } = await scheduledPlaylistFixture(false, "tz-opaque-");
+  // The embedded zone database belongs to the server. A CLI-side allowlist
+  // would go stale, so an unknown name must still reach the server to be
+  // rejected there.
+  await withRuntime(
+    ["--json", "screen", "set-timezone", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--timezone", "Mars/Olympus_Mons", "--if-match", "1"],
+    transport,
+    { fs: fsLike },
+  );
+  const patch = transport.calls.find((call) => call.method === "PATCH");
+  assert.deepEqual(patch?.body, { timezone: "Mars/Olympus_Mons" });
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen set-timezone rejects a missing id, zone, or revision", async () => {
+  const transport = memoryBackend();
+  const { configDir, fsLike } = await scheduledPlaylistFixture(false, "tz-usage-");
+  for (const argv of [
+    ["screen", "set-timezone", "--timezone", "America/Los_Angeles", "--if-match", "1"],
+    ["screen", "set-timezone", "scr_1", "--if-match", "1"],
+    ["screen", "set-timezone", "scr_1", "--timezone", "America/Los_Angeles"],
+  ]) {
+    const result = await withRuntime(["--json", ...argv], transport, { fs: fsLike });
+    assert.equal(result.code, ExitCode.Usage, `${argv.join(" ")}: ${result.stdout}`);
+    const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string } };
+    assert.equal(envelope.error.code, "usage_error");
+    assert.match(envelope.error.detail, /requires <id> --timezone --if-match/);
+  }
+  // A rejected invocation never reaches the server.
+  assert.equal(transport.calls.some((call) => call.method === "PATCH"), false);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("assigning a scheduled playlist to a screen with no timezone is refused before the patch", async () => {
+  const transport = memoryBackend();
+  const { configDir, fsLike, file } = await scheduledPlaylistFixture(true, "tz-assign-refuse-");
+  await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
+  await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
+  transport.calls.length = 0;
+
+  const result = await withRuntime(
+    ["--json", "screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "1"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(result.code, ExitCode.Usage, result.stdout);
+  const envelope = JSON.parse(result.stdout) as {
+    ok: false;
+    error: { code: string; detail: string; next?: { command: string } };
+  };
+  assert.equal(envelope.error.code, "usage_error");
+  assert.match(envelope.error.detail, /scr_PAIRINGAAAAAAAAAAAAAAAA has no timezone/);
+  assert.match(envelope.error.next?.command ?? "", /screen set-timezone scr_PAIRINGAAAAAAAAAAAAAAAA --timezone/);
+  // The refusal happens locally, so no write reaches the server.
+  assert.equal(transport.calls.some((call) => call.method === "PATCH"), false);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("a page disabled outright still counts as scheduled", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("tz-disabled-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_existing_secret" },
+    fsLike,
+  );
+  const basePage = {
+    id: "always",
+    canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
+    transition: { type: "crossfade", duration_ms: 200 },
+    advance: { mode: "duration", duration_ms: 8000 },
+    placements: [
+      {
+        id: "poster",
+        content: { type: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
+        rect: { x: 0, y: 0, width: 1920, height: 1080 },
+        layer: 0,
+        content_fit: "contain",
+      },
+    ],
+  };
+  const file = path.join(configDir, "playlist.json");
+  await writeFile(
+    file,
+    JSON.stringify({ name: "Lobby", pages: [basePage, { ...basePage, id: "off", visibility: { enabled: false } }] }),
+  );
+  await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
+  await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
+
+  const result = await withRuntime(
+    ["--json", "screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "1"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(result.code, ExitCode.Usage, result.stdout);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("an unscheduled playlist assigns to a screen with no timezone", async () => {
+  const transport = memoryBackend();
+  const { configDir, fsLike, file } = await scheduledPlaylistFixture(false, "tz-assign-plain-");
+  await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
+  await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
+
+  const result = await withRuntime(
+    ["--json", "screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "1"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("a scheduled playlist assigns once the screen carries a timezone", async () => {
+  const transport = memoryBackend();
+  const { configDir, fsLike, file } = await scheduledPlaylistFixture(true, "tz-assign-ok-");
+  await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
+  await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
+  await withRuntime(
+    ["--json", "screen", "set-timezone", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--timezone", "America/Los_Angeles", "--if-match", "1"],
+    transport,
+    { fs: fsLike },
+  );
+
+  const result = await withRuntime(
+    ["--json", "screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "2"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("one screen update that sets both a playlist and a timezone needs no preflight", async () => {
+  const transport = memoryBackend();
+  const { configDir, fsLike, file } = await scheduledPlaylistFixture(true, "tz-update-both-");
+  await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
+  await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
+  transport.calls.length = 0;
+
+  const result = await withRuntime(
+    [
+      "--json", "screen", "update", "scr_PAIRINGAAAAAAAAAAAAAAAA",
+      "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA",
+      "--timezone", "America/Los_Angeles",
+      "--if-match", "1",
+    ],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  const patch = transport.calls.find((call) => call.method === "PATCH");
+  assert.deepEqual(patch?.body, { playlist_id: "pl_AAAAAAAAAAAAAAAAAAAAAAAA", timezone: "America/Los_Angeles" });
+  // The patch supplies the zone itself, so the playlist is never fetched.
+  assert.equal(transport.calls.some((call) => call.path.startsWith("/api/v1/playlists/")), false);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("adding a schedule to a playlist an unzoned screen already runs is refused", async () => {
+  const transport = memoryBackend();
+  const { configDir, fsLike, file } = await scheduledPlaylistFixture(false, "tz-playlist-update-");
+  await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
+  await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
+  await withRuntime(
+    ["--json", "screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "1"],
+    transport,
+    { fs: fsLike },
+  );
+
+  const scheduled = await scheduledPlaylistFixture(true, "tz-playlist-update-src-");
+  transport.calls.length = 0;
+  const result = await withRuntime(
+    ["--json", "playlist", "update", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", scheduled.file, "--if-match", "1"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(result.code, ExitCode.Usage, result.stdout);
+  assert.match(result.stdout, /has no timezone/);
+  assert.equal(transport.calls.some((call) => call.method === "PUT"), false);
+  await rm(configDir, { recursive: true, force: true });
+  await rm(scheduled.configDir, { recursive: true, force: true });
+});
+
+test("app upload reports the release id a playlist placement needs", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("release-id-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_existing_secret" },
+    fsLike,
+  );
+  const appDir = path.join(configDir, "app");
+  await mkdir(appDir, { recursive: true });
+  await writeFile(path.join(appDir, "index.html"), "<!doctype html><html><head></head><body>ok</body></html>");
+
+  const result = await withRuntime(["--json", "app", "upload", appDir, "--poll-ms", "1"], transport, { fs: fsLike });
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  const envelope = JSON.parse(result.stdout) as {
+    data: { application: { id: string; release_id: string }; operation: { state: string } };
+  };
+  // release_id is required on the accepted response, so it is available without
+  // reading the operation result.
+  assert.equal(envelope.data.application.release_id, "rel_AAAAAAAAAAAAAAAAAAAAAAAA");
+  assert.equal(envelope.data.operation.state, "succeeded");
+  await rm(configDir, { recursive: true, force: true });
+});

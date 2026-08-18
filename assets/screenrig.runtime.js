@@ -232,10 +232,10 @@
     };
   }
   function assertTrustedOrigin(origin, trusted) {
-    if (!origin || origin === "*" || trusted === "*") {
+    if (!origin || origin === "*" || trusted.length === 0 || trusted.some((value) => !value || value === "*")) {
       throw new SdkValidationError("wildcard_origin", "Wildcard origins are not allowed");
     }
-    if (origin !== trusted) {
+    if (!trusted.includes(origin)) {
       throw new SdkValidationError("untrusted_origin", "Message origin is not the trusted player");
     }
   }
@@ -278,7 +278,7 @@
     context = null;
     capabilities = { ...EMPTY_CAPABILITIES };
     host;
-    trustedPlayerOrigin;
+    trustedPlayerOrigins;
     idFactory;
     ackTimeoutMs;
     allowOpaqueNativeParent;
@@ -300,8 +300,8 @@
     };
     constructor(options, allowOpaqueNativeParent = false) {
       this.host = options.host;
-      this.trustedPlayerOrigin = options.trustedPlayerOrigin ?? DEFAULT_PLAYER_ORIGIN;
-      if (this.trustedPlayerOrigin === "*") {
+      this.trustedPlayerOrigins = options.trustedPlayerOrigins ?? [options.trustedPlayerOrigin ?? DEFAULT_PLAYER_ORIGIN];
+      if (this.trustedPlayerOrigins.length === 0 || this.trustedPlayerOrigins.some((origin) => !origin || origin === "*")) {
         throw new SdkValidationError("wildcard_origin", "Wildcard origins are not allowed");
       }
       this.idFactory = options.idFactory ?? randomId;
@@ -406,7 +406,7 @@
           throw new SdkValidationError("untrusted_origin", "Opaque parent is not allowed for this application origin");
         }
       } else {
-        assertTrustedOrigin(event.origin, this.trustedPlayerOrigin);
+        assertTrustedOrigin(event.origin, this.trustedPlayerOrigins);
       }
       this.parentOrigin = event.origin;
       this.targetOrigin = opaque ? "*" : event.origin;
@@ -634,15 +634,28 @@
   // src/trusted-origin.ts
   var LOCAL_PLAYER_ORIGIN = "http://play.screenrig.localhost:8088";
   var LOCAL_RELEASE_HOSTNAME = /^r-[a-f0-9]{40}\.apps\.screenrig\.localhost$/;
-  function resolveTrustedPlayerOrigin(location) {
-    if (location !== void 0 && location.protocol === "http:" && location.port === "8088" && LOCAL_RELEASE_HOSTNAME.test(location.hostname) && location.origin === `http://${location.hostname}:8088`) {
-      return LOCAL_PLAYER_ORIGIN;
+  var NATIVE_PACKAGE_HOSTNAME = /^p-[a-f0-9]{32}\.[a-f0-9]{32}\.offline\.screenrig\.invalid$/;
+  function isLocalReleaseDocument(location) {
+    return location.protocol === "http:" && location.port === "8088" && LOCAL_RELEASE_HOSTNAME.test(location.hostname) && location.origin === `http://${location.hostname}:8088`;
+  }
+  function isNativePackageDocument(location) {
+    return location.protocol === "https:" && location.port === "" && NATIVE_PACKAGE_HOSTNAME.test(location.hostname) && location.origin === `https://${location.hostname}`;
+  }
+  function resolveTrustedPlayerOrigins(location) {
+    if (location === void 0) {
+      return [DEFAULT_PLAYER_ORIGIN];
     }
-    return DEFAULT_PLAYER_ORIGIN;
+    if (isLocalReleaseDocument(location)) {
+      return [LOCAL_PLAYER_ORIGIN];
+    }
+    if (isNativePackageDocument(location)) {
+      return [DEFAULT_PLAYER_ORIGIN, LOCAL_PLAYER_ORIGIN];
+    }
+    return [DEFAULT_PLAYER_ORIGIN];
   }
   function resolveTrustedParentPolicy(location) {
     return {
-      origin: resolveTrustedPlayerOrigin(location),
+      origins: resolveTrustedPlayerOrigins(location),
       allowOpaqueNativeParent: location?.protocol === "screenrig-app:" && location.origin === "null"
     };
   }
@@ -655,7 +668,7 @@
     const policy = resolveTrustedParentPolicy(windowLike.location);
     const client = createAttachedScreenRig({
       host: new BrowserHost(windowLike),
-      trustedPlayerOrigin: policy.origin
+      trustedPlayerOrigins: policy.origins
     }, policy.allowOpaqueNativeParent);
     Object.defineProperty(windowLike, "screenrig", { value: client, enumerable: true, configurable: false, writable: false });
     return client;

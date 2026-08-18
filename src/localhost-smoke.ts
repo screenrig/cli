@@ -61,7 +61,6 @@ async function main(): Promise<void> {
   const media = path.join(temp, "pixel.png");
   await mkdir(app, { recursive: true });
   await writeFile(path.join(app, "index.html"), "<!doctype html><html><head></head><body>smoke</body></html>");
-  await writeFile(playlist, JSON.stringify({ name: "Smoke playlist", pages: [] }));
   const mediaBytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3]);
   await writeFile(media, mediaBytes);
 
@@ -112,16 +111,83 @@ async function main(): Promise<void> {
     await run("auth", "status");
     await runDoctor();
     await run("app", "pack", app);
-    await run("app", "upload", app, "--poll-ms", "1");
+    // This is the documented "web app on a screen" path: upload the directory,
+    // take the release id from the publication operation result, and pin that
+    // release in an application placement. The release id is the only handle a
+    // playlist accepts; the application id is for `kv` alone.
+    const upload = await run("app", "upload", app, "--poll-ms", "1");
+    const uploadData = upload.data as {
+      application?: { id?: string };
+      operation?: { state?: string; result?: { release_id?: string } };
+    };
+    assert.equal(uploadData.operation?.state, "succeeded");
+    const releaseId = uploadData.operation?.result?.release_id;
+    assert.ok(releaseId, `app upload must report a release id: ${JSON.stringify(upload.data)}`);
     await run("app", "list");
     await run("app", "show", "app_AAAAAAAAAAAAAAAAAAAAAAAA");
+    // An application-advance page requires exactly one controller application
+    // placement, `content_fit: "fill"`, and a `max_ms` backstop for an app that
+    // never calls nextPage().
+    await writeFile(playlist, JSON.stringify({
+      name: "Smoke application page",
+      pages: [
+        {
+          id: "board",
+          canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
+          transition: { type: "crossfade", duration_ms: 200 },
+          advance: { mode: "application", max_ms: 60000 },
+          placements: [
+            {
+              id: "board",
+              content: { type: "application", release_id: releaseId },
+              rect: { x: 0, y: 0, width: 1920, height: 1080 },
+              layer: 0,
+              content_fit: "fill",
+              controller: true,
+            },
+          ],
+        },
+        // A scheduled page. The board page above carries no visibility field at
+        // all, which is what satisfies the always-visible-page rule; a playlist
+        // with no such page is rejected. This window ends at or before its
+        // start, so it crosses midnight and Friday owns the Saturday morning
+        // hours.
+        {
+          id: "after-hours",
+          canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
+          transition: { type: "crossfade", duration_ms: 200 },
+          advance: { mode: "duration", duration_ms: 8000 },
+          visibility: {
+            enabled: true,
+            windows: [{ days: ["fri", "sat"], start: "18:00", end: "02:00" }],
+          },
+          placements: [
+            {
+              id: "after-hours",
+              content: { type: "application", release_id: releaseId },
+              rect: { x: 0, y: 0, width: 1920, height: 1080 },
+              layer: 0,
+              content_fit: "fill",
+            },
+          ],
+        },
+      ],
+    }));
     await run("playlist", "create", playlist);
     await run("playlist", "list");
     await run("playlist", "show", "pl_AAAAAAAAAAAAAAAAAAAAAAAA");
     await run("playlist", "update", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", playlist, "--if-match", "1");
     await run("screen", "list");
     await run("screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA");
+    // The playlist schedules a page, and a schedule is a civil rule, so the
+    // screen needs a zone before it can carry the playlist. Setting it first is
+    // what lets the assignment below through.
+    const zoned = await run("screen", "set-timezone", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--timezone", "America/Los_Angeles", "--if-match", "1");
+    assert.equal((zoned.data as { timezone?: string }).timezone, "America/Los_Angeles");
     await run("screen", "update", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "1");
+    // `screen assign` is the last step of the documented application flow.
+    const assigned = await run("screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "2");
+    assert.equal((assigned.data as { playlist_id?: string }).playlist_id, "pl_AAAAAAAAAAAAAAAAAAAAAAAA");
     const toast = await run(
       "screen",
       "toast",

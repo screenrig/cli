@@ -134,6 +134,32 @@ installation, players, backend services, the site, or production deployment.
   recognizable ScreenRig credential material and other control characters;
   render its problem so the operator can rewrite and resend.
 
+## Page scheduling
+
+- `visibility` on a playlist page is optional playback orchestration and a
+  sibling of `advance`. It is **not** part of `screenrig.canvas/v1`. The CLI
+  forwards it verbatim and never constructs one.
+- The CLI inspects exactly one thing about it: whether the `visibility` key is
+  present on a page. That mirrors the server's own test, so a page whose only
+  rule is `enabled: false` still counts as scheduled. Do not deepen this into
+  local schedule evaluation; the player evaluates, and the server validates.
+- **A screen running a scheduled playlist must have a timezone.** `screen
+  assign`, `screen update --playlist-id`, and `playlist update` refuse locally
+  before sending, naming the screen and the `screen set-timezone` command that
+  fixes it. The server enforces the same rule on assignment, playlist update,
+  and manifest resolution; the local check exists to replace an opaque 400 with
+  an actionable message, never to replace the server's authority.
+- `screen set-timezone` forwards the IANA identifier unchanged. The server owns
+  the zone database. Never add a CLI-side zone list or allowlist; it would go
+  stale and reject valid names.
+- **Every playlist must keep at least one page with no `visibility` field at
+  all.** That is a server rule and the CLI does not duplicate it. Do not add a
+  local copy that could drift; render the server's problem instead.
+- `Application` carries no `state` and no `release_id`. It reports
+  `latest_ready_release`. `OperationAccepted.release_id` is required, so
+  `app upload` reports the release id without waiting on the operation result.
+  Knowing the id is not readiness; the operation still decides that.
+
 ## Product and security boundaries
 
 - Package metadata requires Node.js 20.11+. The plugin's package-relative

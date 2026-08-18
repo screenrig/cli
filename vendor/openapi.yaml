@@ -973,9 +973,9 @@ components:
     CreditAccountingHour: { type: object, additionalProperties: false, required: [hour, in_bytes, out_bytes, used_bytes, bandwidth_mcr, storage_mcr, gb_bytes, bandwidth_mcr_per_gb, storage_mcr_per_gb_month, month_hours], properties: { hour: { type: string, format: date-time }, in_bytes: { type: integer }, out_bytes: { type: integer }, used_bytes: { type: integer }, bandwidth_mcr: { type: integer }, storage_mcr: { type: integer }, gb_bytes: { type: integer }, bandwidth_mcr_per_gb: { type: integer }, storage_mcr_per_gb_month: { type: integer }, month_hours: { type: integer } } }
     RuntimeChrome: { type: object, additionalProperties: false, required: [schema_version, banner], properties: { schema_version: { type: integer, enum: [1] }, banner: { type: "null" } } }
     CLIEnrollment: { type: object, additionalProperties: false, required: [account, token, issuance_id, issuance_expires_at], properties: { account: { $ref: "#/components/schemas/Account" }, token: { type: string, minLength: 32, description: Permanent account bearer credential. It has no scheduled expiry and is redelivered only through this short-lived encrypted issuance envelope. }, issuance_id: { type: string, description: Opaque identifier for the encrypted exact-retry delivery envelope. }, issuance_expires_at: { type: string, format: date-time, description: Exact-retry redelivery deadline for this credential issuance; ten minutes after first enrollment. Later exact retries return credential_issuance_expired while the permanent token remains valid. } } }
-    Application: { type: object, additionalProperties: true, required: [id, name, revision, state], properties: { id: { type: string }, name: { type: string }, revision: { type: integer }, state: { type: string }, release_id: { type: string } } }
+    Application: { type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: { id: { type: string }, name: { type: string }, revision: { type: integer }, latest_ready_release: { type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     ApplicationList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Application" } } } }
-    OperationAccepted: { type: object, additionalProperties: false, required: [id, operation_id], properties: { id: { type: string }, operation_id: { type: string } } }
+    OperationAccepted: { type: object, additionalProperties: false, required: [id, release_id, operation_id], properties: { id: { type: string, description: Application identifier the upload was attributed to. }, release_id: { type: string, description: "Release identifier created by this upload. Poll the operation and pin this release into a playlist once the operation succeeds." }, operation_id: { type: string } } }
     Operation: { type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: { id: { type: string }, kind: { type: string }, state: { type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the bounded upload body is still being durably staged. Terminal values are succeeded, failed, and cancelled." }, request_id: { type: string }, created_at: { type: string }, updated_at: { type: string }, result: { type: object, additionalProperties: true }, error: { type: object, additionalProperties: true } } }
     PlaylistWrite:
       type: object
@@ -1002,6 +1002,7 @@ components:
         canvas: { $ref: "#/components/schemas/PlaylistCanvas" }
         transition: { $ref: "#/components/schemas/PlaylistTransition" }
         advance: { $ref: "#/components/schemas/PlaylistAdvanceWrite" }
+        visibility: { $ref: "#/components/schemas/PageVisibility" }
         placements: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/PlaylistPlacementWrite" } }
     PlaylistPage:
       type: object
@@ -1012,7 +1013,38 @@ components:
         canvas: { $ref: "#/components/schemas/PlaylistCanvas" }
         transition: { $ref: "#/components/schemas/PlaylistTransition" }
         advance: { $ref: "#/components/schemas/PlaylistAdvance" }
+        visibility: { $ref: "#/components/schemas/PageVisibility" }
         placements: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/PlaylistPlacement" } }
+    PageVisibility:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      description: >-
+        Optional page visibility schedule. It is a sibling of advance and is never part of
+        screenrig.canvas/v1; it describes playback orchestration, not geometry. The server
+        validates and carries these rules as data. The player evaluates them against the
+        screen timezone published at the manifest root. A page is eligible when enabled is
+        true, now is inside [from, until), and either windows is absent or at least one
+        window matches. Every playlist must keep at least one page with no visibility field
+        at all, so eligible content always exists. Conformance vectors for the evaluation
+        rules are the screenrig.schedule/v1 family in packages/schedule-contract.
+      properties:
+        enabled: { type: boolean, description: "False hides the page unconditionally and needs no clock. A visibility object that sets enabled true and carries no from, until, or windows is a no-op and is rejected." }
+        from: { type: string, pattern: "^\\d{4}-\\d{2}-\\d{2}T([01]\\d|2[0-3]):[0-5]\\d$", description: "Inclusive civil lower bound in the screen timezone, minute precision, no offset and no zone suffix." }
+        until: { type: string, pattern: "^\\d{4}-\\d{2}-\\d{2}T([01]\\d|2[0-3]):[0-5]\\d$", description: "Exclusive civil upper bound in the screen timezone. When both bounds are present, from must be strictly earlier than until." }
+        windows: { type: array, minItems: 1, maxItems: 16, items: { $ref: "#/components/schemas/PageVisibilityWindow" } }
+    PageVisibilityWindow:
+      type: object
+      additionalProperties: false
+      required: [days]
+      description: >-
+        One recurring civil window. Omitting start and end selects the whole day. When end
+        is less than or equal to start the window crosses midnight and the start day owns
+        it, so fri 22:00 to 02:00 runs into Saturday morning.
+      properties:
+        days: { type: array, minItems: 1, maxItems: 7, uniqueItems: true, items: { type: string, enum: [mon, tue, wed, thu, fri, sat, sun] }, description: "Civil days of week. The server stores them in mon-to-sun order; the set carries no author-visible ordering." }
+        start: { type: string, pattern: "^([01]\\d|2[0-3]):[0-5]\\d$", description: "Inclusive civil start time. Required when end is present." }
+        end: { type: string, pattern: "^([01]\\d|2[0-3]):[0-5]\\d$", description: "Exclusive civil end time. Required when start is present." }
     PlaylistCanvas:
       type: object
       additionalProperties: false
@@ -1150,11 +1182,11 @@ components:
         color: { $ref: "#/components/schemas/CanvasColor" }
     PlaylistIntrinsicSize: { type: object, additionalProperties: false, required: [width, height], properties: { width: { type: number, exclusiveMinimum: 0 }, height: { type: number, exclusiveMinimum: 0 } } }
     PlaylistList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Playlist" } } } }
-    ScreenPatch: { type: object, additionalProperties: false, minProperties: 1, properties: { name: { type: string, minLength: 1, maxLength: 120 }, playlist_id: { type: string } } }
+    ScreenPatch: { type: object, additionalProperties: false, minProperties: 1, properties: { name: { type: string, minLength: 1, maxLength: 120 }, playlist_id: { type: string }, timezone: { type: string, minLength: 1, maxLength: 64, description: "IANA time zone identifier, for example America/Los_Angeles. It is the zone every page visibility rule on this screen is evaluated in. Changing it remints the manifest revision. A screen assigned a playlist that uses page visibility must have one." } } }
     PairScreen: { type: object, additionalProperties: false, required: [code], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, label: { type: string, minLength: 1, maxLength: 120 } } }
     ProvisionScreen: { type: object, additionalProperties: false, properties: { label: { type: string, minLength: 1, maxLength: 120 } } }
     ScreenProvisioning: { type: object, additionalProperties: false, required: [screen, public_url, provisioning_url, expires_at], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri }, provisioning_url: { type: string, pattern: "^https?://[^#]+/s/[^#]+#provision=[A-Za-z0-9_-]{43}$" }, expires_at: { type: string, format: date-time } } }
-    Screen: { type: object, additionalProperties: false, required: [id, public_id, label, revision, manifest_revision, content_access_generation, state, created_at, updated_at], properties: { id: { type: string }, public_id: { type: string }, label: { type: string }, playlist_id: { type: string }, revision: { type: integer }, manifest_revision: { type: integer }, content_access_generation: { type: integer }, state: { type: string, enum: [pairing_pending, active] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    Screen: { type: object, additionalProperties: false, required: [id, public_id, label, revision, manifest_revision, content_access_generation, state, created_at, updated_at], properties: { id: { type: string }, public_id: { type: string }, label: { type: string }, playlist_id: { type: string }, timezone: { type: string, description: "IANA time zone identifier. Absent until it is set. Page visibility rules are evaluated in this zone." }, revision: { type: integer }, manifest_revision: { type: integer }, content_access_generation: { type: integer }, state: { type: string, enum: [pairing_pending, active] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     ScreenList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Screen" } } } }
     ScreenToastWrite:
       type: object
@@ -1276,6 +1308,7 @@ components:
         playlistId: { type: string }
         playlistRevision: { type: integer }
         generatedAt: { type: string }
+        timezone: { type: string, description: "IANA time zone identifier of the screen. Emitted only when the screen has one. Every page visibility rule in this manifest is evaluated in this zone. A manifest that carries any page visibility always carries it." }
         pages: { type: array, items: { $ref: "#/components/schemas/RuntimePage" } }
     RuntimePage:
       type: object
@@ -1287,6 +1320,7 @@ components:
         canvas: { $ref: "#/components/schemas/RuntimeCanvas" }
         transition: { $ref: "#/components/schemas/RuntimeTransition" }
         advance: { $ref: "#/components/schemas/RuntimeAdvance" }
+        visibility: { $ref: "#/components/schemas/PageVisibility", description: "Emitted only on pages that author a schedule. It is the identical snake_case object stored on the playlist page, deliberately outside contractVersion screenrig.canvas/v1." }
         placements: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/RuntimePlacement" }, description: Source array order is the deterministic tie-breaker for equal layers. }
     RuntimeCanvas:
       type: object

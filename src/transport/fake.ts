@@ -259,8 +259,19 @@ export function memoryBackend(): FakeTransport {
 
   transport.on("POST", "/api/v1/applications", (req) => {
     const id = "app_AAAAAAAAAAAAAAAAAAAAAAAA";
+    const releaseId = "rel_AAAAAAAAAAAAAAAAAAAAAAAA";
     const operationId = "op_AAAAAAAAAAAAAAAAAAAAAAAA";
-    applications.set(id, { id, name: "uploaded-application", revision: 1, state: "processing" });
+    // An application carries no state of its own. Publish state lives on the
+    // operation and the release, and latest_ready_release appears only once a
+    // publish reaches ready.
+    applications.set(id, {
+      id,
+      name: "uploaded-application",
+      revision: 1,
+      latest_ready_release: releaseId,
+      created_at: "2026-08-14T17:00:00.000Z",
+      updated_at: "2026-08-14T17:00:01.000Z",
+    });
     operations.set(operationId, {
       id: operationId,
       kind: "application.upload",
@@ -268,9 +279,16 @@ export function memoryBackend(): FakeTransport {
       request_id: req.headers?.["x-request-id"],
       created_at: "2026-08-14T17:00:00.000Z",
       updated_at: "2026-08-14T17:00:01.000Z",
-      result: { application_id: id },
+      // A published application release reports both identifiers here. An
+      // application id cannot be placed in a playlist; the release id can, so
+      // the operation result is where the placement's release_id comes from.
+      result: { application_id: id, release_id: releaseId },
     });
-    return { status: 202, headers: { "x-request-id": req.headers?.["x-request-id"] ?? "req_app" }, body: { id, operation_id: operationId } };
+    return {
+      status: 202,
+      headers: { "x-request-id": req.headers?.["x-request-id"] ?? "req_app" },
+      body: { id, release_id: releaseId, operation_id: operationId },
+    };
   });
 
   transport.on("GET", "/api/v1/applications", (req) => ({
@@ -282,7 +300,13 @@ export function memoryBackend(): FakeTransport {
   transport.on("GET", /^\/api\/v1\/applications\/[^/]+$/, (req) => ({
     status: 200,
     headers: { "x-request-id": req.headers?.["x-request-id"] ?? "req_app_get" },
-    body: applications.get(req.path.split("/").pop() ?? "") ?? { id: req.path.split("/").pop(), name: "application", revision: 1, state: "ready" },
+    body: applications.get(req.path.split("/").pop() ?? "") ?? {
+      id: req.path.split("/").pop(),
+      name: "application",
+      revision: 1,
+      created_at: "2026-08-14T17:00:00.000Z",
+      updated_at: "2026-08-14T17:00:00.000Z",
+    },
   }));
 
   transport.on("POST", "/api/v1/playlists", (req) => {
@@ -307,7 +331,7 @@ export function memoryBackend(): FakeTransport {
   transport.on("GET", /^\/api\/v1\/screens\/[^/]+$/, (req) => ({ status: 200, headers: {}, body: screens.get(req.path.split("/").pop() ?? "") }));
   transport.on("PATCH", /^\/api\/v1\/screens\/[^/]+$/, (req) => {
     const id = req.path.split("/").pop() ?? "";
-    const body = req.body as { name?: string; playlist_id?: string };
+    const body = req.body as { name?: string; playlist_id?: string; timezone?: string };
     const item = {
       ...(screens.get(id) ?? {
         id,
@@ -321,6 +345,8 @@ export function memoryBackend(): FakeTransport {
       }),
       ...(body.name ? { label: body.name } : {}),
       ...(body.playlist_id ? { playlist_id: body.playlist_id } : {}),
+      // A screen has no timezone until one is set, and a patch never clears it.
+      ...(body.timezone ? { timezone: body.timezone } : {}),
       revision: 2,
     };
     screens.set(id, item);

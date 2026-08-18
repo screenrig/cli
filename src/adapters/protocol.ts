@@ -50,7 +50,14 @@ export interface Operation {
 }
 
 export interface OperationAccepted {
+  /** Application identifier the upload was attributed to. */
   id: string;
+  /**
+   * Release created by this upload. The server has always returned it and the
+   * contract now requires it. It is the only handle a playlist placement
+   * accepts, so report it rather than making the caller poll the operation.
+   */
+  release_id: string;
   operation_id: string;
 }
 
@@ -130,6 +137,11 @@ export function limitsFromCapabilities(capabilities: Capabilities): ArchiveLimit
  * placement, and content schemas — including the `text`, `box`, and `line`
  * vector placements — are deliberately not mirrored here. Mirror a schema only
  * when the CLI builds or reads its fields.
+ *
+ * Page `visibility` is the one exception the CLI inspects, and it inspects only
+ * whether the key is present. That is exactly what decides whether a playlist
+ * needs the target screen to carry a timezone, so no member of the schedule
+ * object is mirrored either.
  */
 
 export interface Screen {
@@ -142,7 +154,23 @@ export interface Screen {
   public_id: string;
   revision: number;
   state: "pairing_pending" | "active";
+  /**
+   * IANA time zone identifier. Absent until it is set. Page visibility rules
+   * are civil, so they are evaluated in this zone.
+   */
+  timezone?: string;
   updated_at: string;
+}
+
+/**
+ * The screen patch body. Every member is optional and the server requires at
+ * least one, which is why each command builds only the members it was asked
+ * for rather than sending undefined placeholders.
+ */
+export interface ScreenPatch {
+  name?: string;
+  playlist_id?: string;
+  timezone?: string;
 }
 
 export interface PairScreen {

@@ -22,6 +22,8 @@ import {
   type BrowserLinkClaim,
   type BrowserLinkClaimRequest,
   type ProvisionScreen,
+  type Screen,
+  type ScreenPatch,
   type ScreenProvisioning,
   type ScreenToastAccepted,
   type ScreenToastLevel,
@@ -112,10 +114,12 @@ Commands:
   screen pair CODE [--label LABEL]
   screen provision (--open | --print-url) [--label LABEL]
   browser setup --code CODE [--open]
-  screen update <id> [--name NAME] [--playlist-id ID] --if-match REVISION
+  screen update <id> [--name NAME] [--playlist-id ID] [--timezone ZONE]
+                     --if-match REVISION
   screen list
   screen show <id>
   screen assign <id> --playlist-id ID --if-match REVISION
+  screen set-timezone <id> --timezone ZONE --if-match REVISION
   screen delete <id> --if-match REVISION
   screen rotate-public-id <id> --if-match REVISION
   screen revoke-credential <id> --if-match REVISION
@@ -617,6 +621,10 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
       exitCode: ExitCode.Success,
       human: humanLines("Application uploaded", [
         ["application_id", body.id],
+        // The release id is the only handle a playlist placement accepts, so
+        // report it here rather than making the caller read the operation
+        // result to find it.
+        ["release_id", body.release_id],
         ["operation_id", operation.id],
         ["state", operation.state],
         ["sha256", packed.sha256],
@@ -628,6 +636,7 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
     exitCode: ExitCode.Success,
     human: humanLines("Application upload accepted", [
       ["application_id", body.id],
+      ["release_id", body.release_id],
       ["operation_id", body.operation_id],
       ["sha256", packed.sha256],
     ]),
@@ -1060,6 +1069,11 @@ async function playlistCommand(
       throw usageError(`Playlist JSON contains unsupported fields: ${extra.join(", ")}.`);
     }
     const body = { name: parsed.name, pages: parsed.pages };
+    // A create has no assigned screen yet, so there is nothing to check. An
+    // update can add a schedule to a playlist screens are already running.
+    if (action === "update" && id) {
+      await assertAssignedScreensHaveZone(client, id, parsed.pages);
+    }
     const response = await client.call({
       method: action === "create" ? "POST" : "PUT",
       path: action === "create" ? "/api/v1/playlists" : `/api/v1/playlists/${id}`,
@@ -1082,6 +1096,71 @@ async function playlistCommand(
     return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted playlist ${id}` };
   }
   throw usageError("Unknown playlist command.");
+}
+
+/**
+ * A page schedule is civil, so it means nothing without a zone to read it in.
+ * The server carries that zone on the screen and refuses assignment, playlist
+ * update, and manifest resolution while a scheduled playlist points at a screen
+ * that has none.
+ *
+ * Presence of the `visibility` key is the whole test, exactly as the server
+ * counts it. A page that sets `enabled: false` still counts as scheduled.
+ */
+function usesPageVisibility(playlist: unknown): boolean {
+  const pages = (playlist as { pages?: unknown } | undefined)?.pages;
+  if (!Array.isArray(pages)) {
+    return false;
+  }
+  return pages.some((page) => typeof page === "object" && page !== null && "visibility" in page);
+}
+
+function scheduleZoneError(screenId: string): CliError {
+  return usageError(
+    `Screen ${screenId} has no timezone, and the playlist schedules pages with visibility. Page visibility rules are civil times, so the screen needs an IANA zone before it can run them.`,
+    {
+      command: `screenrig --json screen set-timezone ${screenId} --timezone America/Los_Angeles --if-match REVISION`,
+      reason: "Set the screen timezone first, then assign the playlist. Read the current revision from screen show.",
+    },
+  );
+}
+
+/**
+ * Refuse a scheduled playlist locally before the PATCH goes out. The server
+ * rejects the same pair, but it answers about a body the operator did not
+ * write; naming the screen and the fixing command here is the difference
+ * between a clear message and an opaque rejection.
+ */
+async function assertScheduledPlaylistHasZone(client: ApiClient, screenId: string, playlistId: string): Promise<void> {
+  const playlist = await client.call({ method: "GET", path: `/api/v1/playlists/${playlistId}` });
+  if (!usesPageVisibility(playlist.body)) {
+    return;
+  }
+  const screen = await client.call({ method: "GET", path: `/api/v1/screens/${screenId}` });
+  if ((screen.body as Screen | undefined)?.timezone) {
+    return;
+  }
+  throw scheduleZoneError(screenId);
+}
+
+/**
+ * The same rule reached from the playlist side. Adding visibility to a playlist
+ * that screens already run breaks their manifests, so check every screen the
+ * playlist is assigned to rather than waiting for rematerialize to refuse.
+ */
+async function assertAssignedScreensHaveZone(client: ApiClient, playlistId: string, pages: unknown): Promise<void> {
+  if (!usesPageVisibility({ pages })) {
+    return;
+  }
+  const response = await client.call({ method: "GET", path: "/api/v1/screens" });
+  const items = (response.body as { items?: Screen[] } | undefined)?.items;
+  if (!Array.isArray(items)) {
+    return;
+  }
+  const unzoned = items.find((screen) => screen?.playlist_id === playlistId && !screen?.timezone);
+  if (unzoned) {
+    throw scheduleZoneError(unzoned.id);
+  }
 }
 
 async function screenCommand(
@@ -1193,8 +1272,21 @@ async function screenCommand(
     const ifMatch = flagString(args.flags, "if-match");
     const name = flagString(args.flags, "name");
     const playlistId = flagString(args.flags, "playlist-id");
-    if (!id || !ifMatch || (!name && !playlistId)) throw usageError("screen update requires <id>, --if-match, and --name or --playlist-id.");
-    const body = { ...(name ? { name } : {}), ...(playlistId ? { playlist_id: playlistId } : {}) };
+    const timezone = flagString(args.flags, "timezone");
+    if (!id || !ifMatch || (!name && !playlistId && !timezone)) {
+      throw usageError("screen update requires <id>, --if-match, and --name, --playlist-id, or --timezone.");
+    }
+    // A patch that sets both a playlist and a timezone satisfies the schedule
+    // rule in one request, so only check when the patch leaves the screen
+    // without one.
+    if (playlistId && !timezone) {
+      await assertScheduledPlaylistHasZone(client, id, playlistId);
+    }
+    const body: ScreenPatch = {
+      ...(name ? { name } : {}),
+      ...(playlistId ? { playlist_id: playlistId } : {}),
+      ...(timezone ? { timezone } : {}),
+    };
     const response = await client.call({ method: "PATCH", path: `/api/v1/screens/${id}`, idempotent: true, headers: { "if-match": quotedRevision(ifMatch) }, body });
     return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Updated screen ${id}` };
   }
@@ -1203,14 +1295,34 @@ async function screenCommand(
     const playlistId = flagString(args.flags, "playlist-id");
     const ifMatch = flagString(args.flags, "if-match");
     if (!id || !playlistId || !ifMatch) throw usageError("screen assign requires <id> --playlist-id --if-match.");
+    await assertScheduledPlaylistHasZone(client, id, playlistId);
+    const body: ScreenPatch = { playlist_id: playlistId };
     const response = await client.call({
       method: "PATCH",
       path: `/api/v1/screens/${id}`,
       idempotent: true,
       headers: { "if-match": quotedRevision(ifMatch) },
-      body: { playlist_id: playlistId },
+      body,
     });
     return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Assigned playlist ${playlistId} to ${id}` };
+  }
+  if (action === "set-timezone") {
+    const id = args.positionals[2];
+    const timezone = flagString(args.flags, "timezone");
+    const ifMatch = flagString(args.flags, "if-match");
+    if (!id || !timezone || !ifMatch) throw usageError("screen set-timezone requires <id> --timezone --if-match.");
+    // The zone database belongs to the server, which validates the identifier
+    // against it. Sending the value unchanged keeps one authority for what a
+    // real zone is, so the CLI never carries a list that can go stale.
+    const body: ScreenPatch = { timezone };
+    const response = await client.call({
+      method: "PATCH",
+      path: `/api/v1/screens/${id}`,
+      idempotent: true,
+      headers: { "if-match": quotedRevision(ifMatch) },
+      body,
+    });
+    return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Set timezone ${timezone} on ${id}` };
   }
   if (action === "delete") {
     const id = args.positionals[2];

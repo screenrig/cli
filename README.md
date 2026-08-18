@@ -99,6 +99,31 @@ next-action guidance naming the wait, rather than as a bare status.
 `screenrig doctor` reports a `feedback` check from the server's advertised
 capability map, so support is probed rather than assumed.
 
+## Page scheduling and the screen timezone
+
+A playlist page may carry an optional `visibility` object that limits when the
+page plays. The rule is civil, so it is read in the screen's own time zone.
+
+```sh
+screenrig --json screen set-timezone scr_01 --timezone America/Los_Angeles --if-match 3
+```
+
+`--timezone` takes an IANA identifier. The server validates it against an
+embedded zone database, so the CLI forwards the value unchanged rather than
+carrying a list that can go stale. A screen has no time zone until one is set,
+and a patch never clears one. `screen update` accepts the same `--timezone`.
+
+Two rules decide whether a playlist is accepted:
+
+- **Every playlist keeps at least one page with no `visibility` field at all.**
+  A page whose only rule is `enabled: false` does not satisfy this, and the
+  server rejects a playlist that fails it. That page is what guarantees a screen
+  always has something eligible to show.
+- **A screen running a scheduled playlist must have a time zone.** `screen
+  assign`, `screen update --playlist-id`, and `playlist update` check this
+  before they send anything, and name the screen and the command that fixes it.
+  Set the zone first, then assign.
+
 ## Screen toast
 
 A toast is transient stage chrome on one screen, not a placement. It occupies

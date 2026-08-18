@@ -42,6 +42,7 @@ const VALUE_FLAGS = new Set([
   "value-base64",
   "application-id",
   "playlist-id",
+  "timezone",
   "screen-id",
   "media-id",
   "name",
