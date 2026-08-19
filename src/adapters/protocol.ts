@@ -13,7 +13,7 @@ export type OperationState = "queued" | "running" | "succeeded" | "failed" | "ca
 export interface Account {
   content_limit_bytes: number;
   created_at: string;
-  credit_remaining_mcr: number;
+  credit_remaining: number;
   id: string;
   reserved_bytes: number;
   revision: number;

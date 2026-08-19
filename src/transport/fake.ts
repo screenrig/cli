@@ -49,6 +49,8 @@ export class FakeTransport implements Transport {
   afterStreamChunks?: (req: TransportRequest) => Promise<void>;
   /** Repeating stream hook. Takes precedence over the one-shot queue. */
   streamHandler?: (req: TransportRequest) => Promise<TransportStream>;
+  /** Test hook: merged onto every `request` response (not SSE stream frames). */
+  extraResponseHeaders?: Record<string, string>;
 
   on(method: string, path: string | RegExp, handler: FakeRoute["handler"]): this {
     this.routes.push({ method, path, handler });
@@ -69,7 +71,7 @@ export class FakeTransport implements Transport {
     this.calls.push(req);
     const route = this.routes.find((item) => item.method === req.method && matchPath(item.path, req.path));
     if (!route) {
-      return {
+      return this.withExtraHeaders({
         status: 404,
         headers: { "content-type": "application/problem+json" },
         body: {
@@ -79,9 +81,16 @@ export class FakeTransport implements Transport {
           detail: `No fake route for ${req.method} ${req.path}`,
           code: "not_found",
         },
-      };
+      });
     }
-    return route.handler(req);
+    return this.withExtraHeaders(await route.handler(req));
+  }
+
+  private withExtraHeaders(response: TransportResponse): TransportResponse {
+    if (!this.extraResponseHeaders) {
+      return response;
+    }
+    return { ...response, headers: { ...response.headers, ...this.extraResponseHeaders } };
   }
 
   async stream(req: TransportRequest): Promise<TransportStream> {
@@ -128,7 +137,7 @@ export function memoryBackend(): FakeTransport {
   let account: Account = {
     content_limit_bytes: 0,
     created_at: "2026-08-14T17:00:00.000Z",
-    credit_remaining_mcr: 0,
+    credit_remaining: 0,
     id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
     reserved_bytes: 0,
     revision: 1,

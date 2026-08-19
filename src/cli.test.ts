@@ -1699,9 +1699,12 @@ test("a rate-limited submission surfaces Retry-After instead of a bare 429", asy
   }
 });
 
-test("account show reports remaining prepaid credit in mcr", async () => {
-  const transport = memoryBackend();
-  const configDir = await testTemp("account-show-");
+async function withTokenConfig(
+  transport: FakeTransport,
+  argv: string[],
+  extra?: Partial<CliRuntime>,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  const configDir = await testTemp("credits-cfg-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
@@ -1709,19 +1712,120 @@ test("account show reports remaining prepaid credit in mcr", async () => {
     fsLike,
   );
   try {
-    const json = await withRuntime(["--json", "account", "show"], transport, { fs: fsLike });
-    assert.equal(json.code, 0, json.stdout);
-    const envelope = JSON.parse(json.stdout) as { ok: boolean; data: { credit_remaining_mcr: number } };
-    assert.equal(envelope.ok, true);
-    assert.equal(envelope.data.credit_remaining_mcr, 0);
-    assert.doesNotMatch(json.stdout, /kCr|stripe|x402|\$/i);
-
-    const human = await withRuntime(["account", "show"], transport, { fs: fsLike });
-    assert.equal(human.code, 0, human.stdout);
-    assert.match(human.stdout, /credit_remaining_mcr: 0/);
-    assert.doesNotMatch(human.stdout, /kCr|stripe|x402|\$/i);
+    return await withRuntime(argv, transport, { fs: fsLike, ...extra });
   } finally {
     await rm(configDir, { recursive: true, force: true });
+  }
+}
+
+function accountRecord(credit_remaining: number): Record<string, unknown> {
+  return {
+    content_limit_bytes: 0,
+    created_at: "2026-08-14T17:00:00.000Z",
+    credit_remaining,
+    id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    reserved_bytes: 0,
+    revision: 1,
+    screen_count: 0,
+    screen_limit: 100,
+    status: "active",
+    updated_at: "2026-08-14T17:00:00.000Z",
+    used_bytes: 0,
+  };
+}
+
+function accountShowTransport(opts?: { header?: string; remaining?: number }): FakeTransport {
+  const transport = new FakeTransport();
+  const headers: Record<string, string> = { "x-request-id": "req_account" };
+  if (opts?.header !== undefined) {
+    headers["ScreenRig-Credits-Remaining"] = opts.header;
+  }
+  transport.on("GET", "/api/v1/account", () => ({
+    status: 200,
+    headers,
+    body: accountRecord(opts?.remaining ?? 5000),
+  }));
+  return transport;
+}
+
+test("account show reports integer credit_remaining and warns when remaining is zero", async () => {
+  const transport = memoryBackend();
+  const json = await withTokenConfig(transport, ["--json", "account", "show"]);
+  assert.equal(json.code, 0, json.stdout);
+  const envelope = JSON.parse(json.stdout) as {
+    ok: boolean;
+    data: { credit_remaining: number };
+    warnings: Array<{ code: string; message: string }>;
+  };
+  assert.equal(envelope.ok, true);
+  assert.equal(envelope.data.credit_remaining, 0);
+  const warning = envelope.warnings.find((item) => item.code === "credits_low");
+  assert.ok(warning, json.stdout);
+  assert.match(warning.message, /\b0\b/);
+  assert.match(warning.message, /below 1000 credits/);
+  assert.doesNotMatch(json.stdout, /kCr|stripe|x402|mcr|millicredit|\$/i);
+
+  const human = await withTokenConfig(transport, ["account", "show"]);
+  assert.equal(human.code, 0, human.stdout);
+  assert.match(human.stdout, /credit_remaining: 0/);
+  assert.match(human.stdout, /warning: Remaining prepaid credit is 0, below 1000 credits\./);
+  assert.doesNotMatch(human.stdout, /kCr|stripe|x402|mcr|millicredit|\$/i);
+});
+
+test("remaining header 1000 does not add credits_low", async () => {
+  const transport = accountShowTransport({ header: "1000", remaining: 0 });
+  const json = await withTokenConfig(transport, ["--json", "account", "show"]);
+  assert.equal(json.code, 0, json.stdout);
+  const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string }> };
+  assert.equal(envelope.ok, true);
+  assert.equal(envelope.warnings.some((item) => item.code === "credits_low"), false, json.stdout);
+});
+
+test("remaining header 999 adds credits_low on JSON and human output", async () => {
+  const transport = accountShowTransport({ header: "999", remaining: 5000 });
+  const json = await withTokenConfig(transport, ["--json", "account", "show"]);
+  assert.equal(json.code, 0, json.stdout);
+  const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string; message: string }> };
+  assert.equal(envelope.ok, true);
+  const warning = envelope.warnings.find((item) => item.code === "credits_low");
+  assert.ok(warning, json.stdout);
+  assert.match(warning.message, /\b999\b/);
+  assert.doesNotMatch(json.stdout, /kCr|stripe|x402|mcr|millicredit|\$/i);
+
+  const human = await withTokenConfig(transport, ["account", "show"]);
+  assert.equal(human.code, 0, human.stdout);
+  assert.match(human.stdout, /warning: Remaining prepaid credit is 999, below 1000 credits\./);
+});
+
+test("remaining header 0 on a successful command adds credits_low", async () => {
+  const transport = accountShowTransport({ header: "0", remaining: 5000 });
+  const json = await withTokenConfig(transport, ["--json", "account", "show"]);
+  assert.equal(json.code, 0, json.stdout);
+  const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string; message: string }> };
+  const warning = envelope.warnings.find((item) => item.code === "credits_low");
+  assert.ok(warning, json.stdout);
+  assert.match(warning.message, /\b0\b/);
+});
+
+test("no remaining header and remaining at or above 1000 does not add credits_low", async () => {
+  const transport = accountShowTransport({ remaining: 1000 });
+  const json = await withTokenConfig(transport, ["--json", "account", "show"]);
+  assert.equal(json.code, 0, json.stdout);
+  const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string }> };
+  assert.equal(envelope.warnings.some((item) => item.code === "credits_low"), false, json.stdout);
+});
+
+test("unauthenticated version does not add credits_low", async () => {
+  const transport = memoryBackend();
+  transport.extraResponseHeaders = { "ScreenRig-Credits-Remaining": "0" };
+  const json = await withRuntime(["--json", "version"], transport);
+  try {
+    assert.equal(json.code, 0, json.stdout);
+    const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string }> };
+    assert.equal(envelope.ok, true);
+    assert.equal(envelope.warnings.some((item) => item.code === "credits_low"), false, json.stdout);
+  } finally {
+    await rm(json.configDir, { recursive: true, force: true });
   }
 });
 
@@ -1798,12 +1902,70 @@ test("a payment_required rejection points at remaining prepaid credit", async ()
     assert.equal(result.code, 8, `402 maps to the Client exit code: ${result.stdout}`);
     const envelope = JSON.parse(result.stdout) as {
       error: { code: string; status: number; next?: { command: string; reason: string } };
+      warnings?: Array<{ code: string }>;
     };
     assert.equal(envelope.error.code, "payment_required");
     assert.equal(envelope.error.status, 402);
     assert.match(String(envelope.error.next?.command), /account show/);
-    assert.match(String(envelope.error.next?.reason), /credit_remaining_mcr/);
-    assert.doesNotMatch(result.stdout, /stripe|x402|pay |kCr|\$/i);
+    assert.match(String(envelope.error.next?.reason), /credit_remaining/);
+    assert.doesNotMatch(String(envelope.error.next?.reason), /mcr|millicredit/);
+    assert.equal(envelope.warnings?.some((item) => item.code === "credits_low") ?? false, false, result.stdout);
+    assert.doesNotMatch(result.stdout, /stripe|x402|pay |kCr|mcr|millicredit|\$/i);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("a 402 with remaining header 0 includes payment_required and credits_low", async () => {
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/v1/media/uploads", () => ({
+    status: 402,
+    headers: {
+      "content-type": "application/problem+json",
+      "ScreenRig-Credits-Remaining": "0",
+    },
+    body: {
+      type: "https://screenrig.ai/problems/payment-required",
+      title: "Prepaid credit is required",
+      status: 402,
+      detail: "Prepaid credit remaining is zero.",
+      code: "payment_required",
+    },
+  }));
+  const configDir = await testTemp("media-payment-header-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const file = path.join(configDir, "pixel.png");
+  await writeFile(file, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3]));
+  try {
+    const result = await withRuntime(
+      ["--json", "media", "upload", file, "--no-transcode"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(result.code, 8, result.stdout);
+    const envelope = JSON.parse(result.stdout) as {
+      ok: boolean;
+      error: { code: string; status: number; next?: { command: string } };
+      warnings?: Array<{ code: string; message: string }>;
+    };
+    assert.equal(envelope.ok, false);
+    assert.equal(envelope.error.code, "payment_required");
+    assert.equal(envelope.error.status, 402);
+    assert.match(String(envelope.error.next?.command), /account show/);
+    const warning = envelope.warnings?.find((item) => item.code === "credits_low");
+    assert.ok(warning, result.stdout);
+    assert.match(warning.message, /\b0\b/);
+    assert.doesNotMatch(result.stdout, /stripe|x402|pay |kCr|mcr|millicredit|\$/i);
+
+    const human = await withRuntime(["media", "upload", file, "--no-transcode"], transport, { fs: fsLike });
+    assert.equal(human.code, 8, human.stderr);
+    assert.match(human.stderr, /payment_required/);
+    assert.match(human.stderr, /warning: Remaining prepaid credit is 0, below 1000 credits\./);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
@@ -1865,6 +2027,37 @@ test("media upload warns on a low-information filename without blocking the uplo
     assert.ok(warning, result.stdout);
     assert.match(warning.message, /video\.mp4/);
     assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 1);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("credits_low appends beside generic_filename instead of replacing it", async () => {
+  const transport = memoryBackend();
+  transport.extraResponseHeaders = { "ScreenRig-Credits-Remaining": "999" };
+  const configDir = await testTemp("media-filename-credits-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const file = path.join(configDir, "video.mp4");
+  await writeFile(file, Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
+  try {
+    const result = await withRuntime(
+      ["--json", "media", "upload", file, "--no-transcode"],
+      transport,
+      {
+        fs: fsLike,
+        signedRawPut: async () => ({ status: 200 }),
+      },
+    );
+    assert.equal(result.code, 0, result.stdout);
+    const envelope = JSON.parse(result.stdout) as { ok: boolean; warnings: Array<{ code: string }> };
+    assert.equal(envelope.ok, true);
+    assert.ok(envelope.warnings.some((item) => item.code === "generic_filename"), result.stdout);
+    assert.ok(envelope.warnings.some((item) => item.code === "credits_low"), result.stdout);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }

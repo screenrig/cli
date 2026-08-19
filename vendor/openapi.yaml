@@ -2,7 +2,36 @@ openapi: 3.1.0
 info:
   title: ScreenRig API
   version: 0.2.0
-  description: Agent-operated digital signage control and runtime API.
+  description: >-
+    Agent-operated digital signage control and runtime API.
+
+    Public remaining is whole credits, never millicredits. Authenticated /api/v1
+    JSON and problem responses include ScreenRig-Credits-Remaining,
+    ScreenRig-Credits-Reset, and ScreenRig-Credits-Included. SSE, runtime,
+    content, and unauthenticated responses omit them. The ledger unit remains
+    millicredits (1000 mcr = 1 credit); published remaining is floored.
+
+    Authenticated user or agent /api/v1 requests cost 1 credit, debited
+    immediately against this server request id. Remaining below 1 whole credit
+    is payment_required. GET /api/v1/account and POST
+    /api/v1/account/credential/revoke do not debit, so a zero-remaining account
+    can recover. Screen messages are exempt from this meter:
+    POST /api/v1/screens/{id}/toast, POST /api/v1/screens/{id}/screenshot,
+    GET /api/v1/screens/{id}/screenshot, and GET
+    /api/v1/screens/{id}/screenshot/status. Runtime, pairing, content, health,
+    and unauthenticated routes are not this meter. Inbound media commit,
+    application accept, and K/V put bytes, outbound runtime media/package/release
+    and K/V get bytes, and stored bytes settle hourly against remaining.
+    Public remaining stays whole credits.
+
+    Opening GET /api/v1/events/stream costs 1 credit as the listen subscribe.
+    Later billed events on that stream cost 1 credit each. Screen conversation
+    events are exempt: screen.*, runtime.*, and application.event. Heartbeats
+    and the retry preamble never charge. playlist.*, media.*, kv.*,
+    application.published, operation.*, account.*, feedback.*, stream.cursor,
+    and stream.resync_required are billed. SSE debit idempotency is
+    sse-event:<account_id>:<sequence>; reconnect replay is free. An unpaid
+    billed event is not written and the stream closes.
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 servers:
   - url: https://api.screenrig.ai
@@ -47,14 +76,27 @@ paths:
   /api/v1/account:
     get:
       operationId: getAccount
+      description: >-
+        The calling account. Does not debit the 1-credit API meter, so a
+        zero-remaining account can still read remaining and recover. After a
+        successful account principal, authenticated /api/v1 JSON and problem
+        responses include ScreenRig-Credits-Remaining, ScreenRig-Credits-Reset,
+        and ScreenRig-Credits-Included as whole credits. SSE, runtime, content,
+        and unauthenticated responses omit them.
       security: [{ accountBearer: [] }]
       responses:
-        "200": { description: Account, content: { application/json: { schema: { $ref: "#/components/schemas/Account" } } } }
+        "200":
+          description: Account
+          headers:
+            ScreenRig-Credits-Remaining: { $ref: "#/components/headers/ScreenRigCreditsRemaining" }
+            ScreenRig-Credits-Reset: { $ref: "#/components/headers/ScreenRigCreditsReset" }
+            ScreenRig-Credits-Included: { $ref: "#/components/headers/ScreenRigCreditsIncluded" }
+          content: { application/json: { schema: { $ref: "#/components/schemas/Account" } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/account/credential/revoke:
     post:
       operationId: revokeCurrentAccountCredential
-      description: Revokes exactly the calling account bearer and issues no replacement. The account, screens, and content remain. Repeating this request with the same cryptographically valid already-revoked bearer returns 204 only on this endpoint, allowing safe repair of an ambiguous response; every other account route rejects that bearer. This operation is intrinsically idempotent and does not use an Idempotency-Key.
+      description: Revokes exactly the calling account bearer and issues no replacement. The account, screens, and content remain. Repeating this request with the same cryptographically valid already-revoked bearer returns 204 only on this endpoint, allowing safe repair of an ambiguous response; every other account route rejects that bearer. This operation is intrinsically idempotent and does not use an Idempotency-Key. It does not debit the 1-credit API meter.
       security: [{ accountBearer: [] }]
       responses:
         "204": { description: "The calling credential is revoked. It cannot be recovered, and no replacement token was issued.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } } }
@@ -110,9 +152,17 @@ paths:
   /api/v1/playlists:
     get:
       operationId: listPlaylists
+      description: Lists playlists. Authenticated /api/v1 control-plane read; costs 1 credit.
       security: [{ accountBearer: [] }]
       responses:
-        "200": { description: Playlists, content: { application/json: { schema: { $ref: "#/components/schemas/PlaylistList" } } } }
+        "200":
+          description: Playlists
+          headers:
+            ScreenRig-Credits-Remaining: { $ref: "#/components/headers/ScreenRigCreditsRemaining" }
+            ScreenRig-Credits-Reset: { $ref: "#/components/headers/ScreenRigCreditsReset" }
+            ScreenRig-Credits-Included: { $ref: "#/components/headers/ScreenRigCreditsIncluded" }
+          content: { application/json: { schema: { $ref: "#/components/schemas/PlaylistList" } } }
+        "402": { $ref: "#/components/responses/Problem" }
     post:
       operationId: createPlaylist
       security: [{ accountBearer: [] }]
@@ -256,7 +306,8 @@ paths:
         material and other control characters are rejected. duration_ms defaults
         to 10000 and must be between 2000 and 60000 inclusive. An exact
         Idempotency-Key retry returns the original expires_at for twenty-four
-        hours. Latest-wins: there is no queue and no cancel verb.
+        hours. Latest-wins: there is no queue and no cancel verb. Screen
+        messages are exempt from the 1-credit API meter.
       security: [{ accountBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenToastWrite" } } } }
@@ -281,7 +332,8 @@ paths:
         expires_at. Event details name capture_id, expires_at, max_width_divisor
         2, max_height_divisor 2, format image/webp, quality 80, and max_bytes
         2097152. Image bytes never appear on SSE. Prepaid remaining credit is
-        not a gate. An exact Idempotency-Key retry returns the original
+        not a gate, and this screen-message path is exempt from the 1-credit
+        API meter. An exact Idempotency-Key retry returns the original
         capture_id and expires_at for twenty-four hours.
       security: [{ accountBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
@@ -300,7 +352,8 @@ paths:
         capture_id must match that ready slot. A named capture_id that expired
         with no upload is screenshot_unavailable. A named capture_id replaced
         by a later request is resource_conflict. Image bytes are never a signed
-        URL or object key. Range is not accepted.
+        URL or object key. Range is not accepted. Screen messages are exempt
+        from the 1-credit API meter.
       security: [{ accountBearer: [] }]
       parameters:
         - { $ref: "#/components/parameters/ResourceID" }
@@ -331,7 +384,8 @@ paths:
         timed_out means the current id reached expires_at with no upload.
         Timeout is lazy: the first status GET or next POST after expiry records
         it and appends screen.screenshot_failed once with reason expired.
-        A timed-out request does not delete an older ready slot.
+        A timed-out request does not delete an older ready slot. Screen
+        messages are exempt from the 1-credit API meter.
       security: [{ accountBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/ResourceID" }]
       responses:
@@ -350,10 +404,20 @@ paths:
   /api/v1/events/stream:
     get:
       operationId: streamEvents
+      description: >-
+        Replayable account listen stream. Opening this request costs 1 credit
+        as the listen subscribe. Credit headers are omitted. Later billed
+        events cost 1 credit each; screen.*, runtime.*, and application.event
+        are exempt screen-conversation messages. Heartbeats and the retry
+        preamble never charge. stream.cursor and stream.resync_required are
+        billed. Debit idempotency is sse-event:<account_id>:<sequence>, so
+        reconnect replay is free. An unpaid billed event is not written and
+        the stream closes.
       security: [{ accountBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/AfterCursor" }, { $ref: "#/components/parameters/LastEventID" }]
       responses:
-        "200": { description: "Replayable SSE stream. The query cursor takes precedence over Last-Event-ID. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close.", content: { text/event-stream: { schema: { type: string } } } }
+        "200": { description: "Replayable SSE stream. The query cursor takes precedence over Last-Event-ID. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. No ScreenRig-Credits-* headers.", content: { text/event-stream: { schema: { type: string } } } }
+        "402": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/playback:
     get:
@@ -990,6 +1054,16 @@ paths:
         "204": { description: Paired-device KV deletion }
         default: { $ref: "#/components/responses/Problem" }
 components:
+  headers:
+    ScreenRigCreditsRemaining:
+      description: Remaining prepaid credits as a whole integer. Same value as credit_remaining. Never negative.
+      schema: { type: integer, minimum: 0 }
+    ScreenRigCreditsReset:
+      description: RFC 3339 UTC instant of the first moment of the next UTC calendar month, when the next included grant is added. Remaining is not replaced.
+      schema: { type: string, format: date-time }
+    ScreenRigCreditsIncluded:
+      description: Whole credits granted by the plan each UTC month.
+      schema: { type: integer, minimum: 0 }
   parameters:
     ResourceID: { name: id, in: path, required: true, schema: { type: string } }
     ApplicationID: { name: application_id, in: path, required: true, schema: { type: string } }
@@ -1060,7 +1134,7 @@ components:
     Capabilities:
       type: object
       additionalProperties: false
-      required: [api_version, protocol_version, application_compressed_bytes, application_expanded_bytes, application_package_bytes, application_file_count, application_file_bytes, application_path_depth, application_path_bytes, playlist_max_pages, playlist_max_items_per_page, playlist_max_media_per_selector, transition_max_duration_ms, screens_per_account, account_content_bytes, features]
+      required: [api_version, protocol_version, application_compressed_bytes, application_expanded_bytes, application_package_bytes, application_file_count, application_file_bytes, application_path_depth, application_path_bytes, media_image_bytes, playlist_max_pages, playlist_max_items_per_page, playlist_max_media_per_selector, transition_max_duration_ms, screens_per_account, account_content_bytes, features]
       properties:
         api_version: { type: string }
         protocol_version: { type: string }
@@ -1071,6 +1145,7 @@ components:
         application_file_bytes: { type: integer, enum: [33554432] }
         application_path_depth: { type: integer, enum: [16] }
         application_path_bytes: { type: integer, enum: [255] }
+        media_image_bytes: { type: integer, enum: [20971520], description: "Maximum declared byte size of one image upload, 20 MiB. It is a byte-only gate rejected with invalid_request before any byte is transferred; the server never decodes the image, and the bound applies to animated GIF and animated WebP exactly as it applies to a still. Pixel dimensions are not validated. A video declaration is bounded only by the plan-independent transport ceiling." }
         playlist_max_pages: { type: integer, enum: [100] }
         playlist_max_items_per_page: { type: integer, enum: [24] }
         playlist_max_media_per_selector: { type: integer, enum: [32], description: Maximum ready media objects one image or video selector may resolve to. }
@@ -1079,7 +1154,7 @@ components:
         account_content_bytes: { type: integer, enum: [0], description: "Storage limit of the default plan. Zero means no product storage cap. A custom storage ceiling, when present, still counts committed media, expanded application release trees, and application key/value entries together, including bytes reserved by an upload in flight. The per-request ceilings above are plan-independent transport bounds." }
         features: { type: object, additionalProperties: { type: boolean } }
     CLIEnrollmentRequest: { type: object, additionalProperties: false, required: [client_id], properties: { client_id: { type: string, pattern: "^cli_[A-Za-z0-9_-]{43}$", description: "Stable anonymous installation identity generated from 32 CSPRNG bytes and persisted before the first request. It is rate-limit material, not an account credential." }, beta_key: { type: string, description: "Required when the server has a configured enrollment beta key. Omit when the server does not gate enrollment." } } }
-    Account: { type: object, additionalProperties: false, required: [id, revision, status, used_bytes, reserved_bytes, screen_count, content_limit_bytes, screen_limit, credit_remaining_mcr, created_at, updated_at], properties: { id: { type: string }, revision: { type: integer }, status: { type: string, enum: [active, cancelled, deleted] }, used_bytes: { type: integer, description: "Durable bytes the account owns across media, expanded application release trees, and application key/value entries." }, reserved_bytes: { type: integer, description: "Bytes held by uploads in flight. They count against a custom storage ceiling until the upload commits or its reservation is released." }, screen_count: { type: integer }, content_limit_bytes: { type: integer, description: "Storage ceiling the account's plan allows. Zero means no product storage cap." }, screen_limit: { type: integer, description: "Screen limit the account's plan allows. Zero means no screen cap." }, credit_remaining_mcr: { type: integer, minimum: 0, description: "Remaining prepaid credit in integer mcr. One credit is 1000 mcr. Never negative. Enrollment grants the Standard included remainder." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    Account: { type: object, additionalProperties: false, required: [id, revision, status, used_bytes, reserved_bytes, screen_count, content_limit_bytes, screen_limit, credit_remaining, created_at, updated_at], properties: { id: { type: string }, revision: { type: integer }, status: { type: string, enum: [active, cancelled, deleted] }, used_bytes: { type: integer, description: "Durable bytes the account owns across media, expanded application release trees, and application key/value entries." }, reserved_bytes: { type: integer, description: "Bytes held by uploads in flight. They count against a custom storage ceiling until the upload commits or its reservation is released." }, screen_count: { type: integer }, content_limit_bytes: { type: integer, description: "Storage ceiling the account's plan allows. Zero means no product storage cap." }, screen_limit: { type: integer, description: "Screen limit the account's plan allows. Zero means no screen cap." }, credit_remaining: { type: integer, minimum: 0, description: "Remaining prepaid credits as a whole integer. Never negative. Enrollment grants the Standard included remainder of 10000 credits." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     RuntimeChrome: { type: object, additionalProperties: false, required: [schema_version, banner], properties: { schema_version: { type: integer, enum: [1] }, banner: { type: "null" } } }
     CLIEnrollment: { type: object, additionalProperties: false, required: [account, token, issuance_id, issuance_expires_at], properties: { account: { $ref: "#/components/schemas/Account" }, token: { type: string, minLength: 32, description: Permanent account bearer credential. It has no scheduled expiry and is redelivered only through this short-lived encrypted issuance envelope. }, issuance_id: { type: string, description: Opaque identifier for the encrypted exact-retry delivery envelope. }, issuance_expires_at: { type: string, format: date-time, description: Exact-retry redelivery deadline for this credential issuance; ten minutes after first enrollment. Later exact retries return credential_issuance_expired while the permanent token remains valid. } } }
     Application: { type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: { id: { type: string }, name: { type: string }, revision: { type: integer }, latest_ready_release: { type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
@@ -1416,7 +1491,7 @@ components:
     KVEntry: { type: object, additionalProperties: false, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, value_base64: { type: string, contentEncoding: base64 }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer } } }
     KVSummary: { type: object, additionalProperties: false, required: [application_id, key, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string }, updated_at: { type: string } } }
     KVList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/KVSummary" } } } }
-    MediaUploadDeclaration: { type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. Remaining prepaid credit of zero rejects declare and commit with payment_required. Read account_content_bytes from the capabilities document, or content_limit_bytes on the account, to know any custom ceiling. An optional tag is stored on the ready media object and is not redeclared at commit.", properties: { filename: { type: string, minLength: 1, maxLength: 255 }, content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } } }
+    MediaUploadDeclaration: { type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: the server never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. Remaining prepaid credit of zero rejects declare and commit with payment_required. Read account_content_bytes from the capabilities document, or content_limit_bytes on the account, to know any custom ceiling. An optional tag is stored on the ready media object and is not redeclared at commit.", properties: { filename: { type: string, minLength: 1, maxLength: 255 }, content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } } }
     MediaTagPatch: { type: object, additionalProperties: false, required: [tag], properties: { tag: { oneOf: [{ type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, { type: "null" }], description: "Replacement tag or null to clear it." } } }
     MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], description: "Declares only what the server can re-verify against the stored object byte for byte. Codec identity is not declared here: the server derives it from the container during asynchronous verification, so a client cannot assert a codec that drives player behaviour.", properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
     MediaUploadSession: { type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: { id: { type: string }, operation: { $ref: "#/components/schemas/Operation" }, upload_url: { type: string, format: uri }, method: { type: string, enum: [PUT] }, headers: { type: object, additionalProperties: { type: string }, description: Exact signed request headers; clients must send every field verbatim. }, expires_at: { type: string, format: date-time } } }

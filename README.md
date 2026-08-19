@@ -71,6 +71,15 @@ days first. Filter with `--screen-id`, `--media-id`, and `--day YYYY-MM-DD`.
 Those identifiers select the caller's own rows and are never a cross-account
 lookup.
 
+Authenticated responses may carry remaining prepaid credits as an integer.
+Remaining below 1000 credits adds a `credits_low` warning to the envelope
+`warnings[]` array; the message includes the integer remaining. A 402
+`payment_required` problem means remaining is below 1 credit and billed
+control-plane commands are rejected. Both signals can appear together on a
+402 envelope. `account show`, `auth revoke --yes`, `screen toast`, and
+`screen screenshot` do not debit that meter. Opening `events follow` costs
+1 credit. There is no pay command.
+
 ## Feedback
 
 Bug reports and feature requests are account-scoped and immutable:

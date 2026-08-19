@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { exitCodeForStatus, ExitCode } from "./exit-codes.js";
-import { normalizeProblem, renderProblem } from "./problems.js";
+import { normalizeProblem, renderProblem, withPaymentGuidance } from "./problems.js";
 
 test("maps HTTP statuses onto explicit exit codes", () => {
   assert.equal(exitCodeForStatus(401), ExitCode.Auth);
@@ -34,4 +34,18 @@ test("human rendering includes next-action guidance", () => {
   });
   assert.match(text, /revision_conflict\/412/);
   assert.match(text, /next: screenrig playlist get pl_01 --json/);
+});
+
+test("payment_required guidance names credit_remaining and not millicredits", () => {
+  const problem = withPaymentGuidance({
+    type: "https://screenrig.ai/problems/payment-required",
+    title: "Prepaid credit is required",
+    status: 402,
+    detail: "Prepaid credit remaining is zero.",
+    code: "payment_required",
+    errors: [],
+  });
+  assert.equal(problem.next?.command, "screenrig --json account show");
+  assert.match(problem.next?.reason ?? "", /credit_remaining/);
+  assert.doesNotMatch(problem.next?.reason ?? "", /mcr|millicredit|kCr|stripe|x402|\$/i);
 });

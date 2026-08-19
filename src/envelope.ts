@@ -35,6 +35,7 @@ export interface SuccessEnvelope<T> {
 export interface ErrorEnvelope {
   ok: false;
   error: NormalizedProblem;
+  warnings?: Warning[];
 }
 
 export type Envelope<T> = SuccessEnvelope<T> | ErrorEnvelope;
@@ -52,6 +53,7 @@ export function successEnvelope<T>(
   };
 }
 
-export function errorEnvelope(error: NormalizedProblem): ErrorEnvelope {
-  return { ok: false, error };
+export function errorEnvelope(error: NormalizedProblem, extras?: { warnings?: Warning[] }): ErrorEnvelope {
+  const warnings = extras?.warnings ?? [];
+  return warnings.length > 0 ? { ok: false, error, warnings } : { ok: false, error };
 }

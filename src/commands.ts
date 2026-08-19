@@ -44,6 +44,12 @@ import {
   writeConfigAtomic,
 } from "./config.js";
 import { ensureCredential } from "./enrollment.js";
+import {
+  headerValue,
+  CREDITS_REMAINING_HEADER,
+  observeCreditsRemaining,
+  parseCreditsInteger,
+} from "./credits.js";
 import { successEnvelope } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
 import { CliError, configError, makeProblem, usageError } from "./problems.js";
@@ -178,6 +184,7 @@ function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?
     requestId: flagString(args.flags, "request-id"),
     idempotencyKey: flagString(args.flags, "idempotency-key"),
     timeoutMs: flagNumber(args.flags, "timeout"),
+    creditsOwner: runtime,
   });
 }
 
@@ -565,13 +572,16 @@ async function accountShow(args: ParsedArgs, runtime: CliRuntime, resolved: Awai
   const response = await client.call({ method: "GET", path: "/api/v1/account" });
   const envelope = jsonBody(response, client.requestId, { token_lookup: describeToken(token) });
   const account = response.body as Account;
+  if (headerValue(response.headers, CREDITS_REMAINING_HEADER) === undefined) {
+    observeCreditsRemaining(runtime, parseCreditsInteger(account.credit_remaining));
+  }
   return {
     envelope,
     exitCode: ExitCode.Success,
     human: humanLines("Account", [
       ["id", account.id],
       ["revision", account.revision !== undefined ? String(account.revision) : undefined],
-      ["credit_remaining_mcr", account.credit_remaining_mcr !== undefined ? String(account.credit_remaining_mcr) : undefined],
+      ["credit_remaining", account.credit_remaining !== undefined ? String(account.credit_remaining) : undefined],
       ["token", describeToken(token)],
       ["request_id", client.requestId],
     ]),

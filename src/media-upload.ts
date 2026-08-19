@@ -66,7 +66,7 @@ export async function prepareMediaUpload(filePath: string, explicitContentType?:
   if (bytes.length > 1_073_741_824) {
     throw usageError(
       "Media file exceeds the 1 GiB per-upload transport ceiling. Run screenrig account show " +
-        "to inspect used_bytes, any content_limit_bytes ceiling, and credit_remaining_mcr.",
+        "to inspect used_bytes, any content_limit_bytes ceiling, and credit_remaining.",
     );
   }
   const sha256 = createHash("sha256").update(bytes).digest("hex");

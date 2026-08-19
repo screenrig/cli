@@ -155,7 +155,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   assert.deepEqual(quotedProperties(account), [
     "content_limit_bytes",
     "created_at",
-    "credit_remaining_mcr",
+    "credit_remaining",
     "id",
     "reserved_bytes",
     "revision",
@@ -166,9 +166,14 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "used_bytes",
   ]);
   assert.match(account, /"status": "active" \| "cancelled" \| "deleted"/);
+  assert.doesNotMatch(source, /credit_remaining_mcr/);
   assert.doesNotMatch(source, /AccountAccountings/);
   assert.doesNotMatch(source, /CreditAccountingHour/);
   const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
+  assert.doesNotMatch(openapi, /credit_remaining_mcr/);
+  assert.match(openapi, /ScreenRig-Credits-Remaining/);
+  assert.match(openapi, /ScreenRig-Credits-Reset/);
+  assert.match(openapi, /ScreenRig-Credits-Included/);
   assert.doesNotMatch(openapi, /\/api\/v1\/account\/accountings/);
   assert.doesNotMatch(openapi, /AccountAccountings/);
   assert.doesNotMatch(openapi, /CreditAccountingHour/);

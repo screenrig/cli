@@ -1,5 +1,5 @@
 import { ExitCode, exitCodeForStatus } from "./exit-codes.js";
-import type { NormalizedProblem, ProblemNext } from "./envelope.js";
+import type { NormalizedProblem, ProblemNext, Warning } from "./envelope.js";
 import { redactText, redactValue } from "./redact.js";
 
 const PROBLEM_BASE = "https://screenrig.ai/problems";
@@ -7,12 +7,14 @@ const PROBLEM_BASE = "https://screenrig.ai/problems";
 export class CliError extends Error {
   readonly problem: NormalizedProblem;
   readonly exitCode: ExitCode;
+  readonly warnings: Warning[];
 
-  constructor(problem: NormalizedProblem, exitCode?: ExitCode) {
+  constructor(problem: NormalizedProblem, exitCode?: ExitCode, warnings: Warning[] = []) {
     super(problem.detail || problem.title);
     this.name = "CliError";
     this.problem = problem;
     this.exitCode = exitCode ?? exitCodeForStatus(problem.status);
+    this.warnings = warnings;
   }
 }
 
@@ -218,7 +220,7 @@ export function withQuotaGuidance(problem: NormalizedProblem): NormalizedProblem
 
 /**
  * Remaining prepaid credit of zero rejects costly operations with
- * `payment_required`. Point at account show for credit_remaining_mcr. Do not
+ * `payment_required`. Point at account show for credit_remaining. Do not
  * invent a pay command; v1 does not collect money here.
  */
 export function withPaymentGuidance(problem: NormalizedProblem): NormalizedProblem {
@@ -229,7 +231,7 @@ export function withPaymentGuidance(problem: NormalizedProblem): NormalizedProbl
     ...problem,
     next: {
       command: "screenrig --json account show",
-      reason: "Read credit_remaining_mcr. Remaining prepaid credit of zero rejects costly operations.",
+      reason: "Read credit_remaining. Remaining prepaid credit of zero rejects costly operations.",
     },
   };
 }

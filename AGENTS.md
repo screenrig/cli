@@ -271,11 +271,13 @@ installation, players, backend services, the site, or production deployment.
 - The default plan has no product storage cap (`account_content_bytes` and
   `content_limit_bytes` are 0). A custom storage ceiling, when present, is
   checked first and rejected with `quota_exceeded`. Remaining prepaid credit of
-  zero rejects declare and commit with `payment_required`. Keep the 1 GiB local
-  check as a plan-independent transport bound. Keep `quota_exceeded` and
-  `payment_required` guidance pointing at `account show`. `account show` may
-  print remaining mcr; optional kCr display is later. Do not add pay, Stripe,
-  or x402 commands.
+  below 1 whole credit rejects billed `/api/v1` work with `payment_required`.
+  Keep the 1 GiB local check as a plan-independent transport bound. Keep
+  `quota_exceeded` and `payment_required` guidance pointing at `account show`.
+  `account show` prints integer `credit_remaining` and does not debit.
+  Remaining below 1000 credits adds `credits_low` to envelope `warnings[]`.
+  Screen toast and screenshot are exempt from the 1-credit API meter. Do not
+  add pay, Stripe, or x402 commands.
 - Screenshotting is in v1. `screen screenshot <id>` blocks on a still WebP and
   writes a file. Do not print pixels.
 

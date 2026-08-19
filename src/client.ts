@@ -1,3 +1,4 @@
+import { creditsLowWarnings, observeCreditsRemaining, parseCreditsRemainingHeader } from "./credits.js";
 import { ExitCode } from "./exit-codes.js";
 import { isValidIdempotencyKey, isValidRequestId, newIdempotencyKey, newRequestId } from "./ids.js";
 import {
@@ -20,6 +21,8 @@ export interface ApiClientOptions {
   requestId?: string;
   idempotencyKey?: string;
   timeoutMs?: number;
+  /** When set, authenticated remaining credits are observed for the envelope warning. */
+  creditsOwner?: object;
 }
 
 export class ApiClient {
@@ -28,11 +31,13 @@ export class ApiClient {
   private readonly token?: string;
   private readonly transport: Transport;
   private readonly timeoutMs: number;
+  private readonly creditsOwner?: object;
 
   constructor(options: ApiClientOptions) {
     this.transport = options.transport;
     this.token = options.token;
     this.timeoutMs = options.timeoutMs ?? 30_000;
+    this.creditsOwner = options.creditsOwner;
     if (options.requestId && !isValidRequestId(options.requestId)) {
       throw usageError("Invalid --request-id; expected req_ plus 16+ URL-safe characters.");
     }
@@ -67,6 +72,7 @@ export class ApiClient {
       timeout_ms: req.timeout_ms ?? this.timeoutMs,
       headers: this.headers(idempotent === true, req.headers, idempotencyKey),
     });
+    const remaining = this.token ? parseCreditsRemainingHeader(response.headers) : undefined;
     if (response.status >= 400) {
       const problem = normalizeProblem(response.body, {
         status: response.status,
@@ -79,7 +85,12 @@ export class ApiClient {
             withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
           ),
         ),
+        undefined,
+        creditsLowWarnings(remaining),
       );
+    }
+    if (this.creditsOwner) {
+      observeCreditsRemaining(this.creditsOwner, remaining);
     }
     return response;
   }
