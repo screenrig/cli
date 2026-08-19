@@ -214,6 +214,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "id",
     "label",
     "manifest_revision",
+    "observation",
     "playlist_id",
     "public_id",
     "revision",
@@ -225,6 +226,8 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   // A screen has no timezone until one is set, so it must stay optional. The
   // local schedule preflight reads exactly this member.
   assert.match(screen, /"timezone"\?: string/);
+  // Observation is player-reported and absent until the first report.
+  assert.match(screen, /"observation"\?: ScreenObservation/);
   assert.doesNotMatch(source, /Bootstrap/);
   assert.deepEqual(quotedProperties(interfaceBody(source, "ScreenPatch")), [
     "name",
@@ -293,6 +296,56 @@ test("local enrollment request adapter accepts optional beta_key", () => {
     "utf8",
   );
   assert.match(source, /export interface CLIEnrollmentRequest \{[\s\S]*?beta_key\?: string;/);
+});
+
+test("screen observation is optional, read-only, and absent from ScreenPatch", () => {
+  const generated = readFileSync(GENERATED_CONTRACT, "utf8");
+  const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
+  const adapter = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../src/adapters/protocol.ts"),
+    "utf8",
+  );
+  const commands = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../src/commands.ts"),
+    "utf8",
+  );
+
+  const screen = interfaceBody(generated, "Screen");
+  assert.match(screen, /"observation"\?: ScreenObservation/);
+  assert.doesNotMatch(screen, /"observation": ScreenObservation/);
+
+  const observation = interfaceBody(generated, "ScreenObservation");
+  assert.deepEqual(quotedProperties(observation), ["observed_at", "surfaces"]);
+
+  const surface = interfaceBody(generated, "ScreenObservationSurface");
+  assert.deepEqual(quotedProperties(surface), [
+    "height",
+    "id",
+    "pixel_ratio",
+    "presentation",
+    "width",
+  ]);
+  assert.match(surface, /"presentation": "output" \| "windowed"/);
+
+  const patch = interfaceBody(generated, "ScreenPatch");
+  assert.deepEqual(quotedProperties(patch), ["name", "playlist_id", "timezone"]);
+  assert.doesNotMatch(patch, /observation/);
+  assert.doesNotMatch(interfaceBody(generated, "PairScreen"), /observation/);
+  assert.doesNotMatch(interfaceBody(adapter, "ScreenPatch"), /observation/);
+  assert.match(adapter, /observation\?: ScreenObservation/);
+
+  const details = interfaceBody(generated, "ScreenSurfaceChangedDetails");
+  assert.deepEqual(quotedProperties(details), ["observed_at", "surfaces"]);
+
+  assert.match(openapi, /\/runtime\/v1\/observation:/);
+  assert.match(openapi, /operationId: putRuntimeObservation/);
+  assert.match(openapi, /ScreenPatch cannot write it/);
+  assert.match(openapi, /screen\.surface_changed/);
+  assert.match(openapi, /surfaces: \{ type: array, minItems: 1, maxItems: 1/);
+  // The CLI reads observation from GET /api/v1/screens/{id}. Players PUT the
+  // runtime route; this command surface must not.
+  assert.doesNotMatch(commands, /\/runtime\/v1\/observation/);
+  assert.match(commands, /screen update requires <id>, --if-match, and --name, --playlist-id, or --timezone/);
 });
 
 test("published problem codes include payment_required at 402", () => {

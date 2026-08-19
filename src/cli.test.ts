@@ -2585,6 +2585,114 @@ test("one screen update that sets both a playlist and a timezone needs no prefli
   await rm(configDir, { recursive: true, force: true });
 });
 
+const SAMPLE_OBSERVATION = {
+  observed_at: "2026-08-19T12:00:00Z",
+  surfaces: [
+    {
+      id: "primary",
+      width: 1920,
+      height: 1080,
+      pixel_ratio: 2,
+      presentation: "output" as const,
+    },
+  ],
+};
+
+test("screen show prints optional player-reported observation", async () => {
+  const transport = new FakeTransport();
+  const screen = {
+    content_access_generation: 1,
+    created_at: "2026-08-14T17:00:00.000Z",
+    id: "scr_PAIRINGAAAAAAAAAAAAAAAA",
+    label: "Lobby",
+    manifest_revision: 1,
+    observation: SAMPLE_OBSERVATION,
+    public_id: "scr_public_pairing",
+    revision: 1,
+    state: "active" as const,
+    updated_at: "2026-08-14T17:00:00.000Z",
+  };
+  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({
+    status: 200,
+    headers: { "x-request-id": "req_show_observation" },
+    body: screen,
+  }));
+  const configDir = await testTemp("screen-show-observation-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_existing_secret" },
+    fsLike,
+  );
+
+  const jsonResult = await withRuntime(
+    ["--json", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(jsonResult.code, ExitCode.Success, jsonResult.stdout);
+  const envelope = JSON.parse(jsonResult.stdout) as { ok: boolean; data: { observation?: unknown } };
+  assert.equal(envelope.ok, true);
+  assert.deepEqual(envelope.data.observation, SAMPLE_OBSERVATION);
+
+  const humanResult = await withRuntime(
+    ["screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(humanResult.code, ExitCode.Success, humanResult.stdout);
+  assert.match(humanResult.stdout, /^Screen\n/);
+  assert.match(humanResult.stdout, /"observed_at": "2026-08-19T12:00:00Z"/);
+  assert.match(humanResult.stdout, /"presentation": "output"/);
+  assert.equal(transport.calls.some((call) => call.path === "/runtime/v1/observation"), false);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen show still works when observation is absent", async () => {
+  const transport = memoryBackend();
+  const { code, configDir } = await withRuntime(["--json", "screen", "pair", "ABC234"], transport);
+  assert.equal(code, ExitCode.Success);
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+
+  const result = await withRuntime(
+    ["--json", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  const envelope = JSON.parse(result.stdout) as { ok: boolean; data: { id: string; observation?: unknown } };
+  assert.equal(envelope.ok, true);
+  assert.equal(envelope.data.id, "scr_PAIRINGAAAAAAAAAAAAAAAA");
+  assert.equal(envelope.data.observation, undefined);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen update cannot send observation", async () => {
+  const transport = memoryBackend();
+  const { code, configDir } = await withRuntime(["--json", "screen", "pair", "ABC234"], transport);
+  assert.equal(code, ExitCode.Success);
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  transport.calls.length = 0;
+
+  const result = await withRuntime(
+    [
+      "--json", "screen", "update", "scr_PAIRINGAAAAAAAAAAAAAAAA",
+      "--name", "Lobby",
+      "--if-match", "1",
+      "--observation", JSON.stringify(SAMPLE_OBSERVATION),
+    ],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  const patch = transport.calls.find((call) => call.method === "PATCH");
+  assert.equal(patch?.path, "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA");
+  assert.deepEqual(patch?.body, { name: "Lobby" });
+  assert.equal(JSON.stringify(patch?.body).includes("observation"), false);
+  assert.equal(transport.calls.some((call) => call.path === "/runtime/v1/observation"), false);
+  await rm(configDir, { recursive: true, force: true });
+});
+
 test("adding a schedule to a playlist an unzoned screen already runs is refused", async () => {
   const transport = memoryBackend();
   const { configDir, fsLike, file } = await scheduledPlaylistFixture(false, "tz-playlist-update-");

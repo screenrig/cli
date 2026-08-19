@@ -147,12 +147,32 @@ export function limitsFromCapabilities(capabilities: Capabilities): ArchiveLimit
  * no member of the schedule object is mirrored either.
  */
 
+export type ScreenObservationPresentation = "output" | "windowed";
+
+export interface ScreenObservationSurface {
+  height: number;
+  id: string;
+  pixel_ratio: number;
+  presentation: ScreenObservationPresentation;
+  width: number;
+}
+
+/**
+ * Player-reported playback surface. Absent until the first accepted player
+ * report. Read-only on the account API; ScreenPatch cannot write it.
+ */
+export interface ScreenObservation {
+  observed_at: string;
+  surfaces: ScreenObservationSurface[];
+}
+
 export interface Screen {
   content_access_generation: number;
   created_at: string;
   id: string;
   label: string;
   manifest_revision: number;
+  observation?: ScreenObservation;
   playlist_id?: string;
   public_id: string;
   revision: number;
@@ -168,7 +188,8 @@ export interface Screen {
 /**
  * The screen patch body. Every member is optional and the server requires at
  * least one, which is why each command builds only the members it was asked
- * for rather than sending undefined placeholders.
+ * for rather than sending undefined placeholders. Observation is not a
+ * patchable field.
  */
 export interface ScreenPatch {
   name?: string;
