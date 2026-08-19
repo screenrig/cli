@@ -702,7 +702,7 @@ test("events list sends after and limit when the user supplies them", async () =
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("formatEventLine prints at, type, and scalar details, never canned messages", () => {
+test("formatEventLine prints logfmt, never canned messages", () => {
   assert.equal(
     formatEventLine({
       cursor: "ev1_1",
@@ -713,7 +713,7 @@ test("formatEventLine prints at, type, and scalar details, never canned messages
       details: { extra: { nested: true }, count: 2, placement_id: "weather", code: "cta.pressed" },
       at: "2026-08-14T17:00:00.000Z",
     }),
-    "2026-08-14T17:00:00.000Z application.event code=cta.pressed placement_id=weather count=2",
+    "at=2026-08-14T17:00:00.000Z type=application.event severity=info code=cta.pressed placement_id=weather count=2",
   );
   assert.equal(
     formatEventLine({
@@ -725,7 +725,7 @@ test("formatEventLine prints at, type, and scalar details, never canned messages
       details: { code: "decoder.stalled" },
       at: "2026-08-14T17:00:01.000Z",
     }),
-    "2026-08-14T17:00:01.000Z runtime.reported code=decoder.stalled",
+    "at=2026-08-14T17:00:01.000Z type=runtime.reported severity=warning code=decoder.stalled",
   );
   assert.equal(
     formatEventLine({
@@ -736,7 +736,7 @@ test("formatEventLine prints at, type, and scalar details, never canned messages
       message: "created",
       at: "2026-08-14T17:00:02.000Z",
     }),
-    "2026-08-14T17:00:02.000Z account.created",
+    "at=2026-08-14T17:00:02.000Z type=account.created severity=info message=created",
   );
   assert.equal(
     formatEventLine({
@@ -748,6 +748,167 @@ test("formatEventLine prints at, type, and scalar details, never canned messages
       at: "",
     }),
     undefined,
+  );
+  assert.equal(
+    formatEventLine({
+      cursor: "ev1_5",
+      sequence: 5,
+      type: "application.event",
+      severity: "info",
+      message: "Application emitted an event",
+      at: "2026-08-14T17:00:03.000Z",
+    }),
+    undefined,
+  );
+  assert.equal(
+    formatEventLine({
+      cursor: "ev1_6",
+      sequence: 6,
+      type: "runtime.reported",
+      severity: "warning",
+      message: "Runtime reported a bounded condition",
+      at: "2026-08-14T17:00:04.000Z",
+    }),
+    undefined,
+  );
+  assert.equal(
+    formatEventLine({
+      cursor: "ev1_7",
+      sequence: 7,
+      type: "account.enrolled",
+      severity: "info",
+      message: "account.enrolled",
+      at: "2026-08-14T17:00:05.000Z",
+    }),
+    "at=2026-08-14T17:00:05.000Z type=account.enrolled severity=info",
+  );
+  assert.equal(
+    formatEventLine({
+      cursor: "ev1_8",
+      sequence: 8,
+      type: "application.event",
+      severity: "info",
+      message: "Doors open",
+      resource: { type: "screen", id: "scr_1", revision: 3 },
+      details: { code: "cta.pressed", placement_id: "weather", note: 'said "hi"' },
+      at: "2026-08-18T19:30:48.471Z",
+    }),
+    'at=2026-08-18T19:30:48.471Z type=application.event severity=info resource_type=screen resource_id=scr_1 code=cta.pressed placement_id=weather note="said \\"hi\\"" message="Doors open"',
+  );
+  assert.equal(
+    formatEventLine({
+      cursor: "ev1_9",
+      sequence: 9,
+      type: "screen.screenshot_ready",
+      severity: "info",
+      message: "Screen screenshot ready",
+      resource: { type: "screen", id: "scr_1" },
+      details: {
+        capture_id: "shot_1",
+        token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr",
+        authorization: "Bearer secret",
+        pixels: "data:image/webp;base64,AAAA",
+      },
+      at: "2026-08-14T17:00:06.000Z",
+    }),
+    "at=2026-08-14T17:00:06.000Z type=screen.screenshot_ready severity=info resource_type=screen resource_id=scr_1 capture_id=shot_1",
+  );
+  assert.equal(
+    formatEventLine({
+      cursor: "ev1_10",
+      sequence: 10,
+      type: "application.event",
+      severity: "info",
+      message: "cta.pressed",
+      details: { code: "cta.pressed", placement_id: "weather" },
+      at: "2026-08-14T17:00:07.000Z",
+    }),
+    "at=2026-08-14T17:00:07.000Z type=application.event severity=info code=cta.pressed placement_id=weather",
+  );
+  assert.equal(
+    formatEventLine({
+      cursor: "ev1_11",
+      sequence: 11,
+      type: "screen.screenshot_ready",
+      severity: "info",
+      message: "shot_1",
+      resource: { type: "screen", id: "scr_1" },
+      details: { capture_id: "shot_1" },
+      at: "2026-08-14T17:00:08.000Z",
+    }),
+    "at=2026-08-14T17:00:08.000Z type=screen.screenshot_ready severity=info resource_type=screen resource_id=scr_1 capture_id=shot_1 message=shot_1",
+  );
+  assert.equal(
+    formatEventLine({
+      cursor: "ev1_12",
+      sequence: 12,
+      type: "stream.cursor",
+      severity: "info",
+      message: "Stream cursor advanced",
+      at: "2026-08-14T17:00:09.000Z",
+    }),
+    "at=2026-08-14T17:00:09.000Z type=stream.cursor severity=info",
+  );
+  assert.equal(
+    formatEventLine({
+      cursor: "ev1_13",
+      sequence: 13,
+      type: "stream.resync_required",
+      severity: "info",
+      message: "Stream replay state is no longer retained",
+      at: "2026-08-14T17:00:10.000Z",
+    }),
+    "at=2026-08-14T17:00:10.000Z type=stream.resync_required severity=info",
+  );
+  assert.equal(
+    formatEventLine({
+      cursor: "ev1_14",
+      sequence: 14,
+      type: "runtime.reported",
+      severity: "warning",
+      message: "Player reported runtime status",
+      details: { code: "decoder.stalled" },
+      at: "2026-08-14T17:00:11.000Z",
+    }),
+    "at=2026-08-14T17:00:11.000Z type=runtime.reported severity=warning code=decoder.stalled",
+  );
+  assert.equal(
+    formatEventLine({
+      cursor: "ev1_15",
+      sequence: 15,
+      type: "screen.screenshot_requested",
+      severity: "info",
+      message: "Screenshot requested",
+      details: { capture_id: "shot_1" },
+      at: "2026-08-14T17:00:12.000Z",
+    }),
+    "at=2026-08-14T17:00:12.000Z type=screen.screenshot_requested severity=info capture_id=shot_1",
+  );
+  assert.equal(
+    formatEventLine({
+      cursor: "ev1_16",
+      sequence: 16,
+      type: "application.event",
+      severity: "info",
+      message: "Doors open",
+      details: {
+        extra_token: "sr_live_identifier_secret",
+        object_key: "accounts/acc/objects/obj",
+        upload_url: "https://example.invalid/put?X-Amz-Signature=abc",
+        completion_nonce: "nonce-value",
+        signed_url: "https://example.invalid/get?signature=abc",
+        access_token: "secret-material",
+        cookie: "session=abc",
+        password: "secret-material",
+        secret: "secret-material",
+        note: "use sr_live_identifier_secret now",
+        header: "Bearer secret-material",
+        preview: "data:image/webp;base64,AAAA",
+        code: "cta.pressed",
+      },
+      at: "2026-08-14T17:00:13.000Z",
+    }),
+    "at=2026-08-14T17:00:13.000Z type=application.event severity=info code=cta.pressed message=\"Doors open\"",
   );
 });
 
@@ -799,7 +960,7 @@ test("events list prints data or silence", async () => {
   assert.equal(printed.code, 0, printed.stdout);
   assert.equal(
     printed.stdout,
-    "2026-08-14T17:00:00.000Z application.event code=cta.pressed placement_id=weather\n2026-08-14T17:00:01.000Z runtime.reported code=decoder.stalled\n",
+    "at=2026-08-14T17:00:00.000Z type=application.event severity=info code=cta.pressed placement_id=weather\nat=2026-08-14T17:00:01.000Z type=runtime.reported severity=warning code=decoder.stalled\n",
   );
   assert.ok(!printed.stdout.includes("Application emitted an event"));
   assert.ok(!printed.stdout.includes("Runtime reported a bounded condition"));
@@ -848,7 +1009,7 @@ test("events follow parses SSE frames from the transport stream", async () => {
   assert.equal(human.code, 0, human.stdout);
   assert.equal(
     human.stdout,
-    "2026-08-14T17:00:00.000Z account.created\n2026-08-14T17:00:01.000Z screen.paired\n",
+    "at=2026-08-14T17:00:00.000Z type=account.created severity=info message=created\nat=2026-08-14T17:00:01.000Z type=screen.paired severity=info message=paired\n",
   );
   await rm(configDir, { recursive: true, force: true });
 });
@@ -897,7 +1058,7 @@ test("events follow writes a human line before the stream closes", async () => {
   });
   assert.equal(code, 0);
   assert.equal(wroteBeforeClose, true, `stdout before abort: ${JSON.stringify(writes)}`);
-  assert.equal(writes.join(""), "2026-08-14T17:00:00.000Z account.created\n");
+  assert.equal(writes.join(""), "at=2026-08-14T17:00:00.000Z type=account.created severity=info message=created\n");
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -919,6 +1080,72 @@ test("events follow is silent when no events arrive", async () => {
   assert.equal(lines.length, 1, json.stdout);
   const envelope = JSON.parse(lines[0] ?? "") as { ok: true; data: { items: unknown[] } };
   assert.deepEqual(envelope.data.items, []);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("events --json omits tokens, pixels, authorization, and object keys", async () => {
+  const leakedToken = "sr_live_evtAAAAAAAAAAAAAAAA_eventsecreeventsecreeventsecreeve";
+  const leakedPixels = "data:image/webp;base64,QUFBQQ";
+  const leakedAuth = "Bearer event-secret-material";
+  const leakedObjectKey = "accounts/acc/objects/obj_eventsecret";
+  const event = {
+    cursor: "ev1_9",
+    sequence: 9,
+    type: "screen.screenshot_ready",
+    severity: "info",
+    message: "shot_1",
+    resource: { type: "screen", id: "scr_1" },
+    details: {
+      capture_id: "shot_1",
+      token: leakedToken,
+      authorization: leakedAuth,
+      pixels: leakedPixels,
+      object_key: leakedObjectKey,
+      upload_url: "https://example.invalid/put?X-Amz-Signature=abc",
+      completion_nonce: "nonce-event-secret",
+    },
+    at: "2026-08-14T17:00:06.000Z",
+  };
+  const transport = new FakeTransport();
+  transport.on("GET", "/api/v1/events", () => ({
+    status: 200,
+    headers: { "x-request-id": "req_events_json" },
+    body: { items: [event], next_cursor: "ev1_9" },
+  }));
+  const configDir = await testTemp("ev-json-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const listed = await withRuntime(["--json", "events", "list"], transport, { fs: fsLike });
+  assert.equal(listed.code, 0, listed.stdout);
+  const listedEnvelope = JSON.parse(listed.stdout) as {
+    ok: true;
+    data: { items: Array<{ message: string; details: Record<string, unknown> }> };
+  };
+  assert.equal(listedEnvelope.data.items[0]?.message, "shot_1");
+  assert.deepEqual(listedEnvelope.data.items[0]?.details, { capture_id: "shot_1" });
+  assert.ok(!listed.stdout.includes(leakedToken));
+  assert.ok(!listed.stdout.includes(leakedPixels));
+  assert.ok(!listed.stdout.includes(leakedAuth));
+  assert.ok(!listed.stdout.includes(leakedObjectKey));
+  assert.ok(!listed.stdout.includes("X-Amz-Signature"));
+  assert.ok(!listed.stdout.includes("nonce-event-secret"));
+
+  const followTransport = memoryBackend();
+  followTransport.pushStream(`id: ev1_9\nevent: message\ndata: ${JSON.stringify(event)}\n\n`);
+  const followed = await withRuntime(["--json", "events", "follow"], followTransport, { fs: fsLike });
+  assert.equal(followed.code, 0, followed.stdout);
+  const followLine = followed.stdout.split("\n").find((line) => line.length > 0) ?? "";
+  const followEnvelope = JSON.parse(followLine) as { ok: true; data: { message: string; details: Record<string, unknown> } };
+  assert.equal(followEnvelope.data.message, "shot_1");
+  assert.deepEqual(followEnvelope.data.details, { capture_id: "shot_1" });
+  assert.ok(!followed.stdout.includes(leakedToken));
+  assert.ok(!followed.stdout.includes(leakedPixels));
+  assert.ok(!followed.stdout.includes(leakedAuth));
+  assert.ok(!followed.stdout.includes(leakedObjectKey));
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -945,7 +1172,7 @@ test("events follow prints scalar details and skips empty frames", async () => {
   assert.equal(code, 0, stdout);
   assert.equal(
     stdout,
-    "2026-08-14T17:00:00.000Z application.event code=cta.pressed placement_id=weather\n2026-08-14T17:00:01.000Z runtime.reported code=decoder.stalled\n",
+    "at=2026-08-14T17:00:00.000Z type=application.event severity=info code=cta.pressed placement_id=weather\nat=2026-08-14T17:00:01.000Z type=runtime.reported severity=warning code=decoder.stalled\n",
   );
   assert.ok(!stdout.includes("Application emitted an event"));
   assert.ok(!stdout.includes("Runtime reported a bounded condition"));
@@ -2106,6 +2333,68 @@ test("playlist create expands a templated page and forwards a full page unchange
   assert.equal(title?.content.type, "text");
   assert.equal(title?.content.text, "Welcome");
   assert.equal(introPlacements.find((placement) => placement.id === "bar")?.content.type, "line");
+  assert.deepEqual(body.pages[1], fullPage);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("playlist create accepts a linear canvas.background on a templated page and a full page", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("playlist-gradient-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_existing_secret" },
+    fsLike,
+  );
+  const wash = {
+    type: "linear",
+    stops: [
+      { at: 0, color: "#1b2632ff" },
+      { at: 1, color: "#eee9dfff" },
+    ],
+  };
+  const fullPage = {
+    id: "poster",
+    canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: wash },
+    transition: { type: "crossfade", duration_ms: 200 },
+    advance: { mode: "duration", after_ms: 8000 },
+    placements: [
+      {
+        id: "hero",
+        content: { type: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
+        rect: { x: 0, y: 0, width: 1920, height: 1080 },
+        layer: 0,
+        content_fit: "contain",
+      },
+    ],
+  };
+  const file = path.join(configDir, "playlist.json");
+  await writeFile(
+    file,
+    JSON.stringify({
+      name: "Lobby",
+      pages: [
+        {
+          id: "intro",
+          template: "slide-intro",
+          canvas: { background: wash },
+          slots: { title: { text: "Welcome" } },
+        },
+        fullPage,
+      ],
+    }),
+  );
+  const result = await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  const posted = transport.calls.find((call) => call.method === "POST" && call.path === "/api/v1/playlists");
+  const body = posted?.body as { pages: Array<{ canvas: { background: unknown } }> };
+  assert.deepEqual(body.pages[0]!.canvas.background, {
+    type: "linear",
+    stops: [
+      { at: 0, color: "#1B2632FF" },
+      { at: 1, color: "#EEE9DFFF" },
+    ],
+  });
   assert.deepEqual(body.pages[1], fullPage);
   await rm(configDir, { recursive: true, force: true });
 });

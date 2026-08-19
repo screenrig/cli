@@ -1153,7 +1153,7 @@ components:
         width: { type: number, exclusiveMinimum: 0 }
         height: { type: number, exclusiveMinimum: 0 }
         viewport_fit: { type: string, enum: [contain, cover, fill], default: contain }
-        background: { type: string, pattern: "^#[0-9A-F]{8}$", description: Canonical uppercase RRGGBBAA color. }
+        background: { $ref: "#/components/schemas/CanvasBackground" }
     PlaylistRect:
       type: object
       additionalProperties: false
@@ -1239,6 +1239,27 @@ components:
     PlaylistCornerRadius: { type: object, additionalProperties: false, required: [top_left, top_right, bottom_right, bottom_left], properties: { top_left: { $ref: "#/components/schemas/CanvasLength" }, top_right: { $ref: "#/components/schemas/CanvasLength" }, bottom_right: { $ref: "#/components/schemas/CanvasLength" }, bottom_left: { $ref: "#/components/schemas/CanvasLength" } } }
     CanvasLength: { type: number, minimum: 0, maximum: 100000, description: "Canvas units, like every length in screenrig.canvas/v1. Never pixels and never a percentage." }
     CanvasColor: { type: string, pattern: "^#[0-9A-F]{8}$", description: Canonical uppercase sRGB RRGGBBAA. }
+    LinearGradientStop:
+      type: object
+      additionalProperties: false
+      required: [at, color]
+      description: One stop on a top-to-bottom linear canvas background. at=0 is the top edge, at=1 is the bottom edge.
+      properties:
+        at: { type: number, minimum: 0, maximum: 1 }
+        color: { $ref: "#/components/schemas/CanvasColor" }
+    LinearGradientBackground:
+      type: object
+      additionalProperties: false
+      required: [type, stops]
+      description: Top-to-bottom linear gradient. There is no angle field. stops has 2 through 8 entries, strictly increasing at in [0, 1], first at=0, last at=1.
+      properties:
+        type: { type: string, enum: [linear] }
+        stops: { type: array, minItems: 2, maxItems: 8, items: { $ref: "#/components/schemas/LinearGradientStop" } }
+    CanvasBackground:
+      oneOf:
+        - { $ref: "#/components/schemas/CanvasColor" }
+        - { $ref: "#/components/schemas/LinearGradientBackground" }
+      description: Solid canonical uppercase #RRGGBBAA, or a top-to-bottom linear gradient.
     PlaylistTextContent:
       type: object
       additionalProperties: false
@@ -1483,7 +1504,7 @@ components:
         width: { type: number, exclusiveMinimum: 0 }
         height: { type: number, exclusiveMinimum: 0 }
         viewportFit: { type: string, enum: [contain, cover, fill] }
-        background: { type: string, pattern: "^#[0-9A-F]{8}$", description: Canonical uppercase RRGGBBAA color. }
+        background: { $ref: "#/components/schemas/CanvasBackground" }
     RuntimeRect:
       type: object
       additionalProperties: false

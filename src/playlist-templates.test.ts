@@ -504,7 +504,7 @@ test("slide-photo and slide-full-bleed cover the stage; logo overlays at layer 2
     width: 1834,
     height: 880,
   });
-  assert.equal(photo.find((item) => item.id === "caption")?.rect.x, 419);
+  assert.equal(photo.find((item) => item.id === "caption")?.rect.x, 59);
   assert.equal(photo.find((item) => item.id === "caption")?.rect.y, 1012);
   assert.equal(photo.find((item) => item.id === "logo")?.layer, 2);
   assert.equal(photo.find((item) => item.id === "logo")?.content_fit, "contain");
@@ -545,6 +545,27 @@ test("logo rejects video; page text_color tints only slots without a template co
     canvas: { background: "#112233ff" },
     slots: { eyebrow: { text: "Today" }, headline: { text: "Hours" } },
   }) as { canvas: { background: string } }).canvas.background, "#112233FF");
+  const wash = {
+    type: "linear" as const,
+    stops: [
+      { at: 0, color: "#1b2632ff" },
+      { at: 0.5, color: "#243040FF" },
+      { at: 1, color: "#eee9dfff" },
+    ],
+  };
+  assert.deepEqual((expandPlaylistPage({
+    id: "copy",
+    template: "slide-text-only-1",
+    canvas: { background: wash },
+    slots: { eyebrow: { text: "Today" }, headline: { text: "Hours" } },
+  }) as { canvas: { background: unknown } }).canvas.background, {
+    type: "linear",
+    stops: [
+      { at: 0, color: "#1B2632FF" },
+      { at: 0.5, color: "#243040FF" },
+      { at: 1, color: "#EEE9DFFF" },
+    ],
+  });
   assert.equal(expanded.find((item) => item.id === "headline")?.content.color, "#FFFFFFFF");
   assert.equal(expanded.find((item) => item.id === "eyebrow")?.content.color, SLIDE_MUSTARD);
   assert.equal(expanded.find((item) => item.id === "body")?.content.color, SLIDE_DIM);
@@ -584,6 +605,19 @@ test("a page without template is forwarded unchanged", () => {
   };
   assert.equal(expandPlaylistPage(full), full);
   assert.deepEqual(expandPlaylistPages([full]), [full]);
+  const wash = {
+    type: "linear" as const,
+    stops: [
+      { at: 0, color: "#000000FF" },
+      { at: 1, color: "#FFFFFFFF" },
+    ],
+  };
+  const gradient = {
+    ...full,
+    canvas: { ...full.canvas, background: wash },
+  };
+  assert.equal(expandPlaylistPage(gradient), gradient);
+  assert.equal((gradient.canvas.background as { type: string }).type, "linear");
 });
 
 test("unknown and retired template ids name playlist templates", () => {
@@ -686,6 +720,85 @@ test("templated page usage errors name the offending field", () => {
       slots: { title: { text: "Welcome", rect: { x: 0, y: 0, width: 1, height: 1 } } },
     }),
     /Slot title has unsupported fields: rect/,
+  );
+  assertUsage(
+    () => expandPlaylistPage({
+      id: "intro",
+      template: "slide-intro",
+      canvas: { background: { type: "radial", stops: [{ at: 0, color: "#000000FF" }, { at: 1, color: "#FFFFFFFF" }] } },
+      slots: { title: { text: "Welcome" } },
+    }),
+    /canvas\.background\.type must be linear/,
+  );
+  assertUsage(
+    () => expandPlaylistPage({
+      id: "intro",
+      template: "slide-intro",
+      canvas: { background: { type: "linear", stops: [{ at: 0, color: "#000000FF" }] } },
+      slots: { title: { text: "Welcome" } },
+    }),
+    /canvas\.background\.stops must contain 2 through 8 stops/,
+  );
+  assertUsage(
+    () => expandPlaylistPage({
+      id: "intro",
+      template: "slide-intro",
+      canvas: {
+        background: {
+          type: "linear",
+          angle: 90,
+          stops: [{ at: 0, color: "#000000FF" }, { at: 1, color: "#FFFFFFFF" }],
+        },
+      },
+      slots: { title: { text: "Welcome" } },
+    }),
+    /canvas\.background has unsupported fields: angle/,
+  );
+  assertUsage(
+    () => expandPlaylistPage({
+      id: "intro",
+      template: "slide-intro",
+      canvas: {
+        background: {
+          type: "linear",
+          stops: [{ at: 0.1, color: "#000000FF" }, { at: 1, color: "#FFFFFFFF" }],
+        },
+      },
+      slots: { title: { text: "Welcome" } },
+    }),
+    /canvas\.background\.stops\[0\]\.at must be 0/,
+  );
+  assertUsage(
+    () => expandPlaylistPage({
+      id: "intro",
+      template: "slide-intro",
+      canvas: {
+        background: {
+          type: "linear",
+          stops: [{ at: 0, color: "#000000FF" }, { at: 0.5, color: "#FFFFFFFF" }],
+        },
+      },
+      slots: { title: { text: "Welcome" } },
+    }),
+    /canvas\.background\.stops\[1\]\.at must be 1/,
+  );
+  assertUsage(
+    () => expandPlaylistPage({
+      id: "intro",
+      template: "slide-intro",
+      canvas: {
+        background: {
+          type: "linear",
+          stops: [
+            { at: 0, color: "#000000FF" },
+            { at: 0, color: "#111111FF" },
+            { at: 1, color: "#FFFFFFFF" },
+          ],
+        },
+      },
+      slots: { title: { text: "Welcome" } },
+    }),
+    /canvas\.background\.stops\[1\]\.at must be strictly greater than the previous stop/,
   );
 });
 
@@ -829,7 +942,7 @@ test("slot align override appears on the placement; omitted uses the template de
   );
 });
 
-test("every template uses the shared bottom-left logo rect", () => {
+test("every template uses the shared horizontally centered logo rect", () => {
   assert.equal(SLIDE_TEMPLATES.length, 15);
   for (const template of SLIDE_TEMPLATES) {
     const logo = template.slots.find((slot) => slot.id === "logo");

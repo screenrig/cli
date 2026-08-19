@@ -25,7 +25,25 @@ export const SLIDE_PLATE_PAD_Y = 40;
 export const SLIDE_FIT_MIN_RATIO = 0.5;
 export const SLIDE_FIT_MAX_RATIO = 1.5;
 export const SLIDE_FIT_ABS_FLOOR = 12;
-export const SHARED_LOGO_RECT = { x: 59, y: 972, width: 344, height: 64 };
+export const SHARED_LOGO_RECT = { x: 788, y: 972, width: 344, height: 64 };
+
+/** One stop on a top-to-bottom linear canvas background. `at=0` is the top edge. */
+export interface LinearGradientStop {
+  at: number;
+  color: string;
+}
+
+/**
+ * Top-to-bottom linear fill. There is no angle field. `stops` is 2 through 8
+ * entries, strictly increasing `at` in [0, 1], first at=0, last at=1.
+ */
+export interface LinearGradientBackground {
+  type: "linear";
+  stops: LinearGradientStop[];
+}
+
+/** Solid canonical `#RRGGBBAA`, or a linear top-to-bottom gradient. */
+export type CanvasBackground = string | LinearGradientBackground;
 
 const TEMPLATED_PAGE_KEYS = new Set([
   "id",
@@ -426,7 +444,7 @@ export const SLIDE_TEMPLATES: readonly SlideTemplateDef[] = [
     plate: false,
     slots: [
       picture("picture", true, { x: 43, y: 122, width: 1834, height: 880 }),
-      text("caption", false, { x: 419, y: 1012, width: 1421, height: 52 }, {
+      text("caption", false, { x: 59, y: 1012, width: 713, height: 52 }, {
         font_size: 22,
         line_height: 30,
         font_weight: 400,
@@ -691,7 +709,7 @@ function readSlots(value: unknown, label: string): Record<string, unknown> {
   return value;
 }
 
-function readBackground(canvas: unknown, label: string): string {
+function readBackground(canvas: unknown, label: string): CanvasBackground {
   if (canvas === undefined) {
     return SLIDE_BACKGROUND;
   }
@@ -705,7 +723,56 @@ function readBackground(canvas: unknown, label: string): string {
   if (canvas.background === undefined) {
     return SLIDE_BACKGROUND;
   }
-  return canvasColor(canvas.background, `${label} canvas.background`);
+  return canvasBackground(canvas.background, `${label} canvas.background`);
+}
+
+function canvasBackground(value: unknown, name: string): CanvasBackground {
+  if (typeof value === "string") {
+    return canvasColor(value, name);
+  }
+  if (!isRecord(value)) {
+    throw usageError(`${name} must be an 8-digit #RRGGBBAA color or a linear gradient.`);
+  }
+  const extra = Object.keys(value).filter((key) => key !== "type" && key !== "stops").sort();
+  if (extra.length > 0) {
+    throw usageError(`${name} has unsupported fields: ${extra.join(", ")}.`);
+  }
+  if (value.type !== "linear") {
+    throw usageError(`${name}.type must be linear.`);
+  }
+  if (!Array.isArray(value.stops) || value.stops.length < 2 || value.stops.length > 8) {
+    throw usageError(`${name}.stops must contain 2 through 8 stops.`);
+  }
+  const last = value.stops.length - 1;
+  let previousAt = Number.NEGATIVE_INFINITY;
+  const stops = value.stops.map((stop, index) => {
+    const stopName = `${name}.stops[${index}]`;
+    if (!isRecord(stop)) {
+      throw usageError(`${stopName} must be an object.`);
+    }
+    const stopExtra = Object.keys(stop).filter((key) => key !== "at" && key !== "color").sort();
+    if (stopExtra.length > 0) {
+      throw usageError(`${stopName} has unsupported fields: ${stopExtra.join(", ")}.`);
+    }
+    if (typeof stop.at !== "number" || !Number.isFinite(stop.at) || stop.at < 0 || stop.at > 1) {
+      throw usageError(`${stopName}.at must be a finite number from 0 through 1.`);
+    }
+    if (index === 0 && stop.at !== 0) {
+      throw usageError(`${stopName}.at must be 0.`);
+    }
+    if (index === last && stop.at !== 1) {
+      throw usageError(`${stopName}.at must be 1.`);
+    }
+    if (index > 0 && !(stop.at > previousAt)) {
+      throw usageError(`${stopName}.at must be strictly greater than the previous stop.`);
+    }
+    previousAt = stop.at;
+    return {
+      at: stop.at,
+      color: canvasColor(stop.color, `${stopName}.color`),
+    };
+  });
+  return { type: "linear", stops };
 }
 
 function readTextSlot(slot: TextSlotDef, value: unknown): TextSlotValue | undefined {

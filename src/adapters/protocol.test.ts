@@ -385,6 +385,24 @@ test("an application carries no state of its own and reports its newest ready re
   assert.match(openapi, /Application: \{ type: object, additionalProperties: false/);
 });
 
+test("canvas background is a solid color or a top-to-bottom linear gradient", () => {
+  const generated = readFileSync(GENERATED_CONTRACT, "utf8");
+  const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
+
+  assert.match(generated, /export type CanvasBackground = CanvasColor \| LinearGradientBackground/);
+  const gradient = interfaceBody(generated, "LinearGradientBackground");
+  assert.deepEqual(quotedProperties(gradient), ["stops", "type"]);
+  assert.match(gradient, /"type": "linear"/);
+  const stop = interfaceBody(generated, "LinearGradientStop");
+  assert.deepEqual(quotedProperties(stop), ["at", "color"]);
+  assert.match(interfaceBody(generated, "PlaylistCanvas"), /"background": CanvasBackground/);
+
+  assert.match(openapi, /CanvasBackground:[\s\S]*?oneOf:/);
+  assert.match(openapi, /LinearGradientBackground:[\s\S]*?enum: \[linear\]/);
+  assert.match(openapi, /There is no angle field/);
+  assert.doesNotMatch(openapi, /background: \{ type: string, pattern: "\^#\[0-9A-F\]\{8\}\$"/);
+});
+
 test("page visibility is a scheduling sibling of advance and needs a screen timezone", () => {
   const generated = readFileSync(GENERATED_CONTRACT, "utf8");
   const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");

@@ -152,6 +152,26 @@ installation, players, backend services, the site, or production deployment.
   The success envelope is `screen_id`, `capture_id`, `path`, `bytes`, `sha256`,
   `width`, and `height` only.
 
+## Events
+
+- `events list` binds `GET /api/v1/events` with `--after` / `--cursor` and
+  `--limit`. `events follow` binds `GET /api/v1/events/stream` with the same
+  cursor flags and the global `--timeout`.
+- Human mode is logfmt: one `key=value` line per printable event. `--json
+  events list` is one page envelope. `--json events follow` is a JSON stream
+  of envelopes. Do not document canned server sentences as the trail.
+- A human line carries `at`, `type`, `severity`, optional `resource_type` and
+  `resource_id`, scalar `details`, and a `message` that is not canned and is
+  not a duplicate of `type` or `details.code`. Nested objects, empty strings,
+  and sensitive keys or values are omitted. A screenshot `capture_id` is data.
+- An `application.event` or `runtime.reported` with no remaining scalar
+  payload is silent. A silent page or stream writes no human output. `--json
+  events list` still emits the empty page envelope. `--json events follow`
+  with no events emits one empty `{ items: [] }` envelope.
+- `--json` redacts tokens, pixels, authorization, object keys, and other
+  credential-shaped material. Canned-sentence silence is human-only. After
+  redaction, a server `message` field that is data remains.
+
 ## Page scheduling
 
 - `visibility` on a playlist page is optional playback orchestration and a
@@ -205,6 +225,11 @@ installation, players, backend services, the site, or production deployment.
   still reject a page that contains one until every player is pinned; if it
   does, surface the
   problem and stop. Do not invent an image fallback.
+- `canvas.background` is a solid uppercase `#RRGGBBAA` or a top-to-bottom
+  linear gradient (`type: "linear"`, 2 through 8 strictly increasing stops,
+  first at=0, last at=1). There is no angle. Templated pages accept that
+  union on `canvas.background` only. Default slide templates stay solid
+  `SLIDE_BACKGROUND`. Do not invent a local background variant.
 - `Media.codecs` is server-derived from the stored bytes and never
   client-declared. The CLI must not send, infer, or validate it. `--codec hevc`
   simply causes the server to derive `hvc1.*` instead.

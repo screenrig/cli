@@ -29,7 +29,11 @@ retry.
 
 Playlist create and update expand any templated page (`template` + `slots`)
 into an ordinary page and send that. A page without `template` is forwarded
-unchanged. `playlist templates` prints the closed catalog. Image and
+unchanged. `playlist templates` prints the closed catalog. `canvas.background`
+is a solid uppercase `#RRGGBBAA` or a top-to-bottom linear gradient (`type`
+`linear`, 2 through 8 strictly increasing stops, first `at` 0, last `at` 1, no
+angle). Templated pages override it on `canvas.background` only. The catalog
+default stays the solid `#1B2632FF`. Image and
 video placements write a `selector` (`by` is `id`, `ids`, `all`, or `tag`).
 Do not put `media_id` on the content object, and do not send server-resolved
 `items`. Page advance uses `duration`, `application`, or `media_end`. There
@@ -173,6 +177,29 @@ The success envelope is `screen_id`, `capture_id`, `path`, `bytes`, `sha256`,
 `width`, and `height` only. A matching `timed_out` status or a wait deadline
 is `screenshot_unavailable`. A later `capture_id` is `resource_conflict`. The
 CLI never prints image bytes, hex, or base64.
+
+## Events
+
+`events list` reads one finite page. `events follow` stays on the stream.
+Human mode prints one logfmt line per event. `--json events list` prints one
+JSON page envelope. `--json events follow` prints one JSON envelope per event
+as it arrives.
+
+```sh
+screenrig events list
+screenrig --json events list --after ev1_0 --limit 25
+screenrig events follow
+screenrig --json events follow --after ev1_0
+```
+
+A human line looks like
+`at=2026-08-14T17:00:00.000Z type=application.event severity=info code=cta.pressed placement_id=weather`.
+It carries `at`, `type`, `severity`, optional resource fields, scalar
+details, and a non-canned `message`. Canned server sentences are omitted. An
+`application.event` or `runtime.reported` with no remaining data is silent. A
+page or stream with nothing to print writes no human output. `--json` is a
+JSON envelope or stream. After redaction it may still include a server
+`message` field when that field is data.
 
 ## Media transcoding
 

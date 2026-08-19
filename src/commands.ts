@@ -71,7 +71,7 @@ import {
   clearBrowserSetupRetryState,
   normalizeBrowserSetupCode,
 } from "./browser-setup.js";
-import { redactText } from "./redact.js";
+import { isSensitiveKey, isSensitiveValue, redactEvent, redactText } from "./redact.js";
 import {
   expandPlaylistPages,
   formatTemplateCatalog,
@@ -1733,30 +1733,79 @@ async function operationsCancel(args: ParsedArgs, runtime: CliRuntime, resolved:
   };
 }
 
+const CANNED_EVENT_MESSAGES = new Set([
+  "Application emitted an event",
+  "Runtime reported a bounded condition",
+  "Player reported runtime status",
+  "Screen screenshot requested",
+  "Screen screenshot ready",
+  "Screen screenshot failed",
+  "Screenshot requested",
+  "Screenshot ready",
+  "Screenshot failed",
+  "Stream cursor advanced",
+  "Stream replay state is no longer retained",
+]);
+
+const SILENT_EVENT_TYPES = new Set(["application.event", "runtime.reported"]);
+
 function isEventScalar(value: unknown): value is string | number | boolean {
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }
 
-/** One human line: at, type, then scalar details. Undefined when there is nothing to print. */
+function formatLogfmtValue(value: string | number | boolean): string {
+  if (typeof value !== "string") return String(value);
+  if (!/[\s="]/.test(value)) return value;
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "\\r").replace(/\n/g, "\\n")}"`;
+}
+
+function pushLogfmtField(parts: string[], key: string, value: unknown): boolean {
+  if (!isEventScalar(value)) return false;
+  if (isSensitiveKey(key)) return false;
+  if (typeof value === "string") {
+    if (value.length === 0 || isSensitiveValue(value)) return false;
+  }
+  parts.push(`${key}=${formatLogfmtValue(value)}`);
+  return true;
+}
+
+/** One logfmt line per event. Undefined when there is nothing to print. */
 export function formatEventLine(event: AccountEvent): string | undefined {
   const parts: string[] = [];
-  if (event.at) parts.push(event.at);
-  if (event.type) parts.push(event.type);
+  const hasAt = pushLogfmtField(parts, "at", event.at);
+  const hasType = pushLogfmtField(parts, "type", event.type);
+  pushLogfmtField(parts, "severity", event.severity);
+
+  let payload = 0;
+  const resource = event.resource;
+  if (resource) {
+    if (pushLogfmtField(parts, "resource_type", resource.type)) payload += 1;
+    if (pushLogfmtField(parts, "resource_id", resource.id)) payload += 1;
+  }
+
   const details = event.details ?? {};
   const used = new Set<string>();
   for (const key of ["code", "placement_id"]) {
-    const value = details[key];
-    if (!isEventScalar(value)) continue;
-    parts.push(`${key}=${value}`);
+    if (!pushLogfmtField(parts, key, details[key])) continue;
     used.add(key);
+    payload += 1;
   }
   for (const key of Object.keys(details).sort()) {
     if (used.has(key)) continue;
-    const value = details[key];
-    if (!isEventScalar(value)) continue;
-    parts.push(`${key}=${value}`);
+    if (pushLogfmtField(parts, key, details[key])) payload += 1;
   }
-  return parts.length > 0 ? parts.join(" ") : undefined;
+
+  const message = event.message ?? "";
+  const detailCode = details.code;
+  const canned = CANNED_EVENT_MESSAGES.has(message);
+  const duplicate = message === event.type || (typeof detailCode === "string" && message === detailCode);
+  if (message && !canned && !duplicate && pushLogfmtField(parts, "message", message)) {
+    payload += 1;
+  }
+
+  if (!hasAt && !hasType) return undefined;
+  if (SILENT_EVENT_TYPES.has(event.type) && payload === 0) return undefined;
+  return parts.join(" ");
 }
 
 function formatEventLines(events: AccountEvent[]): string {
@@ -1778,9 +1827,11 @@ async function eventsList(args: ParsedArgs, runtime: CliRuntime, resolved: Await
     },
   });
   const page = response.body as EventPage;
-  const human = formatEventLines(page.items ?? []);
+  const items = page.items ?? [];
+  const human = formatEventLines(items);
+  const safePage = redactEvent({ ...page, items });
   return {
-    envelope: jsonBody(response, client.requestId),
+    envelope: jsonBody({ ...response, body: safePage }, client.requestId),
     exitCode: ExitCode.Success,
     // main.ts writes JSON only when human is truthy; a space is a silent JSON gate.
     human: human || (args.flags.json === true ? " " : ""),
@@ -1800,7 +1851,7 @@ async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awa
   const emit = (event: AccountEvent): void => {
     if (json) {
       printed += 1;
-      runtime.stdout.write(`${JSON.stringify(successEnvelope(event, { request_id: client.requestId }))}\n`);
+      runtime.stdout.write(`${JSON.stringify(successEnvelope(redactEvent(event), { request_id: client.requestId }))}\n`);
       return;
     }
     const line = formatEventLine(event);
