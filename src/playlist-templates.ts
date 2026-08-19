@@ -25,7 +25,7 @@ export const SLIDE_PLATE_PAD_Y = 40;
 export const SLIDE_FIT_MIN_RATIO = 0.5;
 export const SLIDE_FIT_MAX_RATIO = 1.5;
 export const SLIDE_FIT_ABS_FLOOR = 12;
-export const SHARED_LOGO_RECT = { x: 788, y: 972, width: 344, height: 64 };
+export const SHARED_LOGO_RECT = { x: 59, y: 972, width: 344, height: 64 };
 
 /** One stop on a top-to-bottom linear canvas background. `at=0` is the top edge. */
 export interface LinearGradientStop {
@@ -444,7 +444,7 @@ export const SLIDE_TEMPLATES: readonly SlideTemplateDef[] = [
     plate: false,
     slots: [
       picture("picture", true, { x: 43, y: 122, width: 1834, height: 880 }),
-      text("caption", false, { x: 59, y: 1012, width: 713, height: 52 }, {
+      text("caption", false, { x: 419, y: 1012, width: 1421, height: 52 }, {
         font_size: 22,
         line_height: 30,
         font_weight: 400,

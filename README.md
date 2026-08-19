@@ -59,11 +59,18 @@ device credential, or runtime session.
 
 Application packing accepts an already-built static directory. It produces
 deterministic bounded archives, injects the pinned browser SDK runtime, and
-never builds or executes uploaded source. Runtime pages use
-`screenrig.canvas/v1`; protected content and `screenrig.webapp-package/v1`
-delivery are backend/player concerns. `screen screenshot <id>` requests one
-still WebP of an active screen, waits until it is ready, and writes a file.
-It does not print image bytes.
+never builds or executes uploaded source. `app upload` accepts optional
+`--name` (at most 120 characters) as the application name header. Runtime
+pages use `screenrig.canvas/v1`; protected content and
+`screenrig.webapp-package/v1` delivery are backend/player concerns. `screen
+screenshot <id>` requests one still WebP of an active screen, waits until it
+is ready, and writes a file. It does not print image bytes.
+
+`account accountings` lists hourly prepaid-credit accountings. The route
+stays available when remaining mcr is zero. `playback list` returns daily
+playback aggregates for this account, newest days first. Filter with
+`--screen-id`, `--media-id`, and `--day YYYY-MM-DD`. Those identifiers
+select the caller's own rows and are never a cross-account lookup.
 
 ## Feedback
 
@@ -181,15 +188,19 @@ CLI never prints image bytes, hex, or base64.
 ## Events
 
 `events list` reads one finite page. `events follow` stays on the stream.
-Human mode prints one logfmt line per event. `--json events list` prints one
-JSON page envelope. `--json events follow` prints one JSON envelope per event
-as it arrives.
+A disconnect or transient connect failure reconnects with exponential
+backoff and resumes from the last SSE id. `--timeout` covers the whole
+follow, including backoff. Human mode prints one logfmt line per event.
+`--json events list` prints one JSON page envelope. `--json events follow`
+prints one JSON envelope per event as it arrives.
 
 ```sh
 screenrig events list
 screenrig --json events list --after ev1_0 --limit 25
 screenrig events follow
 screenrig --json events follow --after ev1_0
+screenrig --json playback list --screen-id scr_01 --day 2026-08-14
+screenrig --json account accountings
 ```
 
 A human line looks like
@@ -271,12 +282,22 @@ link, but that saving does not outrank playback on the browser path.
 | `--max-edge PIXELS` | Bound on each edge, 16 to 3840. Default 3840. |
 | `--webp-quality 1-100` | WebP quality. Default 90. |
 | `--no-progress` | Emit no progress output. |
+| `--tag TAG` | Optional 1–32 letter-or-digit tag stored on the ready object. |
 
 ```sh
 screenrig --json media upload ./clip.mov
 screenrig --json media upload ./clip.mov --codec hevc
 screenrig --json media upload ./poster.png --no-transcode
+screenrig --json media upload ./lobby-welcome.png --tag lobby
+screenrig --json media list --tag lobby --kind image
+screenrig --json media update med_01 --tag lobby --if-match 1
+screenrig --json media update med_01 --clear-tag --if-match 2
 ```
+
+`media list` forwards `--tag` and `--kind image|video` as query filters.
+Untagged objects are omitted when `--tag` is present. `media update` patches
+the tag only; `--clear-tag` sends `null`. There is no other media metadata
+patch.
 
 ### Progress and the envelope
 

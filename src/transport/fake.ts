@@ -29,12 +29,26 @@ function matchPath(route: string | RegExp, path: string): boolean {
   return route.test(path);
 }
 
+export type FakeStreamOutcome = { chunks: string[]; error?: Error } | Error;
+
+function waitForAbort(signal: AbortSignal | undefined): Promise<void> {
+  if (!signal || signal.aborted) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+}
+
 export class FakeTransport implements Transport {
   readonly calls: TransportRequest[] = [];
   private readonly routes: FakeRoute[] = [];
   private readonly streamChunks: string[] = [];
+  private readonly streamQueue: FakeStreamOutcome[] = [];
   /** Test hook: awaited after pushed chunks so callers can observe incremental writes. */
   afterStreamChunks?: (req: TransportRequest) => Promise<void>;
+  /** Repeating stream hook. Takes precedence over the one-shot queue. */
+  streamHandler?: (req: TransportRequest) => Promise<TransportStream>;
 
   on(method: string, path: string | RegExp, handler: FakeRoute["handler"]): this {
     this.routes.push({ method, path, handler });
@@ -43,6 +57,11 @@ export class FakeTransport implements Transport {
 
   pushStream(chunk: string): this {
     this.streamChunks.push(chunk);
+    return this;
+  }
+
+  queueStream(outcome: FakeStreamOutcome): this {
+    this.streamQueue.push(outcome);
     return this;
   }
 
@@ -67,6 +86,27 @@ export class FakeTransport implements Transport {
 
   async stream(req: TransportRequest): Promise<TransportStream> {
     this.calls.push(req);
+    if (this.streamHandler) {
+      return this.streamHandler(req);
+    }
+    if (this.streamQueue.length > 0) {
+      const next = this.streamQueue.shift()!;
+      if (next instanceof Error) {
+        throw next;
+      }
+      const chunks = next.chunks;
+      const error = next.error;
+      return {
+        async *[Symbol.asyncIterator]() {
+          for (const chunk of chunks) {
+            yield chunk;
+          }
+          if (error) {
+            throw error;
+          }
+        },
+      };
+    }
     const chunks = [...this.streamChunks];
     const after = this.afterStreamChunks;
     return {
@@ -75,6 +115,7 @@ export class FakeTransport implements Transport {
           yield chunk;
         }
         if (after) await after(req);
+        await waitForAbort(req.signal);
       },
     };
   }
@@ -218,6 +259,60 @@ export function memoryBackend(): FakeTransport {
     body: account,
   }));
 
+  transport.on("GET", "/api/v1/account/accountings", (req) => ({
+    status: 200,
+    headers: {
+      "cache-control": "private, no-store",
+      "x-request-id": req.headers?.["x-request-id"] ?? "req_accountings",
+    },
+    body: {
+      hours: [
+        {
+          hour: "2026-08-14T17:00:00.000Z",
+          in_bytes: 0,
+          out_bytes: 0,
+          used_bytes: 0,
+          bandwidth_mcr: 0,
+          storage_mcr: 0,
+          gb_bytes: 1_073_741_824,
+          bandwidth_mcr_per_gb: 0,
+          storage_mcr_per_gb_month: 0,
+          month_hours: 744,
+        },
+      ],
+    },
+  }));
+
+  const playbackItems = [
+    {
+      screen_id: "scr_PAIRINGAAAAAAAAAAAAAAAA",
+      media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA",
+      filename: "lobby-loop.mp4",
+      day: "2026-08-14",
+      play_count: 3,
+      last_page_id: "clip",
+      last_manifest_revision: "1",
+      first_started_at: "2026-08-14T17:00:00.000Z",
+      last_started_at: "2026-08-14T17:04:00.000Z",
+    },
+  ];
+  transport.on("GET", "/api/v1/playback", (req) => {
+    const screenId = req.query?.screen_id;
+    const mediaId = req.query?.media_id;
+    const day = req.query?.day;
+    const items = playbackItems.filter((item) => {
+      if (screenId && item.screen_id !== screenId) return false;
+      if (mediaId && item.media_id !== mediaId) return false;
+      if (day && item.day !== day) return false;
+      return true;
+    });
+    return {
+      status: 200,
+      headers: { "x-request-id": req.headers?.["x-request-id"] ?? "req_playback" },
+      body: { items },
+    };
+  });
+
   transport.on("GET", /^\/api\/v1\/operations\/[^/]+$/, (req) => {
     const id = req.path.split("/").pop() ?? "op_unknown";
     const existing = operations.get(id) ?? {
@@ -270,7 +365,7 @@ export function memoryBackend(): FakeTransport {
     // publish reaches ready.
     applications.set(id, {
       id,
-      name: "uploaded-application",
+      name: req.headers?.["screenrig-application-name"] ?? "uploaded-application",
       revision: 1,
       latest_ready_release: releaseId,
       created_at: "2026-08-14T17:00:00.000Z",
@@ -436,7 +531,18 @@ export function memoryBackend(): FakeTransport {
     return { status: 204, headers: {}, body: undefined };
   });
 
-  transport.on("GET", "/api/v1/media", () => ({ status: 200, headers: {}, body: { items: [...media.values()] } }));
+  transport.on("GET", "/api/v1/media", (req) => {
+    const tag = req.query?.tag;
+    const kind = req.query?.kind;
+    const items = [...media.values()].filter((item) => {
+      const record = item as { tag?: string; kind?: string; declaration?: unknown };
+      if (record.declaration) return false;
+      if (tag && record.tag !== tag) return false;
+      if (kind && record.kind !== kind) return false;
+      return true;
+    });
+    return { status: 200, headers: {}, body: { items } };
+  });
   transport.on("POST", "/api/v1/media/uploads", (req) => {
     const declaration = req.body as MediaUploadDeclaration;
     const operation: Operation = {
@@ -479,6 +585,7 @@ export function memoryBackend(): FakeTransport {
       operation_id: operationId,
       sha256: commit.sha256,
       bytes: commit.bytes,
+      ...(stored.declaration.tag ? { tag: stored.declaration.tag } : {}),
       revision: 1,
       state: "ready",
       created_at: "2026-08-14T17:00:00.000Z",
@@ -502,6 +609,19 @@ export function memoryBackend(): FakeTransport {
     headers: { etag: '"1"' },
     body: media.get(req.path.split("/").pop() ?? ""),
   }));
+  transport.on("PATCH", /^\/api\/v1\/media\/[^/]+$/, (req) => {
+    const id = req.path.split("/").pop() ?? "";
+    const current = (media.get(id) ?? { id, revision: 1 }) as Record<string, unknown>;
+    const patch = (req.body ?? {}) as { tag?: string | null };
+    const item: Record<string, unknown> = { ...current, revision: Number(current.revision ?? 1) + 1 };
+    if (patch.tag === null) {
+      delete item.tag;
+    } else if (typeof patch.tag === "string") {
+      item.tag = patch.tag;
+    }
+    media.set(id, item);
+    return { status: 200, headers: { etag: `"${item.revision}"` }, body: item };
+  });
   transport.on("DELETE", /^\/api\/v1\/media\/[^/]+$/, (req) => {
     media.delete(req.path.split("/").pop() ?? "");
     return { status: 204, headers: {}, body: undefined };

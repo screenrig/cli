@@ -16,6 +16,7 @@ import {
   type FeedbackSubmission,
   type FeedbackWrite,
   type KVEntry,
+  type MediaTagPatch,
   type Operation,
   type OperationAccepted,
   type PairScreen,
@@ -102,17 +103,19 @@ Usage:
 
 Commands:
   account show
+  account accountings
   auth status
   auth revoke --yes
   app pack <directory> [--output FILE]
-  app upload <directory>
+  app upload <directory> [--name NAME] [--no-wait] [--poll-ms MS]
   app list
   app show <id>
-  media upload <file> [--content-type TYPE] [--no-wait]
+  media upload <file> [--content-type TYPE] [--tag TAG] [--no-wait] [--poll-ms MS]
                       [--no-transcode] [--codec h264|hevc] [--max-fps N]
                       [--max-edge PIXELS] [--webp-quality 1-100] [--no-progress]
   media show <id>
-  media list
+  media list [--tag TAG] [--kind image|video]
+  media update <id> (--tag TAG | --clear-tag) --if-match REVISION
   media delete <id> --if-match REVISION
   playlist templates
   playlist create <file>
@@ -133,18 +136,19 @@ Commands:
   screen rotate-public-id <id> --if-match REVISION
   screen revoke-credential <id> --if-match REVISION
   screen toast <id> --level error|alert|info --text TEXT [--duration-ms MS]
-  screen screenshot <id> [--output FILE]
+  screen screenshot <id> [--output FILE] [--timeout MS] [--poll-ms MS]
   kv get --application-id ID <key>
   kv set --application-id ID <key> --json-value JSON [--if-match REVISION]
-  kv set --application-id ID <key> --file FILE --content-type TYPE
-  kv set --application-id ID <key> --value-base64 BASE64 --content-type TYPE
+  kv set --application-id ID <key> --file FILE --content-type TYPE [--if-match REVISION]
+  kv set --application-id ID <key> --value-base64 BASE64 --content-type TYPE [--if-match REVISION]
   kv delete --application-id ID <key> --if-match REVISION
   kv list --application-id ID
   operations get <id>
-  operations wait <id>
+  operations wait <id> [--timeout MS] [--poll-ms MS]
   operations cancel <id>
   events list [--after CURSOR] [--limit N]
-  events follow [--after CURSOR]
+  events follow [--after CURSOR] [--timeout MS]
+  playback list [--screen-id ID] [--media-id ID] [--day YYYY-MM-DD]
   feedback bug <title> (--body TEXT | --body-file FILE)
                        [--command "GROUP ACTION"] [--no-context]
   feedback feature <title> (--body TEXT | --body-file FILE)
@@ -246,6 +250,9 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
   if (group === "account" && action === "show") {
     return accountShow(args, runtime, resolved);
   }
+  if (group === "account" && action === "accountings") {
+    return accountAccountings(args, runtime, resolved);
+  }
   if (group === "auth" && (action === "status" || action === undefined)) {
     return accountShow(args, runtime, resolved);
   }
@@ -289,6 +296,9 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
   }
   if (group === "events" && action === "follow") {
     return eventsFollow(args, runtime, resolved);
+  }
+  if (group === "playback" && action === "list") {
+    return playbackList(args, runtime, resolved);
   }
   if (group === "feedback") {
     return feedbackCommand(args, runtime, resolved, action);
@@ -410,16 +420,17 @@ async function authRevoke(
 
 function isAuthenticatedCommand(group: string, action: string | undefined): boolean {
   const actions: Record<string, ReadonlySet<string | undefined>> = {
-    account: new Set(["show"]),
+    account: new Set(["show", "accountings"]),
     auth: new Set([undefined, "status"]),
     app: new Set(["upload", "list", "show"]),
-    media: new Set(["upload", "show", "list", "delete"]),
+    media: new Set(["upload", "show", "list", "delete", "update"]),
     playlist: new Set(["create", "update", "show", "get", "list", "delete"]),
-    screen: new Set(["pair", "provision", "update", "list", "show", "assign", "delete", "rotate-public-id", "revoke-credential", "toast", "screenshot"]),
+    screen: new Set(["pair", "provision", "update", "list", "show", "assign", "set-timezone", "delete", "rotate-public-id", "revoke-credential", "toast", "screenshot"]),
     browser: new Set(["setup"]),
     kv: new Set(["get", "set", "delete", "list"]),
     operations: new Set(["get", "wait", "cancel"]),
     events: new Set(["list", "follow"]),
+    playback: new Set(["list"]),
     feedback: new Set(["bug", "feature", "list"]),
   };
   return actions[group]?.has(action) ?? false;
@@ -571,6 +582,10 @@ async function accountShow(args: ParsedArgs, runtime: CliRuntime, resolved: Awai
   };
 }
 
+async function accountAccountings(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>): Promise<CommandResult> {
+  return simpleGet(args, runtime, resolved, "/api/v1/account/accountings", "Account accountings");
+}
+
 async function appPack(args: ParsedArgs, runtime: CliRuntime): Promise<CommandResult> {
   const dir = args.positionals[2];
   if (!dir) {
@@ -614,6 +629,7 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
   const packed = await packDirectory(path.resolve(runtime.cwd(), dir), {
     limits: limitsFromCapabilities(capabilitiesResponse.body as Capabilities),
   });
+  const name = applicationNameFromArgs(args);
   const response = await client.call({
     method: "POST",
     path: "/api/v1/applications",
@@ -624,6 +640,7 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
       "screenrig-expanded-bytes": String(packed.expanded_bytes),
       "screenrig-file-count": String(packed.file_count),
       "screenrig-sdk-version": SDK_PROTOCOL_VERSION,
+      ...(name ? { "screenrig-application-name": name } : {}),
     },
     body: packed.archive,
   });
@@ -670,15 +687,62 @@ async function simpleGet(
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
   pathName: string,
   title: string,
+  query?: Record<string, string | undefined>,
 ): Promise<CommandResult> {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
-  const response = await client.call({ method: "GET", path: pathName });
+  const response = await client.call({ method: "GET", path: pathName, query });
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
     human: `${title}\n${JSON.stringify(response.body, null, 2)}`,
   };
+}
+
+const MEDIA_TAG_PATTERN = /^[A-Za-z0-9]{1,32}$/;
+const APPLICATION_NAME_MAX = 120;
+const PLAYBACK_DAY_PATTERN = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
+
+function requireFlagValue(args: ParsedArgs, name: string, example: string): void {
+  if (args.flags[name] === true) {
+    throw usageError(`--${name} requires a value, such as --${name} ${example}.`);
+  }
+}
+
+function mediaTagFromArgs(args: ParsedArgs): string | undefined {
+  requireFlagValue(args, "tag", "lobby");
+  const tag = flagString(args.flags, "tag");
+  if (tag === undefined) {
+    return undefined;
+  }
+  if (!MEDIA_TAG_PATTERN.test(tag)) {
+    throw usageError("--tag must be 1 to 32 letters or digits.");
+  }
+  return tag;
+}
+
+function applicationNameFromArgs(args: ParsedArgs): string | undefined {
+  requireFlagValue(args, "name", "Lobby board");
+  const name = flagString(args.flags, "name");
+  if (name === undefined) {
+    return undefined;
+  }
+  if (name.length > APPLICATION_NAME_MAX || /[\r\n]/.test(name)) {
+    throw usageError("--name must be at most 120 characters and must not contain a line break.");
+  }
+  return name;
+}
+
+function mediaKindFromArgs(args: ParsedArgs): "image" | "video" | undefined {
+  requireFlagValue(args, "kind", "image");
+  const kind = flagString(args.flags, "kind");
+  if (kind === undefined) {
+    return undefined;
+  }
+  if (kind !== "image" && kind !== "video") {
+    throw usageError("--kind must be image or video.");
+  }
+  return kind;
 }
 
 async function mediaCommand(
@@ -688,7 +752,10 @@ async function mediaCommand(
   action: string | undefined,
 ): Promise<CommandResult> {
   if (action === "list") {
-    return simpleGet(args, runtime, resolved, "/api/v1/media", "Media");
+    return simpleGet(args, runtime, resolved, "/api/v1/media", "Media", {
+      tag: mediaTagFromArgs(args),
+      kind: mediaKindFromArgs(args),
+    });
   }
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
@@ -696,6 +763,9 @@ async function mediaCommand(
     const id = args.positionals[2];
     if (!id) throw usageError("media show requires an id.");
     return simpleGet(args, runtime, resolved, `/api/v1/media/${id}`, "Media");
+  }
+  if (action === "update") {
+    return mediaUpdate(args, client);
   }
   if (action === "delete") {
     const id = args.positionals[2];
@@ -713,6 +783,59 @@ async function mediaCommand(
     return mediaUpload(args, runtime, client);
   }
   throw usageError("Unknown media command.");
+}
+
+async function mediaUpdate(args: ParsedArgs, client: ApiClient): Promise<CommandResult> {
+  const id = args.positionals[2];
+  const revision = flagString(args.flags, "if-match");
+  const clearTag = flagBool(args.flags, "clear-tag");
+  const tag = mediaTagFromArgs(args);
+  if (!id || !revision) {
+    throw usageError("media update requires <id>, --if-match, and --tag TAG or --clear-tag.");
+  }
+  if (clearTag === Boolean(tag)) {
+    throw usageError("media update requires exactly one of --tag TAG or --clear-tag.");
+  }
+  const body: MediaTagPatch = { tag: clearTag ? null : tag ?? null };
+  const response = await client.call({
+    method: "PATCH",
+    path: `/api/v1/media/${id}`,
+    idempotent: true,
+    headers: { "if-match": quotedRevision(revision) },
+    body,
+  });
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: clearTag ? `Cleared tag on media ${id}` : `Set tag ${tag} on media ${id}`,
+  };
+}
+
+async function playbackList(
+  args: ParsedArgs,
+  runtime: CliRuntime,
+  resolved: Awaited<ReturnType<typeof resolveConfig>>,
+): Promise<CommandResult> {
+  requireFlagValue(args, "screen-id", "scr_01");
+  requireFlagValue(args, "media-id", "med_01");
+  requireFlagValue(args, "day", "2026-08-14");
+  const screenId = flagString(args.flags, "screen-id");
+  const mediaId = flagString(args.flags, "media-id");
+  const day = flagString(args.flags, "day");
+  if (screenId !== undefined && !screenId.startsWith("scr_")) {
+    throw usageError("--screen-id must start with scr_.");
+  }
+  if (mediaId !== undefined && !mediaId.startsWith("med_")) {
+    throw usageError("--media-id must start with med_.");
+  }
+  if (day !== undefined && !PLAYBACK_DAY_PATTERN.test(day)) {
+    throw usageError("--day must be a UTC calendar day as YYYY-MM-DD.");
+  }
+  return simpleGet(args, runtime, resolved, "/api/v1/playback", "Playback", {
+    screen_id: screenId,
+    media_id: mediaId,
+    day,
+  });
 }
 
 /** Flags that shape the pre-upload transcode. */
@@ -782,6 +905,10 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
     const prepared = transcode
       ? await prepareMediaUpload(transcode.filePath, transcode.contentType)
       : await prepareMediaUpload(sourcePath, explicitContentType);
+    const tag = mediaTagFromArgs(args);
+    if (tag !== undefined) {
+      prepared.declaration.tag = tag;
+    }
     const declarationResponse = await client.call({
       method: "POST",
       path: "/api/v1/media/uploads",
@@ -815,6 +942,7 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
         content_type: prepared.declaration.content_type,
         bytes: prepared.declaration.bytes,
         sha256: prepared.declaration.sha256,
+        ...(prepared.declaration.tag ? { tag: prepared.declaration.tag } : {}),
       },
       transcode: transcode
         ? {
@@ -845,6 +973,7 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
         ["state", operation.state],
         ["filename", prepared.declaration.filename],
         ["content_type", prepared.declaration.content_type],
+        ["tag", prepared.declaration.tag],
         ["transcode", transcode ? `${transcode.reason} in ${transcode.durationMs} ms` : "skipped"],
         ["sha256", prepared.declaration.sha256],
         ...warnings.map((warning): [string, string] => ["warning", warning.message]),
@@ -1838,13 +1967,59 @@ async function eventsList(args: ParsedArgs, runtime: CliRuntime, resolved: Await
   };
 }
 
+/** First reconnect wait after a disconnect. Tests inject `runtime.sleep`. */
+export const EVENT_STREAM_BACKOFF_MS = 250;
+export const EVENT_STREAM_BACKOFF_CAP_MS = 15_000;
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === "AbortError";
+}
+
+/** 401/403/404 and other non-transient 4xx. 408/429/5xx/network retry. */
+function isHardFollowError(err: unknown): boolean {
+  if (!(err instanceof CliError)) {
+    return false;
+  }
+  if (err.problem.code === "transport_error") {
+    return false;
+  }
+  const status = err.problem.status;
+  if (status === 408 || status === 429 || status >= 500 || status < 400) {
+    return false;
+  }
+  return true;
+}
+
+async function sleepWhileOpen(
+  ms: number,
+  signal: AbortSignal,
+  sleep: (ms: number) => Promise<void>,
+): Promise<void> {
+  if (signal.aborted || ms <= 0) {
+    return;
+  }
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<void>((resolve) => {
+    onAbort = () => resolve();
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    await Promise.race([sleep(ms), aborted]);
+  } finally {
+    if (onAbort) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
+}
+
 async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>): Promise<CommandResult> {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const transport = transportFor(runtime, resolved.apiUrl, token);
   const json = args.flags.json === true;
   let printed = 0;
-  let buffer = "";
+  let after = flagString(args.flags, "after") ?? flagString(args.flags, "cursor");
+  let delayMs = EVENT_STREAM_BACKOFF_MS;
   const controller = new AbortController();
   const timeoutMs = flagNumber(args.flags, "timeout");
   const timer = timeoutMs && timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
@@ -1860,28 +2035,56 @@ async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awa
     runtime.stdout.write(`${line}\n`);
   };
   try {
-    const stream = await transport.stream({
-      method: "GET",
-      path: "/api/v1/events/stream",
-      query: { after: flagString(args.flags, "after") ?? flagString(args.flags, "cursor") },
-      headers: { "x-request-id": client.requestId, authorization: `Bearer ${token}` },
-      signal: controller.signal,
-    });
-    for await (const chunk of stream) {
-      buffer += chunk;
-      const parsed = parseSse(buffer);
-      buffer = parsed.rest;
-      for (const event of parsed.events) {
-        if (!event.data) continue;
-        try {
-          emit(JSON.parse(event.data) as AccountEvent);
-        } catch {
-          // Unstructured frames are not event data.
+    while (!controller.signal.aborted) {
+      let buffer = "";
+      let connected = false;
+      try {
+        const stream = await transport.stream({
+          method: "GET",
+          path: "/api/v1/events/stream",
+          query: { after },
+          headers: { "x-request-id": client.requestId, authorization: `Bearer ${token}` },
+          signal: controller.signal,
+        });
+        connected = true;
+        for await (const chunk of stream) {
+          buffer += chunk;
+          const parsed = parseSse(buffer);
+          buffer = parsed.rest;
+          for (const event of parsed.events) {
+            if (event.id) {
+              after = event.id;
+            }
+            if (!event.data) continue;
+            try {
+              emit(JSON.parse(event.data) as AccountEvent);
+            } catch {
+              // Unstructured frames are not event data.
+            }
+          }
+          if (controller.signal.aborted) {
+            break;
+          }
+        }
+      } catch (err) {
+        if (controller.signal.aborted || isAbortError(err)) {
+          break;
+        }
+        if (isHardFollowError(err)) {
+          throw err;
         }
       }
+      if (controller.signal.aborted) {
+        break;
+      }
+      await sleepWhileOpen(delayMs, controller.signal, runtime.sleep);
+      if (controller.signal.aborted) {
+        break;
+      }
+      delayMs = connected
+        ? EVENT_STREAM_BACKOFF_MS
+        : Math.min(delayMs * 2, EVENT_STREAM_BACKOFF_CAP_MS);
     }
-  } catch (err) {
-    if (!controller.signal.aborted) throw err;
   } finally {
     if (timer) clearTimeout(timer);
   }

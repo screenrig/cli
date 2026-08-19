@@ -115,7 +115,7 @@ async function main(): Promise<void> {
     // take the release id from the publication operation result, and pin that
     // release in an application placement. The release id is the only handle a
     // playlist accepts; the application id is for `kv` alone.
-    const upload = await run("app", "upload", app, "--poll-ms", "1");
+    const upload = await run("app", "upload", app, "--name", "Smoke board", "--poll-ms", "1");
     const uploadData = upload.data as {
       application?: { id?: string };
       operation?: { state?: string; result?: { release_id?: string } };
@@ -203,12 +203,15 @@ async function main(): Promise<void> {
     // assertion on what this smoke owns: the declare, signed PUT, and commit route
     // carry the source bytes through unchanged. The transcode path is covered by
     // src/media/transcode.test.ts and src/cli.test.ts with a fake process runner.
-    const mediaUpload = await run("media", "upload", media, "--no-transcode", "--poll-ms", "1");
+    const mediaUpload = await run("media", "upload", media, "--no-transcode", "--tag", "lobby", "--poll-ms", "1");
     assert.deepEqual(signedUploadBytes, mediaBytes);
     const mediaOperation = (mediaUpload.data as { operation?: { result?: { media_id?: string } } }).operation;
     const mediaId = mediaOperation?.result?.media_id ?? "med_AAAAAAAAAAAAAAAAAAAAAAAA";
     await run("media", "show", mediaId);
-    await run("media", "list");
+    await run("media", "list", "--tag", "lobby", "--kind", "image");
+    await run("media", "update", mediaId, "--tag", "lobby2", "--if-match", "1");
+    await run("account", "accountings");
+    await run("playback", "list", "--screen-id", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--day", "2026-08-14");
     await run("kv", "set", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", "{\"message\":\"hello\"}");
     await run("kv", "get", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA");
     await run("kv", "list", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA");
@@ -222,11 +225,11 @@ async function main(): Promise<void> {
       ["bug", "feature"],
     );
     await run("events", "list", "--after", "ev1_0");
-    await run("events", "follow", "--after", "ev1_0");
+    await run("events", "follow", "--after", "ev1_0", "--timeout", "200");
     await run("operations", "wait", "op_AAAAAAAAAAAAAAAAAAAAAAAA", "--poll-ms", "1");
     await run("operations", "cancel", "op_MEDIAAAAAAAAAAAAAAAAAAAAA");
     await run("kv", "delete", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "2");
-    await run("media", "delete", mediaId, "--if-match", "1");
+    await run("media", "delete", mediaId, "--if-match", "2");
     await run("screen", "rotate-public-id", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--if-match", "2");
     await run("screen", "revoke-credential", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--if-match", "3");
     await run("screen", "delete", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--if-match", "4");

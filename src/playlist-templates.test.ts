@@ -504,8 +504,9 @@ test("slide-photo and slide-full-bleed cover the stage; logo overlays at layer 2
     width: 1834,
     height: 880,
   });
-  assert.equal(photo.find((item) => item.id === "caption")?.rect.x, 59);
+  assert.equal(photo.find((item) => item.id === "caption")?.rect.x, 419);
   assert.equal(photo.find((item) => item.id === "caption")?.rect.y, 1012);
+  assert.equal(photo.find((item) => item.id === "caption")?.rect.width, 1421);
   assert.equal(photo.find((item) => item.id === "logo")?.layer, 2);
   assert.equal(photo.find((item) => item.id === "logo")?.content_fit, "contain");
   assert.deepEqual(bleed.find((item) => item.id === "picture")?.rect, {
@@ -942,7 +943,7 @@ test("slot align override appears on the placement; omitted uses the template de
   );
 });
 
-test("every template uses the shared horizontally centered logo rect", () => {
+test("every template uses the shared bottom-left logo rect", () => {
   assert.equal(SLIDE_TEMPLATES.length, 15);
   for (const template of SLIDE_TEMPLATES) {
     const logo = template.slots.find((slot) => slot.id === "logo");

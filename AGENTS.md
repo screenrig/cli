@@ -156,7 +156,11 @@ installation, players, backend services, the site, or production deployment.
 
 - `events list` binds `GET /api/v1/events` with `--after` / `--cursor` and
   `--limit`. `events follow` binds `GET /api/v1/events/stream` with the same
-  cursor flags and the global `--timeout`.
+  cursor flags and the global `--timeout`. It reconnects on disconnect or a
+  transient connect failure, with exponential backoff, and sends the last
+  SSE `id` as `after`. `--timeout` covers the whole follow, including
+  backoff. 401, 403, 404, and other non-transient 4xx problems stop the
+  command. Do not print reconnect chatter on stdout.
 - Human mode is logfmt: one `key=value` line per printable event. `--json
   events list` is one page envelope. `--json events follow` is a JSON stream
   of envelopes. Do not document canned server sentences as the trail.
@@ -171,6 +175,42 @@ installation, players, backend services, the site, or production deployment.
 - `--json` redacts tokens, pixels, authorization, object keys, and other
   credential-shaped material. Canned-sentence silence is human-only. After
   redaction, a server `message` field that is data remains.
+
+## Accountings
+
+- `account accountings` binds `GET /api/v1/account/accountings`. It lists
+  hourly prepaid-credit accountings with snapshotted rates and derived mcr.
+- The route stays available when remaining mcr is zero. Read remaining mcr
+  from `account show`, not from this list. Do not add pay, Stripe, or x402
+  commands.
+- This command is **source-ready**. It is uncommitted and not in the locked
+  plugin bundle. Do not claim marketplace or deployed.
+
+## Playback
+
+- `playback list [--screen-id ID] [--media-id ID] [--day YYYY-MM-DD]` binds
+  `GET /api/v1/playback`. Daily aggregates for this account: one row per
+  screen, media, and UTC day. Newest days first.
+- `--screen-id` must start with `scr_`. `--media-id` must start with `med_`.
+  `--day` is a UTC calendar day as `YYYY-MM-DD`. Identifiers filter the
+  caller's own rows and are never a cross-account lookup.
+- This command is **source-ready**. It is uncommitted and not in the locked
+  plugin bundle. Do not claim marketplace or deployed.
+
+## Media tags
+
+- `media upload --tag TAG` stores a 1–32 letter-or-digit tag on the ready
+  object at declare. It is not redeclared at commit. Pattern
+  `^[A-Za-z0-9]{1,32}$`; reject other values locally as `usage_error`.
+- `media list [--tag TAG] [--kind image|video]` forwards those query
+  filters to `GET /api/v1/media`. Untagged objects are omitted when `--tag`
+  is present.
+- `media update <id> (--tag TAG | --clear-tag) --if-match REVISION` binds
+  `PATCH /api/v1/media/{id}`. Exactly one of `--tag` or `--clear-tag`.
+  `--clear-tag` sends `null`. There is no other media metadata patch. Do
+  not add an update path for filename, kind, or codecs.
+- This surface is **source-ready**. It is uncommitted and not in the locked
+  plugin bundle. Do not claim marketplace or deployed.
 
 ## Page scheduling
 
@@ -197,6 +237,10 @@ installation, players, backend services, the site, or production deployment.
   `latest_ready_release`. `OperationAccepted.release_id` is required, so
   `app upload` reports the release id without waiting on the operation result.
   Knowing the id is not readiness; the operation still decides that.
+  Optional `--name` (at most 120 characters, no line break) is sent as
+  `ScreenRig-Application-Name`. Every upload still creates a new
+  application and a new release; `--name` is not an in-place update. That
+  flag is **source-ready**.
 
 ## Product and security boundaries
 

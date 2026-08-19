@@ -3,10 +3,11 @@ import { PassThrough } from "node:stream";
 import { mkdir, open, readFile, rename, chmod, stat, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
-import { formatEventLine } from "./commands.js";
+import { EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, formatEventLine } from "./commands.js";
 import { run, type CliRuntime } from "./main.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import { ExitCode } from "./exit-codes.js";
+import { CliError, makeProblem, networkError } from "./problems.js";
 import type { ConfigFs } from "./config.js";
 import { isWorldOrGroupReadable, writeConfigAtomic, readConfigFile } from "./config.js";
 import type { Operation } from "./adapters/protocol.js";
@@ -992,9 +993,11 @@ test("events follow parses SSE frames from the transport stream", async () => {
     { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
-  const { code, stdout } = await withRuntime(["--json", "events", "follow", "--cursor", "ev1_0"], transport, {
-    fs: fsLike,
-  });
+  const { code, stdout } = await withRuntime(
+    ["--json", "events", "follow", "--cursor", "ev1_0", "--timeout", "50"],
+    transport,
+    { fs: fsLike },
+  );
   assert.equal(code, 0);
   const lines = stdout.split("\n").filter((line) => line.length > 0);
   assert.equal(lines.length, 2, stdout);
@@ -1005,7 +1008,7 @@ test("events follow parses SSE frames from the transport stream", async () => {
   assert.equal(transport.calls.at(-1)?.query?.after, "ev1_0");
   assert.equal(transport.calls.at(-1)?.query?.cursor, undefined);
 
-  const human = await withRuntime(["events", "follow"], transport, { fs: fsLike });
+  const human = await withRuntime(["events", "follow", "--timeout", "50"], transport, { fs: fsLike });
   assert.equal(human.code, 0, human.stdout);
   assert.equal(
     human.stdout,
@@ -1071,10 +1074,10 @@ test("events follow is silent when no events arrive", async () => {
     { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
-  const human = await withRuntime(["events", "follow"], transport, { fs: fsLike });
+  const human = await withRuntime(["events", "follow", "--timeout", "50"], transport, { fs: fsLike });
   assert.equal(human.code, 0, human.stdout);
   assert.equal(human.stdout, "");
-  const json = await withRuntime(["--json", "events", "follow"], transport, { fs: fsLike });
+  const json = await withRuntime(["--json", "events", "follow", "--timeout", "50"], transport, { fs: fsLike });
   assert.equal(json.code, 0, json.stdout);
   const lines = json.stdout.split("\n").filter((line) => line.length > 0);
   assert.equal(lines.length, 1, json.stdout);
@@ -1136,7 +1139,7 @@ test("events --json omits tokens, pixels, authorization, and object keys", async
 
   const followTransport = memoryBackend();
   followTransport.pushStream(`id: ev1_9\nevent: message\ndata: ${JSON.stringify(event)}\n\n`);
-  const followed = await withRuntime(["--json", "events", "follow"], followTransport, { fs: fsLike });
+  const followed = await withRuntime(["--json", "events", "follow", "--timeout", "50"], followTransport, { fs: fsLike });
   assert.equal(followed.code, 0, followed.stdout);
   const followLine = followed.stdout.split("\n").find((line) => line.length > 0) ?? "";
   const followEnvelope = JSON.parse(followLine) as { ok: true; data: { message: string; details: Record<string, unknown> } };
@@ -1168,7 +1171,7 @@ test("events follow prints scalar details and skips empty frames", async () => {
     { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
-  const { code, stdout } = await withRuntime(["events", "follow"], transport, { fs: fsLike });
+  const { code, stdout } = await withRuntime(["events", "follow", "--timeout", "50"], transport, { fs: fsLike });
   assert.equal(code, 0, stdout);
   assert.equal(
     stdout,
@@ -1176,6 +1179,186 @@ test("events follow prints scalar details and skips empty frames", async () => {
   );
   assert.ok(!stdout.includes("Application emitted an event"));
   assert.ok(!stdout.includes("Runtime reported a bounded condition"));
+  await rm(configDir, { recursive: true, force: true });
+});
+
+function followEventFrame(id: string, type: string, at: string): string {
+  return `id: ${id}\nevent: message\ndata: ${JSON.stringify({ cursor: id, type, severity: "info", message: type, at })}\n\n`;
+}
+
+test("events follow reconnects after the stream ends and prints both connections", async () => {
+  const transport = memoryBackend();
+  transport.queueStream({
+    chunks: [followEventFrame("ev1_1", "account.created", "2026-08-14T17:00:00.000Z")],
+  });
+  transport.queueStream({
+    chunks: [followEventFrame("ev1_2", "screen.paired", "2026-08-14T17:00:01.000Z")],
+  });
+  const configDir = await testTemp("ev-reconnect-done-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const { code, stdout, stderr } = await withRuntime(
+    ["--json", "events", "follow", "--timeout", "50"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(code, 0, stdout);
+  const lines = stdout.split("\n").filter((line) => line.length > 0);
+  assert.equal(lines.length, 2, stdout);
+  const first = JSON.parse(lines[0] ?? "") as { ok: true; data: { type: string } };
+  const second = JSON.parse(lines[1] ?? "") as { ok: true; data: { type: string } };
+  assert.equal(first.data.type, "account.created");
+  assert.equal(second.data.type, "screen.paired");
+  assert.ok(transport.calls.length >= 2, `expected reconnect, calls=${transport.calls.length}`);
+  assert.equal(stderr, "");
+  assert.ok(!stdout.includes("reconnect"));
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("events follow reconnects after a mid-stream network error", async () => {
+  const transport = memoryBackend();
+  transport.queueStream({
+    chunks: [followEventFrame("ev1_1", "account.created", "2026-08-14T17:00:00.000Z")],
+    error: networkError("socket hang up"),
+  });
+  transport.queueStream({
+    chunks: [followEventFrame("ev1_2", "screen.paired", "2026-08-14T17:00:01.000Z")],
+  });
+  const configDir = await testTemp("ev-reconnect-net-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const { code, stdout, stderr } = await withRuntime(
+    ["--json", "events", "follow", "--timeout", "50"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(code, 0, stdout);
+  const lines = stdout.split("\n").filter((line) => line.length > 0);
+  assert.equal(lines.length, 2, stdout);
+  const first = JSON.parse(lines[0] ?? "") as { ok: true; data: { type: string } };
+  const second = JSON.parse(lines[1] ?? "") as { ok: true; data: { type: string } };
+  assert.equal(first.data.type, "account.created");
+  assert.equal(second.data.type, "screen.paired");
+  assert.ok(!stderr.includes("secretsecret"));
+  assert.ok(!stderr.includes("Bearer"));
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("events follow resumes with after equal to the last SSE id", async () => {
+  const transport = memoryBackend();
+  transport.queueStream({
+    chunks: [followEventFrame("ev1_1", "account.created", "2026-08-14T17:00:00.000Z")],
+  });
+  transport.queueStream({
+    chunks: [followEventFrame("ev1_2", "screen.paired", "2026-08-14T17:00:01.000Z")],
+  });
+  const configDir = await testTemp("ev-reconnect-after-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const { code, stdout } = await withRuntime(
+    ["--json", "events", "follow", "--after", "ev1_0", "--timeout", "50"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(code, 0, stdout);
+  const streamCalls = transport.calls.filter((call) => call.path === "/api/v1/events/stream");
+  assert.ok(streamCalls.length >= 2, `expected reconnect, calls=${streamCalls.length}`);
+  assert.equal(streamCalls[0]?.query?.after, "ev1_0");
+  assert.equal(streamCalls[1]?.query?.after, "ev1_1");
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("events follow does not retry a persistent 401", async () => {
+  const transport = memoryBackend();
+  transport.streamHandler = async () => {
+    throw new CliError(makeProblem("unauthorized", "Unauthorized", 401, "Bearer is not valid."));
+  };
+  const configDir = await testTemp("ev-reconnect-401-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const { code, stdout, stderr } = await withRuntime(
+    ["--json", "events", "follow", "--timeout", "50"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(code, ExitCode.Auth, stdout);
+  const envelope = JSON.parse(stdout) as { ok: false; error: { code: string; status: number } };
+  assert.equal(envelope.error.code, "unauthorized");
+  assert.equal(envelope.error.status, 401);
+  assert.equal(transport.calls.length, 1);
+  assert.ok(!stdout.includes("secretsecret"));
+  assert.ok(!stderr.includes("secretsecret"));
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("events follow --timeout exits during backoff without hanging", async () => {
+  const transport = memoryBackend();
+  transport.streamHandler = async () => {
+    throw networkError("ECONNRESET");
+  };
+  const configDir = await testTemp("ev-reconnect-timeout-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const started = Date.now();
+  const { code, stdout } = await withRuntime(
+    ["--json", "events", "follow", "--timeout", "40"],
+    transport,
+    {
+      fs: fsLike,
+      sleep: () => new Promise(() => {
+        /* Never resolves; abort ends the wait. */
+      }),
+    },
+  );
+  const elapsed = Date.now() - started;
+  assert.equal(code, 0, stdout);
+  assert.ok(elapsed < 2000, `timed out in backoff too slowly: ${elapsed}ms`);
+  const envelope = JSON.parse(stdout) as { ok: true; data: { items: unknown[] } };
+  assert.deepEqual(envelope.data.items, []);
+
+  const sequenced: number[] = [];
+  transport.calls.length = 0;
+  const sequencedRun = await withRuntime(
+    ["--json", "events", "follow", "--timeout", "40"],
+    transport,
+    {
+      fs: fsLike,
+      sleep: async (ms) => {
+        sequenced.push(ms);
+        if (sequenced.length >= 4) {
+          await new Promise<void>(() => {
+            /* Stop spinning; abort ends the wait. */
+          });
+        }
+      },
+    },
+  );
+  assert.equal(sequencedRun.code, 0, sequencedRun.stdout);
+  assert.ok(sequenced.length >= 3, `backoff samples=${JSON.stringify(sequenced)}`);
+  assert.equal(sequenced[0], EVENT_STREAM_BACKOFF_MS);
+  assert.equal(sequenced[1], EVENT_STREAM_BACKOFF_MS * 2);
+  assert.equal(sequenced[2], EVENT_STREAM_BACKOFF_MS * 4);
+  assert.ok(sequenced.every((ms) => ms <= EVENT_STREAM_BACKOFF_CAP_MS));
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -2397,6 +2580,114 @@ test("playlist create accepts a linear canvas.background on a templated page and
   });
   assert.deepEqual(body.pages[1], fullPage);
   await rm(configDir, { recursive: true, force: true });
+});
+
+test("account accountings, playback list, media filters, media update, and app --name bind the consumer routes", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("consumer-surface-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_existing_secret" },
+    fsLike,
+  );
+  const appDir = path.join(configDir, "app");
+  await mkdir(appDir, { recursive: true });
+  await writeFile(path.join(appDir, "index.html"), "<!doctype html><html><head></head><body>ok</body></html>");
+  const mediaFile = path.join(configDir, "lobby-poster.png");
+  await writeFile(mediaFile, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3]));
+
+  try {
+    const accountings = await withRuntime(["--json", "account", "accountings"], transport, { fs: fsLike });
+    assert.equal(accountings.code, ExitCode.Success, accountings.stdout);
+    const accountingsCall = transport.calls.find((call) => call.path === "/api/v1/account/accountings");
+    assert.equal(accountingsCall?.method, "GET");
+    const accountingsEnvelope = JSON.parse(accountings.stdout) as { data: { hours: Array<{ hour: string }> } };
+    assert.equal(accountingsEnvelope.data.hours[0]?.hour, "2026-08-14T17:00:00.000Z");
+
+    const playback = await withRuntime(
+      ["--json", "playback", "list", "--screen-id", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--media-id", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--day", "2026-08-14"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(playback.code, ExitCode.Success, playback.stdout);
+    const playbackCall = transport.calls.find((call) => call.path === "/api/v1/playback");
+    assert.deepEqual(playbackCall?.query, {
+      screen_id: "scr_PAIRINGAAAAAAAAAAAAAAAA",
+      media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA",
+      day: "2026-08-14",
+    });
+
+    const badDay = await withRuntime(["--json", "playback", "list", "--day", "14-08-2026"], transport, { fs: fsLike });
+    assert.equal(badDay.code, ExitCode.Usage, badDay.stdout);
+
+    const namedUpload = await withRuntime(
+      ["--json", "app", "upload", appDir, "--name", "Lobby board", "--no-wait"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(namedUpload.code, ExitCode.Success, namedUpload.stdout);
+    const appCall = transport.calls.find((call) => call.method === "POST" && call.path === "/api/v1/applications");
+    assert.equal(appCall?.headers?.["screenrig-application-name"], "Lobby board");
+
+    const mediaUpload = await withRuntime(
+      ["--json", "media", "upload", mediaFile, "--no-transcode", "--tag", "lobby"],
+      transport,
+      { fs: fsLike, signedRawPut: async () => ({ status: 200 }) },
+    );
+    assert.equal(mediaUpload.code, ExitCode.Success, mediaUpload.stdout);
+    const declare = transport.calls.find((call) => call.path === "/api/v1/media/uploads");
+    assert.equal((declare?.body as { tag?: string }).tag, "lobby");
+    const mediaEnvelope = JSON.parse(mediaUpload.stdout) as { data: { upload: { tag?: string } } };
+    assert.equal(mediaEnvelope.data.upload.tag, "lobby");
+
+    transport.calls.length = 0;
+    const listed = await withRuntime(
+      ["--json", "media", "list", "--tag", "lobby", "--kind", "image"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(listed.code, ExitCode.Success, listed.stdout);
+    const listCall = transport.calls.find((call) => call.method === "GET" && call.path === "/api/v1/media");
+    assert.deepEqual(listCall?.query, { tag: "lobby", kind: "image" });
+    const listedEnvelope = JSON.parse(listed.stdout) as { data: { items: Array<{ tag?: string }> } };
+    assert.equal(listedEnvelope.data.items[0]?.tag, "lobby");
+
+    const updated = await withRuntime(
+      ["--json", "media", "update", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--tag", "lobby2", "--if-match", "1"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(updated.code, ExitCode.Success, updated.stdout);
+    const patch = transport.calls.find((call) => call.method === "PATCH" && call.path === "/api/v1/media/med_AAAAAAAAAAAAAAAAAAAAAAAA");
+    assert.deepEqual(patch?.body, { tag: "lobby2" });
+    assert.equal(patch?.headers?.["if-match"], '"1"');
+
+    const cleared = await withRuntime(
+      ["--json", "media", "update", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--clear-tag", "--if-match", "2"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(cleared.code, ExitCode.Success, cleared.stdout);
+    const clearPatch = transport.calls.find((call) => call.method === "PATCH" && call.path === "/api/v1/media/med_AAAAAAAAAAAAAAAAAAAAAAAA" && (call.body as { tag: unknown }).tag === null);
+    assert.deepEqual(clearPatch?.body, { tag: null });
+
+    const both = await withRuntime(
+      ["--json", "media", "update", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--tag", "lobby", "--clear-tag", "--if-match", "3"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(both.code, ExitCode.Usage, both.stdout);
+
+    const badTag = await withRuntime(
+      ["--json", "media", "list", "--tag", "not_a_tag"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(badTag.code, ExitCode.Usage, badTag.stdout);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
 });
 
 test("playlist create refuses a mixed template-and-placements page before the write", async () => {

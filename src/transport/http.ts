@@ -135,6 +135,7 @@ export class FetchTransport implements Transport {
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    const requestId = req.headers?.["x-request-id"];
     return {
       async *[Symbol.asyncIterator]() {
         try {
@@ -145,6 +146,11 @@ export class FetchTransport implements Transport {
             }
             yield decoder.decode(value, { stream: true });
           }
+        } catch (err) {
+          if ((err as Error).name === "AbortError") {
+            throw err;
+          }
+          throw networkError(err instanceof Error ? err.message : "SSE stream failed", requestId);
         } finally {
           reader.releaseLock();
         }

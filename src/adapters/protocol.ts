@@ -263,6 +263,13 @@ export interface MediaUploadDeclaration {
   content_type: "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "video/mp4" | "video/webm";
   filename: string;
   sha256: string;
+  /** Optional mutable query tag. Stored on the ready object, not redeclared at commit. */
+  tag?: string;
+}
+
+/** PATCH /api/v1/media/{id}. tag is required; null clears it. */
+export interface MediaTagPatch {
+  tag: string | null;
 }
 
 export interface MediaUploadSession {
