@@ -11,8 +11,8 @@
     {
       "path": "vendor/openapi.yaml",
       "source": "api/openapi.yaml",
-      "bytes": 157479,
-      "sha256": "bcc20c255ad75456043f3fbff77a901e084e8e377f3590638b4e7e74a153ff98"
+      "bytes": 157722,
+      "sha256": "e0c1e0bdefcf191202bdb21dd308b924ff02cb50497c62c8287a2bfe22ee6e16"
     },
     {
       "path": "assets/screenrig.runtime.js",

@@ -779,7 +779,7 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: createNativeDeviceRuntimeSession
-      description: Exchanges exactly one ScreenRig-Device Authorization credential and an empty body for a signed 30-minute native runtime credential. Cookies are neither accepted nor set. Exact Idempotency-Key replay precedes new abuse admission.
+      description: Exchanges exactly one ScreenRig-Device Authorization credential and an empty body for a signed 24-hour native runtime credential. Cookies are neither accepted nor set. Exact Idempotency-Key replay precedes new abuse admission.
       security: [{ nativeDeviceAuthorization: [] }]
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       responses:
@@ -818,7 +818,7 @@ paths:
         - { $ref: "#/components/parameters/AfterCursor" }
         - { $ref: "#/components/parameters/LastEventID" }
       responses:
-        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. account.suspended and account.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
+        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.deleted is a runtime audience event delivered when the screen is unpaired or deleted; the durable device credential is revoked before it is emitted, so the player must discard its stored credentials and return to pairing rather than retry. account.suspended and account.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/reports:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -1101,7 +1101,7 @@ components:
     nativeSessionAuthorization:
       type: http
       scheme: ScreenRig-Session
-      description: Native-only signed 30-minute runtime authorization. The credential is exactly srs_ plus an opaque signed base64url value.
+      description: Native-only signed 24-hour runtime authorization. The credential is exactly srs_ plus an opaque signed base64url value.
     runtimeCookie: { type: apiKey, in: cookie, name: __Host-screenrig-runtime }
     pairedRuntimeCookie: { type: apiKey, in: cookie, name: __Host-screenrig-runtime, description: Signed runtime session with paired-device mutation profile. }
     pairedDeviceCookie: { type: apiKey, in: cookie, name: __Host-screenrig-device }
