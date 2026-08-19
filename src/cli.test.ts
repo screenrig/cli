@@ -2582,7 +2582,7 @@ test("playlist create accepts a linear canvas.background on a templated page and
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("account accountings, playback list, media filters, media update, and app --name bind the consumer routes", async () => {
+test("playback list, media filters, media update, and app --name bind the consumer routes", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("consumer-surface-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
@@ -2598,13 +2598,6 @@ test("account accountings, playback list, media filters, media update, and app -
   await writeFile(mediaFile, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3]));
 
   try {
-    const accountings = await withRuntime(["--json", "account", "accountings"], transport, { fs: fsLike });
-    assert.equal(accountings.code, ExitCode.Success, accountings.stdout);
-    const accountingsCall = transport.calls.find((call) => call.path === "/api/v1/account/accountings");
-    assert.equal(accountingsCall?.method, "GET");
-    const accountingsEnvelope = JSON.parse(accountings.stdout) as { data: { hours: Array<{ hour: string }> } };
-    assert.equal(accountingsEnvelope.data.hours[0]?.hour, "2026-08-14T17:00:00.000Z");
-
     const playback = await withRuntime(
       ["--json", "playback", "list", "--screen-id", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--media-id", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--day", "2026-08-14"],
       transport,

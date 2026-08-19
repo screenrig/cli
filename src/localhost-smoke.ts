@@ -210,7 +210,6 @@ async function main(): Promise<void> {
     await run("media", "show", mediaId);
     await run("media", "list", "--tag", "lobby", "--kind", "image");
     await run("media", "update", mediaId, "--tag", "lobby2", "--if-match", "1");
-    await run("account", "accountings");
     await run("playback", "list", "--screen-id", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--day", "2026-08-14");
     await run("kv", "set", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", "{\"message\":\"hello\"}");
     await run("kv", "get", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA");

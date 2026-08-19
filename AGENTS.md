@@ -176,16 +176,6 @@ installation, players, backend services, the site, or production deployment.
   credential-shaped material. Canned-sentence silence is human-only. After
   redaction, a server `message` field that is data remains.
 
-## Accountings
-
-- `account accountings` binds `GET /api/v1/account/accountings`. It lists
-  hourly prepaid-credit accountings with snapshotted rates and derived mcr.
-- The route stays available when remaining mcr is zero. Read remaining mcr
-  from `account show`, not from this list. Do not add pay, Stripe, or x402
-  commands.
-- This command is **source-ready**. It is uncommitted and not in the locked
-  plugin bundle. Do not claim marketplace or deployed.
-
 ## Playback
 
 - `playback list [--screen-id ID] [--media-id ID] [--day YYYY-MM-DD]` binds
@@ -194,8 +184,8 @@ installation, players, backend services, the site, or production deployment.
 - `--screen-id` must start with `scr_`. `--media-id` must start with `med_`.
   `--day` is a UTC calendar day as `YYYY-MM-DD`. Identifiers filter the
   caller's own rows and are never a cross-account lookup.
-- This command is **source-ready**. It is uncommitted and not in the locked
-  plugin bundle. Do not claim marketplace or deployed.
+- This command is **repository-ready** on public `main`. It is not in the
+  locked plugin bundle. Do not claim marketplace or deployed.
 
 ## Media tags
 
@@ -209,8 +199,8 @@ installation, players, backend services, the site, or production deployment.
   `PATCH /api/v1/media/{id}`. Exactly one of `--tag` or `--clear-tag`.
   `--clear-tag` sends `null`. There is no other media metadata patch. Do
   not add an update path for filename, kind, or codecs.
-- This surface is **source-ready**. It is uncommitted and not in the locked
-  plugin bundle. Do not claim marketplace or deployed.
+- This surface is **repository-ready** on public `main`. It is not in the
+  locked plugin bundle. Do not claim marketplace or deployed.
 
 ## Page scheduling
 
@@ -240,7 +230,8 @@ installation, players, backend services, the site, or production deployment.
   Optional `--name` (at most 120 characters, no line break) is sent as
   `ScreenRig-Application-Name`. Every upload still creates a new
   application and a new release; `--name` is not an in-place update. That
-  flag is **source-ready**.
+  flag is **repository-ready** on public `main`. It is not in the locked
+  plugin bundle. Do not claim marketplace or deployed.
 
 ## Product and security boundaries
 

@@ -103,7 +103,6 @@ Usage:
 
 Commands:
   account show
-  account accountings
   auth status
   auth revoke --yes
   app pack <directory> [--output FILE]
@@ -249,9 +248,6 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
   }
   if (group === "account" && action === "show") {
     return accountShow(args, runtime, resolved);
-  }
-  if (group === "account" && action === "accountings") {
-    return accountAccountings(args, runtime, resolved);
   }
   if (group === "auth" && (action === "status" || action === undefined)) {
     return accountShow(args, runtime, resolved);
@@ -420,7 +416,7 @@ async function authRevoke(
 
 function isAuthenticatedCommand(group: string, action: string | undefined): boolean {
   const actions: Record<string, ReadonlySet<string | undefined>> = {
-    account: new Set(["show", "accountings"]),
+    account: new Set(["show"]),
     auth: new Set([undefined, "status"]),
     app: new Set(["upload", "list", "show"]),
     media: new Set(["upload", "show", "list", "delete", "update"]),
@@ -580,10 +576,6 @@ async function accountShow(args: ParsedArgs, runtime: CliRuntime, resolved: Awai
       ["request_id", client.requestId],
     ]),
   };
-}
-
-async function accountAccountings(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>): Promise<CommandResult> {
-  return simpleGet(args, runtime, resolved, "/api/v1/account/accountings", "Account accountings");
 }
 
 async function appPack(args: ParsedArgs, runtime: CliRuntime): Promise<CommandResult> {

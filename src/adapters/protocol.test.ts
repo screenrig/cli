@@ -166,19 +166,13 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "used_bytes",
   ]);
   assert.match(account, /"status": "active" \| "cancelled" \| "deleted"/);
-  assert.deepEqual(quotedProperties(interfaceBody(source, "AccountAccountings")), ["hours"]);
-  assert.deepEqual(quotedProperties(interfaceBody(source, "CreditAccountingHour")), [
-    "bandwidth_mcr",
-    "bandwidth_mcr_per_gb",
-    "gb_bytes",
-    "hour",
-    "in_bytes",
-    "month_hours",
-    "out_bytes",
-    "storage_mcr",
-    "storage_mcr_per_gb_month",
-    "used_bytes",
-  ]);
+  assert.doesNotMatch(source, /AccountAccountings/);
+  assert.doesNotMatch(source, /CreditAccountingHour/);
+  const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
+  assert.doesNotMatch(openapi, /\/api\/v1\/account\/accountings/);
+  assert.doesNotMatch(openapi, /AccountAccountings/);
+  assert.doesNotMatch(openapi, /CreditAccountingHour/);
+  assert.match(openapi, /\/api\/v1\/playback:/);
   const chrome = interfaceBody(source, "RuntimeChrome");
   assert.deepEqual(quotedProperties(chrome), ["banner", "schema_version"]);
   assert.match(chrome, /"banner": null/);

@@ -66,11 +66,10 @@ pages use `screenrig.canvas/v1`; protected content and
 screenshot <id>` requests one still WebP of an active screen, waits until it
 is ready, and writes a file. It does not print image bytes.
 
-`account accountings` lists hourly prepaid-credit accountings. The route
-stays available when remaining mcr is zero. `playback list` returns daily
-playback aggregates for this account, newest days first. Filter with
-`--screen-id`, `--media-id`, and `--day YYYY-MM-DD`. Those identifiers
-select the caller's own rows and are never a cross-account lookup.
+`playback list` returns daily playback aggregates for this account, newest
+days first. Filter with `--screen-id`, `--media-id`, and `--day YYYY-MM-DD`.
+Those identifiers select the caller's own rows and are never a cross-account
+lookup.
 
 ## Feedback
 
@@ -200,7 +199,6 @@ screenrig --json events list --after ev1_0 --limit 25
 screenrig events follow
 screenrig --json events follow --after ev1_0
 screenrig --json playback list --screen-id scr_01 --day 2026-08-14
-screenrig --json account accountings
 ```
 
 A human line looks like

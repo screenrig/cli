@@ -259,30 +259,6 @@ export function memoryBackend(): FakeTransport {
     body: account,
   }));
 
-  transport.on("GET", "/api/v1/account/accountings", (req) => ({
-    status: 200,
-    headers: {
-      "cache-control": "private, no-store",
-      "x-request-id": req.headers?.["x-request-id"] ?? "req_accountings",
-    },
-    body: {
-      hours: [
-        {
-          hour: "2026-08-14T17:00:00.000Z",
-          in_bytes: 0,
-          out_bytes: 0,
-          used_bytes: 0,
-          bandwidth_mcr: 0,
-          storage_mcr: 0,
-          gb_bytes: 1_073_741_824,
-          bandwidth_mcr_per_gb: 0,
-          storage_mcr_per_gb_month: 0,
-          month_hours: 744,
-        },
-      ],
-    },
-  }));
-
   const playbackItems = [
     {
       screen_id: "scr_PAIRINGAAAAAAAAAAAAAAAA",
