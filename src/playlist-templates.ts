@@ -1,10 +1,5 @@
+import { WIRE_PLACEMENT_KINDS } from "./compose/catalog.js";
 import { usageError } from "./problems.js";
-import {
-  longestSansLineWidth,
-  minSansLineHeight,
-} from "./sans-advance.js";
-
-export { minSansLineHeight, measureSansLineWidth, longestSansLineWidth } from "./sans-advance.js";
 
 export const SLIDE_CANVAS_WIDTH = 1920;
 export const SLIDE_CANVAS_HEIGHT = 1080;
@@ -57,8 +52,6 @@ const TEMPLATED_PAGE_KEYS = new Set([
 ]);
 
 const COLOR = /^#[0-9A-Fa-f]{8}$/;
-const ALIGN = new Set(["left", "center", "right"]);
-const VERTICAL_ALIGN = new Set(["top", "middle", "bottom"]);
 
 interface Rect {
   x: number;
@@ -468,31 +461,32 @@ export const SLIDE_TEMPLATES: readonly SlideTemplateDef[] = [
 
 const TEMPLATE_BY_ID = new Map(SLIDE_TEMPLATES.map((template) => [template.id, template]));
 
-export type CatalogSlotKind = "text" | "image" | "image_or_video";
+export type CatalogSlotKind = "compose" | "image" | "image_or_video";
 
 export interface TemplateCatalogSlot {
   id: string;
   kind: CatalogSlotKind;
   required: boolean;
-  align?: Align;
-  vertical_align?: VerticalAlign;
 }
 
 export interface TemplateCatalogEntry {
   id: string;
+  compose_locally: boolean;
   slots: TemplateCatalogSlot[];
 }
 
 export interface TemplateCatalog {
+  compose: {
+    catalog_command: string;
+    render_command: string;
+    wire_kinds: readonly string[];
+  };
   canvas: {
     width: number;
     height: number;
     viewport_fit: "contain";
     background: string;
   };
-  text_color: string;
-  font_family: "sans";
-  wrap: false;
   transition: { type: "crossfade"; duration_ms: number };
   advance: { mode: "duration"; after_ms: number };
   templates: TemplateCatalogEntry[];
@@ -500,19 +494,22 @@ export interface TemplateCatalog {
 
 export function playlistTemplateCatalog(): TemplateCatalog {
   return {
+    compose: {
+      catalog_command: "screenrig --json compose catalog",
+      render_command: "screenrig --json compose render <file>",
+      wire_kinds: [...WIRE_PLACEMENT_KINDS],
+    },
     canvas: {
       width: SLIDE_CANVAS_WIDTH,
       height: SLIDE_CANVAS_HEIGHT,
       viewport_fit: SLIDE_VIEWPORT_FIT,
       background: SLIDE_BACKGROUND,
     },
-    text_color: SLIDE_TEXT_COLOR,
-    font_family: SLIDE_FONT_FAMILY,
-    wrap: false,
     transition: { ...SLIDE_DEFAULT_TRANSITION },
     advance: { ...SLIDE_DEFAULT_ADVANCE },
     templates: SLIDE_TEMPLATES.map((template) => ({
       id: template.id,
+      compose_locally: template.slots.some((slot) => slot.kind === "text") || template.chrome.length > 0 || template.plate,
       slots: template.slots.map((slot) => catalogSlot(slot)),
     })),
   };
@@ -520,16 +517,11 @@ export function playlistTemplateCatalog(): TemplateCatalog {
 
 function catalogSlot(slot: SlotDef): TemplateCatalogSlot {
   if (slot.kind === "text") {
-    const entry: TemplateCatalogSlot = {
+    return {
       id: slot.id,
-      kind: "text",
+      kind: "compose",
       required: slot.required,
-      align: slot.align,
     };
-    if (slot.vertical_align !== "top") {
-      entry.vertical_align = slot.vertical_align;
-    }
-    return entry;
   }
   return {
     id: slot.id,
@@ -539,7 +531,11 @@ function catalogSlot(slot: SlotDef): TemplateCatalogSlot {
 }
 
 export function formatTemplateCatalog(catalog: TemplateCatalog): string {
-  const lines = ["Closed slide templates"];
+  const lines = [
+    "Slide layouts with copy or chrome are composed locally, uploaded as image, then placed as one image.",
+    `Wire kinds: ${catalog.compose.wire_kinds.join(", ")}.`,
+    `Compose: ${catalog.compose.catalog_command}`,
+  ];
   for (const template of catalog.templates) {
     const slots = template.slots.map((slot) => formatCatalogSlot(slot)).join("; ");
     lines.push(`${template.id}  ${slots}`);
@@ -549,13 +545,39 @@ export function formatTemplateCatalog(catalog: TemplateCatalog): string {
 
 function formatCatalogSlot(slot: TemplateCatalogSlot): string {
   const parts = [slot.kind, slot.required ? "required" : "optional"];
-  if (slot.align) {
-    parts.push(`align ${slot.align}`);
-  }
-  if (slot.vertical_align) {
-    parts.push(`vertical_align ${slot.vertical_align}`);
-  }
   return `${slot.id} (${parts.join(", ")})`;
+}
+
+function vectorChromeError(label: string): never {
+  throw usageError(
+    `${label} would emit native text, box, or line placements. Compose a still with compose render, upload it as image, and place that image on the page.`,
+    {
+      command: "screenrig --json compose catalog",
+      reason: "List the local compose catalog, then run compose render and media upload.",
+    },
+  );
+}
+
+function assertWirePlacementKinds(page: unknown, index: number): void {
+  if (!isRecord(page) || !Array.isArray(page.placements)) {
+    return;
+  }
+  const label = pageLabel(page, index);
+  for (const [placementIndex, placement] of page.placements.entries()) {
+    if (!isRecord(placement) || !isRecord(placement.content)) {
+      continue;
+    }
+    const type = placement.content.type;
+    if (typeof type !== "string" || !(WIRE_PLACEMENT_KINDS as readonly string[]).includes(type)) {
+      throw usageError(
+        `${label} placements[${placementIndex}] content.type must be ${WIRE_PLACEMENT_KINDS.join("|")}. Compose copy and chrome locally.`,
+        {
+          command: "screenrig --json compose catalog",
+          reason: "List the local compose catalog, then run compose render and media upload.",
+        },
+      );
+    }
+  }
 }
 
 export function expandPlaylistPages(pages: unknown[]): unknown[] {
@@ -570,24 +592,12 @@ export function expandPlaylistPage(page: unknown, index = 0): unknown {
     throw usageError(`${pageLabel(page, index)} mixes template and placements. Use one page shape.`);
   }
   if (!("template" in page)) {
+    assertWirePlacementKinds(page, index);
     return page;
   }
-  return expandTemplatedPage(page, index);
-}
-
-interface TextSlotValue {
-  text: string;
-  align: Align;
-  vertical_align: VerticalAlign;
-}
-
-interface LaidText {
-  text: string;
-  font_size: number;
-  line_height: number;
-  align: Align;
-  vertical_align: VerticalAlign;
-  rect: Rect;
+  const expanded = expandTemplatedPage(page, index);
+  assertWirePlacementKinds(expanded, index);
+  return expanded;
 }
 
 function expandTemplatedPage(page: Record<string, unknown>, index: number): Record<string, unknown> {
@@ -605,69 +615,26 @@ function expandTemplatedPage(page: Record<string, unknown>, index: number): Reco
   if (unknownSlots.length > 0) {
     throw usageError(`Unknown slot ${unknownSlots.join(", ")} on template ${template.id}.`);
   }
+  if (template.slots.some((slot) => slot.kind === "text" && (slot.required || slot.id in slots))) {
+    vectorChromeError(label);
+  }
   for (const slot of template.slots) {
-    if (slot.required && !(slot.id in slots)) {
+    if (slot.kind === "picture" && slot.required && !(slot.id in slots)) {
       throw usageError(`Missing required slot ${slot.id} on template ${template.id}.`);
     }
   }
 
   const background = readBackground(page.canvas, label);
-  const textColor = page.text_color === undefined
-    ? SLIDE_TEXT_COLOR
-    : canvasColor(page.text_color, `${label} text_color`);
-
-  const laid = new Map<string, LaidText>();
-  for (const slot of template.slots) {
-    if (slot.kind !== "text") {
-      continue;
-    }
-    const value = readTextSlot(slot, slots[slot.id]);
-    if (value === undefined) {
-      continue;
-    }
-    laid.set(slot.id, layoutTextSlot(slot, value, template.stack.includes(slot.id)));
-  }
-  packCopyStack(template, laid);
 
   const placements: unknown[] = [];
   for (const slot of template.slots) {
-    if (slot.kind !== "picture" || slot.layer !== 0) {
+    if (slot.kind !== "picture") {
       continue;
     }
     const pictured = readPictureSlot(slot, slots[slot.id]);
     if (pictured) {
       placements.push(picturePlacement(slot, pictured));
     }
-  }
-  for (const chrome of template.chrome) {
-    placements.push(linePlacement(chrome));
-  }
-  if (template.plate) {
-    const plateRects = template.stack
-      .map((id) => laid.get(id)?.rect)
-      .filter((rect): rect is Rect => rect !== undefined);
-    if (plateRects.length > 0) {
-      placements.push(platePlacement(plateRects));
-    }
-  }
-  for (const slot of template.slots) {
-    if (slot.kind !== "picture" || slot.layer !== 2) {
-      continue;
-    }
-    const pictured = readPictureSlot(slot, slots[slot.id]);
-    if (pictured) {
-      placements.push(picturePlacement(slot, pictured));
-    }
-  }
-  for (const slot of template.slots) {
-    if (slot.kind !== "text") {
-      continue;
-    }
-    const value = laid.get(slot.id);
-    if (value === undefined) {
-      continue;
-    }
-    placements.push(textPlacement(slot, value, slot.color ?? textColor));
   }
 
   const expanded: Record<string, unknown> = {
@@ -775,56 +742,6 @@ function canvasBackground(value: unknown, name: string): CanvasBackground {
   return { type: "linear", stops };
 }
 
-function readTextSlot(slot: TextSlotDef, value: unknown): TextSlotValue | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (!isRecord(value)) {
-    throw usageError(`Slot ${slot.id} must be an object.`);
-  }
-  if ("type" in value) {
-    throw usageError(`Slot ${slot.id} is a text slot and does not take type ${String(value.type)}.`);
-  }
-  const extra = Object.keys(value).filter((key) => key !== "text" && key !== "align" && key !== "vertical_align").sort();
-  if (extra.length > 0) {
-    throw usageError(`Slot ${slot.id} has unsupported fields: ${extra.join(", ")}.`);
-  }
-  if (!("text" in value)) {
-    throw usageError(`Slot ${slot.id} is a text slot and requires text.`);
-  }
-  const joined = joinText(value.text, slot.id);
-  if (joined.length === 0) {
-    throw usageError(slot.required
-      ? `Required slot ${slot.id} has empty text.`
-      : `Slot ${slot.id} has empty text.`);
-  }
-  return {
-    text: joined,
-    align: readAlign(slot, value.align),
-    vertical_align: readVerticalAlign(slot, value.vertical_align),
-  };
-}
-
-function readAlign(slot: TextSlotDef, value: unknown): Align {
-  if (value === undefined) {
-    return slot.align;
-  }
-  if (typeof value !== "string" || !ALIGN.has(value)) {
-    throw usageError(`Slot ${slot.id} align must be left, center, or right.`);
-  }
-  return value as Align;
-}
-
-function readVerticalAlign(slot: TextSlotDef, value: unknown): VerticalAlign {
-  if (value === undefined) {
-    return slot.vertical_align;
-  }
-  if (typeof value !== "string" || !VERTICAL_ALIGN.has(value)) {
-    throw usageError(`Slot ${slot.id} vertical_align must be top, middle, or bottom.`);
-  }
-  return value as VerticalAlign;
-}
-
 function readPictureSlot(
   slot: PictureSlotDef,
   value: unknown,
@@ -887,187 +804,6 @@ function readContentFit(slot: PictureSlotDef, value: unknown): "cover" | "contai
   return value;
 }
 
-function joinText(value: unknown, slotId: string): string {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    if (!value.every((line) => typeof line === "string")) {
-      throw usageError(`Slot ${slotId} text array must contain only strings.`);
-    }
-    return value.join("\n");
-  }
-  throw usageError(`Slot ${slotId} text must be a string or an array of strings.`);
-}
-
-function layoutTextSlot(slot: TextSlotDef, value: TextSlotValue, inStack: boolean): LaidText {
-  const fitted = fitAndTruncate(slot, value.text);
-  let y = slot.rect.y;
-  if (!inStack) {
-    if (value.vertical_align === "middle") {
-      y = slot.rect.y + Math.round((slot.rect.height - fitted.height) / 2);
-    } else if (value.vertical_align === "bottom") {
-      y = slot.rect.y + slot.rect.height - fitted.height;
-    }
-  }
-  return {
-    text: fitted.text,
-    font_size: fitted.font_size,
-    line_height: fitted.line_height,
-    align: value.align,
-    vertical_align: value.vertical_align,
-    rect: { x: slot.rect.x, y, width: slot.rect.width, height: fitted.height },
-  };
-}
-
-function fitAndTruncate(slot: TextSlotDef, raw: string): {
-  text: string;
-  font_size: number;
-  line_height: number;
-  height: number;
-} {
-  const source = raw.split("\n");
-  let { font_size, line_height } = fitType(slot, source, true);
-  const maxLines = Math.max(1, Math.floor(slot.rect.height / line_height));
-  const truncated = source.length > maxLines;
-  const lines = truncateLines(source, maxLines);
-  if (truncated) {
-    ({ font_size, line_height } = fitType(slot, lines, false));
-  }
-  return {
-    text: lines.join("\n"),
-    font_size,
-    line_height,
-    height: lines.length * line_height,
-  };
-}
-
-function fitType(
-  slot: TextSlotDef,
-  lines: readonly string[],
-  allowGrow: boolean,
-): { font_size: number; line_height: number } {
-  const minSize = Math.max(SLIDE_FIT_ABS_FLOOR, Math.ceil(slot.font_size * SLIDE_FIT_MIN_RATIO));
-  const maxSize = Math.floor(slot.font_size * SLIDE_FIT_MAX_RATIO);
-  const widthAt = (size: number) => longestSansLineWidth(lines, size, slot.font_weight);
-  const lineHeightAt = (size: number) => lineHeightForSize(slot, size);
-  const maxLinesAt = (size: number) => Math.max(1, Math.floor(slot.rect.height / lineHeightAt(size)));
-
-  let size = slot.font_size;
-  if (widthAt(size) > slot.rect.width) {
-    let low = minSize;
-    let high = size;
-    let best = minSize;
-    while (low <= high) {
-      const mid = Math.floor((low + high) / 2);
-      if (widthAt(mid) <= slot.rect.width) {
-        best = mid;
-        low = mid + 1;
-      } else {
-        high = mid - 1;
-      }
-    }
-    size = best;
-  } else if (allowGrow && size < maxSize) {
-    const keep = Math.min(lines.length, maxLinesAt(slot.font_size));
-    let low = size;
-    let high = maxSize;
-    let best = size;
-    while (low <= high) {
-      const mid = Math.floor((low + high) / 2);
-      const shown = Math.min(lines.length, maxLinesAt(mid));
-      const packed = shown * lineHeightAt(mid);
-      if (widthAt(mid) <= slot.rect.width && packed <= slot.rect.height && shown >= keep) {
-        best = mid;
-        low = mid + 1;
-      } else {
-        high = mid - 1;
-      }
-    }
-    size = best;
-  }
-  return { font_size: size, line_height: lineHeightAt(size) };
-}
-
-function lineHeightForSize(slot: TextSlotDef, fontSize: number): number {
-  const scaled = Math.ceil((slot.line_height * fontSize) / slot.font_size);
-  return Math.max(scaled, minSansLineHeight(fontSize));
-}
-
-function truncateLines(lines: readonly string[], maxLines: number): string[] {
-  if (lines.length <= maxLines) {
-    return [...lines];
-  }
-  const kept = lines.slice(0, Math.max(1, maxLines));
-  const last = kept.length - 1;
-  kept[last] = `${kept[last] ?? ""}…`;
-  return kept;
-}
-
-function packCopyStack(template: SlideTemplateDef, laid: Map<string, LaidText>): void {
-  if (template.stack.length === 0) {
-    return;
-  }
-  const defs = template.stack
-    .map((id) => template.slots.find((slot) => slot.kind === "text" && slot.id === id))
-    .filter((slot): slot is TextSlotDef => slot !== undefined);
-  const present = defs.filter((slot) => laid.has(slot.id));
-  if (present.length === 0) {
-    return;
-  }
-  const holeTop = defs[0]!.rect.y;
-  const holeBottom = Math.max(...defs.map((slot) => slot.rect.y + slot.rect.height));
-  let y = holeTop;
-  let previous: TextSlotDef | undefined;
-  for (const slot of present) {
-    if (previous !== undefined) {
-      const originalGap = slot.rect.y - (previous.rect.y + previous.rect.height);
-      const adjacent = defs[defs.indexOf(previous)! + 1] === slot;
-      y += adjacent ? Math.max(0, originalGap) : 16;
-    }
-    const item = laid.get(slot.id)!;
-    item.rect = { ...item.rect, y, height: item.rect.height };
-    y += item.rect.height;
-    previous = slot;
-  }
-  if (template.pack !== "center") {
-    return;
-  }
-  const first = laid.get(present[0]!.id)!;
-  const last = laid.get(present[present.length - 1]!.id)!;
-  const packedHeight = last.rect.y + last.rect.height - first.rect.y;
-  const holeHeight = holeBottom - holeTop;
-  const shift = Math.round((holeHeight - packedHeight) / 2);
-  if (shift <= 0) {
-    return;
-  }
-  for (const slot of present) {
-    const item = laid.get(slot.id)!;
-    item.rect = { ...item.rect, y: item.rect.y + shift };
-  }
-}
-
-function textPlacement(slot: TextSlotDef, value: LaidText, color: string): Record<string, unknown> {
-  return {
-    id: slot.id,
-    content: {
-      type: "text",
-      text: value.text,
-      font_family: SLIDE_FONT_FAMILY,
-      font_weight: slot.font_weight,
-      italic: false,
-      font_size: value.font_size,
-      line_height: value.line_height,
-      color,
-      align: value.align,
-      vertical_align: value.vertical_align,
-    },
-    rect: { ...value.rect },
-    layer: 2,
-    content_fit: "fill",
-  };
-}
-
 function picturePlacement(
   slot: PictureSlotDef,
   pictured: { content: Record<string, unknown>; content_fit: "cover" | "contain" },
@@ -1078,51 +814,6 @@ function picturePlacement(
     rect: { ...slot.rect },
     layer: slot.layer,
     content_fit: pictured.content_fit,
-  };
-}
-
-function linePlacement(chrome: ChromeDef): Record<string, unknown> {
-  return {
-    id: chrome.id,
-    content: {
-      type: "line",
-      orientation: chrome.rect.width >= chrome.rect.height ? "horizontal" : "vertical",
-      color: chrome.color,
-    },
-    rect: { ...chrome.rect },
-    layer: 1,
-    content_fit: "fill",
-  };
-}
-
-function platePlacement(rects: readonly Rect[]): Record<string, unknown> {
-  const left = Math.max(0, Math.min(...rects.map((rect) => rect.x)) - SLIDE_PLATE_PAD_X);
-  const top = Math.max(0, Math.min(...rects.map((rect) => rect.y)) - SLIDE_PLATE_PAD_Y);
-  const right = Math.min(
-    SLIDE_CANVAS_WIDTH,
-    Math.max(...rects.map((rect) => rect.x + rect.width)) + SLIDE_PLATE_PAD_X,
-  );
-  const bottom = Math.min(
-    SLIDE_CANVAS_HEIGHT,
-    Math.max(...rects.map((rect) => rect.y + rect.height)) + SLIDE_PLATE_PAD_Y,
-  );
-  return {
-    id: "plate",
-    content: {
-      type: "box",
-      fill: SLIDE_PLATE_FILL,
-      border_width: 0,
-      border_color: "#00000000",
-      corner_radius: {
-        top_left: SLIDE_PLATE_RADIUS,
-        top_right: SLIDE_PLATE_RADIUS,
-        bottom_right: SLIDE_PLATE_RADIUS,
-        bottom_left: SLIDE_PLATE_RADIUS,
-      },
-    },
-    rect: { x: left, y: top, width: right - left, height: bottom - top },
-    layer: 1,
-    content_fit: "fill",
   };
 }
 

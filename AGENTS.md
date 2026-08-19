@@ -253,13 +253,12 @@ installation, players, backend services, the site, or production deployment.
   redacts and bounds the stderr tail; keep it on that path.
 - Transcoded bytes live in a `mkdtemp` directory the caller removes. Every
   failure path after that directory exists must remove it.
-- The contract carries `text`, `box`, and `line` vector placements in
-  `screenrig.canvas/v1`. The CLI emits them only by expanding the closed slide
-  templates in `src/playlist-templates.ts`. Do not hand-author free vector
-  geometry, and do not add a template outside that catalog. The server may
-  still reject a page that contains one until every player is pinned; if it
-  does, surface the
-  problem and stop. Do not invent an image fallback.
+- Playlist pages the CLI emits may use only `image`, `video`, `iframe`, and
+  `application`. Do not emit native `text`, `box`, or `line`. Copy and chrome
+  are composed locally with `compose catalog` / `compose render`, uploaded as
+  `image`, then placed as one image. `playlist templates` is a local catalog.
+  Templated pages that would emit vector chrome fail with `usage_error`
+  pointing at those compose commands. Do not silently rasterize and upload.
 - `canvas.background` is a solid uppercase `#RRGGBBAA` or a top-to-bottom
   linear gradient (`type: "linear"`, 2 through 8 strictly increasing stops,
   first at=0, last at=1). There is no angle. Templated pages accept that
@@ -280,6 +279,10 @@ installation, players, backend services, the site, or production deployment.
   add pay, Stripe, or x402 commands.
 - Screenshotting is in v1. `screen screenshot <id>` blocks on a still WebP and
   writes a file. Do not print pixels.
+- `compose catalog` and `compose render` are local and unauthenticated. The
+  render envelope is paths and layout metadata only. Never put PNG bytes in
+  stdout, the envelope, or human text. `--open` opens a local path through
+  `CliRuntime.openPath`; it is not the agent vision loop.
 
 ## Verification
 

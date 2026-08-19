@@ -422,6 +422,41 @@ test("playlist writes send a media selector and media_end, not a singular media_
   assert.doesNotMatch(openapi, /enum: \[video_end\]/);
 });
 
+test("playlist and runtime placements are image, video, iframe, and application only", () => {
+  const generated = readFileSync(GENERATED_CONTRACT, "utf8");
+  const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
+
+  assert.match(
+    generated,
+    /export type PlaylistPlacementWrite = PlaylistApplicationPlacementWrite \| PlaylistImagePlacementWrite \| PlaylistVideoPlacementWrite \| PlaylistIframePlacementWrite;/,
+  );
+  assert.match(
+    generated,
+    /export type PlaylistPlacement = PlaylistApplicationPlacement \| PlaylistImagePlacement \| PlaylistVideoPlacement \| PlaylistIframePlacement;/,
+  );
+  assert.match(
+    generated,
+    /export type RuntimePlacement = RuntimeApplicationPlacement \| RuntimeImagePlacement \| RuntimeVideoPlacement \| RuntimeIframePlacement;/,
+  );
+  for (const name of [
+    "PlaylistTextPlacementWrite",
+    "PlaylistBoxPlacementWrite",
+    "PlaylistLinePlacementWrite",
+    "PlaylistTextContent",
+    "PlaylistBoxContent",
+    "PlaylistLineContent",
+    "RuntimeTextPlacement",
+    "RuntimeBoxPlacement",
+    "RuntimeLinePlacement",
+  ]) {
+    assert.doesNotMatch(generated, new RegExp(`export (type|interface) ${name}\\b`));
+    assert.doesNotMatch(openapi, new RegExp(`${name}:`));
+  }
+  assert.doesNotMatch(openapi, /enum: \[text\]/);
+  assert.doesNotMatch(openapi, /enum: \[box\]/);
+  assert.doesNotMatch(openapi, /enum: \[line\]/);
+});
+
 test("an application carries no state of its own and reports its newest ready release", () => {
   const generated = readFileSync(GENERATED_CONTRACT, "utf8");
   const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");

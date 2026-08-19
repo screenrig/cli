@@ -27,17 +27,27 @@ removing local credential, enrollment, and transient authenticated-operation
 state. A failed or ambiguous server result retains local state for an exact
 retry.
 
-Playlist create and update expand any templated page (`template` + `slots`)
-into an ordinary page and send that. A page without `template` is forwarded
-unchanged. `playlist templates` prints the closed catalog. `canvas.background`
-is a solid uppercase `#RRGGBBAA` or a top-to-bottom linear gradient (`type`
-`linear`, 2 through 8 strictly increasing stops, first `at` 0, last `at` 1, no
-angle). Templated pages override it on `canvas.background` only. The catalog
-default stays the solid `#1B2632FF`. Image and
-video placements write a `selector` (`by` is `id`, `ids`, `all`, or `tag`).
-Do not put `media_id` on the content object, and do not send server-resolved
-`items`. Page advance uses `duration`, `application`, or `media_end`. There
-is no `video_end` mode.
+`compose catalog` and `compose render` run locally. They do not enroll. They
+do not debit credits. `compose render` reads a JSON spec, writes a PNG, and
+writes `<output>.layout.json` next to it. The envelope carries paths, canvas
+size, the resolved font family, space tokens, the type ramp, and whether any
+text was truncated. It never prints image bytes. `--open` opens the local PNG
+with the OS opener when the user asked to view the still on this computer.
+
+Playlist pages on the wire use `image`, `video`, `iframe`, and `application`
+only. Copy and chrome are composed locally, uploaded as `image`, then placed
+as one image. `playlist templates` is a local catalog of slide ids; templates
+that would emit native `text`, `box`, or `line` fail with a pointer at
+`compose catalog` and `compose render`. Picture-only templates still expand
+to image or video placements with selectors. A page without `template` is
+forwarded unchanged when its placements are those wire kinds.
+`canvas.background` is a solid uppercase `#RRGGBBAA` or a top-to-bottom
+linear gradient (`type` `linear`, 2 through 8 strictly increasing stops,
+first `at` 0, last `at` 1, no angle). Image and video placements write a
+`selector` (`by` is `id`, `ids`, `all`, or `tag`). Do not put `media_id` on
+the content object, and do not send server-resolved `items`. Page advance
+uses `duration`, `application`, or `media_end`. There is no `video_end`
+mode.
 
 The ordinary pair command currently accepts six canonical characters:
 
@@ -76,9 +86,9 @@ Remaining below 1000 credits adds a `credits_low` warning to the envelope
 `warnings[]` array; the message includes the integer remaining. A 402
 `payment_required` problem means remaining is below 1 credit and billed
 control-plane commands are rejected. Both signals can appear together on a
-402 envelope. `account show`, `auth revoke --yes`, `screen toast`, and
-`screen screenshot` do not debit that meter. Opening `events follow` costs
-1 credit. There is no pay command.
+402 envelope. `account show`, `auth revoke --yes`, `screen toast`,
+`screen screenshot`, `compose catalog`, and `compose render` do not debit
+that meter. Opening `events follow` costs 1 credit. There is no pay command.
 
 ## Feedback
 
@@ -192,6 +202,29 @@ The success envelope is `screen_id`, `capture_id`, `path`, `bytes`, `sha256`,
 `width`, and `height` only. A matching `timed_out` status or a wait deadline
 is `screenshot_unavailable`. A later `capture_id` is `resource_conflict`. The
 CLI never prints image bytes, hex, or base64.
+
+## Local compose
+
+Compose a still on this machine, look at the PNG, then upload it as media.
+
+```sh
+screenrig --json compose catalog
+screenrig --json compose render ./spec.json --output ./still.png
+screenrig --json media upload ./still.png
+```
+
+The spec is a fail-closed tree of `Frame`, `Column`, `Row`, `Box`, `Spacer`,
+`Text`, and `Image`. Roles are `display`, `title`, `body`, `caption`, and
+`label`. Spacing tokens are `xs`, `s`, `m`, `l`, and `xl`. Pins are `top`,
+`bottom`, `left`, and `right`. Do not author `x`/`y` except on the Frame
+canvas. Do not author `fontSize`. `Image.src` is a local filesystem path
+relative to the spec file. The CLI does not fetch URLs.
+
+`--open` is only for viewing the still on this computer. Agent vision reads
+the file path. Do not cat pixels into chat.
+
+A playlist page for that still is one `image` placement whose `rect` is the
+canvas and whose `content_fit` is `fill`.
 
 ## Events
 

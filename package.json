@@ -83,5 +83,9 @@
   "devDependencies": {
     "@types/node": "^24.2.0",
     "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^1.0.7",
+    "yoga-layout": "^3.2.1"
   }
 }

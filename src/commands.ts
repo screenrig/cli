@@ -84,6 +84,8 @@ import {
   formatTemplateCatalog,
   playlistTemplateCatalog,
 } from "./playlist-templates.js";
+import { composeCatalog, formatComposeCatalog } from "./compose/catalog.js";
+import { composeSpec } from "./compose/compose.js";
 import { ffmpegLookup, resolveFfmpegToolchain } from "./media/ffmpeg.js";
 import { createProgressReporter, silentProgressReporter, type ProgressReporter } from "./media/progress.js";
 import {
@@ -122,6 +124,8 @@ Commands:
   media list [--tag TAG] [--kind image|video]
   media update <id> (--tag TAG | --clear-tag) --if-match REVISION
   media delete <id> --if-match REVISION
+  compose catalog
+  compose render <file> [--output FILE] [--open]
   playlist templates
   playlist create <file>
   playlist update <id> <file> --if-match REVISION
@@ -171,6 +175,93 @@ export interface CommandResult {
 
 function nonemptyEnv(value: string | undefined): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function rethrowCompose(err: unknown): never {
+  if (err instanceof CliError) {
+    throw err;
+  }
+  if (err instanceof Error && (err as { code?: string }).code === "usage_error") {
+    throw usageError(err.message, {
+      command: "screenrig --json compose catalog",
+      reason: "Inspect the fail-closed compose catalog, then compose render a spec.",
+    });
+  }
+  throw err;
+}
+
+function defaultComposePngPath(specPath: string): string {
+  return specPath.toLowerCase().endsWith(".json") ? `${specPath.slice(0, -5)}.png` : `${specPath}.png`;
+}
+
+async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<CommandResult> {
+  const file = args.positionals[2];
+  if (!file) {
+    throw usageError("compose render requires a spec file.", {
+      command: "screenrig --json compose catalog",
+      reason: "Inspect the fail-closed compose catalog, then compose render a spec.",
+    });
+  }
+  if (args.positionals.length > 3) {
+    throw usageError("compose render accepts one spec file.");
+  }
+  if (file.includes("\0")) {
+    throw usageError("compose render spec path must not contain a NUL byte.");
+  }
+  requireFlagValue(args, "output", "./still.png");
+  const specPath = path.resolve(runtime.cwd(), file);
+  const outputFlag = flagString(args.flags, "output");
+  if (outputFlag?.includes("\0")) {
+    throw usageError("compose render --output must not contain a NUL byte.");
+  }
+  const output = path.resolve(runtime.cwd(), outputFlag ?? defaultComposePngPath(file));
+  if (output.includes("\0")) {
+    throw usageError("compose render --output must not contain a NUL byte.");
+  }
+  const layoutOutput = `${output}.layout.json`;
+  let spec: unknown;
+  try {
+    spec = JSON.parse(await readFile(specPath, "utf8"));
+  } catch (err) {
+    throw usageError(`Cannot read compose spec: ${err instanceof Error ? err.message : "invalid JSON"}`);
+  }
+  let result;
+  try {
+    result = await composeSpec(spec, {
+      baseDir: path.dirname(specPath),
+      outPath: output,
+      layoutOutPath: layoutOutput,
+    });
+  } catch (err) {
+    rethrowCompose(err);
+  }
+  const opened = flagBool(args.flags, "open")
+    ? await (runtime.openPath?.(output) ?? Promise.resolve(false))
+    : undefined;
+  const data = {
+    output,
+    layout_output: layoutOutput,
+    width: result.width,
+    height: result.height,
+    font_family: result.font_family,
+    space: result.space,
+    ramp: result.ramp,
+    truncated: result.truncated,
+    ...(opened !== undefined ? { opened } : {}),
+  };
+  return {
+    envelope: successEnvelope(data),
+    exitCode: ExitCode.Success,
+    human: humanLines("Composed still", [
+      ["output", output],
+      ["layout_output", layoutOutput],
+      ["width", String(result.width)],
+      ["height", String(result.height)],
+      ["font_family", result.font_family],
+      ["truncated", result.truncated ? "true" : "false"],
+      ...(opened !== undefined ? [["opened", opened ? "true" : "false"] as [string, string]] : []),
+    ]),
+  };
 }
 
 function transportFor(runtime: CliRuntime, apiUrl: string, token?: string): Transport {
@@ -226,6 +317,20 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
       human: `screenrig ${CLI_VERSION}`,
     };
   }
+  if (group === "compose" && action === "catalog") {
+    if (args.positionals.length > 2) {
+      throw usageError("compose catalog does not accept positional arguments.");
+    }
+    const catalog = composeCatalog();
+    return {
+      envelope: successEnvelope(catalog),
+      exitCode: ExitCode.Success,
+      human: formatComposeCatalog(catalog),
+    };
+  }
+  if (group === "compose" && action === "render") {
+    return composeRender(args, runtime);
+  }
   if (group === "playlist" && action === "templates") {
     if (args.positionals.length > 2) {
       throw usageError("playlist templates does not accept positional arguments.");
@@ -236,6 +341,12 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
       exitCode: ExitCode.Success,
       human: formatTemplateCatalog(catalog),
     };
+  }
+  if (group === "compose") {
+    throw usageError("Unknown compose command. Use compose catalog or compose render.", {
+      command: "screenrig --json compose catalog",
+      reason: "List the fail-closed compose catalog.",
+    });
   }
 
   const repair = flagBool(args.flags, "repair-config");

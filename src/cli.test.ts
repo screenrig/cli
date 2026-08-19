@@ -2747,7 +2747,7 @@ test("playlist templates --json lists the fifteen closed ids without enrolling",
   const transport = memoryBackend();
   const { code, stdout, configDir } = await withRuntime(["--json", "playlist", "templates"], transport);
   assert.equal(code, ExitCode.Success, stdout);
-  const envelope = JSON.parse(stdout) as { ok: true; data: { templates: Array<{ id: string }> } };
+  const envelope = JSON.parse(stdout) as { ok: true; data: { templates: Array<{ id: string }>; compose: { wire_kinds: string[] } } };
   assert.deepEqual(envelope.data.templates.map((template) => template.id), [
     "slide-intro",
     "slide-text-only-1",
@@ -2765,11 +2765,12 @@ test("playlist templates --json lists the fifteen closed ids without enrolling",
     "slide-photo",
     "slide-full-bleed",
   ]);
+  assert.deepEqual(envelope.data.compose.wire_kinds, ["image", "video", "iframe", "application"]);
   assert.equal(transport.calls.length, 0);
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("playlist create expands a templated page and forwards a full page unchanged", async () => {
+test("playlist create expands a picture template and forwards a full page unchanged", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("playlist-templates-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
@@ -2799,7 +2800,13 @@ test("playlist create expands a templated page and forwards a full page unchange
     JSON.stringify({
       name: "Lobby",
       pages: [
-        { id: "intro", template: "slide-intro", slots: { title: { text: "Welcome" } } },
+        {
+          id: "hero",
+          template: "slide-full-bleed",
+          slots: {
+            picture: { type: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
+          },
+        },
         fullPage,
       ],
     }),
@@ -2811,17 +2818,41 @@ test("playlist create expands a templated page and forwards a full page unchange
   assert.equal(body.pages.length, 2);
   assert.equal("template" in body.pages[0]!, false);
   assert.equal("slots" in body.pages[0]!, false);
-  const introPlacements = body.pages[0]!.placements as Array<{ id: string; content: { type: string; text?: string } }>;
-  assert.deepEqual(introPlacements.map((placement) => placement.id), ["bar", "title"]);
-  const title = introPlacements.find((placement) => placement.id === "title");
-  assert.equal(title?.content.type, "text");
-  assert.equal(title?.content.text, "Welcome");
-  assert.equal(introPlacements.find((placement) => placement.id === "bar")?.content.type, "line");
+  const introPlacements = body.pages[0]!.placements as Array<{ id: string; content: { type: string } }>;
+  assert.deepEqual(introPlacements.map((placement) => placement.id), ["picture"]);
+  assert.ok(introPlacements.every((placement) => placement.content.type === "image"));
   assert.deepEqual(body.pages[1], fullPage);
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("playlist create accepts a linear canvas.background on a templated page and a full page", async () => {
+test("playlist create refuses a templated page that would emit text", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("playlist-text-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_existing_secret" },
+    fsLike,
+  );
+  const file = path.join(configDir, "playlist.json");
+  await writeFile(
+    file,
+    JSON.stringify({
+      name: "Lobby",
+      pages: [{ id: "intro", template: "slide-intro", slots: { title: { text: "Welcome" } } }],
+    }),
+  );
+  const result = await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
+  assert.equal(result.code, ExitCode.Usage, result.stdout);
+  const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string; next?: { command: string } } };
+  assert.equal(envelope.error.code, "usage_error");
+  assert.match(envelope.error.detail, /compose render/);
+  assert.equal(envelope.error.next?.command, "screenrig --json compose catalog");
+  assert.equal(transport.calls.some((call) => call.method === "POST" && call.path === "/api/v1/playlists"), false);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("playlist create accepts a linear canvas.background on a picture template and a full page", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("playlist-gradient-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
@@ -2859,10 +2890,12 @@ test("playlist create accepts a linear canvas.background on a templated page and
       name: "Lobby",
       pages: [
         {
-          id: "intro",
-          template: "slide-intro",
+          id: "hero",
+          template: "slide-full-bleed",
           canvas: { background: wash },
-          slots: { title: { text: "Welcome" } },
+          slots: {
+            picture: { type: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
+          },
         },
         fullPage,
       ],

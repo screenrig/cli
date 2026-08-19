@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import type { Writable } from "node:stream";
 import type { Transport } from "./transport/types.js";
 import type { ConfigFs } from "./config.js";
-import { openExternalUrl, type OpenUrl } from "./open-url.js";
+import { openExternalUrl, openLocalPath, type OpenPath, type OpenUrl } from "./open-url.js";
 
 export interface CliRuntime {
   argv: string[];
@@ -19,6 +19,7 @@ export interface CliRuntime {
   signedRawPut?: SignedRawPut;
   cwd: () => string;
   openUrl?: OpenUrl;
+  openPath?: OpenPath;
   runProcess?: RunProcess;
   isStderrTty?: () => boolean;
 }
@@ -171,6 +172,7 @@ export function processRuntime(): CliRuntime {
     cwd: () => process.cwd(),
     signedRawPut: fetchSignedRawPut(),
     openUrl: openExternalUrl,
+    openPath: openLocalPath,
     runProcess: spawnRunProcess(),
     isStderrTty: () => process.stderr.isTTY === true,
     fs: {

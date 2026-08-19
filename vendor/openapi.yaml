@@ -1303,18 +1303,12 @@ components:
         - { $ref: "#/components/schemas/PlaylistImagePlacementWrite" }
         - { $ref: "#/components/schemas/PlaylistVideoPlacementWrite" }
         - { $ref: "#/components/schemas/PlaylistIframePlacementWrite" }
-        - { $ref: "#/components/schemas/PlaylistTextPlacementWrite" }
-        - { $ref: "#/components/schemas/PlaylistBoxPlacementWrite" }
-        - { $ref: "#/components/schemas/PlaylistLinePlacementWrite" }
     PlaylistPlacement:
       oneOf:
         - { $ref: "#/components/schemas/PlaylistApplicationPlacement" }
         - { $ref: "#/components/schemas/PlaylistImagePlacement" }
         - { $ref: "#/components/schemas/PlaylistVideoPlacement" }
         - { $ref: "#/components/schemas/PlaylistIframePlacement" }
-        - { $ref: "#/components/schemas/PlaylistTextPlacement" }
-        - { $ref: "#/components/schemas/PlaylistBoxPlacement" }
-        - { $ref: "#/components/schemas/PlaylistLinePlacement" }
     PlaylistApplicationPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistApplicationContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, default: false } } }
     PlaylistImagePlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistImageContentWrite" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] } } }
     PlaylistVideoPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistVideoContentWrite" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] } } }
@@ -1341,14 +1335,6 @@ components:
     PlaylistImageContent: { type: object, additionalProperties: false, required: [type, selector, items], properties: { type: { type: string, enum: [image] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, items: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistMediaItem" }, description: Server-resolved matches. Clients must not send this field. }, alt: { type: string, maxLength: 300 }, dwell_ms: { type: integer, minimum: 1000, maximum: 86400000 } } }
     PlaylistVideoContent: { type: object, additionalProperties: false, required: [type, selector, items, muted, loop], properties: { type: { type: string, enum: [video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, items: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistMediaItem" }, description: Server-resolved matches. Clients must not send this field. }, muted: { type: boolean, enum: [true] }, loop: { type: boolean } } }
     PlaylistIframeContent: { type: object, additionalProperties: false, required: [type, src, title], properties: { type: { type: string, enum: [iframe] }, src: { type: string, format: uri, pattern: "^https://" }, title: { type: string, minLength: 1, maxLength: 200 } } }
-    PlaylistTextPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistTextContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] } } }
-    PlaylistBoxPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistBoxContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] } } }
-    PlaylistLinePlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistLineContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] } } }
-    PlaylistTextPlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistTextContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, enum: [false] } } }
-    PlaylistBoxPlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistBoxContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, enum: [false] } } }
-    PlaylistLinePlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistLineContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, enum: [false] } } }
-    PlaylistCornerRadius: { type: object, additionalProperties: false, required: [top_left, top_right, bottom_right, bottom_left], properties: { top_left: { $ref: "#/components/schemas/CanvasLength" }, top_right: { $ref: "#/components/schemas/CanvasLength" }, bottom_right: { $ref: "#/components/schemas/CanvasLength" }, bottom_left: { $ref: "#/components/schemas/CanvasLength" } } }
-    CanvasLength: { type: number, minimum: 0, maximum: 100000, description: "Canvas units, like every length in screenrig.canvas/v1. Never pixels and never a percentage." }
     CanvasColor: { type: string, pattern: "^#[0-9A-F]{8}$", description: Canonical uppercase sRGB RRGGBBAA. }
     LinearGradientStop:
       type: object
@@ -1371,47 +1357,6 @@ components:
         - { $ref: "#/components/schemas/CanvasColor" }
         - { $ref: "#/components/schemas/LinearGradientBackground" }
       description: "Solid canonical uppercase #RRGGBBAA, or a top-to-bottom linear gradient."
-    PlaylistTextContent:
-      type: object
-      additionalProperties: false
-      required: [type, text, font_family, font_weight, italic, font_size, line_height, color, align, vertical_align]
-      description: >-
-        One text item styled as a whole, with no per-run spans. Lines are separated
-        only by a literal line feed; there is no automatic wrapping, because line
-        breaking diverges between Blink, the Qt scene graph, and Android Minikin.
-        Text that exceeds its placement clips.
-      properties:
-        type: { type: string, enum: [text] }
-        text: { type: string, minLength: 1, maxLength: 4000, description: "Line feed separates lines. Every other control character is rejected." }
-        font_family: { type: string, enum: [sans, serif, mono], description: "Closed set of bundled families. An unknown family is rejected; no renderer substitutes a system face." }
-        font_weight: { type: integer, enum: [400, 700], description: "Only real bundled faces exist. Synthesis is forbidden, so no other weight is available." }
-        italic: { type: boolean, default: false, description: Selects the true italic face; never an oblique slant. }
-        font_size: { $ref: "#/components/schemas/PositiveCanvasLength" }
-        line_height: { $ref: "#/components/schemas/PositiveCanvasLength" }
-        color: { $ref: "#/components/schemas/CanvasColor" }
-        align: { type: string, enum: [left, center, right] }
-        vertical_align: { type: string, enum: [top, middle, bottom] }
-    PositiveCanvasLength: { type: number, exclusiveMinimum: 0, maximum: 100000, description: "Canvas units, like every length in screenrig.canvas/v1. Never pixels and never a percentage." }
-    PlaylistBoxContent:
-      type: object
-      additionalProperties: false
-      required: [type, fill, border_width, border_color, corner_radius]
-      description: A filled rectangle with per-corner radii. The border always draws inside the bounds. An outline is a border over a fully transparent fill; there is no separate outline type.
-      properties:
-        type: { type: string, enum: [box] }
-        fill: { $ref: "#/components/schemas/CanvasColor" }
-        border_width: { $ref: "#/components/schemas/CanvasLength" }
-        border_color: { $ref: "#/components/schemas/CanvasColor" }
-        corner_radius: { $ref: "#/components/schemas/PlaylistCornerRadius" }
-    PlaylistLineContent:
-      type: object
-      additionalProperties: false
-      required: [type, orientation, color]
-      description: "An axis-aligned rule. Thickness is the rectangle's thin axis, so there is no thickness field: a horizontal rule uses rect.height and a vertical rule uses rect.width. Diagonals are excluded from v1."
-      properties:
-        type: { type: string, enum: [line] }
-        orientation: { type: string, enum: [horizontal, vertical] }
-        color: { $ref: "#/components/schemas/CanvasColor" }
     PlaylistIntrinsicSize: { type: object, additionalProperties: false, required: [width, height], properties: { width: { type: number, exclusiveMinimum: 0 }, height: { type: number, exclusiveMinimum: 0 } } }
     PlaylistList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Playlist" } } } }
     ScreenPatch: { type: object, additionalProperties: false, minProperties: 1, properties: { name: { type: string, minLength: 1, maxLength: 120 }, playlist_id: { type: string }, timezone: { type: string, minLength: 1, maxLength: 64, description: "IANA time zone identifier, for example America/Los_Angeles. It is the zone every page visibility rule on this screen is evaluated in. Changing it remints the manifest revision. A screen assigned a playlist that uses page visibility must have one." } } }
@@ -1438,8 +1383,8 @@ components:
       required: [id, width, height, pixel_ratio, presentation]
       properties:
         id: { type: string, minLength: 1, maxLength: 64, description: "Player-local label such as primary. Not a ScreenRig id and not authorization." }
-        width: { type: integer, minimum: 1, maximum: 100000, description: "Device-independent pixels of the playback surface used for the last resolveLayout. Not canvas author size and not encoded screenshot size. Maximum matches PositiveCanvasLength." }
-        height: { type: integer, minimum: 1, maximum: 100000, description: "Device-independent pixels of the playback surface used for the last resolveLayout. Not canvas author size and not encoded screenshot size. Maximum matches PositiveCanvasLength." }
+        width: { type: integer, minimum: 1, maximum: 100000, description: "Device-independent pixels of the playback surface used for the last resolveLayout. Not canvas author size and not encoded screenshot size. Maximum is 100000." }
+        height: { type: integer, minimum: 1, maximum: 100000, description: "Device-independent pixels of the playback surface used for the last resolveLayout. Not canvas author size and not encoded screenshot size. Maximum is 100000." }
         pixel_ratio: { type: number, exclusiveMinimum: 0, maximum: 32, description: "Device pixel ratio next to the layout surface. Finite. Range-checked only; not proven hardware." }
         presentation: { type: string, enum: [output, windowed] }
     ScreenSurfaceChangedDetails:
@@ -1683,9 +1628,6 @@ components:
         - { $ref: "#/components/schemas/RuntimeImagePlacement" }
         - { $ref: "#/components/schemas/RuntimeVideoPlacement" }
         - { $ref: "#/components/schemas/RuntimeIframePlacement" }
-        - { $ref: "#/components/schemas/RuntimeTextPlacement" }
-        - { $ref: "#/components/schemas/RuntimeBoxPlacement" }
-        - { $ref: "#/components/schemas/RuntimeLinePlacement" }
     RuntimeApplicationPlacement:
       type: object
       additionalProperties: false
@@ -1729,45 +1671,12 @@ components:
         rect: { $ref: "#/components/schemas/RuntimeRect" }
         layer: { type: integer, minimum: 0, maximum: 1024 }
         contentFit: { type: string, enum: [fill] }
-    RuntimeTextPlacement:
-      type: object
-      additionalProperties: false
-      required: [id, content, rect, layer, contentFit]
-      properties:
-        id: { type: string }
-        content: { $ref: "#/components/schemas/RuntimeTextContent" }
-        rect: { $ref: "#/components/schemas/RuntimeRect" }
-        layer: { type: integer, minimum: 0, maximum: 1024 }
-        contentFit: { type: string, enum: [fill] }
-    RuntimeBoxPlacement:
-      type: object
-      additionalProperties: false
-      required: [id, content, rect, layer, contentFit]
-      properties:
-        id: { type: string }
-        content: { $ref: "#/components/schemas/RuntimeBoxContent" }
-        rect: { $ref: "#/components/schemas/RuntimeRect" }
-        layer: { type: integer, minimum: 0, maximum: 1024 }
-        contentFit: { type: string, enum: [fill] }
-    RuntimeLinePlacement:
-      type: object
-      additionalProperties: false
-      required: [id, content, rect, layer, contentFit]
-      properties:
-        id: { type: string }
-        content: { $ref: "#/components/schemas/RuntimeLineContent" }
-        rect: { $ref: "#/components/schemas/RuntimeRect" }
-        layer: { type: integer, minimum: 0, maximum: 1024 }
-        contentFit: { type: string, enum: [fill] }
     RuntimeContent:
       oneOf:
         - { $ref: "#/components/schemas/RuntimeApplicationContent" }
         - { $ref: "#/components/schemas/RuntimeImageContent" }
         - { $ref: "#/components/schemas/RuntimeVideoContent" }
         - { $ref: "#/components/schemas/RuntimeIframeContent" }
-        - { $ref: "#/components/schemas/RuntimeTextContent" }
-        - { $ref: "#/components/schemas/RuntimeBoxContent" }
-        - { $ref: "#/components/schemas/RuntimeLineContent" }
       discriminator: { propertyName: type }
     RuntimeApplicationContent:
       type: object
@@ -1859,46 +1768,6 @@ components:
         absent value as an unsupported codec. This release emits exactly one
         video-track entry; the comma-separated grammar is published now so a later
         audio entry is additive.
-    RuntimeCornerRadius: { type: object, additionalProperties: false, required: [topLeft, topRight, bottomRight, bottomLeft], properties: { topLeft: { $ref: "#/components/schemas/CanvasLength" }, topRight: { $ref: "#/components/schemas/CanvasLength" }, bottomRight: { $ref: "#/components/schemas/CanvasLength" }, bottomLeft: { $ref: "#/components/schemas/CanvasLength" } } }
-    RuntimeTextContent:
-      type: object
-      additionalProperties: false
-      required: [type, text, fontFamily, fontWeight, italic, fontSize, lineHeight, color, align, verticalAlign]
-      description: >-
-        Canvas-unit text. The player resolves the line box and baselines through
-        screenrig.canvas/v1, which pins the per-family metrics every renderer
-        computes from. Readiness for this kind is fontReady.
-      properties:
-        type: { type: string, enum: [text] }
-        text: { type: string, minLength: 1, maxLength: 4000 }
-        fontFamily: { type: string, enum: [sans, serif, mono] }
-        fontWeight: { type: integer, enum: [400, 700] }
-        italic: { type: boolean }
-        fontSize: { $ref: "#/components/schemas/PositiveCanvasLength" }
-        lineHeight: { $ref: "#/components/schemas/PositiveCanvasLength" }
-        color: { $ref: "#/components/schemas/CanvasColor" }
-        align: { type: string, enum: [left, center, right] }
-        verticalAlign: { type: string, enum: [top, middle, bottom] }
-    RuntimeBoxContent:
-      type: object
-      additionalProperties: false
-      required: [type, fill, borderWidth, borderColor, cornerRadius]
-      description: Canvas-unit box. Radii clamp to half the width and half the height after transform, and the border draws inside the bounds. Readiness for this kind is vectorReady.
-      properties:
-        type: { type: string, enum: [box] }
-        fill: { $ref: "#/components/schemas/CanvasColor" }
-        borderWidth: { $ref: "#/components/schemas/CanvasLength" }
-        borderColor: { $ref: "#/components/schemas/CanvasColor" }
-        cornerRadius: { $ref: "#/components/schemas/RuntimeCornerRadius" }
-    RuntimeLineContent:
-      type: object
-      additionalProperties: false
-      required: [type, orientation, color]
-      description: Canvas-unit rule. The resolver applies the hairline floor so a sub-pixel thickness becomes one device-independent pixel instead of vanishing. Readiness for this kind is vectorReady.
-      properties:
-        type: { type: string, enum: [line] }
-        orientation: { type: string, enum: [horizontal, vertical] }
-        color: { $ref: "#/components/schemas/CanvasColor" }
     RuntimeIframeContent:
       type: object
       additionalProperties: false
