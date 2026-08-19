@@ -66,6 +66,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "application_path_bytes",
     "application_path_depth",
     "features",
+    "media_image_bytes",
     "playlist_max_items_per_page",
     "playlist_max_media_per_selector",
     "playlist_max_pages",
@@ -81,6 +82,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   assert.match(capabilities, /"application_package_bytes": 272629760/);
   assert.match(capabilities, /"application_path_bytes": 255/);
   assert.match(capabilities, /"application_path_depth": 16/);
+  assert.match(capabilities, /"media_image_bytes": 20971520/);
   assert.match(capabilities, /"playlist_max_items_per_page": 24/);
   assert.match(capabilities, /"playlist_max_media_per_selector": 32/);
   assert.match(capabilities, /"playlist_max_pages": 100/);
@@ -135,6 +137,10 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "sha256",
     "tag",
   ]);
+  assert.match(
+    readFileSync(OPENAPI_CONTRACT, "utf8"),
+    /Read media_image_bytes from the capabilities document to preflight the image bound/,
+  );
   assert.deepEqual(quotedProperties(interfaceBody(source, "MediaUploadSession")), [
     "expires_at",
     "headers",
@@ -267,6 +273,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     application_path_bytes: 255,
     application_path_depth: 16,
     features: {},
+    media_image_bytes: 20971520,
     playlist_max_items_per_page: 24,
     playlist_max_media_per_selector: 32,
     playlist_max_pages: 100,

@@ -170,6 +170,7 @@ export function memoryBackend(): FakeTransport {
       application_path_bytes: 255,
       application_path_depth: 16,
       features: { feedback: true },
+      media_image_bytes: 20971520,
       playlist_max_items_per_page: 24,
       playlist_max_media_per_selector: 32,
       playlist_max_pages: 100,
