@@ -250,10 +250,11 @@ async function main(): Promise<void> {
     }
     assert.ok(rotated, "screen rotation did not converge after manifest materialization revisions settled");
     screenRevision = Number(rotated.data?.revision);
-    const revisionBeforeRevoke = screenRevision;
-    const revoked = await run(["screen", "revoke-credential", screenId, "--if-match", String(screenRevision)]);
-    screenRevision = Number(revoked.data?.revision);
-    assert.equal(screenRevision, revisionBeforeRevoke + 1, "credential revocation must advance the resource revision");
+    const revisionBeforeArchive = screenRevision;
+    const archived = await run(["screen", "archive", screenId, "--if-match", String(screenRevision)]);
+    screenRevision = Number(archived.data?.revision);
+    assert.equal(archived.data?.state, "archived", "screen archive must set state archived");
+    assert.equal(screenRevision, revisionBeforeArchive + 1, "screen archive must advance the resource revision");
 
     process.stdout.write(JSON.stringify({
       ok: true,
@@ -266,7 +267,7 @@ async function main(): Promise<void> {
       media_id: mediaId,
       config_mode: "0600",
       pairing_session_manifest: "active schemaVersion 2",
-      credential_revocation: "revision advanced",
+      screen_archive: "state archived, revision advanced",
       events_cursor_resume: "durable K/V delete observed after listed cursor",
       note: "real Compose API smoke passed; disposable account/application remain because v0.2.0 publishes no delete routes",
     }) + "\n");

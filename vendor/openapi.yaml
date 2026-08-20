@@ -197,7 +197,9 @@ paths:
   /api/v1/screens:
     get:
       operationId: listScreens
+      description: Default list returns pairing_pending and active screens. Pass state=archived to list archived screens only.
       security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ScreenListState" }]
       responses:
         "200": { description: Screens, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenList" } } } }
         default: { $ref: "#/components/responses/Problem" }
@@ -256,6 +258,7 @@ paths:
     parameters: [{ $ref: "#/components/parameters/ResourceID" }]
     get:
       operationId: getScreen
+      description: Returns pairing_pending, active, and archived screens. Deleted screens are not found.
       security: [{ accountBearer: [] }]
       responses:
         "200": { description: Screen, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
@@ -270,10 +273,11 @@ paths:
         default: { $ref: "#/components/responses/Problem" }
     delete:
       operationId: deleteScreen
+      description: Account delete is not a de-associate. Archive the screen instead. Returns screen_archive_required.
       security: [{ accountBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       responses:
-        "204": { description: Deleted }
+        "409": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/public-id/rotate:
     post:
@@ -281,15 +285,34 @@ paths:
       security: [{ accountBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       responses:
-        "200": { description: Public URL credential rotated; paired device credential preserved and all prior runtime/content grants revoked., content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "200": { description: Public URL credential rotated; player public-key enrollment preserved and all prior runtime/content grants revoked., content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
         default: { $ref: "#/components/responses/Problem" }
-  /api/v1/screens/{id}/credential/revoke:
+  /api/v1/screens/{id}/archive:
     post:
-      operationId: revokeScreenCredential
+      operationId: archiveScreen
+      description: Hides the screen from the default list and darkens the live glass. Does not unbind the player public key. Releases screen_count quota.
       security: [{ accountBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       responses:
-        "200": { description: Paired device credential revoked; public URL preserved and all prior runtime/content grants revoked., content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "200": { description: Screen archived., content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/{id}/unarchive:
+    post:
+      operationId: unarchiveScreen
+      description: Restores an archived screen to the default list and remints a normal manifest. Must pass screen admission. Does not change the bound public key.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Screen unarchived., content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/toast:
     post:
@@ -735,12 +758,14 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: startNativePairingSession
-      description: Creates a native-only pairing session from an empty request. Unclaimed native pairing lasts seventy-two hours. A successful claim starts a fresh independent seventy-two-hour collection window and does not inherit leftover unclaimed time. Cookies, query credentials, cross-site origins, and Authorization are rejected. Exact Idempotency-Key replay precedes new abuse admission. The response never sets a cookie.
+      description: Creates a native-only pairing session from a player Ed25519 public key. Unclaimed native pairing lasts seventy-two hours. A successful claim starts a fresh independent seventy-two-hour collection window and does not inherit leftover unclaimed time. Cookies, query credentials, cross-site origins, and Authorization are rejected. Exact Idempotency-Key replay precedes new abuse admission. The response never sets a cookie. An already-bound public key returns enrollment_bound.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingStart" } } } }
       responses:
         "201": { description: Native pairing code plus temporary ScreenRig-Pairing credential; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingSession" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         "503": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
@@ -762,11 +787,11 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: completeNativePairingSession
-      description: Delivers the native device credential once, with exact same-pairing and nonce repair only until the first device-authenticated activation. No cookie is accepted or set.
+      description: Completes native pairing with a completion nonce and an EdDSA compact JWS (op=pairing.complete). No cookie is accepted or set. No ScreenRig-Device credential is issued. The player next mints ScreenRig-Session from a possession proof.
       security: [{ nativePairingAuthorization: [] }]
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PairingComplete" } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingComplete" } } } }
       responses:
-        "200": { description: Native pairing completion containing the durable ScreenRig-Device credential; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingCompletion" } } } }
+        "200": { description: Native pairing completion; no Set-Cookie and no device credential., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingCompletion" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
@@ -775,19 +800,47 @@ paths:
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         "503": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
-  /runtime/v1/native/device-sessions:
+  /runtime/v1/native/identity/challenges:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
-      operationId: createNativeDeviceRuntimeSession
-      description: Exchanges exactly one ScreenRig-Device Authorization credential and an empty body for a signed 24-hour native runtime credential. Cookies are neither accepted nor set. Exact Idempotency-Key replay precedes new abuse admission.
-      security: [{ nativeDeviceAuthorization: [] }]
+      operationId: createNativeIdentityChallenge
+      description: Issues a short-lived nonce bound to one player public-key thumbprint. Cookies, query credentials, and Authorization are rejected.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityChallengeRequest" } } } }
+      responses:
+        "201": { description: Challenge nonce for an EdDSA compact JWS proof; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityChallenge" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/native/identity/sessions:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    post:
+      operationId: createNativeIdentityRuntimeSession
+      description: Verifies an EdDSA compact JWS (op=session.mint) against the enrolled public key and returns a signed 24-hour ScreenRig-Session. Cookies are neither accepted nor set. Exact Idempotency-Key replay precedes new abuse admission. An archived screen still mints a session so the player can show the archived glass.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityProof" } } } }
       responses:
         "201": { description: Paired native runtime session; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativeRuntimeSession" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/native/identity/reset:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    post:
+      operationId: resetNativeIdentity
+      description: The only de-associate. Verifies an EdDSA compact JWS (op=identity.reset), deletes the enrollment, and tombstones the bound screen. No account bearer. Cookies are neither accepted nor set. A missing local key without this proof is not a reset.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityProof" } } } }
+      responses:
+        "204": { description: Enrollment deleted and screen tombstoned; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         "503": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
@@ -804,10 +857,12 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     get:
       operationId: getRuntimeManifest
+      description: Resolved player manifest. An archived screen returns problem screen_archived and must not refresh last-known-good.
       security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
       responses:
         "200": { description: Resolved player manifest, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeManifest" } } } }
         "304": { description: Manifest unchanged }
+        "409": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/events:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -818,7 +873,7 @@ paths:
         - { $ref: "#/components/parameters/AfterCursor" }
         - { $ref: "#/components/parameters/LastEventID" }
       responses:
-        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.deleted is a runtime audience event delivered when the screen is unpaired or deleted; the durable device credential is revoked before it is emitted, so the player must discard its stored credentials and return to pairing rather than retry. account.suspended and account.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
+        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.archived and screen.unarchived are runtime audience events; they do not wipe credentials. screen.deleted is a runtime audience event delivered when signed identity reset tombstones the screen, so the player must discard its identity file after a successful reset rather than retry. account.suspended and account.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/reports:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -888,18 +943,20 @@ paths:
     post:
       operationId: unpairRuntime
       description: >-
-        Permanently unpairs this player by tombstoning the session screen.
-        Path and body do not name screen_id; the paired runtime session binds
-        it. No If-Match or Idempotency-Key. Browser 204 expires the runtime,
-        device, and pairing host cookies. Native 204 sets no cookies. A valid
-        paired session whose screen is already deleted is still 204. Anonymous
-        or unpaired sessions are forbidden. Prepaid remaining credit is not a
-        gate. The durable event is screen.deleted.
+        Cookie-only unpair. Tombstones a cookie-paired screen that has no
+        player public-key enrollment. Identity-enrolled screens return
+        screen_archive_required; those players de-associate only via
+        POST /runtime/v1/native/identity/reset. Path and body do not name
+        screen_id; the paired runtime session binds it. No If-Match or
+        Idempotency-Key. Browser 204 expires the runtime, device, and pairing
+        host cookies. Native identity-bound calls never 204. Anonymous or
+        unpaired sessions are forbidden. Prepaid remaining credit is not a gate.
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
       responses:
-        "204": { description: Screen tombstoned. Browser pairing cookies expired., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
+        "204": { description: Cookie-paired screen tombstoned. Browser pairing cookies expired., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/manifests/{manifest_revision}/releases/{release_id}/launch:
@@ -948,7 +1005,7 @@ paths:
         paired-device cookie, exact screen grant, manifest revision, content-access generation, release membership,
         and ready package metadata are checked on every request. Account tokens, anonymous runtime cookies, release
         cookies, external iframe placements, and direct object-storage access never authorize package bytes.
-      security: [{ pairedDeviceCookie: [] }, { nativeDeviceAuthorization: [] }]
+      security: [{ pairedDeviceCookie: [] }, { nativeSessionAuthorization: [] }]
       responses:
         "200":
           description: Complete normalized private package.
@@ -983,7 +1040,7 @@ paths:
     head:
       operationId: headNativeWebappPackage
       description: Returns the same authorization and immutable identity headers as GET without package bytes.
-      security: [{ pairedDeviceCookie: [] }, { nativeDeviceAuthorization: [] }]
+      security: [{ pairedDeviceCookie: [] }, { nativeSessionAuthorization: [] }]
       responses:
         "200":
           description: Authorized normalized package metadata.
@@ -1112,6 +1169,7 @@ components:
     Range: { name: Range, in: header, required: false, schema: { type: string, pattern: "^bytes=[0-9]*-[0-9]*$" }, description: V1 accepts one byte range only. }
     ScreenshotCaptureID: { name: capture_id, in: query, required: false, schema: { $ref: "#/components/schemas/ScreenshotCaptureID" } }
     ScreenshotCaptureIDHeader: { name: ScreenRig-Capture-Id, in: header, required: true, schema: { $ref: "#/components/schemas/ScreenshotCaptureID" } }
+    ScreenListState: { name: state, in: query, required: false, schema: { type: string, enum: [archived] }, description: Omit for pairing_pending and active. Pass archived to list archived screens only. }
     SecFetchSite: { name: Sec-Fetch-Site, in: header, required: false, schema: { type: string, enum: [same-origin, same-site, cross-site, none] } }
     SecFetchMode: { name: Sec-Fetch-Mode, in: header, required: false, schema: { type: string } }
     SecFetchDest: { name: Sec-Fetch-Dest, in: header, required: false, schema: { type: string } }
@@ -1121,10 +1179,6 @@ components:
       type: http
       scheme: ScreenRig-Pairing
       description: Native-only temporary pairing authorization. The credential is exactly srp_ plus 43 base64url characters and is never sent in a cookie, URL, or query.
-    nativeDeviceAuthorization:
-      type: http
-      scheme: ScreenRig-Device
-      description: Native-only durable device authorization. The credential is exactly srd_ plus a 22-character base64url lookup ID, underscore, and 43-character base64url secret.
     nativeSessionAuthorization:
       type: http
       scheme: ScreenRig-Session
@@ -1177,7 +1231,7 @@ components:
         playlist_max_items_per_page: { type: integer, enum: [24] }
         playlist_max_media_per_selector: { type: integer, enum: [32], description: Maximum ready media objects one image or video selector may resolve to. }
         transition_max_duration_ms: { type: integer, enum: [60000] }
-        screens_per_account: { type: integer, enum: [100], description: "Screen limit of the default plan. Paired and pairing-pending screens both count. Zero on an account means no screen cap." }
+        screens_per_account: { type: integer, enum: [100], description: "Screen limit of the default plan. Unarchived pairing_pending and active screens count. Archived screens do not. Zero on an account means no screen cap." }
         account_content_bytes: { type: integer, enum: [0], description: "Storage limit of the default plan. Zero means no product storage cap. A custom storage ceiling, when present, still counts committed media, expanded application release trees, and application key/value entries together, including bytes reserved by an upload in flight. The per-request ceilings above are plan-independent transport bounds." }
         features: { type: object, additionalProperties: { type: boolean } }
     CLIEnrollmentRequest: { type: object, additionalProperties: false, required: [client_id], properties: { client_id: { type: string, pattern: "^cli_[A-Za-z0-9_-]{43}$", description: "Stable anonymous installation identity generated from 32 CSPRNG bytes and persisted before the first request. It is rate-limit material, not an account credential." }, beta_key: { type: string, description: "Required when the server has a configured enrollment beta key. Omit when the server does not gate enrollment." } } }
@@ -1377,7 +1431,7 @@ components:
         revision: { type: integer }
         manifest_revision: { type: integer }
         content_access_generation: { type: integer }
-        state: { type: string, enum: [pairing_pending, active] }
+        state: { type: string, enum: [pairing_pending, active, archived] }
         online:
           type: boolean
           description: >-
@@ -1584,7 +1638,53 @@ components:
     PairingClaim: { type: object, additionalProperties: false, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri } } }
     PairingComplete: { type: object, additionalProperties: false, required: [completion_nonce], properties: { completion_nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
     PairingCompletion: { type: object, additionalProperties: false, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri } } }
-    NativePairingCompletion: { type: object, additionalProperties: false, required: [screen, public_url, device_credential], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri }, device_credential: { type: string, pattern: "^srd_[A-Za-z0-9_-]{22}_[A-Za-z0-9_-]{43}$" } } }
+    PlayerPublicKey:
+      type: object
+      additionalProperties: false
+      required: [kty, crv, x]
+      properties:
+        kty: { type: string, enum: [OKP] }
+        crv: { type: string, enum: [Ed25519] }
+        x: { type: string, pattern: "^[A-Za-z0-9_-]{43}$", description: Base64url 32-byte Ed25519 public key. }
+        kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$", description: Optional RFC 7638 SHA-256 JWK thumbprint; the server computes kid from the JWK. }
+    NativePairingStart:
+      type: object
+      additionalProperties: false
+      required: [public_key]
+      properties:
+        public_key: { $ref: "#/components/schemas/PlayerPublicKey" }
+    NativePairingComplete:
+      type: object
+      additionalProperties: false
+      required: [completion_nonce, public_key, signature]
+      properties:
+        completion_nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
+        public_key: { $ref: "#/components/schemas/PlayerPublicKey" }
+        signature: { type: string, minLength: 80, maxLength: 4096, description: Compact EdDSA JWS with op=pairing.complete. }
+    NativeIdentityChallengeRequest:
+      type: object
+      additionalProperties: false
+      required: [kid]
+      properties:
+        kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$", description: RFC 7638 SHA-256 JWK thumbprint of the enrolled public key. }
+    NativeIdentityChallenge:
+      type: object
+      additionalProperties: false
+      required: [nonce, expires_at, aud, op]
+      properties:
+        nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
+        expires_at: { type: string, format: date-time }
+        aud: { type: string, enum: [screenrig-runtime] }
+        op: { type: string, enum: [pairing.complete, session.mint, identity.reset] }
+    NativeIdentityProof:
+      type: object
+      additionalProperties: false
+      required: [kid, public_key, signature]
+      properties:
+        kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
+        public_key: { $ref: "#/components/schemas/PlayerPublicKey" }
+        signature: { type: string, minLength: 80, maxLength: 4096, description: Compact EdDSA JWS. }
+    NativePairingCompletion: { type: object, additionalProperties: false, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri } } }
     BrowserProvisioningExchange: { type: object, additionalProperties: false, required: [provisioning_token, exchange_id], properties: { provisioning_token: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }, exchange_id: { type: string, pattern: "^xchg_[A-Za-z0-9_-]{43}$" } } }
     BrowserProvisioningCompletion: { type: object, additionalProperties: false, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri } } }
     BrowserLinkSession: { type: object, additionalProperties: false, required: [session_id, code, display_code, status, expires_at], properties: { session_id: { type: string, pattern: "^blink_" }, code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, display_code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{3}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{3}$" }, status: { type: string, enum: [waiting, claimed] }, expires_at: { type: string, format: date-time } } }
@@ -1610,7 +1710,6 @@ components:
         screenId: { type: string }
         screenLabel: { type: string }
         playlistId: { type: string }
-        playlistName: { type: string, description: "Display name of the assigned playlist. Emitted only when the playlist has a non-empty name." }
         playlistRevision: { type: integer }
         generatedAt: { type: string }
         timezone: { type: string, description: "IANA time zone identifier of the screen. Emitted only when the screen has one. Every page visibility rule in this manifest is evaluated in this zone. A manifest that carries any page visibility always carries it." }
@@ -1854,4 +1953,4 @@ components:
         errors: { type: array, items: { $ref: "#/components/schemas/ProblemField" } }
         next: { $ref: "#/components/schemas/NextAction" }
 x-problem-registry: ./problems.yaml
-x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_account_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, schema_incompatible, not_ready, screenshot_unavailable]
+x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_account_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, schema_incompatible, not_ready, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required]

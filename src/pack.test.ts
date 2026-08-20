@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, writeFile, readFile, symlink, link, rm } from "node:fs/promises";
+import { mkdir, writeFile, readFile, readdir, symlink, link, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -148,6 +148,11 @@ test("rejects duplicate case-folded names", async () => {
   await writeFile(path.join(dir, "index.html"), "<html></html>");
   await writeFile(path.join(dir, "Readme.txt"), "a");
   await writeFile(path.join(dir, "readme.txt"), "b");
+  const names = await readdir(dir);
+  if (names.filter((name) => name.toLowerCase() === "readme.txt").length < 2) {
+    await rm(dir, { recursive: true, force: true });
+    return;
+  }
   await assert.rejects(() => packDirectory(dir), (err: unknown) => {
     assert.ok(err instanceof CliError);
     assert.equal(err.problem.code, "duplicate_path");

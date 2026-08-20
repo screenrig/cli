@@ -192,7 +192,7 @@ export interface Screen {
   playlist_id?: string;
   public_id: string;
   revision: number;
-  state: "pairing_pending" | "active";
+  state: "pairing_pending" | "active" | "archived";
   /**
    * IANA time zone identifier. Absent until it is set. Page visibility rules
    * are civil, so they are evaluated in this zone.

@@ -2358,8 +2358,9 @@ test("media, operation, screen credential, and K/V revision commands bind the fr
     result = await withRuntime(["--json", "screen", "rotate-public-id", paired.id, "--if-match", String(paired.revision)], transport, runtimeExtra);
     assert.equal(result.code, 0, result.stdout);
     const rotated = (JSON.parse(result.stdout) as { data: { revision: number } }).data;
-    result = await withRuntime(["--json", "screen", "revoke-credential", paired.id, "--if-match", String(rotated.revision)], transport, runtimeExtra);
+    result = await withRuntime(["--json", "screen", "archive", paired.id, "--if-match", String(rotated.revision)], transport, runtimeExtra);
     assert.equal(result.code, 0, result.stdout);
+    assert.equal(transport.calls.at(-1)?.path, `/api/v1/screens/${paired.id}/archive`);
 
     result = await withRuntime(
       ["--json", "screen", "toast", paired.id, "--level", "info", "--text", "Lobby closed"],
@@ -2378,6 +2379,127 @@ test("media, operation, screen credential, and K/V revision commands bind the fr
     result = await withRuntime(["--json", "kv", "set", "settings", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":3}', "--if-match", "1"], transport, runtimeExtra);
     assert.equal(result.code, ExitCode.Precondition);
     assert.equal((JSON.parse(result.stdout) as { error: { current_revision: number } }).error.current_revision, 2);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("screen archive, unarchive, archived list, and retired unbind drive the real handlers", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("screen-archive-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  try {
+    const paired = await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
+    assert.equal(paired.code, 0, paired.stdout);
+    const screen = (JSON.parse(paired.stdout) as { data: { screen: { id: string; revision: number } } }).data.screen;
+
+    const listed = await withRuntime(["--json", "screen", "list"], transport, { fs: fsLike });
+    assert.equal(listed.code, 0, listed.stdout);
+    const listCall = transport.calls.find((call) => call.method === "GET" && call.path === "/api/v1/screens");
+    assert.equal(listCall?.query?.state, undefined);
+    assert.deepEqual(
+      ((JSON.parse(listed.stdout) as { data: { items: Array<{ id: string; state: string }> } }).data.items).map((item) => item.id),
+      [screen.id],
+    );
+
+    const archived = await withRuntime(
+      ["--json", "screen", "archive", screen.id, "--if-match", String(screen.revision)],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(archived.code, 0, archived.stdout);
+    const archiveCall = transport.calls.at(-1);
+    assert.equal(archiveCall?.method, "POST");
+    assert.equal(archiveCall?.path, `/api/v1/screens/${screen.id}/archive`);
+    assert.equal(archiveCall?.headers?.["if-match"], `"${screen.revision}"`);
+    assert.ok(archiveCall?.headers?.["idempotency-key"]);
+    const archivedScreen = (JSON.parse(archived.stdout) as { data: { state: string; revision: number } }).data;
+    assert.equal(archivedScreen.state, "archived");
+
+    const omitted = await withRuntime(["--json", "screen", "list"], transport, { fs: fsLike });
+    assert.equal(omitted.code, 0, omitted.stdout);
+    assert.deepEqual((JSON.parse(omitted.stdout) as { data: { items: unknown[] } }).data.items, []);
+
+    const archivedOnly = await withRuntime(["--json", "screen", "list", "--state", "archived"], transport, { fs: fsLike });
+    assert.equal(archivedOnly.code, 0, archivedOnly.stdout);
+    const archivedListCall = [...transport.calls].reverse().find((call) => call.method === "GET" && call.path === "/api/v1/screens");
+    assert.deepEqual(archivedListCall?.query, { state: "archived" });
+    const archivedItems = (JSON.parse(archivedOnly.stdout) as { data: { items: Array<{ id: string; state: string }> } }).data.items;
+    assert.equal(archivedItems.length, 1);
+    assert.equal(archivedItems[0]?.id, screen.id);
+    assert.equal(archivedItems[0]?.state, "archived");
+
+    const shown = await withRuntime(["--json", "screen", "show", screen.id], transport, { fs: fsLike });
+    assert.equal(shown.code, 0, shown.stdout);
+    assert.equal((JSON.parse(shown.stdout) as { data: { state: string } }).data.state, "archived");
+
+    const unarchived = await withRuntime(
+      ["--json", "screen", "unarchive", screen.id, "--if-match", String(archivedScreen.revision)],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(unarchived.code, 0, unarchived.stdout);
+    const unarchiveCall = transport.calls.at(-1);
+    assert.equal(unarchiveCall?.method, "POST");
+    assert.equal(unarchiveCall?.path, `/api/v1/screens/${screen.id}/unarchive`);
+    assert.equal(unarchiveCall?.headers?.["if-match"], `"${archivedScreen.revision}"`);
+    const restored = (JSON.parse(unarchived.stdout) as { data: { state: string; revision: number } }).data;
+    assert.equal(restored.state, "active");
+
+    const restoredList = await withRuntime(["--json", "screen", "list"], transport, { fs: fsLike });
+    assert.equal(restoredList.code, 0, restoredList.stdout);
+    assert.deepEqual(
+      ((JSON.parse(restoredList.stdout) as { data: { items: Array<{ id: string }> } }).data.items).map((item) => item.id),
+      [screen.id],
+    );
+
+    const callsBeforeDelete = transport.calls.length;
+    const deleted = await withRuntime(
+      ["--json", "screen", "delete", screen.id, "--if-match", String(restored.revision)],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(deleted.code, ExitCode.Conflict, deleted.stdout);
+    const deleteCall = transport.calls.at(-1);
+    assert.equal(deleteCall?.method, "DELETE");
+    assert.equal(deleteCall?.path, `/api/v1/screens/${screen.id}`);
+    assert.equal(deleteCall?.headers?.["if-match"], `"${restored.revision}"`);
+    const deleteEnvelope = JSON.parse(deleted.stdout) as { ok: false; error: { code: string; status: number } };
+    assert.equal(deleteEnvelope.error.code, "screen_archive_required");
+    assert.equal(deleteEnvelope.error.status, 409);
+
+    const stillThere = await withRuntime(["--json", "screen", "show", screen.id], transport, { fs: fsLike });
+    assert.equal(stillThere.code, 0, stillThere.stdout);
+    assert.equal((JSON.parse(stillThere.stdout) as { data: { id: string; state: string } }).data.id, screen.id);
+
+    const callsBeforeRevoke = transport.calls.length;
+    const revoked = await withRuntime(
+      ["--json", "screen", "revoke-credential", screen.id, "--if-match", String(restored.revision)],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(revoked.code, ExitCode.Usage, revoked.stdout);
+    assert.equal(transport.calls.length, callsBeforeRevoke);
+    assert.equal(transport.calls.length, callsBeforeDelete + 2, "delete and show reach the server; revoke-credential does not");
+    const revokeEnvelope = JSON.parse(revoked.stdout) as {
+      error: { code: string; detail: string; next?: { command: string; reason: string } };
+    };
+    assert.equal(revokeEnvelope.error.code, "usage_error");
+    assert.match(revokeEnvelope.error.detail, /retired/);
+    assert.match(revokeEnvelope.error.next?.command ?? "", /screen archive/);
+    assert.equal(
+      transport.calls.some((call) => String(call.path).includes("/credential/revoke")),
+      false,
+    );
+
+    const badState = await withRuntime(["--json", "screen", "list", "--state", "active"], transport, { fs: fsLike });
+    assert.equal(badState.code, ExitCode.Usage, badState.stdout);
+    assert.equal((JSON.parse(badState.stdout) as { error: { code: string } }).error.code, "usage_error");
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }

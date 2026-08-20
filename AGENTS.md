@@ -134,6 +134,23 @@ installation, players, backend services, the site, or production deployment.
   recognizable ScreenRig credential material and other control characters;
   render its problem so the operator can rewrite and resend.
 
+## Archive
+
+- `screen archive <id> --if-match REVISION` binds
+  `POST /api/v1/screens/{id}/archive`. It hides the screen from the default
+  list and darkens the glass. It does not unbind the player.
+- `screen unarchive <id> --if-match REVISION` binds
+  `POST /api/v1/screens/{id}/unarchive`. It restores the screen to the default
+  list. Unarchive must pass screen admission.
+- `screen list` omits archived screens. `screen list --state archived` lists
+  archived screens only. `screen show <id>` still returns an archived row.
+- `screen delete` sends `DELETE /api/v1/screens/{id}` and surfaces
+  `screen_archive_required`. It does not tombstone. There is no account unbind.
+- `screen revoke-credential` is retired. The CLI does not call
+  `POST /api/v1/screens/{id}/credential/revoke`. It returns a usage error that
+  names `screen archive`.
+- The CLI is not a screen. Do not add a CLI keypair.
+
 ## Screenshot
 
 - `screen screenshot <id> [--output FILE]` binds
@@ -243,7 +260,13 @@ installation, players, backend services, the site, or production deployment.
   `--beta-key` and `SCREENRIG_BETA_KEY` are sent as `beta_key` on
   `POST /api/v1/enrollments` when present, and omitted when unset.
 - `auth revoke --yes` is server-first and retains local state after failed or
-  ambiguous server results.
+  ambiguous server results. That route is
+  `POST /api/v1/account/credential/revoke` (CLI account bearer). It does
+  not unbind a screen. `POST /api/v1/screens/{id}/credential/revoke` is
+  retired. Archive hides a screen. Do not teach `screen revoke-credential`
+  or `screen delete` as unbind. `screen delete` surfaces
+  `screen_archive_required`. The CLI is not a screen and holds no player
+  keypair.
 - `screen pair` currently accepts exactly six canonical undashed characters.
   `browser setup --code` accepts the dashed or undashed public handoff form.
 - Configuration and transient retry state are atomic and user-private. Never

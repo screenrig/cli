@@ -66,6 +66,7 @@ const VALUE_FLAGS = new Set([
   "duration-ms",
   "tag",
   "day",
+  "state",
 ]);
 
 export function parseArgv(argv: string[]): ParsedArgs {

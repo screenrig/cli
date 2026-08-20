@@ -230,8 +230,16 @@ async function main(): Promise<void> {
     await run("kv", "delete", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "2");
     await run("media", "delete", mediaId, "--if-match", "2");
     await run("screen", "rotate-public-id", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--if-match", "2");
-    await run("screen", "revoke-credential", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--if-match", "3");
-    await run("screen", "delete", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--if-match", "4");
+    const archived = await run("screen", "archive", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--if-match", "3");
+    assert.equal((archived.data as { state?: string }).state, "archived");
+    const listed = await run("screen", "list");
+    assert.equal(((listed.data as { items?: unknown[] }).items ?? []).length, 0);
+    const archivedList = await run("screen", "list", "--state", "archived");
+    assert.equal(((archivedList.data as { items?: Array<{ id?: string }> }).items ?? [])[0]?.id, "scr_PAIRINGAAAAAAAAAAAAAAAA");
+    await run("screen", "unarchive", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--if-match", "4");
+    const deleted = await invoke(["screen", "delete", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--if-match", "5"]);
+    assert.equal(deleted.code, 5, `screen delete must surface screen_archive_required: ${deleted.stderr || deleted.stdout}`);
+    assert.equal((JSON.parse(deleted.stdout) as { error?: { code?: string } }).error?.code, "screen_archive_required");
     await run("playlist", "delete", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "2");
     process.stdout.write(`localhost v1 smoke passed: ${apiUrl} (mock-backed control-plane routes)\n`);
   } finally {

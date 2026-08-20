@@ -414,7 +414,13 @@ export function memoryBackend(): FakeTransport {
     return { status: 204, headers: {}, body: undefined };
   });
 
-  transport.on("GET", "/api/v1/screens", () => ({ status: 200, headers: {}, body: { items: [...screens.values()] } }));
+  transport.on("GET", "/api/v1/screens", (req) => {
+    const archivedOnly = req.query?.state === "archived";
+    const items = [...screens.values()].filter((screen) => (
+      archivedOnly ? screen.state === "archived" : screen.state !== "archived"
+    ));
+    return { status: 200, headers: {}, body: { items } };
+  });
   transport.on("GET", /^\/api\/v1\/screens\/[^/]+$/, (req) => ({ status: 200, headers: {}, body: screens.get(req.path.split("/").pop() ?? "") }));
   transport.on("PATCH", /^\/api\/v1\/screens\/[^/]+$/, (req) => {
     const id = req.path.split("/").pop() ?? "";
@@ -453,15 +459,28 @@ export function memoryBackend(): FakeTransport {
     screens.set(id, item);
     return { status: 200, headers: {}, body: item };
   });
-  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/credential\/revoke$/, (req) => {
+  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/archive$/, (req) => {
     const id = req.path.split("/")[4] ?? "";
     const current = screens.get(id) as Screen;
     const item: Screen = {
       ...current,
+      state: "archived",
       revision: current.revision + 1,
       content_access_generation: current.content_access_generation + 1,
-      state: "pairing_pending",
-      updated_at: "2026-08-14T17:00:02.000Z",
+      updated_at: "2026-08-14T17:00:03.000Z",
+    };
+    screens.set(id, item);
+    return { status: 200, headers: {}, body: item };
+  });
+  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/unarchive$/, (req) => {
+    const id = req.path.split("/")[4] ?? "";
+    const current = screens.get(id) as Screen;
+    const item: Screen = {
+      ...current,
+      state: "active",
+      revision: current.revision + 1,
+      content_access_generation: current.content_access_generation + 1,
+      updated_at: "2026-08-14T17:00:04.000Z",
     };
     screens.set(id, item);
     return { status: 200, headers: {}, body: item };
@@ -515,10 +534,20 @@ export function memoryBackend(): FakeTransport {
     },
     body: screenshotBytes,
   }));
-  transport.on("DELETE", /^\/api\/v1\/screens\/[^/]+$/, (req) => {
-    screens.delete(req.path.split("/").pop() ?? "");
-    return { status: 204, headers: {}, body: undefined };
-  });
+  transport.on("DELETE", /^\/api\/v1\/screens\/[^/]+$/, (req) => ({
+    status: 409,
+    headers: {
+      "content-type": "application/problem+json",
+      "x-request-id": req.headers?.["x-request-id"] ?? "req_delete",
+    },
+    body: {
+      type: "https://screenrig.ai/problems/screen-archive-required",
+      title: "Archive the screen instead of deleting or unbinding it",
+      status: 409,
+      detail: "Archive the screen instead of deleting it.",
+      code: "screen_archive_required",
+    },
+  }));
 
   transport.on("GET", "/api/v1/media", (req) => {
     const tag = req.query?.tag;

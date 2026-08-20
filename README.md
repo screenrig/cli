@@ -69,7 +69,18 @@ screenrig --json browser setup --code ABC-234
 Browser handoff has a backend-owned 30-minute unclaimed window and a fresh
 10-minute protected delivery window after claim. The CLI never receives or
 prints the browser cookie, provisioning token, continuation redirect, native
-device credential, or runtime session.
+pairing or session credentials, or identity material.
+
+`screen archive` hides a screen and darkens live glass. It does not unbind
+the player. `screen list` omits archived rows; `screen list --state archived`
+lists them. `screen show` still returns an archived row. `screen unarchive`
+restores the screen if admission passes. `screen delete` is not a
+de-associate; the server returns `screen_archive_required`.
+`screen revoke-credential` is retired. Native players use generate-once
+Ed25519 identity with `ScreenRig-Pairing` and `ScreenRig-Session`;
+`ScreenRig-Device` is retired. Signed on-device reset is the only
+de-associate. The CLI is not a screen and holds no player keypair. Archive
+and identity are source-ready; they are not a deployed claim.
 
 Application packing accepts an already-built static directory. It produces
 deterministic bounded archives, injects the pinned browser SDK runtime, and

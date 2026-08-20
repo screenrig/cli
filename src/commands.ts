@@ -137,13 +137,14 @@ Commands:
   browser setup --code CODE [--open]
   screen update <id> [--name NAME] [--playlist-id ID] [--timezone ZONE]
                      --if-match REVISION
-  screen list
+  screen list [--state archived]
   screen show <id>
   screen assign <id> --playlist-id ID --if-match REVISION
   screen set-timezone <id> --timezone ZONE --if-match REVISION
+  screen archive <id> --if-match REVISION
+  screen unarchive <id> --if-match REVISION
   screen delete <id> --if-match REVISION
   screen rotate-public-id <id> --if-match REVISION
-  screen revoke-credential <id> --if-match REVISION
   screen toast <id> --level error|alert|info --text TEXT [--duration-ms MS]
   screen screenshot <id> [--output FILE] [--timeout MS] [--poll-ms MS]
   kv get --application-id ID <key>
@@ -539,7 +540,7 @@ function isAuthenticatedCommand(group: string, action: string | undefined): bool
     app: new Set(["upload", "list", "show"]),
     media: new Set(["upload", "show", "list", "delete", "update"]),
     playlist: new Set(["create", "update", "show", "get", "list", "delete"]),
-    screen: new Set(["pair", "provision", "update", "list", "show", "assign", "set-timezone", "delete", "rotate-public-id", "revoke-credential", "toast", "screenshot"]),
+    screen: new Set(["pair", "provision", "update", "list", "show", "assign", "set-timezone", "archive", "unarchive", "delete", "rotate-public-id", "toast", "screenshot"]),
     browser: new Set(["setup"]),
     kv: new Set(["get", "set", "delete", "list"]),
     operations: new Set(["get", "wait", "cancel"]),
@@ -847,6 +848,18 @@ function mediaKindFromArgs(args: ParsedArgs): "image" | "video" | undefined {
     throw usageError("--kind must be image or video.");
   }
   return kind;
+}
+
+function screenListStateFromArgs(args: ParsedArgs): "archived" | undefined {
+  requireFlagValue(args, "state", "archived");
+  const state = flagString(args.flags, "state");
+  if (state === undefined) {
+    return undefined;
+  }
+  if (state !== "archived") {
+    throw usageError("--state must be archived.");
+  }
+  return state;
 }
 
 async function mediaCommand(
@@ -1428,9 +1441,19 @@ async function screenCommand(
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
   action: string | undefined,
 ): Promise<CommandResult> {
+  if (action === "revoke-credential") {
+    throw usageError("screen revoke-credential is retired. Archive the screen instead.", {
+      command: "screenrig --json screen archive <id> --if-match REVISION",
+      reason: "Archive hides the screen. It does not unbind the player. There is no account unbind.",
+    });
+  }
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
-  if (action === "list") return simpleGet(args, runtime, resolved, "/api/v1/screens", "Screens");
+  if (action === "list") {
+    return simpleGet(args, runtime, resolved, "/api/v1/screens", "Screens", {
+      state: screenListStateFromArgs(args),
+    });
+  }
   if (action === "provision") {
     const openMode = flagBool(args.flags, "open");
     const printMode = flagBool(args.flags, "print-url");
@@ -1583,6 +1606,22 @@ async function screenCommand(
     });
     return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Set timezone ${timezone} on ${id}` };
   }
+  if (action === "archive" || action === "unarchive") {
+    const id = args.positionals[2];
+    const revision = flagString(args.flags, "if-match");
+    if (!id || !revision) throw usageError(`screen ${action} requires <id> and --if-match.`);
+    const response = await client.call({
+      method: "POST",
+      path: `/api/v1/screens/${id}/${action}`,
+      idempotent: true,
+      headers: { "if-match": quotedRevision(revision) },
+    });
+    return {
+      envelope: jsonBody(response, client.requestId),
+      exitCode: ExitCode.Success,
+      human: action === "archive" ? `Archived screen ${id}` : `Unarchived screen ${id}`,
+    };
+  }
   if (action === "delete") {
     const id = args.positionals[2];
     const ifMatch = flagString(args.flags, "if-match");
@@ -1595,21 +1634,20 @@ async function screenCommand(
     });
     return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted screen ${id}` };
   }
-  if (action === "rotate-public-id" || action === "revoke-credential") {
+  if (action === "rotate-public-id") {
     const id = args.positionals[2];
     const revision = flagString(args.flags, "if-match");
-    if (!id || !revision) throw usageError(`screen ${action} requires <id> and --if-match.`);
-    const suffix = action === "rotate-public-id" ? "public-id/rotate" : "credential/revoke";
+    if (!id || !revision) throw usageError("screen rotate-public-id requires <id> and --if-match.");
     const response = await client.call({
       method: "POST",
-      path: `/api/v1/screens/${id}/${suffix}`,
+      path: `/api/v1/screens/${id}/public-id/rotate`,
       idempotent: true,
       headers: { "if-match": quotedRevision(revision) },
     });
     return {
       envelope: jsonBody(response, client.requestId),
       exitCode: ExitCode.Success,
-      human: action === "rotate-public-id" ? `Rotated public id for ${id}` : `Revoked device credential for ${id}`,
+      human: `Rotated public id for ${id}`,
     };
   }
   if (action === "toast") {

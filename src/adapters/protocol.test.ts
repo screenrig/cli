@@ -225,7 +225,12 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "timezone",
     "updated_at",
   ]);
-  assert.match(screen, /"state": "pairing_pending" \| "active"/);
+  assert.match(screen, /"state": "pairing_pending" \| "active" \| "archived"/);
+  assert.match(openapi, /\/api\/v1\/screens\/\{id\}\/archive:/);
+  assert.match(openapi, /\/api\/v1\/screens\/\{id\}\/unarchive:/);
+  assert.match(openapi, /ScreenListState: \{ name: state, in: query[\s\S]*enum: \[archived\]/);
+  assert.match(openapi, /screen_archive_required/);
+  assert.doesNotMatch(openapi, /\/api\/v1\/screens\/\{id\}\/credential\/revoke/);
   // A screen has no timezone until one is set, so it must stay optional. The
   // local schedule preflight reads exactly this member.
   assert.match(screen, /"timezone"\?: string/);
@@ -428,6 +433,12 @@ test("published problem codes include payment_required at 402", () => {
     "schema_incompatible",
     "not_ready",
     "screenshot_unavailable",
+    "identity_invalid",
+    "identity_conflict",
+    "enrollment_bound",
+    "proof_invalid",
+    "screen_archived",
+    "screen_archive_required",
   ]);
   assert.match(source, /payment_required/);
   assert.doesNotMatch(source, /stripe|x402/i);
@@ -607,7 +618,7 @@ test("screenshot contract is latest-wins POST, status GET, and binary WebP GET",
   assert.match(route, /screenshot_unavailable/);
   assert.match(route, /resource_conflict/);
   assert.match(source, /ScreenshotCaptureID: \{ type: string, pattern: "\^shot_\[A-Za-z0-9_-\]\{16,64\}\$"/);
-  assert.match(source, /x-problem-codes: \[[^\]]+screenshot_unavailable\]/);
+  assert.match(source, /x-problem-codes: \[[^\]]*screenshot_unavailable[^\]]*\]/);
   const generated = readFileSync(GENERATED_CONTRACT, "utf8");
   assert.deepEqual(quotedProperties(interfaceBody(generated, "ScreenScreenshotAccepted")), [
     "capture_id",
