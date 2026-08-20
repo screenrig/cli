@@ -194,6 +194,38 @@ installation, players, backend services, the site, or production deployment.
   The success envelope is `screen_id`, `capture_id`, `path`, `bytes`, `sha256`,
   `width`, and `height` only.
 
+## Dashboard
+
+- `dashboard [--print-url]` binds `POST /api/v1/account/dashboard-links` on the
+  CLI account bearer. It mints one single-use link, then opens it with
+  `runtime.openUrl`, the same opener `browser setup --open` uses. Do not add a
+  second opener.
+- **The whole URL is a credential.** The 256-bit token rides the fragment, which
+  no server, access log, or `Referer` header sees. The URL reaches stdout as one
+  line only when the opener failed or the operator passed `--print-url`. Never
+  write it to a file, never keep it in the config, and never repeat it.
+- `DashboardLinkTTL` is ten minutes and the link is single use. That clock is
+  not the 30-minute public locator, not the 10-minute protected provisioning
+  window, and not the 72-hour native pairing clocks. Do not describe it as any
+  of them. The remedy for an expired link is another mint, not a refresh route.
+- `validateDashboardLink` binds the returned origin to the configured control
+  plane and accepts only `/#link=<43 base64url characters>`. A query, a path, or
+  authority credentials is a rejection, never something to strip and continue
+  with.
+- **The CLI mints and never claims.** `POST /dashboard/v1/links/claim` is the
+  browser's request on the dashboard origin. `dashboard_link_invalid`,
+  `dashboard_link_expired`, `dashboard_link_consumed`, `passkey_invalid`, and
+  `passkeys_disabled` belong to that origin; the CLI cannot receive them and must
+  not pretend to map them. The mint call returns `invalid_request`,
+  `unauthorized`, `payment_required`, `rate_limited`, or `not_ready`.
+- Writes carry `Idempotency-Key`. An exact retry returns the original link and
+  expiry for twenty-four hours, so a retry is safe and does not mint a second
+  live link.
+- This command is **source-ready**. It is not in the locked plugin bundle, and
+  the dashboard origin is not deployed. Do not claim a working dashboard.
+- `redactText` strips a `#link=` or `#provision=` fragment from any text that
+  reaches a problem detail, an event, or a message. Keep new output on that path.
+
 ## Events
 
 - `events list` binds `GET /api/v1/events` with `--after` / `--cursor` and
@@ -217,6 +249,12 @@ installation, players, backend services, the site, or production deployment.
 - `--json` redacts tokens, pixels, authorization, object keys, and other
   credential-shaped material. Canned-sentence silence is human-only. After
   redaction, a server `message` field that is data remains.
+- Optional `Event.actor` is `{ user_id, display_name }` and names the dashboard
+  user that caused one mutation. It is descriptive attribution and never
+  authorization. Events an agent, the CLI, a player, or a worker produced carry
+  no actor. `--json` passes it through. It is a nested object, so the human
+  logfmt line omits it under the existing rule; no event carries one until the
+  dashboard serves traffic, so do not add a rendering that cannot be verified.
 
 ## Playback
 

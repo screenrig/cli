@@ -1518,12 +1518,21 @@ paths:
         Requests one still screenshot of the named active screen owned by the
         session's account. It is the cookie sibling of POST
         /api/v1/screens/{id}/screenshot and shares one server-side slot and one
-        state machine with it. Latest-wins: a new request replaces any
-        in-flight capture_id and does not conflict, and the current ready slot
-        is kept until a later upload succeeds. The server status machine is the
-        arbiter of the one-in-flight rule; a request while the slot is pending
-        returns that pending capture. Image bytes never appear on any event
-        stream.
+        state machine with it. This route is pending-safe: a request that is not
+        an exact idempotent retry and is made while the slot is pending returns
+        that in-flight capture_id with its expiry unchanged, and starts no second
+        capture. An exact idempotent retry is answered from its own idempotency
+        record instead, so it returns the capture_id that key first received
+        whatever the slot now holds, and the 202 is the authority on that. There
+        is one in-flight capture per screen, so concurrent dashboard viewers
+        converge on the same capture instead of competing for the slot, and a
+        repeated request cannot restart the expiry clock. Outside a replay, the
+        idle, ready, and timed_out states each start a fresh capture. The shared
+        slot machine is unchanged and stays latest-wins for the bearer route;
+        this route reads status first and never takes that replacement path. The
+        current ready slot is kept until a later upload succeeds. The server
+        status machine is the arbiter of the one-in-flight rule. Image bytes
+        never appear on any event stream.
       security: [{ dashboardSession: [] }]
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       responses:

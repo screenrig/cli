@@ -134,6 +134,51 @@ control-plane commands are rejected. Both signals can appear together on a
 `screen screenshot`, `compose catalog`, and `compose render` do not debit
 that meter. Opening `events follow` costs 1 credit. There is no pay command.
 
+## Account dashboard
+
+`dashboard` mints one single-use link to the account dashboard and hands it to
+the browser:
+
+```sh
+screenrig dashboard
+```
+
+The link is single use and stops being claimable ten minutes after it is
+minted. That clock belongs to the dashboard link alone: it is not the
+30-minute public handoff locator, not the 10-minute protected provisioning
+delivery window, and not the 72-hour native pairing clocks. A fresh link is one
+more `screenrig dashboard` away, so let one expire rather than keeping it.
+
+The token rides the URL fragment. No server sees a fragment, no access log
+records one, and no `Referer` header carries one, so **the whole URL is a
+credential**. The CLI opens it and prints nothing. The URL reaches stdout as
+one line in exactly two cases: the opener could not start a browser, or you
+asked for it with `--print-url` because your shell is not on the machine with
+the browser. Treat that line the way you would treat a password. The CLI never
+writes the link to a file, never keeps it in configuration, and cannot show it
+again.
+
+```sh
+screenrig --json dashboard --print-url
+```
+
+The command mints; it never claims. Claiming happens in the browser on the
+dashboard origin, so the CLI never presents a link token and never sees
+`dashboard_link_expired` or `dashboard_link_consumed`. What the mint call can
+return is `invalid_request`, `unauthorized`, `payment_required`,
+`rate_limited`, and `not_ready`; the CLI renders each with the server's own
+detail and guidance.
+
+Minting is an authenticated control-plane request and debits 1 credit. Retrying
+is safe: the request carries `Idempotency-Key`, and an exact retry returns the
+original link and expiry for twenty-four hours instead of minting a second live
+link.
+
+This command is **source-ready in this repository**. It is not in the locked
+plugin bundle. The dashboard origin is not deployed: no request has been served
+there, so a minted link does not resolve yet. Do not read this section as a
+working dashboard.
+
 ## Feedback
 
 Bug reports and feature requests are account-scoped and immutable:
@@ -261,7 +306,11 @@ The spec is a fail-closed tree of `Frame`, `Column`, `Row`, `Box`, `Spacer`,
 `Text`, and `Image`. Roles are `display`, `title`, `body`, `caption`, and
 `label`. Spacing tokens are `xs`, `s`, `m`, `l`, and `xl`. Pins are `top`,
 `bottom`, `left`, and `right`. Do not author `x`/`y` except on the Frame
-canvas. Do not author `fontSize`. Optional Text `textShadow` is
+canvas. Do not author `fontSize`. `Image`, `Box`, `Row`, `Column`, and
+`Spacer` honor `width` and `height` in px. Keep `flex` for remaining space.
+`pin` `top` or `bottom` stretches the full width; `left` or `right` stretches
+the full height. Size a wordmark with `width` and `height`, not `pin`.
+Optional Text `textShadow` is
 `{ "x": 2, "y": 2, "blur": 4, "color": "#00000080" }`; omit it to paint
 without a shadow. `Image.src` is a local filesystem path
 relative to the spec file. The CLI does not fetch URLs.
@@ -404,6 +453,11 @@ of presenting an estimate as a measurement.
 `0` for a passthrough. Under `--no-transcode` the block reduces to `applied`
 and `reason`. Warnings such as a missing tone mapping filter appear as
 `transcode_warning` entries in the envelope warnings.
+
+When the upload operation succeeds, the same envelope also carries `media_id`,
+and `id` with the same value. That is the ready object id for playlist
+selectors. It is also at `operation.result.media_id`. Do not guess a different
+path. After a tagged upload, `media list --tag TAG` is the filename-to-id map.
 
 ## Development and provenance
 

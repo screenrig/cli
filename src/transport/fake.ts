@@ -265,6 +265,15 @@ export function memoryBackend(): FakeTransport {
     },
   }));
 
+  transport.on("POST", "/api/v1/account/dashboard-links", (req) => ({
+    status: 201,
+    headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer", "x-request-id": req.headers?.["x-request-id"] ?? "req_dashboard_link" },
+    body: {
+      url: `https://dashboard.screenrig.ai/#link=${"D".repeat(43)}`,
+      expires_at: "2026-08-14T17:10:00.000Z",
+    },
+  }));
+
   transport.on("GET", "/api/v1/account", (req) => ({
     status: 200,
     headers: { "x-request-id": req.headers?.["x-request-id"] ?? "req_account" },

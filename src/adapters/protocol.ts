@@ -65,6 +65,15 @@ export interface EventResource {
   [key: string]: unknown;
 }
 
+/**
+ * Dashboard user that caused one mutation. Descriptive attribution only; it is
+ * never authorization.
+ */
+export interface EventActor {
+  user_id: string;
+  display_name: string;
+}
+
 export interface AccountEvent {
   cursor: string;
   sequence: number;
@@ -75,6 +84,12 @@ export interface AccountEvent {
   operation_id?: string;
   message: string;
   details?: Record<string, unknown>;
+  /**
+   * Absent on every event an agent, the CLI, a player, or a worker produced, so
+   * its presence distinguishes a dashboard mutation rather than labelling all
+   * traffic.
+   */
+  actor?: EventActor;
   at: string;
 }
 
@@ -306,6 +321,18 @@ export interface BrowserLinkClaim {
   session_id: string;
   status: "claimed";
   screen: BrowserLinkClaimScreen;
+}
+
+/**
+ * Response of POST /api/v1/account/dashboard-links.
+ *
+ * The single-use token rides the fragment of `url`, so the whole string is a
+ * credential: open it, never print it except as the one documented fallback,
+ * and never store it.
+ */
+export interface DashboardLink {
+  url: string;
+  expires_at: string;
 }
 
 export interface MediaCommit {

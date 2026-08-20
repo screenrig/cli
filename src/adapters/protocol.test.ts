@@ -204,6 +204,17 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   assert.deepEqual(quotedProperties(interfaceBody(source, "ScreenProvisioning")), [
     "expires_at", "provisioning_url", "public_url", "screen",
   ]);
+  // The mint route is the CLI's only dashboard operation. Claiming a link is
+  // the browser's job on the dashboard origin, so the CLI never sees
+  // dashboard_link_expired or dashboard_link_consumed from its own request.
+  assert.deepEqual(quotedProperties(interfaceBody(source, "DashboardLink")), ["expires_at", "url"]);
+  assert.match(openapi, /\/api\/v1\/account\/dashboard-links:/);
+  assert.match(openapi, /operationId: createAccountDashboardLink[\s\S]{0,2200}?security: \[\{ accountBearer: \[\] \}\]/);
+  assert.match(openapi, /\/dashboard\/v1\/links\/claim:/);
+  // Attribution on an account event. Absent on everything the CLI produces.
+  const event = interfaceBody(source, "Event");
+  assert.match(event, /"actor"\?: EventActor/);
+  assert.deepEqual(quotedProperties(interfaceBody(source, "EventActor")), ["display_name", "user_id"]);
   assert.deepEqual(quotedProperties(interfaceBody(source, "BrowserLinkClaimRequest")), ["code"]);
   assert.deepEqual(quotedProperties(interfaceBody(source, "BrowserLinkClaim")), ["screen", "session_id", "status"]);
   assert.deepEqual(quotedProperties(interfaceBody(source, "BrowserLinkClaimScreen")), ["id", "public_id", "public_url", "state"]);
@@ -312,6 +323,27 @@ test("local enrollment request adapter accepts optional beta_key", () => {
     "utf8",
   );
   assert.match(source, /export interface CLIEnrollmentRequest \{[\s\S]*?beta_key\?: string;/);
+});
+
+test("the dashboard link is minted only, and the CLI never claims one", () => {
+  const adapter = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../src/adapters/protocol.ts"),
+    "utf8",
+  );
+  const commands = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../src/commands.ts"),
+    "utf8",
+  );
+  assert.deepEqual(quotedProperties(interfaceBody(readFileSync(GENERATED_CONTRACT, "utf8"), "DashboardLink")), [
+    "expires_at",
+    "url",
+  ]);
+  assert.match(adapter, /export interface DashboardLink \{[\s\S]*?expires_at: string;/);
+  assert.match(adapter, /actor\?: EventActor/);
+  assert.match(commands, /"\/api\/v1\/account\/dashboard-links"/);
+  // Claiming happens in the browser on the dashboard origin. The CLI holds the
+  // account bearer and must never present a link token itself.
+  assert.doesNotMatch(commands, /\/dashboard\/v1\//);
 });
 
 test("screen observation is optional, read-only, and absent from ScreenPatch", () => {

@@ -477,6 +477,169 @@ test("browser setup --open opens only the public handoff URL by argv", async () 
   await rm(result.configDir, { recursive: true, force: true });
 });
 
+const DASHBOARD_TOKEN = "D".repeat(43);
+const DASHBOARD_URL = `https://dashboard.screenrig.ai/#link=${DASHBOARD_TOKEN}`;
+
+function dashboardLinkTransport(status: number, body: unknown, headers?: Record<string, string>): FakeTransport {
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/v1/enrollments", () => ({
+    status: 201,
+    headers: { "cache-control": "private, no-store" },
+    body: {
+      account: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" },
+      token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      issuance_id: "iss_AAAAAAAAAAAAAAAAAAAAAAAA",
+      issuance_expires_at: "2026-08-14T17:10:00.000Z",
+    },
+  }));
+  transport.on("GET", "/api/v1/account", () => ({ status: 200, headers: {}, body: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" } }));
+  transport.on("POST", "/api/v1/account/dashboard-links", () => ({
+    status,
+    headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer", ...headers },
+    body,
+  }));
+  return transport;
+}
+
+test("dashboard mints one single-use link, opens it, and keeps the URL out of every output", async () => {
+  const transport = memoryBackend();
+  const opened: string[] = [];
+  const result = await withRuntime(
+    ["--json", "dashboard"],
+    transport,
+    { openUrl: async (url) => { opened.push(url); return true; } },
+  );
+  assert.equal(result.code, 0, result.stdout);
+  assert.deepEqual(opened, [DASHBOARD_URL]);
+  const envelope = JSON.parse(result.stdout) as { data: Record<string, unknown> };
+  assert.deepEqual(envelope.data, {
+    expires_at: "2026-08-14T17:10:00.000Z",
+    single_use: true,
+    opened: true,
+  });
+  // The token was handed to the browser and to nothing else.
+  assert.doesNotMatch(result.stdout, /#link=|dashboard\.screenrig\.ai|DDDDD/);
+  assert.doesNotMatch(result.stderr, /#link=|DDDDD/);
+  assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), [
+    "POST /api/v1/enrollments",
+    "GET /api/v1/account",
+    "POST /api/v1/account/dashboard-links",
+  ]);
+  const mint = transport.calls.at(-1);
+  assert.ok(mint?.headers?.["idempotency-key"], "the mint route requires an Idempotency-Key");
+  assert.equal(mint?.body, undefined);
+  // Nothing about the link is persisted; only a fresh mint can produce another.
+  const config = await readConfigFile(path.join(result.configDir, "screenrig", "config.json"), {
+    mkdir, open, rename, rm, chmod, stat,
+    homedir: () => result.configDir,
+    env: { XDG_CONFIG_HOME: result.configDir },
+  });
+  assert.doesNotMatch(JSON.stringify(config), /#link=|dashboard|DDDDD/);
+  await rm(result.configDir, { recursive: true, force: true });
+});
+
+test("dashboard prints the link exactly once when no browser could be opened", async () => {
+  const result = await withRuntime(
+    ["dashboard"],
+    memoryBackend(),
+    { openUrl: async () => false },
+  );
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout.match(/#link=/g)?.length, 1);
+  assert.match(result.stdout, /no browser could be opened/);
+  assert.match(result.stdout, /single use, ten minutes from mint/);
+  assert.match(result.stdout, /reissue: run screenrig dashboard again for a fresh link/);
+  assert.match(result.stdout, new RegExp(`url: ${DASHBOARD_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  await rm(result.configDir, { recursive: true, force: true });
+});
+
+test("dashboard --print-url never starts a browser and reports the same expiry", async () => {
+  const opened: string[] = [];
+  const result = await withRuntime(
+    ["--json", "dashboard", "--print-url"],
+    memoryBackend(),
+    { openUrl: async (url) => { opened.push(url); return true; } },
+  );
+  assert.equal(result.code, 0, result.stdout);
+  assert.deepEqual(opened, []);
+  const envelope = JSON.parse(result.stdout) as { data: Record<string, unknown> };
+  assert.deepEqual(envelope.data, {
+    expires_at: "2026-08-14T17:10:00.000Z",
+    single_use: true,
+    url: DASHBOARD_URL,
+  });
+  await rm(result.configDir, { recursive: true, force: true });
+});
+
+test("dashboard refuses an unsafe or off-origin minted URL and opens nothing", async () => {
+  for (const url of [
+    `https://dashboard.screenrig.ai/?link=${DASHBOARD_TOKEN}`,
+    `https://evil.invalid/#link=${DASHBOARD_TOKEN}`,
+    `http://dashboard.screenrig.localhost/#link=${DASHBOARD_TOKEN}`,
+  ]) {
+    const opened: string[] = [];
+    const result = await withRuntime(
+      ["--json", "dashboard"],
+      dashboardLinkTransport(201, { url, expires_at: "2026-08-14T17:10:00.000Z" }),
+      { openUrl: async (target) => { opened.push(target); return true; } },
+    );
+    assert.equal(result.code, ExitCode.Usage, result.stdout);
+    assert.deepEqual(opened, []);
+    assert.match(result.stdout, /unsafe URL/);
+    assert.doesNotMatch(result.stdout, /DDDDD/);
+    await rm(result.configDir, { recursive: true, force: true });
+  }
+});
+
+test("dashboard surfaces the mint problem verbatim and prints no link", async () => {
+  const cases: Array<{ status: number; code: string; exit: number }> = [
+    { status: 401, code: "unauthorized", exit: ExitCode.Auth },
+    { status: 402, code: "payment_required", exit: ExitCode.Client },
+    { status: 503, code: "not_ready", exit: ExitCode.Server },
+  ];
+  for (const item of cases) {
+    const result = await withRuntime(
+      ["--json", "dashboard"],
+      dashboardLinkTransport(item.status, {
+        type: `https://screenrig.ai/problems/${item.code.replaceAll("_", "-")}`,
+        title: "Mint refused",
+        status: item.status,
+        code: item.code,
+        detail: "The dashboard link was not minted.",
+      }),
+      { openUrl: async () => true },
+    );
+    const envelope = JSON.parse(result.stdout) as { ok: boolean; error: { code: string; status: number } };
+    assert.equal(envelope.ok, false, result.stdout);
+    assert.equal(envelope.error.code, item.code);
+    assert.equal(envelope.error.status, item.status);
+    assert.equal(result.code, item.exit, `${item.code} exit code`);
+    assert.doesNotMatch(result.stdout, /#link=|DDDDD/);
+    await rm(result.configDir, { recursive: true, force: true });
+  }
+});
+
+test("dashboard rejects positional arguments and a mint response without private no-store", async () => {
+  const positional = await withRuntime(["--json", "dashboard", "open"], memoryBackend());
+  assert.equal(positional.code, ExitCode.Usage, positional.stdout);
+  assert.match(positional.stdout, /does not accept positional arguments/);
+  await rm(positional.configDir, { recursive: true, force: true });
+
+  const cached = await withRuntime(
+    ["--json", "dashboard"],
+    dashboardLinkTransport(
+      201,
+      { url: DASHBOARD_URL, expires_at: "2026-08-14T17:10:00.000Z" },
+      { "cache-control": "public, max-age=60" },
+    ),
+    { openUrl: async () => true },
+  );
+  assert.equal(cached.code, ExitCode.Usage, cached.stdout);
+  assert.match(cached.stdout, /private, no-store/);
+  assert.doesNotMatch(cached.stdout, /DDDDD/);
+  await rm(cached.configDir, { recursive: true, force: true });
+});
+
 const BROWSER_CLAIM_SCREEN = {
   id: "scr_browser_link",
   public_id: "browser-link-screen",
@@ -1561,11 +1724,17 @@ test("media upload transcodes before declaring, and uploads only the transcoded 
 
     const envelope = JSON.parse(result.stdout) as {
       data: {
+        id?: string;
+        media_id?: string;
+        operation: { result?: { media_id?: string } };
         upload: { content_type: string };
         transcode: { applied: boolean; width: number; height: number; dimensions_measured: boolean };
       };
     };
     assert.equal(envelope.data.upload.content_type, "image/webp");
+    assert.equal(envelope.data.media_id, "med_AAAAAAAAAAAAAAAAAAAAAAAA");
+    assert.equal(envelope.data.id, envelope.data.media_id);
+    assert.equal(envelope.data.operation.result?.media_id, envelope.data.media_id);
     assert.equal(envelope.data.transcode.applied, true);
     assert.equal(envelope.data.transcode.width, 3840);
     assert.equal(envelope.data.transcode.height, 1920);
@@ -2063,9 +2232,13 @@ test("media upload warns on a low-information filename without blocking the uplo
     assert.equal(result.code, 0, result.stdout);
     const envelope = JSON.parse(result.stdout) as {
       ok: boolean;
+      data: { id?: string; media_id?: string; operation: { result?: { media_id?: string } } };
       warnings: Array<{ code: string; message: string }>;
     };
     assert.equal(envelope.ok, true);
+    assert.equal(envelope.data.media_id, "med_AAAAAAAAAAAAAAAAAAAAAAAA");
+    assert.equal(envelope.data.id, envelope.data.media_id);
+    assert.equal(envelope.data.operation.result?.media_id, envelope.data.media_id);
     const warning = envelope.warnings.find((item) => item.code === "generic_filename");
     assert.ok(warning, result.stdout);
     assert.match(warning.message, /video\.mp4/);

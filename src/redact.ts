@@ -1,11 +1,17 @@
 const TOKEN_RE = /\bsr_live_[A-Za-z0-9_-]+_[A-Za-z0-9_-]+\b/g;
 const BEARER_RE = /Bearer\s+\S+/gi;
 const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
+/**
+ * Single-use tokens ScreenRig delivers in a URL fragment. The whole URL is the
+ * credential, so a link that reaches an error detail, an event, or a message
+ * must lose its fragment rather than be echoed back.
+ */
+const URL_FRAGMENT_TOKEN_RE = /#(link|provision)=[A-Za-z0-9_-]{8,}/gi;
 
 const SENSITIVE_KEY_RE =
   /(authorization|access_token|token|password|secret|cookie|object_key|signed_url|completion_nonce|upload_url|image_bytes|pixels)/i;
 const SENSITIVE_VALUE_RE =
-  /(sr_live_|Bearer\s|data:image\/|[?&](X-Amz-Signature|X-Goog-Signature|signature)=)/i;
+  /(sr_live_|Bearer\s|data:image\/|#(link|provision)=|[?&](X-Amz-Signature|X-Goog-Signature|signature)=)/i;
 
 export function tokenLookupId(token: string): string | undefined {
   const match = /^sr_live_([A-Za-z0-9_-]+)_/.exec(token);
@@ -32,6 +38,7 @@ export function redactText(value: string): string {
   return value
     .replace(TOKEN_RE, (token) => redactToken(token))
     .replace(BEARER_RE, "Bearer ***")
+    .replace(URL_FRAGMENT_TOKEN_RE, (_match, name: string) => `#${name.toLowerCase()}=***`)
     .replace(EMAIL_RE, "[redacted-email]");
 }
 

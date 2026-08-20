@@ -20,6 +20,23 @@ test("redacts credentials and email addresses from errors", () => {
   );
 });
 
+test("redacts a fragment-delivered single-use link wherever text carries one", () => {
+  const token = "D".repeat(43);
+  assert.equal(
+    redactText(`open https://dashboard.screenrig.ai/#link=${token} now`),
+    "open https://dashboard.screenrig.ai/#link=*** now",
+  );
+  assert.equal(
+    redactText(`https://play.screenrig.ai/s/pub#provision=${token}`),
+    "https://play.screenrig.ai/s/pub#provision=***",
+  );
+  // The origin stays legible so the operator can tell which link failed.
+  assert.doesNotMatch(redactText(`#link=${token}`), /DDD/);
+  assert.equal(isSensitiveValue(`https://dashboard.screenrig.ai/#link=${token}`), true);
+  assert.equal(isSensitiveValue(`https://play.screenrig.ai/s/pub#provision=${token}`), true);
+  assert.equal(isSensitiveValue("https://dashboard.screenrig.ai/"), false);
+});
+
 test("sensitive keys match embedded names, not only exact tokens", () => {
   for (const key of [
     "token",

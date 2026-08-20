@@ -23,6 +23,7 @@ import {
   type PairingClaim,
   type BrowserLinkClaim,
   type BrowserLinkClaimRequest,
+  type DashboardLink,
   type ProvisionScreen,
   type Screen,
   type ScreenPatch,
@@ -73,6 +74,7 @@ import type { MediaUploadSession } from "./adapters/protocol.js";
 import { newIdempotencyKey } from "./ids.js";
 import { clearProvisionRetryState, provisionRetryState } from "./provisioning-state.js";
 import { validateProvisioningUrls } from "./provisioning-url.js";
+import { validateDashboardLink } from "./dashboard-link.js";
 import {
   browserHandoffUrl,
   browserSetupRetryState,
@@ -114,6 +116,7 @@ Commands:
   account show
   auth status
   auth revoke --yes
+  dashboard [--print-url]
   app pack <directory> [--output FILE]
   app upload <directory> [--name NAME] [--no-wait] [--poll-ms MS]
   app list
@@ -378,6 +381,9 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
   if (group === "auth" && (action === "status" || action === undefined)) {
     return accountShow(args, runtime, resolved);
   }
+  if (group === "dashboard") {
+    return dashboardCommand(args, runtime, resolved);
+  }
   if (group === "app" && action === "upload") {
     return appUpload(args, runtime, resolved);
   }
@@ -547,6 +553,7 @@ function isAuthenticatedCommand(group: string, action: string | undefined): bool
   const actions: Record<string, ReadonlySet<string | undefined>> = {
     account: new Set(["show"]),
     auth: new Set([undefined, "status"]),
+    dashboard: new Set([undefined]),
     app: new Set(["upload", "list", "show"]),
     media: new Set(["upload", "show", "list", "delete", "update"]),
     playlist: new Set(["create", "update", "show", "get", "list", "delete"]),
@@ -623,6 +630,67 @@ async function browserSetupCommand(
       ["status", claim.status],
       ["player_public_url", publicUrl.href],
       ...(opened !== undefined ? [["opened", opened ? "true" : "false"] as [string, string]] : []),
+    ]),
+  };
+}
+
+/**
+ * Mints one single-use account dashboard link and hands it to the browser.
+ *
+ * The token rides the URL fragment, which no server sees, no access log
+ * records, and no `Referer` header carries, so the whole URL is a credential.
+ * The default path opens it and keeps it out of stdout entirely. The URL
+ * reaches stdout as exactly one line in two cases: the opener could not start a
+ * browser, or the operator asked for it with `--print-url` because the shell is
+ * not on the machine with the browser. It is never written to a file, never
+ * persisted in the config, and never repeated in a later command.
+ */
+async function dashboardCommand(
+  args: ParsedArgs,
+  runtime: CliRuntime,
+  resolved: Awaited<ReturnType<typeof resolveConfig>>,
+): Promise<CommandResult> {
+  if (args.positionals.length > 1) {
+    throw usageError("dashboard does not accept positional arguments.", {
+      command: "screenrig dashboard",
+      reason: "Mint one single-use dashboard link for the enrolled account and open it.",
+    });
+  }
+  const printMode = flagBool(args.flags, "print-url");
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+  const response = await client.call({
+    method: "POST",
+    path: "/api/v1/account/dashboard-links",
+    idempotent: true,
+  });
+  requirePrivateNoStore(response.headers, "Dashboard link response");
+  const link = validateDashboardLink(response.body as DashboardLink, resolved.apiUrl);
+  const opened = printMode ? false : await (runtime.openUrl?.(link.url) ?? Promise.resolve(false));
+  // Falling back is the only reason to print an unasked-for URL: the link
+  // expires in ten minutes, and a link nobody can reach is worse than one line
+  // of sensitive output the operator already chose to produce.
+  const printed = printMode || !opened;
+  const data = {
+    expires_at: link.expiresAt,
+    single_use: true,
+    ...(printed ? { url: link.url } : {}),
+    ...(printMode ? {} : { opened }),
+  };
+  const title = printMode
+    ? "Single-use dashboard link"
+    : opened
+      ? "Dashboard link opened"
+      : "Single-use dashboard link; no browser could be opened";
+  return {
+    envelope: successEnvelope(data, { request_id: client.requestId }),
+    exitCode: ExitCode.Success,
+    human: humanLines(title, [
+      ...(printed ? [["url", link.url] as [string, string]] : []),
+      ["expires_at", link.expiresAt],
+      ["validity", "single use, ten minutes from mint"],
+      ["reissue", "run screenrig dashboard again for a fresh link"],
+      ...(printMode ? [] : [["opened", opened ? "true" : "false"] as [string, string]]),
     ]),
   };
 }
@@ -966,6 +1034,11 @@ async function playbackList(
   });
 }
 
+function readyMediaId(operation: Operation): string | undefined {
+  const mediaId = operation.result?.media_id;
+  return typeof mediaId === "string" && mediaId.length > 0 ? mediaId : undefined;
+}
+
 /** Flags that shape the pre-upload transcode. */
 export function transcodeOptionsFromArgs(args: ParsedArgs): TranscodeOptions {
   const codecFlag = flagString(args.flags, "codec")?.toLowerCase();
@@ -1063,7 +1136,9 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
         sleep: runtime.sleep,
       });
     }
+    const mediaId = readyMediaId(operation);
     const data = {
+      ...(mediaId ? { media_id: mediaId, id: mediaId } : {}),
       operation,
       upload: {
         filename: prepared.declaration.filename,
@@ -1097,6 +1172,7 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
       }),
       exitCode: ExitCode.Success,
       human: humanLines(flagBool(args.flags, "no-wait") ? "Media upload committed" : "Media uploaded", [
+        ["media_id", mediaId],
         ["operation_id", operation.id],
         ["state", operation.state],
         ["filename", prepared.declaration.filename],
