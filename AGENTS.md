@@ -265,6 +265,19 @@ installation, players, backend services, the site, or production deployment.
 - **Every playlist must keep at least one page with no `visibility` field at
   all.** That is a server rule and the CLI does not duplicate it. Do not add a
   local copy that could drift; render the server's problem instead.
+
+## Page motion
+
+- Default templated pages stay `{ type: "crossfade", duration_ms: 200 }` with
+  no placement `enter`. Do not flip that default to swipe.
+- Full pages are opaque: the CLI forwards `transition.type` swipe variants
+  (`swipe-left`, `swipe-right`, `swipe-up`, `swipe-down`) and optional
+  placement `enter: { type }` with that same object name. No snake_case
+  inside `enter`. `duration_ms` is required, 0 through 60000. Swipe
+  authoring default when chosen is `duration_ms: 600`.
+- Teach swipe and `enter` as spare emphasis, not as the ordinary page.
+  Object enter delay 500 ms and duration 400 ms are contract constants, not
+  author fields and not CLI flags.
 - `Application` carries no `state` and no `release_id`. It reports
   `latest_ready_release`. `OperationAccepted.release_id` is required, so
   `app upload` reports the release id without waiting on the operation result.

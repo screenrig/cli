@@ -135,12 +135,14 @@ export function limitsFromCapabilities(capabilities: Capabilities): ArchiveLimit
 
 /**
  * Full playlist pages stay opaque: the CLI forwards author-supplied playlist
- * JSON unchanged. Templated pages are the exception — the CLI expands
+ * JSON unchanged, including `transition.type` swipe variants and optional
+ * placement `enter`. Templated pages are the exception — the CLI expands
  * `template` + `slots` into an ordinary write page in `playlist-templates.ts`
- * and never sends `template` to the server. The contract's page, placement,
- * and content schemas are still not mirrored here except for the fields that
- * expander writes. Mirror a schema only when the CLI builds or reads its
- * fields.
+ * and never sends `template` to the server. Omitted templated transitions stay
+ * `{ type: "crossfade", duration_ms: 200 }` with no `enter`. The contract's
+ * page, placement, and content schemas are still not mirrored here except for
+ * the fields that expander writes. Mirror a schema only when the CLI builds or
+ * reads its fields.
  *
  * Page `visibility` is inspected only for key presence. That is exactly what
  * decides whether a playlist needs the target screen to carry a timezone, so

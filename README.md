@@ -49,6 +49,28 @@ the content object, and do not send server-resolved `items`. Page advance
 uses `duration`, `application`, or `media_end`. There is no `video_end`
 mode.
 
+Default pages use `{ "type": "crossfade", "duration_ms": 200 }` and put no
+`enter` on placements. `transition.type` may also be `swipe-left`,
+`swipe-right`, `swipe-up`, or `swipe-down`. `duration_ms` is required and
+runs from 0 through 60000. When a swipe type is chosen, write
+`duration_ms: 600`. That is the authoring default for swipe, not a schema
+default, and it does not change the template default. Swipe is the incoming
+page's type. The outgoing page follows so the edges stay touching. The name
+is motion direction: `swipe-left` moves content left.
+
+Optional placement `enter` is `{ "type": "..." }` with that same object
+name on playlist JSON. There is no snake_case rename inside it. Types are
+`fade-up`, `fade-down`, `fade-left`, `fade-right`, `fade-in`, `zoom-in`,
+and `zoom-out`. Absent means no object animation. Use swipe and `enter`
+sparingly, for emphasis or a particular style, not on every page. If you
+want object animation, layer the content and put the motion on the
+top-layer text or images. Do not animate every placement. Object enter
+starts invisible. It runs 500 ms after the page occupies the full
+viewport, for 400 ms. Those delays are contract constants, not author
+fields and not CLI flags. These are playlist document fields the CLI
+sends. They are source-ready. They are not a claim that production already
+serves them.
+
 The ordinary pair command currently accepts six canonical characters:
 
 ```sh

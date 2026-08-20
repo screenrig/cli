@@ -3227,6 +3227,32 @@ test("playlist templates --json lists the fifteen closed ids without enrolling",
     "slide-full-bleed",
   ]);
   assert.deepEqual(envelope.data.compose.wire_kinds, ["image", "video", "iframe", "application"]);
+  const catalog = envelope.data as {
+    templates: Array<{ id: string }>;
+    compose: { wire_kinds: string[] };
+    transition: { type: string; duration_ms: number };
+    transition_types: string[];
+    swipe_duration_ms: number;
+    enter_types: string[];
+  };
+  assert.deepEqual(catalog.transition, { type: "crossfade", duration_ms: 200 });
+  assert.deepEqual(catalog.transition_types, [
+    "crossfade",
+    "swipe-left",
+    "swipe-right",
+    "swipe-up",
+    "swipe-down",
+  ]);
+  assert.equal(catalog.swipe_duration_ms, 600);
+  assert.deepEqual(catalog.enter_types, [
+    "fade-up",
+    "fade-down",
+    "fade-left",
+    "fade-right",
+    "fade-in",
+    "zoom-in",
+    "zoom-out",
+  ]);
   assert.equal(transport.calls.length, 0);
   await rm(configDir, { recursive: true, force: true });
 });
@@ -3283,6 +3309,51 @@ test("playlist create expands a picture template and forwards a full page unchan
   assert.deepEqual(introPlacements.map((placement) => placement.id), ["picture"]);
   assert.ok(introPlacements.every((placement) => placement.content.type === "image"));
   assert.deepEqual(body.pages[1], fullPage);
+  assert.deepEqual(body.pages[0]!.transition, { type: "crossfade", duration_ms: 200 });
+  const heroPlacements = body.pages[0]!.placements as Array<Record<string, unknown>>;
+  assert.ok(heroPlacements.every((placement) => !("enter" in placement)));
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("playlist create forwards swipe transition and placement enter on a full page", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("playlist-motion-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_existing_secret" },
+    fsLike,
+  );
+  const fullPage = {
+    id: "poster",
+    canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
+    transition: { type: "swipe-left", duration_ms: 600 },
+    advance: { mode: "duration", after_ms: 8000 },
+    placements: [
+      {
+        id: "hero",
+        content: { type: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
+        rect: { x: 0, y: 0, width: 1920, height: 1080 },
+        layer: 0,
+        content_fit: "contain",
+      },
+      {
+        id: "caption",
+        content: { type: "image", selector: { by: "id", media_id: "med_BBBBBBBBBBBBBBBBBBBBBBBB" } },
+        rect: { x: 80, y: 860, width: 1760, height: 160 },
+        layer: 2,
+        content_fit: "contain",
+        enter: { type: "fade-up" },
+      },
+    ],
+  };
+  const file = path.join(configDir, "playlist.json");
+  await writeFile(file, JSON.stringify({ name: "Lobby", pages: [fullPage] }));
+  const result = await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  const posted = transport.calls.find((call) => call.method === "POST" && call.path === "/api/v1/playlists");
+  const body = posted?.body as { pages: Array<Record<string, unknown>> };
+  assert.deepEqual(body.pages[0], fullPage);
   await rm(configDir, { recursive: true, force: true });
 });
 

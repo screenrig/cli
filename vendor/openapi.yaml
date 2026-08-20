@@ -103,6 +103,35 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
+  /api/v1/account/dashboard-links:
+    post:
+      operationId: createAccountDashboardLink
+      description: >-
+        Mints one single-use dashboard link for the calling account. The link
+        carries a 256-bit token in its URL fragment, and its lifetime is the
+        separate DashboardLinkTTL constant of ten minutes. That clock is not the
+        thirty-minute public handoff locator, not the ten-minute protected
+        provisioning delivery window, and not the seventy-two-hour native
+        pairing clocks; do not describe it as any of them. There is no
+        mint-time user hint in v1: the link names an account, and the claiming
+        visitor establishes or selects the dashboard user. A fragment is never
+        sent to the server, never lands in an access log, and never appears in a
+        Referer header, so the client must strip it with history.replaceState
+        before its first network call and then POST it exactly once to
+        /dashboard/v1/links/claim. An exact Idempotency-Key retry returns the
+        original link and expiry for twenty-four hours. Authenticated /api/v1
+        control-plane request; costs 1 credit.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "201": { description: "Single-use dashboard link. Treat the whole URL as a credential: it is not a shareable address.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardLink" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "402": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
   /api/v1/applications:
     get:
       operationId: listApplications
@@ -1238,6 +1267,560 @@ paths:
       responses:
         "204": { description: Paired-device KV deletion }
         default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/links/claim:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: claimDashboardLink
+      description: >-
+        Claims one dashboard link. The token is presented in the request body
+        only, because it rides the browser URL fragment and a fragment never
+        reaches the server. No cookie is required and no ScreenRig-*
+        Authorization header is ever accepted on this path family. next is the
+        only discriminator a client may branch on. ready means a valid dashboard
+        session for the same account already exists and this is a no-op sign-in.
+        register_passkey means production mode with no session; the response
+        sets the short-lived setup cookie and the client continues with a
+        WebAuthn registration ceremony. create_session means the server is in
+        dashboard development-authentication mode; the response sets the setup
+        cookie and the client continues with POST /dashboard/v1/sessions. An
+        unknown token, a malformed token, and a claim presented from a session
+        bound to a different account all return dashboard_link_invalid, so the
+        route is not an account or token existence oracle. An elapsed link is
+        dashboard_link_expired and an already-claimed link is
+        dashboard_link_consumed. The response never echoes the token and never
+        carries provisioning material.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardLinkClaimRequest" } } } }
+      responses:
+        "200":
+          description: >-
+            Link claimed. Set-Cookie carries the session cookie for ready and
+            the short-lived setup cookie for register_passkey and
+            create_session. The body carries no token and no cookie value.
+          headers:
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+            Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }
+            Set-Cookie: { schema: { type: string } }
+          content: { application/json: { schema: { $ref: "#/components/schemas/DashboardLinkClaim" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "410": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/webauthn/registrations:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: startDashboardPasskeyRegistration
+      description: >-
+        Starts one WebAuthn registration ceremony and returns the creation
+        options verbatim for navigator.credentials.create. Either the setup
+        cookie or an established session cookie authorizes it: a link claim
+        registers a first passkey for a new user, and a signed-in user adds
+        another passkey to their own account without a new link. The relying
+        party is the dashboard host, credentials are discoverable, user
+        verification is required, and attestation is none. The ceremony is
+        bound to the presenting cookie and expires with DashboardCeremonyTTL of
+        five minutes. When the server runs dashboard development
+        authentication, this route returns passkeys_disabled.
+        display_name is required with the setup cookie, because the creation
+        options must name the new user, and is rejected with a session cookie,
+        because that user already has a name.
+      security: [{ dashboardSetup: [] }, { dashboardSession: [] }]
+      requestBody: { required: false, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardPasskeyRegistrationStart" } } } }
+      responses:
+        "201": { description: WebAuthn creation options bound to this ceremony., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardPasskeyRegistration" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/webauthn/registrations/complete:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: completeDashboardPasskeyRegistration
+      description: >-
+        Verifies one registration ceremony and stores the credential. A setup
+        cookie creates the user the ceremony named and mints the session
+        cookie. A session cookie adds a credential to the signed-in user and
+        does not create a user or replace the session. A ceremony that is
+        unknown, elapsed, already used, or bound to a different cookie returns
+        passkey_invalid, and so does a response the relying party cannot
+        verify. When the server runs dashboard development authentication, this
+        route returns passkeys_disabled.
+      security: [{ dashboardSetup: [] }, { dashboardSession: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardPasskeyRegistrationComplete" } } } }
+      responses:
+        "200": { description: Credential stored. Set-Cookie is present only when this call created the session., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Set-Cookie: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardSession" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/webauthn/assertions:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: startDashboardPasskeyAssertion
+      description: >-
+        Starts one usernameless WebAuthn assertion ceremony and returns the
+        request options verbatim for navigator.credentials.get. No cookie is
+        required, and no allowCredentials list is published, so the route
+        reveals nothing about which users or credentials exist. The ceremony
+        expires with DashboardCeremonyTTL of five minutes. When the server runs
+        dashboard development authentication, this route returns
+        passkeys_disabled.
+      responses:
+        "201": { description: WebAuthn request options bound to this ceremony., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardPasskeyAssertion" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/webauthn/assertions/complete:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: completeDashboardPasskeyAssertion
+      description: >-
+        Verifies one usernameless assertion and mints the dashboard session
+        cookie for the user the discoverable credential identifies. No cookie
+        authenticates the request. A ceremony that is unknown, elapsed, or
+        already used returns passkey_invalid, and so does an assertion the
+        relying party cannot verify or a sign counter that moves backwards.
+        The credential identifier is not authorization on its own: the signed
+        assertion is. When the server runs dashboard development
+        authentication, this route returns passkeys_disabled.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardPasskeyAssertionComplete" } } } }
+      responses:
+        "200": { description: Session cookie minted from a verified assertion., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Set-Cookie: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardSession" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/sessions:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: createDashboardSession
+      description: >-
+        Development-authentication-only session mint. It exists so that a local
+        loop needs no WebAuthn secure context and no stable relying-party
+        identifier, and so that event attribution still records a display name.
+        It creates the user named by display_name and mints the session cookie
+        directly from the setup cookie, with no credential and no proof of
+        possession. When the server does not run dashboard development
+        authentication this route returns forbidden, unconditionally and before
+        it reads the body. The flag defaults to off, and the server refuses to
+        start with the flag on unless every configured public origin is a
+        .localhost host.
+      security: [{ dashboardSetup: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardSessionCreate" } } } }
+      responses:
+        "201": { description: Development-mode session cookie minted., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Set-Cookie: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardSession" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/session:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardSession
+      description: >-
+        Returns the current dashboard session. Authority is the session cookie
+        and the server-side session row it names; the user identifier in the
+        body is descriptive and is never authorization. A returning visit calls
+        this first, and treats 401 as the signal to run a usernameless
+        assertion ceremony. dev_auth reports the server mode so the client
+        needs no build-time flag, environment check, or hostname test.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Current dashboard session., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardSession" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/logout:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: logoutDashboardSession
+      description: >-
+        Deletes the server-side session row and expires the session cookie. It
+        does not delete the user and does not remove any credential. It is
+        intrinsically idempotent and takes no Idempotency-Key.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "204": { description: Session row deleted and session cookie expired., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Set-Cookie: { schema: { type: string } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/users:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardUsers
+      description: >-
+        Lists the dashboard users of the session's account. An account holds N
+        users, and every user holds equal read and delete authority; there are
+        no roles in v1. There is no user delete in v1, because the
+        last-user-lockout hazard is unresolved. Another account's users are
+        never returned and are not addressable by identifier.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Dashboard users of the session's account., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardUserList" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/summary:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardSummary
+      description: >-
+        Account network-status counters for the session's account. Screen
+        online counts are derived from live paired runtime event streams, the
+        same derivation Screen.online publishes; they are not a stored boolean
+        and not a player heartbeat. Media bytes are the durable bytes of ready
+        media only.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Account summary counters., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardSummary" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/screens:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardScreens
+      description: Default list returns pairing_pending and active screens of the session's account. Pass state=archived to list archived screens only.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ScreenListState" }]
+      responses:
+        "200": { description: Screens, headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenList" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/screens/{id}:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    get:
+      operationId: getDashboardScreen
+      description: >-
+        Returns one pairing_pending, active, or archived screen. Authority is
+        the session's account owning the screen; the identifier is not
+        authorization. A screen of any other account is not_found. Deleted
+        screens are not found. There is no dashboard screen create, patch, or
+        delete: the dashboard is a read, list, and delete surface, screens
+        archive rather than delete, and authoring stays in the agent
+        conversation and the CLI.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Screen, headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/screens/{id}/screenshot:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    post:
+      operationId: requestDashboardScreenScreenshot
+      description: >-
+        Requests one still screenshot of the named active screen owned by the
+        session's account. It is the cookie sibling of POST
+        /api/v1/screens/{id}/screenshot and shares one server-side slot and one
+        state machine with it. Latest-wins: a new request replaces any
+        in-flight capture_id and does not conflict, and the current ready slot
+        is kept until a later upload succeeds. The server status machine is the
+        arbiter of the one-in-flight rule; a request while the slot is pending
+        returns that pending capture. Image bytes never appear on any event
+        stream.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "202": { description: "Accepted. The request is durable until expires_at. An exact idempotent retry returns this same capture_id and expiry.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenScreenshotAccepted" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: getDashboardScreenScreenshot
+      description: >-
+        Returns the current ready still WebP for the named screen as
+        first-party same-origin bytes. There is no signed URL and no object
+        key anywhere on this path: a signed URL reaching the dashboard is a
+        defect. Optional capture_id must match the current ready slot. A named
+        capture_id that elapsed with no upload is screenshot_unavailable, and
+        one replaced by a later request is resource_conflict. Range is not
+        accepted.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ScreenshotCaptureID" }]
+      responses:
+        "200":
+          description: Current ready still WebP.
+          headers:
+            Content-Type: { schema: { type: string, enum: [image/webp] } }
+            Content-Length: { schema: { type: integer } }
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            Content-Disposition: { schema: { type: string } }
+          content: { image/webp: { schema: { type: string, format: binary } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/screens/{id}/screenshot/status:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardScreenScreenshotStatus
+      description: >-
+        Returns the screenshot state machine for the named screen owned by the
+        session's account. It reads the same slot as GET
+        /api/v1/screens/{id}/screenshot/status. idle has no request and no ready
+        slot. pending is the current capture_id before expires_at with no
+        upload. ready means the last successful upload matches the current
+        capture_id. timed_out means the current identifier reached expires_at
+        with no upload; a client renders screenshot_unavailable inline and backs
+        off. Timeout is lazy, and a timed-out request does not delete an older
+        ready slot.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Screenshot status for this session account's screen., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenScreenshotStatus" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/screens/{id}/archive:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: archiveDashboardScreen
+      description: >-
+        Hides the screen from the default list and darkens the live glass. It
+        does not unbind the player public key, and it releases screen_count
+        quota. Archive is the only screen removal the dashboard offers: hard
+        screen delete stays blocked by player identity, so DELETE is absent
+        from this path family rather than answering screen_archive_required.
+        The durable account event carries the acting dashboard user as actor.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Screen archived., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/screens/{id}/unarchive:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: unarchiveDashboardScreen
+      description: >-
+        Restores an archived screen to the default list and remints a normal
+        manifest. It must pass screen admission and it does not change the
+        bound public key. The durable account event carries the acting
+        dashboard user as actor.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Screen unarchived., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/media:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardMedia
+      description: Lists ready media of the session's account. The backend holds one rendition per object and publishes no thumbnail.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/MediaTagQuery" }, { $ref: "#/components/parameters/MediaKindQuery" }]
+      responses:
+        "200": { description: Media, headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/MediaList" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/media/{id}:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    get:
+      operationId: getDashboardMedia
+      description: >-
+        Returns metadata for one ready media object owned by the session's
+        account. The identifier is not authorization; an object of any other
+        account is not_found. There is no dashboard media upload or patch.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Ready private media metadata., headers: { ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Media" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteDashboardMedia
+      description: >-
+        Tombstones one media object owned by the session's account. An object a
+        desired or active grant still references cannot be deleted. The durable
+        account event carries the acting dashboard user as actor.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "204": { description: Tombstoned. Referenced desired or active grants cannot be deleted., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/media/{id}/content:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardMediaContent
+      description: >-
+        Streams the original rendition of one media object owned by the
+        session's account as first-party same-origin bytes. Authority is the
+        session cookie plus account ownership; the identifier and the object
+        path are never authorization, and no signed URL or object key is ever
+        published here. Range is accepted so that a plain video element can
+        seek. This is not a runtime content grant: it does not read a manifest
+        revision, it does not accept a runtime or release cookie, and it does
+        not accept any ScreenRig-* Authorization header. V1 accepts one byte
+        range only.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/Range" }]
+      responses:
+        "200":
+          description: Complete original rendition.
+          headers:
+            Accept-Ranges: { schema: { type: string, enum: [bytes] } }
+            Content-Length: { schema: { type: integer } }
+            Content-Type: { schema: { type: string } }
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            Content-Disposition: { schema: { type: string } }
+            X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
+        "206":
+          description: One standards-correct byte range.
+          headers:
+            Accept-Ranges: { schema: { type: string, enum: [bytes] } }
+            Content-Range: { schema: { type: string } }
+            Content-Length: { schema: { type: integer } }
+            Content-Type: { schema: { type: string } }
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "416": { description: "Unsatisfiable, multiple, or malformed range.", headers: { Content-Range: { schema: { type: string } }, Accept-Ranges: { schema: { type: string, enum: [bytes] } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/applications:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardApplications
+      description: Lists applications of the session's account. The interface calls them web apps; the contract name stays applications.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Applications, headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ApplicationList" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/applications/{id}:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    get:
+      operationId: getDashboardApplication
+      description: Returns one application owned by the session's account. The identifier is not authorization; an application of any other account is not_found. There is no dashboard application upload.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Application, headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Application" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteDashboardApplication
+      description: >-
+        Tombstones one application of the session's account together with its
+        releases. It returns application_in_use while a live manifest still
+        references any of those releases; the caller must first remove the
+        placement through the authoring surface. The durable account event
+        carries the acting dashboard user as actor.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "204": { description: Application and its releases tombstoned., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/applications/{id}/preview-launches:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: createDashboardApplicationPreviewLaunch
+      description: >-
+        Mints one single-use thirty-second launch ticket for the latest ready
+        release of an application the session's account owns, on the existing
+        exact release host. The ticket converts to the release-grant cookie on
+        that host only, so the preview is cross-origin by construction and web
+        application code can never read a dashboard cookie. Assign launch_url
+        to iframe.src and to nothing else. Authority here is owner authority:
+        the session's account owns the application. That is a deliberate second
+        authority source alongside exact-current-manifest authority for
+        screenrig.webapp-package/v1, and it is scoped to this operation. Do not
+        generalize it to media or to protected runtime content. There is no
+        parent player, so the browser SDK and the key-value bridge fail closed
+        and the preview is presentation-only. An application with no ready
+        release is resource_conflict.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "201": { description: Single-use 30-second exact-release-host preview launch., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ReleaseLaunch" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/events:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardEvents
+      description: >-
+        Lists durable account events for the session's account. Dashboard
+        mutations carry an actor naming the acting dashboard user. Events an
+        agent or the CLI produced carry no actor.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/AfterCursor" }]
+      responses:
+        "200": { description: Durable events, headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/EventList" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/events/stream:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: streamDashboardEvents
+      description: >-
+        Replayable account event stream for the session's account, used for the
+        live activity log and for screen presence changes. The query cursor
+        takes precedence over Last-Event-ID. Invalid, future, and pre-retention
+        cursors receive stream.resync_required at the current head and close.
+        Screenshot image bytes and media bytes never appear on this stream.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/AfterCursor" }, { $ref: "#/components/parameters/LastEventID" }]
+      responses:
+        "200": { description: "Replayable SSE stream. No ScreenRig-Credits-* headers.", headers: { Cache-Control: { schema: { type: string, enum: ["no-cache, no-store, no-transform"] } }, X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/playback:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardPlaybackAggregates
+      description: >-
+        Daily playback aggregates for the session's account. One row per
+        screen, media, and UTC day, newest days first. Identifiers filter the
+        session account's own rows and are never a cross-account lookup.
+      security: [{ dashboardSession: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/PlaybackScreenID" }
+        - { $ref: "#/components/parameters/PlaybackMediaID" }
+        - { $ref: "#/components/parameters/PlaybackDay" }
+      responses:
+        "200": { description: Daily playback aggregates for the session's account., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackAggregateList" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
 components:
   headers:
     ScreenRigCreditsRemaining:
@@ -1299,6 +1882,30 @@ components:
         session, screen, application release, placement, manifest revision,
         content-access generation, and allowed KV operations. Refresh by fetching
         the current manifest.
+    dashboardSession:
+      type: apiKey
+      in: cookie
+      name: __Host-screenrig-dashboard
+      description: >-
+        Server-managed host-only Secure HttpOnly SameSite=Strict Path=/ account
+        dashboard session cookie. It names a twenty-four-hour server-side
+        session row; logout deletes that row. It is the only credential the
+        /dashboard/v1 family accepts on an authenticated read or mutation, and
+        it grants no runtime, content, pairing, or release authority. Dashboard
+        routes accept no ScreenRig-* Authorization header, and no runtime,
+        device, pairing, browser-link, or release cookie is accepted here. The
+        dashboard is not a player: it holds no identity keypair, installed as a
+        progressive web application or not.
+    dashboardSetup:
+      type: apiKey
+      in: cookie
+      name: __Host-screenrig-dashboard-setup
+      description: >-
+        Short-lived host-only Secure HttpOnly SameSite=Strict Path=/ setup
+        cookie set by a successful link claim. It authorizes only first-passkey
+        registration and the development-mode session mint, and it carries no
+        read or delete authority over any signage resource. It is replaced by
+        the session cookie as soon as a session exists.
     releaseGrantCookie: { type: apiKey, in: cookie, name: __Host-screenrig-release, description: Exact-host release/screen/generation/grant cookie; never valid on runtime or account routes. }
     releaseLaunchTicket: { type: apiKey, in: query, name: ticket, description: Random single-use 30-second ticket consumed only on its exact release host. }
     operatorBearer: { type: http, scheme: bearer }
@@ -1436,9 +2043,22 @@ components:
       type: object
       additionalProperties: false
       required: [type, duration_ms]
+      description: >-
+        Page transition. type and duration_ms are both required; OpenAPI does not default
+        them. Swipe authoring examples use duration_ms 600; that value is not a schema default.
       properties:
-        type: { type: string, enum: [crossfade] }
+        type: { type: string, enum: [crossfade, swipe-left, swipe-right, swipe-up, swipe-down] }
         duration_ms: { type: integer, minimum: 0, maximum: 60000 }
+    PlacementEnter:
+      type: object
+      additionalProperties: false
+      required: [type]
+      description: >-
+        Optional object enter. Playlist write and the runtime manifest use this object as-is;
+        there is no snake_case rename inside it. Absent means paint at rest, full opacity.
+        No per-placement duration or delay; those are named constants in screenrig.canvas/v1.
+      properties:
+        type: { type: string, enum: [fade-up, fade-down, fade-left, fade-right, fade-in, zoom-in, zoom-out] }
     PlaylistAdvanceWrite:
       oneOf:
         - { $ref: "#/components/schemas/PlaylistDurationAdvance" }
@@ -1467,14 +2087,14 @@ components:
         - { $ref: "#/components/schemas/PlaylistImagePlacement" }
         - { $ref: "#/components/schemas/PlaylistVideoPlacement" }
         - { $ref: "#/components/schemas/PlaylistIframePlacement" }
-    PlaylistApplicationPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistApplicationContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, default: false } } }
-    PlaylistImagePlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistImageContentWrite" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] } } }
-    PlaylistVideoPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistVideoContentWrite" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] } } }
-    PlaylistIframePlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistIframeContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] } } }
+    PlaylistApplicationPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistApplicationContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, default: false }, enter: { $ref: "#/components/schemas/PlacementEnter" } } }
+    PlaylistImagePlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistImageContentWrite" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, enter: { $ref: "#/components/schemas/PlacementEnter" } } }
+    PlaylistVideoPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistVideoContentWrite" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, enter: { $ref: "#/components/schemas/PlacementEnter" } } }
+    PlaylistIframePlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistIframeContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, enter: { $ref: "#/components/schemas/PlacementEnter" } } }
     PlaylistApplicationPlacement: { allOf: [{ $ref: "#/components/schemas/PlaylistApplicationPlacementWrite" }] }
-    PlaylistImagePlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistImageContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] } } }
-    PlaylistVideoPlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistVideoContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] } } }
-    PlaylistIframePlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistIframeContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, enum: [false] } } }
+    PlaylistImagePlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistImageContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PlacementEnter" } } }
+    PlaylistVideoPlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistVideoContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PlacementEnter" } } }
+    PlaylistIframePlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistIframeContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PlacementEnter" } } }
     PlaylistApplicationContent: { type: object, additionalProperties: false, required: [type, release_id], properties: { type: { type: string, enum: [application] }, application_id: { type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id. }, release_id: { type: string } } }
     PlaylistMediaSelector:
       oneOf:
@@ -1691,7 +2311,20 @@ components:
       properties:
         capture_id: { $ref: "#/components/schemas/ScreenshotCaptureID" }
         reason: { type: string, enum: [expired] }
-    Event: { type: object, additionalProperties: true, required: [cursor, sequence, type, severity, message, at], properties: { cursor: { type: string }, sequence: { type: integer }, type: { type: string }, severity: { type: string }, request_id: { type: string }, operation_id: { type: string }, message: { type: string }, resource: { type: object, additionalProperties: true }, details: { type: object, additionalProperties: true }, at: { type: string } } }
+    Event: { type: object, additionalProperties: true, required: [cursor, sequence, type, severity, message, at], properties: { cursor: { type: string }, sequence: { type: integer }, type: { type: string }, severity: { type: string }, request_id: { type: string }, operation_id: { type: string }, message: { type: string }, actor: { $ref: "#/components/schemas/EventActor" }, resource: { type: object, additionalProperties: true }, details: { type: object, additionalProperties: true }, at: { type: string } } }
+    EventActor:
+      type: object
+      additionalProperties: false
+      required: [user_id, display_name]
+      description: >-
+        Dashboard user that caused this mutation. Optional and absent on every
+        event an agent, the CLI, a player, or a worker produced, so the field
+        distinguishes a dashboard mutation rather than labelling all traffic. It
+        is descriptive attribution only and is never authorization. display_name
+        is the name the user chose at registration and is not verified.
+      properties:
+        user_id: { type: string }
+        display_name: { type: string, minLength: 1, maxLength: 80 }
     EventList: { type: object, additionalProperties: false, required: [items, next_cursor], properties: { items: { type: array, items: { $ref: "#/components/schemas/Event" } }, next_cursor: { type: string } } }
     PlaybackAggregate:
       type: object
@@ -1876,8 +2509,9 @@ components:
       type: object
       additionalProperties: false
       required: [type, durationMs]
+      description: Authored page transition. The runtime mint passes type through; it does not rewrite swipe to crossfade.
       properties:
-        type: { type: string, enum: [crossfade] }
+        type: { type: string, enum: [crossfade, swipe-left, swipe-right, swipe-up, swipe-down] }
         durationMs: { type: integer }
     RuntimeAdvance:
       type: object
@@ -1904,6 +2538,7 @@ components:
         layer: { type: integer, minimum: 0, maximum: 1024 }
         contentFit: { type: string, enum: [fill] }
         controller: { type: boolean }
+        enter: { $ref: "#/components/schemas/PlacementEnter" }
         capabilityHandle: { type: string, minLength: 32, description: Opaque parent-only capability; never forward it into the uploaded iframe. }
         capabilityExpiresAt: { type: string, format: date-time, description: Five-minute expiry. Refresh the manifest before this time to obtain a replacement handle. }
     RuntimeImagePlacement:
@@ -1916,6 +2551,7 @@ components:
         rect: { $ref: "#/components/schemas/RuntimeRect" }
         layer: { type: integer, minimum: 0, maximum: 1024 }
         contentFit: { type: string, enum: [contain, cover, fill] }
+        enter: { $ref: "#/components/schemas/PlacementEnter" }
     RuntimeVideoPlacement:
       type: object
       additionalProperties: false
@@ -1926,6 +2562,7 @@ components:
         rect: { $ref: "#/components/schemas/RuntimeRect" }
         layer: { type: integer, minimum: 0, maximum: 1024 }
         contentFit: { type: string, enum: [contain, cover, fill] }
+        enter: { $ref: "#/components/schemas/PlacementEnter" }
     RuntimeIframePlacement:
       type: object
       additionalProperties: false
@@ -1936,6 +2573,7 @@ components:
         rect: { $ref: "#/components/schemas/RuntimeRect" }
         layer: { type: integer, minimum: 0, maximum: 1024 }
         contentFit: { type: string, enum: [fill] }
+        enter: { $ref: "#/components/schemas/PlacementEnter" }
     RuntimeContent:
       oneOf:
         - { $ref: "#/components/schemas/RuntimeApplicationContent" }
@@ -2055,6 +2693,154 @@ components:
     ApplicationEventContext: { type: object, additionalProperties: false, required: [placement_id, code], properties: { placement_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, code: { type: string, pattern: "^[A-Za-z0-9._-]{1,64}$" } } }
     RuntimeConditionReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info, warning, error] }, code: { type: string, pattern: "^[a-z0-9._-]{1,80}$", not: { enum: [manifest.activated, playback.video_started, application.event] } }, context: { type: object, additionalProperties: true } } }
     ReleaseLaunch: { type: object, additionalProperties: false, required: [launch_url, expires_at], properties: { launch_url: { type: string }, expires_at: { type: string } } }
+    DashboardDisplayName:
+      type: string
+      minLength: 1
+      maxLength: 80
+      description: >-
+        Name a dashboard user chose for itself. It exists so that a mutation can
+        be attributed on the event log. It is not verified, it is not an email
+        address, it is not unique within an account, and it is never
+        authorization. Leading and trailing whitespace is trimmed, control
+        characters are rejected, and recognizable ScreenRig credential material
+        is rejected with invalid_request and is not stored.
+    DashboardLink:
+      type: object
+      additionalProperties: false
+      required: [url, expires_at]
+      properties:
+        url:
+          type: string
+          description: >-
+            Absolute dashboard URL whose fragment carries the single-use token.
+            Treat the whole string as a credential: open it, do not log it, do
+            not print it, and do not store it. The server never sees the
+            fragment, so the claiming client strips it before its first network
+            call.
+        expires_at: { type: string, format: date-time, description: "Instant the unclaimed link stops being claimable, ten minutes after mint. This is DashboardLinkTTL, a separate clock from the handoff locator and from native pairing." }
+    DashboardLinkClaimRequest:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token: { type: string, pattern: "^[A-Za-z0-9_-]{43}$", description: "Single-use 256-bit token taken from the URL fragment, unpadded base64url. It is presented in the body exactly once and never in a query, path, or header." }
+    DashboardLinkClaim:
+      type: object
+      additionalProperties: false
+      required: [next, dev_auth]
+      description: >-
+        Result of one link claim. next is the only discriminator a client may
+        branch on, and dev_auth is the only server-mode signal it receives, so
+        no dashboard client needs a build-time flag, an environment check, or a
+        hostname test. The response carries no token, no cookie value, and no
+        provisioning material.
+      properties:
+        next: { type: string, enum: [ready, register_passkey, create_session], description: "ready is a no-op sign-in on an existing same-account session. register_passkey is production mode with no session. create_session is dashboard development-authentication mode." }
+        dev_auth: { type: boolean, description: "True when the server runs dashboard development authentication and the four WebAuthn ceremony routes therefore return passkeys_disabled. False in production, where POST /dashboard/v1/sessions returns forbidden." }
+    DashboardPasskeyRegistrationStart:
+      type: object
+      additionalProperties: false
+      description: Optional registration-start body. Send display_name with the setup cookie; omit the body entirely with a session cookie.
+      properties:
+        display_name: { $ref: "#/components/schemas/DashboardDisplayName" }
+    DashboardPasskeyRegistration:
+      type: object
+      additionalProperties: false
+      required: [ceremony_id, creation_options]
+      properties:
+        ceremony_id: { type: string, description: "Opaque handle for this ceremony. It is bound to the presenting cookie and is not a credential on its own." }
+        creation_options: { type: object, additionalProperties: true, description: "WebAuthn PublicKeyCredentialCreationOptions, passed verbatim to navigator.credentials.create. The relying party is the dashboard host, credentials are discoverable, user verification is required, and attestation is none." }
+    DashboardPasskeyRegistrationComplete:
+      type: object
+      additionalProperties: false
+      required: [ceremony_id, credential]
+      properties:
+        ceremony_id: { type: string }
+        credential: { type: object, additionalProperties: true, description: WebAuthn registration response serialized from the PublicKeyCredential the authenticator returned. }
+    DashboardPasskeyAssertion:
+      type: object
+      additionalProperties: false
+      required: [ceremony_id, request_options]
+      properties:
+        ceremony_id: { type: string }
+        request_options: { type: object, additionalProperties: true, description: "WebAuthn PublicKeyCredentialRequestOptions, passed verbatim to navigator.credentials.get. It publishes no allowCredentials list, so it is not a user or credential existence oracle." }
+    DashboardPasskeyAssertionComplete:
+      type: object
+      additionalProperties: false
+      required: [ceremony_id, credential]
+      properties:
+        ceremony_id: { type: string }
+        credential: { type: object, additionalProperties: true, description: WebAuthn assertion response serialized from the PublicKeyCredential the authenticator returned. }
+    DashboardSessionCreate:
+      type: object
+      additionalProperties: false
+      required: [display_name]
+      description: Development-authentication-only session mint body. It carries no credential and no proof of possession, which is why the route is forbidden outside development authentication.
+      properties:
+        display_name: { $ref: "#/components/schemas/DashboardDisplayName" }
+    DashboardSession:
+      type: object
+      additionalProperties: false
+      required: [user_id, account_id, display_name, dev_auth, expires_at]
+      description: >-
+        Current dashboard session. Every field is descriptive: authority is the
+        session cookie and the server-side row it names, never these
+        identifiers. All users of an account hold equal read and delete
+        authority, so this object publishes no role.
+      properties:
+        user_id: { type: string }
+        account_id: { type: string }
+        display_name: { $ref: "#/components/schemas/DashboardDisplayName" }
+        dev_auth: { type: boolean, description: True when the server runs dashboard development authentication. }
+        expires_at: { type: string, format: date-time, description: Instant the twenty-four-hour session row stops being accepted. Logout deletes the row before this time. }
+    DashboardUser:
+      type: object
+      additionalProperties: false
+      required: [user_id, display_name, credential_count, created_at]
+      properties:
+        user_id: { type: string }
+        display_name: { $ref: "#/components/schemas/DashboardDisplayName" }
+        credential_count: { type: integer, minimum: 0, description: "Number of stored passkeys. It is zero for a user created through development-authentication session mint, which stores no credential." }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time, description: Instant this user last presented a valid session. Absent until the first authenticated request after creation. }
+    DashboardUserList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/DashboardUser" } } } }
+    DashboardSummary:
+      type: object
+      additionalProperties: false
+      required: [screens, media, applications]
+      properties:
+        screens: { $ref: "#/components/schemas/DashboardScreenSummary" }
+        media: { $ref: "#/components/schemas/DashboardMediaSummary" }
+        applications: { $ref: "#/components/schemas/DashboardApplicationSummary" }
+    DashboardScreenSummary:
+      type: object
+      additionalProperties: false
+      required: [total, online, pairing_pending, active, archived]
+      description: >-
+        Screen counters for the session's account. total is pairing_pending plus
+        active and excludes archived, matching account screen_count. online is
+        derived from live paired runtime event streams exactly as Screen.online
+        is; it is not a stored boolean and not a player heartbeat.
+      properties:
+        total: { type: integer, minimum: 0 }
+        online: { type: integer, minimum: 0 }
+        pairing_pending: { type: integer, minimum: 0 }
+        active: { type: integer, minimum: 0 }
+        archived: { type: integer, minimum: 0 }
+    DashboardMediaSummary:
+      type: object
+      additionalProperties: false
+      required: [count, bytes]
+      description: Ready media counters for the session's account. bytes counts stored media bytes only; it is not the account used_bytes total, which also covers release trees and key/value entries.
+      properties:
+        count: { type: integer, minimum: 0 }
+        bytes: { type: integer, minimum: 0 }
+    DashboardApplicationSummary:
+      type: object
+      additionalProperties: false
+      required: [count]
+      properties:
+        count: { type: integer, minimum: 0 }
     ProblemField: { type: object, additionalProperties: false, required: [field, code, detail], properties: { field: { type: string }, code: { type: string }, detail: { type: string } } }
     NextAction: { type: object, additionalProperties: false, required: [command, reason], properties: { command: { type: string }, reason: { type: string } } }
     Problem:
@@ -2074,4 +2860,4 @@ components:
         errors: { type: array, items: { $ref: "#/components/schemas/ProblemField" } }
         next: { $ref: "#/components/schemas/NextAction" }
 x-problem-registry: ./problems.yaml
-x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_account_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, schema_incompatible, not_ready, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required]
+x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_account_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, schema_incompatible, not_ready, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, dashboard_link_invalid, dashboard_link_expired, dashboard_link_consumed, passkey_invalid, passkeys_disabled, application_in_use]

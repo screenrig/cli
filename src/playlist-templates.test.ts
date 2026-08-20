@@ -8,6 +8,8 @@ import {
   playlistTemplateCatalog,
   SHARED_LOGO_RECT,
   SLIDE_BACKGROUND,
+  SLIDE_DEFAULT_TRANSITION,
+  SLIDE_SWIPE_AUTHORING_DURATION_MS,
   SLIDE_TEMPLATES,
 } from "./playlist-templates.js";
 
@@ -74,11 +76,32 @@ test("the catalog lists the fifteen slide ids and points copy at compose", () =>
   assert.equal(catalog.canvas.width, 1920);
   assert.equal(catalog.canvas.height, 1080);
   assert.deepEqual(catalog.compose.wire_kinds, ["image", "video", "iframe", "application"]);
+  assert.deepEqual(catalog.transition, { type: "crossfade", duration_ms: 200 });
+  assert.deepEqual(catalog.transition, SLIDE_DEFAULT_TRANSITION);
+  assert.deepEqual(catalog.transition_types, [
+    "crossfade",
+    "swipe-left",
+    "swipe-right",
+    "swipe-up",
+    "swipe-down",
+  ]);
+  assert.equal(catalog.swipe_duration_ms, 600);
+  assert.equal(catalog.swipe_duration_ms, SLIDE_SWIPE_AUTHORING_DURATION_MS);
+  assert.deepEqual(catalog.enter_types, [
+    "fade-up",
+    "fade-down",
+    "fade-left",
+    "fade-right",
+    "fade-in",
+    "zoom-in",
+    "zoom-out",
+  ]);
   assert.match(catalog.compose.catalog_command, /compose catalog/);
   assert.match(catalog.compose.render_command, /compose render/);
   const formatted = formatTemplateCatalog(catalog);
   assert.match(formatted, /composed locally/);
   assert.match(formatted, /compose catalog/);
+  assert.match(formatted, /Default page transition is crossfade 200 ms with no placement enter/);
   assert.doesNotMatch(formatted, /title \(text, required/);
   assert.doesNotMatch(formatted, /emit native text/);
   const intro = catalog.templates.find((template) => template.id === "slide-intro");
@@ -277,6 +300,13 @@ test("expanded picture pages never retain template identity", () => {
 });
 
 test("omitted transition and advance take the slide defaults; supplied values replace them", () => {
+  const omitted = expandPlaylistPage({
+    id: "hero",
+    template: "slide-full-bleed",
+    slots: { picture: MEDIA },
+  }) as { transition: unknown; placements: Array<Record<string, unknown>> };
+  assert.deepEqual(omitted.transition, { type: "crossfade", duration_ms: 200 });
+  assert.ok(omitted.placements.every((placement) => !("enter" in placement)));
   const custom = expandPlaylistPage({
     id: "hero",
     template: "slide-full-bleed",
@@ -288,6 +318,44 @@ test("omitted transition and advance take the slide defaults; supplied values re
   assert.deepEqual(custom.transition, { type: "crossfade", duration_ms: 400 });
   assert.deepEqual(custom.advance, { mode: "duration", after_ms: 12000 });
   assert.deepEqual(custom.visibility, { enabled: true, windows: [{ days: ["mon"] }] });
+});
+
+test("a templated page forwards a supplied swipe transition and never invents enter", () => {
+  const expanded = expandPlaylistPage({
+    id: "hero",
+    template: "slide-full-bleed",
+    transition: { type: "swipe-left", duration_ms: 600 },
+    slots: { picture: MEDIA },
+  }) as { transition: unknown; placements: Array<Record<string, unknown>> };
+  assert.deepEqual(expanded.transition, { type: "swipe-left", duration_ms: 600 });
+  assert.ok(expanded.placements.every((placement) => !("enter" in placement)));
+});
+
+test("a full page with swipe and enter is forwarded unchanged", () => {
+  const full = {
+    id: "poster",
+    canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
+    transition: { type: "swipe-left", duration_ms: 600 },
+    advance: { mode: "duration", after_ms: 8000 },
+    placements: [
+      {
+        id: "hero",
+        content: MEDIA,
+        rect: { x: 0, y: 0, width: 1920, height: 1080 },
+        layer: 0,
+        content_fit: "contain",
+      },
+      {
+        id: "caption",
+        content: MEDIA,
+        rect: { x: 80, y: 860, width: 1760, height: 160 },
+        layer: 2,
+        content_fit: "contain",
+        enter: { type: "fade-up" },
+      },
+    ],
+  };
+  assert.equal(expandPlaylistPage(full), full);
 });
 
 test("a linear canvas.background is accepted on a picture template", () => {

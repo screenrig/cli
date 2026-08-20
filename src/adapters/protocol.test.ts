@@ -441,9 +441,50 @@ test("published problem codes include payment_required at 402", () => {
     "proof_invalid",
     "screen_archived",
     "screen_archive_required",
+    "dashboard_link_invalid",
+    "dashboard_link_expired",
+    "dashboard_link_consumed",
+    "passkey_invalid",
+    "passkeys_disabled",
+    "application_in_use",
   ]);
   assert.match(source, /payment_required/);
   assert.doesNotMatch(source, /stripe|x402/i);
+});
+
+test("playlist transition types include swipe and optional placement enter", () => {
+  const generated = readFileSync(GENERATED_CONTRACT, "utf8");
+  const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
+
+  const transition = interfaceBody(generated, "PlaylistTransition");
+  assert.deepEqual(quotedProperties(transition), ["duration_ms", "type"]);
+  assert.match(
+    transition,
+    /"type": "crossfade" \| "swipe-left" \| "swipe-right" \| "swipe-up" \| "swipe-down"/,
+  );
+
+  const runtimeTransition = interfaceBody(generated, "RuntimeTransition");
+  assert.match(
+    runtimeTransition,
+    /"type": "crossfade" \| "swipe-left" \| "swipe-right" \| "swipe-up" \| "swipe-down"/,
+  );
+
+  const enter = interfaceBody(generated, "PlacementEnter");
+  assert.deepEqual(quotedProperties(enter), ["type"]);
+  assert.match(
+    enter,
+    /"type": "fade-up" \| "fade-down" \| "fade-left" \| "fade-right" \| "fade-in" \| "zoom-in" \| "zoom-out"/,
+  );
+
+  const imageWrite = interfaceBody(generated, "PlaylistImagePlacementWrite");
+  assert.deepEqual(quotedProperties(imageWrite), ["content", "content_fit", "enter", "id", "layer", "rect"]);
+  assert.match(imageWrite, /"enter"\?: PlacementEnter/);
+
+  assert.match(openapi, /enum: \[crossfade, swipe-left, swipe-right, swipe-up, swipe-down\]/);
+  assert.match(openapi, /PlacementEnter:/);
+  assert.match(openapi, /enum: \[fade-up, fade-down, fade-left, fade-right, fade-in, zoom-in, zoom-out\]/);
+  assert.match(openapi, /there is no snake_case rename inside it/);
+  assert.doesNotMatch(openapi, /enter_type|object_enter_delay_ms|enter_delay_ms/);
 });
 
 test("playlist writes send a media selector and media_end, not a singular media_id or video_end", () => {

@@ -11,7 +11,26 @@ export const SLIDE_MUSTARD = "#F8B334FF";
 export const SLIDE_DIM = "#B8B3A9FF";
 export const SLIDE_FAINT = "#8C8880FF";
 export const SLIDE_FONT_FAMILY = "sans" as const;
+// Omitted templated transitions stay crossfade. Swipe is opt-in, never this default.
 export const SLIDE_DEFAULT_TRANSITION = { type: "crossfade" as const, duration_ms: 200 };
+/** Authoring duration when a swipe type is chosen. Not an OpenAPI default. */
+export const SLIDE_SWIPE_AUTHORING_DURATION_MS = 600;
+export const PLAYLIST_TRANSITION_TYPES = [
+  "crossfade",
+  "swipe-left",
+  "swipe-right",
+  "swipe-up",
+  "swipe-down",
+] as const;
+export const PLACEMENT_ENTER_TYPES = [
+  "fade-up",
+  "fade-down",
+  "fade-left",
+  "fade-right",
+  "fade-in",
+  "zoom-in",
+  "zoom-out",
+] as const;
 export const SLIDE_DEFAULT_ADVANCE = { mode: "duration" as const, after_ms: 8000 };
 export const SLIDE_PLATE_FILL = "#243040FF";
 export const SLIDE_PLATE_RADIUS = 24;
@@ -488,6 +507,9 @@ export interface TemplateCatalog {
     background: string;
   };
   transition: { type: "crossfade"; duration_ms: number };
+  transition_types: readonly typeof PLAYLIST_TRANSITION_TYPES[number][];
+  swipe_duration_ms: number;
+  enter_types: readonly typeof PLACEMENT_ENTER_TYPES[number][];
   advance: { mode: "duration"; after_ms: number };
   templates: TemplateCatalogEntry[];
 }
@@ -506,6 +528,9 @@ export function playlistTemplateCatalog(): TemplateCatalog {
       background: SLIDE_BACKGROUND,
     },
     transition: { ...SLIDE_DEFAULT_TRANSITION },
+    transition_types: [...PLAYLIST_TRANSITION_TYPES],
+    swipe_duration_ms: SLIDE_SWIPE_AUTHORING_DURATION_MS,
+    enter_types: [...PLACEMENT_ENTER_TYPES],
     advance: { ...SLIDE_DEFAULT_ADVANCE },
     templates: SLIDE_TEMPLATES.map((template) => ({
       id: template.id,
@@ -535,6 +560,7 @@ export function formatTemplateCatalog(catalog: TemplateCatalog): string {
     "Slide layouts with copy or chrome are composed locally, uploaded as image, then placed as one image.",
     `Wire kinds: ${catalog.compose.wire_kinds.join(", ")}.`,
     `Compose: ${catalog.compose.catalog_command}`,
+    `Default page transition is ${catalog.transition.type} ${catalog.transition.duration_ms} ms with no placement enter. Swipe and enter are optional and spare.`,
   ];
   for (const template of catalog.templates) {
     const slots = template.slots.map((slot) => formatCatalogSlot(slot)).join("; ");
