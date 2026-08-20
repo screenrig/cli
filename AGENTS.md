@@ -16,8 +16,12 @@ installation, players, backend services, the site, or production deployment.
   inputs.
 - `scripts/package-release.sh` defines deterministic `screenrig-cli.tgz`.
 - `.github/workflows/ci.yml` defines public, test, package, and secret gates.
-  This repository does not SSH the production host. Backend `main` is the only
-  production droplet ingest.
+  **Deploys are independent** (operating rule): this repository's `main`
+  Action publishes the `screenrig-cli.tgz` CI artifact only. No npm or
+  marketplace publish unless the user asks later. Do not pack siblings.
+  Do not dispatch backend. Do not copy deploy tokens between repos.
+  Coordinated multi-repo deploy is rare and only for a breaking contract
+  change. Current CI packages the archive and does not publish npm.
 
 ## Edit and generation rules
 

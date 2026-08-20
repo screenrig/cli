@@ -419,8 +419,12 @@ never a pass. Run it whenever the backend contract may have changed; a snapshot
 that passes `vendor:check` can still be superseded.
 
 CI publishes deterministic `screenrig-cli.tgz`. The plugin repository pins that
-artifact by CLI commit and SHA-256. This repository does not deploy ScreenRig.
-Backend `main` is the only production droplet ingest.
+artifact by CLI commit and SHA-256. **Deploys are independent** (operating
+rule): this repository's `main` Action publishes that CI artifact only. No
+npm or marketplace publish unless the user asks later. Do not pack siblings.
+Do not dispatch backend. Do not copy deploy tokens between repos.
+Coordinated multi-repo deploy is rare and only for a breaking contract
+change. This repository does not deploy ScreenRig.
 
 Source/package tests do not prove installed-plugin loading, live enrollment or
 pairing, public browser handoff, Player rendering, native hardware, or
