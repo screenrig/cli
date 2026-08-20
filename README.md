@@ -420,10 +420,7 @@ that passes `vendor:check` can still be superseded.
 
 CI publishes deterministic `screenrig-cli.tgz`. The plugin repository pins that
 artifact by CLI commit and SHA-256. This repository does not deploy ScreenRig.
-Backend assemble is the only production droplet ingest. While backend
-component pinning is off (the default), assemble selects the latest successful
-consumer `ci.yml` on `main`. Backend `components.lock.json` is the pin-on
-input.
+Backend `main` is the only production droplet ingest.
 
 Source/package tests do not prove installed-plugin loading, live enrollment or
 pairing, public browser handoff, Player rendering, native hardware, or

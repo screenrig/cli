@@ -47,19 +47,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  deploy:
-    needs: verify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Dispatch production assemble
-        env:
-          GH_TOKEN: ${{ secrets.SCREENRIG_DEPLOY_DISPATCH_TOKEN }}
-        run: |
-          test -n "${GH_TOKEN}"
-          gh workflow run deploy-test.yml --repo screenrig/backend --ref main
-
   secrets:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
