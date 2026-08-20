@@ -209,6 +209,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   assert.deepEqual(quotedProperties(interfaceBody(source, "BrowserLinkClaimScreen")), ["id", "public_id", "public_url", "state"]);
   const screen = interfaceBody(source, "Screen");
   assert.deepEqual(quotedProperties(screen), [
+    "comments",
     "content_access_generation",
     "created_at",
     "id",
@@ -225,6 +226,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "timezone",
     "updated_at",
   ]);
+  assert.match(screen, /"comments"\?: Record<string, unknown>/);
   assert.match(screen, /"state": "pairing_pending" \| "active" \| "archived"/);
   assert.match(openapi, /\/api\/v1\/screens\/\{id\}\/archive:/);
   assert.match(openapi, /\/api\/v1\/screens\/\{id\}\/unarchive:/);
@@ -675,7 +677,7 @@ test("feedback contract is account-scoped, immutable, idempotent, and closed to 
 test("the feedback command pattern rejects every shape an argument value takes", () => {
   // Mirrors FeedbackContext.command in the vendored contract exactly.
   const pattern = /^[a-z][a-z0-9-]{0,31}( [a-z][a-z0-9-]{0,31}){0,3}$/;
-  for (const accepted of ["doctor", "media upload", "screen pair", "kv set", "screen rotate-public-id"]) {
+  for (const accepted of ["doctor", "media upload", "screen pair", "kv set", "comment set", "screen rotate-public-id"]) {
     assert.ok(pattern.test(accepted), `${accepted} must be accepted`);
   }
   for (const rejected of [
@@ -693,6 +695,61 @@ test("the feedback command pattern rejects every shape an argument value takes",
   ]) {
     assert.ok(!pattern.test(rejected), `${rejected} must be rejected`);
   }
+});
+
+test("opaque agent comments are optional on GET resources, dedicated comment routes write them, and writes cannot", () => {
+  const generated = readFileSync(GENERATED_CONTRACT, "utf8");
+  const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
+  const adapter = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../src/adapters/protocol.ts"),
+    "utf8",
+  );
+  const commands = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../src/commands.ts"),
+    "utf8",
+  );
+
+  assert.match(interfaceBody(generated, "Screen"), /"comments"\?: Record<string, unknown>/);
+  assert.match(interfaceBody(generated, "Playlist"), /"comments"\?: Record<string, unknown>/);
+  assert.match(interfaceBody(generated, "PlaylistPage"), /"comments"\?: Record<string, unknown>/);
+  assert.doesNotMatch(interfaceBody(generated, "ScreenPatch"), /comments/);
+  assert.doesNotMatch(interfaceBody(generated, "PlaylistWrite"), /comments/);
+  assert.doesNotMatch(interfaceBody(generated, "PlaylistPageWrite"), /comments/);
+  assert.doesNotMatch(interfaceBody(generated, "RuntimeManifest"), /comments/);
+  assert.doesNotMatch(interfaceBody(generated, "RuntimePage"), /comments/);
+
+  const comments = interfaceBody(generated, "Comments");
+  assert.deepEqual(quotedProperties(comments), ["comments"]);
+  assert.match(comments, /"comments": Record<string, unknown> \| null/);
+  const write = interfaceBody(generated, "CommentsWrite");
+  assert.deepEqual(quotedProperties(write), ["comments"]);
+  assert.match(write, /"comments": Record<string, unknown>/);
+  assert.doesNotMatch(write, /"comments"\?:/);
+
+  assert.match(adapter, /comments\?: Record<string, unknown>/);
+  assert.doesNotMatch(interfaceBody(adapter, "ScreenPatch"), /comments/);
+
+  assert.match(openapi, /\/api\/v1\/comment\/screen\/\{id\}:/);
+  assert.match(openapi, /\/api\/v1\/comment\/playlist\/\{id\}:/);
+  assert.match(openapi, /\/api\/v1\/comment\/playlist\/\{id\}\/page\/\{page_id\}:/);
+  assert.match(openapi, /Never reads or uses it|ScreenRig never reads or uses it/);
+  assert.match(openapi, /Not on the runtime manifest and never authorization/);
+  assert.match(openapi, /Last-write-wins on the comments field only/);
+  const screenComments = openapi.slice(
+    openapi.indexOf("/api/v1/comment/screen/{id}:"),
+    openapi.indexOf("/api/v1/comment/playlist/{id}:"),
+  );
+  assert.match(screenComments, /parameters: \[\{ \$ref: "#\/components\/parameters\/IdempotencyKey" \}\]/);
+  assert.doesNotMatch(screenComments, /IfMatch/);
+
+  assert.match(commands, /comment show screen <id>/);
+  assert.match(commands, /comment show playlist <id> \[--page PAGE_ID\]/);
+  assert.match(commands, /comment set screen <id> \(--json-value JSON \| --file FILE\)/);
+  assert.match(commands, /comment set playlist <id> \[--page PAGE_ID\] \(--json-value JSON \| --file FILE\)/);
+  assert.match(commands, /comment delete screen <id>/);
+  assert.match(commands, /comment delete playlist <id> \[--page PAGE_ID\]/);
+  assert.doesNotMatch(commands, /comment\/screen\/:id/);
+  assert.doesNotMatch(commands, /--value-base64.*comment/);
 });
 
 test("control-plane KV adapter follows the authoritative binary-safe OpenAPI schema", () => {

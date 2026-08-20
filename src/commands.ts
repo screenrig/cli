@@ -59,6 +59,7 @@ import { FetchTransport } from "./transport/http.js";
 import type { Transport } from "./transport/types.js";
 import { parseSse } from "./sse.js";
 import { kvWriteFromArgs } from "./kv-write.js";
+import { commentsWriteFromArgs } from "./comments-write.js";
 import { quotedRevision } from "./if-match.js";
 import { lowInformationFilenameWarning } from "./media-filename.js";
 import {
@@ -153,6 +154,12 @@ Commands:
   kv set --application-id ID <key> --value-base64 BASE64 --content-type TYPE [--if-match REVISION]
   kv delete --application-id ID <key> --if-match REVISION
   kv list --application-id ID
+  comment show screen <id>
+  comment show playlist <id> [--page PAGE_ID]
+  comment set screen <id> (--json-value JSON | --file FILE)
+  comment set playlist <id> [--page PAGE_ID] (--json-value JSON | --file FILE)
+  comment delete screen <id>
+  comment delete playlist <id> [--page PAGE_ID]
   operations get <id>
   operations wait <id> [--timeout MS] [--poll-ms MS]
   operations cancel <id>
@@ -397,6 +404,9 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
   if (group === "kv") {
     return kvCommand(args, runtime, resolved, action);
   }
+  if (group === "comment") {
+    return commentCommand(args, runtime, resolved, action);
+  }
   if (group === "operations" && action === "get") {
     return operationsGet(args, runtime, resolved);
   }
@@ -543,6 +553,7 @@ function isAuthenticatedCommand(group: string, action: string | undefined): bool
     screen: new Set(["pair", "provision", "update", "list", "show", "assign", "set-timezone", "archive", "unarchive", "delete", "rotate-public-id", "toast", "screenshot"]),
     browser: new Set(["setup"]),
     kv: new Set(["get", "set", "delete", "list"]),
+    comment: new Set(["show", "set", "delete"]),
     operations: new Set(["get", "wait", "cancel"]),
     events: new Set(["list", "follow"]),
     playback: new Set(["list"]),
@@ -1128,6 +1139,7 @@ const TOAST_DURATION_MIN = 2000;
 const TOAST_DURATION_MAX = 60000;
 
 const SCREEN_ID_PATTERN = /^scr_[A-Za-z0-9_-]+$/;
+const PLAYLIST_PAGE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const SCREENSHOT_DEFAULT_WAIT_MS = 35_000;
 const SCREENSHOT_DEFAULT_POLL_MS = 500;
 
@@ -1950,6 +1962,84 @@ async function kvCommand(
     return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted ${key}` };
   }
   throw usageError("Unknown kv command.");
+}
+
+function commentPath(target: "screen" | "playlist", id: string, pageId: string | undefined): string {
+  if (target === "screen") {
+    return `/api/v1/comment/screen/${encodeURIComponent(id)}`;
+  }
+  if (pageId) {
+    return `/api/v1/comment/playlist/${encodeURIComponent(id)}/page/${encodeURIComponent(pageId)}`;
+  }
+  return `/api/v1/comment/playlist/${encodeURIComponent(id)}`;
+}
+
+async function commentCommand(
+  args: ParsedArgs,
+  runtime: CliRuntime,
+  resolved: Awaited<ReturnType<typeof resolveConfig>>,
+  action: string | undefined,
+): Promise<CommandResult> {
+  if (action !== "show" && action !== "set" && action !== "delete") {
+    throw usageError("Unknown comment command.");
+  }
+  const target = args.positionals[2];
+  const id = args.positionals[3];
+  if (target !== "screen" && target !== "playlist") {
+    throw usageError("comment commands require screen <id> or playlist <id>.");
+  }
+  if (!id || (target === "screen" && !isScreenId(id))) {
+    throw usageError(`comment ${action} ${target} requires <id>.`);
+  }
+  if (args.positionals.length > 4) {
+    throw usageError(`comment ${action} ${target} does not accept extra arguments.`);
+  }
+  if (Object.hasOwn(args.flags, "if-match")) {
+    throw usageError("comment commands do not take --if-match; last write wins and does not bump revision.");
+  }
+  requireFlagValue(args, "page", "poster");
+  const pageId = flagString(args.flags, "page");
+  if (target === "screen" && pageId !== undefined) {
+    throw usageError("comment screen commands do not take --page; use comment playlist <id> --page PAGE_ID.");
+  }
+  if (pageId !== undefined && !PLAYLIST_PAGE_ID_PATTERN.test(pageId)) {
+    throw usageError("--page must be a playlist page id: a letter, then up to 63 letters, digits, underscores, or hyphens.");
+  }
+  const pathName = commentPath(target, id, pageId);
+  if (action === "show") {
+    return simpleGet(args, runtime, resolved, pathName, "Comments");
+  }
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+  if (action === "set") {
+    const body = await commentsWriteFromArgs(args, runtime.cwd());
+    const response = await client.call({
+      method: "PUT",
+      path: pathName,
+      idempotent: true,
+      body,
+    });
+    return {
+      envelope: jsonBody(response, client.requestId),
+      exitCode: ExitCode.Success,
+      human: humanLines("Comments set", [
+        [target, id],
+        ["page", pageId],
+      ]),
+    };
+  }
+  const response = await client.call({
+    method: "DELETE",
+    path: pathName,
+    idempotent: true,
+  });
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: pageId
+      ? `Deleted comments on playlist ${id} page ${pageId}`
+      : `Deleted comments on ${target} ${id}`,
+  };
 }
 
 async function operationsGet(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>): Promise<CommandResult> {

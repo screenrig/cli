@@ -139,6 +139,26 @@ installation, players, backend services, the site, or production deployment.
   recognizable ScreenRig credential material and other control characters;
   render its problem so the operator can rewrite and resend.
 
+## Comments
+
+- `comment show|set|delete` bind dedicated `/api/v1/comment/...` routes on a
+  screen, a playlist, or one playlist page (`--page`). USAGE is word commands
+  (`comment show screen <id>`), not the HTTP path.
+- Comments are the agent's own JSON object. Compact UTF-8 of that object is at
+  most 1024 bytes. The value itself must be an object; arrays and scalars are
+  rejected. ScreenRig does not read or use them. They are not authorization
+  and are not on the runtime manifest. Last-write-wins; no `--if-match`; no
+  revision bump.
+- `comment set` takes exactly one of `--json-value` or `--file`. Both send the
+  object as `{ "comments": { ... } }`. Do not add `--value-base64`.
+- Unset GET is `{ "comments": null }`. DELETE is 204, unsets, and is
+  idempotent. Writes carry `Idempotency-Key`.
+- Optional `comments` on `screen show` / `playlist show` (and lists) is passed
+  through when the server sends it. Do not strip it. `ScreenPatch` and
+  playlist writes cannot set it.
+- This surface is **source-ready**. It is not in the locked plugin bundle. Do
+  not claim marketplace or deployed.
+
 ## Archive
 
 - `screen archive <id> --if-match REVISION` binds

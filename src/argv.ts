@@ -67,6 +67,7 @@ const VALUE_FLAGS = new Set([
   "tag",
   "day",
   "state",
+  "page",
 ]);
 
 export function parseArgv(argv: string[]): ParsedArgs {

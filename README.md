@@ -91,6 +91,13 @@ pages use `screenrig.canvas/v1`; protected content and
 screenshot <id>` requests one still WebP of an active screen, waits until it
 is ready, and writes a file. It does not print image bytes.
 
+`comment show`, `comment set`, and `comment delete` store an opaque JSON
+object on a screen, a playlist, or one playlist page. Compact UTF-8 of that
+object is at most 1 KiB. ScreenRig does not read or use it, does not send it
+to players, and does not treat it as authorization. Set takes `--json-value`
+or `--file`. Last write wins; there is no `--if-match`. This command is
+source-ready. It is not a marketplace or deployed claim.
+
 `playback list` returns daily playback aggregates for this account, newest
 days first. Filter with `--screen-id`, `--media-id`, and `--day YYYY-MM-DD`.
 Those identifiers select the caller's own rows and are never a cross-account

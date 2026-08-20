@@ -2169,6 +2169,155 @@ test("control-plane KV writes use binary-safe OpenAPI payloads and idempotency",
   }
 });
 
+test("comment show, set, and delete bind word commands to /api/v1/comment routes", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("comment-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const commentsFile = path.join(configDir, "comments.json");
+  await writeFile(commentsFile, '{"slot":"hero"}');
+  const playlistFile = path.join(configDir, "playlist.json");
+  await writeFile(playlistFile, JSON.stringify({
+    name: "Lobby",
+    pages: [{
+      id: "poster",
+      canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
+      transition: { type: "crossfade", duration_ms: 200 },
+      advance: { mode: "duration", after_ms: 8000 },
+      placements: [{
+        id: "hero",
+        content: { type: "iframe", src: "https://example.com/", title: "Lobby" },
+        rect: { x: 0, y: 0, width: 1920, height: 1080 },
+        layer: 0,
+        content_fit: "fill",
+      }],
+    }],
+  }));
+  try {
+    const paired = await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
+    assert.equal(paired.code, ExitCode.Success, paired.stdout);
+    const screenId = "scr_PAIRINGAAAAAAAAAAAAAAAA";
+    const created = await withRuntime(["--json", "playlist", "create", playlistFile], transport, { fs: fsLike, cwd: () => configDir });
+    assert.equal(created.code, ExitCode.Success, created.stdout);
+    const playlistId = "pl_AAAAAAAAAAAAAAAAAAAAAAAA";
+
+    const unset = await withRuntime(["--json", "comment", "show", "screen", screenId], transport, { fs: fsLike });
+    assert.equal(unset.code, ExitCode.Success, unset.stdout);
+    assert.deepEqual(JSON.parse(unset.stdout).data, { comments: null });
+    assert.equal(transport.calls.at(-1)?.path, `/api/v1/comment/screen/${screenId}`);
+    assert.equal(transport.calls.at(-1)?.method, "GET");
+
+    const setScreen = await withRuntime(
+      ["--json", "comment", "set", "screen", screenId, "--json-value", '{"note":"lobby"}'],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(setScreen.code, ExitCode.Success, setScreen.stdout);
+    const setCall = transport.calls.at(-1);
+    assert.equal(setCall?.method, "PUT");
+    assert.equal(setCall?.path, `/api/v1/comment/screen/${screenId}`);
+    assert.ok(setCall?.headers?.["idempotency-key"], "comment set must carry Idempotency-Key");
+    assert.equal(setCall?.headers?.["if-match"], undefined);
+    assert.deepEqual(setCall?.body, { comments: { note: "lobby" } });
+    assert.deepEqual(JSON.parse(setScreen.stdout).data, { comments: { note: "lobby" } });
+
+    const shownScreen = await withRuntime(["--json", "screen", "show", screenId], transport, { fs: fsLike });
+    assert.equal(shownScreen.code, ExitCode.Success, shownScreen.stdout);
+    assert.deepEqual(JSON.parse(shownScreen.stdout).data.comments, { note: "lobby" });
+    const revisionAfterComments = JSON.parse(shownScreen.stdout).data.revision;
+
+    const shownComments = await withRuntime(["--json", "comment", "show", "screen", screenId], transport, { fs: fsLike });
+    assert.deepEqual(JSON.parse(shownComments.stdout).data, { comments: { note: "lobby" } });
+
+    const setPlaylist = await withRuntime(
+      ["--json", "comment", "set", "playlist", playlistId, "--file", "comments.json"],
+      transport,
+      { fs: fsLike, cwd: () => configDir },
+    );
+    assert.equal(setPlaylist.code, ExitCode.Success, setPlaylist.stdout);
+    assert.equal(transport.calls.at(-1)?.path, `/api/v1/comment/playlist/${playlistId}`);
+    assert.deepEqual(transport.calls.at(-1)?.body, { comments: { slot: "hero" } });
+
+    const setPage = await withRuntime(
+      ["--json", "comment", "set", "playlist", playlistId, "--page", "poster", "--json-value", '{"why":"hero"}'],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(setPage.code, ExitCode.Success, setPage.stdout);
+    assert.equal(transport.calls.at(-1)?.path, `/api/v1/comment/playlist/${playlistId}/page/poster`);
+    assert.deepEqual(JSON.parse(setPage.stdout).data, { comments: { why: "hero" } });
+
+    const shownPlaylist = await withRuntime(["--json", "playlist", "show", playlistId], transport, { fs: fsLike });
+    assert.equal(shownPlaylist.code, ExitCode.Success, shownPlaylist.stdout);
+    const playlistBody = JSON.parse(shownPlaylist.stdout).data as {
+      comments?: unknown;
+      pages?: Array<{ comments?: unknown }>;
+      revision?: number;
+    };
+    assert.deepEqual(playlistBody.comments, { slot: "hero" });
+    assert.deepEqual(playlistBody.pages?.[0]?.comments, { why: "hero" });
+    assert.equal(playlistBody.revision, 1);
+
+    const deleted = await withRuntime(["--json", "comment", "delete", "screen", screenId], transport, { fs: fsLike });
+    assert.equal(deleted.code, ExitCode.Success, deleted.stdout);
+    assert.equal(transport.calls.at(-1)?.method, "DELETE");
+    assert.ok(transport.calls.at(-1)?.headers?.["idempotency-key"], "comment delete must carry Idempotency-Key");
+    const afterDelete = await withRuntime(["--json", "comment", "show", "screen", screenId], transport, { fs: fsLike });
+    assert.deepEqual(JSON.parse(afterDelete.stdout).data, { comments: null });
+    const screenAfterDelete = await withRuntime(["--json", "screen", "show", screenId], transport, { fs: fsLike });
+    assert.equal(JSON.parse(screenAfterDelete.stdout).data.comments, undefined);
+    assert.equal(JSON.parse(screenAfterDelete.stdout).data.revision, revisionAfterComments);
+
+    const pageDelete = await withRuntime(
+      ["--json", "comment", "delete", "playlist", playlistId, "--page", "poster"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(pageDelete.code, ExitCode.Success, pageDelete.stdout);
+    assert.equal(transport.calls.at(-1)?.path, `/api/v1/comment/playlist/${playlistId}/page/poster`);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("comment set rejects non-objects, oversize payloads, and last-write-wins flags before calling the server", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("comment-usage-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const commentCalls = () => transport.calls.filter((call) => String(call.path).startsWith("/api/v1/comment/"));
+  try {
+    await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
+    const cases: Array<[string[], RegExp]> = [
+      [["comment", "set", "screen"], /requires <id>/],
+      [["comment", "show", "device", "scr_PAIRINGAAAAAAAAAAAAAAAA"], /screen <id> or playlist <id>/],
+      [["comment", "set", "screen", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--json-value", "[]"], /JSON object/],
+      [["comment", "set", "screen", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--json-value", '{"note":"x"}', "--file", "x.json"], /exactly one of --json-value or --file/],
+      [["comment", "set", "screen", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--value-base64", "e30="], /--json-value or --file/],
+      [["comment", "set", "screen", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--json-value", '{"note":"x"}', "--if-match", "1"], /do not take --if-match/],
+      [["comment", "set", "screen", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--page", "poster", "--json-value", '{"note":"x"}'], /do not take --page/],
+      [["comment", "show", "playlist", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--page", "1poster"], /playlist page id/],
+      [["comment", "set", "screen", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--json-value", `{"x":"${"a".repeat(1017)}"}`], /1024 bytes/],
+    ];
+    for (const [argv, detail] of cases) {
+      const result = await withRuntime(["--json", ...argv], transport, { fs: fsLike });
+      assert.equal(result.code, ExitCode.Usage, result.stdout);
+      assert.match(JSON.parse(result.stdout).error.detail as string, detail);
+    }
+    assert.equal(commentCalls().length, 0, "invalid comment commands must not reach the server");
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
 test("screen toast posts the closed write body and does not echo the text", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("toast-");

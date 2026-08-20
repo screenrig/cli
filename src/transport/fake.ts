@@ -414,6 +414,108 @@ export function memoryBackend(): FakeTransport {
     return { status: 204, headers: {}, body: undefined };
   });
 
+  const notFound = (detail: string): TransportResponse => ({
+    status: 404,
+    headers: { "content-type": "application/problem+json" },
+    body: {
+      type: "https://screenrig.ai/problems/not-found",
+      title: "Not found",
+      status: 404,
+      detail,
+      code: "not_found",
+    },
+  });
+  const invalidComments = (): TransportResponse => ({
+    status: 400,
+    headers: { "content-type": "application/problem+json" },
+    body: {
+      type: "https://screenrig.ai/problems/invalid-request",
+      title: "Invalid request",
+      status: 400,
+      detail: "comments must be a JSON object",
+      code: "invalid_request",
+    },
+  });
+  const commentsFromBody = (body: unknown): Record<string, unknown> | undefined => {
+    if (!body || typeof body !== "object" || Array.isArray(body)) return undefined;
+    const comments = (body as { comments?: unknown }).comments;
+    if (!comments || typeof comments !== "object" || Array.isArray(comments)) return undefined;
+    const compact = JSON.stringify(comments);
+    if (Buffer.byteLength(compact, "utf8") > 1024) return undefined;
+    return comments as Record<string, unknown>;
+  };
+  const playlistPage = (playlist: Record<string, unknown> | undefined, pageId: string): Record<string, unknown> | undefined => {
+    const pages = playlist?.pages;
+    if (!Array.isArray(pages)) return undefined;
+    return pages.find((page): page is Record<string, unknown> => (
+      Boolean(page) && typeof page === "object" && !Array.isArray(page) && page.id === pageId
+    ));
+  };
+
+  transport.on("GET", /^\/api\/v1\/comment\/playlist\/[^/]+\/page\/[^/]+$/, (req) => {
+    const parts = req.path.split("/");
+    const playlist = playlists.get(decodeURIComponent(parts[5] ?? ""));
+    const page = playlistPage(playlist, decodeURIComponent(parts[7] ?? ""));
+    if (!playlist || !page) return notFound("Playlist page not found");
+    return { status: 200, headers: {}, body: { comments: page.comments ?? null } };
+  });
+  transport.on("PUT", /^\/api\/v1\/comment\/playlist\/[^/]+\/page\/[^/]+$/, (req) => {
+    const parts = req.path.split("/");
+    const playlist = playlists.get(decodeURIComponent(parts[5] ?? ""));
+    const page = playlistPage(playlist, decodeURIComponent(parts[7] ?? ""));
+    const comments = commentsFromBody(req.body);
+    if (!playlist || !page) return notFound("Playlist page not found");
+    if (!comments) return invalidComments();
+    page.comments = comments;
+    return { status: 200, headers: {}, body: { comments } };
+  });
+  transport.on("DELETE", /^\/api\/v1\/comment\/playlist\/[^/]+\/page\/[^/]+$/, (req) => {
+    const parts = req.path.split("/");
+    const playlist = playlists.get(decodeURIComponent(parts[5] ?? ""));
+    const page = playlistPage(playlist, decodeURIComponent(parts[7] ?? ""));
+    if (!playlist || !page) return notFound("Playlist page not found");
+    delete page.comments;
+    return { status: 204, headers: {}, body: undefined };
+  });
+  transport.on("GET", /^\/api\/v1\/comment\/playlist\/[^/]+$/, (req) => {
+    const playlist = playlists.get(decodeURIComponent(req.path.split("/").pop() ?? ""));
+    if (!playlist) return notFound("Playlist not found");
+    return { status: 200, headers: {}, body: { comments: playlist.comments ?? null } };
+  });
+  transport.on("PUT", /^\/api\/v1\/comment\/playlist\/[^/]+$/, (req) => {
+    const playlist = playlists.get(decodeURIComponent(req.path.split("/").pop() ?? ""));
+    const comments = commentsFromBody(req.body);
+    if (!playlist) return notFound("Playlist not found");
+    if (!comments) return invalidComments();
+    playlist.comments = comments;
+    return { status: 200, headers: {}, body: { comments } };
+  });
+  transport.on("DELETE", /^\/api\/v1\/comment\/playlist\/[^/]+$/, (req) => {
+    const playlist = playlists.get(decodeURIComponent(req.path.split("/").pop() ?? ""));
+    if (!playlist) return notFound("Playlist not found");
+    delete playlist.comments;
+    return { status: 204, headers: {}, body: undefined };
+  });
+  transport.on("GET", /^\/api\/v1\/comment\/screen\/[^/]+$/, (req) => {
+    const screen = screens.get(decodeURIComponent(req.path.split("/").pop() ?? ""));
+    if (!screen) return notFound("Screen not found");
+    return { status: 200, headers: {}, body: { comments: screen.comments ?? null } };
+  });
+  transport.on("PUT", /^\/api\/v1\/comment\/screen\/[^/]+$/, (req) => {
+    const screen = screens.get(decodeURIComponent(req.path.split("/").pop() ?? ""));
+    const comments = commentsFromBody(req.body);
+    if (!screen) return notFound("Screen not found");
+    if (!comments) return invalidComments();
+    screen.comments = comments;
+    return { status: 200, headers: {}, body: { comments } };
+  });
+  transport.on("DELETE", /^\/api\/v1\/comment\/screen\/[^/]+$/, (req) => {
+    const screen = screens.get(decodeURIComponent(req.path.split("/").pop() ?? ""));
+    if (!screen) return notFound("Screen not found");
+    delete screen.comments;
+    return { status: 204, headers: {}, body: undefined };
+  });
+
   transport.on("GET", "/api/v1/screens", (req) => {
     const archivedOnly = req.query?.state === "archived";
     const items = [...screens.values()].filter((screen) => (

@@ -190,6 +190,11 @@ export interface Screen {
    */
   online: boolean;
   playlist_id?: string;
+  /**
+   * Opaque agent JSON object. Absent when unset. ScreenRig never reads or uses
+   * it. Not on the runtime manifest and never authorization.
+   */
+  comments?: Record<string, unknown>;
   public_id: string;
   revision: number;
   state: "pairing_pending" | "active" | "archived";
@@ -205,12 +210,22 @@ export interface Screen {
  * The screen patch body. Every member is optional and the server requires at
  * least one, which is why each command builds only the members it was asked
  * for rather than sending undefined placeholders. Observation, online,
- * last_online_at, and last_ip are not patchable fields.
+ * last_online_at, last_ip, and comments are not patchable fields.
  */
 export interface ScreenPatch {
   name?: string;
   playlist_id?: string;
   timezone?: string;
+}
+
+/** PUT /api/v1/comment/... body. Compact UTF-8 JSON of comments must be ≤ 1024 bytes. */
+export interface CommentsWrite {
+  comments: Record<string, unknown>;
+}
+
+/** GET/PUT /api/v1/comment/... body. Null when the target exists and comments are unset. */
+export interface Comments {
+  comments: Record<string, unknown> | null;
 }
 
 export interface PairScreen {

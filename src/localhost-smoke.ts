@@ -177,6 +177,31 @@ async function main(): Promise<void> {
     await run("playlist", "list");
     await run("playlist", "show", "pl_AAAAAAAAAAAAAAAAAAAAAAAA");
     await run("playlist", "update", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", playlist, "--if-match", "1");
+    const commentsSet = await run(
+      "comment",
+      "set",
+      "screen",
+      "scr_PAIRINGAAAAAAAAAAAAAAAA",
+      "--json-value",
+      "{\"note\":\"lobby\"}",
+    );
+    assert.deepEqual((commentsSet.data as { comments?: unknown }).comments, { note: "lobby" });
+    const commentsShown = await run("comment", "show", "screen", "scr_PAIRINGAAAAAAAAAAAAAAAA");
+    assert.deepEqual((commentsShown.data as { comments?: unknown }).comments, { note: "lobby" });
+    await run(
+      "comment",
+      "set",
+      "playlist",
+      "pl_AAAAAAAAAAAAAAAAAAAAAAAA",
+      "--page",
+      "board",
+      "--json-value",
+      "{\"slot\":\"hero\"}",
+    );
+    await run("comment", "show", "playlist", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--page", "board");
+    await run("comment", "delete", "screen", "scr_PAIRINGAAAAAAAAAAAAAAAA");
+    const commentsCleared = await run("comment", "show", "screen", "scr_PAIRINGAAAAAAAAAAAAAAAA");
+    assert.equal((commentsCleared.data as { comments?: unknown }).comments, null);
     await run("screen", "list");
     await run("screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA");
     // The playlist schedules a page, and a schedule is a civil rule, so the
