@@ -91,6 +91,14 @@ def check_public_tree(errors: list[str]) -> None:
         ):
             if fact not in workflow:
                 errors.append(f"public CI is missing required gate: {fact}")
+    release_path = ROOT / "scripts" / "package-release.sh"
+    if not release_path.is_file():
+        errors.append("missing public packaging file: scripts/package-release.sh")
+    else:
+        release = release_path.read_text(encoding="utf-8")
+        for fact in ("scripts/vendor-runtime-dependencies.mjs", "scripts/check-release-artifact.mjs"):
+            if fact not in release:
+                errors.append(f"CLI release packaging is missing required gate: {fact}")
 
     prohibited_names = {
         "SPLIT_" + "HANDOFF.md",

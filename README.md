@@ -526,6 +526,13 @@ Do not dispatch backend. Do not copy deploy tokens between repos.
 Coordinated multi-repo deploy is rare and only for a breaking contract
 change. This repository does not deploy ScreenRig.
 
+The release archive vendors the complete production dependency closure from
+`package-lock.json`, including every locked native canvas target. Packaging
+verifies each registry tarball against its locked SHA-512 integrity and then
+runs `version` and `compose catalog` from the extracted offline archive. The
+installed plugin never runs `npm install` and does not fetch mutable runtime
+dependencies.
+
 Source/package tests do not prove installed-plugin loading, live enrollment or
 pairing, public browser handoff, Player rendering, native hardware, or
 production deployment. The transcode profiles above are asserted by unit tests

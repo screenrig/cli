@@ -15,6 +15,9 @@ installation, players, backend services, the site, or production deployment.
 - `vendor/manifest.json` records exact backend OpenAPI/protocol/SDK runtime
   inputs.
 - `scripts/package-release.sh` defines deterministic `screenrig-cli.tgz`.
+- `scripts/vendor-runtime-dependencies.mjs` vendors the complete exact
+  production closure from `package-lock.json`; `scripts/check-release-artifact.mjs`
+  rejects a release that cannot run offline.
 - `.github/workflows/ci.yml` defines public, test, package, and secret gates.
   **Deploys are independent** (operating rule): this repository's `main`
   Action publishes the `screenrig-cli.tgz` CI artifact only. No npm or
@@ -50,6 +53,9 @@ installation, players, backend services, the site, or production deployment.
 - Inspect every vendored path/byte/hash change and keep adapters/tests aligned.
 - Preserve deterministic archive ordering, normalized metadata, SDK injection,
   path/type/size limits, and source-directory immutability.
+- The release artifact must include every non-development package recorded in
+  `package-lock.json`, including all optional native targets. Verify SHA-512
+  before extraction. Never add a mutable runtime install step to the plugin.
 - Preserve unrelated work. Do not commit, push, tag, publish, deploy, or change
   external systems unless explicitly authorized.
 
@@ -399,6 +405,7 @@ npm run lint
 npm test
 npm run smoke:mock
 npm run pack:dry
+npm run pack:release
 ```
 
 `npm run smoke:server` requires an explicitly owned local backend and is not a
