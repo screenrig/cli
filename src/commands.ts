@@ -582,9 +582,7 @@ async function browserSetupCommand(
   requirePrivateNoStore(response.headers, "Browser setup claim response");
   const claim = response.body as BrowserLinkClaim;
   const screen = claim.screen;
-  if (!hasExactKeys(claim, ["session_id", "status", "screen"])
-    || !hasExactKeys(screen, ["id", "public_id", "state", "public_url"])
-    || !claim.session_id || claim.status !== "claimed" || !screen.id || !screen.public_id || screen.state !== "pairing_pending") {
+  if (!claim.session_id || claim.status !== "claimed" || !screen?.id || !screen.public_id || screen.state !== "pairing_pending" || !screen.public_url) {
     throw usageError("Browser setup response does not match the generated BrowserLinkClaim contract.");
   }
   const apiUrl = new URL(resolved.apiUrl);
@@ -615,13 +613,6 @@ async function browserSetupCommand(
       ...(opened !== undefined ? [["opened", opened ? "true" : "false"] as [string, string]] : []),
     ]),
   };
-}
-
-function hasExactKeys(value: unknown, keys: string[]): value is Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const actual = Object.keys(value).sort();
-  const expected = [...keys].sort();
-  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
 
 function requirePrivateNoStore(headers: Record<string, string>, context: string): void {

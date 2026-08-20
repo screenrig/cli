@@ -288,6 +288,7 @@ async function paint(
   }
   if (node.type === "Text" && node._fit) {
     const fit = node._fit;
+    ctx.save();
     ctx.fillStyle = parseColor(node.color, "#EEE9DF");
     ctx.font = fit.font;
     ctx.textBaseline = "alphabetic";
@@ -299,10 +300,18 @@ async function paint(
     const blockHeight = fit.lines.length * fit.lineHeight;
     let y = box.y + Math.round((box.height - blockHeight) / 2) + Math.round(fit.fontSize * 0.8);
     if (box.height <= blockHeight + 2) y = box.y + Math.round(fit.fontSize * 0.8);
+    const shadow = node.textShadow;
+    if (shadow) {
+      ctx.shadowOffsetX = shadow.x;
+      ctx.shadowOffsetY = shadow.y;
+      ctx.shadowBlur = shadow.blur ?? 0;
+      ctx.shadowColor = parseColor(shadow.color, "#000000");
+    }
     for (const line of fit.lines) {
       ctx.fillText(line, x, y);
       y += fit.lineHeight;
     }
+    ctx.restore();
   }
   for (const child of node.children ?? []) await paint(ctx, child, baseDir, space, cache);
   if (clipBox) ctx.restore();

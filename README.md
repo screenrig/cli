@@ -55,6 +55,10 @@ The ordinary pair command currently accepts six canonical characters:
 screenrig --json screen pair ABC234
 ```
 
+Native player pairing codes last 72 hours while unclaimed. A successful claim
+starts a fresh independent 72-hour collection window. `screen pair` claims the
+code on the control plane; the CLI does not time the code locally.
+
 The separate homepage handoff command accepts either `ABC-234` or `ABC234`,
 normalizes it, and returns only safe status fields:
 
@@ -217,7 +221,9 @@ The spec is a fail-closed tree of `Frame`, `Column`, `Row`, `Box`, `Spacer`,
 `Text`, and `Image`. Roles are `display`, `title`, `body`, `caption`, and
 `label`. Spacing tokens are `xs`, `s`, `m`, `l`, and `xl`. Pins are `top`,
 `bottom`, `left`, and `right`. Do not author `x`/`y` except on the Frame
-canvas. Do not author `fontSize`. `Image.src` is a local filesystem path
+canvas. Do not author `fontSize`. Optional Text `textShadow` is
+`{ "x": 2, "y": 2, "blur": 4, "color": "#00000080" }`; omit it to paint
+without a shadow. `Image.src` is a local filesystem path
 relative to the spec file. The CLI does not fetch URLs.
 
 `--open` is only for viewing the still on this computer. Agent vision reads

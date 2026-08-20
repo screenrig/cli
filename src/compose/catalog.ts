@@ -14,6 +14,7 @@ export interface ComposeCatalog {
     fontSize: false;
     image_src: string;
     envelope: string;
+    textShadow: string;
   };
   wire_kinds: typeof WIRE_PLACEMENT_KINDS[number][];
   font_fallbacks: typeof FONT_FALLBACKS[number][];
@@ -30,6 +31,7 @@ export function composeCatalog(): ComposeCatalog {
       fontSize: false,
       image_src: "local filesystem path relative to the spec file directory",
       envelope: "structured JSON, not pixels",
+      textShadow: "optional Text object { x, y, blur?, color }; omitted paints without a shadow",
     },
     wire_kinds: [...WIRE_PLACEMENT_KINDS],
     font_fallbacks: [...FONT_FALLBACKS],
@@ -46,6 +48,7 @@ export function formatComposeCatalog(catalog: ComposeCatalog): string {
     `authoring_xy: ${catalog.rules.authoring_xy}`,
     "fontSize: not authorable",
     `image_src: ${catalog.rules.image_src}`,
+    `textShadow: ${catalog.rules.textShadow}`,
     `wire_kinds: ${catalog.wire_kinds.join("|")}`,
     "envelope: structured JSON, not pixels",
   ];

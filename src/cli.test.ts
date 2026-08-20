@@ -477,9 +477,15 @@ test("browser setup --open opens only the public handoff URL by argv", async () 
   await rm(result.configDir, { recursive: true, force: true });
 });
 
-test("browser setup fails closed on extra delivery fields without echoing them", async () => {
+const BROWSER_CLAIM_SCREEN = {
+  id: "scr_browser_link",
+  public_id: "browser-link-screen",
+  state: "pairing_pending" as const,
+  public_url: "https://play.screenrig.ai/s/browser-link-screen",
+};
+
+function browserSetupClaimTransport(body: unknown): FakeTransport {
   const transport = new FakeTransport();
-  const secret = `https://play.screenrig.ai/s/browser-link-screen#provision=${"S".repeat(43)}`;
   transport.on("POST", "/api/v1/enrollments", () => ({
     status: 201,
     headers: { "cache-control": "private, no-store" },
@@ -494,22 +500,59 @@ test("browser setup fails closed on extra delivery fields without echoing them",
   transport.on("POST", "/api/v1/account/browser-links/claim", () => ({
     status: 201,
     headers: { "cache-control": "private, no-store" },
-    body: {
-      session_id: "bls_fixture",
-      status: "claimed",
-      screen: {
-        id: "scr_browser_link",
-        public_id: "browser-link-screen",
-        state: "pairing_pending",
-        public_url: "https://play.screenrig.ai/s/browser-link-screen",
-      },
-      provisioning_url: secret,
-    },
+    body,
   }));
+  return transport;
+}
+
+test("browser setup ignores extra claim and screen keys without echoing them", async () => {
+  const secret = `https://play.screenrig.ai/s/browser-link-screen#provision=${"S".repeat(43)}`;
+  const transport = browserSetupClaimTransport({
+    session_id: "bls_fixture",
+    status: "claimed",
+    screen: {
+      ...BROWSER_CLAIM_SCREEN,
+      timezone: "America/Los_Angeles",
+      observation: {
+        observed_at: "2026-08-14T17:00:00.000Z",
+        surfaces: [{ id: "primary", width: 1920, height: 1080, pixel_ratio: 1, presentation: "output" }],
+      },
+    },
+    provisioning_url: secret,
+  });
   const result = await withRuntime(["--json", "browser", "setup", "--code", "ABC234"], transport);
-  assert.equal(result.code, ExitCode.Usage);
-  assert.doesNotMatch(result.stdout, /#provision=|provisioning_url|SSSSSS/i);
+  assert.equal(result.code, 0, result.stdout);
+  const envelope = JSON.parse(result.stdout) as { data: Record<string, unknown> };
+  assert.deepEqual(envelope.data, {
+    code: "ABC-234",
+    status: "claimed",
+    player_public_url: "https://play.screenrig.ai/s/browser-link-screen",
+  });
+  assert.doesNotMatch(result.stdout, /#provision=|provisioning_url|SSSSSS|timezone|observation|America\/Los_Angeles/i);
   await rm(result.configDir, { recursive: true, force: true });
+});
+
+test("browser setup rejects missing required claim fields, bad status, and unsafe public URLs", async () => {
+  const cases: Array<{ name: string; body: Record<string, unknown> }> = [
+    { name: "missing session_id", body: { status: "claimed", screen: BROWSER_CLAIM_SCREEN } },
+    { name: "bad status", body: { session_id: "bls_fixture", status: "waiting", screen: BROWSER_CLAIM_SCREEN } },
+    { name: "missing screen", body: { session_id: "bls_fixture", status: "claimed" } },
+    { name: "missing screen id", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, id: "" } } },
+    { name: "missing public_id", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_id: "" } } },
+    { name: "bad screen state", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, state: "active" } } },
+    { name: "missing public_url", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "" } } },
+    { name: "hash in public_url", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://play.screenrig.ai/s/browser-link-screen#provision=SSS" } } },
+    { name: "search in public_url", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://play.screenrig.ai/s/browser-link-screen?q=1" } } },
+    { name: "userinfo in public_url", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://user:pass@play.screenrig.ai/s/browser-link-screen" } } },
+    { name: "wrong origin", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://example.invalid/s/browser-link-screen" } } },
+    { name: "pathname mismatch", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://play.screenrig.ai/s/other-id" } } },
+  ];
+  for (const item of cases) {
+    const result = await withRuntime(["--json", "browser", "setup", "--code", "ABC234"], browserSetupClaimTransport(item.body));
+    assert.equal(result.code, ExitCode.Usage, item.name);
+    assert.doesNotMatch(result.stdout, /#provision=|user:pass|token|cookie|proof/i, item.name);
+    await rm(result.configDir, { recursive: true, force: true });
+  }
 });
 
 test("browser setup rejects malformed codes before claim and keeps exact ambiguous retry state", async () => {
@@ -2690,6 +2733,153 @@ test("screen update cannot send observation", async () => {
   assert.deepEqual(patch?.body, { name: "Lobby" });
   assert.equal(JSON.stringify(patch?.body).includes("observation"), false);
   assert.equal(transport.calls.some((call) => call.path === "/runtime/v1/observation"), false);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+const DOCUMENTATION_IPV4 = "192.0.2.10";
+const DOCUMENTATION_IPV6 = "2001:db8::1";
+
+test("screen show includes online and optional last_online_at and last_ip", async () => {
+  const transport = new FakeTransport();
+  const screen = {
+    content_access_generation: 1,
+    created_at: "2026-08-14T17:00:00.000Z",
+    id: "scr_PAIRINGAAAAAAAAAAAAAAAA",
+    label: "Lobby",
+    last_ip: DOCUMENTATION_IPV4,
+    last_online_at: "2026-08-19T12:00:00Z",
+    manifest_revision: 1,
+    online: true,
+    public_id: "scr_public_pairing",
+    revision: 1,
+    state: "active" as const,
+    updated_at: "2026-08-14T17:00:00.000Z",
+  };
+  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({
+    status: 200,
+    headers: { "x-request-id": "req_show_online" },
+    body: screen,
+  }));
+  const configDir = await testTemp("screen-show-online-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_existing_secret" },
+    fsLike,
+  );
+
+  const jsonResult = await withRuntime(
+    ["--json", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(jsonResult.code, ExitCode.Success, jsonResult.stdout);
+  const envelope = JSON.parse(jsonResult.stdout) as {
+    ok: boolean;
+    data: { online?: boolean; last_online_at?: string; last_ip?: string };
+  };
+  assert.equal(envelope.ok, true);
+  assert.equal(envelope.data.online, true);
+  assert.equal(envelope.data.last_online_at, "2026-08-19T12:00:00Z");
+  assert.equal(envelope.data.last_ip, DOCUMENTATION_IPV4);
+
+  const humanResult = await withRuntime(
+    ["screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(humanResult.code, ExitCode.Success, humanResult.stdout);
+  assert.match(humanResult.stdout, /^Screen\n/);
+  assert.match(humanResult.stdout, /"online": true/);
+  assert.match(humanResult.stdout, /"last_online_at": "2026-08-19T12:00:00Z"/);
+  assert.match(humanResult.stdout, /"last_ip": "192.0.2.10"/);
+
+  screen.last_ip = DOCUMENTATION_IPV6;
+  const v6Result = await withRuntime(
+    ["--json", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(v6Result.code, ExitCode.Success, v6Result.stdout);
+  const v6Envelope = JSON.parse(v6Result.stdout) as { ok: boolean; data: { last_ip?: string } };
+  assert.equal(v6Envelope.data.last_ip, DOCUMENTATION_IPV6);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen show still works when last_online_at and last_ip are absent", async () => {
+  const transport = new FakeTransport();
+  const screen = {
+    content_access_generation: 1,
+    created_at: "2026-08-14T17:00:00.000Z",
+    id: "scr_PAIRINGAAAAAAAAAAAAAAAA",
+    label: "Lobby",
+    manifest_revision: 1,
+    online: false,
+    public_id: "scr_public_pairing",
+    revision: 1,
+    state: "pairing_pending" as const,
+    updated_at: "2026-08-14T17:00:00.000Z",
+  };
+  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({
+    status: 200,
+    headers: { "x-request-id": "req_show_offline" },
+    body: screen,
+  }));
+  const configDir = await testTemp("screen-show-offline-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_existing_secret" },
+    fsLike,
+  );
+
+  const result = await withRuntime(
+    ["--json", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  const envelope = JSON.parse(result.stdout) as {
+    ok: boolean;
+    data: { id: string; online?: boolean; last_online_at?: string; last_ip?: string };
+  };
+  assert.equal(envelope.ok, true);
+  assert.equal(envelope.data.id, "scr_PAIRINGAAAAAAAAAAAAAAAA");
+  assert.equal(envelope.data.online, false);
+  assert.equal(envelope.data.last_online_at, undefined);
+  assert.equal(envelope.data.last_ip, undefined);
+  assert.equal(JSON.stringify(envelope.data).includes("last_online_at"), false);
+  assert.equal(JSON.stringify(envelope.data).includes("last_ip"), false);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen update cannot send online, last_online_at, or last_ip", async () => {
+  const transport = memoryBackend();
+  const { code, configDir } = await withRuntime(["--json", "screen", "pair", "ABC234"], transport);
+  assert.equal(code, ExitCode.Success);
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  transport.calls.length = 0;
+
+  const result = await withRuntime(
+    [
+      "--json", "screen", "update", "scr_PAIRINGAAAAAAAAAAAAAAAA",
+      "--name", "Lobby",
+      "--if-match", "1",
+      "--online", "true",
+      "--last-online-at", "2026-08-19T12:00:00Z",
+      "--last-ip", DOCUMENTATION_IPV4,
+    ],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  const patch = transport.calls.find((call) => call.method === "PATCH");
+  assert.equal(patch?.path, "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA");
+  assert.deepEqual(patch?.body, { name: "Lobby" });
+  const patchJson = JSON.stringify(patch?.body);
+  assert.equal(patchJson.includes("online"), false);
+  assert.equal(patchJson.includes("last_online_at"), false);
+  assert.equal(patchJson.includes("last_ip"), false);
   await rm(configDir, { recursive: true, force: true });
 });
 

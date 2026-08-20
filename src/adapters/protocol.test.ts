@@ -213,8 +213,11 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "created_at",
     "id",
     "label",
+    "last_ip",
+    "last_online_at",
     "manifest_revision",
     "observation",
+    "online",
     "playlist_id",
     "public_id",
     "revision",
@@ -228,6 +231,12 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   assert.match(screen, /"timezone"\?: string/);
   // Observation is player-reported and absent until the first report.
   assert.match(screen, /"observation"\?: ScreenObservation/);
+  // online is required and false until the first paired runtime connect.
+  // last_online_at and last_ip stay optional until that first connect.
+  assert.match(screen, /"online": boolean/);
+  assert.doesNotMatch(screen, /"online"\?: boolean/);
+  assert.match(screen, /"last_online_at"\?: string/);
+  assert.match(screen, /"last_ip"\?: string/);
   assert.doesNotMatch(source, /Bootstrap/);
   assert.deepEqual(quotedProperties(interfaceBody(source, "ScreenPatch")), [
     "name",
@@ -345,6 +354,42 @@ test("screen observation is optional, read-only, and absent from ScreenPatch", (
   // The CLI reads observation from GET /api/v1/screens/{id}. Players PUT the
   // runtime route; this command surface must not.
   assert.doesNotMatch(commands, /\/runtime\/v1\/observation/);
+  assert.match(commands, /screen update requires <id>, --if-match, and --name, --playlist-id, or --timezone/);
+});
+
+test("screen online is required, last_online_at and last_ip are optional, and ScreenPatch cannot write them", () => {
+  const generated = readFileSync(GENERATED_CONTRACT, "utf8");
+  const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
+  const adapter = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../src/adapters/protocol.ts"),
+    "utf8",
+  );
+  const commands = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../src/commands.ts"),
+    "utf8",
+  );
+
+  const screen = interfaceBody(generated, "Screen");
+  assert.match(screen, /"online": boolean/);
+  assert.doesNotMatch(screen, /"online"\?: boolean/);
+  assert.match(screen, /"last_online_at"\?: string/);
+  assert.match(screen, /"last_ip"\?: string/);
+
+  const patch = interfaceBody(generated, "ScreenPatch");
+  assert.deepEqual(quotedProperties(patch), ["name", "playlist_id", "timezone"]);
+  assert.doesNotMatch(patch, /online|last_online_at|last_ip/);
+  assert.doesNotMatch(interfaceBody(generated, "PairScreen"), /online|last_online_at|last_ip/);
+  assert.doesNotMatch(interfaceBody(adapter, "ScreenPatch"), /online|last_online_at|last_ip/);
+  assert.match(adapter, /online: boolean/);
+  assert.match(adapter, /last_online_at\?: string/);
+  assert.match(adapter, /last_ip\?: string/);
+
+  const screenSchema = openapi.slice(openapi.indexOf("    Screen:\n"), openapi.indexOf("    ScreenList:"));
+  assert.match(screenSchema, /state, online, created_at, updated_at/);
+  assert.match(screenSchema, /not a player heartbeat or presence\.write report/);
+  assert.match(screenSchema, /maxLength: 45/);
+  assert.match(screenSchema, /ScreenPatch, pairing bodies, session[\s\S]*runtime manifest cannot write it/);
+  assert.doesNotMatch(commands, /--online|--last-online-at|--last-ip/);
   assert.match(commands, /screen update requires <id>, --if-match, and --name, --playlist-id, or --timezone/);
 });
 

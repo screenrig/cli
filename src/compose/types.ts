@@ -10,6 +10,13 @@ export type Justify = "start" | "center" | "end" | "space-between" | "space-arou
 export type TextAlign = "left" | "center" | "right";
 export type ObjectFit = "cover" | "contain" | "fill";
 
+export interface TextShadow {
+  x: number;
+  y: number;
+  blur?: number;
+  color: string;
+}
+
 export interface ComposeNode {
   type: string;
   width?: number;
@@ -28,6 +35,7 @@ export interface ComposeNode {
   text?: string;
   role?: Role;
   color?: string;
+  textShadow?: TextShadow;
   src?: string;
   objectFit?: ObjectFit;
   [key: string]: unknown;

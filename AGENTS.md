@@ -283,6 +283,11 @@ installation, players, backend services, the site, or production deployment.
   render envelope is paths and layout metadata only. Never put PNG bytes in
   stdout, the envelope, or human text. `--open` opens a local path through
   `CliRuntime.openPath`; it is not the agent vision loop.
+- Optional Text `textShadow` is local `compose render` paint only. Author
+  `{ x, y, blur?, color }` in px; omit it to paint without a shadow. It is
+  not `screenrig.canvas/v1` and not a player feature. Layout `x`/`y` on Text
+  stay forbidden. This is **source-ready** in the working tree. It is not in
+  the locked plugin bundle. Do not claim marketplace or deployed.
 
 ## Verification
 

@@ -10,6 +10,7 @@ const screen = {
   public_id: "public-test",
   label: "Test",
   manifest_revision: 1,
+  online: false,
   revision: 1,
   state: "pairing_pending" as const,
   updated_at: "2026-08-15T17:00:00Z",

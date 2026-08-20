@@ -171,8 +171,24 @@ export interface Screen {
   created_at: string;
   id: string;
   label: string;
+  /**
+   * Last client IP at a paired runtime events connect. Absent until the first
+   * connect. Operational metadata; IDs and IPs are never authorization.
+   */
+  last_ip?: string;
+  /**
+   * Instant a paired runtime events stream last became connected. Present
+   * after the first connect. When offline, last time the screen was online.
+   */
+  last_online_at?: string;
   manifest_revision: number;
   observation?: ScreenObservation;
+  /**
+   * True while at least one paired runtime events stream is connected,
+   * including a short reconnect window. Always present; false until first
+   * connect. Read-only; not a player heartbeat.
+   */
+  online: boolean;
   playlist_id?: string;
   public_id: string;
   revision: number;
@@ -188,8 +204,8 @@ export interface Screen {
 /**
  * The screen patch body. Every member is optional and the server requires at
  * least one, which is why each command builds only the members it was asked
- * for rather than sending undefined placeholders. Observation is not a
- * patchable field.
+ * for rather than sending undefined placeholders. Observation, online,
+ * last_online_at, and last_ip are not patchable fields.
  */
 export interface ScreenPatch {
   name?: string;

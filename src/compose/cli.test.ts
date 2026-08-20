@@ -63,10 +63,14 @@ test("compose catalog does not enroll", async () => {
   const transport = new FakeTransport();
   const { code, stdout, cwdDir } = await withRuntime(["--json", "compose", "catalog"], { transport });
   assert.equal(code, ExitCode.Success, stdout);
-  const envelope = JSON.parse(stdout) as { ok: true; data: { types: string[]; rules: { fontSize: boolean } } };
+  const envelope = JSON.parse(stdout) as {
+    ok: true;
+    data: { types: string[]; rules: { fontSize: boolean; textShadow: string } };
+  };
   assert.equal(envelope.ok, true);
   assert.deepEqual(envelope.data.types, ["Frame", "Column", "Row", "Box", "Spacer", "Text", "Image"]);
   assert.equal(envelope.data.rules.fontSize, false);
+  assert.match(envelope.data.rules.textShadow, /optional Text object \{ x, y, blur\?, color \}/);
   assert.equal(transport.calls.length, 0);
   assert.doesNotMatch(stdout, /\u0089PNG/);
   await rm(cwdDir, { recursive: true, force: true });
