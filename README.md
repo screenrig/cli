@@ -1,8 +1,8 @@
 # ScreenRig CLI
 
 This repository implements the noninteractive ScreenRig control-plane CLI and
-deterministic static-application packer. The supported customer distribution is
-the exact CI artifact pinned and bundled by
+deterministic web-application package packer. The supported customer
+distribution is the exact CI artifact pinned and bundled by
 [`screenrig/plugin`](https://github.com/screenrig/plugin); the plugin invokes it
 through a package-relative launcher.
 
@@ -33,6 +33,10 @@ writes `<output>.layout.json` next to it. The envelope carries paths, canvas
 size, the resolved font family, space tokens, the type ramp, and whether any
 text was truncated. It never prints image bytes. `--open` opens the local PNG
 with the OS opener when the user asked to view the still on this computer.
+
+ScreenRig content has three families: static images, including stills produced
+by local compose; motion video; and web content delivered as an `iframe` or
+`application`.
 
 Playlist pages on the wire use `image`, `video`, `iframe`, and `application`
 only. Copy and chrome are composed locally, uploaded as `image`, then placed
@@ -102,8 +106,10 @@ de-associate; the server returns `screen_archive_required`.
 `screen revoke-credential` is retired. Native players use generate-once
 Ed25519 identity with `ScreenRig-Pairing` and `ScreenRig-Session`;
 `ScreenRig-Device` is retired. Signed on-device reset is the only
-de-associate. The CLI is not a screen and holds no player keypair. Archive
-and identity are source-ready; they are not a deployed claim.
+de-associate. The CLI is not a screen and holds no player keypair. `screen
+archive` and `screen unarchive` are repository-ready on public `main`. They are
+absent from the locked plugin bundle. Native identity remains an owning-player
+claim; none of this is a marketplace, deployed, or hardware-validated claim.
 
 Application packing accepts an already-built static directory. It produces
 deterministic bounded archives, injects the pinned browser SDK runtime, and
@@ -118,8 +124,9 @@ is ready, and writes a file. It does not print image bytes.
 object on a screen, a playlist, or one playlist page. Compact UTF-8 of that
 object is at most 1 KiB. ScreenRig does not read or use it, does not send it
 to players, and does not treat it as authorization. Set takes `--json-value`
-or `--file`. Last write wins; there is no `--if-match`. This command is
-source-ready. It is not a marketplace or deployed claim.
+or `--file`. Last write wins; there is no `--if-match`. These commands are
+repository-ready on public `main`. They are absent from the locked plugin
+bundle and are not a marketplace or deployed claim.
 
 `playback list` returns daily playback aggregates for this account, newest
 days first. Filter with `--screen-id`, `--media-id`, and `--day YYYY-MM-DD`.
@@ -175,10 +182,10 @@ is safe: the request carries `Idempotency-Key`, and an exact retry returns the
 original link and expiry for twenty-four hours instead of minting a second live
 link.
 
-This command is **source-ready in this repository**. It is not in the locked
-plugin bundle. The dashboard origin is not deployed: no request has been served
-there, so a minted link does not resolve yet. Do not read this section as a
-working dashboard.
+This command is **repository-ready on public `main`**. It is absent from the
+locked plugin bundle. The dashboard origin is not deployed: no request has
+been served there, so a minted link does not resolve yet. Do not read this
+section as a working dashboard.
 
 ## Feedback
 
@@ -188,7 +195,7 @@ Bug reports and feature requests are account-scoped and immutable:
 screenrig --json feedback bug "Playlist stalls after pairing" \
   --body-file ./report.md --command "screen pair"
 screenrig --json feedback feature "Add a dry-run flag" --body "Preview a change first."
-screenrig --json feedback list [--kind bug|feature]
+screenrig --json feedback list --kind bug
 ```
 
 The kind comes from the CLI action, which selects the route; nothing in the
@@ -306,9 +313,12 @@ screenrig --json media upload ./still.png
 The spec is a fail-closed tree of `Frame`, `Column`, `Row`, `Box`, `Spacer`,
 `Text`, and `Image`. Roles are `display`, `title`, `body`, `caption`, and
 `label`. Spacing tokens are `xs`, `s`, `m`, `l`, and `xl`. Pins are `top`,
-`bottom`, `left`, and `right`. Do not author `x`/`y` except on the Frame
-canvas. Do not author `fontSize`. `Image`, `Box`, `Row`, `Column`, and
-`Spacer` honor `width` and `height` in px. Keep `flex` for remaining space.
+`bottom`, `left`, and `right`. Do not author `x` or `y` on any node. The root
+`Frame` defines the canvas through required `width` and `height`. Do not author
+`fontSize`. In the current dirty working tree only, `Image`, `Box`, `Row`,
+`Column`, and `Spacer` accept positive `width` and `height` values in px. That
+child-sizing support is source-ready, not on public `main` or in the locked
+plugin bundle. Keep `flex` for remaining space.
 `pin` `top` or `bottom` stretches the full width; `left` or `right` stretches
 the full height. Size a wordmark with `width` and `height`, not `pin`.
 Optional Text `textShadow` is
@@ -350,10 +360,11 @@ JSON envelope or stream. After redaction it may still include a server
 
 ## Media transcoding
 
-`media upload` transcodes the source before it declares the upload, so the
-control plane only ever receives delivery-ready bytes. This makes **ffmpeg and
-ffprobe a required external dependency** of that one command. The CLI does not
-bundle them. It runs `ffmpeg` and `ffprobe` from `PATH`, or from the absolute
+`media upload` transcodes the source by default before it declares the upload,
+so the control plane receives delivery-ready bytes on that path. **ffmpeg and
+ffprobe are external dependencies only for default transcoding.**
+`--no-transcode` uploads the source unchanged and bypasses both tools. The CLI
+does not bundle them. It runs `ffmpeg` and `ffprobe` from `PATH`, or from the absolute
 paths in `SCREENRIG_FFMPEG` and `SCREENRIG_FFPROBE` when those variables are
 set. The install hint asks for ffmpeg 6.0 or newer; the CLI reports the resolved
 version but does not enforce a minimum. What it does enforce is the presence of
@@ -394,7 +405,8 @@ than the bound is never upscaled.
 ScreenRig stores exactly one rendition per media object, and the layout contract
 carries no codec parameter. There is no per-client fallback: whatever the CLI
 uploads is what every player has to decode. H.264 High profile level 4.2 is the
-default because current browsers play it universally.
+default because it has broad decode support across current browser and platform
+combinations.
 
 H.265 support is not universal:
 
@@ -412,7 +424,7 @@ link, but that saving does not outrank playback on the browser path.
 
 | Flag | Effect |
 | --- | --- |
-| `--no-transcode` | Upload the source bytes unchanged. ffmpeg is never run. |
+| `--no-transcode` | Upload the source bytes unchanged. Neither ffmpeg nor ffprobe is run. |
 | `--codec h264\|hevc` | Video codec. Default `h264`. `avc` and `h265` are accepted as aliases. |
 | `--max-fps N` | Frame-rate cap, greater than 0 and at most 240. Default 30. |
 | `--max-edge PIXELS` | Bound on each edge, 16 to 3840. Default 3840. |
@@ -462,8 +474,12 @@ path. After a tagged upload, `media list --tag TAG` is the filename-to-id map.
 
 ## Development and provenance
 
-Node.js 20.11 or newer is required by the package. `media upload` additionally
-requires ffmpeg and ffprobe on the host; no other command runs them.
+Node.js 20.11 or newer is required by the package. The commands below are
+source-checkout development gates, not installed-plugin commands; run them from
+this repository checkout. Default `media upload` transcoding additionally
+requires ffmpeg and ffprobe on the host. `--no-transcode` bypasses both. No
+other command requires them; `screenrig doctor` only probes and reports the
+optional toolchain.
 
 ```sh
 npm ci
@@ -516,7 +532,7 @@ production deployment. The transcode profiles above are asserted by unit tests
 that drive a fake process runner; they are not validated by playback on player
 hardware or in any browser.
 
-Security reports belong in
+See the repository [security policy](SECURITY.md). Security reports belong in
 [GitHub Private Vulnerability Reporting](https://github.com/screenrig/cli/security/advisories/new).
-See [SECURITY.md](SECURITY.md). The Apache-2.0 license covers this public CLI,
+The Apache-2.0 license covers this public CLI,
 not other ScreenRig services or repositories.
