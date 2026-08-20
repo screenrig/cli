@@ -419,8 +419,11 @@ never a pass. Run it whenever the backend contract may have changed; a snapshot
 that passes `vendor:check` can still be superseded.
 
 CI publishes deterministic `screenrig-cli.tgz`. The plugin repository pins that
-artifact by CLI commit and SHA-256, and the backend production lock separately
-selects it for release assembly. This repository does not deploy ScreenRig.
+artifact by CLI commit and SHA-256. This repository does not deploy ScreenRig.
+Backend assemble is the only production droplet ingest. While backend
+component pinning is off (the default), assemble selects the latest successful
+consumer `ci.yml` on `main`. Backend `components.lock.json` is the pin-on
+input.
 
 Source/package tests do not prove installed-plugin loading, live enrollment or
 pairing, public browser handoff, Player rendering, native hardware, or

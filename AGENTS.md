@@ -16,7 +16,11 @@ installation, players, backend services, the site, or production deployment.
   inputs.
 - `scripts/package-release.sh` defines deterministic `screenrig-cli.tgz`.
 - `.github/workflows/ci.yml` defines public, test, package, and secret gates.
-  Production selects the artifact only through the backend component lock.
+  This repository does not SSH the production host. After a successful `push`
+  to `main`, CI may `workflow_dispatch` backend `deploy-test.yml`. While
+  backend component pinning is off (the default), assemble selects the latest
+  successful consumer `ci.yml` on `main`. Backend `components.lock.json` is the
+  pin-on input.
 
 ## Edit and generation rules
 
