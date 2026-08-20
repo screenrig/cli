@@ -68,8 +68,9 @@ top-layer text or images. Do not animate every placement. Object enter
 starts invisible. It runs 500 ms after the page occupies the full
 viewport, for 400 ms. Those delays are contract constants, not author
 fields and not CLI flags. These are playlist document fields the CLI
-sends. They are source-ready. They are not a claim that production already
-serves them.
+sends. The control plane accepts swipe types and placement `enter`.
+Canonical CLI source on public `main` is repository-ready. They are not
+in the locked plugin bundle.
 
 The ordinary pair command currently accepts six canonical characters:
 
