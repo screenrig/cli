@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { packDirectory, parseTar, gzipDeterministic } from "./pack/index.js";
+import { crc32 } from "./pack/archive.js";
 import { gunzipSync } from "node:zlib";
 import { CliError } from "./problems.js";
 import { testTemp } from "./test-temp.js";
@@ -190,6 +191,20 @@ test("rejects files that exceed per-file and depth limits", async () => {
 test("gzip of identical tar bytes is identical", () => {
   const payload = Buffer.from("abc");
   assert.deepEqual(gzipDeterministic(payload), gzipDeterministic(payload));
+});
+
+test("CRC-32 matches standard known vectors", () => {
+  assert.equal(crc32(Buffer.alloc(0)), 0x00000000);
+  assert.equal(crc32(Buffer.from("123456789", "ascii")), 0xcbf43926);
+  assert.equal(crc32(Buffer.from("The quick brown fox jumps over the lazy dog", "ascii")), 0x414fa339);
+});
+
+test("deterministic gzip writes the payload CRC-32 and size into its trailer", () => {
+  const payload = Buffer.from("123456789", "ascii");
+  const archive = gzipDeterministic(payload);
+  assert.equal(archive.readUInt32LE(archive.length - 8), 0xcbf43926);
+  assert.equal(archive.readUInt32LE(archive.length - 4), payload.length);
+  assert.deepEqual(gunzipSync(archive), payload);
 });
 
 test("sparse files are rejected when detectable", async () => {

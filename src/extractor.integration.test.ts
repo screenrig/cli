@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { crc32, inflateRawSync } from "node:zlib";
+import { inflateRawSync } from "node:zlib";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { packDirectory } from "./pack/index.js";
+import { crc32 } from "./pack/archive.js";
 import { testTemp } from "./test-temp.js";
 
 const BLOCK = 512;

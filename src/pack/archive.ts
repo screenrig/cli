@@ -1,11 +1,26 @@
 import { createHash } from "node:crypto";
-import { crc32, deflateRawSync } from "node:zlib";
+import { deflateRawSync } from "node:zlib";
 import { packError } from "./limits.js";
 import type { ArchiveEntry } from "./types.js";
 
 const BLOCK = 512;
 const USTAR_MAGIC = "ustar\0";
 const USTAR_VERSION = "00";
+const CRC32_TABLE = Uint32Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) {
+    value = (value & 1) === 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  }
+  return value >>> 0;
+});
+
+export function crc32(data: Uint8Array): number {
+  let value = 0xffffffff;
+  for (let index = 0; index < data.length; index += 1) {
+    value = CRC32_TABLE[(value ^ data[index]!) & 0xff]! ^ (value >>> 8);
+  }
+  return (value ^ 0xffffffff) >>> 0;
+}
 
 function putString(buf: Buffer, offset: number, length: number, value: string): void {
   buf.fill(0, offset, offset + length);
