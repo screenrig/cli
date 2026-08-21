@@ -56,8 +56,15 @@ def check_metadata(errors: list[str]) -> None:
     repository = package.get("repository")
     if not isinstance(repository, dict) or repository.get("url") != EXPECTED_REPOSITORY:
         errors.append(f"package.json repository.url must be {EXPECTED_REPOSITORY}")
-    if package.get("publishConfig") != {"access": "public", "provenance": True}:
-        errors.append("package.json publishConfig must require public access and provenance")
+    if package.get("publishConfig") != {
+        "access": "public",
+        "provenance": True,
+        "registry": "https://registry.npmjs.org/",
+    }:
+        errors.append("package.json publishConfig must require public npm access and provenance")
+    package_files = package.get("files") or []
+    if not isinstance(package_files, list) or "SECURITY.md" not in package_files:
+        errors.append("package.json files must include SECURITY.md in the public npm package")
     try:
         commands = (ROOT / "src" / "commands.ts").read_text(encoding="utf-8")
     except OSError as exc:
@@ -87,6 +94,9 @@ def check_public_tree(errors: list[str]) -> None:
             "npm run lint",
             "npm audit --audit-level=high --package-lock-only",
             "name: screenrig-cli",
+            "name: npm install (${{ matrix.os }}, Node 20.11.1)",
+            "os: [ubuntu-24.04, macos-14, windows-2022]",
+            "npm run check:npm-install",
             "gitleaks\" git",
         ):
             if fact not in workflow:
@@ -99,6 +109,36 @@ def check_public_tree(errors: list[str]) -> None:
         for fact in ("scripts/vendor-runtime-dependencies.mjs", "scripts/check-release-artifact.mjs"):
             if fact not in release:
                 errors.append(f"CLI release packaging is missing required gate: {fact}")
+
+    npm_release_path = ROOT / ".github" / "workflows" / "npm-release.yml"
+    if not npm_release_path.is_file():
+        errors.append("missing public npm release workflow: .github/workflows/npm-release.yml")
+    else:
+        npm_release = npm_release_path.read_text(encoding="utf-8")
+        for fact in (
+            "types: [published]",
+            "github.event.release.prerelease == false",
+            "environment: npm",
+            "id-token: write",
+            "npm install --global npm@11.5.1",
+            "node scripts/check-release-tag.mjs",
+            "npm publish --access public",
+            "screenrig@${{ needs.publish.outputs.version }}",
+            "ubuntu-24.04, macos-14, windows-2022",
+            "gh release upload",
+        ):
+            if fact not in npm_release:
+                errors.append(f"npm release workflow is missing required gate: {fact}")
+        if "NODE_AUTH_TOKEN" in npm_release or "NPM_TOKEN" in npm_release:
+            errors.append("npm release workflow must use trusted publishing without a long-lived token")
+
+    for required in (
+        "RELEASING.md",
+        "scripts/check-release-tag.mjs",
+        "scripts/check-npm-install.mjs",
+    ):
+        if not (ROOT / required).is_file():
+            errors.append(f"missing public npm release file: {required}")
 
     prohibited_names = {
         "SPLIT_" + "HANDOFF.md",

@@ -24,6 +24,7 @@
     }
   },
   "files": [
+    "SECURITY.md",
     "assets/screenrig.runtime.js",
     "dist/**/*.js",
     "dist/**/*.d.ts",
@@ -70,16 +71,21 @@
     "pack:dry": "npm pack --dry-run",
     "pack:release": "bash scripts/package-release.sh screenrig-cli.tgz",
     "pack:check": "node scripts/check-release-artifact.mjs screenrig-cli.tgz",
+    "check:npm-install": "node scripts/check-npm-install.mjs",
     "check:public": "python3 scripts/check-public-repo.py"
   },
   "keywords": [
     "screenrig",
-    "digital-signage"
+    "digital-signage",
+    "kiosk",
+    "agent-cli",
+    "automation"
   ],
   "license": "Apache-2.0",
   "publishConfig": {
     "access": "public",
-    "provenance": true
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
   },
   "devDependencies": {
     "@types/node": "^24.2.0",

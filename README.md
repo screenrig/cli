@@ -6,6 +6,25 @@ distribution is the exact CI artifact pinned and bundled by
 [`screenrig/plugin`](https://github.com/screenrig/plugin); the plugin invokes it
 through a package-relative launcher.
 
+## Official npm installation for developer shells
+
+The public npm package is `screenrig`. Install an exact published version rather
+than a mutable range:
+
+```sh
+npm install --global screenrig@0.1.0
+screenrig --json version
+```
+
+Node.js 20.11 or newer is required. `media upload` additionally requires ffmpeg
+and ffprobe 6.0 or newer; the other commands do not. Run `screenrig --json doctor`
+to inspect the optional media toolchain before an upload.
+
+This global package is the official developer-shell distribution. Agent workflows
+that load the ScreenRig plugin must keep using the plugin-relative launcher. The
+plugin pins and bundles an exact reviewed CLI artifact, so it never resolves a
+global `screenrig` from `PATH` and never substitutes the npm package at run time.
+
 ## Implemented behavior
 
 The CLI emits machine-readable envelopes and automatically enrolls on the first
@@ -526,13 +545,17 @@ is absent, valueless, not a directory, or missing a canonical input is an error,
 never a pass. Run it whenever the backend contract may have changed; a snapshot
 that passes `vendor:check` can still be superseded.
 
-CI publishes deterministic `screenrig-cli.tgz`. The plugin repository pins that
-artifact by CLI commit and SHA-256. **Deploys are independent** (operating
-rule): this repository's `main` Action publishes that CI artifact only. No
-npm or marketplace publish unless the user asks later. Do not pack siblings.
-Do not dispatch backend. Do not copy deploy tokens between repos.
-Coordinated multi-repo deploy is rare and only for a breaking contract
-change. This repository does not deploy ScreenRig.
+The ordinary `main` workflow publishes deterministic `screenrig-cli.tgz` as a
+short-lived CI artifact. The plugin repository pins that artifact by CLI commit
+and SHA-256. A separate protected workflow publishes npm only after a
+non-prerelease GitHub release is published with a tag matching the package version.
+It uses npm trusted publishing through GitHub OIDC, includes provenance, performs
+exact-version clean-install tests on Linux, macOS, and Windows, and attaches the
+offline archive plus its checksum to the stable GitHub release. See the
+[release procedure](https://github.com/screenrig/cli/blob/main/RELEASING.md).
+
+The plugin marketplace is a separate distribution. This repository does not
+deploy ScreenRig, publish Homebrew formulae, or publish to PyPI.
 
 The release archive vendors the complete production dependency closure from
 `package-lock.json`, including every locked native canvas target. Packaging

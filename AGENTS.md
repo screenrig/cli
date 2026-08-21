@@ -1,8 +1,9 @@
 # ScreenRig CLI agent guide
 
 This repository owns the public noninteractive ScreenRig CLI and deterministic
-static-application packer. The supported customer distribution is the pinned
-CLI artifact bundled by `screenrig/plugin`; this repository does not own plugin
+static-application packer. The supported agent distribution is the pinned CLI
+artifact bundled by `screenrig/plugin`. Exact-version npm releases are the
+official developer-shell distribution. This repository does not own plugin
 installation, players, backend services, the site, or production deployment.
 
 ## Sources of truth
@@ -19,12 +20,15 @@ installation, players, backend services, the site, or production deployment.
   production closure from `package-lock.json`; `scripts/check-release-artifact.mjs`
   rejects a release that cannot run offline.
 - `.github/workflows/ci.yml` defines public, test, package, and secret gates.
-  **Deploys are independent** (operating rule): this repository's `main`
-  Action publishes the `screenrig-cli.tgz` CI artifact only. No npm or
-  marketplace publish unless the user asks later. Do not pack siblings.
+  The `main` Action publishes the `screenrig-cli.tgz` CI artifact only.
+- `.github/workflows/npm-release.yml` is the only npm publication path. It runs
+  from a protected, non-prerelease GitHub release, requires an exact version tag,
+  uses npm trusted publishing and provenance, and performs post-publish clean
+  installs. Do not publish npm from a laptop or add a long-lived npm token.
+- **Deploys are independent** (operating rule). Do not pack siblings.
   Do not dispatch backend. Do not copy deploy tokens between repos.
   Coordinated multi-repo deploy is rare and only for a breaking contract
-  change. Current CI packages the archive and does not publish npm.
+  change. The ordinary `main` CI packages the archive and does not publish npm.
 
 ## Edit and generation rules
 
@@ -417,6 +421,7 @@ npm test
 npm run smoke:mock
 npm run pack:dry
 npm run pack:release
+npm run check:npm-install
 ```
 
 `npm run smoke:server` requires an explicitly owned local backend and is not a
