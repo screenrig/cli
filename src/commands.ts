@@ -257,6 +257,8 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
     font_family: result.font_family,
     space: result.space,
     ramp: result.ramp,
+    ramp_root: result.ramp_root,
+    ramp_at_1080: result.ramp_at_1080,
     truncated: result.truncated,
     ...(opened !== undefined ? { opened } : {}),
   };

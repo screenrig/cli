@@ -65,12 +65,17 @@ test("compose catalog does not enroll", async () => {
   assert.equal(code, ExitCode.Success, stdout);
   const envelope = JSON.parse(stdout) as {
     ok: true;
-    data: { types: string[]; rules: { fontSize: boolean; textShadow: string } };
+    data: {
+      types: string[];
+      rules: { fontSize: boolean; textShadow: string; child_size: string; pin_stretch: string };
+    };
   };
   assert.equal(envelope.ok, true);
   assert.deepEqual(envelope.data.types, ["Frame", "Column", "Row", "Box", "Spacer", "Text", "Image"]);
   assert.equal(envelope.data.rules.fontSize, false);
   assert.match(envelope.data.rules.textShadow, /optional Text object \{ x, y, blur\?, color \}/);
+  assert.match(envelope.data.rules.child_size, /honor width and height/);
+  assert.match(envelope.data.rules.pin_stretch, /Size a wordmark with width and height, not pin/);
   assert.equal(transport.calls.length, 0);
   assert.doesNotMatch(stdout, /\u0089PNG/);
   await rm(cwdDir, { recursive: true, force: true });
@@ -108,8 +113,22 @@ test("compose render writes a PNG and layout.json; envelope has paths and no ima
   assert.equal(envelope.data.layout_output, `${envelope.data.output}.layout.json`);
   const png = await readFile(envelope.data.output);
   assert.ok(png.subarray(0, 8).equals(PNG_HEADER));
-  const layout = JSON.parse(await readFile(envelope.data.layout_output, "utf8")) as { tree: { type: string } };
+  const layout = JSON.parse(await readFile(envelope.data.layout_output, "utf8")) as {
+    tree: { type: string };
+    ramp_root: number;
+    ramp: { title: { wish: number } };
+    ramp_at_1080: { title: { wish: number } };
+  };
   assert.equal(layout.tree.type, "Frame");
+  assert.equal(layout.ramp_root, 180);
+  assert.equal(layout.ramp_at_1080.title.wish, 86);
+  assert.equal(typeof layout.ramp.title.wish, "number");
+  const envelopeData = envelope.data as typeof envelope.data & {
+    ramp_root: number;
+    ramp_at_1080: { title: { wish: number } };
+  };
+  assert.equal(envelopeData.ramp_root, 180);
+  assert.equal(envelopeData.ramp_at_1080.title.wish, 86);
   assert.doesNotMatch(stdout, /\u0089PNG/);
   assert.equal(stdout.includes(png.toString("base64")), false);
   await rm(cwdDir, { recursive: true, force: true });

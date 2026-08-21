@@ -2,8 +2,15 @@ import { ROLES, SPACES, type Role, type SpaceScale, type SpaceToken, type TypeRa
 
 export { PINS, ROLES, SPACES } from "./types.js";
 
+/** 1920×1080 reference canvas for comparing strip-Frame ramps. */
+export const REFERENCE_CANVAS = { width: 1920, height: 1080 } as const;
+
+export function rampRoot(canvasWidth: number, canvasHeight: number): number {
+  return Math.min(canvasWidth, canvasHeight);
+}
+
 export function spaceScale(canvasWidth: number, canvasHeight: number): SpaceScale {
-  const root = Math.min(canvasWidth, canvasHeight);
+  const root = rampRoot(canvasWidth, canvasHeight);
   const s = Math.max(8, Math.round(root / 68));
   return {
     xs: Math.max(4, Math.round(s / 2)),
@@ -15,7 +22,7 @@ export function spaceScale(canvasWidth: number, canvasHeight: number): SpaceScal
 }
 
 export function typeRamp(canvasWidth: number, canvasHeight: number): TypeRamp {
-  const root = Math.min(canvasWidth, canvasHeight);
+  const root = rampRoot(canvasWidth, canvasHeight);
   const display = Math.max(64, Math.round(root * 0.12));
   const title = Math.max(48, Math.round(root * 0.08));
   const body = Math.max(32, Math.round(root * 0.042));

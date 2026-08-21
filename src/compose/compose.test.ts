@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { composeCatalog, formatComposeCatalog } from "./catalog.js";
 import { composeSpec, resolveFontFamily } from "./compose.js";
+import { REFERENCE_CANVAS, rampRoot, typeRamp } from "./tokens.js";
 import { testTemp } from "../test-temp.js";
 import { validateSpec } from "./validate.js";
 
@@ -26,6 +27,10 @@ test("catalog lists fail-closed types, roles, spaces, and pins", () => {
   assert.deepEqual(catalog.pins, ["top", "bottom", "left", "right"]);
   assert.equal(catalog.rules.fontSize, false);
   assert.match(catalog.rules.authoring_xy, /Frame canvas only/);
+  assert.match(catalog.rules.authoring_xy, /width, height, pin, flex/);
+  assert.match(catalog.rules.child_size, /Image, Box, Row, Column, and Spacer honor width and height/);
+  assert.match(catalog.rules.pin_stretch, /pin top\|bottom stretches the full width/);
+  assert.match(catalog.rules.pin_stretch, /Size a wordmark with width and height, not pin/);
   assert.equal(catalog.rules.envelope, "structured JSON, not pixels");
   assert.equal(
     catalog.rules.textShadow,
@@ -35,6 +40,8 @@ test("catalog lists fail-closed types, roles, spaces, and pins", () => {
   assert.match(formatted, /fontSize: not authorable/);
   assert.doesNotMatch(formatted, /fontSize: true/);
   assert.match(formatted, /textShadow: optional Text object \{ x, y, blur\?, color \}/);
+  assert.match(formatted, /child_size: Image, Box, Row, Column, and Spacer honor width and height/);
+  assert.match(formatted, /pin_stretch: pin top\|bottom stretches the full width/);
 });
 
 test("unknown keys, fontSize, and child x,y are usage_error", () => {
@@ -52,8 +59,26 @@ test("unknown keys, fontSize, and child x,y are usage_error", () => {
     /must not set x/,
   );
   assertUsage(
+    () => validateSpec({
+      type: "Frame",
+      width: 320,
+      height: 180,
+      children: [{ type: "Image", src: "mark.png", width: 400, height: 80, x: 1424, y: 946 }],
+    }),
+    /must not set x/,
+  );
+  assertUsage(
     () => validateSpec({ type: "Frame", width: 320, height: 180, mystery: true }),
     /unknown keys: mystery/,
+  );
+  assertUsage(
+    () => validateSpec({
+      type: "Frame",
+      width: 320,
+      height: 180,
+      children: [{ type: "Image", src: "mark.png", width: 0, height: 80 }],
+    }),
+    /width must be a finite number greater than 0/,
   );
 });
 
@@ -75,8 +100,16 @@ test("composeSpec writes a PNG and layout dump without returning pixels in the l
   assert.ok(png.subarray(0, 8).equals(PNG_HEADER));
   assert.ok(result.png.subarray(0, 8).equals(PNG_HEADER));
   const layoutText = await readFile(layoutOutPath, "utf8");
-  const layout = JSON.parse(layoutText) as { tree: { type: string } };
+  const layout = JSON.parse(layoutText) as {
+    tree: { type: string };
+    ramp: { title: { wish: number } };
+    ramp_root: number;
+    ramp_at_1080: { title: { wish: number } };
+  };
   assert.equal(layout.tree.type, "Frame");
+  assert.equal(layout.ramp_root, 180);
+  assert.equal(layout.ramp_at_1080.title.wish, 86);
+  assert.equal(layout.ramp.title.wish, typeRamp(320, 180).title.wish);
   assert.equal(result.width, 320);
   assert.equal(result.height, 180);
   assert.equal(result.truncated, false);
@@ -158,6 +191,109 @@ test("Image.src relative to the spec directory is painted", async () => {
     { baseDir: specDir, outPath },
   );
   assert.ok(result.png.subarray(0, 8).equals(PNG_HEADER));
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("child Image, Box, and Spacer honor width and height; pin still stretches", async () => {
+  const dir = await testTemp("compose-size-");
+  const tile = await composeSpec(
+    { type: "Frame", width: 8, height: 8, background: "#ff0000" },
+    { baseDir: dir, outPath: path.join(dir, "tile.png") },
+  );
+  assert.ok(tile.png.subarray(0, 8).equals(PNG_HEADER));
+
+  const sized = await composeSpec(
+    {
+      type: "Frame",
+      width: 200,
+      height: 100,
+      children: [
+        { type: "Box", width: 40, height: 20, background: "#00ff00" },
+        { type: "Image", src: "tile.png", width: 16, height: 8 },
+        { type: "Spacer", height: 12 },
+      ],
+    },
+    { baseDir: dir },
+  );
+  const box = sized.layout.children?.[0]?.box;
+  const image = sized.layout.children?.[1]?.box;
+  const spacer = sized.layout.children?.[2]?.box;
+  assert.equal(box?.width, 40);
+  assert.equal(box?.height, 20);
+  assert.equal(image?.width, 16);
+  assert.equal(image?.height, 8);
+  assert.equal(spacer?.width, 200);
+  assert.equal(spacer?.height, 12);
+  assert.equal(validateSpec({
+    type: "Frame",
+    width: 200,
+    height: 100,
+    children: [{ type: "Spacer", height: 12, flex: 0 }],
+  }).children?.[0]?.height, 12);
+
+  const pinned = await composeSpec(
+    {
+      type: "Frame",
+      width: 200,
+      height: 100,
+      children: [{ type: "Box", pin: "bottom", height: 24, background: "#000000E8" }],
+    },
+    { baseDir: dir },
+  );
+  const plate = pinned.layout.children?.[0]?.box;
+  assert.equal(plate?.width, 200);
+  assert.equal(plate?.height, 24);
+  assert.equal(plate?.y, 76);
+
+  const unsizedImage = await composeSpec(
+    {
+      type: "Frame",
+      width: 64,
+      height: 64,
+      children: [{ type: "Image", src: "tile.png" }],
+    },
+    { baseDir: dir },
+  );
+  assert.equal(unsizedImage.layout.children?.[0]?.box?.width, 64);
+  assert.equal(unsizedImage.layout.children?.[0]?.box?.height, 0);
+
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("typeRamp uses min(width, height); a 1920×400 strip is not the 1080 reference", () => {
+  assert.equal(rampRoot(1920, 400), 400);
+  assert.equal(rampRoot(REFERENCE_CANVAS.width, REFERENCE_CANVAS.height), 1080);
+  const strip = typeRamp(1920, 400);
+  const at1080 = typeRamp(REFERENCE_CANVAS.width, REFERENCE_CANVAS.height);
+  assert.equal(strip.title.wish, 48);
+  assert.equal(at1080.title.wish, 86);
+});
+
+test("a 1920×400 Frame writes ramp_root 400 and a 48 px title next to ramp_at_1080 86", async () => {
+  const dir = await testTemp("compose-strip-");
+  const layoutOutPath = path.join(dir, "strip.png.layout.json");
+  const result = await composeSpec(
+    {
+      type: "Frame",
+      width: 1920,
+      height: 400,
+      children: [{ type: "Text", text: "Lower third", role: "title" }],
+    },
+    { baseDir: dir, layoutOutPath },
+  );
+  assert.equal(result.ramp_root, 400);
+  assert.equal(result.ramp.title.wish, 48);
+  assert.equal(result.ramp_at_1080.title.wish, 86);
+  const layout = JSON.parse(await readFile(layoutOutPath, "utf8")) as {
+    ramp_root: number;
+    ramp: { title: { wish: number } };
+    ramp_at_1080: { title: { wish: number } };
+    tree: { type: string };
+  };
+  assert.equal(layout.ramp_root, 400);
+  assert.equal(layout.ramp.title.wish, 48);
+  assert.equal(layout.ramp_at_1080.title.wish, 86);
+  assert.equal(layout.tree.type, "Frame");
   await rm(dir, { recursive: true, force: true });
 });
 
