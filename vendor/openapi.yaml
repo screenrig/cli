@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: ScreenRig API
-  version: 0.2.0
+  version: 0.3.0
   description: >-
     Agent-operated digital signage control and runtime API.
 
@@ -37,6 +37,54 @@ info:
     SSE debit idempotency is
     sse-event:<account_id>:<sequence>; reconnect replay is free. An unpaid
     billed event is not written and the stream closes.
+
+    The URL major is the compatibility boundary for the /api/v1, /runtime/v1,
+    /content/v1, and /dashboard/v1 families. This document's info.version is
+    the contract-document version, not a URL or product API major. The
+    lifecycle policy is recorded in x-api-lifecycle below.
+
+    No operation is currently deprecated, so responses emit no Deprecation,
+    Sunset, or rel=deprecation Link lifecycle headers today.
+
+    Successful responses from routes that consume a disclosed fixed-window
+    policy may include the optional RateLimit-Policy and RateLimit structured
+    field list members when the request passes admission. Exact replays and
+    deployments without shared admission can answer without them. Fixed-window
+    rejections include them according to
+    draft-ietf-httpapi-ratelimit-headers-11, an Internet-Draft rather than an
+    RFC. Retry-After remains authoritative on 429. Fleet-global quotas,
+    internal partition keys, concurrency capacity, and byte-budget capacity
+    are not disclosed. Every operation with public fixed-window controls lists
+    those controls in x-rate-limit-policies and names its optional admitted
+    response headers in x-rate-limit-admitted-response-headers.
+x-api-lifecycle:
+  documentVersionMeaning: Contract-document version; not a URL or product API major.
+  urlMajorFamilies: [/api/v1, /runtime/v1, /content/v1, /dashboard/v1]
+  compatibleWithinMajor:
+    - Additive endpoints and methods.
+    - Optional request members.
+    - New problem codes.
+    - New fields only where the published schema permits unknown fields.
+  breakingWithinMajor:
+    - Route or field removal or rename.
+    - Type, meaning, or authorization changes.
+    - Making optional input required.
+    - Adding a member to a closed enum.
+    - Adding a field to a closed response object.
+  newMajorMinimumOverlapDays: 180
+  sunsetMinimumNoticeDays: 90
+  deprecationMinimumServiceDays: 90
+  deprecationServiceClock: RFC 9745 Deprecation effective date; a later published commitment controls.
+  deprecationSignals:
+    - OpenAPI deprecated true on the operation.
+    - RFC 9745 Deprecation with its effective date.
+    - RFC 8594 Sunset once the sunset date is fixed.
+    - Link with rel=deprecation to migration documentation.
+  migrationChannels:
+    - OpenAPI
+    - /docs/api/#deprecations
+    - /docs/api.md#deprecations
+  currentDeprecatedOperations: []
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 servers:
   - url: https://api.screenrig.ai
@@ -67,11 +115,13 @@ paths:
   /api/v1/enrollments:
     post:
       operationId: enrollCLI
+      x-rate-limit-policies: [{ name: cli-enrollment-client, quota: 3, windowSeconds: 3600 }, { name: cli-enrollment-ip, quota: 5, windowSeconds: 3600 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Internal bundled-CLI first-use enrollment. Persist client_id and Idempotency-Key before sending; an exact retry redelivers the same permanent credential from its encrypted issuance for ten minutes without creating another account. After that delivery window the durable idempotency result returns credential_issuance_expired; no follow-up mutation is required or supported.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CLIEnrollmentRequest" } } } }
       responses:
-        "201": { description: "Anonymous account and permanent bearer credential. Persist and verify the token, then resume the original command. The credential has no scheduled expiry but its encrypted exact-retry delivery envelope exists only until issuance_expires_at.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/CLIEnrollment" } } } }
+        "201": { description: "Anonymous account and permanent bearer credential. Persist and verify the token, then resume the original command. The credential has no scheduled expiry but its encrypted exact-retry delivery envelope exists only until issuance_expires_at.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/CLIEnrollment" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "410": { $ref: "#/components/responses/Problem" }
@@ -111,6 +161,8 @@ paths:
   /api/v1/account/dashboard-links:
     post:
       operationId: createAccountDashboardLink
+      x-rate-limit-policies: [{ name: dashboard-link-account, quota: 30, windowSeconds: 3600 }, { name: dashboard-link-token, quota: 20, windowSeconds: 3600 }, { name: dashboard-link-ip, quota: 30, windowSeconds: 3600 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Mints one single-use dashboard link for the calling account. The link
         carries a 256-bit token in its URL fragment, and its lifetime is the
@@ -129,7 +181,7 @@ paths:
       security: [{ accountBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       responses:
-        "201": { description: "Single-use dashboard link. Treat the whole URL as a credential: it is not a shareable address.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardLink" } } } }
+        "201": { description: "Single-use dashboard link. Treat the whole URL as a credential: it is not a shareable address.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardLink" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "402": { $ref: "#/components/responses/Problem" }
@@ -146,6 +198,8 @@ paths:
         default: { $ref: "#/components/responses/Problem" }
     post:
       operationId: uploadApplication
+      x-rate-limit-policies: [{ name: application-upload, quota: 10, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Streams one CLI-produced tar.gz directly into bounded durable staging. Metadata is carried in headers so the archive is never base64-wrapped or materialized as JSON by the server.
       security: [{ accountBearer: [] }]
       parameters:
@@ -157,7 +211,7 @@ paths:
         - { $ref: "#/components/parameters/ApplicationName" }
       requestBody: { required: true, content: { application/gzip: { schema: { type: string, contentMediaType: application/gzip, contentEncoding: binary, maxLength: 104857600 } } } }
       responses:
-        "202": { description: Upload accepted, content: { application/json: { schema: { $ref: "#/components/schemas/OperationAccepted" } } } }
+        "202": { description: Upload accepted, headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/OperationAccepted" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/applications/{id}:
     get:
@@ -341,12 +395,14 @@ paths:
   /api/v1/account/browser-links/claim:
     post:
       operationId: claimBrowserLink
+      x-rate-limit-policies: [{ name: browser-link-claim-account, quota: 20, windowSeconds: 3600 }, { name: browser-link-claim-token, quota: 5, windowSeconds: 3600 }, { name: browser-link-claim-ip, quota: 10, windowSeconds: 3600 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Claims one browser-link code for the authenticated account and atomically creates exactly one first pairing_pending screen plus its existing browser provisioning grant. Enrollment remains account-only. The response is safe metadata only and never contains a provisioning token, fragment URL, cookie, or proof.
       security: [{ accountBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserLinkClaimRequest" } } } }
       responses:
-        "201": { description: Exact replay-safe fragment-free browser-link claim., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserLinkClaim" } } } }
+        "201": { description: Exact replay-safe fragment-free browser-link claim., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserLinkClaim" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -358,12 +414,14 @@ paths:
   /api/v1/screens/pair:
     post:
       operationId: pairScreen
+      x-rate-limit-policies: [{ name: pairing-claim-account, quota: 30, windowSeconds: 60 }, { name: pairing-claim-ip, quota: 30, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Claims one fleet-global six-character Player pairing session. Exact Idempotency-Key retries return the durable original result without consuming quota again.
       security: [{ accountBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PairScreen" } } } }
       responses:
-        "201": { description: Durable pairing_pending screen claim., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/PairingClaim" } } } }
+        "201": { description: Durable pairing_pending screen claim., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/PairingClaim" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -375,12 +433,14 @@ paths:
   /api/v1/screens/provision:
     post:
       operationId: provisionScreen
+      x-rate-limit-policies: [{ name: screen-provision-account, quota: 20, windowSeconds: 3600 }, { name: screen-provision-token, quota: 5, windowSeconds: 3600 }, { name: screen-provision-ip, quota: 10, windowSeconds: 3600 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Optional browser-only new-screen provisioning. Always creates one new quota-counted pairing_pending screen; exact retries redeliver the same fragment token for ten minutes. Six-character pairing remains the default and only recovery flow.
       security: [{ accountBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ProvisionScreen" } } } }
       responses:
-        "201": { description: New browser provisioning link., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenProvisioning" } } } }
+        "201": { description: New browser provisioning link., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenProvisioning" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
@@ -452,6 +512,8 @@ paths:
   /api/v1/screens/{id}/toast:
     post:
       operationId: postScreenToast
+      x-rate-limit-policies: [{ name: toast-account, quota: 60, windowSeconds: 60 }, { name: toast-screen, quota: 20, windowSeconds: 60 }, { name: toast-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Posts one transient stage-chrome toast to the named screen. A toast is
         not a placement: it does not occupy a canvas slot, has no layer, and
@@ -470,7 +532,7 @@ paths:
       parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenToastWrite" } } } }
       responses:
-        "202": { description: "Accepted. The toast is durable until expires_at. An exact idempotent retry returns this same expiry.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenToastAccepted" } } } }
+        "202": { description: "Accepted. The toast is durable until expires_at. An exact idempotent retry returns this same expiry.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenToastAccepted" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -480,6 +542,8 @@ paths:
   /api/v1/screens/{id}/screenshot:
     post:
       operationId: requestScreenScreenshot
+      x-rate-limit-policies: [{ name: screenshot-screen, quota: 10, windowSeconds: 60 }, { name: screenshot-account, quota: 30, windowSeconds: 60 }, { name: screenshot-ip, quota: 30, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Requests one still screenshot of the named active screen. Latest-wins:
         a new request replaces any in-flight capture_id and does not 409. The
@@ -496,7 +560,7 @@ paths:
       security: [{ accountBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       responses:
-        "202": { description: "Accepted. The request is durable until expires_at. An exact idempotent retry returns this same capture_id and expiry.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenScreenshotAccepted" } } } }
+        "202": { description: "Accepted. The request is durable until expires_at. An exact idempotent retry returns this same capture_id and expiry.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenScreenshotAccepted" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -629,11 +693,13 @@ paths:
   /api/v1/media/uploads:
     post:
       operationId: createMediaUpload
+      x-rate-limit-policies: [{ name: media-upload-admission, quota: 20, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ accountBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MediaUploadDeclaration" } } } }
       responses:
-        "201": { description: Short-lived signed authorization for exactly one private object PUT. Send the returned method and every returned header verbatim., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/MediaUploadSession" } } } }
+        "201": { description: Short-lived signed authorization for exactly one private object PUT. Send the returned method and every returned header verbatim., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/MediaUploadSession" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/media/uploads/{id}/commit:
     post:
@@ -680,6 +746,8 @@ paths:
         default: { $ref: "#/components/responses/Problem" }
     post:
       operationId: reportBug
+      x-rate-limit-policies: [{ name: feedback-submit-account, quota: 20, windowSeconds: 3600 }, { name: feedback-submit-ip, quota: 60, windowSeconds: 3600 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Records one immutable bug report against the calling account. A submission
         cannot be updated or deleted; a correction is a new submission. An exact
@@ -693,7 +761,7 @@ paths:
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackWrite" } } } }
       responses:
-        "201": { description: "Stored bug report. An exact idempotent retry returns this same submission.", content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackSubmission" } } } }
+        "201": { description: "Stored bug report. An exact idempotent retry returns this same submission.", headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackSubmission" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
@@ -711,6 +779,8 @@ paths:
         default: { $ref: "#/components/responses/Problem" }
     post:
       operationId: requestFeature
+      x-rate-limit-policies: [{ name: feedback-submit-account, quota: 20, windowSeconds: 3600 }, { name: feedback-submit-ip, quota: 60, windowSeconds: 3600 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Records one immutable feature request against the calling account. A
         submission cannot be updated or deleted; a correction is a new submission. An
@@ -724,7 +794,7 @@ paths:
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackWrite" } } } }
       responses:
-        "201": { description: "Stored feature request. An exact idempotent retry returns this same submission.", content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackSubmission" } } } }
+        "201": { description: "Stored feature request. An exact idempotent retry returns this same submission.", headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackSubmission" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
@@ -733,9 +803,11 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: startPairingSession
+      x-rate-limit-policies: [{ name: pairing-start, quota: 20, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Creates one fleet-global expiring pairing session and sets the temporary HttpOnly Secure SameSite=Strict pairing cookie. An untrusted Origin or cross-site browser request is rejected with forbidden before rate-limit or pairing state is created.
       responses:
-        "201": { description: Exact six-character pairing code and expiry., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/PairingSession" } } } }
+        "201": { description: Exact six-character pairing code and expiry., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/PairingSession" } } } }
         "403": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         "503": { $ref: "#/components/responses/Problem" }
@@ -753,10 +825,12 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: completePairingSession
+      x-rate-limit-policies: [{ name: pairing-complete, quota: 30, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ pairingCookie: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PairingComplete" } } } }
       responses:
-        "200": { description: Paired-device cookie issued; the Player next creates the ordinary paired runtime session., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/PairingCompletion" } } } }
+        "200": { description: Paired-device cookie issued; the Player next creates the ordinary paired runtime session., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/PairingCompletion" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
@@ -768,9 +842,11 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: createAnonymousRuntimeSession
+      x-rate-limit-policies: [{ name: runtime-session, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeSessionRequest" } } } }
       responses:
-        "201": { description: Read-only runtime session cookie, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeSession" } } } }
+        "201": { description: Read-only runtime session cookie, headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeSession" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/device-sessions:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -786,10 +862,12 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted browser Player origin }]
     post:
       operationId: exchangeBrowserProvisioning
+      x-rate-limit-policies: [{ name: browser-provision-exchange-ip, quota: 30, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Browser-only same-origin exchange. Atomically binds the one-time token to exchange_id and sets only the normal host-only HttpOnly Secure SameSite=Strict paired-device cookie. Android and Qt never consume this grant.
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserProvisioningExchange" } } } }
       responses:
-        "201": { description: Paired-device cookie issued without a runtime cookie or credential in the body., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserProvisioningCompletion" } } } }
+        "201": { description: Paired-device cookie issued without a runtime cookie or credential in the body., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserProvisioningCompletion" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -802,9 +880,11 @@ paths:
     servers: [{ url: https://screenrig.ai, description: HTTPS apex browser-link origin }]
     post:
       operationId: startBrowserLink
+      x-rate-limit-policies: [{ name: browser-link-session-ip, quota: 20, windowSeconds: 60 }, { name: browser-link-session-outstanding, quota: 5, windowSeconds: 600 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Strict same-origin no-JavaScript-compatible POST that creates or reuses a thirty-minute unclaimed browser-link session. Claiming within that window creates a fresh, independent ten-minute protected provisioning-delivery window; cookie Player pairing remains ten minutes. Native pairing is a separate seventy-two-hour unclaimed locator plus a fresh independent seventy-two-hour collection window after claim. It sets exactly the apex host-only Secure HttpOnly SameSite=Strict Path=/ __Host-screenrig-browser-link cookie with no Domain. JSON clients receive 201; Accept text/html receives a bodyless 303 to /setup. No insecure localhost fallback exists; development requires the configured HTTPS loopback origin.
       responses:
-        "201": { description: Safe browser-link code/status metadata., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, Set-Cookie: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserLinkSession" } } } }
+        "201": { description: Safe browser-link code/status metadata., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, Set-Cookie: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserLinkSession" } } } }
         "303": { description: No-JavaScript form continuation to the read-only setup page., headers: { Location: { schema: { type: string, enum: [/setup] } }, Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, Set-Cookie: { schema: { type: string } } } }
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
@@ -893,11 +973,13 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: startNativePairingSession
+      x-rate-limit-policies: [{ name: native-pairing-start-ip, quota: 20, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Creates a native-only pairing session from a player Ed25519 public key. Unclaimed native pairing lasts seventy-two hours. A successful claim starts a fresh independent seventy-two-hour collection window and does not inherit leftover unclaimed time. Cookies, query credentials, cross-site origins, and Authorization are rejected. Exact Idempotency-Key replay precedes new abuse admission. The response never sets a cookie. An already-bound public key returns enrollment_bound.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingStart" } } } }
       responses:
-        "201": { description: Native pairing code plus temporary ScreenRig-Pairing credential; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingSession" } } } }
+        "201": { description: Native pairing code plus temporary ScreenRig-Pairing credential; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingSession" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
@@ -922,11 +1004,13 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: completeNativePairingSession
+      x-rate-limit-policies: [{ name: native-pairing-complete-ip, quota: 30, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Completes native pairing with a completion nonce and an EdDSA compact JWS (op=pairing.complete). No cookie is accepted or set. No ScreenRig-Device credential is issued. The player next mints ScreenRig-Session from a possession proof.
       security: [{ nativePairingAuthorization: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingComplete" } } } }
       responses:
-        "200": { description: Native pairing completion; no Set-Cookie and no device credential., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingCompletion" } } } }
+        "200": { description: Native pairing completion; no Set-Cookie and no device credential., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingCompletion" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
@@ -939,10 +1023,12 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: createNativeIdentityChallenge
+      x-rate-limit-policies: [{ name: native-identity-challenge-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Issues a short-lived nonce bound to one player public-key thumbprint. Cookies, query credentials, and Authorization are rejected.
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityChallengeRequest" } } } }
       responses:
-        "201": { description: Challenge nonce for an EdDSA compact JWS proof; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityChallenge" } } } }
+        "201": { description: Challenge nonce for an EdDSA compact JWS proof; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityChallenge" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
@@ -952,11 +1038,13 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: createNativeIdentityRuntimeSession
+      x-rate-limit-policies: [{ name: native-identity-session-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Verifies an EdDSA compact JWS (op=session.mint) against the enrolled public key and returns a signed 24-hour ScreenRig-Session. Cookies are neither accepted nor set. Exact Idempotency-Key replay precedes new abuse admission. An archived screen still mints a session so the player can show the archived glass.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityProof" } } } }
       responses:
-        "201": { description: Paired native runtime session; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativeRuntimeSession" } } } }
+        "201": { description: Paired native runtime session; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativeRuntimeSession" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
@@ -969,10 +1057,12 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: resetNativeIdentity
+      x-rate-limit-policies: [{ name: native-identity-reset-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: The only de-associate. Verifies an EdDSA compact JWS (op=identity.reset), deletes the enrollment, and tombstones the bound screen. No account bearer. Cookies are neither accepted nor set. A missing local key without this proof is not a reset.
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityProof" } } } }
       responses:
-        "204": { description: Enrollment deleted and screen tombstoned; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
+        "204": { description: Enrollment deleted and screen tombstoned; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -1014,10 +1104,12 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: createRuntimeReport
+      x-rate-limit-policies: [{ name: runtime-report, quota: 120, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeReport" } } } }
       responses:
-        "202": { description: Accepted. manifest.activated is committed before this response and is idempotent for the current active revision. playback.video_started upserts the daily aggregate before this response. application.event appends a durable account event before this response. }
+        "202": { description: Accepted. manifest.activated is committed before this response and is idempotent for the current active revision. playback.video_started upserts the daily aggregate before this response. application.event appends a durable account event before this response., headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/screenshot:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -1077,6 +1169,8 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: unpairRuntime
+      x-rate-limit-policies: [{ name: runtime-unpair, quota: 30, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Cookie-only unpair. Tombstones a cookie-paired screen that has no
         player public-key enrollment. Identity-enrolled screens return
@@ -1088,7 +1182,7 @@ paths:
         unpaired sessions are forbidden. Prepaid remaining credit is not a gate.
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
       responses:
-        "204": { description: Cookie-paired screen tombstoned. Browser pairing cookies expired., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
+        "204": { description: Cookie-paired screen tombstoned. Browser pairing cookies expired., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
@@ -1098,12 +1192,14 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: launchApplicationRelease
+      x-rate-limit-policies: [{ name: release-launch, quota: 120, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
       parameters:
         - { name: manifest_revision, in: path, required: true, schema: { type: string } }
         - { name: release_id, in: path, required: true, schema: { type: string } }
       responses:
-        "201": { description: Single-use 30-second exact-release-host launch ticket, headers: { Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ReleaseLaunch" } } } }
+        "201": { description: Single-use 30-second exact-release-host launch ticket, headers: { Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/ReleaseLaunch" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /content/v1/manifests/{manifest_revision}/media/{media_id}:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -1259,23 +1355,29 @@ paths:
         default: { $ref: "#/components/responses/Problem" }
     put:
       operationId: putRuntimeKV
+      x-rate-limit-policies: [{ name: runtime-kv-write, quota: 120, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ pairedRuntimeCookie: [], placementCapability: [] }, { nativeSessionAuthorization: [], placementCapability: [] }]
       parameters: [{ $ref: "#/components/parameters/OptionalIfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/KVWrite" } } } }
       responses:
-        "200": { description: Paired-device KV mutation, content: { application/json: { schema: { $ref: "#/components/schemas/KVEntry" } } } }
+        "200": { description: Paired-device KV mutation, headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/KVEntry" } } } }
         default: { $ref: "#/components/responses/Problem" }
     delete:
       operationId: deleteRuntimeKV
+      x-rate-limit-policies: [{ name: runtime-kv-write, quota: 120, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ pairedRuntimeCookie: [], placementCapability: [] }, { nativeSessionAuthorization: [], placementCapability: [] }]
       parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       responses:
-        "204": { description: Paired-device KV deletion }
+        "204": { description: Paired-device KV deletion, headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/links/claim:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
     post:
       operationId: claimDashboardLink
+      x-rate-limit-policies: [{ name: dashboard-claim-ip, quota: 30, windowSeconds: 600 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Claims one dashboard link. The token is presented in the request body
         only, because it rides the browser URL fragment and a fragment never
@@ -1305,6 +1407,8 @@ paths:
             Cache-Control: { schema: { type: string, enum: [no-store] } }
             Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }
             Set-Cookie: { schema: { type: string } }
+            RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }
+            RateLimit: { $ref: "#/components/headers/RateLimit" }
           content: { application/json: { schema: { $ref: "#/components/schemas/DashboardLinkClaim" } } }
         "400": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -1366,6 +1470,8 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
     post:
       operationId: startDashboardPasskeyAssertion
+      x-rate-limit-policies: [{ name: dashboard-assertion-ip, quota: 30, windowSeconds: 600 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Starts one usernameless WebAuthn assertion ceremony and returns the
         request options verbatim for navigator.credentials.get. No cookie is
@@ -1375,7 +1481,7 @@ paths:
         dashboard development authentication, this route returns
         passkeys_disabled.
       responses:
-        "201": { description: WebAuthn request options bound to this ceremony., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardPasskeyAssertion" } } } }
+        "201": { description: WebAuthn request options bound to this ceremony., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardPasskeyAssertion" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
@@ -1534,6 +1640,8 @@ paths:
     parameters: [{ $ref: "#/components/parameters/ResourceID" }]
     post:
       operationId: requestDashboardScreenScreenshot
+      x-rate-limit-policies: [{ name: screenshot-screen, quota: 10, windowSeconds: 60 }, { name: screenshot-account, quota: 30, windowSeconds: 60 }, { name: screenshot-ip, quota: 30, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Requests one still screenshot of the named active screen owned by the
         session's account. It is the cookie sibling of POST
@@ -1556,7 +1664,7 @@ paths:
       security: [{ dashboardSession: [] }]
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       responses:
-        "202": { description: "Accepted. The request is durable until expires_at. An exact idempotent retry returns this same capture_id and expiry.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenScreenshotAccepted" } } } }
+        "202": { description: "Accepted. The request is durable until expires_at. An exact idempotent retry returns this same capture_id and expiry.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenScreenshotAccepted" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -1780,6 +1888,8 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
     post:
       operationId: createDashboardApplicationPreviewLaunch
+      x-rate-limit-policies: [{ name: dashboard-preview-account, quota: 120, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Mints one single-use thirty-second launch ticket for the latest ready
         release of an application the session's account owns, on the existing
@@ -1797,7 +1907,7 @@ paths:
       security: [{ dashboardSession: [] }]
       parameters: [{ $ref: "#/components/parameters/ResourceID" }]
       responses:
-        "201": { description: Single-use 30-second exact-release-host preview launch., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ReleaseLaunch" } } } }
+        "201": { description: Single-use 30-second exact-release-host preview launch., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/ReleaseLaunch" } } } }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
@@ -1852,6 +1962,23 @@ paths:
         default: { $ref: "#/components/responses/Problem" }
 components:
   headers:
+    RateLimitPolicy:
+      description: >-
+        One or more public fixed-window policy list members using the Structured
+        Fields syntax defined by draft-ietf-httpapi-ratelimit-headers-11. That
+        specification is an Internet-Draft, not an RFC. Each member is a stable
+        public policy name with q and w parameters. Internal keys and the pk
+        parameter are never exposed; fleet-global quotas are omitted.
+      schema: { type: string, example: '"account-write";q=20;w=60' }
+    RateLimit:
+      description: >-
+        One or more fixed-window service-limit list members using the Structured
+        Fields syntax defined by draft-ietf-httpapi-ratelimit-headers-11. Each
+        disclosed member carries exact post-request remaining r and reset delay
+        t rounded up to seconds. A fleet-global denial may instead carry only
+        the opaque member "service";r=0;t=N. Retry-After is authoritative on
+        429. Concurrency and byte-budget remaining capacity are not disclosed.
+      schema: { type: string, example: '"account-write";r=19;t=42' }
     ScreenRigCreditsRemaining:
       description: Remaining prepaid credits as a whole integer. Same value as credit_remaining. Never negative.
       schema: { type: integer, minimum: 0 }
@@ -1943,8 +2070,11 @@ components:
       description: Stable RFC 9457 problem response.
       content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
     RateLimitedProblem:
-      description: Stable rate_limited problem. Retry only after the declared interval.
-      headers: { Retry-After: { required: true, schema: { type: integer, minimum: 1 } } }
+      description: Stable rate_limited problem. Retry only after the authoritative Retry-After interval. Fixed-window denials also include the applicable RateLimit-Policy and RateLimit members; concurrency and byte-budget denials omit those optional disclosures.
+      headers:
+        Retry-After: { required: true, schema: { type: integer, minimum: 1 } }
+        RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }
+        RateLimit: { $ref: "#/components/headers/RateLimit" }
       content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
   schemas:
     HealthResponse: { type: object, additionalProperties: false, required: [status], properties: { status: { type: string, enum: [alive] } } }
