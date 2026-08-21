@@ -29,7 +29,12 @@ info:
     events are exempt: screen.*, runtime.*, and application.event. Heartbeats
     and the retry preamble never charge. playlist.*, media.*, kv.*,
     application.published, operation.*, account.*, feedback.*, stream.cursor,
-    and stream.resync_required are billed. SSE debit idempotency is
+    and stream.resync_required are billed. GET /dashboard/v1/events/stream
+    bills arriving events under this same per-event meter and the same
+    exemption set; like every SSE response it omits the ScreenRig-Credits-*
+    headers. A dashboard session reads the same whole-credit balance through
+    GET /dashboard/v1/balance, which never debits and remains available at zero.
+    SSE debit idempotency is
     sse-event:<account_id>:<sequence>; reconnect replay is free. An unpaid
     billed event is not written and the stream closes.
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
@@ -1479,6 +1484,21 @@ paths:
         "200": { description: Account summary counters., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardSummary" } } } }
         "401": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/balance:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardBalance
+      description: >-
+        Returns the session account's public whole-credit balance. This
+        cookie-authenticated read never debits, so it remains available at zero
+        after an unpaid billable dashboard-stream event closes the SSE response.
+        It is the dashboard recovery surface; the cookie-only dashboard never
+        presents an account bearer to GET /api/v1/account.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Public whole-credit balance., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardBalance" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/screens:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
     get:
@@ -1810,7 +1830,7 @@ paths:
       security: [{ dashboardSession: [] }]
       parameters: [{ $ref: "#/components/parameters/AfterCursor" }, { $ref: "#/components/parameters/LastEventID" }]
       responses:
-        "200": { description: "Replayable SSE stream. No ScreenRig-Credits-* headers.", headers: { Cache-Control: { schema: { type: string, enum: ["no-cache, no-store, no-transform"] } }, X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
+        "200": { description: "Replayable SSE stream. Arriving billable events debit 1 whole credit each under the same meter and exemption set as GET /api/v1/events/stream; heartbeats and the retry preamble never charge. An unpaid billable event is not written and closes the stream; GET /dashboard/v1/balance remains available at zero. No ScreenRig-Credits-* headers.", headers: { Cache-Control: { schema: { type: string, enum: ["no-cache, no-store, no-transform"] } }, X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
         "401": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/playback:
@@ -2613,7 +2633,30 @@ components:
       required: [version, url, bytes, sha256, entrypoint, contentType]
       properties:
         version: { type: string, enum: ["screenrig.webapp-package/v1"] }
-        url: { type: string, format: uri, description: "Same-origin protected path under /content/v1/manifests/{manifest_revision}/releases/{release_id}/package; production uses https://play.screenrig.ai." }
+        url:
+          type: string
+          format: uri-reference
+          description: &manifest-bound-route >-
+            Manifest-bound route. The runtime origin is the origin this session
+            fetched /runtime/v1/manifest from; that origin is deployment
+            configuration, so this binding is normative prose rather than a
+            machine-readable constraint. A consumer resolves this value — an
+            absolute URL or a root-relative path — against the runtime origin
+            and requires all of the following of the resolved URL: its scheme,
+            host, and effective port equal the runtime origin's, with
+            default-port normalization (443 for https, 80 for http); it carries
+            no query component, no fragment, and no user info; and its path is
+            byte-for-byte exactly the route emitted for this field —
+            /content/v1/manifests/{manifest_revision}/media/{media_id} for an
+            image or video item, with the containing manifest revision and the
+            item's mediaId, or
+            /content/v1/manifests/{manifest_revision}/releases/{release_id}/package
+            for an application package, with the containing manifest revision
+            and the content's releaseId. A value that fails this binding makes
+            the whole manifest invalid: the consumer rejects the manifest at
+            parse time, before any credentialed fetch, and never requests the
+            route. The sibling sha256 pins bytes after transfer; hash-pinning
+            is never destination authorization and never relaxes this binding.
         bytes: { type: integer, minimum: 1, maximum: 272629760 }
         sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
         entrypoint: { type: string, enum: [index.html] }
@@ -2635,7 +2678,7 @@ components:
       required: [mediaId, src, intrinsicSize, sha256, bytes, contentType]
       properties:
         mediaId: { type: string }
-        src: { type: string }
+        src: { type: string, format: uri-reference, description: *manifest-bound-route }
         intrinsicSize: { $ref: "#/components/schemas/RuntimeIntrinsicSize" }
         sha256: { type: string, pattern: "^[a-f0-9]{64}$", description: Immutable content digest for integrity and optional native caching; not an authorization capability. }
         bytes: { type: integer, minimum: 1, maximum: 1073741824 }
@@ -2657,7 +2700,7 @@ components:
       required: [mediaId, src, intrinsicSize, sha256, bytes, contentType]
       properties:
         mediaId: { type: string }
-        src: { type: string }
+        src: { type: string, format: uri-reference, description: *manifest-bound-route }
         intrinsicSize: { $ref: "#/components/schemas/RuntimeIntrinsicSize" }
         sha256: { type: string, pattern: "^[a-f0-9]{64}$", description: Immutable content digest for integrity and optional native caching; not an authorization capability. }
         bytes: { type: integer, minimum: 1, maximum: 1073741824 }
@@ -2821,6 +2864,14 @@ components:
         screens: { $ref: "#/components/schemas/DashboardScreenSummary" }
         media: { $ref: "#/components/schemas/DashboardMediaSummary" }
         applications: { $ref: "#/components/schemas/DashboardApplicationSummary" }
+    DashboardBalance:
+      type: object
+      additionalProperties: false
+      required: [credit_remaining, credit_included, credit_reset]
+      properties:
+        credit_remaining: { type: integer, minimum: 0, description: "Remaining prepaid credits as a whole integer. Never negative." }
+        credit_included: { type: integer, minimum: 0, description: "Whole credits in the account's recurring included grant." }
+        credit_reset: { type: string, format: date-time, description: "Next instant at which the recurring included grant resets." }
     DashboardScreenSummary:
       type: object
       additionalProperties: false
