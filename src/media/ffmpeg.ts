@@ -19,6 +19,18 @@ export interface FfmpegLookup {
   ffprobeFromEnv: boolean;
 }
 
+/** Resolved `cwebp` binary used when ffmpeg has no libwebp encoder. */
+export interface CwebpToolchain {
+  cwebp: string;
+  version: string;
+  fromEnv: boolean;
+}
+
+export interface CwebpLookup {
+  cwebp: string;
+  cwebpFromEnv: boolean;
+}
+
 const INSTALL_HINT =
   "Install ffmpeg 6.0 or newer and make ffmpeg and ffprobe reachable on PATH, " +
   "or set SCREENRIG_FFMPEG and SCREENRIG_FFPROBE to their absolute paths.";
@@ -37,9 +49,24 @@ export function ffmpegLookup(env: NodeJS.Dict<string>): FfmpegLookup {
   };
 }
 
+/** Where the CLI will look for `cwebp`, without running anything. */
+export function cwebpLookup(env: NodeJS.Dict<string>): CwebpLookup {
+  const cwebpEnv = trimmed(env.SCREENRIG_CWEBP);
+  return {
+    cwebp: cwebpEnv ?? "cwebp",
+    cwebpFromEnv: cwebpEnv !== undefined,
+  };
+}
+
 function trimmed(value: string | undefined): string | undefined {
   const text = value?.trim();
   return text && text.length > 0 ? text : undefined;
+}
+
+/** First dotted version token in `cwebp -version` output, else `unknown`. */
+export function parseCwebpVersion(output: string): string {
+  const match = /(\d+\.\d+(?:\.\d+)?)/.exec(output);
+  return match?.[1] ?? "unknown";
 }
 
 export function runProcessFor(runtime: CliRuntime): RunProcess {
@@ -98,10 +125,12 @@ export function parseFilterNames(output: string): Set<string> {
 }
 
 let cached: Promise<FfmpegToolchain> | undefined;
+let cwebpCached: Promise<CwebpToolchain | undefined> | undefined;
 
-/** Test seam: forget the memoized toolchain probe. */
+/** Test seam: forget the memoized ffmpeg and cwebp probes. */
 export function resetFfmpegToolchainCache(): void {
   cached = undefined;
+  cwebpCached = undefined;
 }
 
 export async function resolveFfmpegToolchain(runtime: CliRuntime): Promise<FfmpegToolchain> {
@@ -163,6 +192,39 @@ async function probeToolchain(runtime: CliRuntime): Promise<FfmpegToolchain> {
     ffprobeVersion: parseVersion(ffprobeVersionResult.stdout),
     encoders: parseEncoderNames(encodersResult.stdout),
     filters: parseFilterNames(filtersResult.stdout),
+  };
+}
+
+/**
+ * Probe `cwebp` the same way ffmpeg is probed. A missing binary is `undefined`,
+ * not an exception, so the image planner can name both missing pieces together.
+ */
+export async function resolveCwebpToolchain(runtime: CliRuntime): Promise<CwebpToolchain | undefined> {
+  cwebpCached ??= probeCwebp(runtime);
+  try {
+    return await cwebpCached;
+  } catch (error) {
+    cwebpCached = undefined;
+    throw error;
+  }
+}
+
+async function probeCwebp(runtime: CliRuntime): Promise<CwebpToolchain | undefined> {
+  const run = runProcessFor(runtime);
+  const lookup = cwebpLookup(runtime.env);
+  const result = await run({
+    command: lookup.cwebp,
+    args: ["-version"],
+    timeoutMs: VERSION_TIMEOUT_MS,
+  });
+  if (result.spawnError || result.code !== 0 || result.timedOut) {
+    return undefined;
+  }
+  const version = parseCwebpVersion(`${result.stdout}\n${result.stderrTail}`);
+  return {
+    cwebp: lookup.cwebp,
+    version,
+    fromEnv: lookup.cwebpFromEnv,
   };
 }
 

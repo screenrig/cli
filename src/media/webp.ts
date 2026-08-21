@@ -12,6 +12,8 @@ export interface WebpContainer {
   /** Zero when the chunk that carries the canvas size is absent. */
   width: number;
   height: number;
+  /** True when a VP8L chunk is present (lossless still, alone or after VP8X). */
+  lossless: boolean;
 }
 
 const RIFF = 0x52494646;
@@ -26,7 +28,7 @@ export function readWebpContainer(bytes: Buffer): WebpContainer | undefined {
   }
 
   let offset = 12;
-  let result: WebpContainer = { animated: false, width: 0, height: 0 };
+  let result: WebpContainer = { animated: false, width: 0, height: 0, lossless: false };
   while (offset + 8 <= bytes.length) {
     const id = bytes.toString("ascii", offset, offset + 4);
     const size = bytes.readUInt32LE(offset + 4);
@@ -38,26 +40,25 @@ export function readWebpContainer(bytes: Buffer): WebpContainer | undefined {
     if (id === "VP8X" && size >= 10) {
       const flags = bytes.readUInt8(payload);
       result = {
+        ...result,
         animated: (flags & 0x02) !== 0,
         width: bytes.readUIntLE(payload + 4, 3) + 1,
         height: bytes.readUIntLE(payload + 7, 3) + 1,
       };
-      // VP8X is always first and carries the authoritative canvas size.
-      return result;
-    }
-    if (id === "VP8L" && size >= 5 && bytes.readUInt8(payload) === 0x2f) {
-      const bits = bytes.readUInt32LE(payload + 1);
-      return { animated: false, width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
-    }
-    if (id === "VP8 " && size >= 10) {
+      // VP8X is first and carries the canvas size. Keep scanning for VP8L.
+    } else if (id === "VP8L") {
+      result.lossless = true;
+      if (result.width === 0 && size >= 5 && bytes.readUInt8(payload) === 0x2f) {
+        const bits = bytes.readUInt32LE(payload + 1);
+        result.width = (bits & 0x3fff) + 1;
+        result.height = ((bits >> 14) & 0x3fff) + 1;
+      }
+    } else if (id === "VP8 " && size >= 10 && result.width === 0) {
       // Uncompressed data chunk of a VP8 key frame: 3-byte start code then 2+2 dimensions.
       const start = payload + 3;
       if (bytes.readUInt8(start) === 0x9d && bytes.readUInt8(start + 1) === 0x01 && bytes.readUInt8(start + 2) === 0x2a) {
-        return {
-          animated: false,
-          width: bytes.readUInt16LE(start + 3) & 0x3fff,
-          height: bytes.readUInt16LE(start + 5) & 0x3fff,
-        };
+        result.width = bytes.readUInt16LE(start + 3) & 0x3fff;
+        result.height = bytes.readUInt16LE(start + 5) & 0x3fff;
       }
     }
 

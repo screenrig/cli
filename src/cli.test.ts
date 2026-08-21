@@ -3,7 +3,7 @@ import { PassThrough } from "node:stream";
 import { mkdir, open, readFile, rename, chmod, stat, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
-import { EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, formatEventLine } from "./commands.js";
+import { EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, USAGE, formatEventLine } from "./commands.js";
 import { run, type CliRuntime } from "./main.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import { ExitCode } from "./exit-codes.js";
@@ -1579,7 +1579,54 @@ test("doctor reports checks over the published foundation routes", async () => {
   assert.ok(names.includes("ready"));
   assert.ok(names.includes("version"));
   assert.ok(names.includes("capabilities"));
+  assert.ok(names.includes("cwebp"));
   await rm(configDir, { recursive: true, force: true });
+});
+
+test("doctor reports encoder_libwebp independently of the cwebp fallback", async () => {
+  resetFfmpegToolchainCache();
+  const transport = memoryBackend();
+  const configDir = await testTemp("doctor-cwebp-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const runProcess = async (request: { command: string; args: string[] }) => {
+    if (request.args.includes("-version") && !request.args.includes("-hide_banner")) {
+      return { code: 0, signal: null, stdout: "1.6.0\nlibsharpyuv: 0.4.2\n", stderrTail: "" };
+    }
+    if (request.args.includes("-version")) {
+      return { code: 0, signal: null, stdout: `${path.basename(request.command)} version n8.1.2\n`, stderrTail: "" };
+    }
+    if (request.args.includes("-encoders")) {
+      return { code: 0, signal: null, stdout: " V....D libx264              libx264 H.264\n", stderrTail: "" };
+    }
+    if (request.args.includes("-filters")) {
+      return { code: 0, signal: null, stdout: " .S scale            V->V       Scale.\n", stderrTail: "" };
+    }
+    return { code: 1, signal: null, stdout: "", stderrTail: "" };
+  };
+  const { code, stdout } = await withRuntime(["--json", "doctor"], transport, {
+    fs: fsLike,
+    runProcess: runProcess as unknown as NonNullable<CliRuntime["runProcess"]>,
+  });
+  try {
+    const envelope = JSON.parse(stdout) as {
+      ok: boolean;
+      data: { checks: Array<{ name: string; status: string; detail: string }> };
+    };
+    const byName = Object.fromEntries(envelope.data.checks.map((check) => [check.name, check]));
+    assert.equal(byName.encoder_libwebp?.status, "fail");
+    assert.match(byName.encoder_libwebp?.detail ?? "", /libwebp missing/);
+    assert.doesNotMatch(byName.encoder_libwebp?.detail ?? "", /cwebp/);
+    assert.equal(byName.cwebp?.status, "pass");
+    assert.match(byName.cwebp?.detail ?? "", /1\.6\.0/);
+    assert.equal(code, ExitCode.Unexpected, "encoder_libwebp fail still makes doctor non-zero");
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
 });
 
 test("control-plane payloads and mutation idempotency match the v0.2 architecture", async () => {
@@ -1629,6 +1676,31 @@ test("control-plane payloads and mutation idempotency match the v0.2 architectur
   await rm(configDir, { recursive: true, force: true });
 });
 
+function losslessWebpFixture(width = 8, height = 8): Buffer {
+  const bits = Buffer.alloc(5);
+  bits.writeUInt8(0x2f, 0);
+  bits.writeUInt32LE((width - 1) | ((height - 1) << 14), 1);
+  const chunkSize = Buffer.alloc(4);
+  chunkSize.writeUInt32LE(bits.length);
+  const pad = Buffer.from([0]);
+  const body = Buffer.concat([Buffer.from("WEBP"), Buffer.from("VP8L"), chunkSize, bits, pad]);
+  const size = Buffer.alloc(4);
+  size.writeUInt32LE(body.length);
+  return Buffer.concat([Buffer.from("RIFF"), size, body]);
+}
+
+function lossyWebpFixture(width = 8, height = 8): Buffer {
+  const data = Buffer.alloc(10);
+  data.writeUIntLE(width - 1, 4, 3);
+  data.writeUIntLE(height - 1, 7, 3);
+  const chunkSize = Buffer.alloc(4);
+  chunkSize.writeUInt32LE(data.length);
+  const body = Buffer.concat([Buffer.from("WEBP"), Buffer.from("VP8X"), chunkSize, data]);
+  const size = Buffer.alloc(4);
+  size.writeUInt32LE(body.length);
+  return Buffer.concat([Buffer.from("RIFF"), size, body]);
+}
+
 test("media upload returns usage error and makes no /media/uploads call", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("media-upload-");
@@ -1642,6 +1714,31 @@ test("media upload returns usage error and makes no /media/uploads call", async 
   assert.equal(result.code, ExitCode.Usage);
   const envelope = JSON.parse(result.stdout) as { ok: false; error: { code: string } };
   assert.equal(envelope.error.code, "usage_error");
+  assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 0);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("media upload refuses lossless WebP before declare", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("media-lossless-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const file = path.join(configDir, "mark.webp");
+  await writeFile(file, losslessWebpFixture());
+  const result = await withRuntime(
+    ["--json", "media", "upload", file, "--no-transcode"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(result.code, ExitCode.Usage, result.stdout);
+  const envelope = JSON.parse(result.stdout) as { ok: false; error: { code: string; detail: string } };
+  assert.equal(envelope.error.code, "usage_error");
+  assert.match(envelope.error.detail, /Lossless WebP \(VP8L\) is not accepted/);
+  assert.match(envelope.error.detail, /--no-transcode/);
   assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 0);
   await rm(configDir, { recursive: true, force: true });
 });
@@ -1660,7 +1757,7 @@ test("media upload transcodes before declaring, and uploads only the transcoded 
   const sourceBytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3]);
   await writeFile(source, sourceBytes);
 
-  const encoded = Buffer.from("RIFF----WEBPtranscoded", "utf8");
+  const encoded = lossyWebpFixture(3840, 1920);
   let encodeArgs: string[] = [];
   let temporaryOutput = "";
   const runProcess = async (request: { command: string; args: string[]; onStdoutLine?: (line: string) => void }) => {
@@ -2569,6 +2666,43 @@ test("screen toast posts the closed write body and does not echo the text", asyn
   }
 });
 
+test("screen toast defaults omitted --level to info", async () => {
+  assert.match(USAGE, /screen toast <id> --text TEXT \[--level info\] \[--duration-ms MS\]/);
+  const transport = memoryBackend();
+  const configDir = await testTemp("toast-default-level-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  try {
+    const result = await withRuntime(
+      ["--json", "screen", "toast", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--text", "Lobby closed"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(result.code, 0, result.stdout);
+    const post = transport.calls.find((call) => call.path === "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/toast");
+    assert.ok(post, "must bind POST /api/v1/screens/{id}/toast");
+    assert.deepEqual(post.body, { level: "info", text: "Lobby closed" });
+    const envelope = JSON.parse(result.stdout) as { ok: boolean; data: { expires_at?: string; level?: string } };
+    assert.equal(envelope.ok, true);
+    assert.equal(envelope.data.expires_at, "2026-08-14T17:00:10.000Z");
+    assert.equal(envelope.data.level, undefined);
+
+    const explicit = await withRuntime(
+      ["--json", "screen", "toast", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--level", "error", "--text", "Offline"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(explicit.code, 0, explicit.stdout);
+    assert.deepEqual(transport.calls.at(-1)?.body, { level: "error", text: "Offline" });
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
 test("screen toast rejects invalid level, text, and duration before calling the server", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("toast-usage-");
@@ -2582,7 +2716,6 @@ test("screen toast rejects invalid level, text, and duration before calling the 
   try {
     for (const [argv, detail] of [
       [["screen", "toast"], /requires <id>/],
-      [["screen", "toast", "scr_1", "--text", "Lobby closed"], /requires <id>/],
       [["screen", "toast", "scr_1", "--level", "info"], /requires <id>/],
       [["screen", "toast", "scr_1", "--level", "INFO", "--text", "Lobby closed"], /error, alert, or info/],
       [["screen", "toast", "scr_1", "--level", "warn", "--text", "Lobby closed"], /error, alert, or info/],

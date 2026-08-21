@@ -89,7 +89,7 @@ import {
 } from "./playlist-templates.js";
 import { composeCatalog, formatComposeCatalog } from "./compose/catalog.js";
 import { composeSpec } from "./compose/compose.js";
-import { ffmpegLookup, resolveFfmpegToolchain } from "./media/ffmpeg.js";
+import { cwebpLookup, ffmpegLookup, resolveCwebpToolchain, resolveFfmpegToolchain } from "./media/ffmpeg.js";
 import { createProgressReporter, silentProgressReporter, type ProgressReporter } from "./media/progress.js";
 import {
   DEFAULT_CODEC,
@@ -149,7 +149,7 @@ Commands:
   screen unarchive <id> --if-match REVISION
   screen delete <id> --if-match REVISION
   screen rotate-public-id <id> --if-match REVISION
-  screen toast <id> --level error|alert|info --text TEXT [--duration-ms MS]
+  screen toast <id> --text TEXT [--level info] [--duration-ms MS]
   screen screenshot <id> [--output FILE] [--timeout MS] [--poll-ms MS]
   kv get --application-id ID <key>
   kv set --application-id ID <key> --json-value JSON [--if-match REVISION]
@@ -1209,6 +1209,7 @@ const FEEDBACK_TITLE_MAX = 120;
 const FEEDBACK_BODY_MAX = 4000;
 
 const TOAST_LEVELS = new Set<ScreenToastLevel>(["error", "alert", "info"]);
+const TOAST_DEFAULT_LEVEL: ScreenToastLevel = "info";
 const TOAST_TEXT_MAX = 120;
 const TOAST_MAX_LINES = 3;
 const TOAST_DURATION_MIN = 2000;
@@ -1758,13 +1759,14 @@ async function screenToast(args: ParsedArgs, client: ApiClient): Promise<Command
   if (args.flags["duration-ms"] === true) {
     throw usageError("--duration-ms requires a value.");
   }
-  const level = flagString(args.flags, "level");
+  const rawLevel = flagString(args.flags, "level");
   const rawText = flagString(args.flags, "text");
-  if (!id || !level || rawText === undefined) {
-    throw usageError("screen toast requires <id>, --level error|alert|info, and --text TEXT.");
+  if (!id || rawText === undefined) {
+    throw usageError("screen toast requires <id> and --text TEXT.");
   }
+  const level = rawLevel ?? TOAST_DEFAULT_LEVEL;
   if (!isScreenToastLevel(level)) {
-    throw usageError("--level must be error, alert, or info.");
+    throw usageError("--level must be error, alert, or info. Agent toasts use --level info.");
   }
   const text = trimToastText(rawText);
   const textLength = [...text].length;
@@ -2480,6 +2482,26 @@ async function doctor(
   } catch (err) {
     const detail = err instanceof CliError ? err.problem.detail : err instanceof Error ? redactText(err.message) : "ffmpeg probe failed";
     checks.push({ name: "ffmpeg", status: "fail", detail });
+  }
+  const webpLookup = cwebpLookup(runtime.env);
+  try {
+    const cwebp = await resolveCwebpToolchain(runtime);
+    if (cwebp) {
+      checks.push({
+        name: "cwebp",
+        status: "pass",
+        detail: `${cwebp.cwebp} ${cwebp.version}${cwebp.fromEnv ? " (SCREENRIG_CWEBP)" : ""}`,
+      });
+    } else {
+      checks.push({
+        name: "cwebp",
+        status: "fail",
+        detail: `${webpLookup.cwebp} not available${webpLookup.cwebpFromEnv ? " (SCREENRIG_CWEBP)" : ""}`,
+      });
+    }
+  } catch (err) {
+    const detail = err instanceof CliError ? err.problem.detail : err instanceof Error ? redactText(err.message) : "cwebp probe failed";
+    checks.push({ name: "cwebp", status: "fail", detail });
   }
 
   const client = clientFor(runtime, args, resolved.apiUrl, resolved.token);

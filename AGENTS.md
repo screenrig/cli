@@ -64,15 +64,20 @@ installation, players, backend services, the site, or production deployment.
 - `media upload` transcodes by default, so **ffmpeg and ffprobe are a required
   external dependency** of that command. The CLI never bundles or installs
   them. Resolution order is `SCREENRIG_FFMPEG` / `SCREENRIG_FFPROBE`, then
-  `PATH`. `doctor` reports both binaries, the `libx265`, `libx264`, and
-  `libwebp` encoders, and the `zscale` / `tonemap` filters.
+  `PATH`. Image encode prefers ffmpeg `libwebp` / `libwebp_anim`; if those are
+  missing it falls back to `cwebp` on `PATH` or `SCREENRIG_CWEBP`. `doctor`
+  reports both ffmpeg binaries, the `libx265`, `libx264`, and `libwebp`
+  encoders, the `cwebp` fallback, and the `zscale` / `tonemap` filters. Do not
+  claim ffmpeg has `libwebp` when it does not.
 - Delivery profiles are fixed. Video defaults to H.264 (`libx264`, High, level
   4.2, `-preset fast -crf 23 -maxrate 8M -bufsize 16M`, `-bf 2`, GOP two
   seconds, `yuv420p`, Rec. 709 limited range, AAC 192 kbit/s 48 kHz stereo),
   with H.265 (`libx265`, `hvc1`, Main, CRF 28) under `--codec hevc`. Players
   play from a complete cached file, so the encode does not remux for
-  progressive download (`+faststart`). Images are WebP quality 90, `yuva420p` when the source has
-  alpha, `libwebp_anim` for animation. Both bound **each** edge to 3840 px,
+  progressive download (`+faststart`). Images are lossy WebP quality 90,
+  `yuva420p` when the source has alpha, `libwebp_anim` for animation. When
+  ffmpeg has no libwebp encoder, stills use `cwebp` (`-q 90 -alpha_q 100`,
+  never lossless). Both bound **each** edge to 3840 px,
   preserve aspect, and never upscale. HDR is tone mapped to Rec. 709, with a
   warning-and-fallback path when the build has no libzimg. Do not retune these
   values here; they are a product decision, not a local one.
@@ -94,13 +99,14 @@ installation, players, backend services, the site, or production deployment.
   `boundedSize` plans the encode; ffmpeg rounds differently, so the envelope
   must carry a read-back. Keep the honest fallback: on a failed read-back,
   report the planned size with `dimensions_measured: false` and a warning.
-- `--no-transcode` uploads the source bytes unchanged and never runs ffmpeg.
+- `--no-transcode` uploads accepted source bytes unchanged and never runs ffmpeg.
+  It does not bypass the lossy-WebP delivery policy: VP8L input is rejected.
   Any gate or test that asserts raw-byte upload identity must pass it.
 - `npm run smoke:mock` must stay independent of a host ffmpeg. It uses
   `--no-transcode` for `media upload` and ignores the toolchain checks in
   `doctor`. The transcode paths are covered by `src/media/transcode.test.ts` and
   `src/cli.test.ts` with a fake process runner.
-- This transcoding support is source-ready. No test here proves playback on a
+- This transcoding support is implemented in current source. No test here proves playback on a
   real browser, on player hardware, or in production.
 
 ## Feedback
@@ -130,9 +136,14 @@ installation, players, backend services, the site, or production deployment.
 
 ## Toast
 
-- `screen toast <id> --level error|alert|info --text TEXT [--duration-ms MS]`
+- `screen toast <id> --text TEXT [--level info] [--duration-ms MS]`
   binds `POST /api/v1/screens/{id}/toast`. A toast is stage chrome, not a
   placement: no canvas slot, no layer, no readiness or crossfade.
+- `--level` defaults to `info` when omitted. Agent toasts are info. Info
+  stream toasts are admitted in production. `error` and `alert` remain
+  accepted. Do not map player HTTP errors onto this command. Player-local
+  faults are a different path: error always; alert and info only off
+  production.
 - Latest-wins. Do not add a queue, a cancel command, or a colour field.
   Player chrome chooses the fill; the API never carries one.
 - Text is 1 to 120 characters, line feed is the only accepted line break, and

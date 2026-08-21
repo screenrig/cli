@@ -15,6 +15,33 @@ import { CliError } from "./problems.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 
+function webpChunk(id: string, data: Buffer): Buffer {
+  const size = Buffer.alloc(4);
+  size.writeUInt32LE(data.length);
+  const pad = data.length % 2 ? Buffer.from([0]) : Buffer.alloc(0);
+  return Buffer.concat([Buffer.from(id), size, data, pad]);
+}
+
+function losslessWebp(width = 8, height = 8): Buffer {
+  const bits = Buffer.alloc(5);
+  bits.writeUInt8(0x2f, 0);
+  bits.writeUInt32LE((width - 1) | ((height - 1) << 14), 1);
+  const body = Buffer.concat([Buffer.from("WEBP"), webpChunk("VP8L", bits)]);
+  const size = Buffer.alloc(4);
+  size.writeUInt32LE(body.length);
+  return Buffer.concat([Buffer.from("RIFF"), size, body]);
+}
+
+function lossyVp8xWebp(width = 8, height = 8): Buffer {
+  const data = Buffer.alloc(10);
+  data.writeUIntLE(width - 1, 4, 3);
+  data.writeUIntLE(height - 1, 7, 3);
+  const body = Buffer.concat([Buffer.from("WEBP"), webpChunk("VP8X", data)]);
+  const size = Buffer.alloc(4);
+  size.writeUInt32LE(body.length);
+  return Buffer.concat([Buffer.from("RIFF"), size, body]);
+}
+
 function session(headers: Record<string, unknown> = { "content-type": "image/png", "x-signed": "yes" }): MediaUploadSession {
   return {
     id: "upload_1",
@@ -45,6 +72,21 @@ test("prepares supported media with inferred or explicit content type", async ()
     });
     assert.equal((await prepareMediaUpload(file, "video/webm")).declaration.content_type, "video/webm");
     await assert.rejects(() => prepareMediaUpload(file, "text/plain"), CliError);
+
+    const lossyPath = path.join(dir, "lossy.webp");
+    await writeFile(lossyPath, lossyVp8xWebp());
+    const lossy = await prepareMediaUpload(lossyPath);
+    assert.equal(lossy.declaration.content_type, "image/webp");
+
+    const losslessPath = path.join(dir, "lossless.webp");
+    await writeFile(losslessPath, losslessWebp());
+    await assert.rejects(() => prepareMediaUpload(losslessPath), (error: unknown) => {
+      assert.ok(error instanceof CliError);
+      assert.equal(error.problem.code, "usage_error");
+      assert.match(error.message, /Lossless WebP \(VP8L\) is not accepted/);
+      assert.match(error.message, /--no-transcode/);
+      return true;
+    });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -95,6 +137,28 @@ test("signed PUT preserves exact raw bytes and headers without account credentia
     assert.ok(error instanceof CliError);
     assert.ok(!error.message.includes("secret"));
     assert.ok(!error.message.includes("signature="));
+    assert.match(error.message, /HTTP 403/);
+    return true;
+  });
+  await assert.rejects(() => performSignedMediaPut(prepared, validated, async () => {
+    throw new Error("connect refused");
+  }), (error) => {
+    assert.ok(error instanceof CliError);
+    assert.equal(error.problem.code, "transport_error");
+    assert.equal(error.problem.status, 503);
+    assert.match(error.message, /not ready/);
+    assert.match(error.message, /doctor/);
+    assert.match(error.message, /ready/);
+    assert.ok(!error.message.includes("connect refused"));
+    return true;
+  });
+  await assert.rejects(() => performSignedMediaPut(prepared, validated, async () => ({ status: 503, bodyText: "secret" })), (error) => {
+    assert.ok(error instanceof CliError);
+    assert.equal(error.problem.code, "transport_error");
+    assert.equal(error.problem.status, 503);
+    assert.match(error.message, /not ready/);
+    assert.match(error.message, /doctor/);
+    assert.ok(!error.message.includes("secret"));
     return true;
   });
 });

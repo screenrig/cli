@@ -7,6 +7,8 @@ import { CliError } from "../problems.js";
 import type { CliRuntime, RunProcessRequest, RunProcessResult } from "../runtime.js";
 import { testTemp } from "../test-temp.js";
 import {
+  cwebpLookup,
+  parseCwebpVersion,
   parseEncoderNames,
   parseFilterNames,
   parseProbePayload,
@@ -16,6 +18,7 @@ import {
 } from "./ffmpeg.js";
 import { createProgressReporter, formatBytes, formatClock } from "./progress.js";
 import {
+  boundedImageSize,
   boundedScaleFilter,
   boundedSize,
   classifySource,
@@ -37,6 +40,25 @@ const ENCODER_LISTING = [
   " V....D libx265              libx265 H.265 / HEVC (codec hevc)",
   " V....D libwebp_anim         libwebp WebP image (codec webp)",
   " V....D libwebp              libwebp WebP image (codec webp)",
+  " A....D aac                  AAC (Advanced Audio Coding)",
+].join("\n");
+
+const ENCODER_LISTING_NO_WEBP = [
+  "Encoders:",
+  " V..... = Video",
+  " ------",
+  " V....D libx264              libx264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (codec h264)",
+  " V....D libx265              libx265 H.265 / HEVC (codec hevc)",
+  " A....D aac                  AAC (Advanced Audio Coding)",
+].join("\n");
+
+const ENCODER_LISTING_ANIM_ONLY = [
+  "Encoders:",
+  " V..... = Video",
+  " ------",
+  " V....D libx264              libx264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (codec h264)",
+  " V....D libx265              libx265 H.265 / HEVC (codec hevc)",
+  " V....D libwebp_anim         libwebp WebP image (codec webp)",
   " A....D aac                  AAC (Advanced Audio Coding)",
 ].join("\n");
 
@@ -86,6 +108,60 @@ interface FakeOptions {
   /** Progress fractions the fake ffmpeg reports before finishing. */
   progressSeconds?: number[];
   writeOutputBytes?: number;
+  /** Exact bytes written to a successful encode output. Overrides the default fill. */
+  writeOutput?: Buffer;
+  /** When true, `cwebp -version` succeeds. Default false, so missing libwebp fails closed. */
+  cwebp?: boolean;
+  cwebpVersion?: string;
+  cwebpExit?: number;
+  cwebpStderr?: string;
+}
+
+function webpChunk(id: string, data: Buffer): Buffer {
+  const size = Buffer.alloc(4);
+  size.writeUInt32LE(data.length);
+  const pad = data.length % 2 ? Buffer.from([0]) : Buffer.alloc(0);
+  return Buffer.concat([Buffer.from(id), size, data, pad]);
+}
+
+function lossyVp8xWebp(width = 8, height = 8): Buffer {
+  const data = Buffer.alloc(10);
+  data.writeUIntLE(width - 1, 4, 3);
+  data.writeUIntLE(height - 1, 7, 3);
+  const body = Buffer.concat([Buffer.from("WEBP"), webpChunk("VP8X", data)]);
+  const riffSize = Buffer.alloc(4);
+  riffSize.writeUInt32LE(body.length);
+  return Buffer.concat([Buffer.from("RIFF"), riffSize, body]);
+}
+
+function losslessVp8lWebp(width = 8, height = 8): Buffer {
+  const bits = Buffer.alloc(5);
+  bits.writeUInt8(0x2f, 0);
+  bits.writeUInt32LE((width - 1) | ((height - 1) << 14), 1);
+  const body = Buffer.concat([Buffer.from("WEBP"), webpChunk("VP8L", bits)]);
+  const riffSize = Buffer.alloc(4);
+  riffSize.writeUInt32LE(body.length);
+  return Buffer.concat([Buffer.from("RIFF"), riffSize, body]);
+}
+
+async function writeEncodeOutput(output: string, options: FakeOptions): Promise<void> {
+  if (options.writeOutput) {
+    await writeFile(output, options.writeOutput);
+    return;
+  }
+  if (output.endsWith(".webp")) {
+    await writeFile(output, lossyVp8xWebp(8, 8));
+    return;
+  }
+  await writeFile(output, Buffer.alloc(options.writeOutputBytes ?? 4096, 7));
+}
+
+function isCwebpVersionProbe(request: RunProcessRequest): boolean {
+  return request.args.includes("-version") && !request.args.includes("-hide_banner");
+}
+
+function isCwebpEncode(request: RunProcessRequest): boolean {
+  return request.args.includes("-o") && !request.args.includes("-progress");
 }
 
 function fakeRuntime(options: FakeOptions): { runtime: CliRuntime; calls: RunProcessRequest[]; stderr: PassThrough } {
@@ -110,6 +186,12 @@ function fakeRuntime(options: FakeOptions): { runtime: CliRuntime; calls: RunPro
       }
       return { code: 0, signal: null, stdout: options.probe, stderrTail: "" };
     }
+    if (isCwebpVersionProbe(request)) {
+      if (!options.cwebp) {
+        return { code: null, signal: null, stdout: "", stderrTail: "", spawnError: "spawn cwebp ENOENT" };
+      }
+      return { code: 0, signal: null, stdout: `${options.cwebpVersion ?? "1.6.0"}\n`, stderrTail: "" };
+    }
     if (request.args.includes("-version")) {
       return { code: 0, signal: null, stdout: "ffmpeg version n8.1.2\n", stderrTail: "" };
     }
@@ -118,6 +200,16 @@ function fakeRuntime(options: FakeOptions): { runtime: CliRuntime; calls: RunPro
     }
     if (request.args.includes("-filters")) {
       return { code: 0, signal: null, stdout: FILTER_LISTING, stderrTail: "" };
+    }
+    if (isCwebpEncode(request)) {
+      const outputFlag = request.args.indexOf("-o");
+      const output = outputFlag >= 0 ? String(request.args[outputFlag + 1] ?? "") : "";
+      const exit = options.cwebpExit ?? 0;
+      if (exit === 0 && output) {
+        encodedOutput = output;
+        await writeEncodeOutput(output, options);
+      }
+      return { code: exit, signal: null, stdout: "", stderrTail: options.cwebpStderr ?? "" };
     }
 
     // Encode invocation: emit progress records, then write the output file.
@@ -130,7 +222,7 @@ function fakeRuntime(options: FakeOptions): { runtime: CliRuntime; calls: RunPro
     if (exit === 0) {
       const output = request.args[request.args.length - 1] as string;
       encodedOutput = output;
-      await writeFile(output, Buffer.alloc(options.writeOutputBytes ?? 4096, 7));
+      await writeEncodeOutput(output, options);
     }
     return { code: exit, signal: null, stdout: "", stderrTail: options.encodeStderr ?? "" };
   };
@@ -178,6 +270,9 @@ test("bounds both edges to the delivery box without upscaling", () => {
     assert.equal(size.height % 2, 0);
     assert.ok(size.width <= 3840 && size.height <= 3840);
   }
+  assert.deepEqual(boundedImageSize(2000, 6000, 3840), { width: 1280, height: 3840 });
+  assert.deepEqual(boundedImageSize(640, 480, 3840), { width: 640, height: 480 });
+  assert.deepEqual(boundedImageSize(8000, 4000, 3840), { width: 3840, height: 1920 });
 });
 
 test("scale filter bounds width and height together", () => {
@@ -283,9 +378,45 @@ test("reads WebP containers that ffmpeg cannot demux", () => {
       return b;
     })(),
   ]);
-  assert.deepEqual(readWebpContainer(animated), { animated: true, width: 800, height: 600 });
+  assert.deepEqual(readWebpContainer(animated), { animated: true, width: 800, height: 600, lossless: false });
   assert.equal(readWebpContainer(Buffer.from("not a webp file at all")), undefined);
   assert.equal(readWebpContainer(Buffer.alloc(4)), undefined);
+
+  const vp8lPayload = Buffer.alloc(5);
+  vp8lPayload.writeUInt8(0x2f, 0);
+  vp8lPayload.writeUInt32LE((15) | (31 << 14), 1);
+  const vp8lSize = Buffer.alloc(4);
+  vp8lSize.writeUInt32LE(5);
+  const simpleLossless = Buffer.concat([
+    Buffer.from("RIFF"),
+    (() => { const b = Buffer.alloc(4); b.writeUInt32LE(4 + 8 + 5 + 1); return b; })(),
+    Buffer.from("WEBP"),
+    Buffer.from("VP8L"),
+    vp8lSize,
+    vp8lPayload,
+    Buffer.from([0]),
+  ]);
+  assert.deepEqual(readWebpContainer(simpleLossless), { animated: false, width: 16, height: 32, lossless: true });
+
+  const vp8xThenLossless = Buffer.concat([
+    Buffer.from("RIFF"),
+    (() => { const b = Buffer.alloc(4); b.writeUInt32LE(4 + 8 + 10 + 8 + 5 + 1); return b; })(),
+    Buffer.from("WEBP"),
+    Buffer.from("VP8X"),
+    (() => { const b = Buffer.alloc(4); b.writeUInt32LE(10); return b; })(),
+    (() => {
+      const b = Buffer.alloc(10);
+      b.writeUInt8(0x10, 0);
+      b.writeUIntLE(15, 4, 3);
+      b.writeUIntLE(31, 7, 3);
+      return b;
+    })(),
+    Buffer.from("VP8L"),
+    vp8lSize,
+    vp8lPayload,
+    Buffer.from([0]),
+  ]);
+  assert.deepEqual(readWebpContainer(vp8xThenLossless), { animated: false, width: 16, height: 32, lossless: true });
 });
 
 test("video transcode defaults to the universally playable H.264 profile and reports progress", async () => {
@@ -440,6 +571,7 @@ test("image transcode targets WebP and honours alpha, animation, and the 4K boun
     assert.equal(valueAfter("-quality"), "90");
     assert.ok(args.includes("-frames:v"));
     assert.ok(!args.includes("-loop"));
+    assert.equal(calls.filter((call) => isCwebpEncode(call) || isCwebpVersionProbe(call)).length, 0);
   } finally {
     await rm(dir, { recursive: true, force: true });
     if (result.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });
@@ -467,6 +599,243 @@ test("animated sources use the inter-frame WebP encoder and loop forever", async
   }
 });
 
+test("cwebp lookup mirrors SCREENRIG_FFMPEG and parses cwebp -version", () => {
+  assert.deepEqual(cwebpLookup({}), { cwebp: "cwebp", cwebpFromEnv: false });
+  assert.deepEqual(cwebpLookup({ SCREENRIG_CWEBP: " /opt/libwebp/bin/cwebp " }), {
+    cwebp: "/opt/libwebp/bin/cwebp",
+    cwebpFromEnv: true,
+  });
+  assert.equal(parseCwebpVersion("1.6.0\nlibsharpyuv: 0.4.2\n"), "1.6.0");
+  assert.equal(parseCwebpVersion(""), "unknown");
+});
+
+test("without libwebp, stills fall back to cwebp with quality 90, alpha, and the 4K bound", async () => {
+  resetFfmpegToolchainCache();
+  const dir = await testTemp("transcode-cwebp-");
+  const source = path.join(dir, "poster.png");
+  await writeFile(source, Buffer.alloc(1024, 5));
+  const { runtime, calls } = fakeRuntime({
+    probe: probeJson({
+      codec_name: "png",
+      width: 2000,
+      height: 6000,
+      pix_fmt: "rgba",
+      nb_frames: "1",
+      avg_frame_rate: "0/0",
+    }, { duration: "0", format_name: "png_pipe" }),
+    outputProbe: probeJson({
+      codec_name: "webp",
+      width: 1280,
+      height: 3840,
+      pix_fmt: "yuva420p",
+      nb_frames: "1",
+      avg_frame_rate: "0/0",
+    }, { duration: "0", format_name: "webp_pipe" }),
+    encoders: ENCODER_LISTING_NO_WEBP,
+    cwebp: true,
+  });
+
+  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() });
+  try {
+    assert.equal(result.contentType, "image/webp");
+    assert.equal(result.filename, "poster.webp");
+    assert.equal(result.passthrough, false);
+    assert.equal(result.width, 1280);
+    assert.equal(result.height, 3840);
+    assert.match(result.reason, /cwebp/);
+    assert.equal(calls.filter((call) => call.args.includes("-progress")).length, 0);
+    const encode = calls.filter(isCwebpEncode).at(-1);
+    assert.ok(encode, "cwebp must run the encode");
+    const args = encode.args;
+    const valueAfter = (flag: string) => args[args.indexOf(flag) + 1];
+    assert.equal(encode.command, "cwebp");
+    assert.equal(valueAfter("-q"), "90");
+    assert.equal(valueAfter("-alpha_q"), "100");
+    assert.equal(valueAfter("-resize"), "1280");
+    assert.equal(args[args.indexOf("-resize") + 2], "3840");
+    assert.ok(!args.includes("-lossless"));
+    assert.ok(!args.includes("-hint"));
+    assert.ok(!args.includes("-quiet"));
+    assert.equal(encode.onStdoutLine, undefined, "cwebp stdout is not ffmpeg progress");
+    assert.equal(valueAfter("-o"), result.filePath);
+    assert.equal(path.basename(result.filePath), result.filename);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    if (result.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });
+  }
+});
+
+test("libwebp_anim alone does not make the missing still encoder runnable", async () => {
+  resetFfmpegToolchainCache();
+  const dir = await testTemp("transcode-anim-only-encoder-");
+  const source = path.join(dir, "poster.png");
+  await writeFile(source, Buffer.alloc(1024, 5));
+  const { runtime, calls } = fakeRuntime({
+    probe: probeJson({
+      codec_name: "png",
+      width: 640,
+      height: 480,
+      pix_fmt: "rgba",
+      nb_frames: "1",
+      avg_frame_rate: "0/0",
+    }, { duration: "0", format_name: "png_pipe" }),
+    encoders: ENCODER_LISTING_ANIM_ONLY,
+    cwebp: true,
+  });
+
+  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() });
+  try {
+    assert.equal(calls.filter(isCwebpEncode).length, 1);
+    assert.equal(calls.filter((call) => call.args.includes("-c:v") && call.args.includes("libwebp")).length, 0);
+    assert.match(result.reason, /cwebp/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    if (result.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });
+  }
+});
+
+test("without libwebp, SCREENRIG_CWEBP selects the cwebp binary", async () => {
+  resetFfmpegToolchainCache();
+  const dir = await testTemp("transcode-cwebp-env-");
+  const source = path.join(dir, "mark.jpg");
+  await writeFile(source, Buffer.alloc(512, 4));
+  const { runtime, calls } = fakeRuntime({
+    probe: probeJson({
+      codec_name: "mjpeg",
+      width: 640,
+      height: 480,
+      pix_fmt: "yuvj420p",
+      nb_frames: "1",
+      avg_frame_rate: "0/0",
+    }, { duration: "0", format_name: "image2" }),
+    encoders: ENCODER_LISTING_NO_WEBP,
+    cwebp: true,
+  });
+  runtime.env = { ...runtime.env, SCREENRIG_CWEBP: "/opt/libwebp/bin/cwebp" };
+
+  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() });
+  try {
+    const encode = calls.filter(isCwebpEncode).at(-1);
+    assert.equal(encode?.command, "/opt/libwebp/bin/cwebp");
+    assert.ok(!encode?.args.includes("-resize"), "a source inside the bound must not be upscaled");
+    assert.match(result.reason, /cwebp/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    if (result.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });
+  }
+});
+
+test("cwebp output that is lossless or not WebP is rejected before upload", async () => {
+  resetFfmpegToolchainCache();
+  const dir = await testTemp("transcode-cwebp-reject-");
+  const source = path.join(dir, "poster.png");
+  await writeFile(source, Buffer.alloc(256, 5));
+  const probe = probeJson({
+    codec_name: "png",
+    width: 640,
+    height: 480,
+    pix_fmt: "rgba",
+    nb_frames: "1",
+    avg_frame_rate: "0/0",
+  }, { duration: "0", format_name: "png_pipe" });
+
+  for (const [label, writeOutput, detail] of [
+    ["vp8l", losslessVp8lWebp(640, 480), /lossless WebP \(VP8L\)/],
+    ["garbage", Buffer.alloc(64, 7), /did not write a WebP file/],
+  ] as const) {
+    resetFfmpegToolchainCache();
+    const { runtime, calls } = fakeRuntime({
+      probe,
+      encoders: ENCODER_LISTING_NO_WEBP,
+      cwebp: true,
+      writeOutput,
+    });
+    await assert.rejects(
+      () => transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() }),
+      (error: unknown) => {
+        assert.ok(error instanceof CliError, label);
+        assert.match(error.problem.detail, detail, label);
+        return true;
+      },
+    );
+    assert.equal(calls.filter(isCwebpEncode).length, 1, label);
+  }
+
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("without libwebp or cwebp, image transcode names both missing pieces", async () => {
+  resetFfmpegToolchainCache();
+  const dir = await testTemp("transcode-no-webp-");
+  const scratch = path.join(dir, "tmp");
+  await mkdir(scratch, { recursive: true });
+  const source = path.join(dir, "poster.png");
+  await writeFile(source, Buffer.alloc(64, 3));
+  const { runtime, calls } = fakeRuntime({
+    probe: probeJson({
+      codec_name: "png",
+      width: 800,
+      height: 600,
+      pix_fmt: "rgba",
+      nb_frames: "1",
+      avg_frame_rate: "0/0",
+    }, { duration: "0", format_name: "png_pipe" }),
+    encoders: ENCODER_LISTING_NO_WEBP,
+    cwebp: false,
+  });
+  const previousTmpdir = process.env.TMPDIR;
+  process.env.TMPDIR = scratch;
+  try {
+    await assert.rejects(
+      () => transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() }),
+      (error: unknown) => {
+        assert.ok(error instanceof CliError);
+        assert.match(error.problem.detail, /no libwebp encoder/);
+        assert.match(error.problem.detail, /cwebp is not available/);
+        assert.match(error.problem.detail, /SCREENRIG_CWEBP/);
+        assert.doesNotMatch(error.problem.detail, /or pass --no-transcode to upload the source unchanged/);
+        return true;
+      },
+    );
+    assert.deepEqual(await readdir(scratch), [], "a planning failure must remove its temporary directory");
+    assert.equal(calls.filter(isCwebpEncode).length, 0);
+  } finally {
+    if (previousTmpdir === undefined) {
+      delete process.env.TMPDIR;
+    } else {
+      process.env.TMPDIR = previousTmpdir;
+    }
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("cwebp cannot encode animation when libwebp is missing", async () => {
+  resetFfmpegToolchainCache();
+  const dir = await testTemp("transcode-anim-cwebp-");
+  const source = path.join(dir, "loop.gif");
+  await writeFile(source, Buffer.alloc(512, 9));
+  const { runtime, calls } = fakeRuntime({
+    probe: probeJson({ codec_name: "gif", width: 800, height: 600, nb_frames: "10", pix_fmt: "bgra" },
+      { duration: "1.0", format_name: "gif" }),
+    encoders: ENCODER_LISTING_NO_WEBP,
+    cwebp: true,
+  });
+  try {
+    await assert.rejects(
+      () => transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() }),
+      (error: unknown) => {
+        assert.ok(error instanceof CliError);
+        assert.match(error.problem.detail, /animated WebP/);
+        assert.match(error.problem.detail, /cwebp encodes stills only/);
+        return true;
+      },
+    );
+    assert.equal(calls.filter(isCwebpEncode).length, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("a conforming WebP source is passed through instead of re-encoded", async () => {
   resetFfmpegToolchainCache();
   const dir = await testTemp("transcode-passthrough-");
@@ -484,6 +853,53 @@ test("a conforming WebP source is passed through instead of re-encoded", async (
     assert.equal(calls.filter((call) => call.args.includes("-progress")).length, 0);
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a lossless WebP source is re-encoded under the lossy delivery profile", async () => {
+  resetFfmpegToolchainCache();
+  const dir = await testTemp("transcode-lossless-webp-");
+  const source = path.join(dir, "mark.webp");
+  const vp8lPayload = Buffer.alloc(5);
+  vp8lPayload.writeUInt8(0x2f, 0);
+  vp8lPayload.writeUInt32LE((15) | (31 << 14), 1);
+  const body = Buffer.concat([
+    Buffer.from("WEBP"),
+    Buffer.from("VP8L"),
+    (() => { const size = Buffer.alloc(4); size.writeUInt32LE(vp8lPayload.length); return size; })(),
+    vp8lPayload,
+    Buffer.from([0]),
+  ]);
+  const riffSize = Buffer.alloc(4);
+  riffSize.writeUInt32LE(body.length);
+  await writeFile(source, Buffer.concat([Buffer.from("RIFF"), riffSize, body]));
+  const { runtime, calls } = fakeRuntime({
+    probe: probeJson({
+      codec_name: "webp",
+      width: 16,
+      height: 32,
+      pix_fmt: "rgba",
+      nb_frames: "1",
+      avg_frame_rate: "0/0",
+    }, { duration: "0", format_name: "webp_pipe" }),
+    outputProbe: probeJson({
+      codec_name: "webp",
+      width: 16,
+      height: 32,
+      pix_fmt: "yuva420p",
+      nb_frames: "1",
+      avg_frame_rate: "0/0",
+    }, { duration: "0", format_name: "webp_pipe" }),
+  });
+
+  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() });
+  try {
+    assert.equal(result.passthrough, false);
+    assert.equal(encodeCall(calls)?.args.includes("libwebp"), true);
+    assert.match(result.reason, /converted to WebP quality 90/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    if (result.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });
   }
 });
 

@@ -261,14 +261,16 @@ crossfade. Latest-wins: there is no queue and the CLI exposes no cancel
 command. Level colours are player chrome and are not API fields.
 
 ```sh
+screenrig --json screen toast scr_01 --text "Lobby closed"
 screenrig --json screen toast scr_01 --level info --text "Lobby closed"
 screenrig --json screen toast scr_01 --level alert --text "Doors locked" --duration-ms 5000
 ```
 
-`--level` is one of `error`, `alert`, or `info`. `--text` is 1 to 120
-characters, accepts line feed as the only line break, and allows at most
-three lines. `--duration-ms` is optional, defaults to 10000 on the server, and
-must be between 2000 and 60000 inclusive when supplied.
+`--level` defaults to `info` when omitted. Agent toasts are info. Info stream
+toasts are admitted in production. `error` and `alert` remain accepted.
+`--text` is 1 to 120 characters, accepts line feed as the only line break, and
+allows at most three lines. `--duration-ms` is optional, defaults to 10000 on
+the server, and must be between 2000 and 60000 inclusive when supplied.
 
 The write is idempotent. An exact retry under the same `--idempotency-key`
 returns the original `expires_at` for twenty-four hours. Runtime scan never
@@ -315,10 +317,9 @@ The spec is a fail-closed tree of `Frame`, `Column`, `Row`, `Box`, `Spacer`,
 `label`. Spacing tokens are `xs`, `s`, `m`, `l`, and `xl`. Pins are `top`,
 `bottom`, `left`, and `right`. Do not author `x` or `y` on any node. The root
 `Frame` defines the canvas through required `width` and `height`. Do not author
-`fontSize`. In the current dirty working tree only, `Image`, `Box`, `Row`,
-`Column`, and `Spacer` accept positive `width` and `height` values in px. That
-child-sizing support is source-ready, not on public `main` or in the locked
-plugin bundle. Keep `flex` for remaining space.
+`fontSize`. The current source accepts positive `width` and `height` values in
+px on `Image`, `Box`, `Row`, `Column`, and `Spacer`. This implemented behavior
+is not in the locked plugin bundle. Keep `flex` for remaining space.
 `pin` `top` or `bottom` stretches the full width; `left` or `right` stretches
 the full height. Size a wordmark with `width` and `height`, not `pin`.
 Optional Text `textShadow` is
@@ -366,11 +367,15 @@ ffprobe are external dependencies only for default transcoding.**
 `--no-transcode` uploads the source unchanged and bypasses both tools. The CLI
 does not bundle them. It runs `ffmpeg` and `ffprobe` from `PATH`, or from the absolute
 paths in `SCREENRIG_FFMPEG` and `SCREENRIG_FFPROBE` when those variables are
-set. The install hint asks for ffmpeg 6.0 or newer; the CLI reports the resolved
+set. Image encode prefers ffmpeg `libwebp` / `libwebp_anim`. If those encoders
+are missing, the CLI falls back to `cwebp` on `PATH`, or `SCREENRIG_CWEBP`.
+The install hint asks for ffmpeg 6.0 or newer; the CLI reports the resolved
 version but does not enforce a minimum. What it does enforce is the presence of
 the encoder each profile needs. `screenrig doctor` reports the resolved binaries
-and versions, the `libx265`, `libx264`, and `libwebp` encoders, and whether the
-build carries the `zscale` and `tonemap` filters that HDR tone mapping needs.
+and versions, the `libx265`, `libx264`, and `libwebp` encoders, the `cwebp`
+fallback, and whether the build carries the `zscale` and `tonemap` filters that
+HDR tone mapping needs. `encoder_libwebp` is the ffmpeg encoder only; a fail
+there does not mean stills cannot transcode when `cwebp` passes.
 
 The command also checks the filename. A low-information name such as
 `video.mp4` or `IMG_1234.jpg` adds an advisory `generic_filename` warning to
@@ -391,10 +396,13 @@ Video becomes an MP4:
   for progressive download.
 - The frame rate is capped at 30 fps by default.
 
-Images become WebP at quality 90, in `yuva420p` when the source carries an
+Images become lossy WebP at quality 90, in `yuva420p` when the source carries an
 alpha channel and `yuv420p` otherwise. An animated source uses `libwebp_anim`
-where the build provides it and loops forever. A WebP source that already fits
-the size bound is passed through unchanged instead of re-encoded.
+where the build provides it and loops forever. If ffmpeg has no libwebp encoder,
+a still is encoded with `cwebp` (`-q 90 -alpha_q 100`, never `-lossless`). A
+WebP source that already fits the size bound is passed through unchanged instead
+of re-encoded. `--no-transcode` is the escape hatch for already-correct delivery
+WebP, not the recovery for a missing libwebp encoder.
 
 Both families bound **each** edge to 3840 pixels, so a portrait source is capped
 exactly like a landscape one. Aspect ratio is preserved, and a source smaller
@@ -424,7 +432,7 @@ link, but that saving does not outrank playback on the browser path.
 
 | Flag | Effect |
 | --- | --- |
-| `--no-transcode` | Upload the source bytes unchanged. Neither ffmpeg nor ffprobe is run. |
+| `--no-transcode` | Upload accepted delivery bytes unchanged. ffmpeg, ffprobe, and cwebp are not run; lossless WebP is still rejected. |
 | `--codec h264\|hevc` | Video codec. Default `h264`. `avc` and `h265` are accepted as aliases. |
 | `--max-fps N` | Frame-rate cap, greater than 0 and at most 240. Default 30. |
 | `--max-edge PIXELS` | Bound on each edge, 16 to 3840. Default 3840. |

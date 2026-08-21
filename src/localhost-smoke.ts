@@ -86,7 +86,7 @@ async function main(): Promise<void> {
   // This smoke runs against a mock control plane and must stay independent of
   // whether the host has ffmpeg, so it asserts only the control-plane checks.
   const TOOLCHAIN_CHECKS = new Set([
-    "ffmpeg", "ffprobe", "encoder_libx265", "encoder_libx264", "encoder_libwebp", "filter_hdr_tonemap",
+    "ffmpeg", "ffprobe", "encoder_libx265", "encoder_libx264", "encoder_libwebp", "cwebp", "filter_hdr_tonemap",
   ]);
   const runDoctor = async () => {
     const result = await invoke(["doctor"]);
@@ -217,8 +217,6 @@ async function main(): Promise<void> {
       "screen",
       "toast",
       "scr_PAIRINGAAAAAAAAAAAAAAAA",
-      "--level",
-      "info",
       "--text",
       "Lobby closed",
     );
