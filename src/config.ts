@@ -7,9 +7,33 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
       api_url: string;
       token?: string;
       account_id?: string;
+      agent_id?: string;
+      last_agent?: {
+        id: string;
+        name: string;
+        agent_type: string;
+        state: "revoked";
+        revoked_at?: string;
+      };
+      agent_connection?: {
+        private_jwk: {
+          kty: "OKP";
+          crv: "X25519";
+          x: string;
+          d: string;
+        };
+        name?: string;
+        connection_id?: string;
+        connection_token?: string;
+        approval_url?: string;
+        expires_at?: string;
+        pending_agent_id?: string;
+      };
       enrollment?: {
         client_id: string;
         idempotency_key: string;
+        /** Exact trimmed contact address retained only until enrollment verifies. */
+        email?: string;
       };
       screen_provision?: {
         idempotency_key: string;
@@ -184,7 +208,7 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
     }
 
     /**
-     * Serialize first-use enrollment across CLI processes. The lock lives beside
+     * Serialize explicit enrollment across CLI processes. The lock lives beside
      * the durable config, never in a replaceable plugin/cache directory.
      */
     export async function withConfigLock<T>(
@@ -249,7 +273,10 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
       apiUrl: string;
       token?: string;
       accountId?: string;
+      agentId?: string;
       enrollment?: ScreenRigConfig["enrollment"];
+      agentConnection?: ScreenRigConfig["agent_connection"];
+      lastAgent?: ScreenRigConfig["last_agent"];
       configPath: string;
       source: {
         apiUrl: "flag" | "env" | "config" | "default";
@@ -272,7 +299,7 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
       const envToken = options.fs.env.SCREENRIG_TOKEN;
       if (flagToken !== undefined || envToken) {
         throw configError(
-          "Token flags and SCREENRIG_TOKEN are not supported. ScreenRig enrolls automatically and stores its credential in the user config.",
+          "Token flags and SCREENRIG_TOKEN are not supported. ScreenRig enrollment or passkey-approved agent connection stores a distinct credential in the user config.",
         );
       }
 
@@ -301,7 +328,10 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
         apiUrl: apiUrl.replace(/\/+$/, ""),
         token,
         accountId: file?.account_id,
+        agentId: file?.agent_id,
         enrollment: file?.enrollment,
+        agentConnection: file?.agent_connection,
+        lastAgent: file?.last_agent,
         configPath,
         source: { apiUrl: apiSource, token: tokenSource },
       };

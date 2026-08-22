@@ -12,11 +12,13 @@ import { configError } from "./problems.js";
 export interface EnrollmentCredential {
   token: string;
   accountId?: string;
+  agentId?: string;
 }
 
 export interface EnrollmentState {
   clientId: string;
   idempotencyKey: string;
+  email: string;
 }
 
 export interface EnrollmentRuntime {
@@ -34,6 +36,8 @@ export async function ensureCredential(options: {
   runtime: EnrollmentRuntime;
   enroll: (state: EnrollmentState) => Promise<EnrollmentCredential>;
   verify: (token: string, accountId?: string) => Promise<void>;
+  /** Exact validated, trimmed contact address for a new or legacy pending enrollment. */
+  enrollmentEmail?: string;
   generateClientId?: () => string;
   generateIdempotencyKey?: () => string;
 }): Promise<ResolvedConfig> {
@@ -52,16 +56,30 @@ export async function ensureCredential(options: {
           ...resolved,
           token: current.token,
           accountId: current.account_id,
+          agentId: current.agent_id,
           enrollment: current.enrollment,
+          agentConnection: current.agent_connection,
+          lastAgent: current.last_agent,
           source: { ...resolved.source, token: "config" as const },
         };
       }
       if (current?.enrollment && current.api_url.replace(/\/+$/, "") !== resolved.apiUrl) {
         throw configError("Pending enrollment is bound to a different API URL.");
       }
-      const enrollment = current?.enrollment ?? {
-        client_id: (options.generateClientId ?? (() => randomPrefixedId("cli", 32)))(),
-        idempotency_key: (options.generateIdempotencyKey ?? newIdempotencyKey)(),
+      const existingEnrollment = current?.enrollment;
+      if (existingEnrollment?.email && options.enrollmentEmail && existingEnrollment.email !== options.enrollmentEmail) {
+        throw configError("Pending enrollment is bound to a different contact email. Resume it without changing --email.");
+      }
+      const email = existingEnrollment?.email ?? options.enrollmentEmail;
+      if (!email) {
+        throw configError("Enrollment requires a contact email. Run screenrig agent enroll --email ADDRESS.");
+      }
+      const enrollment = {
+        ...(existingEnrollment ?? {
+          client_id: (options.generateClientId ?? (() => randomPrefixedId("cli", 32)))(),
+          idempotency_key: (options.generateIdempotencyKey ?? newIdempotencyKey)(),
+        }),
+        email,
       };
       if (!/^cli_[A-Za-z0-9_-]{43}$/.test(enrollment.client_id)) {
         throw configError("Enrollment client state is invalid.");
@@ -78,6 +96,7 @@ export async function ensureCredential(options: {
       const credential = await options.enroll({
         clientId: enrollment.client_id,
         idempotencyKey: enrollment.idempotency_key,
+        email: enrollment.email,
       });
       if (!credential.token || credential.token.trim() !== credential.token) {
         throw configError("Enrollment returned an invalid credential.");
@@ -86,6 +105,7 @@ export async function ensureCredential(options: {
         api_url: resolved.apiUrl,
         token: credential.token,
         ...(credential.accountId ? { account_id: credential.accountId } : {}),
+        ...(credential.agentId ? { agent_id: credential.agentId } : {}),
         enrollment,
         updated_at: runtime.now().toISOString(),
       };
@@ -94,6 +114,7 @@ export async function ensureCredential(options: {
         ...resolved,
         token: credential.token,
         accountId: credential.accountId,
+        agentId: credential.agentId,
         enrollment,
         source: { ...resolved.source, token: "config" as const },
       };

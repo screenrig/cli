@@ -9,7 +9,9 @@ const EXPIRES = "2026-08-20T19:10:00.000Z";
 test("derives the dashboard origin from the configured control-plane origin", () => {
   assert.equal(dashboardOriginFor("https://api.screenrig.ai"), "dashboard.screenrig.ai");
   assert.equal(dashboardOriginFor("https://api.screenrig.localhost:8088"), "dashboard.screenrig.localhost:8088");
+  assert.equal(dashboardOriginFor("http://api.screenrig.localhost:8088"), "dashboard.screenrig.localhost:8088");
   assert.throws(() => dashboardOriginFor("http://api.screenrig.ai"), /HTTPS/);
+  assert.throws(() => dashboardOriginFor("http://api.example.invalid:8088"), /HTTPS/);
   assert.throws(() => dashboardOriginFor("https://api.example.invalid"), /api\.screenrig\.ai/);
 });
 
@@ -21,7 +23,7 @@ test("accepts only the fragment-carried link on the derived origin", () => {
   assert.deepEqual(
     validateDashboardLink(
       { url: `http://dashboard.screenrig.localhost:8088/#link=${TOKEN}`, expires_at: EXPIRES },
-      "https://api.screenrig.localhost:8088",
+      "http://api.screenrig.localhost:8088",
     ),
     { url: `http://dashboard.screenrig.localhost:8088/#link=${TOKEN}`, expiresAt: EXPIRES },
   );

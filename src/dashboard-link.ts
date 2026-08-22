@@ -17,8 +17,9 @@ export interface ValidatedDashboardLink {
  */
 export function dashboardOriginFor(apiUrl: string): string {
   const api = new URL(apiUrl);
-  if (api.protocol !== "https:") {
-    throw usageError("dashboard requires the configured HTTPS ScreenRig origin.");
+  const documentedLocalHttp = api.protocol === "http:" && api.hostname === "api.screenrig.localhost";
+  if (api.protocol !== "https:" && !documentedLocalHttp) {
+    throw usageError("dashboard requires HTTPS or the documented HTTP api.screenrig.localhost development origin.");
   }
   const host = api.hostname === "api.screenrig.ai"
     ? "dashboard.screenrig.ai"

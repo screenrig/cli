@@ -117,16 +117,93 @@ paths:
       operationId: enrollCLI
       x-rate-limit-policies: [{ name: cli-enrollment-client, quota: 3, windowSeconds: 3600 }, { name: cli-enrollment-ip, quota: 5, windowSeconds: 3600 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
-      description: Internal bundled-CLI first-use enrollment. Persist client_id and Idempotency-Key before sending; an exact retry redelivers the same permanent credential from its encrypted issuance for ten minutes without creating another account. After that delivery window the durable idempotency result returns credential_issuance_expired; no follow-up mutation is required or supported.
+      description: >-
+        Internal bundled-CLI enrollment. It is an explicit step the agent runs, not an
+        automatic side effect of the first account-scoped command. The body must carry a
+        contact email; a missing or malformed address is rejected with invalid_request and
+        the rejection never echoes it. The address is unique across accounts, so a second
+        enrollment with the same normalized address is rejected with email_conflict, which
+        the same cli-enrollment-client and cli-enrollment-ip policies bound. The address is
+        stored unverified and is never authorization, never a login identifier, and never a
+        way to reach an existing account; attaching another installation to an existing
+        account stays the passkey-approved agent-connection path. Persist client_id, the
+        email, and Idempotency-Key before sending; an exact retry redelivers the same
+        permanent credential from its encrypted issuance for ten minutes without creating
+        another account and without tripping the email conflict. After that delivery window
+        the durable idempotency result returns credential_issuance_expired; no follow-up
+        mutation is required or supported.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CLIEnrollmentRequest" } } } }
       responses:
-        "201": { description: "Anonymous account and permanent bearer credential. Persist and verify the token, then resume the original command. The credential has no scheduled expiry but its encrypted exact-retry delivery envelope exists only until issuance_expires_at.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/CLIEnrollment" } } } }
+        "201": { description: "New account and permanent bearer credential. The account carries the unverified contact address in its trimmed supplied form. Persist and verify the token before reporting enrollment success. The credential has no scheduled expiry but its encrypted exact-retry delivery envelope exists only until issuance_expires_at.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/CLIEnrollment" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "410": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/agent-connections:
+    post:
+      operationId: startAgentConnection
+      description: Starts a ten-minute request to connect another agent to an existing account. The caller supplies an X25519 public JWK and receives a temporary connection credential separately from the browser approval URL. No account bearer, cookie, Origin header, query credential, or Idempotency-Key is accepted. The connection id is descriptive and never authority.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AgentConnectionRequest" } } } }
+      responses:
+        "201": { description: "Temporary connection authority and safe dashboard approval URL. The temporary credential is never placed in the URL.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/AgentConnectionStart" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/agent-connections/{id}/events:
+    get:
+      operationId: streamAgentConnectionEvents
+      description: Status-only SSE authenticated by the temporary ScreenRig-Agent-Connect credential in Authorization. Data contains only AgentConnection metadata and closes on approved, denied, connected, expired, or cancelled. It never contains a bearer, credential envelope, nonce, cookie, or account identifier.
+      security: [{ agentConnectionAuthorization: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Status-only connection SSE., headers: { Cache-Control: { schema: { type: string, enum: ["no-cache, no-store, no-transform"] } }, X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/agent-connections/{id}/credential:
+    post:
+      operationId: collectAgentCredential
+      description: Collects the exact replay-safe credential envelope after approval. The temporary connection bearer authenticates the request, while X25519, HKDF-SHA-256, and AES-256-GCM bind the envelope to the recipient key supplied at connection creation. No plaintext account bearer is returned by this route. The envelope is available only for a fresh ten-minute delivery window and is deleted on activation, cancellation, or expiry.
+      security: [{ agentConnectionAuthorization: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Recipient-bound credential envelope., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/AgentCredentialCollection" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "410": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/agents/self/activate:
+    post:
+      operationId: activateCurrentAgent
+      description: Proves successful envelope decryption and durable local storage by presenting the pending bearer. Atomically activates both the agent and token, deletes the delivery envelope, and is replay-safe with the now-active bearer. It takes no body and does not debit the API meter.
+      security: [{ pendingAgentBearer: [] }]
+      responses:
+        "200": { description: Active agent., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Agent" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "410": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/agents/self:
+    get:
+      operationId: getCurrentAgent
+      description: Returns the agent installation linked to the calling account bearer plus connection_ready. connection_ready is true only when this account has at least one persisted WebAuthn credential and can authorize another agent through the production passkey flow; dashboard users or sessions without a passkey never make it true. Identity status is diagnostic and does not debit the API meter.
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Current agent and production connection readiness., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSelfStatus" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/agents/self/disconnect:
+    post:
+      operationId: disconnectCurrentAgent
+      description: Revokes the calling agent and its bearer without deleting the account or content. Repeating with the same cryptographically valid revoked bearer is a no-op success. Disconnecting the last active agent returns agent_lockout_risk unless allow_last_agent is explicit. Does not debit the API meter.
+      security: [{ revocableAgentBearer: [] }]
+      requestBody: { required: false, content: { application/json: { schema: { $ref: "#/components/schemas/AgentDisconnectRequest" } } } }
+      responses:
+        "204": { description: Agent disconnected., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/account:
     get:
@@ -151,11 +228,13 @@ paths:
   /api/v1/account/credential/revoke:
     post:
       operationId: revokeCurrentAccountCredential
-      description: Revokes exactly the calling account bearer and issues no replacement. The account, screens, and content remain. Repeating this request with the same cryptographically valid already-revoked bearer returns 204 only on this endpoint, allowing safe repair of an ambiguous response; every other account route rejects that bearer. This operation is intrinsically idempotent and does not use an Idempotency-Key. It does not debit the 1-credit API meter.
+      description: Legacy compatibility alias for POST /api/v1/agents/self/disconnect. It disconnects the agent linked to exactly the calling account bearer and issues no replacement. The account, screens, and content remain. Disconnecting the last active agent returns agent_lockout_risk unless allow_last_agent is explicit. Repeating this request with the same cryptographically valid already-revoked bearer returns 204 only on this endpoint, allowing safe repair of an ambiguous response; every other account route rejects that bearer. This operation is intrinsically idempotent and does not use an Idempotency-Key. It does not debit the 1-credit API meter.
       security: [{ accountBearer: [] }]
+      requestBody: { required: false, content: { application/json: { schema: { $ref: "#/components/schemas/AgentDisconnectRequest" } } } }
       responses:
-        "204": { description: "The calling credential is revoked. It cannot be recovered, and no replacement token was issued.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } } }
+        "204": { description: "The bearer-linked agent is disconnected and no replacement token was issued.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } } }
         "401": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
         "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/account/dashboard-links:
@@ -1605,6 +1684,132 @@ paths:
         "200": { description: Dashboard users of the session's account., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardUserList" } } } }
         "401": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/agents:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardAgents
+      description: Lists every pending, active, revoked, cancelled, and expired agent of the session account with safe installation metadata, last use, authenticated request count, and directly attributable metered credits. No bearer, recipient key bytes, envelope, or account identifier is returned.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Account agents., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/AgentList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/agents/{id}/events:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardAgentEvents
+      description: Recent lifecycle events for this agent plus events directly caused by its authenticated bearer. Worker, player, and dashboard-only activity is never inferred as agent activity.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }]
+      responses:
+        "200": { description: Agent events., content: { application/json: { schema: { $ref: "#/components/schemas/EventList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/agents/{id}/commands:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardAgentCommands
+      description: >-
+        What this agent asked for, newest first, as distinct from the events
+        above which describe what changed as a result. One entry per mutating
+        request authenticated as that agent, including activation, self-disconnect,
+        and the legacy credential-revoke alias. Reads are not recorded, because
+        they change nothing and a polling agent would bury every real action.
+
+        Anonymous enrollment and connection creation are excluded. Requests using
+        temporary ScreenRig-Agent-Connect authority are also excluded because that
+        authority has not authenticated an account agent installation.
+
+        Every field is derived from the route this server matched. There is no
+        argument vector, no request body, no header, and no free text anywhere in
+        an entry, so nothing needs redacting and no caller can write chosen text
+        into an operator-visible surface. Resource identifiers appear because an
+        identifier is never authorization and is already published on events.
+
+        Entries expire on the account's own event retention window, so the
+        command log and the events it corresponds to disappear together.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }]
+      responses:
+        "200": { description: Agent command history., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/AgentCommandList" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/agents/{id}/disconnect/assertions:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: startDashboardAgentDisconnectAssertion
+      description: Starts a fresh five-minute passkey assertion bound to this exact agent disconnect. An existing dashboard session alone is insufficient. Development-authentication mode returns an explicit-confirmation challenge instead and never enables that exception in production.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "201": { description: Fresh passkey assertion. Production response., content: { application/json: { schema: { $ref: "#/components/schemas/DashboardAgentAuthorization" } } } }
+        "200": { description: Guarded development confirmation., content: { application/json: { schema: { $ref: "#/components/schemas/DashboardAgentAuthorization" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/agents/{id}/disconnect:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: disconnectDashboardAgent
+      description: Completes the fresh passkey step-up and revokes the selected agent and its bearer. Disconnecting an approved pending agent atomically marks its connection cancelled and deletes its credential issuance, so collection and activation cannot continue. A dashboard user may disconnect the last active agent because the registered passkey remains independent administrative authority.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardAgentAuthorizationComplete" } } } }
+      responses:
+        "204": { description: Agent disconnected. }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/agent-connections/{id}:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardAgentConnection
+      description: Safe review metadata for a connection id opened by the CLI. The id is not authority; the authenticated user selects the account only through a fresh approval assertion.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Safe connection metadata., content: { application/json: { schema: { $ref: "#/components/schemas/AgentConnection" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/agent-connections/{id}/approve/assertions:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: startDashboardAgentApprovalAssertion
+      description: Starts a fresh five-minute passkey assertion bound to this exact connection approval. An existing dashboard session alone is insufficient. Production accounts without a registered passkey cannot approve another agent.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "201": { description: Fresh passkey assertion., content: { application/json: { schema: { $ref: "#/components/schemas/DashboardAgentAuthorization" } } } }
+        "200": { description: Guarded development confirmation., content: { application/json: { schema: { $ref: "#/components/schemas/DashboardAgentAuthorization" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/agent-connections/{id}/approve:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: approveDashboardAgentConnection
+      description: Completes the fresh passkey assertion, binds the connection to the session account, and creates a pending agent and pending bearer. At most 200 live pending or active agents count toward admission; cancelled, revoked, and expired agents do not. The dashboard response contains safe agent metadata only; it never contains the bearer or credential envelope.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardAgentAuthorizationComplete" } } } }
+      responses:
+        "200": { description: Pending agent safe metadata., content: { application/json: { schema: { $ref: "#/components/schemas/Agent" } } } }
+        "409": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/agent-connections/{id}/deny/assertions:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: startDashboardAgentDenialAssertion
+      description: Starts a fresh assertion bound to denying this exact connection.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "201": { description: Fresh passkey assertion., content: { application/json: { schema: { $ref: "#/components/schemas/DashboardAgentAuthorization" } } } }
+        "200": { description: Guarded development confirmation., content: { application/json: { schema: { $ref: "#/components/schemas/DashboardAgentAuthorization" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/agent-connections/{id}/deny:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: denyDashboardAgentConnection
+      description: Completes a fresh step-up and denies this connection without creating an agent or credential.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardAgentAuthorizationComplete" } } } }
+      responses:
+        "204": { description: Connection denied. }
+        default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/summary:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
     get:
@@ -1619,6 +1824,31 @@ paths:
       responses:
         "200": { description: Account summary counters., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardSummary" } } } }
         "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/account:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardAccount
+      description: >-
+        Status, the unverified contact address, enforced limits, usage, retention,
+        and public whole-credit state for the session's account, on the cookie.
+        The address is display-only: no route updates it, and the dashboard signs
+        in with a passkey, never with an address.
+
+        Every derived value is resolved from the account's private plan identifier
+        at read time and none is stored, so a published limit cannot drift from
+        enforcement. The plan identifier itself remains unpublished.
+
+        Credit comes from the same snapshot GET /dashboard/v1/balance reads, so
+        the two can never disagree, and it is absent rather than zero when that
+        snapshot is unavailable. A zero would read as an exhausted account.
+
+        Read-only. This route does not change account configuration.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: "Account status, unverified contact address, enforced limits, usage, retention, and public whole-credit state.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardAccount" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/balance:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
@@ -1874,6 +2104,37 @@ paths:
         "416": { description: "Unsatisfiable, multiple, or malformed range.", headers: { Content-Range: { schema: { type: string } }, Accept-Ranges: { schema: { type: string, enum: [bytes] } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/playlists:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardPlaylists
+      description: >-
+        Lists playlists of the session's account. This family is read-only: the
+        dashboard shows what a screen is playing and never authors it, so there
+        is no create, update, or delete here and there must not be. Authoring
+        stays in the agent conversation and the CLI. (User ruling 2026-08-22.)
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Playlists, headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/PlaylistList" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/playlists/{id}:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    get:
+      operationId: getDashboardPlaylist
+      description: >-
+        Returns one playlist owned by the session's account, with its pages and
+        their placements. Authority is the session's account owning the
+        playlist; the identifier is not authorization, so a playlist of any
+        other account is not_found. There is no dashboard playlist write of any
+        kind.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Playlist, headers: { ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Playlist" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/applications:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
     get:
@@ -2045,6 +2306,13 @@ components:
     SecFetchMode: { name: Sec-Fetch-Mode, in: header, required: false, schema: { type: string } }
     SecFetchDest: { name: Sec-Fetch-Dest, in: header, required: false, schema: { type: string } }
   securitySchemes:
+    agentConnectionAuthorization:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: Temporary `ScreenRig-Agent-Connect <credential>` authority returned only by connection creation. It is never accepted as an account bearer, dashboard cookie, URL parameter, or runtime credential.
+    pendingAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Pending agent bearer accepted only for its own activation, plus the same active bearer for exact acknowledgement replay." }
+    revocableAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active agent bearer, or the same cryptographically verified revoked bearer for an idempotent self-disconnect replay." }
     accountBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: Active account bearer. The credential-revocation operation alone may reverify the same already-revoked bearer to return its idempotent 204 result. }
     nativePairingAuthorization:
       type: http
@@ -2132,10 +2400,67 @@ components:
         screens_per_account: { type: integer, enum: [100], description: "Screen limit of the default plan. Unarchived pairing_pending and active screens count. Archived screens do not. Zero on an account means no screen cap." }
         account_content_bytes: { type: integer, enum: [0], description: "Storage limit of the default plan. Zero means no product storage cap. A custom storage ceiling, when present, still counts committed media, expanded application release trees, and application key/value entries together, including bytes reserved by an upload in flight. The per-request ceilings above are plan-independent transport bounds." }
         features: { type: object, additionalProperties: { type: boolean } }
-    CLIEnrollmentRequest: { type: object, additionalProperties: false, required: [client_id], properties: { client_id: { type: string, pattern: "^cli_[A-Za-z0-9_-]{43}$", description: "Stable anonymous installation identity generated from 32 CSPRNG bytes and persisted before the first request. It is rate-limit material, not an account credential." }, beta_key: { type: string, description: "Required when the server has a configured enrollment beta key. Omit when the server does not gate enrollment." } } }
-    Account: { type: object, additionalProperties: false, required: [id, revision, status, used_bytes, reserved_bytes, screen_count, content_limit_bytes, screen_limit, credit_remaining, created_at, updated_at], properties: { id: { type: string }, revision: { type: integer }, status: { type: string, enum: [active, cancelled, deleted] }, used_bytes: { type: integer, description: "Durable bytes the account owns across media, expanded application release trees, and application key/value entries." }, reserved_bytes: { type: integer, description: "Bytes held by uploads in flight. They count against a custom storage ceiling until the upload commits or its reservation is released." }, screen_count: { type: integer }, content_limit_bytes: { type: integer, description: "Storage ceiling the account's plan allows. Zero means no product storage cap." }, screen_limit: { type: integer, description: "Screen limit the account's plan allows. Zero means no screen cap." }, credit_remaining: { type: integer, minimum: 0, description: "Remaining prepaid credits as a whole integer. Never negative. Enrollment grants the Standard included remainder of 10000 credits." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    CLIEnrollmentRequest: { type: object, additionalProperties: false, required: [client_id, email], properties: { client_id: { type: string, pattern: "^cli_[A-Za-z0-9_-]{43}$", description: "Stable anonymous installation identity generated from 32 CSPRNG bytes and persisted before the first request. It is rate-limit material, not an account credential." }, email: { type: string, format: email, minLength: 3, maxLength: 254, description: "Required account contact address: one plain ASCII addr-spec with an unquoted local part and dotted DNS domain, with no display name, angle bracket, comma, quote, whitespace, or control character. The server trims surrounding whitespace, lowercases the address into a private uniqueness key, and preserves the trimmed capitalization for display. It is unique across accounts: a second enrollment with the same normalized address is rejected with email_conflict. A malformed or missing address is rejected with invalid_request, and the rejection never echoes the address. It is stored unverified, email_verified stays false, and ScreenRig sends no mail. It is contact metadata only: it is never an authorization factor, never a login identifier, and no route accepts an address to look up, log into, or attach to an existing account." }, beta_key: { type: string, description: "Required when the server has a configured enrollment beta key. Omit when the server does not gate enrollment." }, name: { type: string, minLength: 1, maxLength: 80, default: "ScreenRig CLI" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
+    Account: { type: object, additionalProperties: false, required: [id, revision, status, email, email_verified, used_bytes, reserved_bytes, screen_count, content_limit_bytes, screen_limit, credit_remaining, created_at, updated_at], properties: { id: { type: string }, revision: { type: integer }, status: { type: string, enum: [active, cancelled, deleted] }, email: { type: string, minLength: 3, maxLength: 254, description: "Required contact address supplied at enrollment, preserving its capitalization after surrounding whitespace is trimmed. Read-only: no route updates it, and it is published only on an authenticated read of the caller's own account." }, email_verified: { type: boolean, enum: [false], description: "Always false. The address is stored unverified, ScreenRig sends no mail, and no flow sets this true. It is published so a later recovery feature cannot mistake an unverified string for authority. It is not an authorization factor." }, used_bytes: { type: integer, description: "Durable bytes the account owns across media, expanded application release trees, and application key/value entries." }, reserved_bytes: { type: integer, description: "Bytes held by uploads in flight. They count against a custom storage ceiling until the upload commits or its reservation is released." }, screen_count: { type: integer }, content_limit_bytes: { type: integer, description: "Storage ceiling the account's plan allows. Zero means no product storage cap." }, screen_limit: { type: integer, description: "Screen limit the account's plan allows. Zero means no screen cap." }, credit_remaining: { type: integer, minimum: 0, description: "Remaining prepaid credits as a whole integer. Never negative. Enrollment grants the Standard included remainder of 10000 credits." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     RuntimeChrome: { type: object, additionalProperties: false, required: [schema_version, banner], properties: { schema_version: { type: integer, enum: [1] }, banner: { type: "null" } } }
-    CLIEnrollment: { type: object, additionalProperties: false, required: [account, token, issuance_id, issuance_expires_at], properties: { account: { $ref: "#/components/schemas/Account" }, token: { type: string, minLength: 32, description: Permanent account bearer credential. It has no scheduled expiry and is redelivered only through this short-lived encrypted issuance envelope. }, issuance_id: { type: string, description: Opaque identifier for the encrypted exact-retry delivery envelope. }, issuance_expires_at: { type: string, format: date-time, description: Exact-retry redelivery deadline for this credential issuance; ten minutes after first enrollment. Later exact retries return credential_issuance_expired while the permanent token remains valid. } } }
+    CLIEnrollment: { type: object, additionalProperties: false, required: [account, agent, connection_ready, token, issuance_id, issuance_expires_at], properties: { account: { $ref: "#/components/schemas/Account" }, agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, enum: [false], description: "A newly enrolled account has no registered dashboard passkey yet, so production approval of another agent is not ready. Re-read GET /api/v1/agents/self after passkey registration." }, token: { type: string, minLength: 32, description: Permanent bearer credential for exactly this first agent. It has no scheduled expiry and is redelivered only through this short-lived encrypted issuance envelope. }, issuance_id: { type: string, description: Opaque identifier for the encrypted exact-retry delivery envelope. }, issuance_expires_at: { type: string, format: date-time, description: Exact-retry redelivery deadline for this credential issuance; ten minutes after first enrollment. Later exact retries return credential_issuance_expired while the permanent token remains valid. } } }
+    AgentInput: { type: object, additionalProperties: false, properties: { name: { type: string, minLength: 1, maxLength: 80, default: "ScreenRig CLI" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
+    Agent:
+      type: object
+      additionalProperties: false
+      required: [id, name, agent_type, state, authenticated_requests, metered_credits, created_at]
+      properties:
+        id: { type: string, pattern: "^agt_" }
+        name: { type: string, minLength: 1, maxLength: 80 }
+        agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$" }
+        platform: { type: string, maxLength: 80 }
+        version: { type: string, maxLength: 40 }
+        state: { type: string, enum: [pending, active, revoked, cancelled, expired] }
+        public_key_kid: { type: string, description: RFC 7638-style thumbprint of the X25519 recipient public JWK. Public key bytes are not returned. }
+        authenticated_requests: { type: integer, minimum: 0, description: "Best-effort diagnostic count of successful bearer verifications directly attributable to this agent installation. Authentication success is not coupled to this counter write, so a temporarily unavailable metadata update is intentionally omitted rather than failing the authenticated request." }
+        metered_credits: { type: integer, minimum: 0, description: Whole credits directly attributable to requests carrying this agent principal. }
+        created_at: { type: string, format: date-time }
+        connected_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+    AgentList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Agent" } } } }
+    AgentCommandEntry:
+      type: object
+      additionalProperties: false
+      required: [id, command, method, outcome, status, at]
+      description: >-
+        One mutating request an agent made. Every field is derived from the route
+        the server matched, never from the request the agent sent, so an entry
+        cannot carry an argument vector, a body, a header, or any text the caller
+        chose. There is deliberately no field for one.
+      properties:
+        id: { type: string }
+        command:
+          type: string
+          description: >-
+            Route-derived operation name such as screens.archive or media.create.
+            Built from the matched pattern's literal segments, so every part of it
+            is a string the server published. A route with no recognizable shape
+            is reported as unknown rather than echoing the request.
+        method: { type: string, enum: [POST, PUT, PATCH, DELETE], description: "Reads are not recorded: they change nothing." }
+        resource_id: { type: string, description: "Identifier the route matched, when it had one. An identifier is never authorization and is already published on events." }
+        outcome:
+          type: string
+          enum: [ok, blocked, failed]
+          description: "ok is a 2xx or 3xx. blocked is a 4xx, meaning the server refused it. failed is a 5xx, meaning the server broke. The distinction is the first thing an operator wants."
+        problem_code: { type: string, description: "Stable problem code when the request was refused, such as application_in_use. Absent on success." }
+        status: { type: integer, description: HTTP status this server produced. }
+        request_id: { type: string }
+        at: { type: string, format: date-time }
+    AgentCommandList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/AgentCommandEntry" } } } }
+    AgentSelfStatus: { type: object, additionalProperties: false, required: [agent, connection_ready], properties: { agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, description: True only when the account has at least one persisted WebAuthn credential and can authorize another agent through the production passkey flow. Dashboard users and sessions without a passkey do not count. } } }
+    X25519PublicJWK: { type: object, additionalProperties: false, required: [kty, crv, x], properties: { kty: { type: string, enum: [OKP] }, crv: { type: string, enum: [X25519] }, x: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
+    AgentConnectionRequest: { type: object, additionalProperties: false, required: [recipient_public_key], properties: { name: { type: string, minLength: 1, maxLength: 80 }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$" }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 }, recipient_public_key: { $ref: "#/components/schemas/X25519PublicJWK" } } }
+    AgentConnectionStart: { type: object, additionalProperties: false, required: [connection_id, connection_token, approval_url, expires_at], properties: { connection_id: { type: string, pattern: "^acn_" }, connection_token: { type: string, pattern: "^sac_[A-Za-z0-9_-]{43}$", description: Temporary header credential. Never place in a URL or log. }, approval_url: { type: string, format: uri, description: Safe URL containing only the non-authority connection id. }, expires_at: { type: string, format: date-time } } }
+    AgentConnection: { type: object, additionalProperties: false, required: [connection_id, name, agent_type, status, expires_at, created_at], properties: { connection_id: { type: string, pattern: "^acn_" }, name: { type: string }, agent_type: { type: string }, platform: { type: string }, version: { type: string }, status: { type: string, enum: [pending, approved, connected, denied, expired, cancelled] }, expires_at: { type: string, format: date-time }, created_at: { type: string, format: date-time } } }
+    AgentCredentialEnvelope: { type: object, additionalProperties: false, required: [algorithm, ephemeral_public_key, nonce, ciphertext], properties: { algorithm: { type: string, enum: [X25519-HKDF-SHA256-A256GCM] }, ephemeral_public_key: { $ref: "#/components/schemas/X25519PublicJWK" }, nonce: { type: string, description: Unpadded base64url AES-GCM nonce. }, ciphertext: { type: string, description: Unpadded base64url ciphertext and authentication tag. Decrypt with AAD screenrig/agent-credential-envelope/aad/v1 NUL connection_id NUL agent_id. } } }
+    AgentCredentialCollection: { type: object, additionalProperties: false, required: [agent, credential_envelope, issuance_expires_at], properties: { agent: { $ref: "#/components/schemas/Agent" }, credential_envelope: { $ref: "#/components/schemas/AgentCredentialEnvelope" }, issuance_expires_at: { type: string, format: date-time } } }
+    AgentDisconnectRequest: { type: object, additionalProperties: false, properties: { allow_last_agent: { type: boolean, default: false, description: Explicitly accept loss of the last active agent bearer. A registered dashboard passkey remains independent administrative authority. } } }
     Application: { type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: { id: { type: string }, name: { type: string }, revision: { type: integer }, latest_ready_release: { type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     ApplicationList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Application" } } } }
     OperationAccepted: { type: object, additionalProperties: false, required: [id, release_id, operation_id], properties: { id: { type: string, description: Application identifier the upload was attributed to. }, release_id: { type: string, description: "Release identifier created by this upload. Poll the operation and pin this release into a playlist once the operation succeeds." }, operation_id: { type: string } } }
@@ -2500,7 +2825,7 @@ components:
       properties:
         capture_id: { $ref: "#/components/schemas/ScreenshotCaptureID" }
         reason: { type: string, enum: [expired] }
-    Event: { type: object, additionalProperties: true, required: [cursor, sequence, type, severity, message, at], properties: { cursor: { type: string }, sequence: { type: integer }, type: { type: string }, severity: { type: string }, request_id: { type: string }, operation_id: { type: string }, message: { type: string }, actor: { $ref: "#/components/schemas/EventActor" }, resource: { type: object, additionalProperties: true }, details: { type: object, additionalProperties: true }, at: { type: string } } }
+    Event: { type: object, additionalProperties: true, required: [cursor, sequence, type, severity, message, at], properties: { cursor: { type: string }, sequence: { type: integer }, type: { type: string }, severity: { type: string }, request_id: { type: string }, operation_id: { type: string }, message: { type: string }, actor: { $ref: "#/components/schemas/EventActor" }, agent: { $ref: "#/components/schemas/EventAgent" }, resource: { type: object, additionalProperties: true }, details: { type: object, additionalProperties: true }, at: { type: string } } }
     EventActor:
       type: object
       additionalProperties: false
@@ -2955,6 +3280,15 @@ components:
       description: Optional registration-start body. Send display_name with the setup cookie; omit the body entirely with a session cookie.
       properties:
         display_name: { $ref: "#/components/schemas/DashboardDisplayName" }
+    EventAgent:
+      type: object
+      additionalProperties: false
+      required: [agent_id, name, agent_type]
+      description: Safe agent principal attribution present only when the event was directly caused by an authenticated agent bearer. It is never authorization.
+      properties:
+        agent_id: { type: string, pattern: "^agt_" }
+        name: { type: string, maxLength: 80 }
+        agent_type: { type: string, maxLength: 32 }
     DashboardPasskeyRegistration:
       type: object
       additionalProperties: false
@@ -3016,6 +3350,22 @@ components:
         created_at: { type: string, format: date-time }
         last_seen_at: { type: string, format: date-time, description: Instant this user last presented a valid session. Absent until the first authenticated request after creation. }
     DashboardUserList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/DashboardUser" } } } }
+    DashboardAgentAuthorization:
+      type: object
+      additionalProperties: false
+      description: Production returns ceremony_id and request_options. Development-authentication mode returns dev_auth=true and confirmation_required=true instead; that exception is server-gated and unavailable in production.
+      properties:
+        ceremony_id: { type: string }
+        request_options: { type: object, additionalProperties: true }
+        dev_auth: { type: boolean, enum: [true] }
+        confirmation_required: { type: boolean, enum: [true] }
+    DashboardAgentAuthorizationComplete:
+      type: object
+      additionalProperties: false
+      properties:
+        ceremony_id: { type: string }
+        credential: { type: object, additionalProperties: true }
+        dev_confirm: { type: boolean, description: Must be true only on a server running dashboard development authentication; rejected as a substitute for a production passkey assertion. }
     DashboardSummary:
       type: object
       additionalProperties: false
@@ -3024,6 +3374,25 @@ components:
         screens: { $ref: "#/components/schemas/DashboardScreenSummary" }
         media: { $ref: "#/components/schemas/DashboardMediaSummary" }
         applications: { $ref: "#/components/schemas/DashboardApplicationSummary" }
+    DashboardAccount:
+      type: object
+      additionalProperties: false
+      required: [status, created_at, email, email_verified, screen_count, screen_limit, used_bytes, reserved_bytes, content_limit_bytes, event_retention_days]
+      description: Status, contact address, enforced limits, usage, retention, and public whole-credit state for one account. The internal plan identifier remains unpublished.
+      properties:
+        status: { type: string, enum: [active, cancelled, deleted] }
+        created_at: { type: string, format: date-time }
+        email: { type: string, minLength: 3, maxLength: 254, description: "Required contact address supplied at enrollment, preserving its capitalization after surrounding whitespace is trimmed. Display only. No dashboard route updates it, and it is never an authorization factor: the dashboard signs in with a passkey, never with an address." }
+        email_verified: { type: boolean, enum: [false], description: "Always false. The address is stored unverified and ScreenRig sends no mail. Show it as unverified; do not present it as a recovery channel." }
+        screen_count: { type: integer, minimum: 0, description: Paired and pairing-pending screens together. Archived screens are excluded. }
+        screen_limit: { type: integer, minimum: 0, description: "Plan screen cap. Zero means no cap, not a cap of zero." }
+        used_bytes: { type: integer, minimum: 0, description: "Every durable byte the account owns: committed media, expanded release trees, and key/value entries." }
+        reserved_bytes: { type: integer, minimum: 0, description: Bytes held by uploads in flight. }
+        content_limit_bytes: { type: integer, minimum: 0, description: "Plan storage cap. Zero means no cap, not a cap of zero." }
+        event_retention_days: { type: integer, minimum: 1, description: "Plan event retention window. Agent command records are events, so they expire on this same window." }
+        credit_remaining: { type: integer, minimum: 0, description: "Absent when the credit snapshot is unavailable, which is not the same as zero." }
+        credit_included: { type: integer, minimum: 0 }
+        credit_reset: { type: string, format: date-time }
     DashboardBalance:
       type: object
       additionalProperties: false
@@ -3080,4 +3449,4 @@ components:
         errors: { type: array, items: { $ref: "#/components/schemas/ProblemField" } }
         next: { $ref: "#/components/schemas/NextAction" }
 x-problem-registry: ./problems.yaml
-x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_account_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, schema_incompatible, not_ready, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, dashboard_link_invalid, dashboard_link_expired, dashboard_link_consumed, passkey_invalid, passkeys_disabled, application_in_use]
+x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_account_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, schema_incompatible, not_ready, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, dashboard_link_invalid, dashboard_link_expired, dashboard_link_consumed, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk]

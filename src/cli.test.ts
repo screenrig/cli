@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createCipheriv, createHash, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync } from "node:crypto";
 import { PassThrough } from "node:stream";
 import { mkdir, open, readFile, rename, chmod, stat, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
@@ -14,6 +15,18 @@ import type { Operation } from "./adapters/protocol.js";
 import { SDK_PROTOCOL_VERSION } from "./adapters/sdk-injection.js";
 import { testTemp } from "./test-temp.js";
 import { resetFfmpegToolchainCache } from "./media/ffmpeg.js";
+import { generateAgentConnectionKey } from "./agent-identity.js";
+
+const TEST_AGENT = {
+  id: "agt_AAAAAAAAAAAAAAAAAAAAAAAA",
+  name: "ScreenRig CLI",
+  agent_type: "cli",
+  state: "active",
+  authenticated_requests: 1,
+  metered_credits: 0,
+  created_at: "2026-08-14T17:00:00.000Z",
+  connected_at: "2026-08-14T17:00:00.000Z",
+} as const;
 
 function collect(stream: PassThrough): Promise<string> {
   return new Promise((resolve) => {
@@ -63,32 +76,78 @@ async function withRuntime(
   return { code, stdout: await outP, stderr: await errP, configDir };
 }
 
-test("first authenticated use enrolls, persists, verifies, resumes, and pairs the screen", async () => {
+async function withAuthenticatedRuntime(
+  argv: string[],
+  transport: FakeTransport,
+  extra?: Partial<CliRuntime>,
+): Promise<{ code: number; stdout: string; stderr: string; configDir: string }> {
+  const configDir = extra?.fs ? "" : await testTemp("cfg-authenticated-");
+  const fsLike: ConfigFs = extra?.fs ?? {
+    mkdir,
+    open,
+    rename,
+    rm,
+    chmod,
+    stat,
+    homedir: () => configDir,
+    env: { XDG_CONFIG_HOME: configDir },
+  };
+  const configPath = fsLike.env.SCREENRIG_CONFIG
+    ?? path.join(fsLike.env.XDG_CONFIG_HOME ?? fsLike.homedir(), "screenrig", "config.json");
+  const existing = await readConfigFile(configPath, fsLike);
+  if (!existing?.token) {
+    await writeConfigAtomic(configPath, {
+      ...(existing ?? {}),
+      api_url: existing?.api_url ?? "https://api.screenrig.ai",
+      token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+      agent_id: TEST_AGENT.id,
+    }, fsLike);
+  }
+  const result = await withRuntime(argv, transport, { ...extra, fs: fsLike });
+  return { ...result, configDir };
+}
+
+test("pairing requires explicit enrollment and then preserves the original pairing behavior", async () => {
   const transport = memoryBackend();
-  const { code, stdout, configDir } = await withRuntime(
-    ["--json", "screen", "pair", "abc234", "--label", "Lobby"],
+  const configDir = await testTemp("explicit-enrollment-pair-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const missing = await withRuntime(["--json", "screen", "pair", "abc234", "--label", "Lobby"], transport, { fs: fsLike });
+  assert.equal(missing.code, ExitCode.Auth);
+  const blocked = JSON.parse(missing.stdout) as { error: { code: string; next: { command: string } } };
+  assert.equal(blocked.error.code, "not_enrolled");
+  assert.equal(blocked.error.next.command, "screenrig agent enroll --email ADDRESS");
+  assert.equal(transport.calls.length, 0);
+
+  const enrolled = await withRuntime(
+    ["--json", "agent", "enroll", "--email", "Owner@example.com"],
     transport,
+    { fs: fsLike },
   );
-  assert.equal(code, 0);
-  const envelope = JSON.parse(stdout) as {
+  assert.equal(enrolled.code, 0, enrolled.stdout);
+  const paired = await withRuntime(["--json", "screen", "pair", "abc234", "--label", "Lobby"], transport, { fs: fsLike });
+  assert.equal(paired.code, 0, paired.stdout);
+  const envelope = JSON.parse(paired.stdout) as {
     ok: boolean;
     data: { public_url: string; screen: { id: string; label: string } };
   };
   assert.equal(envelope.ok, true);
   assert.equal(envelope.data.screen.label, "Lobby");
   assert.equal(envelope.data.public_url, "https://play.screenrig.ai/s/scr_public_pairing");
-  assert.ok(!stdout.includes("sr_live_tokidAAAAAAAAAAAAAAAA_AAAA"));
+  assert.ok(!paired.stdout.includes("sr_live_tokidAAAAAAAAAAAAAAAA_AAAA"));
   const methods = transport.calls.map((call) => `${call.method} ${call.path}`);
-  assert.deepEqual(methods.slice(0, 3), [
+  assert.deepEqual(methods, [
     "POST /api/v1/enrollments",
     "GET /api/v1/account",
+    "GET /api/v1/agents/self",
     "POST /api/v1/screens/pair",
   ]);
   assert.ok(transport.calls[0]?.headers?.["idempotency-key"]);
   assert.ok(transport.calls[0]?.headers?.["x-request-id"]);
-  const enrollBody = transport.calls[0]?.body as { client_id?: string; beta_key?: string };
+  const enrollBody = transport.calls[0]?.body as { client_id?: string; email?: string };
   assert.match(enrollBody.client_id ?? "", /^cli_[A-Za-z0-9_-]{43}$/);
-  assert.deepEqual(Object.keys(enrollBody).sort(), ["client_id"]);
+  assert.equal(enrollBody.email, "Owner@example.com");
+  assert.deepEqual(Object.keys(enrollBody).sort(), ["agent_type", "client_id", "email", "platform", "version"]);
   const verification = transport.calls.find((call) => call.path === "/api/v1/account");
   assert.match(verification?.headers?.authorization ?? "", /^Bearer sr_live_/);
   const pairing = transport.calls.find((call) => call.path === "/api/v1/screens/pair");
@@ -117,22 +176,23 @@ test("first authenticated use enrolls, persists, verifies, resumes, and pairs th
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("first-use enroll includes beta_key when --beta-key is set", async () => {
+test("explicit enrollment includes beta_key when --beta-key is set", async () => {
   const transport = memoryBackend();
   const { code, stdout, configDir } = await withRuntime(
-    ["--json", "--beta-key", "screenrig-beta-program", "account", "show"],
+    ["--json", "--beta-key", "screenrig-beta-program", "agent", "enroll", "--email", "owner@example.com"],
     transport,
   );
   assert.equal(code, 0, stdout);
   const enroll = transport.calls.find((call) => call.path === "/api/v1/enrollments");
-  const body = enroll?.body as { client_id?: string; beta_key?: string };
+  const body = enroll?.body as { client_id?: string; beta_key?: string; email?: string };
   assert.match(body.client_id ?? "", /^cli_[A-Za-z0-9_-]{43}$/);
   assert.equal(body.beta_key, "screenrig-beta-program");
-  assert.deepEqual(Object.keys(body).sort(), ["beta_key", "client_id"]);
+  assert.equal(body.email, "owner@example.com");
+  assert.deepEqual(Object.keys(body).sort(), ["agent_type", "beta_key", "client_id", "email", "platform", "version"]);
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("first-use enroll includes beta_key from SCREENRIG_BETA_KEY when the flag is unset", async () => {
+test("explicit enrollment includes beta_key from SCREENRIG_BETA_KEY when the flag is unset", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("enroll-beta-env-");
   const fsLike = {
@@ -145,17 +205,21 @@ test("first-use enroll includes beta_key from SCREENRIG_BETA_KEY when the flag i
     homedir: () => configDir,
     env: { XDG_CONFIG_HOME: configDir, SCREENRIG_BETA_KEY: "screenrig-beta-program" },
   };
-  const result = await withRuntime(["--json", "account", "show"], transport, { fs: fsLike });
+  const result = await withRuntime(["--json", "agent", "enroll", "--email", "owner@example.com"], transport, { fs: fsLike });
   assert.equal(result.code, 0, result.stdout);
   const enroll = transport.calls.find((call) => call.path === "/api/v1/enrollments");
   assert.deepEqual(enroll?.body, {
     client_id: (enroll?.body as { client_id: string }).client_id,
+    email: "owner@example.com",
     beta_key: "screenrig-beta-program",
+    agent_type: "cli",
+    platform: `${process.platform}/${process.arch}`,
+    version: "0.1.0",
   });
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("first-use enroll prefers --beta-key over SCREENRIG_BETA_KEY", async () => {
+test("explicit enrollment prefers --beta-key over SCREENRIG_BETA_KEY", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("enroll-beta-flag-wins-");
   const fsLike = {
@@ -169,13 +233,570 @@ test("first-use enroll prefers --beta-key over SCREENRIG_BETA_KEY", async () => 
     env: { XDG_CONFIG_HOME: configDir, SCREENRIG_BETA_KEY: "from-env" },
   };
   const result = await withRuntime(
-    ["--json", "--beta-key", "from-flag", "account", "show"],
+    ["--json", "--beta-key", "from-flag", "agent", "enroll", "--email", "owner@example.com"],
     transport,
     { fs: fsLike },
   );
   assert.equal(result.code, 0, result.stdout);
   const enroll = transport.calls.find((call) => call.path === "/api/v1/enrollments");
   assert.equal((enroll?.body as { beta_key?: string }).beta_key, "from-flag");
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("agent enroll requires contact email, trims it, and creates the first named agent without echoing it", async () => {
+  const transport = memoryBackend();
+  const result = await withRuntime(["--json", "agent", "enroll", "--email", " Owner@example.com ", "--name", "Office Codex"], transport);
+  assert.equal(result.code, 0, result.stdout);
+  const envelope = JSON.parse(result.stdout) as { data: { status: string; connection_ready: boolean; agent: { id: string; name: string } } };
+  assert.equal(envelope.data.status, "active");
+  assert.equal(envelope.data.connection_ready, false);
+  assert.equal(envelope.data.agent.id, TEST_AGENT.id);
+  const enrollment = transport.calls.find((call) => call.path === "/api/v1/enrollments");
+  assert.deepEqual(enrollment?.body, {
+    client_id: (enrollment?.body as { client_id: string }).client_id,
+    email: "Owner@example.com",
+    name: "Office Codex",
+    agent_type: "cli",
+    platform: `${process.platform}/${process.arch}`,
+    version: "0.1.0",
+  });
+  assert.deepEqual(transport.calls.map((call) => call.path), [
+    "/api/v1/enrollments",
+    "/api/v1/account",
+    "/api/v1/agents/self",
+  ]);
+  assert.doesNotMatch(result.stdout, /sr_live_|issuance|client_id|Owner@example\.com/);
+  await rm(result.configDir, { recursive: true, force: true });
+});
+
+test("agent enroll rejects missing or malformed contact email before the network without echoing input", async () => {
+  const missingTransport = new FakeTransport();
+  const missing = await withRuntime(["--json", "agent", "enroll"], missingTransport);
+  assert.equal(missing.code, ExitCode.Usage);
+  assert.match(JSON.parse(missing.stdout).error.detail, /requires --email ADDRESS/i);
+  assert.equal(missingTransport.calls.length, 0);
+
+  const malformedAddress = "Private Person <private@example.com>";
+  const malformedTransport = new FakeTransport();
+  const malformed = await withRuntime(
+    ["--json", "agent", "enroll", "--email", malformedAddress],
+    malformedTransport,
+  );
+  assert.equal(malformed.code, ExitCode.Usage);
+  assert.doesNotMatch(malformed.stdout, /Private Person|private@example\.com/);
+  assert.equal(malformedTransport.calls.length, 0);
+
+  await rm(missing.configDir, { recursive: true, force: true });
+  await rm(malformed.configDir, { recursive: true, force: true });
+});
+
+test("email_conflict is terminal and generic, clears only pending enrollment, and requires a new explicit enrollment", async () => {
+  const configDir = await testTemp("email-conflict-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const rejectedAddress = "Victim@example.com";
+  const conflict = new FakeTransport().on("POST", "/api/v1/enrollments", () => ({
+    status: 409,
+    headers: { "content-type": "application/problem+json" },
+    body: {
+      type: "https://screenrig.ai/problems/email-conflict",
+      title: `Conflict for ${rejectedAddress}`,
+      status: 409,
+      detail: `${rejectedAddress} is already present`,
+      code: "email_conflict",
+      errors: [{ field: "email", detail: rejectedAddress }],
+    },
+  }));
+  const rejected = await withRuntime(
+    ["--json", "agent", "enroll", "--email", rejectedAddress],
+    conflict,
+    { fs: fsLike },
+  );
+  assert.equal(rejected.code, ExitCode.Conflict, rejected.stdout);
+  assert.doesNotMatch(rejected.stdout, /Victim@example\.com/i);
+  assert.doesNotMatch(rejected.stdout, /\[redacted-email\]/i);
+  const envelope = JSON.parse(rejected.stdout) as { error: { code: string; errors: unknown[]; next: { command: string } } };
+  assert.equal(envelope.error.code, "email_conflict");
+  assert.deepEqual(envelope.error.errors, []);
+  assert.equal(envelope.error.next.command, "screenrig agent connect");
+  const configPath = path.join(configDir, "screenrig", "config.json");
+  assert.equal((await readConfigFile(configPath, fsLike))?.enrollment, undefined);
+
+  const retried = await withRuntime(
+    ["--json", "agent", "enroll", "--email", "different@example.com"],
+    memoryBackend(),
+    { fs: fsLike },
+  );
+  assert.equal(retried.code, 0, retried.stdout);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("every authenticated command reports not_enrolled instead of enrolling", async () => {
+  for (const argv of [
+    ["--json", "account", "show"],
+    ["--json", "dashboard"],
+    ["--json", "screen", "list"],
+    ["--json", "media", "list"],
+    ["--json", "playlist", "list"],
+    ["--json", "events", "list"],
+    ["--json", "feedback", "list"],
+  ]) {
+    const transport = memoryBackend();
+    const result = await withRuntime(argv, transport);
+    assert.equal(result.code, ExitCode.Auth, argv.join(" "));
+    const envelope = JSON.parse(result.stdout) as { ok: boolean; error: { code: string; next: { command: string } } };
+    assert.equal(envelope.ok, false, argv.join(" "));
+    assert.equal(envelope.error.code, "not_enrolled", argv.join(" "));
+    assert.equal(envelope.error.next.command, "screenrig agent enroll --email ADDRESS", argv.join(" "));
+    assert.equal(transport.calls.length, 0, argv.join(" "));
+    await rm(result.configDir, { recursive: true, force: true });
+  }
+});
+
+test("agent status and deprecated auth status never enroll a missing installation", async () => {
+  const transport = new FakeTransport();
+  const status = await withRuntime(["--json", "agent", "status"], transport);
+  assert.equal(status.code, 0, status.stdout);
+  assert.equal(JSON.parse(status.stdout).data.status, "not_enrolled");
+  assert.equal(transport.calls.length, 0);
+  const legacy = await withRuntime(["--json", "auth", "status"], transport);
+  assert.equal(legacy.code, 0, legacy.stdout);
+  assert.equal(JSON.parse(legacy.stdout).data.status, "not_enrolled");
+  assert.deepEqual(JSON.parse(legacy.stdout).warnings.map((item: { code: string }) => item.code), ["deprecated_command"]);
+  assert.equal(transport.calls.length, 0);
+  await rm(status.configDir, { recursive: true, force: true });
+  await rm(legacy.configDir, { recursive: true, force: true });
+});
+
+test("agent status reports whether a persisted passkey can authorize another agent", async () => {
+  const transport = new FakeTransport();
+  const configDir = await testTemp("agent-status-ready-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
+    api_url: "https://api.screenrig.ai",
+    token: `sr_live_status_${"S".repeat(43)}`,
+    account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    agent_id: TEST_AGENT.id,
+  }, fsLike);
+  transport.on("GET", "/api/v1/agents/self", () => ({
+    status: 200,
+    headers: { "cache-control": "private, no-store" },
+    body: { agent: TEST_AGENT, connection_ready: true },
+  }));
+  const result = await withRuntime(["--json", "agent", "status"], transport, { fs: fsLike });
+  assert.equal(result.code, 0, result.stdout);
+  assert.equal(JSON.parse(result.stdout).data.connection_ready, true);
+  assert.deepEqual(transport.calls.map((call) => call.path), ["/api/v1/agents/self"]);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+function agentConnectionEnvelope(recipient: { kty: "OKP"; crv: "X25519"; x: string }) {
+  const connectionId = "acn_AAAAAAAAAAAAAAAAAAAAAAAA";
+  const agentId = "agt_CONNECTEDAAAAAAAAAAAAAAAA";
+  const pendingToken = `sr_live_connected_${"P".repeat(43)}`;
+  const ephemeral = generateKeyPairSync("x25519");
+  const ephemeralJwk = ephemeral.publicKey.export({ format: "jwk" });
+  const shared = diffieHellman({
+    privateKey: ephemeral.privateKey,
+    publicKey: createPublicKey({ key: recipient as unknown as import("node:crypto").JsonWebKey, format: "jwk" }),
+  });
+  const salt = createHash("sha256").update(`screenrig/agent-credential-envelope/salt/v1\0${connectionId}`).digest();
+  const key = Buffer.from(hkdfSync("sha256", shared, salt, Buffer.from("screenrig/agent-credential-envelope/key/v1"), 32));
+  const nonce = Buffer.alloc(12, 3);
+  const cipher = createCipheriv("aes-256-gcm", key, nonce);
+  cipher.setAAD(Buffer.from(`screenrig/agent-credential-envelope/aad/v1\0${connectionId}\0${agentId}`));
+  const plaintext = Buffer.from(JSON.stringify({ token: pendingToken, agent_id: agentId, connection_id: connectionId }));
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final(), cipher.getAuthTag()]);
+  const pendingAgent = {
+    id: agentId,
+    name: "Office Codex",
+    agent_type: "cli",
+    platform: `${process.platform}/${process.arch}`,
+    version: "0.1.0",
+    state: "pending" as const,
+    authenticated_requests: 0,
+    metered_credits: 0,
+    created_at: "2026-08-14T17:00:00.000Z",
+  };
+  return {
+    connectionId,
+    agentId,
+    pendingToken,
+    pendingAgent,
+    collection: {
+      agent: pendingAgent,
+      credential_envelope: {
+        algorithm: "X25519-HKDF-SHA256-A256GCM",
+        ephemeral_public_key: { kty: "OKP", crv: "X25519", x: ephemeralJwk.x },
+        nonce: nonce.toString("base64url"),
+        ciphertext: ciphertext.toString("base64url"),
+      },
+      issuance_expires_at: "2026-08-14T17:10:00.000Z",
+    },
+  };
+}
+
+test("agent connect opens the safe approval URL, consumes status-only SSE, and activates a distinct credential", async () => {
+  const transport = new FakeTransport();
+  let sealed: ReturnType<typeof agentConnectionEnvelope> | undefined;
+  const connectionToken = `sac_${"C".repeat(43)}`;
+  transport.on("POST", "/api/v1/agent-connections", (req) => {
+    const input = req.body as { recipient_public_key: { kty: "OKP"; crv: "X25519"; x: string } };
+    sealed = agentConnectionEnvelope(input.recipient_public_key);
+    return {
+      status: 201,
+      headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
+      body: {
+        connection_id: sealed.connectionId,
+        connection_token: connectionToken,
+        approval_url: `https://dashboard.screenrig.ai/agents/connect/${sealed.connectionId}`,
+        expires_at: "2026-08-14T17:10:00.000Z",
+      },
+    };
+  });
+  transport.pushStream(`event: agent.connection\ndata: ${JSON.stringify({
+    connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA",
+    name: "Office Codex",
+    agent_type: "cli",
+    status: "approved",
+    expires_at: "2026-08-14T17:10:00.000Z",
+    created_at: "2026-08-14T17:00:00.000Z",
+  })}\n\n`);
+  transport.on("POST", /\/api\/v1\/agent-connections\/acn_.*\/credential/, (req) => {
+    assert.equal(req.headers?.authorization, `ScreenRig-Agent-Connect ${connectionToken}`);
+    return { status: 200, headers: { "cache-control": "private, no-store" }, body: sealed!.collection };
+  });
+  transport.on("POST", "/api/v1/agents/self/activate", (req) => {
+    assert.equal(req.headers?.authorization, `Bearer ${sealed!.pendingToken}`);
+    return { status: 200, headers: { "cache-control": "private, no-store" }, body: { ...sealed!.pendingAgent, state: "active", connected_at: "2026-08-14T17:00:01.000Z" } };
+  });
+  transport.on("GET", "/api/v1/agents/self", () => ({
+    status: 200,
+    headers: { "cache-control": "private, no-store" },
+    body: { agent: { ...sealed!.pendingAgent, state: "active", connected_at: "2026-08-14T17:00:01.000Z" }, connection_ready: true },
+  }));
+  const opened: string[] = [];
+  const result = await withRuntime(["--json", "agent", "connect", "--name", "Office Codex"], transport, {
+    openUrl: async (url) => { opened.push(url); return true; },
+  });
+  assert.equal(result.code, 0, result.stdout);
+  assert.deepEqual(opened, ["https://dashboard.screenrig.ai/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA"]);
+  assert.equal(JSON.parse(result.stdout).data.status, "active");
+  assert.equal(result.stderr, "");
+  assert.doesNotMatch(result.stdout, /sr_live_|sac_|ciphertext|nonce|private|authorization/i);
+  const configPath = path.join(result.configDir, "screenrig", "config.json");
+  const config = await readConfigFile(configPath, {
+    mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir, env: { XDG_CONFIG_HOME: result.configDir },
+  });
+  assert.equal(config?.token, sealed?.pendingToken);
+  assert.equal(config?.agent_id, sealed?.agentId);
+  assert.equal(config?.agent_connection, undefined);
+  assert.equal((await stat(configPath)).mode & 0o777, 0o600);
+  await rm(result.configDir, { recursive: true, force: true });
+});
+
+test("agent disconnect revokes only this installation and preserves safe disconnected status", async () => {
+  const transport = new FakeTransport();
+  const active = { ...TEST_AGENT, name: "Office Codex" };
+  transport.on("GET", "/api/v1/agents/self", () => ({
+    status: 200,
+    headers: { "cache-control": "private, no-store" },
+    body: { agent: active, connection_ready: true },
+  }));
+  transport.on("POST", "/api/v1/agents/self/disconnect", (req) => {
+    assert.equal(req.body, undefined);
+    return { status: 204, headers: { "cache-control": "private, no-store" }, body: undefined };
+  });
+  const configDir = await testTemp("agent-disconnect-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
+    api_url: "https://api.screenrig.ai",
+    token: `sr_live_disconnect_${"D".repeat(43)}`,
+    account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    agent_id: active.id,
+  }, fsLike);
+  const result = await withRuntime(["--json", "agent", "disconnect", "--yes"], transport, { fs: fsLike });
+  assert.equal(result.code, 0, result.stdout);
+  assert.deepEqual(JSON.parse(result.stdout).data, {
+    status: "disconnected",
+    local_credential_removed: true,
+    account_preserved: true,
+    screens_preserved: true,
+    other_agents_preserved: true,
+  });
+  assert.doesNotMatch(result.stdout, /sr_live_|account_id|token/i);
+  const local = await readConfigFile(path.join(configDir, "screenrig", "config.json"), fsLike);
+  assert.equal(local?.token, undefined);
+  assert.equal(local?.account_id, undefined);
+  assert.equal(local?.last_agent?.id, active.id);
+  const status = await withRuntime(["--json", "agent", "status"], new FakeTransport(), { fs: fsLike });
+  assert.equal(JSON.parse(status.stdout).data.status, "disconnected");
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("agent connect resumes activation after the pending bearer was durably stored", async () => {
+  const transport = new FakeTransport();
+  const token = `sr_live_resume_${"R".repeat(43)}`;
+  const active = { ...TEST_AGENT, id: "agt_RESUMEAAAAAAAAAAAAAAAAA", name: "Resume agent" };
+  transport.on("POST", "/api/v1/agents/self/activate", (req) => {
+    assert.equal(req.headers?.authorization, `Bearer ${token}`);
+    return { status: 200, headers: { "cache-control": "private, no-store" }, body: active };
+  });
+  transport.on("GET", "/api/v1/agents/self", () => ({
+    status: 200,
+    headers: { "cache-control": "private, no-store" },
+    body: { agent: active, connection_ready: true },
+  }));
+  const configDir = await testTemp("agent-connect-resume-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const configPath = path.join(configDir, "screenrig", "config.json");
+  await writeConfigAtomic(configPath, {
+    api_url: "https://api.screenrig.ai",
+    token,
+    agent_id: active.id,
+    agent_connection: {
+      private_jwk: generateAgentConnectionKey(),
+      connection_id: "acn_RESUMEAAAAAAAAAAAAAAAA",
+      connection_token: `sac_${"S".repeat(43)}`,
+      approval_url: "https://dashboard.screenrig.ai/agents/connect/acn_RESUMEAAAAAAAAAAAAAAAA",
+      expires_at: "2026-08-14T16:10:00.000Z",
+      pending_agent_id: active.id,
+    },
+  }, fsLike);
+  let opened = false;
+  const result = await withRuntime(["--json", "agent", "connect"], transport, {
+    fs: fsLike,
+    openUrl: async () => { opened = true; return true; },
+  });
+  assert.equal(result.code, 0, result.stdout);
+  assert.equal(opened, false);
+  assert.deepEqual(transport.calls.map((call) => call.path), [
+    "/api/v1/agents/self/activate",
+    "/api/v1/agents/self",
+  ]);
+  assert.equal((await readConfigFile(configPath, fsLike))?.agent_connection, undefined);
+  assert.doesNotMatch(result.stdout, /sr_live_|sac_|private|authorization/i);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("agent connect clears private and pending bearer state when the dashboard cancels", async () => {
+  const transport = new FakeTransport();
+  const connectionId = "acn_CANCELAAAAAAAAAAAAAAAA";
+  transport.on("POST", "/api/v1/agent-connections", () => ({
+    status: 201,
+    headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
+    body: {
+      connection_id: connectionId,
+      connection_token: `sac_${"C".repeat(43)}`,
+      approval_url: `https://dashboard.screenrig.ai/agents/connect/${connectionId}`,
+      expires_at: "2026-08-14T17:10:00.000Z",
+    },
+  }));
+  transport.pushStream(`event: agent.connection\ndata: ${JSON.stringify({
+    connection_id: connectionId,
+    name: "Cancelled agent",
+    agent_type: "cli",
+    status: "cancelled",
+    expires_at: "2026-08-14T17:10:00.000Z",
+    created_at: "2026-08-14T17:00:00.000Z",
+  })}\n\n`);
+  const result = await withRuntime(["--json", "agent", "connect"], transport, { openUrl: async () => true });
+  assert.equal(result.code, ExitCode.Client);
+  const envelope = JSON.parse(result.stdout) as { error: { code: string; next: { command: string } } };
+  assert.equal(envelope.error.code, "agent_connection_cancelled");
+  assert.equal(envelope.error.next.command, "screenrig agent connect");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir, env: { XDG_CONFIG_HOME: result.configDir } };
+  const local = await readConfigFile(path.join(result.configDir, "screenrig", "config.json"), fsLike);
+  assert.equal(local?.agent_connection, undefined);
+  assert.equal(local?.token, undefined);
+  assert.doesNotMatch(result.stdout, /sac_|private_jwk|connection_token/);
+  await rm(result.configDir, { recursive: true, force: true });
+});
+
+test("agent connect clears private state when credential collection reports cancellation", async () => {
+  const transport = new FakeTransport();
+  const connectionId = "acn_CANCELPROBLEMAAAAAAAAA";
+  transport.on("POST", "/api/v1/agent-connections", () => ({
+    status: 201,
+    headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
+    body: {
+      connection_id: connectionId,
+      connection_token: `sac_${"P".repeat(43)}`,
+      approval_url: `https://dashboard.screenrig.ai/agents/connect/${connectionId}`,
+      expires_at: "2026-08-14T17:10:00.000Z",
+    },
+  }));
+  transport.pushStream(`event: agent.connection\ndata: ${JSON.stringify({
+    connection_id: connectionId,
+    name: "Cancelled after approval",
+    agent_type: "cli",
+    status: "approved",
+    expires_at: "2026-08-14T17:10:00.000Z",
+    created_at: "2026-08-14T17:00:00.000Z",
+  })}\n\n`);
+  transport.on("POST", `/api/v1/agent-connections/${connectionId}/credential`, () => ({
+    status: 410,
+    headers: { "content-type": "application/problem+json" },
+    body: { status: 410, code: "agent_connection_cancelled", title: "Cancelled", detail: "Pending agent was disconnected." },
+  }));
+  const result = await withRuntime(["--json", "agent", "connect"], transport, { openUrl: async () => true });
+  assert.equal(result.code, ExitCode.Client);
+  assert.equal((JSON.parse(result.stdout) as { error: { code: string } }).error.code, "agent_connection_cancelled");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir, env: { XDG_CONFIG_HOME: result.configDir } };
+  const local = await readConfigFile(path.join(result.configDir, "screenrig", "config.json"), fsLike);
+  assert.equal(local?.agent_connection, undefined);
+  assert.equal(local?.token, undefined);
+  await rm(result.configDir, { recursive: true, force: true });
+});
+
+test("agent connect clears private state when the SSE endpoint reports cancellation", async () => {
+  const transport = new FakeTransport();
+  const connectionId = "acn_CANCELSSEPROBLEMAAAAAA";
+  transport.on("POST", "/api/v1/agent-connections", () => ({
+    status: 201,
+    headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
+    body: {
+      connection_id: connectionId,
+      connection_token: `sac_${"Q".repeat(43)}`,
+      approval_url: `https://dashboard.screenrig.ai/agents/connect/${connectionId}`,
+      expires_at: "2026-08-14T17:10:00.000Z",
+    },
+  }));
+  transport.streamHandler = async () => {
+    throw new CliError(makeProblem(
+      "agent_connection_cancelled",
+      "Cancelled",
+      410,
+      "Pending agent was disconnected.",
+    ));
+  };
+  const result = await withRuntime(["--json", "agent", "connect"], transport, { openUrl: async () => true });
+  assert.equal(result.code, ExitCode.Client);
+  assert.equal((JSON.parse(result.stdout) as { error: { code: string } }).error.code, "agent_connection_cancelled");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir, env: { XDG_CONFIG_HOME: result.configDir } };
+  const local = await readConfigFile(path.join(result.configDir, "screenrig", "config.json"), fsLike);
+  assert.equal(local?.agent_connection, undefined);
+  assert.equal(local?.token, undefined);
+  assert.doesNotMatch(result.stdout, /sac_|private_jwk|connection_token/);
+  await rm(result.configDir, { recursive: true, force: true });
+});
+
+async function writePendingActivationConfig(
+  configDir: string,
+  token: string,
+  active: typeof TEST_AGENT,
+) {
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const configPath = path.join(configDir, "screenrig", "config.json");
+  await writeConfigAtomic(configPath, {
+    api_url: "https://api.screenrig.ai",
+    token,
+    agent_id: active.id,
+    agent_connection: {
+      private_jwk: generateAgentConnectionKey(),
+      connection_id: "acn_HARDENAAAAAAAAAAAAAAAA",
+      connection_token: `sac_${"H".repeat(43)}`,
+      approval_url: "https://dashboard.screenrig.ai/agents/connect/acn_HARDENAAAAAAAAAAAAAAAA",
+      expires_at: "2026-08-14T17:10:00.000Z",
+      pending_agent_id: active.id,
+    },
+  }, fsLike);
+  return { fsLike, configPath };
+}
+
+test("agent connect removes a cryptographically rejected pending credential", async () => {
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/v1/agents/self/activate", () => ({
+    status: 401,
+    headers: { "content-type": "application/problem+json" },
+    body: { status: 401, code: "unauthorized", title: "Unauthorized", detail: "Pending bearer revoked." },
+  }));
+  const configDir = await testTemp("agent-connect-revoked-");
+  const token = `sr_live_revoked_${"R".repeat(43)}`;
+  const { fsLike, configPath } = await writePendingActivationConfig(configDir, token, TEST_AGENT);
+  const result = await withRuntime(["--json", "agent", "connect"], transport, { fs: fsLike });
+  assert.equal(result.code, ExitCode.Auth);
+  const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string; next: { command: string } } };
+  assert.equal(envelope.error.code, "unauthorized");
+  assert.match(envelope.error.detail, /rejected or revoked/);
+  assert.equal(envelope.error.next.command, "screenrig agent connect");
+  const local = await readConfigFile(configPath, fsLike);
+  assert.equal(local?.token, undefined);
+  assert.equal(local?.agent_id, undefined);
+  assert.equal(local?.agent_connection, undefined);
+  assert.doesNotMatch(result.stdout, /sr_live_|sac_|private_jwk/);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("agent connect recovers an activation committed before connection cleanup", async () => {
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/v1/agents/self/activate", () => ({
+    status: 404,
+    headers: { "content-type": "application/problem+json" },
+    body: { status: 404, code: "agent_connection_invalid", title: "Invalid", detail: "Connection cleanup completed." },
+  }));
+  transport.on("GET", "/api/v1/agents/self", () => ({
+    status: 200,
+    headers: { "cache-control": "private, no-store" },
+    body: { agent: TEST_AGENT, connection_ready: true },
+  }));
+  const configDir = await testTemp("agent-connect-committed-");
+  const token = `sr_live_committed_${"K".repeat(43)}`;
+  const { fsLike, configPath } = await writePendingActivationConfig(configDir, token, TEST_AGENT);
+  const result = await withRuntime(["--json", "agent", "connect"], transport, { fs: fsLike });
+  assert.equal(result.code, 0, result.stdout);
+  assert.deepEqual(transport.calls.map((call) => call.path), ["/api/v1/agents/self/activate", "/api/v1/agents/self"]);
+  const local = await readConfigFile(configPath, fsLike);
+  assert.equal(local?.token, token);
+  assert.equal(local?.agent_id, TEST_AGENT.id);
+  assert.equal(local?.agent_connection, undefined);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("agent connect retains pending activation state after an ambiguous transport failure", async () => {
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/v1/agents/self/activate", () => { throw networkError("ambiguous activation response"); });
+  const configDir = await testTemp("agent-connect-ambiguous-");
+  const token = `sr_live_ambiguous_${"A".repeat(43)}`;
+  const { fsLike, configPath } = await writePendingActivationConfig(configDir, token, TEST_AGENT);
+  const before = await readConfigFile(configPath, fsLike);
+  const result = await withRuntime(["--json", "agent", "connect"], transport, { fs: fsLike });
+  assert.equal(result.code, ExitCode.Network);
+  assert.equal((JSON.parse(result.stdout) as { error: { code: string } }).error.code, "transport_error");
+  assert.deepEqual(await readConfigFile(configPath, fsLike), before);
+  assert.doesNotMatch(result.stdout, /sr_live_|sac_|private_jwk/);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("agent disconnect keeps the credential on lockout risk and names the explicit override", async () => {
+  const transport = new FakeTransport();
+  transport.on("GET", "/api/v1/agents/self", () => ({
+    status: 200,
+    headers: { "cache-control": "private, no-store" },
+    body: { agent: TEST_AGENT, connection_ready: false },
+  }));
+  transport.on("POST", "/api/v1/agents/self/disconnect", () => ({
+    status: 409,
+    headers: { "content-type": "application/problem+json" },
+    body: {
+      status: 409,
+      code: "agent_lockout_risk",
+      title: "Agent lockout risk",
+      detail: "Disconnecting the last active agent requires explicit override.",
+    },
+  }));
+  const configDir = await testTemp("agent-lockout-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const token = `sr_live_lockout_${"L".repeat(43)}`;
+  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
+    api_url: "https://api.screenrig.ai",
+    token,
+    agent_id: TEST_AGENT.id,
+  }, fsLike);
+  const result = await withRuntime(["--json", "agent", "disconnect", "--yes"], transport, { fs: fsLike });
+  assert.equal(result.code, ExitCode.Conflict);
+  assert.equal(JSON.parse(result.stdout).error.next.command, "screenrig agent disconnect --yes --allow-lockout");
+  assert.equal((await readConfigFile(path.join(configDir, "screenrig", "config.json"), fsLike))?.token, token);
+  assert.doesNotMatch(result.stdout, /sr_live_/);
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -212,13 +833,18 @@ test("auth revoke requires explicit confirmation and never auto-enrolls", async 
   await rm(configPath, { force: true });
   result = await withRuntime(["--json", "auth", "revoke", "--yes"], transport, { fs: fsLike });
   assert.equal(result.code, ExitCode.Usage);
-  assert.match((JSON.parse(result.stdout) as { error: { detail: string } }).error.detail, /No stored ScreenRig account credential/);
+  assert.match((JSON.parse(result.stdout) as { error: { detail: string } }).error.detail, /No stored ScreenRig agent credential/);
   assert.equal(transport.calls.length, 0);
   await rm(configDir, { recursive: true, force: true });
 });
 
 test("auth revoke confirms server success before atomically removing all local credential state", async () => {
   const transport = new FakeTransport();
+  transport.on("GET", "/api/v1/agents/self", () => ({
+    status: 200,
+    headers: { "cache-control": "private, no-store" },
+    body: { agent: TEST_AGENT, connection_ready: true },
+  }));
   transport.on("POST", "/api/v1/account/credential/revoke", () => ({
     status: 204,
     headers: { "cache-control": "private, no-store", "x-request-id": "req_revokeAAAAAAAAAAAAAAAA" },
@@ -239,29 +865,34 @@ test("auth revoke confirms server success before atomically removing all local c
 
   const result = await withRuntime(["--json", "auth", "revoke", "--yes"], transport, { fs: fsLike });
   assert.equal(result.code, 0, result.stdout);
-  const envelope = JSON.parse(result.stdout) as { ok: true; data: Record<string, unknown> };
+  const envelope = JSON.parse(result.stdout) as { ok: true; data: Record<string, unknown>; warnings: Array<{ code: string }> };
   assert.deepEqual(envelope.data, {
-    revoked: true,
+    status: "disconnected",
     local_credential_removed: true,
     account_preserved: true,
     screens_preserved: true,
-    recoverable: false,
+    other_agents_preserved: true,
   });
+  assert.deepEqual(envelope.warnings.map((warning) => warning.code), ["deprecated_command"]);
   assert.doesNotMatch(result.stdout, /current_private_secret|acc_current|enrollment-retry-key|browser-setup-key/);
-  assert.equal(transport.calls.length, 1);
-  assert.equal(transport.calls[0]?.path, "/api/v1/account/credential/revoke");
-  assert.equal(transport.calls[0]?.headers?.authorization, `Bearer ${token}`);
-  assert.equal(transport.calls[0]?.headers?.["idempotency-key"], undefined);
-  assert.deepEqual(await readConfigFile(configPath, fsLike), {
-    api_url: "https://api.screenrig.ai",
-    updated_at: "2026-08-14T17:00:00.000Z",
-  });
+  assert.deepEqual(transport.calls.map((call) => call.path), ["/api/v1/agents/self", "/api/v1/account/credential/revoke"]);
+  assert.equal(transport.calls[1]?.headers?.authorization, `Bearer ${token}`);
+  assert.equal(transport.calls[1]?.headers?.["idempotency-key"], undefined);
+  const cleaned = await readConfigFile(configPath, fsLike);
+  assert.equal(cleaned?.api_url, "https://api.screenrig.ai");
+  assert.equal(cleaned?.token, undefined);
+  assert.equal(cleaned?.last_agent?.id, TEST_AGENT.id);
   assert.equal((await stat(configPath)).mode & 0o777, 0o600);
   await rm(configDir, { recursive: true, force: true });
 });
 
 test("auth revoke retains local state on a server failure and gives a safe retry", async () => {
   const transport = new FakeTransport();
+  transport.on("GET", "/api/v1/agents/self", () => ({
+    status: 200,
+    headers: { "cache-control": "private, no-store" },
+    body: { agent: TEST_AGENT, connection_ready: true },
+  }));
   transport.on("POST", "/api/v1/account/credential/revoke", () => ({
     status: 503,
     headers: { "content-type": "application/problem+json" },
@@ -288,7 +919,7 @@ test("auth revoke retains local state on a server failure and gives a safe retry
   assert.equal(result.code, ExitCode.Server);
   const envelope = JSON.parse(result.stdout) as { error: { code: string; next: { command: string; reason: string } } };
   assert.equal(envelope.error.code, "dependency_unavailable");
-  assert.equal(envelope.error.next.command, "screenrig auth revoke --yes");
+  assert.equal(envelope.error.next.command, "screenrig agent disconnect --yes");
   assert.match(envelope.error.next.reason, /Local credential state was retained/);
   assert.deepEqual(await readConfigFile(configPath, fsLike), original);
   assert.doesNotMatch(result.stdout, /current_private_secret|browser-setup-key/);
@@ -297,6 +928,11 @@ test("auth revoke retains local state on a server failure and gives a safe retry
 
 test("auth revoke retries the exact revoked bearer after cleanup failure and completes local cleanup", async () => {
   const transport = new FakeTransport();
+  transport.on("GET", "/api/v1/agents/self", () => ({
+    status: 200,
+    headers: { "cache-control": "private, no-store" },
+    body: { agent: TEST_AGENT, connection_ready: true },
+  }));
   transport.on("POST", "/api/v1/account/credential/revoke", () => ({
     status: 204,
     headers: { "cache-control": "private, no-store" },
@@ -324,25 +960,58 @@ test("auth revoke retries the exact revoked bearer after cleanup failure and com
   const result = await withRuntime(["--json", "auth", "revoke", "--yes"], transport, { fs: interruptedFs });
   assert.equal(result.code, ExitCode.Config);
   const envelope = JSON.parse(result.stdout) as { error: { detail: string; next: { command: string } } };
-  assert.match(envelope.error.detail, /server revoked.*atomic local cleanup failed/i);
-  assert.equal(envelope.error.next.command, "screenrig auth revoke --yes");
+  assert.match(envelope.error.detail, /server disconnected.*atomic local cleanup failed/i);
+  assert.equal(envelope.error.next.command, "screenrig agent disconnect --yes");
   assert.doesNotMatch(result.stdout, /current_private_secret/);
   assert.deepEqual(await readConfigFile(configPath, realFs), original);
 
   const retry = await withRuntime(["--json", "auth", "revoke", "--yes"], transport, { fs: realFs });
   assert.equal(retry.code, 0, retry.stdout);
-  assert.equal(transport.calls.length, 2);
-  assert.equal(transport.calls[1]?.headers?.authorization, `Bearer ${original.token}`);
-  assert.deepEqual(await readConfigFile(configPath, realFs), {
-    api_url: "https://api.screenrig.ai",
-    updated_at: "2026-08-14T17:00:00.000Z",
+  assert.equal(transport.calls.length, 4);
+  assert.equal(transport.calls[3]?.headers?.authorization, `Bearer ${original.token}`);
+  const cleaned = await readConfigFile(configPath, realFs);
+  assert.equal(cleaned?.token, undefined);
+  assert.equal(cleaned?.last_agent?.id, TEST_AGENT.id);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("auth revoke shares the last-agent guard and explicit allow-lockout override", async () => {
+  const transport = new FakeTransport();
+  transport.on("GET", "/api/v1/agents/self", () => ({
+    status: 200,
+    headers: { "cache-control": "private, no-store" },
+    body: { agent: TEST_AGENT, connection_ready: true },
+  }));
+  transport.on("POST", "/api/v1/account/credential/revoke", (req) => {
+    if (req.body) {
+      return { status: 204, headers: { "cache-control": "private, no-store" } as Record<string, string>, body: undefined };
+    }
+    return {
+      status: 409,
+      headers: { "content-type": "application/problem+json" } as Record<string, string>,
+      body: { status: 409, code: "agent_lockout_risk", title: "Lockout risk", detail: "Last active agent." },
+    };
   });
+  const configDir = await testTemp("auth-revoke-lockout-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const configPath = path.join(configDir, "screenrig", "config.json");
+  const token = `sr_live_auth_lockout_${"L".repeat(43)}`;
+  await writeConfigAtomic(configPath, { api_url: "https://api.screenrig.ai", token, agent_id: TEST_AGENT.id }, fsLike);
+  const guarded = await withRuntime(["--json", "auth", "revoke", "--yes"], transport, { fs: fsLike });
+  assert.equal(guarded.code, ExitCode.Conflict);
+  assert.equal((JSON.parse(guarded.stdout) as { error: { next: { command: string } } }).error.next.command,
+    "screenrig agent disconnect --yes --allow-lockout");
+  assert.equal((await readConfigFile(configPath, fsLike))?.token, token);
+  const override = await withRuntime(["--json", "auth", "revoke", "--yes", "--allow-lockout"], transport, { fs: fsLike });
+  assert.equal(override.code, 0, override.stdout);
+  assert.deepEqual(transport.calls[3]?.body, { allow_last_agent: true });
+  assert.equal((await readConfigFile(configPath, fsLike))?.token, undefined);
   await rm(configDir, { recursive: true, force: true });
 });
 
 test("screen pair normalizes safe lowercase input and reports canonical uppercase", async () => {
   const transport = memoryBackend();
-  const result = await withRuntime(["screen", "pair", "abc234", "--label", "Lobby"], transport);
+  const result = await withAuthenticatedRuntime(["screen", "pair", "abc234", "--label", "Lobby"], transport);
   assert.equal(result.code, 0, result.stdout);
   assert.match(result.stdout, /Screen paired/);
   assert.match(result.stdout, /code: ABC234/);
@@ -351,7 +1020,7 @@ test("screen pair normalizes safe lowercase input and reports canonical uppercas
 
 test("screen pair rejects ambiguous or malformed codes before claiming", async () => {
   const transport = memoryBackend();
-  const result = await withRuntime(["--json", "screen", "pair", "ABCI01"], transport);
+  const result = await withAuthenticatedRuntime(["--json", "screen", "pair", "ABCI01"], transport);
   assert.equal(result.code, ExitCode.Usage);
   assert.equal(transport.calls.some((call) => call.path === "/api/v1/screens/pair"), false);
   assert.match(result.stdout, /23456789ABCDEFGHJKMNPQRSTUVWXYZ/);
@@ -363,7 +1032,7 @@ test("screen provision requires exactly one explicit delivery mode", async () =>
     ["--json", "screen", "provision", "--open", "--print-url"],
   ]) {
     const transport = memoryBackend();
-    const result = await withRuntime(argv, transport);
+    const result = await withAuthenticatedRuntime(argv, transport);
     assert.equal(result.code, ExitCode.Usage);
     assert.equal(transport.calls.some((call) => call.path === "/api/v1/screens/provision"), false);
     await rm(result.configDir, { recursive: true, force: true });
@@ -373,7 +1042,7 @@ test("screen provision requires exactly one explicit delivery mode", async () =>
 test("screen provision --open launches by argv and returns only safe fields", async () => {
   const transport = memoryBackend();
   const opened: string[] = [];
-  const result = await withRuntime(
+  const result = await withAuthenticatedRuntime(
     ["--json", "screen", "provision", "--open", "--label", "Demo"],
     transport,
     { openUrl: async (url) => { opened.push(url); return true; } },
@@ -396,7 +1065,7 @@ test("screen provision --open launches by argv and returns only safe fields", as
 test("screen provision --print-url explicitly returns the one-time URL without opening it", async () => {
   const transport = memoryBackend();
   let opens = 0;
-  const result = await withRuntime(
+  const result = await withAuthenticatedRuntime(
     ["--json", "screen", "provision", "--print-url"],
     transport,
     { openUrl: async () => { opens += 1; return true; } },
@@ -414,8 +1083,8 @@ test("failed browser launch retains only the exact retry key and label", async (
   const configDir = await testTemp("provision-retry-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   const argv = ["--json", "screen", "provision", "--open", "--label", "Retry demo"];
-  const first = await withRuntime(argv, transport, { fs: fsLike, openUrl: async () => false });
-  const second = await withRuntime(argv, transport, { fs: fsLike, openUrl: async () => false });
+  const first = await withAuthenticatedRuntime(argv, transport, { fs: fsLike, openUrl: async () => false });
+  const second = await withAuthenticatedRuntime(argv, transport, { fs: fsLike, openUrl: async () => false });
   assert.equal(first.code, 0);
   assert.equal(second.code, 0);
   const calls = transport.calls.filter((call) => call.path === "/api/v1/screens/provision");
@@ -431,9 +1100,9 @@ test("failed browser launch retains only the exact retry key and label", async (
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("first use resumes into browser setup claim with safe fragment-free output", async () => {
+test("an enrolled agent completes browser setup with safe fragment-free output", async () => {
   const transport = memoryBackend();
-  const result = await withRuntime(["--json", "browser", "setup", "--code", "abc-234"], transport);
+  const result = await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "abc-234"], transport);
   assert.equal(result.code, 0, result.stdout);
   const envelope = JSON.parse(result.stdout) as { data: Record<string, unknown> };
   assert.deepEqual(envelope.data, {
@@ -441,9 +1110,7 @@ test("first use resumes into browser setup claim with safe fragment-free output"
     status: "claimed",
     player_public_url: "https://play.screenrig.ai/s/browser-link-screen",
   });
-  assert.deepEqual(transport.calls.slice(0, 3).map((call) => `${call.method} ${call.path}`), [
-    "POST /api/v1/enrollments",
-    "GET /api/v1/account",
+  assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), [
     "POST /api/v1/account/browser-links/claim",
   ]);
   const claim = transport.calls.at(-1);
@@ -462,7 +1129,7 @@ test("first use resumes into browser setup claim with safe fragment-free output"
 test("browser setup --open opens only the public handoff URL by argv", async () => {
   const transport = memoryBackend();
   const opened: string[] = [];
-  const result = await withRuntime(
+  const result = await withAuthenticatedRuntime(
     ["--json", "browser", "setup", "--code", "ABC234", "--open"],
     transport,
     { openUrl: async (url) => { opened.push(url); return true; } },
@@ -487,6 +1154,8 @@ function dashboardLinkTransport(status: number, body: unknown, headers?: Record<
     headers: { "cache-control": "private, no-store" },
     body: {
       account: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" },
+      agent: TEST_AGENT,
+      connection_ready: false,
       token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       issuance_id: "iss_AAAAAAAAAAAAAAAAAAAAAAAA",
       issuance_expires_at: "2026-08-14T17:10:00.000Z",
@@ -504,7 +1173,7 @@ function dashboardLinkTransport(status: number, body: unknown, headers?: Record<
 test("dashboard mints one single-use link, opens it, and keeps the URL out of every output", async () => {
   const transport = memoryBackend();
   const opened: string[] = [];
-  const result = await withRuntime(
+  const result = await withAuthenticatedRuntime(
     ["--json", "dashboard"],
     transport,
     { openUrl: async (url) => { opened.push(url); return true; } },
@@ -521,8 +1190,6 @@ test("dashboard mints one single-use link, opens it, and keeps the URL out of ev
   assert.doesNotMatch(result.stdout, /#link=|dashboard\.screenrig\.ai|DDDDD/);
   assert.doesNotMatch(result.stderr, /#link=|DDDDD/);
   assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), [
-    "POST /api/v1/enrollments",
-    "GET /api/v1/account",
     "POST /api/v1/account/dashboard-links",
   ]);
   const mint = transport.calls.at(-1);
@@ -539,7 +1206,7 @@ test("dashboard mints one single-use link, opens it, and keeps the URL out of ev
 });
 
 test("dashboard prints the link exactly once when no browser could be opened", async () => {
-  const result = await withRuntime(
+  const result = await withAuthenticatedRuntime(
     ["dashboard"],
     memoryBackend(),
     { openUrl: async () => false },
@@ -555,7 +1222,7 @@ test("dashboard prints the link exactly once when no browser could be opened", a
 
 test("dashboard --print-url never starts a browser and reports the same expiry", async () => {
   const opened: string[] = [];
-  const result = await withRuntime(
+  const result = await withAuthenticatedRuntime(
     ["--json", "dashboard", "--print-url"],
     memoryBackend(),
     { openUrl: async (url) => { opened.push(url); return true; } },
@@ -578,7 +1245,7 @@ test("dashboard refuses an unsafe or off-origin minted URL and opens nothing", a
     `http://dashboard.screenrig.localhost/#link=${DASHBOARD_TOKEN}`,
   ]) {
     const opened: string[] = [];
-    const result = await withRuntime(
+    const result = await withAuthenticatedRuntime(
       ["--json", "dashboard"],
       dashboardLinkTransport(201, { url, expires_at: "2026-08-14T17:10:00.000Z" }),
       { openUrl: async (target) => { opened.push(target); return true; } },
@@ -598,7 +1265,7 @@ test("dashboard surfaces the mint problem verbatim and prints no link", async ()
     { status: 503, code: "not_ready", exit: ExitCode.Server },
   ];
   for (const item of cases) {
-    const result = await withRuntime(
+    const result = await withAuthenticatedRuntime(
       ["--json", "dashboard"],
       dashboardLinkTransport(item.status, {
         type: `https://screenrig.ai/problems/${item.code.replaceAll("_", "-")}`,
@@ -625,7 +1292,7 @@ test("dashboard rejects positional arguments and a mint response without private
   assert.match(positional.stdout, /does not accept positional arguments/);
   await rm(positional.configDir, { recursive: true, force: true });
 
-  const cached = await withRuntime(
+  const cached = await withAuthenticatedRuntime(
     ["--json", "dashboard"],
     dashboardLinkTransport(
       201,
@@ -654,6 +1321,8 @@ function browserSetupClaimTransport(body: unknown): FakeTransport {
     headers: { "cache-control": "private, no-store" },
     body: {
       account: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" },
+      agent: TEST_AGENT,
+      connection_ready: false,
       token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       issuance_id: "iss_AAAAAAAAAAAAAAAAAAAAAAAA",
       issuance_expires_at: "2026-08-14T17:10:00.000Z",
@@ -683,7 +1352,7 @@ test("browser setup ignores extra claim and screen keys without echoing them", a
     },
     provisioning_url: secret,
   });
-  const result = await withRuntime(["--json", "browser", "setup", "--code", "ABC234"], transport);
+  const result = await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC234"], transport);
   assert.equal(result.code, 0, result.stdout);
   const envelope = JSON.parse(result.stdout) as { data: Record<string, unknown> };
   assert.deepEqual(envelope.data, {
@@ -711,7 +1380,7 @@ test("browser setup rejects missing required claim fields, bad status, and unsaf
     { name: "pathname mismatch", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://play.screenrig.ai/s/other-id" } } },
   ];
   for (const item of cases) {
-    const result = await withRuntime(["--json", "browser", "setup", "--code", "ABC234"], browserSetupClaimTransport(item.body));
+    const result = await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC234"], browserSetupClaimTransport(item.body));
     assert.equal(result.code, ExitCode.Usage, item.name);
     assert.doesNotMatch(result.stdout, /#provision=|user:pass|token|cookie|proof/i, item.name);
     await rm(result.configDir, { recursive: true, force: true });
@@ -719,7 +1388,7 @@ test("browser setup rejects missing required claim fields, bad status, and unsaf
 });
 
 test("browser setup rejects malformed codes before claim and keeps exact ambiguous retry state", async () => {
-  const invalid = await withRuntime(["--json", "browser", "setup", "--code", "ABC10I"], memoryBackend());
+  const invalid = await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC10I"], memoryBackend());
   assert.equal(invalid.code, ExitCode.Usage);
   await rm(invalid.configDir, { recursive: true, force: true });
 
@@ -729,6 +1398,8 @@ test("browser setup rejects malformed codes before claim and keeps exact ambiguo
     headers: { "cache-control": "private, no-store" },
     body: {
       account: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" },
+      agent: TEST_AGENT,
+      connection_ready: false,
       token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       issuance_id: "iss_AAAAAAAAAAAAAAAAAAAAAAAA",
       issuance_expires_at: "2026-08-14T17:10:00.000Z",
@@ -742,8 +1413,8 @@ test("browser setup rejects malformed codes before claim and keeps exact ambiguo
   }));
   const configDir = await testTemp("browser-claim-retry-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
-  await withRuntime(["--json", "browser", "setup", "--code", "ABC234"], transport, { fs: fsLike });
-  await withRuntime(["--json", "browser", "setup", "--code", "ABC-234"], transport, { fs: fsLike });
+  await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC234"], transport, { fs: fsLike });
+  await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC-234"], transport, { fs: fsLike });
   const claims = transport.calls.filter((call) => call.path === "/api/v1/account/browser-links/claim");
   assert.equal(claims.length, 2);
   assert.equal(claims[0]?.headers?.["idempotency-key"], claims[1]?.headers?.["idempotency-key"]);
@@ -772,17 +1443,24 @@ test("expired enrollment replay surfaces 410 and reuses the persisted identity w
   const retryState = {
     client_id: `cli_${"E".repeat(43)}`,
     idempotency_key: "enroll-expired-exact-retry",
+    email: "owner@example.com",
   };
   await writeConfigAtomic(configPath, {
     api_url: "https://api.screenrig.ai",
     enrollment: retryState,
   }, fsLike);
-  const result = await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
+  const result = await withRuntime(["--json", "agent", "enroll"], transport, { fs: fsLike });
   assert.notEqual(result.code, 0);
   assert.equal((JSON.parse(result.stdout) as { error: { code: string } }).error.code, "credential_issuance_expired");
   assert.deepEqual(transport.calls.map((call) => call.path), ["/api/v1/enrollments"]);
   assert.equal(transport.calls[0]?.headers?.["idempotency-key"], retryState.idempotency_key);
-  assert.deepEqual(transport.calls[0]?.body, { client_id: retryState.client_id });
+  assert.deepEqual(transport.calls[0]?.body, {
+    client_id: retryState.client_id,
+    email: retryState.email,
+    agent_type: "cli",
+    platform: `${process.platform}/${process.arch}`,
+    version: "0.1.0",
+  });
   assert.deepEqual((await readConfigFile(configPath, fsLike))?.enrollment, retryState);
   await rm(configDir, { recursive: true, force: true });
 });
@@ -3270,7 +3948,7 @@ test("screen show prints optional player-reported observation", async () => {
 
 test("screen show still works when observation is absent", async () => {
   const transport = memoryBackend();
-  const { code, configDir } = await withRuntime(["--json", "screen", "pair", "ABC234"], transport);
+  const { code, configDir } = await withAuthenticatedRuntime(["--json", "screen", "pair", "ABC234"], transport);
   assert.equal(code, ExitCode.Success);
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
 
@@ -3289,7 +3967,7 @@ test("screen show still works when observation is absent", async () => {
 
 test("screen update cannot send observation", async () => {
   const transport = memoryBackend();
-  const { code, configDir } = await withRuntime(["--json", "screen", "pair", "ABC234"], transport);
+  const { code, configDir } = await withAuthenticatedRuntime(["--json", "screen", "pair", "ABC234"], transport);
   assert.equal(code, ExitCode.Success);
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   transport.calls.length = 0;
@@ -3432,7 +4110,7 @@ test("screen show still works when last_online_at and last_ip are absent", async
 
 test("screen update cannot send online, last_online_at, or last_ip", async () => {
   const transport = memoryBackend();
-  const { code, configDir } = await withRuntime(["--json", "screen", "pair", "ABC234"], transport);
+  const { code, configDir } = await withAuthenticatedRuntime(["--json", "screen", "pair", "ABC234"], transport);
   assert.equal(code, ExitCode.Success);
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   transport.calls.length = 0;

@@ -49,7 +49,7 @@ test("atomic config writes preserve the prior credential when replacement is int
   await rm(home, { recursive: true, force: true });
 });
 
-test("credential lock serializes concurrent first-use work", async () => {
+test("credential lock serializes concurrent enrollment work", async () => {
   const home = await testTemp("config-lock-");
   const configPath = path.join(home, "screenrig", "config.json");
   const fsLike = realFs(home);

@@ -162,6 +162,8 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "content_limit_bytes",
     "created_at",
     "credit_remaining",
+    "email",
+    "email_verified",
     "id",
     "reserved_bytes",
     "revision",
@@ -190,14 +192,18 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   assert.match(chrome, /"schema_version": 1/);
   assert.deepEqual(quotedProperties(interfaceBody(source, "CLIEnrollment")), [
     "account",
+    "agent",
+    "connection_ready",
     "issuance_expires_at",
     "issuance_id",
     "token",
   ]);
+  assert.deepEqual(quotedProperties(interfaceBody(source, "AgentSelfStatus")), ["agent", "connection_ready"]);
   const enrollmentRequest = interfaceBody(source, "CLIEnrollmentRequest");
-  assert.deepEqual(quotedProperties(enrollmentRequest), ["beta_key", "client_id"]);
+  assert.deepEqual(quotedProperties(enrollmentRequest), ["agent_type", "beta_key", "client_id", "email", "name", "platform", "version"]);
   assert.match(enrollmentRequest, /"beta_key"\?: string/);
   assert.match(enrollmentRequest, /"client_id": string/);
+  assert.match(enrollmentRequest, /"email": string/);
   assert.deepEqual(quotedProperties(interfaceBody(source, "PairScreen")), ["code", "label"]);
   assert.deepEqual(quotedProperties(interfaceBody(source, "PairingClaim")), ["public_url", "screen"]);
   assert.deepEqual(quotedProperties(interfaceBody(source, "ProvisionScreen")), ["label"]);
@@ -214,7 +220,9 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   // Attribution on an account event. Absent on everything the CLI produces.
   const event = interfaceBody(source, "Event");
   assert.match(event, /"actor"\?: EventActor/);
+  assert.match(event, /"agent"\?: EventAgent/);
   assert.deepEqual(quotedProperties(interfaceBody(source, "EventActor")), ["display_name", "user_id"]);
+  assert.deepEqual(quotedProperties(interfaceBody(source, "EventAgent")), ["agent_id", "agent_type", "name"]);
   assert.deepEqual(quotedProperties(interfaceBody(source, "BrowserLinkClaimRequest")), ["code"]);
   assert.deepEqual(quotedProperties(interfaceBody(source, "BrowserLinkClaim")), ["screen", "session_id", "status"]);
   assert.deepEqual(quotedProperties(interfaceBody(source, "BrowserLinkClaimScreen")), ["id", "public_id", "public_url", "state"]);
@@ -317,12 +325,13 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   assert.deepEqual(limits, DEFAULT_ARCHIVE_LIMITS);
 });
 
-test("local enrollment request adapter accepts optional beta_key", () => {
+test("local enrollment request adapter requires email and accepts optional beta_key", () => {
   const source = readFileSync(
     join(dirname(fileURLToPath(import.meta.url)), "../../src/adapters/protocol.ts"),
     "utf8",
   );
   assert.match(source, /export interface CLIEnrollmentRequest \{[\s\S]*?beta_key\?: string;/);
+  assert.match(source, /export interface CLIEnrollmentRequest \{[\s\S]*?email: string;/);
 });
 
 test("the dashboard link is minted only, and the CLI never claims one", () => {
@@ -445,6 +454,7 @@ test("published problem codes include payment_required at 402", () => {
     "method_not_allowed",
     "idempotency_mismatch",
     "credential_issuance_expired",
+    "email_conflict",
     "provisioning_invalid",
     "provisioning_expired",
     "provisioning_consumed",
@@ -479,6 +489,13 @@ test("published problem codes include payment_required at 402", () => {
     "passkey_invalid",
     "passkeys_disabled",
     "application_in_use",
+    "agent_connection_invalid",
+    "agent_connection_expired",
+    "agent_connection_conflict",
+    "agent_connection_not_approved",
+    "agent_connection_cancelled",
+    "agent_limit_exceeded",
+    "agent_lockout_risk",
   ]);
   assert.match(source, /payment_required/);
   assert.doesNotMatch(source, /stripe|x402/i);

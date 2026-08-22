@@ -233,6 +233,10 @@ installation, players, backend services, the site, or production deployment.
   plane and accepts only `/#link=<43 base64url characters>`. A query, a path, or
   authority credentials is a rejection, never something to strip and continue
   with.
+- Production requires HTTPS. The only HTTP exception is the documented local
+  control plane `http://api.screenrig.localhost:8088`, which maps to the same-port
+  `http://dashboard.screenrig.localhost:8088` origin. No other HTTP host is
+  accepted.
 - **The CLI mints and never claims.** `POST /dashboard/v1/links/claim` is the
   browser's request on the dashboard origin. `dashboard_link_invalid`,
   `dashboard_link_expired`, `dashboard_link_consumed`, `passkey_invalid`, and
@@ -272,10 +276,10 @@ installation, players, backend services, the site, or production deployment.
   redaction, a server `message` field that is data remains.
 - Optional `Event.actor` is `{ user_id, display_name }` and names the dashboard
   user that caused one mutation. It is descriptive attribution and never
-  authorization. Events an agent, the CLI, a player, or a worker produced carry
-  no actor. `--json` passes it through. It is a nested object, so the human
-  logfmt line omits it under the existing rule; no event carries one until the
-  dashboard serves traffic, so do not add a rendering that cannot be verified.
+  authorization. Optional `Event.agent` is `{ agent_id, name, agent_type }` and
+  names the authenticated agent that directly caused one mutation. An event
+  never uses either field as authorization. `--json` passes both through. They
+  are nested objects, so human logfmt omits them under the existing rule.
 
 ## Playback
 
@@ -352,14 +356,34 @@ installation, players, backend services, the site, or production deployment.
 - Package metadata requires Node.js 20.11+. The plugin's package-relative
   launcher owns the exact runtime preflight. ffmpeg and ffprobe are a host
   dependency the launcher does not provide.
-- The first authenticated command persists replay state, enrolls automatically,
-  verifies the issued credential, and resumes the original command.
+- `agent enroll --email ADDRESS` explicitly creates the account's first
+  independently revocable agent. It persists exact replay state before the
+  request and verifies the issued credential. Other authenticated commands do
+  not enroll as a side effect; without a credential they fail with the stable
+  local code `not_enrolled`, exit code 3, and a `next.command` naming
+  `agent enroll --email ADDRESS` or `agent connect`. Agents branch on
+  `error.code`, so keep that code stable. `agent status` never enrolls. The
+  email is unverified contact metadata, not authentication or recovery
+  authority. The email joins the enrollment request hash as its lowercase
+  uniqueness key, so a retry must send the exact persisted address; the pending
+  `enrollment` record carries it and is cleared once the credential verifies.
+  A `409 email_conflict` is terminal: report it, clear only the pending
+  enrollment, and point at `agent connect`. Never retry it automatically and
+  never advise substituting another address.
   `--beta-key` and `SCREENRIG_BETA_KEY` are sent as `beta_key` on
   `POST /api/v1/enrollments` when present, and omitted when unset.
-- `auth revoke --yes` is server-first and retains local state after failed or
-  ambiguous server results. That route is
-  `POST /api/v1/account/credential/revoke` (CLI account bearer). It does
-  not unbind a screen. `POST /api/v1/screens/{id}/credential/revoke` is
+- `agent connect` adds this installation to an existing account after a fresh
+  dashboard passkey assertion. Cancelled or expired connections, and a
+  cryptographically rejected or revoked pending bearer, clear unusable local
+  connection state before directing the user to start again. Ambiguous transport
+  failures retain the exact state for retry. `connection_ready` means a persisted
+  account passkey exists; a dashboard user or session alone is insufficient.
+- `agent disconnect --yes` is server-first, revokes only the calling agent,
+  and retains local state after failed or ambiguous server results. The last
+  active agent requires the separate `--allow-lockout` choice. `auth status`
+  and `auth revoke --yes [--allow-lockout]` are deprecated compatibility aliases
+  with the same last-agent guard and cleanup semantics. None of these
+  routes unbinds a screen. `POST /api/v1/screens/{id}/credential/revoke` is
   retired. Archive hides a screen. Do not teach `screen revoke-credential`
   or `screen delete` as unbind. `screen delete` surfaces
   `screen_archive_required`. The CLI is not a screen and holds no player

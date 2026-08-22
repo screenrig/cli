@@ -27,24 +27,83 @@ global `screenrig` from `PATH` and never substitutes the npm package at run time
 
 ## Implemented behavior
 
-The CLI emits machine-readable envelopes and automatically enrolls on the first
-authenticated operation. It atomically persists enrollment retry state before
-the request, stores the issued credential in user-private configuration outside
-the replaceable plugin directory, verifies it, and resumes the original
-command.
+The CLI emits machine-readable envelopes. Enrollment is an explicit account
+creation step: it atomically persists enrollment retry state before the request,
+stores the issued credential in user-private configuration outside the
+replaceable plugin directory, and verifies it.
+
+Enrollment creates the account's first independently revocable agent. Run it
+before the first screen is available when account setup and content preparation
+must begin early:
+
+```sh
+screenrig --json agent enroll --email owner@example.com --name "Office MacBook Codex" --open-dashboard
+```
+
+`--email` is required for a new enrollment. The server stores the trimmed
+address as unverified account contact metadata; it is not authentication,
+account recovery authority, or proof that the operator controls that mailbox.
+The CLI retains it only with private transient retry state and does not print it
+in enrollment output. A persisted pending address takes precedence on retry and
+cannot be changed until that attempt finishes or receives a definitive
+`email_conflict` response.
+
+`screen pair` and other authenticated commands do not create accounts as a side
+effect. Without a credential they fail with the stable error code
+`not_enrolled`, exit code 3, and a `next.command` naming the exact command to
+run, and they make no authenticated operation request. Branch on
+`error.code == "not_enrolled"`, then run `error.next.command`: `screenrig agent
+enroll --email ADDRESS` for a new account, or `screenrig agent connect` when a
+connection is pending or this installation was disconnected. Enrollment remains
+idempotent when this installation already has an active agent.
 
 If the server asks for a beta key, pass `--beta-key` with the key the operator
 gave you, or set `SCREENRIG_BETA_KEY`. The CLI sends that value as `beta_key`
 on `POST /api/v1/enrollments` and omits the field when it is unset.
 
 ```sh
-screenrig --json --beta-key screenrig-beta-program account show
+screenrig --json --beta-key screenrig-beta-program agent enroll --email owner@example.com
 ```
 
-`auth revoke --yes` revokes the calling credential on the server before
-removing local credential, enrollment, and transient authenticated-operation
-state. A failed or ambiguous server result retains local state for an exact
-retry.
+One account can have many agent installations. `agent connect [--name NAME]`
+connects a new installation to an existing account. The CLI generates an
+X25519 recipient key, opens a safe dashboard approval URL, and waits on a
+status-only SSE endpoint. The dashboard requires an existing signed-in user and
+a fresh passkey assertion. Approval delivers a recipient-encrypted credential
+through a separate endpoint. The CLI decrypts and stores it locally, activates
+it, verifies its distinct agent identity, and deletes the temporary connection
+state. `--print-url` writes the safe non-authority approval URL to stderr while
+stdout remains one machine-readable result envelope.
+
+A cancelled or expired connection, or a cryptographically rejected or revoked
+pending bearer, removes its unusable local bearer, recipient private key, and
+transient state. An ambiguous activation failure retains that state for exact
+retry; if activation already committed before server connection cleanup, the
+retry accepts it only after `agents/self` returns the matching active agent.
+
+```sh
+screenrig --json agent connect --name "Studio Automation"
+screenrig --json agent status
+screenrig --json agent disconnect --yes
+```
+
+`agent status` never enrolls. It reports `not_enrolled`, `connecting`, `active`,
+or `disconnected`. For an active agent, `connection_ready` is true only when
+the account has a persisted dashboard passkey that can approve another agent.
+`agent disconnect --yes` revokes only the calling agent and
+removes its local credential after server success. It preserves the account,
+screens, content, and other agents. Disconnecting the last active agent fails
+with `agent_lockout_risk`; use `--allow-lockout` only after confirming a
+registered dashboard passkey or accepting loss of the account. Failed or
+ambiguous disconnects preserve local state for an exact retry.
+
+Do not copy `config.json` to add another installation. That clones one bearer
+and defeats independent revocation and usage attribution. Run `agent connect`
+on the destination so it receives its own credential.
+
+`auth status` and `auth revoke --yes [--allow-lockout]` remain deprecated
+compatibility aliases. Revoke uses the same last-agent guard and local cleanup
+semantics as `agent disconnect`.
 
 `compose catalog` and `compose render` run locally. They do not enroll. They
 do not debit credits. `compose render` reads a JSON spec, writes a PNG, and
@@ -156,7 +215,8 @@ Remaining below 1000 credits adds a `credits_low` warning to the envelope
 `warnings[]` array; the message includes the integer remaining. A 402
 `payment_required` problem means remaining is below 1 credit and billed
 control-plane commands are rejected. Both signals can appear together on a
-402 envelope. `account show`, `auth revoke --yes`, `screen toast`,
+402 envelope. `account show`, `agent status`, `agent disconnect --yes`,
+`auth status`, `auth revoke --yes [--allow-lockout]`, `screen toast`,
 `screen screenshot`, `compose catalog`, and `compose render` do not debit
 that meter. Opening `events follow` costs 1 credit. There is no pay command.
 
@@ -168,6 +228,12 @@ the browser:
 ```sh
 screenrig dashboard
 ```
+
+The dashboard Agents view lists each installation, state, last use, directly
+attributable request and credit usage, and recent resource events. A fresh
+passkey assertion can disconnect one selected agent. Shared screen bandwidth
+and retained storage are not assigned to one agent. Authenticated request counts
+are best-effort diagnostics, not exact billing or audit totals.
 
 The link is single use and stops being claimable ten minutes after it is
 minted. That clock belongs to the dashboard link alone: it is not the
@@ -195,14 +261,21 @@ return is `invalid_request`, `unauthorized`, `payment_required`,
 `rate_limited`, and `not_ready`; the CLI renders each with the server's own
 detail and guidance.
 
+Production links require HTTPS. Local development has one exact exception:
+`http://api.screenrig.localhost:8088` may return and open
+`http://dashboard.screenrig.localhost:8088`. The CLI rejects every other HTTP
+control-plane or dashboard host.
+
 Minting is an authenticated control-plane request and debits 1 credit. Retrying
 is safe: the request carries `Idempotency-Key`, and an exact retry returns the
 original link and expiry for twenty-four hours instead of minting a second live
 link.
 
-This command is implemented by the pinned CLI. The dashboard origin is not
-deployed: no request has been served there, so a minted link does not resolve
-yet. Do not read this section as a working dashboard.
+This command is implemented in current CLI source, but the current locked plugin
+bundle has not yet selected a reviewed artifact containing it. The dashboard
+origin is not deployed: no request has been served there, so a minted link does
+not resolve yet. Do not read this section as a working dashboard or marketplace
+availability claim.
 
 ## Feedback
 
@@ -299,10 +372,17 @@ screenrig --json playlist import ./lobby-bundle --update pl_02 --if-match 8
 Import validates the complete local bundle before it starts a remote mutation.
 It lists existing media, reuses exact filename/MIME/size/SHA-256/tag matches with
 an injective source-to-destination mapping, and uploads remaining media serially
-without transcoding. The playlist write happens only after every media object is
-ready. Import never deletes or prunes remote media. If a later step fails after
-an upload starts, the error reports partial mutation and states that no cleanup
-was attempted; retrying the same bundle reuses exact ready media.
+without transcoding. Missing-media declarations are paced to the server's 20 per
+60 seconds admission policy; exact matches consume no upload slot, and a 429 with
+`Retry-After` safely retries only the same idempotent declaration once. If that
+retry is still limited, the latest 429 and retry interval remain authoritative;
+the error also identifies any earlier media confirmed ready without claiming
+partial mutation when none succeeded. A 429 after the playlist write is sent
+reports its outcome as unknown and directs an exact idempotent read-back/retry; it
+never claims that no write started. The playlist write happens only after every
+media object is ready. Import never deletes or prunes remote media. If a later step
+fails after an upload starts, the error reports partial mutation and states that no
+cleanup was attempted; retrying the same bundle reuses exact ready media.
 
 ## Screen toast
 
@@ -584,6 +664,13 @@ It uses npm trusted publishing through GitHub OIDC, includes provenance, perform
 exact-version clean-install tests on Linux, macOS, and Windows, and attaches the
 offline archive plus its checksum to the stable GitHub release. See the
 [release procedure](https://github.com/screenrig/cli/blob/main/RELEASING.md).
+
+For a coordinated identity release, freeze and review the backend contract
+first, vendor and gate that exact snapshot here, publish and review the resulting
+CLI CI artifact, then update the plugin lock and regenerate its bundle. Site and
+dashboard releases follow their own independent workflows only after those
+inputs are fixed. Source-ready CLI commands are not evidence that the older
+locked plugin bundle or any public origin exposes them.
 
 The plugin marketplace is a separate distribution. This repository does not
 deploy ScreenRig, publish Homebrew formulae, or publish to PyPI.

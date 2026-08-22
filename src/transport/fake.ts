@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type {
   Account,
   AccountEvent,
+  Agent,
   Capabilities,
   FeedbackKind,
   FeedbackSubmission,
@@ -175,6 +176,8 @@ export function memoryBackend(): FakeTransport {
     content_limit_bytes: 0,
     created_at: "2026-08-14T17:00:00.000Z",
     credit_remaining: 0,
+    email: "owner@example.com",
+    email_verified: false,
     id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
     reserved_bytes: 0,
     revision: 1,
@@ -189,6 +192,18 @@ export function memoryBackend(): FakeTransport {
   const screens = new Map<string, Screen>();
   const media = new Map<string, Record<string, unknown>>();
   const kv = new Map<string, KVEntry>();
+  const currentAgent: Agent = {
+    id: "agt_AAAAAAAAAAAAAAAAAAAAAAAA",
+    name: "ScreenRig CLI",
+    agent_type: "cli",
+    platform: "test/mock",
+    version: "0.1.0",
+    state: "active",
+    authenticated_requests: 1,
+    metered_credits: 0,
+    created_at: "2026-08-14T17:00:00.000Z",
+    connected_at: "2026-08-14T17:00:00.000Z",
+  };
 
   transport.on("GET", "/.health", () => ({ status: 200, headers: {}, body: { status: "alive" } }));
   transport.on("GET", "/.ready", () => ({ status: 200, headers: {}, body: { status: "ready", degraded: [] } }));
@@ -217,18 +232,37 @@ export function memoryBackend(): FakeTransport {
     } satisfies Capabilities,
   }));
 
-  transport.on("POST", "/api/v1/enrollments", (req) => ({
-    status: 201,
-    headers: {
-      "cache-control": "private, no-store",
-      "x-request-id": req.headers?.["x-request-id"] ?? "req_enroll",
-    },
-    body: {
-      account,
-      token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-      issuance_id: "iss_AAAAAAAAAAAAAAAAAAAAAAAA",
-      issuance_expires_at: "2026-08-14T17:10:00.000Z",
-    },
+  transport.on("POST", "/api/v1/enrollments", (req): TransportResponse => {
+    const email = (req.body as { email?: unknown } | undefined)?.email;
+    if (typeof email !== "string") {
+      return {
+        status: 400,
+        headers: { "content-type": "application/problem+json" },
+        body: { status: 400, code: "invalid_request", title: "Invalid request", detail: "A contact email is required." },
+      };
+    }
+    account = { ...account, email };
+    return {
+      status: 201,
+      headers: {
+        "cache-control": "private, no-store",
+        "x-request-id": req.headers?.["x-request-id"] ?? "req_enroll",
+      },
+      body: {
+        account,
+        agent: currentAgent,
+        connection_ready: false,
+        token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        issuance_id: "iss_AAAAAAAAAAAAAAAAAAAAAAAA",
+        issuance_expires_at: "2026-08-14T17:10:00.000Z",
+      },
+    };
+  });
+
+  transport.on("GET", "/api/v1/agents/self", () => ({
+    status: 200,
+    headers: { "cache-control": "private, no-store", "x-request-id": "req_agent_selfAAAAAAAAAAAA" },
+    body: { agent: currentAgent, connection_ready: false },
   }));
 
   transport.on("POST", "/api/v1/screens/pair", (req) => {

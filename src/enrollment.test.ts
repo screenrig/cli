@@ -27,7 +27,7 @@ function fixture(home: string): { fs: ConfigFs; resolved: ResolvedConfig } {
   };
 }
 
-test("first authenticated use atomically persists, verifies, and completes outside the plugin", async () => {
+test("explicit enrollment atomically persists email, verifies, and completes outside the plugin", async () => {
   const home = await testTemp("enrollment-first-");
   const { fs, resolved } = fixture(home);
   let enrollments = 0;
@@ -36,6 +36,7 @@ test("first authenticated use atomically persists, verifies, and completes outsi
     runtime: { fs, now: () => new Date("2026-08-14T20:00:00.000Z"), sleep: async () => undefined },
     generateClientId: () => `cli_${"A".repeat(43)}`,
     generateIdempotencyKey: () => "enroll-first-idempotency",
+    enrollmentEmail: "Owner@example.com",
     verify: async (token, accountId) => {
       assert.equal(token, "sr_live_enrollment_secret");
       assert.equal(accountId, "acc_enrollment");
@@ -46,6 +47,7 @@ test("first authenticated use atomically persists, verifies, and completes outsi
         enrollment: {
           client_id: `cli_${"A".repeat(43)}`,
           idempotency_key: "enroll-first-idempotency",
+          email: "Owner@example.com",
         },
         updated_at: "2026-08-14T20:00:00.000Z",
       });
@@ -55,12 +57,14 @@ test("first authenticated use atomically persists, verifies, and completes outsi
       assert.deepEqual(state, {
         clientId: `cli_${"A".repeat(43)}`,
         idempotencyKey: "enroll-first-idempotency",
+        email: "Owner@example.com",
       });
       assert.deepEqual(await readConfigFile(resolved.configPath, fs), {
         api_url: "https://api.screenrig.ai",
         enrollment: {
           client_id: `cli_${"A".repeat(43)}`,
           idempotency_key: "enroll-first-idempotency",
+          email: "Owner@example.com",
         },
         updated_at: "2026-08-14T20:00:00.000Z",
       });
@@ -93,7 +97,7 @@ test("existing credential bypasses enrollment and remains unchanged", async () =
   await rm(home, { recursive: true, force: true });
 });
 
-test("concurrent first-use calls perform one enrollment and share the credential", async () => {
+test("concurrent explicit enrollment calls perform one enrollment and share the credential", async () => {
   const home = await testTemp("enrollment-concurrent-");
   const { fs, resolved } = fixture(home);
   let enrollments = 0;
@@ -112,6 +116,7 @@ test("concurrent first-use calls perform one enrollment and share the credential
   const generators = {
     generateClientId: () => `cli_${"B".repeat(43)}`,
     generateIdempotencyKey: () => "enroll-shared-idempotency",
+    enrollmentEmail: "owner@example.com",
   };
   const verify = async () => undefined;
   const first = ensureCredential({ resolved, runtime, enroll, verify, ...generators });
@@ -127,10 +132,10 @@ test("concurrent first-use calls perform one enrollment and share the credential
   await rm(home, { recursive: true, force: true });
 });
 
-test("ambiguous enrollment retries reuse the persisted client and idempotency state", async () => {
+test("ambiguous enrollment retries reuse the persisted client, contact email, and idempotency state", async () => {
   const home = await testTemp("enrollment-retry-");
   const { fs, resolved } = fixture(home);
-  const seen: Array<{ clientId: string; idempotencyKey: string }> = [];
+  const seen: Array<{ clientId: string; idempotencyKey: string; email: string }> = [];
   const runtime = { fs, now: () => new Date(), sleep: async () => undefined };
   const generators = {
     generateClientId: () => `cli_${"C".repeat(43)}`,
@@ -141,6 +146,7 @@ test("ambiguous enrollment retries reuse the persisted client and idempotency st
       resolved,
       runtime,
       ...generators,
+      enrollmentEmail: "owner@example.com",
       verify: async () => undefined,
       enroll: async (state) => {
         seen.push(state);
@@ -153,6 +159,7 @@ test("ambiguous enrollment retries reuse the persisted client and idempotency st
   assert.deepEqual(pending?.enrollment, {
     client_id: `cli_${"C".repeat(43)}`,
     idempotency_key: "enroll-retry-idempotency",
+    email: "owner@example.com",
   });
   const result = await ensureCredential({
     resolved,
@@ -180,6 +187,7 @@ test("verification failure preserves the permanent token and exact enrollment re
     runtime,
     generateClientId: () => `cli_${"D".repeat(43)}`,
     generateIdempotencyKey: () => "enroll-verify-retry",
+    enrollmentEmail: "owner@example.com",
     enroll: async () => ({ token: "sr_live_verify_secret", accountId: "acc_verify" }),
     verify: async () => { throw new Error("verification temporarily unavailable"); },
   }), /verification temporarily unavailable/);
@@ -190,6 +198,7 @@ test("verification failure preserves the permanent token and exact enrollment re
     enrollment: {
       client_id: `cli_${"D".repeat(43)}`,
       idempotency_key: "enroll-verify-retry",
+      email: "owner@example.com",
     },
     updated_at: "2026-08-14T20:00:00.000Z",
   });

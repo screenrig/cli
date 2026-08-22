@@ -14,6 +14,8 @@ export interface Account {
   content_limit_bytes: number;
   created_at: string;
   credit_remaining: number;
+  email: string;
+  email_verified: false;
   id: string;
   reserved_bytes: number;
   revision: number;
@@ -26,6 +28,8 @@ export interface Account {
 
 export interface CLIEnrollment {
   account: Account;
+  agent: Agent;
+  connection_ready: false;
   issuance_expires_at: string;
   issuance_id: string;
   token: string;
@@ -33,8 +37,83 @@ export interface CLIEnrollment {
 
 export interface CLIEnrollmentRequest {
   client_id: string;
+  email: string;
   /** Present only when the operator supplies --beta-key or SCREENRIG_BETA_KEY. */
   beta_key?: string;
+  name?: string;
+  agent_type?: string;
+  platform?: string;
+  version?: string;
+}
+
+export interface Agent {
+  agent_type: string;
+  authenticated_requests: number;
+  connected_at?: string;
+  created_at: string;
+  id: string;
+  last_used_at?: string;
+  metered_credits: number;
+  name: string;
+  platform?: string;
+  public_key_kid?: string;
+  revoked_at?: string;
+  state: "pending" | "active" | "revoked" | "cancelled" | "expired";
+  version?: string;
+}
+
+export interface AgentSelfStatus {
+  agent: Agent;
+  connection_ready: boolean;
+}
+
+export interface X25519PublicJWK {
+  kty: "OKP";
+  crv: "X25519";
+  x: string;
+}
+
+export interface AgentConnectionRequest {
+  agent_type?: string;
+  name?: string;
+  platform?: string;
+  recipient_public_key: X25519PublicJWK;
+  version?: string;
+}
+
+export interface AgentConnectionStart {
+  approval_url: string;
+  connection_id: string;
+  connection_token: string;
+  expires_at: string;
+}
+
+export interface AgentConnection {
+  agent_type: string;
+  connection_id: string;
+  created_at: string;
+  expires_at: string;
+  name: string;
+  platform?: string;
+  status: "pending" | "approved" | "connected" | "denied" | "expired" | "cancelled";
+  version?: string;
+}
+
+export interface AgentCredentialEnvelope {
+  algorithm: "X25519-HKDF-SHA256-A256GCM";
+  ciphertext: string;
+  ephemeral_public_key: X25519PublicJWK;
+  nonce: string;
+}
+
+export interface AgentCredentialCollection {
+  agent: Agent;
+  credential_envelope: AgentCredentialEnvelope;
+  issuance_expires_at: string;
+}
+
+export interface AgentDisconnectRequest {
+  allow_last_agent?: boolean;
 }
 
 export interface Operation {
@@ -74,6 +153,13 @@ export interface EventActor {
   display_name: string;
 }
 
+/** Safe agent principal attribution on directly caused account events. */
+export interface EventAgent {
+  agent_id: string;
+  name: string;
+  agent_type: string;
+}
+
 export interface AccountEvent {
   cursor: string;
   sequence: number;
@@ -90,6 +176,7 @@ export interface AccountEvent {
    * traffic.
    */
   actor?: EventActor;
+  agent?: EventAgent;
   at: string;
 }
 

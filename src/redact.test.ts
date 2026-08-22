@@ -20,6 +20,15 @@ test("redacts credentials and email addresses from errors", () => {
   );
 });
 
+test("redacts temporary agent connection authority and envelope material", () => {
+  const temporary = `sac_${"A".repeat(43)}`;
+  assert.equal(redactText(`ScreenRig-Agent-Connect ${temporary}`), "ScreenRig-Agent-Connect ***");
+  assert.equal(isSensitiveValue(temporary), true);
+  assert.equal(isSensitiveKey("credential_envelope_ciphertext"), true);
+  assert.equal(isSensitiveKey("private_jwk"), true);
+  assert.equal(isSensitiveKey("nonce"), true);
+});
+
 test("redacts a fragment-delivered single-use link wherever text carries one", () => {
   const token = "D".repeat(43);
   assert.equal(

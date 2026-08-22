@@ -104,6 +104,7 @@ async function main(): Promise<void> {
   };
 
   try {
+    await run("--api-url", apiUrl, "agent", "enroll", "--email", "smoke@example.com");
     const pairing = await run("--api-url", apiUrl, "screen", "pair", "abc234", "--label", "Pairing smoke");
     const pairingData = pairing.data as { public_url?: string; screen?: { id?: string } };
     assert.equal(pairingData.screen?.id, "scr_PAIRINGAAAAAAAAAAAAAAAA");
