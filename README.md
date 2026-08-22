@@ -90,10 +90,9 @@ want object animation, layer the content and put the motion on the
 top-layer text or images. Do not animate every placement. Object enter
 starts invisible. It runs 500 ms after the page occupies the full
 viewport, for 400 ms. Those delays are contract constants, not author
-fields and not CLI flags. These are playlist document fields the CLI
-sends. The control plane accepts swipe types and placement `enter`.
-Canonical CLI source on public `main` is repository-ready. They are not
-in the locked plugin bundle.
+fields and not CLI flags. The pinned CLI implements these playlist document
+fields, and the control plane accepts swipe types and placement `enter`. This
+does not establish marketplace availability or deployment.
 
 The ordinary pair command currently accepts six canonical characters:
 
@@ -126,9 +125,9 @@ de-associate; the server returns `screen_archive_required`.
 Ed25519 identity with `ScreenRig-Pairing` and `ScreenRig-Session`;
 `ScreenRig-Device` is retired. Signed on-device reset is the only
 de-associate. The CLI is not a screen and holds no player keypair. `screen
-archive` and `screen unarchive` are repository-ready on public `main`. They are
-absent from the locked plugin bundle. Native identity remains an owning-player
-claim; none of this is a marketplace, deployed, or hardware-validated claim.
+archive` and `screen unarchive` are implemented by the pinned CLI. Native
+identity remains an owning-player claim; none of this establishes marketplace
+availability, deployment, or hardware validation.
 
 Application packing accepts an already-built static directory. It produces
 deterministic bounded archives, injects the pinned browser SDK runtime, and
@@ -144,8 +143,8 @@ object on a screen, a playlist, or one playlist page. Compact UTF-8 of that
 object is at most 1 KiB. ScreenRig does not read or use it, does not send it
 to players, and does not treat it as authorization. Set takes `--json-value`
 or `--file`. Last write wins; there is no `--if-match`. These commands are
-repository-ready on public `main`. They are absent from the locked plugin
-bundle and are not a marketplace or deployed claim.
+implemented by the pinned CLI. Their inclusion does not establish marketplace
+availability or deployment.
 
 `playback list` returns daily playback aggregates for this account, newest
 days first. Filter with `--screen-id`, `--media-id`, and `--day YYYY-MM-DD`.
@@ -201,10 +200,9 @@ is safe: the request carries `Idempotency-Key`, and an exact retry returns the
 original link and expiry for twenty-four hours instead of minting a second live
 link.
 
-This command is **repository-ready on public `main`**. It is absent from the
-locked plugin bundle. The dashboard origin is not deployed: no request has
-been served there, so a minted link does not resolve yet. Do not read this
-section as a working dashboard.
+This command is implemented by the pinned CLI. The dashboard origin is not
+deployed: no request has been served there, so a minted link does not resolve
+yet. Do not read this section as a working dashboard.
 
 ## Feedback
 
@@ -336,9 +334,8 @@ The spec is a fail-closed tree of `Frame`, `Column`, `Row`, `Box`, `Spacer`,
 `label`. Spacing tokens are `xs`, `s`, `m`, `l`, and `xl`. Pins are `top`,
 `bottom`, `left`, and `right`. Do not author `x` or `y` on any node. The root
 `Frame` defines the canvas through required `width` and `height`. Do not author
-`fontSize`. The current source accepts positive `width` and `height` values in
-px on `Image`, `Box`, `Row`, `Column`, and `Spacer`. This implemented behavior
-is not in the locked plugin bundle. Keep `flex` for remaining space.
+`fontSize`. The pinned CLI accepts positive `width` and `height` values in px on
+`Image`, `Box`, `Row`, `Column`, and `Spacer`. Keep `flex` for remaining space.
 `pin` `top` or `bottom` stretches the full width; `left` or `right` stretches
 the full height. Size a wordmark with `width` and `height`, not `pin`.
 Optional Text `textShadow` is
