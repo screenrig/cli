@@ -14,12 +14,24 @@ import type {
   Operation,
   Screen,
 } from "../adapters/protocol.js";
-import type { Transport, TransportRequest, TransportResponse, TransportStream } from "./types.js";
+import type {
+  Transport,
+  TransportDownloadResponse,
+  TransportRequest,
+  TransportResponse,
+  TransportStream,
+} from "./types.js";
 
 export interface FakeRoute {
   method: string;
   path: string | RegExp;
   handler: (req: TransportRequest) => TransportResponse | Promise<TransportResponse>;
+}
+
+export interface FakeDownloadRoute {
+  method: string;
+  path: string | RegExp;
+  handler: (req: TransportRequest) => TransportDownloadResponse | Promise<TransportDownloadResponse>;
 }
 
 function matchPath(route: string | RegExp, path: string): boolean {
@@ -43,6 +55,7 @@ function waitForAbort(signal: AbortSignal | undefined): Promise<void> {
 export class FakeTransport implements Transport {
   readonly calls: TransportRequest[] = [];
   private readonly routes: FakeRoute[] = [];
+  private readonly downloadRoutes: FakeDownloadRoute[] = [];
   private readonly streamChunks: string[] = [];
   private readonly streamQueue: FakeStreamOutcome[] = [];
   /** Test hook: awaited after pushed chunks so callers can observe incremental writes. */
@@ -54,6 +67,11 @@ export class FakeTransport implements Transport {
 
   on(method: string, path: string | RegExp, handler: FakeRoute["handler"]): this {
     this.routes.push({ method, path, handler });
+    return this;
+  }
+
+  onDownload(method: string, path: string | RegExp, handler: FakeDownloadRoute["handler"]): this {
+    this.downloadRoutes.push({ method, path, handler });
     return this;
   }
 
@@ -127,6 +145,25 @@ export class FakeTransport implements Transport {
         await waitForAbort(req.signal);
       },
     };
+  }
+
+  async download(req: TransportRequest): Promise<TransportDownloadResponse> {
+    this.calls.push(req);
+    const route = this.downloadRoutes.find((item) => item.method === req.method && matchPath(item.path, req.path));
+    if (!route) {
+      return {
+        status: 404,
+        headers: { "content-type": "application/problem+json" },
+        problem: {
+          type: "https://screenrig.ai/problems/not-found",
+          title: "Not found",
+          status: 404,
+          detail: `No fake download route for ${req.method} ${req.path}`,
+          code: "not_found",
+        },
+      };
+    }
+    return route.handler(req);
   }
 }
 

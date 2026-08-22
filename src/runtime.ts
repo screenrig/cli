@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import type { Writable } from "node:stream";
+import { Readable, type Writable } from "node:stream";
 import type { Transport } from "./transport/types.js";
 import type { ConfigFs } from "./config.js";
 import { openExternalUrl, openLocalPath, type OpenPath, type OpenUrl } from "./open-url.js";
@@ -28,7 +28,7 @@ export interface SignedRawPutRequest {
   url: string;
   method: "PUT";
   headers: Record<string, string>;
-  body: Uint8Array;
+  body: Uint8Array | AsyncIterable<Uint8Array>;
   credentials: "omit";
   redirect: "error";
 }
@@ -149,13 +149,19 @@ export function spawnRunProcess(): RunProcess {
 
 export function fetchSignedRawPut(fetchImpl: typeof fetch = fetch): SignedRawPut {
   return async (request) => {
-    const response = await fetchImpl(request.url, {
+    const streaming = !(request.body instanceof Uint8Array);
+    const body: Buffer | Readable = request.body instanceof Uint8Array
+      ? Buffer.from(request.body)
+      : Readable.from(request.body);
+    const init = {
       method: request.method,
       headers: request.headers,
-      body: Buffer.from(request.body),
+      body,
       credentials: request.credentials,
       redirect: request.redirect,
-    });
+      ...(streaming ? { duplex: "half" } : {}),
+    } as RequestInit;
+    const response = await fetchImpl(request.url, init);
     return { status: response.status, bodyText: await response.text() };
   };
 }

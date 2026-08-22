@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { MediaCommit, MediaUploadDeclaration, MediaUploadSession } from "./adapters/protocol.js";
@@ -114,13 +115,37 @@ export async function performSignedMediaPut(
   session: ValidatedMediaUploadSession,
   signedRawPut: SignedRawPut,
 ): Promise<void> {
+  return performSignedMediaBodyPut(prepared.bytes, session, signedRawPut);
+}
+
+export async function performSignedMediaFilePut(
+  filePath: string,
+  session: ValidatedMediaUploadSession,
+  signedRawPut: SignedRawPut,
+): Promise<void> {
+  return performSignedMediaBodyPut(createReadStream(filePath), session, signedRawPut);
+}
+
+export async function performSignedMediaStreamPut(
+  body: AsyncIterable<Uint8Array>,
+  session: ValidatedMediaUploadSession,
+  signedRawPut: SignedRawPut,
+): Promise<void> {
+  return performSignedMediaBodyPut(body, session, signedRawPut);
+}
+
+async function performSignedMediaBodyPut(
+  body: Uint8Array | AsyncIterable<Uint8Array>,
+  session: ValidatedMediaUploadSession,
+  signedRawPut: SignedRawPut,
+): Promise<void> {
   let response;
   try {
     response = await signedRawPut({
       url: session.uploadUrl,
       method: "PUT",
       headers: session.headers,
-      body: prepared.bytes,
+      body,
       credentials: "omit",
       redirect: "error",
     });

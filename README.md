@@ -270,6 +270,40 @@ Two rules decide whether a playlist is accepted:
   before they send anything, and name the screen and the command that fixes it.
   Set the zone first, then assign.
 
+## Playlist bundles
+
+Export one playlist and the exact original renditions it currently resolves:
+
+```sh
+screenrig --json playlist export pl_01 --output ./lobby-bundle
+```
+
+The destination must not exist. Export writes a private
+`screenrig.playlist-bundle/v1` directory through a temporary sibling and then
+renames it into place. The bundle contains `screenrig-bundle.json`,
+`playlist.json`, and content-addressed `media/<sha256>.<canonical-ext>` files.
+The manifest records `selector_policy: "snapshot"` and
+`comments_policy: "excluded"`. Dynamic `all` and `tag` selectors become exact
+`id` or `ids` snapshots. Iframes remain URLs. Application placements are
+rejected before any media download because v1 has no application-package
+export.
+
+Import creates a new playlist by default. Updating is explicit and requires the
+current destination revision:
+
+```sh
+screenrig --json playlist import ./lobby-bundle
+screenrig --json playlist import ./lobby-bundle --update pl_02 --if-match 8
+```
+
+Import validates the complete local bundle before it starts a remote mutation.
+It lists existing media, reuses exact filename/MIME/size/SHA-256/tag matches with
+an injective source-to-destination mapping, and uploads remaining media serially
+without transcoding. The playlist write happens only after every media object is
+ready. Import never deletes or prunes remote media. If a later step fails after
+an upload starts, the error reports partial mutation and states that no cleanup
+was attempted; retrying the same bundle reuses exact ready media.
+
 ## Screen toast
 
 A toast is transient stage chrome on one screen, not a placement. It occupies

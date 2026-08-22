@@ -1,5 +1,12 @@
 import { CliError, networkError, normalizeProblem, timeoutError } from "../problems.js";
-import type { Transport, TransportRequest, TransportResponse, TransportStream } from "./types.js";
+import type {
+  Transport,
+  TransportByteStream,
+  TransportDownloadResponse,
+  TransportRequest,
+  TransportResponse,
+  TransportStream,
+} from "./types.js";
 
 function headerMap(headers: Headers): Record<string, string> {
   const out: Record<string, string> = {};
@@ -156,5 +163,64 @@ export class FetchTransport implements Transport {
         }
       },
     };
+  }
+
+  async download(req: TransportRequest): Promise<TransportDownloadResponse> {
+    const controller = new AbortController();
+    const timer =
+      req.timeout_ms && req.timeout_ms > 0
+        ? setTimeout(() => controller.abort(), req.timeout_ms)
+        : undefined;
+    let response: Response;
+    try {
+      response = await this.fetchImpl(buildUrl(this.apiUrl, req.path, req.query), {
+        method: req.method,
+        headers: { ...this.headers(req), accept: "*/*" },
+        signal: req.signal ?? controller.signal,
+      });
+    } catch (err) {
+      if (timer) clearTimeout(timer);
+      if ((err as Error).name === "AbortError") {
+        throw timeoutError("Media download timed out", req.headers?.["x-request-id"]);
+      }
+      throw networkError(err instanceof Error ? err.message : "Media download failed", req.headers?.["x-request-id"]);
+    }
+
+    const headers = headerMap(response.headers);
+    if (response.status >= 400) {
+      if (timer) clearTimeout(timer);
+      const text = await response.text();
+      return {
+        status: response.status,
+        headers,
+        problem: decodeTextBody(text, headers["content-type"] ?? ""),
+        rawText: text,
+      };
+    }
+    if (!response.body) {
+      if (timer) clearTimeout(timer);
+      return { status: response.status, headers };
+    }
+
+    const reader = response.body.getReader();
+    const requestId = req.headers?.["x-request-id"];
+    const body: TransportByteStream = {
+      async *[Symbol.asyncIterator]() {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            yield value;
+          }
+        } catch (err) {
+          if ((err as Error).name === "AbortError") throw timeoutError("Media download timed out", requestId);
+          throw networkError(err instanceof Error ? err.message : "Media download stream failed", requestId);
+        } finally {
+          if (timer) clearTimeout(timer);
+          reader.releaseLock();
+        }
+      },
+    };
+    return { status: response.status, headers, body };
   }
 }

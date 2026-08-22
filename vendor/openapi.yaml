@@ -716,7 +716,7 @@ paths:
       operationId: getMedia
       security: [{ accountBearer: [] }]
       responses:
-        "200": { description: Ready private media metadata. Bytes remain available only through a runtime manifest grant., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Media" } } } }
+        "200": { description: Ready private media metadata. Original bytes are available to the owning account through the account export route and to a screen only through an exact runtime manifest grant., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Media" } } } }
         default: { $ref: "#/components/responses/Problem" }
     patch:
       operationId: patchMedia
@@ -732,6 +732,36 @@ paths:
       parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       responses:
         "204": { description: Tombstoned. Referenced desired or active grants cannot be deleted. }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/media/{id}/content:
+    parameters:
+      - { $ref: "#/components/parameters/ResourceID" }
+      - { $ref: "#/components/parameters/Range" }
+      - { name: If-None-Match, in: header, required: false, schema: { type: string }, description: Exact strong media SHA-256 ETag returned by this route. }
+    get:
+      operationId: exportMediaContent
+      description: >-
+        Exports the original immutable rendition owned by the authenticated account. The account bearer is charged the normal
+        authenticated API request credit, and completed response bytes are recorded as account_media_export egress. The media
+        identifier is never authority: another account's identifier returns not_found. The API streams from private storage and
+        never publishes an object key, storage URL, or signed GET. The attachment filename is the media identifier plus the
+        canonical extension for the verified content type.
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Complete original rendition., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Length: { schema: { type: integer } }, Content-Type: { schema: { type: string } }, Content-Disposition: { schema: { type: string, pattern: '^attachment; filename="med_[A-Za-z0-9_-]+\.(png|jpg|webp|gif|mp4|webm)"$' } }, ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } } }, content: { image/png: { schema: { type: string, format: binary } }, image/jpeg: { schema: { type: string, format: binary } }, image/webp: { schema: { type: string, format: binary } }, image/gif: { schema: { type: string, format: binary } }, video/mp4: { schema: { type: string, format: binary } }, video/webm: { schema: { type: string, format: binary } } } }
+        "206": { description: One standards-correct byte range., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } }, Content-Length: { schema: { type: integer } }, Content-Type: { schema: { type: string } }, Content-Disposition: { schema: { type: string } }, ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } } }, content: { image/png: { schema: { type: string, format: binary } }, image/jpeg: { schema: { type: string, format: binary } }, image/webp: { schema: { type: string, format: binary } }, image/gif: { schema: { type: string, format: binary } }, video/mp4: { schema: { type: string, format: binary } }, video/webm: { schema: { type: string, format: binary } } } }
+        "304": { description: The exact immutable media ETag matches If-None-Match. No body or egress increment is produced., headers: { ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } } }
+        "416": { description: Unsatisfiable or malformed range., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    head:
+      operationId: headMediaContent
+      description: Applies the same account ownership, conditional, range, and private-storage rules as exportMediaContent without opening or transferring the stored rendition.
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Complete-rendition metadata with no body., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Length: { schema: { type: integer } }, Content-Type: { schema: { type: string } }, Content-Disposition: { schema: { type: string } }, ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } } } }
+        "206": { description: Byte-range metadata with no body., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } }, Content-Length: { schema: { type: integer } }, Content-Type: { schema: { type: string } }, Content-Disposition: { schema: { type: string } }, ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } } } }
+        "304": { description: The exact immutable media ETag matches If-None-Match. No body is produced., headers: { ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } } }
+        "416": { description: Unsatisfiable or malformed range., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/feedback/bugs:
     get:

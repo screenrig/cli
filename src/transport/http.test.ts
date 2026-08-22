@@ -93,3 +93,33 @@ test("JSON GET still uses text()", async () => {
   assert.equal(result.rawText, '{"state":"ready"}');
   assert.deepEqual(result.body, { state: "ready" });
 });
+
+test("media download exposes response chunks without calling text or arrayBuffer", async () => {
+  const chunks = [Uint8Array.from([1, 2]), Uint8Array.from([3, 4, 5])];
+  const inner = new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  }), {
+    status: 200,
+    headers: { "content-type": "image/png", "content-length": "5", etag: '"abc"' },
+  });
+  let textCalls = 0;
+  let arrayBufferCalls = 0;
+  const response = {
+    get status() { return inner.status; },
+    get headers() { return inner.headers; },
+    get body() { return inner.body; },
+    text: async () => { textCalls += 1; throw new Error("must not buffer as text"); },
+    arrayBuffer: async () => { arrayBufferCalls += 1; throw new Error("must not buffer as arrayBuffer"); },
+  } as unknown as Response;
+  const transport = new FetchTransport("https://api.screenrig.ai/", "sr_live_test", async () => response);
+  const result = await transport.download({ method: "GET", path: "/api/v1/media/med_1/content" });
+  const received: number[] = [];
+  assert.ok(result.body);
+  for await (const chunk of result.body) received.push(...chunk);
+  assert.deepEqual(received, [1, 2, 3, 4, 5]);
+  assert.equal(textCalls, 0);
+  assert.equal(arrayBufferCalls, 0);
+});
