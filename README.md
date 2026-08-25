@@ -32,6 +32,19 @@ creation step: it atomically persists enrollment retry state before the request,
 stores the issued credential in user-private configuration outside the
 replaceable plugin directory, and verifies it.
 
+### Configuration profiles
+
+When `config.local-dev.json` exists in the selected ScreenRig configuration
+directory, the CLI uses the documented local control plane by default:
+`http://api.screenrig.localhost:8088`. This profile is selected automatically
+when the selected config path resolves to that filename.
+
+`config.json` and an absent local-development profile keep the production
+default `https://api.screenrig.ai`. `SCREENRIG_API_URL` and `--api-url` remain
+explicit overrides. A stored production default in `config.local-dev.json` is
+treated as stale profile state; a different stored URL remains an explicit
+configuration override.
+
 Enrollment creates the account's first independently revocable agent. Run it
 before the first screen is available when account setup and content preparation
 must begin early:

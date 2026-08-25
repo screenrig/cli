@@ -47,6 +47,7 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
     }
 
     export const DEFAULT_API_URL = "https://api.screenrig.ai";
+    export const LOCAL_DEV_API_URL = "http://api.screenrig.localhost:8088";
 
     export interface ConfigFs {
       mkdir: typeof mkdir;
@@ -279,7 +280,7 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
       lastAgent?: ScreenRigConfig["last_agent"];
       configPath: string;
       source: {
-        apiUrl: "flag" | "env" | "config" | "default";
+        apiUrl: "flag" | "env" | "config" | "local-dev" | "default";
         token: "config" | "none";
       };
     }
@@ -303,10 +304,12 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
         );
       }
 
-      let apiUrl = DEFAULT_API_URL;
-      let apiSource: ResolvedConfig["source"]["apiUrl"] = "default";
-      if (file?.api_url) {
-        apiUrl = file.api_url;
+      const localDevProfile = path.basename(configPath) === LOCAL_DEV_CONFIG_NAME;
+      let apiUrl = localDevProfile ? LOCAL_DEV_API_URL : DEFAULT_API_URL;
+      let apiSource: ResolvedConfig["source"]["apiUrl"] = localDevProfile ? "local-dev" : "default";
+      const storedApiUrl = file?.api_url?.replace(/\/+$/, "");
+      if (storedApiUrl && (!localDevProfile || storedApiUrl !== DEFAULT_API_URL)) {
+        apiUrl = storedApiUrl;
         apiSource = "config";
       }
       if (envApi) {

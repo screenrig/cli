@@ -4,6 +4,8 @@ import path from "node:path";
 import { test } from "node:test";
 import {
   defaultConfigPath,
+  DEFAULT_API_URL,
+  LOCAL_DEV_API_URL,
   readConfigFile,
   resolveConfig,
   withConfigLock,
@@ -128,6 +130,67 @@ test("default config path is config.local-dev.json when that file exists", async
   const localDev = path.join(dir, "config.local-dev.json");
   await writeFile(localDev, "{}\n");
   assert.equal(await defaultConfigPath(fsLike), localDev);
+  await rm(home, { recursive: true, force: true });
+});
+
+test("local-dev profile resolves the documented local API by default", async () => {
+  const home = await testTemp("config-local-dev-api-");
+  const fsLike = realFs(home);
+  const dir = path.join(home, "screenrig");
+  const localDev = path.join(dir, "config.local-dev.json");
+  await mkdir(dir, { recursive: true });
+  await writeFile(localDev, "{}\n");
+  await chmod(localDev, 0o600);
+
+  const resolved = await resolveConfig({ flags: {}, fs: fsLike });
+  assert.equal(resolved.apiUrl, LOCAL_DEV_API_URL);
+  assert.equal(resolved.source.apiUrl, "local-dev");
+  assert.notEqual(resolved.apiUrl, DEFAULT_API_URL);
+
+  await rm(home, { recursive: true, force: true });
+});
+
+test("local-dev profile replaces a stored production default but preserves explicit overrides", async () => {
+  const home = await testTemp("config-local-dev-overrides-");
+  const fsLike = realFs(home);
+  const dir = path.join(home, "screenrig");
+  const localDev = path.join(dir, "config.local-dev.json");
+  await mkdir(dir, { recursive: true });
+  await writeFile(localDev, JSON.stringify({ api_url: `${DEFAULT_API_URL}/` }) + "\n");
+  await chmod(localDev, 0o600);
+
+  let resolved = await resolveConfig({ flags: {}, fs: fsLike });
+  assert.equal(resolved.apiUrl, LOCAL_DEV_API_URL);
+  assert.equal(resolved.source.apiUrl, "local-dev");
+
+  await writeFile(localDev, JSON.stringify({ api_url: "http://127.0.0.1:8088" }) + "\n");
+  resolved = await resolveConfig({ flags: {}, fs: fsLike });
+  assert.equal(resolved.apiUrl, "http://127.0.0.1:8088");
+  assert.equal(resolved.source.apiUrl, "config");
+
+  resolved = await resolveConfig({
+    flags: { "api-url": "http://127.0.0.1:18088" },
+    fs: { ...fsLike, env: { XDG_CONFIG_HOME: home, SCREENRIG_API_URL: "http://127.0.0.1:28088" } },
+  });
+  assert.equal(resolved.apiUrl, "http://127.0.0.1:18088");
+  assert.equal(resolved.source.apiUrl, "flag");
+
+  resolved = await resolveConfig({
+    flags: {},
+    fs: { ...fsLike, env: { XDG_CONFIG_HOME: home, SCREENRIG_API_URL: "http://127.0.0.1:28088" } },
+  });
+  assert.equal(resolved.apiUrl, "http://127.0.0.1:28088");
+  assert.equal(resolved.source.apiUrl, "env");
+
+  await rm(home, { recursive: true, force: true });
+});
+
+test("production default config keeps the production API", async () => {
+  const home = await testTemp("config-production-api-");
+  const fsLike = realFs(home);
+  const resolved = await resolveConfig({ flags: {}, fs: fsLike });
+  assert.equal(resolved.apiUrl, DEFAULT_API_URL);
+  assert.equal(resolved.source.apiUrl, "default");
   await rm(home, { recursive: true, force: true });
 });
 
