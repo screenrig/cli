@@ -153,6 +153,9 @@ test("HTTP request and response share correlation_id with distinct event_id", as
   assert.notEqual(request.event_id, response.event_id);
   assert.equal(request.method, "GET");
   assert.equal(request.path, "/api/v1/screens");
+  assert.equal(request.tag, "get_screens");
+  assert.equal(response.tag, "get_screens");
+  assert.equal(request.message, undefined);
   assert.equal(response.status, 200);
   assert.equal(request.op, "GET /api/v1/screens");
   assert.equal(response.request_id, "req_AAAAAAAAAAAAAAAA");
@@ -181,9 +184,120 @@ test("HTTP error logs status, problem, and the paired correlation_id", async () 
   assert.ok(request);
   assert.ok(errorEvent);
   assert.equal(request.correlation_id, errorEvent.correlation_id);
+  assert.equal(request.tag, "get_screen");
+  assert.equal(errorEvent.tag, "get_screen");
+  assert.equal(request.path, "/api/v1/screens/scr_missing");
   assert.equal(errorEvent.status, 404);
   assert.equal((errorEvent.problem as { code?: string } | undefined)?.code, "not_found");
   assert.match(String((errorEvent.problem as { detail?: string } | undefined)?.detail), /Screen not found/);
+});
+
+test("HTTP path with scr_ sets id on request and response", async () => {
+  const { logger, events } = createMemoryLogger({ command: ["screen", "show"] });
+  const transport = new FakeTransport().on("GET", "/api/v1/screens/scr_1q2333321", () => ({
+    status: 200,
+    headers: { "content-type": "application/json" },
+    body: { id: "scr_1q2333321" },
+  }));
+  const client = new ApiClient({ transport, logger, requestId: "req_CCCCCCCCCCCCCCCC" });
+  await client.call({ method: "GET", path: "/api/v1/screens/scr_1q2333321" });
+  const request = events.find((event) => event.kind === "http" && event.phase === "request");
+  const response = events.find((event) => event.kind === "http" && event.phase === "response");
+  assert.ok(request);
+  assert.ok(response);
+  assert.equal(request.id, "scr_1q2333321");
+  assert.equal(response.id, "scr_1q2333321");
+  assert.equal(request.tag, "get_screen");
+  assert.notEqual(request.id, request.event_id);
+  assert.notEqual(request.id, request.correlation_id);
+});
+
+test("HTTP startHttp uses explicit id and params over the path", () => {
+  const { logger, events } = createMemoryLogger({ command: ["screen", "show"] });
+  const span = logger.startHttp({
+    op: "GET /api/v1/screens/scr_from_path",
+    method: "GET",
+    path: "/api/v1/screens/scr_from_path",
+    id: "scr_explicit",
+    params: { foo: "bar", blah: 2133 },
+  });
+  span.response(200);
+  const request = events.find((event) => event.phase === "request");
+  const response = events.find((event) => event.phase === "response");
+  assert.equal(request?.id, "scr_explicit");
+  assert.equal(response?.id, "scr_explicit");
+  assert.deepEqual(request?.params, { foo: "bar", blah: 2133 });
+  assert.deepEqual(response?.params, { foo: "bar", blah: 2133 });
+});
+
+test("params round-trip on a local finish", () => {
+  const { logger, events } = createMemoryLogger({ command: ["media", "upload"] });
+  const span = logger.startLocal({
+    op: "media.transcode",
+    id: "med_roundtrip",
+    params: { foo: "bar" },
+  });
+  span.finish({ params: { blah: 2133 }, width: 1920, height: 1080, encoder: "libx264" });
+  const start = events.find((event) => event.phase === "start");
+  const finish = events.find((event) => event.phase === "finish");
+  assert.equal(start?.id, "med_roundtrip");
+  assert.deepEqual(start?.params, { foo: "bar" });
+  assert.equal(finish?.id, "med_roundtrip");
+  assert.deepEqual(finish?.params, { foo: "bar", blah: 2133, width: 1920, height: 1080, encoder: "libx264" });
+});
+
+test("local finish uses capture_id as id when id is empty", () => {
+  const { logger, events } = createMemoryLogger({ command: ["screen", "screenshot"] });
+  const span = logger.startLocal({ op: "screenshot.wait" });
+  span.finish({ capture_id: "cap_ready", state: "ready", width: 1280 });
+  const finish = events.find((event) => event.phase === "finish");
+  assert.equal(finish?.id, "cap_ready");
+  assert.deepEqual(finish?.params, { capture_id: "cap_ready", state: "ready", width: 1280 });
+});
+
+test("token-like values never appear in params", () => {
+  const { logger, events } = createMemoryLogger({ command: ["media", "upload"] });
+  const token = "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const span = logger.startLocal({
+    op: "media.signed_put",
+    params: {
+      token,
+      authorization: `Bearer ${token}`,
+      ok: true,
+    },
+  });
+  span.finish({
+    params: {
+      upload_url: "https://storage.example.invalid/private?X-Amz-Signature=abc",
+      pixels: "data:image/webp;base64,AAAA",
+      cookie: "sid=secret",
+      encoder: "libx264",
+    },
+  });
+  const serialized = events.map((event) => JSON.stringify(event)).join("\n");
+  assert.doesNotMatch(serialized, /sr_live_tokidAAAAAAAAAAAAAAAA_AAAA/);
+  assert.doesNotMatch(serialized, /X-Amz-Signature=abc/);
+  assert.doesNotMatch(serialized, /data:image\/webp;base64,AAAA/);
+  assert.doesNotMatch(serialized, /sid=secret/);
+  for (const event of events) {
+    const params = event.params;
+    if (!params) {
+      continue;
+    }
+    const encoded = JSON.stringify(params);
+    assert.doesNotMatch(encoded, /sr_live_/);
+    assert.doesNotMatch(encoded, /Bearer /);
+    assert.doesNotMatch(encoded, /X-Amz-Signature/);
+    assert.doesNotMatch(encoded, /data:image/);
+    assert.doesNotMatch(encoded, /sid=secret/);
+    assert.equal("token" in params, false);
+    assert.equal("authorization" in params, false);
+    assert.equal("upload_url" in params, false);
+    assert.equal("pixels" in params, false);
+    assert.equal("cookie" in params, false);
+  }
+  const finish = events.find((event) => event.phase === "finish");
+  assert.deepEqual(finish?.params, { ok: true, encoder: "libx264" });
 });
 
 test("redaction strips tokens, authorization, signed URLs, and pixels from serialized lines", () => {
@@ -220,6 +334,8 @@ test("pack emits start and finish without archive bytes", async () => {
   assert.ok(start);
   assert.ok(finish);
   assert.equal(start.correlation_id, finish.correlation_id);
+  assert.equal(start.tag, "pack_directory");
+  assert.equal(finish.tag, "pack_directory");
   assert.ok(events.some((event) => event.op === "pack.walk" && event.phase === "start"));
   assert.ok(events.some((event) => event.op === "pack.walk" && event.phase === "finish"));
   assert.ok(events.some((event) => event.op === "pack.archive" && event.phase === "finish"));
@@ -292,6 +408,7 @@ test("log_socket writes one NDJSON object per line with v 1", async () => {
       assert.equal(event.v, 1);
       assert.match(event.event_id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
       assert.deepEqual(event.command, ["screen", "list"]);
+      assert.match(String(event.tag), /^[a-z0-9_]+$/);
     }
     const httpReq = listener.events.find((event) => event.kind === "http" && event.phase === "request");
     const httpRes = listener.events.find((event) => event.kind === "http" && event.phase === "response");
@@ -357,6 +474,23 @@ test("agent connect rewrite keeps log_socket", async () => {
   const stored = await readConfigFile(configPath, fsLike);
   assert.equal(stored?.log_socket, "/tmp/screenrig.sock");
   await rm(home, { recursive: true, force: true });
+});
+
+test("local spans tag start, progress, finish, and error from op", () => {
+  const { logger, events } = createMemoryLogger({ command: ["media", "upload"] });
+  const span = logger.startLocal({ op: "media.transcode", message: "ffmpeg" });
+  span.progress({ percent: 10 });
+  span.finish();
+  const start = events.find((event) => event.phase === "start");
+  const progress = events.find((event) => event.phase === "progress");
+  const finish = events.find((event) => event.phase === "finish");
+  assert.equal(start?.tag, "media_transcode");
+  assert.equal(progress?.tag, "media_transcode");
+  assert.equal(finish?.tag, "media_transcode");
+  const failed = logger.startLocal({ op: "process.spawn" });
+  failed.error(new Error("exit 1"));
+  const errorEvent = events.find((event) => event.op === "process.spawn" && event.phase === "error");
+  assert.equal(errorEvent?.tag, "process_spawn");
 });
 
 test("preserveLogSocket copies the field onto a sparse rewrite", () => {

@@ -16,6 +16,12 @@ export interface LogEvent {
   kind: LogKind;
   phase: LogPhase;
   op: string;
+  /** Compact snake_case display key. Prefer this over `message` for HTTP. */
+  tag?: string;
+  /** Associated resource id (`scr_…`, `pl_…`, `med_…`, application or operation id). Not `event_id` or `correlation_id`. */
+  id?: string;
+  /** Small scalar extras. Omitted when empty. */
+  params?: Record<string, string | number | boolean>;
   duration_ms?: number;
   parent_correlation_id?: string;
   message?: string;
@@ -61,11 +67,15 @@ export interface StartHttpInit {
   content_type?: string;
   byte_length?: number;
   request?: unknown;
+  id?: string;
+  params?: Record<string, string | number | boolean>;
 }
 
 export interface StartLocalInit {
   op: string;
   message?: string;
+  id?: string;
+  params?: Record<string, string | number | boolean>;
   [key: string]: unknown;
 }
 

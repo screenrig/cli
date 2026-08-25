@@ -13,6 +13,7 @@ export {
   responseSummary,
 } from "./logger.js";
 export { connectUnixLogSocket } from "./socket.js";
+export { httpResourceId, httpTag, localTag } from "./tag.js";
 export { LOG_EVENT_VERSION } from "./types.js";
 export type {
   HttpSpan,

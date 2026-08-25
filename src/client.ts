@@ -80,7 +80,6 @@ export class ApiClient {
       op: `${req.method} ${req.path}`,
       method: req.method,
       path: req.path,
-      message: `${req.method} ${req.path}`,
       query_keys: keys,
       request_id: headers["x-request-id"] ?? this.requestId,
       content_type: summary.content_type,
@@ -140,7 +139,6 @@ export class ApiClient {
       op: `${req.method} ${req.path}`,
       method: req.method,
       path: req.path,
-      message: `${req.method} ${req.path}`,
       query_keys: keys,
       request_id: headers["x-request-id"] ?? this.requestId,
     });

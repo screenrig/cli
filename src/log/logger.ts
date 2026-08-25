@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { CliError, configError } from "../problems.js";
-import { redactText, redactValue } from "../redact.js";
+import { isSensitiveKey, isSensitiveValue, redactText, redactValue } from "../redact.js";
 import type { SignedRawPut } from "../runtime.js";
 import type { RunProcess } from "../runtime.js";
 import type { Transport, TransportStream } from "../transport/types.js";
+import { httpResourceId, httpTag, localTag } from "./tag.js";
 import type {
   HttpSpan,
   LocalSpan,
@@ -18,6 +19,90 @@ import type {
 import { LOG_EVENT_VERSION } from "./types.js";
 
 const SUMMARY_LIMIT = 8_192;
+
+type LogParamValue = string | number | boolean;
+
+const LOCAL_PARAM_KEYS = new Set([
+  "width",
+  "height",
+  "encoder",
+  "file_count",
+  "exit_code",
+  "state",
+  "capture_id",
+  "operation_id",
+]);
+
+function isLogParamValue(value: unknown): value is LogParamValue {
+  return typeof value === "string" || (typeof value === "number" && Number.isFinite(value)) || typeof value === "boolean";
+}
+
+function keepParam(key: string, value: LogParamValue): boolean {
+  if (isSensitiveKey(key)) {
+    return false;
+  }
+  if (typeof value === "string" && (value.length === 0 || isSensitiveValue(value))) {
+    return false;
+  }
+  return true;
+}
+
+function takeParams(source: Record<string, unknown> | undefined, keys?: ReadonlySet<string>): Record<string, LogParamValue> {
+  const out: Record<string, LogParamValue> = {};
+  if (!source) {
+    return out;
+  }
+  for (const [key, value] of Object.entries(source)) {
+    if (keys && !keys.has(key)) {
+      continue;
+    }
+    if (!isLogParamValue(value) || !keepParam(key, value)) {
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+function asParamRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function compactParams(explicit?: unknown, fields?: LogFields): Record<string, LogParamValue> | undefined {
+  const out: Record<string, LogParamValue> = {
+    ...takeParams(asParamRecord(explicit)),
+    ...takeParams(asParamRecord(fields?.params)),
+    ...takeParams(fields, LOCAL_PARAM_KEYS),
+  };
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function omitResourceFields(fields?: LogFields): LogFields | undefined {
+  if (!fields) {
+    return undefined;
+  }
+  const { id: _id, params: _params, ...rest } = fields;
+  return rest;
+}
+
+function resourceId(explicit?: string, fields?: LogFields): string | undefined {
+  if (typeof explicit === "string" && explicit.length > 0 && !isSensitiveValue(explicit)) {
+    return explicit;
+  }
+  if (!fields) {
+    return undefined;
+  }
+  for (const key of ["capture_id", "operation_id"] as const) {
+    const value = fields[key];
+    if (typeof value === "string" && value.length > 0 && !isSensitiveValue(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
 
 export function commandWords(positionals: string[]): string[] {
   return positionals.slice(0, 2).filter((word) => word.length > 0);
@@ -179,20 +264,25 @@ class BaseLogger implements OperationLogger {
     const correlationId = randomUUID();
     const parent = this.stack.push(correlationId);
     const started = this.now().getTime();
+    const tag = httpTag(init.method, init.path);
+    const id = resourceId(init.id) ?? httpResourceId(init.path);
+    const params = compactParams(init.params);
     this.emit({
       kind: "http",
       phase: "request",
       op: init.op,
+      tag,
       correlation_id: correlationId,
       ...(parent ? { parent_correlation_id: parent } : {}),
       method: init.method,
       path: init.path,
-      message: init.message ?? `${init.method} ${init.path}`,
       ...(init.query_keys && init.query_keys.length > 0 ? { query_keys: init.query_keys } : {}),
       ...(init.request_id ? { request_id: init.request_id } : {}),
       ...(init.content_type ? { content_type: init.content_type } : {}),
       ...(init.byte_length !== undefined ? { byte_length: init.byte_length } : {}),
       ...(init.request !== undefined ? { request: init.request } : {}),
+      ...(id ? { id } : {}),
+      ...(params ? { params } : {}),
     });
     let closed = false;
     const close = (phase: "response" | "error", fields?: LogFields) => {
@@ -201,6 +291,7 @@ class BaseLogger implements OperationLogger {
       }
       closed = true;
       this.stack.pop(correlationId);
+      const closeParams = compactParams(params, fields) ?? params;
       this.emit({
         kind: "http",
         phase,
@@ -211,7 +302,10 @@ class BaseLogger implements OperationLogger {
         path: init.path,
         duration_ms: Math.max(0, this.now().getTime() - started),
         ...(init.request_id ? { request_id: init.request_id } : {}),
-        ...(fields ?? {}),
+        ...(omitResourceFields(fields) ?? {}),
+        tag,
+        ...(id ? { id } : {}),
+        ...(closeParams ? { params: closeParams } : {}),
       });
     };
     return {
@@ -234,7 +328,10 @@ class BaseLogger implements OperationLogger {
     const correlationId = randomUUID();
     const parent = this.stack.push(correlationId);
     const started = this.now().getTime();
-    const { op, message, ...rest } = init;
+    const { op, message, id: initId, params: initParams, ...rest } = init;
+    const tag = localTag(op);
+    const id = resourceId(typeof initId === "string" ? initId : undefined, rest);
+    const params = compactParams(initParams, rest);
     this.emit({
       kind: "local",
       phase: "start",
@@ -243,6 +340,9 @@ class BaseLogger implements OperationLogger {
       ...(parent ? { parent_correlation_id: parent } : {}),
       ...(message ? { message } : {}),
       ...rest,
+      tag,
+      ...(id ? { id } : {}),
+      ...(params ? { params } : {}),
     });
     let closed = false;
     const close = (phase: "finish" | "error", fields?: LogFields) => {
@@ -251,6 +351,8 @@ class BaseLogger implements OperationLogger {
       }
       closed = true;
       this.stack.pop(correlationId);
+      const closeId = resourceId(id, fields);
+      const closeParams = compactParams(params, fields);
       this.emit({
         kind: "local",
         phase,
@@ -258,7 +360,10 @@ class BaseLogger implements OperationLogger {
         correlation_id: correlationId,
         ...(parent ? { parent_correlation_id: parent } : {}),
         duration_ms: Math.max(0, this.now().getTime() - started),
-        ...(fields ?? {}),
+        ...(omitResourceFields(fields) ?? {}),
+        tag,
+        ...(closeId ? { id: closeId } : {}),
+        ...(closeParams ? { params: closeParams } : {}),
       });
     };
     return {
@@ -270,13 +375,18 @@ class BaseLogger implements OperationLogger {
         if (closed) {
           return;
         }
+        const progressId = resourceId(id, fields);
+        const progressParams = compactParams(params, fields);
         this.emit({
           kind: "local",
           phase: "progress",
           op,
           correlation_id: correlationId,
           ...(parent ? { parent_correlation_id: parent } : {}),
-          ...(fields ?? {}),
+          ...(omitResourceFields(fields) ?? {}),
+          tag,
+          ...(progressId ? { id: progressId } : {}),
+          ...(progressParams ? { params: progressParams } : {}),
         });
       },
       finish: (fields) => close("finish", fields),

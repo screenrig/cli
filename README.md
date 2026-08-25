@@ -66,10 +66,16 @@ Each line is a v1 event. Every event includes `v` (`1`), `ts` (ISO-8601 UTC),
 its response, or a local start with its finish), `run_id` (UUID shared by the
 CLI process), `command` (parsed command words), `kind` (`http` or `local`),
 `phase` (`request` / `response` for HTTP; `start` / `progress` / `finish` /
-`error` for local), and `op` (short stable name). Nested work also carries
-`parent_correlation_id`. HTTP lines add method, path, query keys, status, a
-redacted request or response summary, and `x-request-id` when present.
-Finish, response, and error phases include `duration_ms`. Binary bodies log
+`error` for local), `op` (short stable name), and `tag` (compact snake_case
+display key, for example `get_screens` or `media_transcode`). Nested work also
+carries `parent_correlation_id`. When there is an associated resource,
+`id` is that identifier (`scr_…`, `pl_…`, `med_…`, application or operation
+id). It is not `event_id` or `correlation_id`. HTTP events derive it from the
+first path segment that is not a kept route token. Optional `params` is an
+object of small scalars (`string`, `number`, or `boolean`) and is omitted
+when empty. HTTP lines add method, path, query keys, status, a redacted
+request or response summary, and `x-request-id` when present. Finish,
+response, and error phases include `duration_ms`. Binary bodies log
 `content_type` and `byte_length` only. Tokens, `Authorization` headers,
 signed URLs, pairing material, and image bytes are never written.
 
