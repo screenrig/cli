@@ -34,6 +34,7 @@ import {
 import { CliError } from "./problems.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
+import type { TransportRequest, TransportResponse } from "./transport/types.js";
 
 function sha(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -264,6 +265,14 @@ async function writeBundle(root: string, sources: BundleSource[]): Promise<Playl
   return manifest;
 }
 
+function bundleSources(count: number): BundleSource[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `med_SOURCE_${String(index).padStart(2, "0")}`,
+    filename: `asset-${index}.png`,
+    bytes: Uint8Array.from([index]),
+  }));
+}
+
 async function replaceManifest(root: string, mutate: (manifest: PlaylistBundleManifest) => void): Promise<void> {
   const filename = path.join(root, PLAYLIST_BUNDLE_MANIFEST);
   const manifest = JSON.parse(await readFile(filename, "utf8")) as PlaylistBundleManifest;
@@ -386,7 +395,14 @@ test("preflight rejects bundle roots or listed media that are symlinks, hardlink
   await Promise.all([symlinkDir, hardlinkDir, sparseDir, specialDir, rootLink, ancestorDir, containedDir].map((entry) => rm(entry, { recursive: true, force: true })));
 });
 
-function importTransport(existing: unknown[], uploadedIds: string[] = []) {
+function importTransport(
+  existing: unknown[],
+  uploadedIds: string[] = [],
+  options: {
+    declarationResponse?: (index: number, request: TransportRequest) => TransportResponse | undefined;
+    playlistResponse?: (request: TransportRequest) => TransportResponse | undefined;
+  } = {},
+) {
   const transport = new FakeTransport();
   let declaration = 0;
   const operations = new Map<string, string>();
@@ -396,8 +412,10 @@ function importTransport(existing: unknown[], uploadedIds: string[] = []) {
     headers: { etag: '"8"' },
     body: { id: req.path.split("/").pop(), name: "Target", revision: 8, pages: [] },
   }));
-  transport.on("POST", "/api/v1/media/uploads", () => {
+  transport.on("POST", "/api/v1/media/uploads", (request) => {
     const index = declaration++;
+    const overridden = options.declarationResponse?.(index, request);
+    if (overridden) return overridden;
     const operationId = `op_${index}`;
     operations.set(operationId, uploadedIds[index] ?? `med_UPLOADED_${index}`);
     return {
@@ -425,15 +443,56 @@ function importTransport(existing: unknown[], uploadedIds: string[] = []) {
       body: { id: operationId, kind: "media.upload", state: "succeeded", created_at: "", updated_at: "", result: { media_id: operations.get(operationId) } },
     };
   });
-  transport.on("POST", "/api/v1/playlists", (req) => ({ status: 201, headers: {}, body: { ...(req.body as object), id: "pl_IMPORTED", revision: 1 } }));
-  transport.on("PUT", /^\/api\/v1\/playlists\//, (req) => ({ status: 200, headers: {}, body: { ...(req.body as object), id: req.path.split("/").pop(), revision: 9 } }));
+  transport.on("POST", "/api/v1/playlists", (req) => options.playlistResponse?.(req) ?? ({
+    status: 201,
+    headers: {},
+    body: { ...(req.body as object), id: "pl_IMPORTED", revision: 1 },
+  }));
+  transport.on("PUT", /^\/api\/v1\/playlists\//, (req) => options.playlistResponse?.(req) ?? ({
+    status: 200,
+    headers: {},
+    body: { ...(req.body as object), id: req.path.split("/").pop(), revision: 9 },
+  }));
   return transport;
 }
 
-function runtimeForImport(signedBodies: Uint8Array[]): CliRuntime {
+function importClock() {
+  let nowMs = Date.parse("2026-08-21T00:00:00Z");
+  const sleeps: number[] = [];
   return {
-    argv: [], env: {}, stdout: new PassThrough(), stderr: new PassThrough(), now: () => new Date("2026-08-21T00:00:00Z"),
-    sleep: async () => undefined, homedir: () => "/tmp", cwd: () => "/tmp",
+    sleeps,
+    now: () => new Date(nowMs),
+    sleep: async (ms: number) => {
+      sleeps.push(ms);
+      nowMs += ms;
+    },
+  };
+}
+
+function rateLimitResponse(retryAfterSeconds: number): TransportResponse {
+  return {
+    status: 429,
+    headers: { "retry-after": String(retryAfterSeconds) },
+    body: {
+      type: "https://screenrig.ai/problems/rate-limited",
+      title: "Rate limited",
+      status: 429,
+      detail: `Media upload admission remains limited for ${retryAfterSeconds} seconds.`,
+      code: "rate_limited",
+    },
+  };
+}
+
+function runtimeForImport(
+  signedBodies: Uint8Array[],
+  clock: Pick<CliRuntime, "now" | "sleep"> = {
+    now: () => new Date("2026-08-21T00:00:00Z"),
+    sleep: async () => undefined,
+  },
+): CliRuntime {
+  return {
+    argv: [], env: {}, stdout: new PassThrough(), stderr: new PassThrough(), now: clock.now,
+    sleep: clock.sleep, homedir: () => "/tmp", cwd: () => "/tmp",
     fs: { mkdir, open, rename, rm, chmod, stat, homedir: () => "/tmp", env: {} },
     signedRawPut: async (request) => {
       const chunks: Uint8Array[] = [];
@@ -499,6 +558,239 @@ test("import uploads missing media serially without transcoding, preserves decla
   const methods = transport.calls.map((call) => `${call.method} ${call.path}`);
   assert.ok(methods.indexOf("POST /api/v1/media/uploads/upload_0/commit") < methods.indexOf("POST /api/v1/media/uploads" , methods.indexOf("POST /api/v1/media/uploads") + 1));
   assert.equal(transport.calls.at(-1)?.path, "/api/v1/playlists");
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("import paces the twenty-first missing media declaration without delaying the first twenty", async () => {
+  const dir = await testTemp("bundle-rate-window-");
+  await writeBundle(dir, bundleSources(21));
+  const transport = importTransport([]);
+  const clock = importClock();
+  const runtime = runtimeForImport([], clock);
+  const result = await importPlaylistBundle({
+    directory: dir,
+    client: new ApiClient({ transport, token: "token", idempotencyKey: "bundle-base-key" }),
+    runtime,
+  });
+
+  assert.equal(result.media.uploaded, 21);
+  assert.deepEqual(clock.sleeps, [60_000]);
+  assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 21);
+  assert.equal((runtime.stdout as PassThrough).read(), null);
+  assert.match(String((runtime.stderr as PassThrough).read()), /waiting 60 seconds for media upload admission/);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("reused media does not consume upload admission slots", async () => {
+  const dir = await testTemp("bundle-rate-reuse-");
+  const sources = bundleSources(21);
+  await writeBundle(dir, sources);
+  const reusedSource = sources[0]!;
+  const existing = [remoteMedia(reusedSource.id, reusedSource.bytes, { filename: reusedSource.filename })];
+  const transport = importTransport(existing);
+  const clock = importClock();
+  const result = await importPlaylistBundle({
+    directory: dir,
+    client: new ApiClient({ transport, token: "token", idempotencyKey: "bundle-base-key" }),
+    runtime: runtimeForImport([], clock),
+  });
+
+  assert.deepEqual(result.media, { total: 21, reused: 1, uploaded: 20 });
+  assert.deepEqual(clock.sleeps, []);
+  assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 20);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("import honors Retry-After once for the same idempotent media declaration", async () => {
+  const dir = await testTemp("bundle-rate-retry-");
+  await writeBundle(dir, bundleSources(1));
+  const transport = importTransport([], [], {
+    declarationResponse: (index) => index === 0 ? {
+      status: 429,
+      headers: { "retry-after": "7" },
+      body: {
+        type: "https://screenrig.ai/problems/rate-limited",
+        title: "Rate limited",
+        status: 429,
+        detail: "Media upload admission is temporarily limited.",
+        code: "rate_limited",
+      },
+    } : undefined,
+  });
+  const clock = importClock();
+  const runtime = runtimeForImport([], clock);
+  const result = await importPlaylistBundle({
+    directory: dir,
+    client: new ApiClient({ transport, token: "token", idempotencyKey: "bundle-base-key" }),
+    runtime,
+  });
+
+  assert.equal(result.media.uploaded, 1);
+  assert.deepEqual(clock.sleeps, [7_000]);
+  const declarations = transport.calls.filter((call) => call.path === "/api/v1/media/uploads");
+  assert.equal(declarations.length, 2);
+  assert.equal(declarations[0]?.headers?.["idempotency-key"], declarations[1]?.headers?.["idempotency-key"]);
+  assert.deepEqual(declarations[0]?.body, declarations[1]?.body);
+  assert.equal((runtime.stdout as PassThrough).read(), null);
+  assert.match(String((runtime.stderr as PassThrough).read()), /rate limited; waiting 7 seconds/);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("two declaration 429s before any successful upload preserve the latest rate-limit problem", async () => {
+  const dir = await testTemp("bundle-rate-exhausted-empty-");
+  await writeBundle(dir, bundleSources(1));
+  const transport = importTransport([], [], {
+    declarationResponse: (index) => rateLimitResponse(index === 0 ? 3 : 11),
+  });
+  const clock = importClock();
+  const runtime = runtimeForImport([], clock);
+  await assert.rejects(
+    () => importPlaylistBundle({
+      directory: dir,
+      client: new ApiClient({ transport, token: "token", idempotencyKey: "bundle-base-key" }),
+      runtime,
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof CliError);
+      assert.equal(error.problem.status, 429);
+      assert.equal(error.problem.code, "rate_limited");
+      assert.equal(error.problem.retry_after_seconds, 11);
+      assert.match(error.problem.detail, /remains limited for 11 seconds/);
+      assert.match(error.problem.detail, /Retry-After is 11 seconds/);
+      assert.match(error.problem.next?.reason ?? "", /Wait 11 seconds/);
+      assert.deepEqual(error.problem.errors, []);
+      assert.doesNotMatch(error.problem.detail, /partial|confirmed ready|cleanup/i);
+      return true;
+    },
+  );
+
+  const declarations = transport.calls.filter((call) => call.path === "/api/v1/media/uploads");
+  assert.equal(declarations.length, 2);
+  assert.equal(declarations[0]?.headers?.["idempotency-key"], declarations[1]?.headers?.["idempotency-key"]);
+  assert.deepEqual(declarations[0]?.body, declarations[1]?.body);
+  assert.deepEqual(clock.sleeps, [3_000]);
+  assert.equal(transport.calls.some((call) => /^\/api\/v1\/playlists/.test(call.path)), false);
+  assert.equal((runtime.stdout as PassThrough).read(), null);
+  assert.match(String((runtime.stderr as PassThrough).read()), /rate limited; waiting 3 seconds/);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("two declaration 429s after a ready upload preserve Retry-After and report truthful partial state", async () => {
+  const dir = await testTemp("bundle-rate-exhausted-partial-");
+  await writeBundle(dir, bundleSources(2));
+  const transport = importTransport([], [], {
+    declarationResponse: (index) => index === 0 ? undefined : rateLimitResponse(index === 1 ? 5 : 13),
+  });
+  const clock = importClock();
+  const runtime = runtimeForImport([], clock);
+  await assert.rejects(
+    () => importPlaylistBundle({
+      directory: dir,
+      client: new ApiClient({ transport, token: "token", idempotencyKey: "bundle-base-key" }),
+      runtime,
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof CliError);
+      assert.equal(error.problem.status, 429);
+      assert.equal(error.problem.code, "rate_limited");
+      assert.equal(error.problem.retry_after_seconds, 13);
+      assert.match(error.problem.detail, /remains limited for 13 seconds/);
+      assert.match(error.problem.detail, /Retry-After is 13 seconds/);
+      assert.match(error.problem.next?.reason ?? "", /Wait 13 seconds/);
+      assert.match(error.problem.detail, /partially complete: 1 new media object is confirmed ready/);
+      assert.match(error.problem.detail, /No playlist write was started, no cleanup was attempted, and no media was deleted/);
+      assert.deepEqual(error.problem.errors, [{ code: "confirmed_media_ready", media_id: "med_UPLOADED_0" }]);
+      return true;
+    },
+  );
+
+  const declarations = transport.calls.filter((call) => call.path === "/api/v1/media/uploads");
+  assert.equal(declarations.length, 3);
+  const limited = declarations.slice(1);
+  assert.equal(limited.length, 2);
+  assert.equal(limited[0]?.headers?.["idempotency-key"], limited[1]?.headers?.["idempotency-key"]);
+  assert.deepEqual(limited[0]?.body, limited[1]?.body);
+  assert.deepEqual(clock.sleeps, [5_000]);
+  assert.equal(transport.calls.some((call) => /^\/api\/v1\/playlists/.test(call.path)), false);
+  assert.equal((runtime.stdout as PassThrough).read(), null);
+  assert.match(String((runtime.stderr as PassThrough).read()), /rate limited; waiting 5 seconds/);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("playlist-write 429 preserves Retry-After and reports an unknown write outcome without retrying", async () => {
+  const dir = await testTemp("bundle-rate-playlist-write-");
+  await writeBundle(dir, bundleSources(1));
+  const transport = importTransport([], [], {
+    playlistResponse: () => rateLimitResponse(17),
+  });
+  const clock = importClock();
+  const runtime = runtimeForImport([], clock);
+  await assert.rejects(
+    () => importPlaylistBundle({
+      directory: dir,
+      client: new ApiClient({ transport, token: "token", idempotencyKey: "bundle-base-key" }),
+      runtime,
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof CliError);
+      assert.equal(error.problem.status, 429);
+      assert.equal(error.problem.code, "rate_limited");
+      assert.equal(error.problem.retry_after_seconds, 17);
+      assert.match(error.problem.detail, /remains limited for 17 seconds/);
+      assert.match(error.problem.detail, /Retry-After is 17 seconds/);
+      assert.match(error.problem.next?.reason ?? "", /Wait 17 seconds/);
+      assert.match(error.problem.next?.reason ?? "", /Read back the destination account/);
+      assert.match(error.problem.next?.reason ?? "", /same idempotency key/);
+      assert.match(error.problem.detail, /1 new media object is confirmed ready/);
+      assert.match(error.problem.detail, /playlist write request was sent and its outcome may be unknown/);
+      assert.match(error.problem.detail, /No cleanup was attempted, and no media was deleted/);
+      assert.doesNotMatch(error.problem.detail, /No playlist write was started/);
+      assert.deepEqual(error.problem.errors, [{ code: "confirmed_media_ready", media_id: "med_UPLOADED_0" }]);
+      return true;
+    },
+  );
+
+  const playlistCalls = transport.calls.filter((call) => call.path === "/api/v1/playlists");
+  assert.equal(playlistCalls.length, 1);
+  assert.deepEqual(clock.sleeps, []);
+  assert.equal((runtime.stdout as PassThrough).read(), null);
+  assert.equal((runtime.stderr as PassThrough).read(), null);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("a non-rate-limit declaration failure remains partial and is not retried", async () => {
+  const dir = await testTemp("bundle-rate-nonretry-");
+  await writeBundle(dir, bundleSources(2));
+  const transport = importTransport([], [], {
+    declarationResponse: (index) => index === 1 ? {
+      status: 503,
+      headers: {},
+      body: {
+        type: "https://screenrig.ai/problems/unavailable",
+        title: "Unavailable",
+        status: 503,
+        detail: "Upload admission is unavailable.",
+        code: "unavailable",
+      },
+    } : undefined,
+  });
+  const clock = importClock();
+  await assert.rejects(
+    () => importPlaylistBundle({
+      directory: dir,
+      client: new ApiClient({ transport, token: "token", idempotencyKey: "bundle-base-key" }),
+      runtime: runtimeForImport([], clock),
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof CliError);
+      assert.equal(error.problem.code, "bundle_import_partial");
+      assert.deepEqual(error.problem.errors, [{ code: "confirmed_media_ready", media_id: "med_UPLOADED_0" }]);
+      return true;
+    },
+  );
+  assert.deepEqual(clock.sleeps, []);
+  assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 2);
+  assert.equal(transport.calls.some((call) => /^\/api\/v1\/playlists/.test(call.path)), false);
   await rm(dir, { recursive: true, force: true });
 });
 

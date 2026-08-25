@@ -22,6 +22,9 @@ export const PLAYLIST_BUNDLE_PLAYLIST = "playlist.json";
 
 const JSON_FILE_LIMIT = 8 * 1024 * 1024;
 const MAX_MEDIA_BYTES = 1_073_741_824;
+const MEDIA_UPLOAD_ADMISSION_QUOTA = 20;
+const MEDIA_UPLOAD_ADMISSION_WINDOW_MS = 60_000;
+const MEDIA_UPLOAD_RATE_LIMIT_RETRIES = 1;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const MEDIA_ID_PATTERN = /^med_[A-Za-z0-9_-]+$/;
 const CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u;
@@ -682,6 +685,114 @@ function mediaIdFromOperation(operation: Operation): string | undefined {
   return typeof id === "string" && MEDIA_ID_PATTERN.test(id) ? id : undefined;
 }
 
+function writeImportProgress(runtime: CliRuntime, message: string): void {
+  runtime.stderr.write(`${message}\n`);
+}
+
+function mediaUploadAdmissionLimiter(runtime: CliRuntime): {
+  waitForSlot(): Promise<void>;
+  recordAdmission(): void;
+} {
+  const admissions: number[] = [];
+  return {
+    async waitForSlot(): Promise<void> {
+      while (true) {
+        const now = runtime.now().getTime();
+        while (admissions.length > 0 && now - admissions[0]! >= MEDIA_UPLOAD_ADMISSION_WINDOW_MS) {
+          admissions.shift();
+        }
+        if (admissions.length < MEDIA_UPLOAD_ADMISSION_QUOTA) return;
+        const waitMs = admissions[0]! + MEDIA_UPLOAD_ADMISSION_WINDOW_MS - now;
+        writeImportProgress(
+          runtime,
+          `Playlist import is waiting ${Math.ceil(waitMs / 1000)} seconds for media upload admission.`,
+        );
+        await runtime.sleep(waitMs);
+      }
+    },
+    recordAdmission(): void {
+      admissions.push(runtime.now().getTime());
+    },
+  };
+}
+
+async function declareBundleMediaUpload(options: {
+  client: ApiClient;
+  runtime: CliRuntime;
+  limiter: ReturnType<typeof mediaUploadAdmissionLimiter>;
+  idempotencyKey: string;
+  body: JsonRecord;
+}): Promise<Awaited<ReturnType<ApiClient["call"]>>> {
+  let rateLimitRetries = 0;
+  while (true) {
+    await options.limiter.waitForSlot();
+    try {
+      const response = await options.client.call({
+        method: "POST",
+        path: "/api/v1/media/uploads",
+        idempotent: true,
+        idempotencyKey: options.idempotencyKey,
+        body: options.body,
+      });
+      options.limiter.recordAdmission();
+      return response;
+    } catch (error) {
+      const retryAfterSeconds = error instanceof CliError && error.problem.status === 429
+        ? error.problem.retry_after_seconds
+        : undefined;
+      if (retryAfterSeconds === undefined || rateLimitRetries >= MEDIA_UPLOAD_RATE_LIMIT_RETRIES) throw error;
+      rateLimitRetries += 1;
+      writeImportProgress(
+        options.runtime,
+        `Playlist import is rate limited; waiting ${retryAfterSeconds} seconds before retrying the same media declaration.`,
+      );
+      await options.runtime.sleep(retryAfterSeconds * 1000);
+      // Only the replay-safe declaration is retried, with its exact key and body.
+      // Signed uploads, commits, and playlist writes are never retried here.
+    }
+  }
+}
+
+function rethrowRateLimitedImport(error: unknown, state: {
+  uploaded: string[];
+  mutationStarted: boolean;
+  playlistWriteStarted: boolean;
+}): void {
+  if (!(error instanceof CliError) || error.problem.status !== 429) return;
+  const count = state.uploaded.length;
+  const confirmed = count > 0
+    ? ` The import is partially complete: ${count} new media object${count === 1 ? " is" : "s are"} confirmed ready.`
+    : "";
+  let phase: string;
+  let next = error.problem.next;
+  if (state.playlistWriteStarted) {
+    phase = " The playlist write request was sent and its outcome may be unknown. No cleanup was attempted, and no media was deleted.";
+    next = {
+      command: error.problem.next?.command ?? "retry the same playlist import command",
+      reason: `${error.problem.next?.reason ? `${error.problem.next.reason} ` : ""}Read back the destination account when practical, then retry the exact import with the same idempotency key; an exact playlist-write replay returns the original outcome.`,
+    };
+  } else if (count > 0) {
+    phase = " No playlist write was started, no cleanup was attempted, and no media was deleted.";
+  } else if (state.mutationStarted) {
+    phase = " Media upload work was admitted, but no new media object is confirmed ready. No playlist write was started, no cleanup was attempted, and no media was deleted.";
+  } else {
+    phase = " No media upload or playlist write was admitted; the import made no remote mutation.";
+  }
+  throw new CliError(
+    {
+      ...error.problem,
+      detail: `${error.problem.detail}${confirmed}${phase}`,
+      errors: [
+        ...error.problem.errors,
+        ...state.uploaded.map((media_id) => ({ code: "confirmed_media_ready", media_id })),
+      ],
+      next,
+    },
+    error.exitCode,
+    error.warnings,
+  );
+}
+
 function partialImportError(
   error: unknown,
   uploaded: string[],
@@ -734,6 +845,7 @@ export async function importPlaylistBundle(options: {
   let mutationStarted = false;
   let playlistWriteStarted = false;
   const uploaded: string[] = [];
+  const admissionLimiter = mediaUploadAdmissionLimiter(options.runtime);
 
   try {
     if (options.updateId && options.ifMatch) {
@@ -773,13 +885,12 @@ export async function importPlaylistBundle(options: {
         continue;
       }
 
-      mutationStarted = true;
       const declareKey = deriveBundleIdempotencyKey(options.client.idempotencyKey, "media-declare", source.source_id);
       const commitKey = deriveBundleIdempotencyKey(options.client.idempotencyKey, "media-commit", source.source_id);
-      const declarationResponse = await options.client.call({
-        method: "POST",
-        path: "/api/v1/media/uploads",
-        idempotent: true,
+      const declarationResponse = await declareBundleMediaUpload({
+        client: options.client,
+        runtime: options.runtime,
+        limiter: admissionLimiter,
         idempotencyKey: declareKey,
         body: {
           filename: source.filename,
@@ -789,6 +900,7 @@ export async function importPlaylistBundle(options: {
           ...(source.tag ? { tag: source.tag } : {}),
         },
       });
+      mutationStarted = true;
       if (header(declarationResponse.headers, "cache-control") !== "private, no-store") {
         throw usageError("Media upload declaration did not return the required private, no-store cache policy.");
       }
@@ -845,6 +957,7 @@ export async function importPlaylistBundle(options: {
       media: { total: bundle.manifest.media.length, reused, uploaded: uploaded.length },
     };
   } catch (error) {
+    rethrowRateLimitedImport(error, { uploaded, mutationStarted, playlistWriteStarted });
     partialImportError(error, uploaded, mutationStarted, playlistWriteStarted);
   } finally {
     await bundle.close();
