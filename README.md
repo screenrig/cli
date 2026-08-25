@@ -45,6 +45,34 @@ explicit overrides. A stored production default in `config.local-dev.json` is
 treated as stale profile state; a different stored URL remains an explicit
 configuration override.
 
+Optional `log_socket` in that same user config enables a side-channel NDJSON
+operation log. The CLI connects as a **client** to an already-listening Unix
+domain socket at that path and writes one JSON object per line. Stdout stays
+the single command envelope; `--json` and stderr progress are unchanged. There
+is no `--log-socket` flag and no `SCREENRIG_LOG_SOCKET` override. If the field
+is absent or empty, behavior is unchanged. If it is set and connect or write
+fails, the command fails: the consumer must already be listening.
+
+```json
+{
+  "api_url": "https://api.screenrig.ai",
+  "token": "sr_live_…",
+  "log_socket": "/tmp/screenrig.sock"
+}
+```
+
+Each line is a v1 event. Every event includes `v` (`1`), `ts` (ISO-8601 UTC),
+`event_id` (UUID of this line), `correlation_id` (UUID pairing a request with
+its response, or a local start with its finish), `run_id` (UUID shared by the
+CLI process), `command` (parsed command words), `kind` (`http` or `local`),
+`phase` (`request` / `response` for HTTP; `start` / `progress` / `finish` /
+`error` for local), and `op` (short stable name). Nested work also carries
+`parent_correlation_id`. HTTP lines add method, path, query keys, status, a
+redacted request or response summary, and `x-request-id` when present.
+Finish, response, and error phases include `duration_ms`. Binary bodies log
+`content_type` and `byte_length` only. Tokens, `Authorization` headers,
+signed URLs, pairing material, and image bytes are never written.
+
 Enrollment creates the account's first independently revocable agent. Run it
 before the first screen is available when account setup and content preparation
 must begin early:

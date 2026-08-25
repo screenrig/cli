@@ -43,6 +43,7 @@ import { SDK_PROTOCOL_VERSION } from "./adapters/sdk-injection.js";
 import { flagBool, flagNumber, flagString, type ParsedArgs } from "./argv.js";
 import { ApiClient, requireToken } from "./client.js";
 import {
+  preserveLogSocket,
   resolveConfig,
   describeToken,
   readConfigFile,
@@ -50,6 +51,7 @@ import {
   writeConfigAtomic,
   type ScreenRigConfig,
 } from "./config.js";
+import { attachOperationLogger, loggerOf, loggingTransport } from "./log/index.js";
 import { ensureCredential } from "./enrollment.js";
 import {
   headerValue,
@@ -129,6 +131,12 @@ Usage:
             [--request-id ID] [--idempotency-key KEY] [--timeout MS]
             [--beta-key KEY]
             <command> [args]
+
+Configuration (user config JSON, not flags):
+  log_socket   optional path to an already-listening Unix socket. The CLI
+               connects as a client and writes one NDJSON operation-log
+               object per line. Absent or empty keeps current behavior.
+               This is a config field only, not a command-line switch.
 
 Commands:
   account show
@@ -280,13 +288,26 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
   } catch (err) {
     throw usageError(`Cannot read compose spec: ${err instanceof Error ? err.message : "invalid JSON"}`);
   }
+  const logger = loggerOf(runtime);
   let result;
   try {
-    result = await composeSpec(spec, {
-      baseDir: path.dirname(specPath),
-      outPath: output,
-      layoutOutPath: layoutOutput,
-    });
+    result = await logger.withLocal(
+      { op: "compose.render", message: `render ${path.basename(specPath)}` },
+      async (span) => {
+        const rendered = await composeSpec(spec, {
+          baseDir: path.dirname(specPath),
+          outPath: output,
+          layoutOutPath: layoutOutput,
+        });
+        span.finish({
+          output,
+          width: rendered.width,
+          height: rendered.height,
+          truncated: rendered.truncated,
+        });
+        return rendered;
+      },
+    );
   } catch (err) {
     rethrowCompose(err);
   }
@@ -322,7 +343,8 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
 }
 
 function transportFor(runtime: CliRuntime, apiUrl: string, token?: string): Transport {
-  return runtime.transport ?? new FetchTransport(apiUrl, token);
+  const base = runtime.transport ?? new FetchTransport(apiUrl, token);
+  return loggingTransport(base, loggerOf(runtime));
 }
 
 function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?: string): ApiClient {
@@ -333,6 +355,7 @@ function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?
     idempotencyKey: flagString(args.flags, "idempotency-key"),
     timeoutMs: flagNumber(args.flags, "timeout"),
     creditsOwner: runtime,
+    logger: loggerOf(runtime),
   });
 }
 
@@ -374,16 +397,23 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
       human: `screenrig ${CLI_VERSION}`,
     };
   }
+
+  const repair = flagBool(args.flags, "repair-config");
+  let resolved = await resolveConfig({ flags: args.flags, fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }, repair });
+  await attachOperationLogger(runtime, args, resolved);
+
   if (group === "compose" && action === "catalog") {
     if (args.positionals.length > 2) {
       throw usageError("compose catalog does not accept positional arguments.");
     }
-    const catalog = composeCatalog();
-    return {
-      envelope: successEnvelope(catalog),
-      exitCode: ExitCode.Success,
-      human: formatComposeCatalog(catalog),
-    };
+    return loggerOf(runtime).withLocal({ op: "compose.catalog", message: "compose catalog" }, async () => {
+      const catalog = composeCatalog();
+      return {
+        envelope: successEnvelope(catalog),
+        exitCode: ExitCode.Success,
+        human: formatComposeCatalog(catalog),
+      };
+    });
   }
   if (group === "compose" && action === "render") {
     return composeRender(args, runtime);
@@ -406,9 +436,6 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
     });
   }
 
-  const repair = flagBool(args.flags, "repair-config");
-  let resolved = await resolveConfig({ flags: args.flags, fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }, repair });
-
   if (group === "doctor") {
     return doctor(args, runtime, resolved);
   }
@@ -422,10 +449,14 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
     return agentStatus(args, runtime, resolved, true);
   }
   if (group === "agent" && action === "connect") {
-    return agentConnect(args, runtime, resolved);
+    return loggerOf(runtime).withLocal({ op: "agent.connect", message: "agent connect" }, () =>
+      agentConnect(args, runtime, resolved),
+    );
   }
   if (group === "agent" && action === "enroll") {
-    return agentEnroll(args, runtime, resolved);
+    return loggerOf(runtime).withLocal({ op: "agent.enroll", message: "agent enroll" }, () =>
+      agentEnroll(args, runtime, resolved),
+    );
   }
   if (group === "agent" && action === "disconnect") {
     return agentDisconnect(args, runtime, resolved, false);
@@ -462,7 +493,9 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
     return dashboardCommand(args, runtime, resolved);
   }
   if (group === "app" && action === "upload") {
-    return appUpload(args, runtime, resolved);
+    return loggerOf(runtime).withLocal({ op: "app.upload", message: "app upload" }, () =>
+      appUpload(args, runtime, resolved),
+    );
   }
   if (group === "app" && action === "list") {
     return simpleGet(args, runtime, resolved, "/api/v1/applications", "Applications");
@@ -503,7 +536,9 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
     return eventsList(args, runtime, resolved);
   }
   if (group === "events" && action === "follow") {
-    return eventsFollow(args, runtime, resolved);
+    return loggerOf(runtime).withLocal({ op: "events.follow", message: "events follow" }, () =>
+      eventsFollow(args, runtime, resolved),
+    );
   }
   if (group === "playback" && action === "list") {
     return playbackList(args, runtime, resolved);
@@ -1202,11 +1237,11 @@ async function agentDisconnect(
         state: "revoked" as const,
         revoked_at: runtime.now().toISOString(),
       } : current.last_agent;
-      await writeConfigAtomic(resolved.configPath, {
+      await writeConfigAtomic(resolved.configPath, preserveLogSocket(current, {
         api_url: current.api_url,
         ...(lastAgent ? { last_agent: lastAgent } : {}),
         updated_at: runtime.now().toISOString(),
-      }, fsLike);
+      }), fsLike);
     });
   } catch (err) {
     throw configError(
@@ -1521,7 +1556,7 @@ async function appPack(args: ParsedArgs, runtime: CliRuntime): Promise<CommandRe
   if (!dir) {
     throw usageError("app pack requires a directory.");
   }
-  const result = await packDirectory(path.resolve(runtime.cwd(), dir));
+  const result = await packDirectory(path.resolve(runtime.cwd(), dir), { logger: loggerOf(runtime) });
   const output = flagString(args.flags, "output");
   if (output) {
     await writeFile(path.resolve(runtime.cwd(), output), result.archive);
@@ -1558,6 +1593,7 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
   const capabilitiesResponse = await client.call({ method: "GET", path: "/api/v1/capabilities" });
   const packed = await packDirectory(path.resolve(runtime.cwd(), dir), {
     limits: limitsFromCapabilities(capabilitiesResponse.body as Capabilities),
+    logger: loggerOf(runtime),
   });
   const name = applicationNameFromArgs(args);
   const response = await client.call({
@@ -1722,7 +1758,9 @@ async function mediaCommand(
     return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted media ${id}` };
   }
   if (action === "upload") {
-    return mediaUpload(args, runtime, client);
+    return loggerOf(runtime).withLocal({ op: "media.upload", message: "media upload" }, () =>
+      mediaUpload(args, runtime, client),
+    );
   }
   throw usageError("Unknown media command.");
 }
@@ -2538,7 +2576,9 @@ async function screenCommand(
     return screenToast(args, client);
   }
   if (action === "screenshot") {
-    return screenScreenshot(args, runtime, client);
+    return loggerOf(runtime).withLocal({ op: "screenshot.capture", message: "screen screenshot" }, () =>
+      screenScreenshot(args, runtime, client),
+    );
   }
   throw usageError("Unknown screen command.");
 }
@@ -2679,35 +2719,42 @@ async function screenScreenshot(args: ParsedArgs, runtime: CliRuntime, client: A
 
   const deadline = Date.now() + timeoutMs;
   let status: ScreenScreenshotStatus | undefined;
-  while (true) {
-    const statusResponse = await client.call({
-      method: "GET",
-      path: `/api/v1/screens/${id}/screenshot/status`,
-    });
-    status = (statusResponse.body ?? {}) as ScreenScreenshotStatus;
-    const currentId = status.capture_id;
-    if (typeof currentId === "string" && currentId.length > 0 && currentId !== captureId) {
-      throw new CliError(
-        makeProblem(
-          "resource_conflict",
-          "Resource state conflicts with the request",
-          409,
-          "A later screenshot request replaced this one.",
-          { request_id: client.requestId },
-        ),
-      );
-    }
-    if (status.state === "ready" && currentId === captureId) {
-      break;
-    }
-    if (status.state === "timed_out" && currentId === captureId) {
-      throw screenshotUnavailable(client.requestId);
-    }
-    if (Date.now() >= deadline) {
-      throw screenshotUnavailable(client.requestId);
-    }
-    await runtime.sleep(pollMs);
-  }
+  await loggerOf(runtime).withLocal(
+    { op: "screenshot.wait", message: `wait for screenshot ${id}` },
+    async (span) => {
+      while (true) {
+        const statusResponse = await client.call({
+          method: "GET",
+          path: `/api/v1/screens/${id}/screenshot/status`,
+        });
+        status = (statusResponse.body ?? {}) as ScreenScreenshotStatus;
+        const currentId = status.capture_id;
+        span.progress({ capture_id: currentId, state: status.state });
+        if (typeof currentId === "string" && currentId.length > 0 && currentId !== captureId) {
+          throw new CliError(
+            makeProblem(
+              "resource_conflict",
+              "Resource state conflicts with the request",
+              409,
+              "A later screenshot request replaced this one.",
+              { request_id: client.requestId },
+            ),
+          );
+        }
+        if (status.state === "ready" && currentId === captureId) {
+          span.finish({ capture_id: captureId, state: status.state });
+          return;
+        }
+        if (status.state === "timed_out" && currentId === captureId) {
+          throw screenshotUnavailable(client.requestId);
+        }
+        if (Date.now() >= deadline) {
+          throw screenshotUnavailable(client.requestId);
+        }
+        await runtime.sleep(pollMs);
+      }
+    },
+  );
 
   const download = await client.call({
     method: "GET",
@@ -3241,6 +3288,11 @@ async function doctor(
     name: "api_url",
     status: resolved.apiUrl.startsWith("https://") || resolved.apiUrl.startsWith("http://127.") || resolved.apiUrl.includes("localhost") ? "pass" : "fail",
     detail: resolved.apiUrl,
+  });
+  checks.push({
+    name: "log_socket",
+    status: "pass",
+    detail: resolved.logSocket ?? "(none)",
   });
   const lookup = ffmpegLookup(runtime.env);
   try {

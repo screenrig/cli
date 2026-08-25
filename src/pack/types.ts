@@ -1,3 +1,5 @@
+import type { OperationLogger } from "../log/types.js";
+
 export interface ArchiveLimits {
   application_archive_bytes: number;
   application_expanded_bytes: number;
@@ -26,6 +28,7 @@ export interface PackResult {
 
 export interface PackOptions {
   limits?: Partial<ArchiveLimits>;
+  logger?: OperationLogger;
   injector?: {
     inject(entries: ArchiveEntry[]): Promise<{
       entries: ArchiveEntry[];

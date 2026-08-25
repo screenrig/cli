@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { Readable, type Writable } from "node:stream";
 import type { Transport } from "./transport/types.js";
 import type { ConfigFs } from "./config.js";
+import type { OperationLogger } from "./log/types.js";
 import { openExternalUrl, openLocalPath, type OpenPath, type OpenUrl } from "./open-url.js";
 
 export interface CliRuntime {
@@ -15,6 +16,7 @@ export interface CliRuntime {
   sleep: (ms: number) => Promise<void>;
   homedir: () => string;
   fs: ConfigFs;
+  logger?: OperationLogger;
   transport?: Transport;
   signedRawPut?: SignedRawPut;
   cwd: () => string;

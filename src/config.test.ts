@@ -105,6 +105,30 @@ test("default credential location survives replacement of a plugin cache", async
   await rm(home, { recursive: true, force: true });
 });
 
+test("log_socket is resolved from the user config and rejected when it is a directory", async () => {
+  const home = await testTemp("config-log-socket-");
+  const fsLike = realFs(home);
+  const dir = path.join(home, "screenrig");
+  await mkdir(dir, { recursive: true });
+  const configPath = path.join(dir, "config.json");
+  const socketDir = path.join(home, "socks");
+  await mkdir(socketDir, { recursive: true });
+  await writeFile(configPath, JSON.stringify({ api_url: "https://api.screenrig.ai", log_socket: socketDir }) + "\n");
+  await chmod(configPath, 0o600);
+  await assert.rejects(resolveConfig({ flags: {}, fs: fsLike }), /log_socket is a directory/);
+
+  await writeFile(configPath, JSON.stringify({ api_url: "https://api.screenrig.ai", log_socket: "/tmp/screenrig.sock" }) + "\n");
+  await chmod(configPath, 0o600);
+  const resolved = await resolveConfig({ flags: {}, fs: fsLike });
+  assert.equal(resolved.logSocket, "/tmp/screenrig.sock");
+
+  await writeFile(configPath, JSON.stringify({ api_url: "https://api.screenrig.ai", log_socket: "   " }) + "\n");
+  await chmod(configPath, 0o600);
+  const empty = await resolveConfig({ flags: {}, fs: fsLike });
+  assert.equal(empty.logSocket, undefined);
+  await rm(home, { recursive: true, force: true });
+});
+
 test("token paste branches are rejected instead of overriding durable credentials", async () => {
   const home = await testTemp("config-token-branch-");
   const fsLike = realFs(home, { XDG_CONFIG_HOME: home, SCREENRIG_TOKEN: "sr_live_pasted_secret" });

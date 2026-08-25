@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { loggerOf } from "../log/logger.js";
 import { usageError } from "../problems.js";
 import { redactText } from "../redact.js";
 import type { CliRuntime } from "../runtime.js";
@@ -15,6 +16,37 @@ import {
 } from "./ffmpeg.js";
 import { silentProgressReporter, type ProgressReporter } from "./progress.js";
 import { readWebpContainer } from "./webp.js";
+import type { LocalSpan } from "../log/types.js";
+
+function loggingProgressReporter(inner: ProgressReporter, span: LocalSpan): ProgressReporter {
+  let lastPercent = -1;
+  return {
+    start(info) {
+      span.progress({
+        stage: info.stage,
+        target: info.target,
+        source_bytes: info.sourceBytes,
+        width: info.width,
+        height: info.height,
+      });
+      inner.start(info);
+    },
+    update(fraction) {
+      const percent = Math.floor(Math.min(1, Math.max(0, fraction)) * 100);
+      if (percent === 100 || percent - lastPercent >= 5) {
+        lastPercent = percent;
+        span.progress({ percent });
+      }
+      inner.update(fraction);
+    },
+    finish(info) {
+      inner.finish(info);
+    },
+    failed() {
+      inner.failed();
+    },
+  };
+}
 
 /**
  * Delivery targets for signage and kiosk playback.
@@ -108,16 +140,35 @@ export interface TranscodeRequest {
 
 export async function transcodeForUpload(request: TranscodeRequest): Promise<TranscodeResult> {
   const { runtime, filePath, options } = request;
-  const reporter = request.reporter ?? silentProgressReporter();
+  const logger = loggerOf(runtime);
+  return logger.withLocal(
+    { op: "media.transcode", message: `transcode ${path.basename(filePath)}` },
+    async (transcodeSpan) => {
+  const reporter = loggingProgressReporter(request.reporter ?? silentProgressReporter(), transcodeSpan);
   const kind = classifySource(filePath, request.explicitContentType);
   const toolchain = await resolveFfmpegToolchain(runtime);
   const probe = await probeMedia(runtime, toolchain, filePath);
   const sourceBytes = (await stat(filePath)).size;
-  const sourceWebp =
+  const sourceWebpBytes =
     kind === "image" &&
     (probe.codec === "webp" || path.extname(filePath).toLowerCase() === ".webp" || request.explicitContentType === "image/webp")
-      ? readWebpContainer(await readFile(filePath, { flag: "r" }))
+      ? await readFile(filePath, { flag: "r" })
       : undefined;
+  const sourceWebp = sourceWebpBytes
+    ? logger.enabled
+      ? await logger.withLocal({ op: "webp.inspect", message: `inspect ${path.basename(filePath)}` }, async (span) => {
+          const container = readWebpContainer(sourceWebpBytes);
+          span.finish({
+            animated: container?.animated,
+            lossless: container?.lossless,
+            width: container?.width,
+            height: container?.height,
+            byte_length: sourceWebpBytes.byteLength,
+          });
+          return container;
+        })
+      : readWebpContainer(sourceWebpBytes)
+    : undefined;
 
   if (!probe.hasVideo) {
     // ffmpeg has no animated-WebP demuxer, so a valid animated WebP probes empty.
@@ -129,6 +180,14 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
             "Supply the original source, or pass --no-transcode to upload it unchanged.",
         );
       }
+      transcodeSpan.finish({
+        passthrough: true,
+        stage: "image",
+        source_bytes: sourceBytes,
+        output_bytes: sourceBytes,
+        width: sourceWebp.width,
+        height: sourceWebp.height,
+      });
       return {
         filePath,
         filename: path.basename(filePath),
@@ -154,6 +213,15 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
 
   const passthrough = passthroughReason(kind, probe, options, sourceWebp);
   if (passthrough) {
+    transcodeSpan.finish({
+      passthrough: true,
+      stage: kind,
+      source_bytes: sourceBytes,
+      output_bytes: sourceBytes,
+      width: probe.displayWidth,
+      height: probe.displayHeight,
+      reason: passthrough,
+    });
     return {
       filePath,
       filename: path.basename(filePath),
@@ -197,7 +265,17 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
 
     const startedAt = runtime.now().getTime();
     const tool = path.basename(plan.command) || plan.command;
-    await runEncode(runtime, plan.command, plan.args, plan.progressDurationSeconds, reporter);
+    if (tool === "cwebp" || tool.endsWith("cwebp")) {
+      await logger.withLocal(
+        { op: "webp.encode", message: "cwebp fallback", encoder: "cwebp" },
+        async (span) => {
+          await runEncode(runtime, plan.command, plan.args, plan.progressDurationSeconds, reporter);
+          span.finish({ encoder: "cwebp", width: plan.outputWidth, height: plan.outputHeight });
+        },
+      );
+    } else {
+      await runEncode(runtime, plan.command, plan.args, plan.progressDurationSeconds, reporter);
+    }
 
     let outputBytes: number;
     try {
@@ -225,6 +303,17 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
       );
     }
 
+    transcodeSpan.finish({
+      passthrough: false,
+      stage: kind,
+      source_bytes: sourceBytes,
+      output_bytes: outputBytes,
+      width: measured?.width ?? plan.outputWidth,
+      height: measured?.height ?? plan.outputHeight,
+      dimensions_measured: measured !== undefined,
+      encoder: tool,
+      duration_ms: durationMs,
+    });
     return {
       filePath: outputPath,
       filename,
@@ -246,6 +335,8 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
     await rm(cleanupDir, { recursive: true, force: true });
     throw error;
   }
+    },
+  );
 }
 
 /**

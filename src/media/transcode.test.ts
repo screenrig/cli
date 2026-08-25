@@ -31,6 +31,7 @@ import {
   videoFilterChain,
 } from "./transcode.js";
 import { readWebpContainer } from "./webp.js";
+import { createMemoryLogger } from "../log/index.js";
 
 const ENCODER_LISTING = [
   "Encoders:",
@@ -1104,4 +1105,32 @@ test("temporary output lives outside the source directory and is removed by the 
   await rm(result.cleanupDir, { recursive: true, force: true });
   await assert.rejects(() => stat(result.filePath));
   await rm(dir, { recursive: true, force: true });
+});
+
+test("transcode emits paired local start and finish events without pixels", async () => {
+  resetFfmpegToolchainCache();
+  const dir = await testTemp("transcode-log-");
+  await mkdir(dir, { recursive: true });
+  const source = path.join(dir, "clip.mp4");
+  await writeFile(source, Buffer.alloc(128, 4));
+  const { runtime } = fakeRuntime({ probe: probeJson(), progressSeconds: [6] });
+  const { logger, events } = createMemoryLogger({ command: ["media", "upload"] });
+  runtime.logger = logger;
+  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() });
+  try {
+    const starts = events.filter((event) => event.kind === "local" && event.phase === "start" && event.op === "media.transcode");
+    const finishes = events.filter((event) => event.kind === "local" && event.phase === "finish" && event.op === "media.transcode");
+    assert.equal(starts.length, 1);
+    assert.equal(finishes.length, 1);
+    assert.equal(starts[0]?.correlation_id, finishes[0]?.correlation_id);
+    assert.notEqual(starts[0]?.event_id, finishes[0]?.event_id);
+    assert.equal(finishes[0]?.v, 1);
+    assert.equal(typeof finishes[0]?.duration_ms, "number");
+    const serialized = events.map((event) => JSON.stringify(event)).join("\n");
+    assert.doesNotMatch(serialized, /pixels|image_bytes|data:image\//i);
+    assert.ok(events.some((event) => event.op === "process.spawn"));
+  } finally {
+    if (result.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true });
+  }
 });

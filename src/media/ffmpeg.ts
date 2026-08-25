@@ -1,3 +1,4 @@
+import { loggingRunProcess, loggerOf } from "../log/logger.js";
 import { usageError } from "../problems.js";
 import { redactText } from "../redact.js";
 import type { CliRuntime, RunProcess, RunProcessResult } from "../runtime.js";
@@ -74,7 +75,7 @@ export function runProcessFor(runtime: CliRuntime): RunProcess {
   if (!run) {
     throw usageError("This runtime cannot start the ffmpeg toolchain.");
   }
-  return run;
+  return loggingRunProcess(run, loggerOf(runtime));
 }
 
 function missingToolError(binary: string, result: RunProcessResult): never {

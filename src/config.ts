@@ -1,11 +1,14 @@
 import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
     import path from "node:path";
+    import type { OperationLogger } from "./log/types.js";
     import { configError } from "./problems.js";
     import { redactToken, tokenLookupId } from "./redact.js";
 
     export interface ScreenRigConfig {
       api_url: string;
       token?: string;
+      /** Path to an already-listening AF_UNIX socket for NDJSON operation logs. */
+      log_socket?: string;
       account_id?: string;
       agent_id?: string;
       last_agent?: {
@@ -58,6 +61,7 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
       stat: typeof stat;
       homedir: () => string;
       env: NodeJS.Dict<string>;
+      logger?: OperationLogger;
     }
 
     const DEFAULT_CONFIG_NAME = "config.json";
@@ -128,6 +132,7 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
       fsLike: ConfigFs,
       options: { repair?: boolean } = {},
     ): Promise<ScreenRigConfig | undefined> {
+      return withConfigLog(fsLike, "config.read", configPath, async () => {
       let info;
       try {
         info = await fsLike.stat(configPath);
@@ -166,6 +171,51 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
       } finally {
         await handle.close();
       }
+      });
+    }
+
+    /**
+     * Keep `log_socket` across rewrites that build a fresh object. Spread
+     * `current` first when the rest of the file should survive; use this when
+     * the write is intentionally sparse (enrollment pending, disconnect).
+     */
+    export function preserveLogSocket(
+      current: ScreenRigConfig | undefined,
+      next: ScreenRigConfig,
+    ): ScreenRigConfig {
+      const fromNext = typeof next.log_socket === "string" ? next.log_socket.trim() : "";
+      const fromCurrent = typeof current?.log_socket === "string" ? current.log_socket.trim() : "";
+      const logSocket = fromNext || fromCurrent;
+      if (logSocket) {
+        return { ...next, log_socket: logSocket };
+      }
+      if ("log_socket" in next) {
+        const { log_socket: _omit, ...rest } = next;
+        return rest;
+      }
+      return next;
+    }
+
+    async function withConfigLog<T>(
+      fsLike: Pick<ConfigFs, "logger">,
+      op: string,
+      configPath: string,
+      work: () => Promise<T>,
+    ): Promise<T> {
+      const logger = fsLike.logger;
+      if (!logger?.enabled) {
+        return work();
+      }
+      return logger.withLocal({ op, message: op, config_path: configPath }, async (span) => {
+        try {
+          const result = await work();
+          span.finish({ outcome: "ok", config_path: configPath });
+          return result;
+        } catch (err) {
+          span.error(err, { config_path: configPath });
+          throw err;
+        }
+      });
     }
 
     export async function writeConfigAtomic(
@@ -173,6 +223,7 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
       config: ScreenRigConfig,
       fsLike: ConfigFs,
     ): Promise<void> {
+      return withConfigLog(fsLike, "config.write", configPath, async () => {
       const dir = path.dirname(configPath);
       await fsLike.mkdir(dir, { recursive: true, mode: 0o700 });
       try {
@@ -198,6 +249,7 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
         await fsLike.rm(tmp, { force: true }).catch(() => undefined);
         throw err;
       }
+      });
     }
 
     export interface ConfigLockOptions {
@@ -218,6 +270,7 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
       options: ConfigLockOptions,
       callback: () => Promise<T>,
     ): Promise<T> {
+      return withConfigLog(fsLike, "config.lock", configPath, async () => {
       const dir = path.dirname(configPath);
       const lockPath = `${configPath}.lock`;
       const retryMs = options.retryMs ?? 50;
@@ -268,6 +321,7 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
       } finally {
         await fsLike.rm(lockPath, { recursive: true, force: true });
       }
+      });
     }
 
     export interface ResolvedConfig {
@@ -279,10 +333,39 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
       agentConnection?: ScreenRigConfig["agent_connection"];
       lastAgent?: ScreenRigConfig["last_agent"];
       configPath: string;
+      logSocket?: string;
       source: {
         apiUrl: "flag" | "env" | "config" | "local-dev" | "default";
         token: "config" | "none";
       };
+    }
+
+    export async function validateLogSocketPath(
+      value: unknown,
+      fsLike: Pick<ConfigFs, "stat">,
+    ): Promise<string | undefined> {
+      if (value === undefined || value === null) {
+        return undefined;
+      }
+      if (typeof value !== "string") {
+        throw configError("log_socket must be a string path to an already-listening Unix socket.");
+      }
+      const socketPath = value.trim();
+      if (socketPath.length === 0) {
+        return undefined;
+      }
+      try {
+        const info = await fsLike.stat(socketPath);
+        if (info.isDirectory()) {
+          throw configError(`log_socket is a directory: ${socketPath}. Set it to a Unix socket path whose consumer is already listening.`);
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+          return socketPath;
+        }
+        throw err;
+      }
+      return socketPath;
     }
 
     export async function resolveConfig(options: {
@@ -327,6 +410,7 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
         token = file.token;
         tokenSource = "config";
       }
+      const logSocket = await validateLogSocketPath(file?.log_socket, options.fs);
       return {
         apiUrl: apiUrl.replace(/\/+$/, ""),
         token,
@@ -336,6 +420,7 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
         agentConnection: file?.agent_connection,
         lastAgent: file?.last_agent,
         configPath,
+        logSocket,
         source: { apiUrl: apiSource, token: tokenSource },
       };
     }

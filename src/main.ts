@@ -10,6 +10,7 @@ import { processRuntime } from "./runtime.js";
 
 export async function run(runtime: CliRuntime = processRuntime()): Promise<number> {
   const json = runtime.argv.includes("--json");
+  let failure: unknown;
   try {
     const args = parseArgv(runtime.argv);
     const result = applyCreditsLowToSuccess(await dispatch(args, runtime), observedCreditsRemaining(runtime));
@@ -22,6 +23,7 @@ export async function run(runtime: CliRuntime = processRuntime()): Promise<numbe
     }
     return result.exitCode;
   } catch (err) {
+    failure = err;
     const problem =
       err instanceof CliError
         ? err.problem
@@ -42,6 +44,16 @@ export async function run(runtime: CliRuntime = processRuntime()): Promise<numbe
       }
     }
     return exitCode;
+  } finally {
+    const logger = runtime.logger;
+    if (logger) {
+      try {
+        logger.endRun(failure);
+        await logger.close();
+      } catch {
+        // Socket close is best-effort after the command envelope is written.
+      }
+    }
   }
 }
 
