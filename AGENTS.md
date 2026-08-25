@@ -433,6 +433,34 @@ installation, players, backend services, the site, or production deployment.
   stay forbidden. This is **source-ready** in the working tree. It is not in
   the locked plugin bundle. Do not claim marketplace or deployed.
 
+## Follow operation logs
+
+The CLI is a **client**. Optional `log_socket` lives in the same 0600 user
+config as the token (`src/config.ts`). `README.md` documents the field.
+There is no `--log-socket` flag and no `SCREENRIG_LOG_SOCKET` override
+(`src/commands.ts` USAGE).
+
+If `log_socket` is absent or empty, commands work unchanged. If it is set,
+connect or write failure fails the command: the consumer must already be
+listening (`src/log/attach.ts`, `src/log/socket.ts`).
+
+Each line is one v1 NDJSON object (`src/log/types.ts`): `v`, `ts`,
+`event_id`, `correlation_id`, `run_id`, `command`, `kind` (`http` or
+`local`), `phase`, `op`, `tag`, optional `id` / `params`. Pair HTTP
+request/response and local start/finish on `correlation_id`. Prefer `tag`
+(snake_case, for example `get_screens`). Optional `id` is the associated
+resource (`scr_…`, `pl_…`), never `event_id` or `correlation_id`. Optional
+`params` is small scalars.
+
+This socket is not `events follow`. `events follow` is account SSE
+(`GET /api/v1/events/stream`).
+
+To follow: start a listener on the configured path, then run the CLI
+command. The README example path is `/tmp/screenrig.sock`. Do not paste
+full NDJSON into reports. Prefer `tag`, `correlation_id`, `id`, `status` /
+`phase`. Never log or print credentials, cookies, `Authorization` headers,
+nonces, signed URLs, object keys, or pixels.
+
 ## Verification
 
 ```sh
