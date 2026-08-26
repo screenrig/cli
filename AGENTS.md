@@ -143,11 +143,10 @@ installation, players, backend services, the site, or production deployment.
 - `screen toast <id> --text TEXT [--level info] [--duration-ms MS]`
   binds `POST /api/v1/screens/{id}/toast`. A toast is stage chrome, not a
   placement: no canvas slot, no layer, no readiness or crossfade.
-- `--level` defaults to `info` when omitted. Agent toasts are info. Info
-  stream toasts are admitted in production. `error` and `alert` remain
-  accepted. Do not map player HTTP errors onto this command. Player-local
-  faults are a different path: error always; alert and info only off
-  production.
+- `--level` is `info`, `alert`, or `error`. It defaults to `info` when
+  omitted. The CLI accepts all three. Production glass shows error toasts
+  only; alert and info only off production. Status chips show in every
+  environment. Do not map player HTTP errors onto this command.
 - Latest-wins. Do not add a queue, a cancel command, or a colour field.
   Player chrome chooses the fill; the API never carries one.
 - Text is 1 to 120 characters, line feed is the only accepted line break, and

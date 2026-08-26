@@ -444,8 +444,9 @@ screenrig --json screen toast scr_01 --level info --text "Lobby closed"
 screenrig --json screen toast scr_01 --level alert --text "Doors locked" --duration-ms 5000
 ```
 
-`--level` defaults to `info` when omitted. Agent toasts are info. Info stream
-toasts are admitted in production. `error` and `alert` remain accepted.
+`--level` is `info`, `alert`, or `error`. It defaults to `info` when omitted.
+The CLI accepts all three. Production glass shows error toasts only; alert
+and info only off production. Status chips show in every environment.
 `--text` is 1 to 120 characters, accepts line feed as the only line break, and
 allows at most three lines. `--duration-ms` is optional, defaults to 10000 on
 the server, and must be between 2000 and 60000 inclusive when supplied.
