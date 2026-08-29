@@ -555,9 +555,9 @@ through the npm package — passes even when optional pieces are absent. Stdout
 is a success envelope either way: branch on `data.status` and the rows, not on
 `ok`.
 
-A `fail` row is one of `node`, `config_permissions`, `token`, `api_url`,
-`ffmpeg`, `ffprobe`, `encoder_libx264`, `encoder_libwebp`, `cwebp`, `health`,
-`ready`, `version`, or `capabilities`. These rows warn instead:
+`node`, `config_permissions`, `token`, `api_url`, `ffmpeg`, `ffprobe`,
+`encoder_libx264`, `health`, `ready`, `version`, and `capabilities` fail when
+they are not satisfied. These rows warn instead:
 
 | Check | Why it is optional |
 | --- | --- |
@@ -567,11 +567,11 @@ A `fail` row is one of `node`, `config_permissions`, `token`, `api_url`,
 | `filter_hdr_tonemap` | Without `zscale` and `tonemap` an HDR source converts without tone mapping, and the upload envelope carries a warning. |
 | `feedback` | The server advertises it; the `feedback` commands are unavailable where it is absent. |
 
-The two WebP rows are the two ways to encode the one delivery format for
-images, so they are a warning while the other is usable and fail together when
-the host has neither. That single case is a real defect: no image can be
-transcoded. The remedy the `cwebp` row names is an ffmpeg built with libwebp,
-or `cwebp` on `PATH`, or `SCREENRIG_CWEBP` pointing at it.
+`encoder_libwebp` and `cwebp` are the two ways to encode the one delivery
+format for images, so each warns while the other is usable and the two fail
+together when the host has neither. That case is a real defect: no image can be
+transcoded at all. The remedy the `cwebp` row names is an ffmpeg built with
+libwebp, or `cwebp` on `PATH`, or `SCREENRIG_CWEBP` pointing at it.
 
 Neither the plugin launcher nor the npm package installs ffmpeg, ffprobe, or
 cwebp. They stay host dependencies, resolved from `PATH` or from
