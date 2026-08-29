@@ -2261,49 +2261,149 @@ test("doctor reports checks over the published foundation routes", async () => {
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("doctor reports encoder_libwebp independently of the cwebp fallback", async () => {
+/**
+ * Fake toolchain probe. `encoders` and `filters` are the ffmpeg capability
+ * listings, and `cwebp` decides whether the standalone binary answers
+ * `-version` at all.
+ */
+function fakeToolchainProbe(options: { encoders: string[]; filters: string[]; cwebp: boolean }) {
+  return async (request: { command: string; args: string[] }) => {
+    if (request.args.includes("-version") && !request.args.includes("-hide_banner")) {
+      return options.cwebp
+        ? { code: 0, signal: null, stdout: "1.6.0\nlibsharpyuv: 0.4.2\n", stderrTail: "" }
+        : { code: null, signal: null, stdout: "", stderrTail: "", spawnError: "spawn cwebp ENOENT" };
+    }
+    if (request.args.includes("-version")) {
+      return { code: 0, signal: null, stdout: `${path.basename(request.command)} version n8.1.2\n`, stderrTail: "" };
+    }
+    if (request.args.includes("-encoders")) {
+      const rows = options.encoders.map((encoder) => ` V....D ${encoder}              ${encoder}\n`).join("");
+      return { code: 0, signal: null, stdout: rows, stderrTail: "" };
+    }
+    if (request.args.includes("-filters")) {
+      const rows = options.filters.map((filter) => ` .S ${filter}            V->V       Filter.\n`).join("");
+      return { code: 0, signal: null, stdout: rows, stderrTail: "" };
+    }
+    return { code: 1, signal: null, stdout: "", stderrTail: "" };
+  };
+}
+
+async function doctorWithToolchain(
+  prefix: string,
+  options: { encoders: string[]; filters: string[]; cwebp: boolean },
+): Promise<{
+  code: number;
+  status: string;
+  byName: Record<string, { name: string; status: string; detail: string } | undefined>;
+  cleanup: () => Promise<void>;
+}> {
   resetFfmpegToolchainCache();
   const transport = memoryBackend();
-  const configDir = await testTemp("doctor-cwebp-");
+  const configDir = await testTemp(prefix);
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
     { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
-  const runProcess = async (request: { command: string; args: string[] }) => {
-    if (request.args.includes("-version") && !request.args.includes("-hide_banner")) {
-      return { code: 0, signal: null, stdout: "1.6.0\nlibsharpyuv: 0.4.2\n", stderrTail: "" };
-    }
-    if (request.args.includes("-version")) {
-      return { code: 0, signal: null, stdout: `${path.basename(request.command)} version n8.1.2\n`, stderrTail: "" };
-    }
-    if (request.args.includes("-encoders")) {
-      return { code: 0, signal: null, stdout: " V....D libx264              libx264 H.264\n", stderrTail: "" };
-    }
-    if (request.args.includes("-filters")) {
-      return { code: 0, signal: null, stdout: " .S scale            V->V       Scale.\n", stderrTail: "" };
-    }
-    return { code: 1, signal: null, stdout: "", stderrTail: "" };
-  };
   const { code, stdout } = await withRuntime(["--json", "doctor"], transport, {
     fs: fsLike,
-    runProcess: runProcess as unknown as NonNullable<CliRuntime["runProcess"]>,
+    runProcess: fakeToolchainProbe(options) as unknown as NonNullable<CliRuntime["runProcess"]>,
+  });
+  const envelope = JSON.parse(stdout) as {
+    ok: boolean;
+    data: { status: string; checks: Array<{ name: string; status: string; detail: string }> };
+  };
+  return {
+    code,
+    status: envelope.data.status,
+    byName: Object.fromEntries(envelope.data.checks.map((check) => [check.name, check])),
+    cleanup: () => rm(configDir, { recursive: true, force: true }),
+  };
+}
+
+test("doctor exits 0 on a clean host whose ffmpeg has libwebp and which has no cwebp", async () => {
+  const { code, status, byName, cleanup } = await doctorWithToolchain("doctor-no-cwebp-", {
+    encoders: ["libx264", "libx265", "libwebp", "libwebp_anim"],
+    filters: ["scale", "zscale", "tonemap"],
+    cwebp: false,
   });
   try {
-    const envelope = JSON.parse(stdout) as {
-      ok: boolean;
-      data: { checks: Array<{ name: string; status: string; detail: string }> };
-    };
-    const byName = Object.fromEntries(envelope.data.checks.map((check) => [check.name, check]));
-    assert.equal(byName.encoder_libwebp?.status, "fail");
+    assert.equal(byName.encoder_libwebp?.status, "pass");
+    assert.equal(byName.cwebp?.status, "warn", "cwebp is only the fallback for a build without libwebp");
+    assert.match(byName.cwebp?.detail ?? "", /not required because this ffmpeg build has the libwebp encoder/);
+    assert.equal(status, "warn");
+    assert.equal(code, ExitCode.Success, "a host missing nothing required must exit 0");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("doctor warns rather than fails for the encoders and filters that only optional paths need", async () => {
+  const { code, byName, cleanup } = await doctorWithToolchain("doctor-optional-", {
+    encoders: ["libx264", "libwebp", "libwebp_anim"],
+    filters: ["scale"],
+    cwebp: true,
+  });
+  try {
+    assert.equal(byName.encoder_libx264?.status, "pass");
+    assert.equal(byName.encoder_libx265?.status, "warn");
+    assert.match(byName.encoder_libx265?.detail ?? "", /--codec hevc is unavailable/);
+    assert.equal(byName.filter_hdr_tonemap?.status, "warn");
+    assert.equal(byName.cwebp?.status, "pass");
+    assert.equal(code, ExitCode.Success);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("doctor reports encoder_libwebp independently of the cwebp fallback", async () => {
+  const { code, byName, cleanup } = await doctorWithToolchain("doctor-cwebp-", {
+    encoders: ["libx264"],
+    filters: ["scale"],
+    cwebp: true,
+  });
+  try {
+    assert.equal(byName.encoder_libwebp?.status, "warn", "the cwebp fallback still encodes stills");
     assert.match(byName.encoder_libwebp?.detail ?? "", /libwebp missing/);
     assert.doesNotMatch(byName.encoder_libwebp?.detail ?? "", /cwebp/);
     assert.equal(byName.cwebp?.status, "pass");
     assert.match(byName.cwebp?.detail ?? "", /1\.6\.0/);
-    assert.equal(code, ExitCode.Unexpected, "encoder_libwebp fail still makes doctor non-zero");
+    assert.equal(code, ExitCode.Success);
   } finally {
-    await rm(configDir, { recursive: true, force: true });
+    await cleanup();
+  }
+});
+
+test("doctor fails when neither libwebp nor cwebp can produce WebP", async () => {
+  const { code, status, byName, cleanup } = await doctorWithToolchain("doctor-no-webp-", {
+    encoders: ["libx264"],
+    filters: ["scale"],
+    cwebp: false,
+  });
+  try {
+    assert.equal(byName.encoder_libwebp?.status, "fail");
+    assert.equal(byName.cwebp?.status, "fail");
+    assert.match(byName.cwebp?.detail ?? "", /no libwebp encoder either/);
+    assert.match(byName.cwebp?.detail ?? "", /SCREENRIG_CWEBP/);
+    assert.equal(status, "fail");
+    assert.equal(code, ExitCode.Unexpected, "no WebP encoder at all is a real defect");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("doctor fails a missing libx264 because it is the default video profile", async () => {
+  const { code, byName, cleanup } = await doctorWithToolchain("doctor-no-x264-", {
+    encoders: ["libwebp"],
+    filters: ["zscale", "tonemap"],
+    cwebp: false,
+  });
+  try {
+    assert.equal(byName.encoder_libx264?.status, "fail");
+    assert.equal(code, ExitCode.Unexpected);
+  } finally {
+    await cleanup();
   }
 });
 
