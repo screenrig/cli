@@ -73,6 +73,17 @@ installation, players, backend services, the site, or production deployment.
   reports both ffmpeg binaries, the `libx265`, `libx264`, and `libwebp`
   encoders, the `cwebp` fallback, and the `zscale` / `tonemap` filters. Do not
   claim ffmpeg has `libwebp` when it does not.
+- **`doctor` check status is `pass`, `warn`, or `fail`, and only a `fail` moves
+  the exit code.** `data.status` is the worst row. A clean host must exit 0, so
+  an optional piece the CLI has a documented path without is a warning: `cwebp`
+  beside an ffmpeg with `libwebp`, `encoder_libwebp` beside a usable `cwebp`,
+  `encoder_libx265` (only `--codec hevc`), `filter_hdr_tonemap`, and the
+  server-advertised `feedback` feature. The two WebP rows fail together when
+  the host has neither encoder, because then no image can be transcoded at all.
+  `encoder_libx264`, `ffmpeg`, `ffprobe`, `node`, `config_permissions`,
+  `token`, `api_url`, and the four control-plane rows stay `fail`. Never widen
+  a `fail` to something the host cannot fix or a supported command never needs;
+  never soften a piece a default path requires.
 - Delivery profiles are fixed. Video defaults to H.264 (`libx264`, High, level
   4.2, `-preset fast -crf 23 -maxrate 8M -bufsize 16M`, `-bf 2`, GOP two
   seconds, `yuv420p`, Rec. 709 limited range, AAC 192 kbit/s 48 kHz stereo),
