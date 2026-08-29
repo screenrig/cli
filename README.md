@@ -18,7 +18,8 @@ screenrig --json version
 
 Node.js 20.11 or newer is required. `media upload` additionally requires ffmpeg
 and ffprobe 6.0 or newer; the other commands do not. Run `screenrig --json doctor`
-to inspect the optional media toolchain before an upload.
+to inspect the optional media toolchain before an upload. It exits 0 on a host
+that is missing nothing required and reports the rest as warnings.
 
 This global package is the official developer-shell distribution. Agent workflows
 that load the ScreenRig plugin must keep using the plugin-relative launcher. The
@@ -537,6 +538,45 @@ page or stream with nothing to print writes no human output. `--json` is a
 JSON envelope or stream. After redaction it may still include a server
 `message` field when that field is data.
 
+## Preflight checks (`doctor`)
+
+`screenrig --json doctor` probes this installation and the configured control
+plane, and reports one row per check with a `name`, a `detail`, and a `status`:
+
+| Status | Meaning | Effect on the exit code |
+| --- | --- | --- |
+| `pass` | Present and usable. | none |
+| `warn` | An optional piece is absent and the CLI has a documented path without it. | none |
+| `fail` | A defect that breaks a supported command until it is fixed. | exit 1 |
+
+`data.status` is the worst row in the list. The command exits 0 unless
+something required failed, so a clean host — installed through the plugin or
+through the npm package — passes even when optional pieces are absent. Stdout
+is a success envelope either way: branch on `data.status` and the rows, not on
+`ok`.
+
+`node`, `config_permissions`, `token`, `api_url`, `ffmpeg`, `ffprobe`,
+`encoder_libx264`, `health`, `ready`, `version`, and `capabilities` fail when
+they are not satisfied. These rows warn instead:
+
+| Check | Why it is optional |
+| --- | --- |
+| `cwebp` | The standalone WebP encoder is only the fallback for an ffmpeg build without libwebp, so a host whose ffmpeg carries the `libwebp` encoder never runs it. |
+| `encoder_libwebp` | Where the binary above is installed, stills are encoded with it instead. Animation still needs `libwebp_anim`. |
+| `encoder_libx265` | Only `--codec hevc` uses it. |
+| `filter_hdr_tonemap` | Without `zscale` and `tonemap` an HDR source converts without tone mapping, and the upload envelope carries a warning. |
+| `feedback` | The server advertises it; the `feedback` commands are unavailable where it is absent. |
+
+`encoder_libwebp` and `cwebp` are the two ways to encode the one delivery
+format for images, so each warns while the other is usable and the two fail
+together when the host has neither. That case is a real defect: no image can be
+transcoded at all. The remedy the `cwebp` row names is an ffmpeg built with
+libwebp, or `cwebp` on `PATH`, or `SCREENRIG_CWEBP` pointing at it.
+
+Neither the plugin launcher nor the npm package installs ffmpeg, ffprobe, or
+cwebp. They stay host dependencies, resolved from `PATH` or from
+`SCREENRIG_FFMPEG`, `SCREENRIG_FFPROBE`, and `SCREENRIG_CWEBP`.
+
 ## Media transcoding
 
 `media upload` transcodes the source by default before it declares the upload,
@@ -552,8 +592,9 @@ version but does not enforce a minimum. What it does enforce is the presence of
 the encoder each profile needs. `screenrig doctor` reports the resolved binaries
 and versions, the `libx265`, `libx264`, and `libwebp` encoders, the `cwebp`
 fallback, and whether the build carries the `zscale` and `tonemap` filters that
-HDR tone mapping needs. `encoder_libwebp` is the ffmpeg encoder only; a fail
-there does not mean stills cannot transcode when `cwebp` passes.
+HDR tone mapping needs. `encoder_libwebp` is the ffmpeg encoder only, and its
+detail never claims the fallback covers it: a warning there means stills still
+transcode through `cwebp` while animation does not.
 
 The command also checks the filename. A low-information name such as
 `video.mp4` or `IMG_1234.jpg` adds an advisory `generic_filename` warning to
@@ -664,8 +705,8 @@ Node.js 20.11 or newer is required by the package. The commands below are
 source-checkout development gates, not installed-plugin commands; run them from
 this repository checkout. Default `media upload` transcoding additionally
 requires ffmpeg and ffprobe on the host. `--no-transcode` bypasses both. No
-other command requires them; `screenrig doctor` only probes and reports the
-optional toolchain.
+other command requires them; `screenrig doctor` probes and reports the
+toolchain, and fails only on a piece a supported command actually needs.
 
 ```sh
 npm ci

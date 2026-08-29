@@ -97,7 +97,14 @@ import {
 } from "./playlist-templates.js";
 import { composeCatalog, formatComposeCatalog } from "./compose/catalog.js";
 import { composeSpec } from "./compose/compose.js";
-import { cwebpLookup, ffmpegLookup, resolveCwebpToolchain, resolveFfmpegToolchain } from "./media/ffmpeg.js";
+import {
+  cwebpLookup,
+  ffmpegLookup,
+  resolveCwebpToolchain,
+  resolveFfmpegToolchain,
+  type CwebpToolchain,
+  type FfmpegToolchain,
+} from "./media/ffmpeg.js";
 import { createProgressReporter, silentProgressReporter, type ProgressReporter } from "./media/progress.js";
 import {
   DEFAULT_CODEC,
@@ -3250,12 +3257,33 @@ async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awa
   };
 }
 
+/**
+ * `pass` is present and usable and `fail` is a defect the operator has to fix.
+ * `warn` is an optional piece the CLI has a documented path without, so it is
+ * reported without moving the exit code: a host that is missing nothing
+ * required exits 0.
+ */
+type DoctorStatus = "pass" | "warn" | "fail";
+
+interface DoctorCheck {
+  name: string;
+  status: DoctorStatus;
+  detail: string;
+}
+
+function probeFailureDetail(err: unknown, fallback: string): string {
+  if (err instanceof CliError) {
+    return err.problem.detail;
+  }
+  return err instanceof Error ? redactText(err.message) : fallback;
+}
+
 async function doctor(
   args: ParsedArgs,
   runtime: CliRuntime,
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<CommandResult> {
-  const checks: Array<{ name: string; status: "pass" | "fail"; detail: string }> = [];
+  const checks: DoctorCheck[] = [];
   const nodeMajor = Number(process.versions.node.split(".")[0]);
   checks.push({
     name: "node",
@@ -3295,8 +3323,30 @@ async function doctor(
     detail: resolved.logSocket ?? "(none)",
   });
   const lookup = ffmpegLookup(runtime.env);
+  const webpLookup = cwebpLookup(runtime.env);
+  let toolchain: FfmpegToolchain | undefined;
+  let toolchainDetail: string | undefined;
   try {
-    const toolchain = await resolveFfmpegToolchain(runtime);
+    toolchain = await resolveFfmpegToolchain(runtime);
+  } catch (err) {
+    toolchainDetail = probeFailureDetail(err, "ffmpeg probe failed");
+  }
+  let cwebp: CwebpToolchain | undefined;
+  let cwebpDetail: string | undefined;
+  try {
+    cwebp = await resolveCwebpToolchain(runtime);
+  } catch (err) {
+    cwebpDetail = probeFailureDetail(err, "cwebp probe failed");
+  }
+  // WebP stills have two independent encoders: ffmpeg's libwebp, and the
+  // `cwebp` binary the image planner falls back to. Neither is required on its
+  // own, so each is a warning while the other is usable, and the pair fails
+  // only when the CLI has no way to produce WebP at all. `undefined` means the
+  // ffmpeg probe never answered, which the ffmpeg check already reports.
+  const libwebp = toolchain?.encoders.has("libwebp");
+  const webpEncodable = libwebp === true || cwebp !== undefined;
+
+  if (toolchain) {
     checks.push({
       name: "ffmpeg",
       status: "pass",
@@ -3307,48 +3357,70 @@ async function doctor(
       status: "pass",
       detail: `${toolchain.ffprobe} ${toolchain.ffprobeVersion}${lookup.ffprobeFromEnv ? " (SCREENRIG_FFPROBE)" : ""}`,
     });
-    for (const [name, encoder] of [
-      ["encoder_libx265", "libx265"],
-      ["encoder_libx264", "libx264"],
-      ["encoder_libwebp", "libwebp"],
-    ] as const) {
-      checks.push({
-        name,
-        status: toolchain.encoders.has(encoder) ? "pass" : "fail",
-        detail: toolchain.encoders.has(encoder) ? `${encoder} available` : `${encoder} missing from this ffmpeg build`,
-      });
-    }
+    const encoders = toolchain.encoders;
+    checks.push({
+      name: "encoder_libx264",
+      status: encoders.has("libx264") ? "pass" : "fail",
+      detail: encoders.has("libx264")
+        ? "libx264 available"
+        : "libx264 missing from this ffmpeg build; the default video profile cannot encode",
+    });
+    checks.push({
+      name: "encoder_libx265",
+      status: encoders.has("libx265") ? "pass" : "warn",
+      detail: encoders.has("libx265")
+        ? "libx265 available"
+        : "libx265 missing from this ffmpeg build; --codec hevc is unavailable",
+    });
+    checks.push({
+      name: "encoder_libwebp",
+      status: encoders.has("libwebp") ? "pass" : webpEncodable ? "warn" : "fail",
+      detail: encoders.has("libwebp")
+        ? "libwebp available"
+        : "libwebp missing from this ffmpeg build; animation cannot be encoded",
+    });
     const tonemap = toolchain.filters.has("zscale") && toolchain.filters.has("tonemap");
     checks.push({
       name: "filter_hdr_tonemap",
-      status: tonemap ? "pass" : "fail",
+      status: tonemap ? "pass" : "warn",
       detail: tonemap
         ? "zscale and tonemap available"
         : "zscale or tonemap missing; HDR sources convert without tone mapping",
     });
-  } catch (err) {
-    const detail = err instanceof CliError ? err.problem.detail : err instanceof Error ? redactText(err.message) : "ffmpeg probe failed";
-    checks.push({ name: "ffmpeg", status: "fail", detail });
+  } else {
+    checks.push({ name: "ffmpeg", status: "fail", detail: toolchainDetail ?? "ffmpeg probe failed" });
   }
-  const webpLookup = cwebpLookup(runtime.env);
-  try {
-    const cwebp = await resolveCwebpToolchain(runtime);
-    if (cwebp) {
+
+  if (cwebp) {
+    checks.push({
+      name: "cwebp",
+      status: "pass",
+      detail: `${cwebp.cwebp} ${cwebp.version}${cwebp.fromEnv ? " (SCREENRIG_CWEBP)" : ""}`,
+    });
+  } else {
+    const missing =
+      cwebpDetail ?? `${webpLookup.cwebp} not available${webpLookup.cwebpFromEnv ? " (SCREENRIG_CWEBP)" : ""}`;
+    if (libwebp === true) {
       checks.push({
         name: "cwebp",
-        status: "pass",
-        detail: `${cwebp.cwebp} ${cwebp.version}${cwebp.fromEnv ? " (SCREENRIG_CWEBP)" : ""}`,
+        status: "warn",
+        detail: `${missing}; not required because this ffmpeg build has the libwebp encoder`,
+      });
+    } else if (libwebp === false) {
+      checks.push({
+        name: "cwebp",
+        status: "fail",
+        detail:
+          `${missing}; this ffmpeg build has no libwebp encoder either, so image transcode cannot produce WebP. ` +
+          "Install an ffmpeg built with libwebp, or install cwebp on PATH (or set SCREENRIG_CWEBP).",
       });
     } else {
       checks.push({
         name: "cwebp",
-        status: "fail",
-        detail: `${webpLookup.cwebp} not available${webpLookup.cwebpFromEnv ? " (SCREENRIG_CWEBP)" : ""}`,
+        status: "warn",
+        detail: `${missing}; it is the fallback for an ffmpeg build without libwebp, so fix ffmpeg first`,
       });
     }
-  } catch (err) {
-    const detail = err instanceof CliError ? err.problem.detail : err instanceof Error ? redactText(err.message) : "cwebp probe failed";
-    checks.push({ name: "cwebp", status: "fail", detail });
   }
 
   const client = clientFor(runtime, args, resolved.apiUrl, resolved.token);
@@ -3364,7 +3436,8 @@ async function doctor(
         const supported = features.feedback === true;
         checks.push({
           name: "feedback",
-          status: supported ? "pass" : "fail",
+          // An optional server feature, so its absence is not a local defect.
+          status: supported ? "pass" : "warn",
           detail: supported
             ? "server advertises feedback support"
             : "server does not advertise feedback support; feedback commands are unavailable",
@@ -3377,8 +3450,10 @@ async function doctor(
     }
   }
   const failed = checks.some((check) => check.status === "fail");
+  const warned = checks.some((check) => check.status === "warn");
+  const status: DoctorStatus = failed ? "fail" : warned ? "warn" : "pass";
   return {
-    envelope: successEnvelope({ checks, version: CLI_VERSION }),
+    envelope: successEnvelope({ status, checks, version: CLI_VERSION }),
     exitCode: failed ? ExitCode.Unexpected : ExitCode.Success,
     human: checks.map((check) => `${check.status.toUpperCase()} ${check.name}: ${check.detail}`).join("\n"),
   };

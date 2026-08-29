@@ -92,14 +92,26 @@ async function main(): Promise<void> {
     const result = await invoke(["doctor"]);
     const envelope = JSON.parse(result.stdout) as {
       ok: boolean;
-      data?: { checks?: Array<{ name: string; status: string; detail: string }> };
+      data?: { status?: string; checks?: Array<{ name: string; status: string; detail: string }> };
     };
     assert.equal(envelope.ok, true, result.stdout);
     const checks = envelope.data?.checks ?? [];
     assert.ok(checks.length > 0, result.stdout);
     for (const check of checks) {
       if (TOOLCHAIN_CHECKS.has(check.name)) continue;
-      assert.equal(check.status, "pass", `doctor check ${check.name} failed: ${check.detail}`);
+      assert.notEqual(check.status, "fail", `doctor check ${check.name} failed: ${check.detail}`);
+    }
+    const byName = new Map(checks.map((check) => [check.name, check]));
+    // Host-dependent, but never skipped on a host that has ffmpeg: `cwebp` is
+    // only the fallback for a build without libwebp, so an ffmpeg that carries
+    // the encoder must not leave doctor failing over a binary it never runs.
+    if (byName.get("encoder_libwebp")?.status === "pass") {
+      const cwebp = byName.get("cwebp");
+      assert.notEqual(cwebp?.status, "fail", `cwebp is optional beside libwebp: ${cwebp?.detail}`);
+    }
+    if (!checks.some((check) => check.status === "fail")) {
+      assert.equal(envelope.data?.status !== "fail", true, result.stdout);
+      assert.equal(result.code, 0, `doctor with no failing check must exit 0: ${result.stdout}`);
     }
   };
 
