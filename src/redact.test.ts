@@ -14,10 +14,18 @@ test("redacts credentials and email addresses from errors", () => {
   assert.deepEqual(
     redactValue({ token, nested: [`email owner@example.com`] }),
     {
-      token: "sr_live_identifier_***",
+      token: "sr_live_***",
       nested: ["email [redacted-email]"],
     },
   );
+});
+
+test("a redacted credential keeps no lookup segment of the live token", () => {
+  const token = "sr_live_identifier_secret";
+  assert.equal(redactText(`token ${token}`), "token sr_live_***");
+  assert.doesNotMatch(redactText(`token ${token}`), /identifier/);
+  assert.doesNotMatch(JSON.stringify(redactValue({ token })), /identifier/);
+  assert.doesNotMatch(JSON.stringify(redactValue({ note: `use ${token}` })), /identifier/);
 });
 
 test("redacts temporary agent connection authority and envelope material", () => {

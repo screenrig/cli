@@ -15,18 +15,18 @@ const SENSITIVE_KEY_RE =
 const SENSITIVE_VALUE_RE =
   /(sr_live_|sac_|Bearer\s|ScreenRig-Agent-Connect\s|data:image\/|#(link|provision)=|[?&](X-Amz-Signature|X-Goog-Signature|signature)=)/i;
 
+/**
+ * Lookup segment of a credential, for internal correlation only. A redacted
+ * credential never carries it: the segment identifies the live token, so
+ * printing it hands an observer a usable half of the secret.
+ */
 export function tokenLookupId(token: string): string | undefined {
   const match = /^sr_live_([A-Za-z0-9_-]+)_/.exec(token);
   return match?.[1];
 }
 
-export function redactToken(token: string): string {
-  const id = tokenLookupId(token);
-  if (!id) {
-    return "sr_live_***";
-  }
-  return `sr_live_${id}_***`;
-}
+/** What a live credential looks like once redacted: the shape, and nothing else. */
+export const REDACTED_TOKEN = "sr_live_***";
 
 export function isSensitiveKey(key: string): boolean {
   return SENSITIVE_KEY_RE.test(key);
@@ -38,7 +38,7 @@ export function isSensitiveValue(value: string): boolean {
 
 export function redactText(value: string): string {
   return value
-    .replace(TOKEN_RE, (token) => redactToken(token))
+    .replace(TOKEN_RE, REDACTED_TOKEN)
     .replace(AGENT_CONNECTION_TOKEN_RE, "sac_***")
     .replace(AGENT_CONNECTION_AUTH_RE, "ScreenRig-Agent-Connect ***")
     .replace(BEARER_RE, "Bearer ***")
@@ -48,7 +48,7 @@ export function redactText(value: string): string {
 
 function redactSensitive(nested: unknown): unknown {
   if (typeof nested === "string" && tokenLookupId(nested)) {
-    return redactToken(nested);
+    return REDACTED_TOKEN;
   }
   return "***";
 }
