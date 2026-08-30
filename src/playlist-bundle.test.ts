@@ -139,7 +139,7 @@ test("normalizes server playlists, preserves snapshotted selectors and iframes, 
   const text = JSON.stringify(normalized.playlist);
   assert.doesNotMatch(text, /comments|controller|"by":"tag"/);
   assert.match(text, /"by":"ids","media_ids":\["med_B","med_A"\],"one_at_a_time":true/);
-  assert.match(text, /"type":"iframe"/);
+  assert.match(text, /"primitive":"iframe"/);
 });
 
 test("rejects application primitives before any media lookup or local output", async () => {
