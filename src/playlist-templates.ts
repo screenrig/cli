@@ -1,4 +1,4 @@
-import { WIRE_PLACEMENT_KINDS } from "./compose/catalog.js";
+import { WIRE_PRIMITIVES } from "./compose/catalog.js";
 import { usageError } from "./problems.js";
 
 export const SLIDE_CANVAS_WIDTH = 1920;
@@ -22,7 +22,7 @@ export const PLAYLIST_TRANSITION_TYPES = [
   "swipe-up",
   "swipe-down",
 ] as const;
-export const PLACEMENT_ENTER_TYPES = [
+export const OBJECT_ENTER_TYPES = [
   "fade-up",
   "fade-down",
   "fade-left",
@@ -498,7 +498,7 @@ export interface TemplateCatalog {
   compose: {
     catalog_command: string;
     render_command: string;
-    wire_kinds: readonly string[];
+    wire_primitives: readonly string[];
   };
   canvas: {
     width: number;
@@ -509,7 +509,7 @@ export interface TemplateCatalog {
   transition: { type: "crossfade"; duration_ms: number };
   transition_types: readonly typeof PLAYLIST_TRANSITION_TYPES[number][];
   swipe_duration_ms: number;
-  enter_types: readonly typeof PLACEMENT_ENTER_TYPES[number][];
+  enter_types: readonly typeof OBJECT_ENTER_TYPES[number][];
   advance: { mode: "duration"; after_ms: number };
   templates: TemplateCatalogEntry[];
 }
@@ -519,7 +519,7 @@ export function playlistTemplateCatalog(): TemplateCatalog {
     compose: {
       catalog_command: "screenrig --json compose catalog",
       render_command: "screenrig --json compose render <file>",
-      wire_kinds: [...WIRE_PLACEMENT_KINDS],
+      wire_primitives: [...WIRE_PRIMITIVES],
     },
     canvas: {
       width: SLIDE_CANVAS_WIDTH,
@@ -530,7 +530,7 @@ export function playlistTemplateCatalog(): TemplateCatalog {
     transition: { ...SLIDE_DEFAULT_TRANSITION },
     transition_types: [...PLAYLIST_TRANSITION_TYPES],
     swipe_duration_ms: SLIDE_SWIPE_AUTHORING_DURATION_MS,
-    enter_types: [...PLACEMENT_ENTER_TYPES],
+    enter_types: [...OBJECT_ENTER_TYPES],
     advance: { ...SLIDE_DEFAULT_ADVANCE },
     templates: SLIDE_TEMPLATES.map((template) => ({
       id: template.id,
@@ -558,9 +558,9 @@ function catalogSlot(slot: SlotDef): TemplateCatalogSlot {
 export function formatTemplateCatalog(catalog: TemplateCatalog): string {
   const lines = [
     "Slide layouts with copy or chrome are composed locally, uploaded as image, then placed as one image.",
-    `Wire kinds: ${catalog.compose.wire_kinds.join(", ")}.`,
+    `Wire primitives: ${catalog.compose.wire_primitives.join(", ")}.`,
     `Compose: ${catalog.compose.catalog_command}`,
-    `Default page transition is ${catalog.transition.type} ${catalog.transition.duration_ms} ms with no placement enter. Swipe and enter are optional and spare.`,
+    `Default page transition is ${catalog.transition.type} ${catalog.transition.duration_ms} ms with no object enter. Swipe and enter are optional and spare.`,
   ];
   for (const template of catalog.templates) {
     const slots = template.slots.map((slot) => formatCatalogSlot(slot)).join("; ");
@@ -576,7 +576,7 @@ function formatCatalogSlot(slot: TemplateCatalogSlot): string {
 
 function vectorChromeError(label: string): never {
   throw usageError(
-    `${label} would emit native text, box, or line placements. Compose a still with compose render, upload it as image, and place that image on the page.`,
+    `${label} would emit native text, box, or line primitives. Compose a still with compose render, upload it as image, and use that image primitive on the page.`,
     {
       command: "screenrig --json compose catalog",
       reason: "List the local compose catalog, then run compose render and media upload.",
@@ -584,24 +584,36 @@ function vectorChromeError(label: string): never {
   );
 }
 
-function assertWirePlacementKinds(page: unknown, index: number): void {
-  if (!isRecord(page) || !Array.isArray(page.placements)) {
+function assertWirePrimitives(page: unknown, index: number): void {
+  if (!isRecord(page) || !Array.isArray(page.primitives)) {
     return;
   }
   const label = pageLabel(page, index);
-  for (const [placementIndex, placement] of page.placements.entries()) {
-    if (!isRecord(placement) || !isRecord(placement.content)) {
+  for (const [primitiveIndex, primitive] of page.primitives.entries()) {
+    if (!isRecord(primitive)) {
       continue;
     }
-    const type = placement.content.type;
-    if (typeof type !== "string" || !(WIRE_PLACEMENT_KINDS as readonly string[]).includes(type)) {
+    const category = primitive.primitive;
+    if (typeof category !== "string" || !(WIRE_PRIMITIVES as readonly string[]).includes(category)) {
       throw usageError(
-        `${label} placements[${placementIndex}] content.type must be ${WIRE_PLACEMENT_KINDS.join("|")}. Compose copy and chrome locally.`,
+        `${label} primitives[${primitiveIndex}].primitive must be ${WIRE_PRIMITIVES.join("|")}. Compose copy and chrome locally.`,
         {
           command: "screenrig --json compose catalog",
           reason: "List the local compose catalog, then run compose render and media upload.",
         },
       );
+    }
+    if (category === "image" || category === "video") {
+      if (!isRecord(primitive.selector) || !["id", "ids", "all", "tag"].includes(String(primitive.selector.by))) {
+        throw usageError(`${label} primitives[${primitiveIndex}] ${category} requires a selector with by id|ids|all|tag.`);
+      }
+      for (const retired of ["query", "filter", "items", "media_id", "media_ids"]) {
+        if (retired in primitive) {
+          throw usageError(`${label} primitives[${primitiveIndex}] puts media selection in selector, not ${retired}.`);
+        }
+      }
+    } else if ("selector" in primitive) {
+      throw usageError(`${label} primitives[${primitiveIndex}] ${category} does not take a selector.`);
     }
   }
 }
@@ -614,15 +626,15 @@ export function expandPlaylistPage(page: unknown, index = 0): unknown {
   if (!isRecord(page)) {
     return page;
   }
-  if ("template" in page && "placements" in page) {
-    throw usageError(`${pageLabel(page, index)} mixes template and placements. Use one page shape.`);
+  if ("template" in page && "primitives" in page) {
+    throw usageError(`${pageLabel(page, index)} mixes template and primitives. Use one page shape.`);
   }
   if (!("template" in page)) {
-    assertWirePlacementKinds(page, index);
+    assertWirePrimitives(page, index);
     return page;
   }
   const expanded = expandTemplatedPage(page, index);
-  assertWirePlacementKinds(expanded, index);
+  assertWirePrimitives(expanded, index);
   return expanded;
 }
 
@@ -652,14 +664,14 @@ function expandTemplatedPage(page: Record<string, unknown>, index: number): Reco
 
   const background = readBackground(page.canvas, label);
 
-  const placements: unknown[] = [];
+  const primitives: unknown[] = [];
   for (const slot of template.slots) {
     if (slot.kind !== "picture") {
       continue;
     }
     const pictured = readPictureSlot(slot, slots[slot.id]);
     if (pictured) {
-      placements.push(picturePlacement(slot, pictured));
+      primitives.push(picturePrimitive(slot, pictured));
     }
   }
 
@@ -673,7 +685,7 @@ function expandTemplatedPage(page: Record<string, unknown>, index: number): Reco
     },
     transition: page.transition === undefined ? { ...SLIDE_DEFAULT_TRANSITION } : page.transition,
     advance: page.advance === undefined ? { ...SLIDE_DEFAULT_ADVANCE } : page.advance,
-    placements,
+    primitives,
   };
   if ("visibility" in page) {
     expanded.visibility = page.visibility;
@@ -771,36 +783,36 @@ function canvasBackground(value: unknown, name: string): CanvasBackground {
 function readPictureSlot(
   slot: PictureSlotDef,
   value: unknown,
-): { content: Record<string, unknown>; content_fit: "cover" | "contain" } | undefined {
+): { primitive: Record<string, unknown>; content_fit: "cover" | "contain" } | undefined {
   if (value === undefined) {
     return undefined;
   }
   if (!isRecord(value)) {
     throw usageError(`Slot ${slot.id} must be an object.`);
   }
-  if ("text" in value && !("type" in value)) {
+  if ("text" in value && !("primitive" in value)) {
     throw usageError(
       slot.accept === "image"
         ? `Slot ${slot.id} is an image slot and does not take text.`
         : `Slot ${slot.id} is an image or video slot and does not take text.`,
     );
   }
-  const type = value.type;
-  if (type !== "image" && type !== "video") {
+  const primitive = value.primitive;
+  if (primitive !== "image" && primitive !== "video") {
     throw usageError(
       slot.accept === "image"
-        ? `Slot ${slot.id} must be image content.`
-        : `Slot ${slot.id} must be image or video content.`,
+        ? `Slot ${slot.id} must be an image primitive.`
+        : `Slot ${slot.id} must be an image or video primitive.`,
     );
   }
-  if (slot.accept === "image" && type === "video") {
+  if (slot.accept === "image" && primitive === "video") {
     throw usageError(`Slot ${slot.id} is an image slot and does not take video.`);
   }
-  const allowed = type === "image"
+  const allowed = primitive === "image"
     ? slot.accept === "image"
-      ? ["type", "selector", "alt", "dwell_ms"]
-      : ["type", "selector", "alt", "dwell_ms", "content_fit"]
-    : ["type", "selector", "muted", "loop", "content_fit"];
+      ? ["primitive", "selector", "alt", "dwell_ms"]
+      : ["primitive", "selector", "alt", "dwell_ms", "content_fit"]
+    : ["primitive", "selector", "muted", "loop", "content_fit"];
   const extra = Object.keys(value).filter((key) => !allowed.includes(key)).sort();
   if (extra.length > 0) {
     throw usageError(`Slot ${slot.id} has unsupported fields: ${extra.join(", ")}.`);
@@ -809,15 +821,15 @@ function readPictureSlot(
     throw usageError(`Slot ${slot.id} requires a selector.`);
   }
   const content_fit = readContentFit(slot, value.content_fit);
-  const content: Record<string, unknown> = { type, selector: value.selector };
-  if (type === "image") {
-    if (value.alt !== undefined) content.alt = value.alt;
-    if (value.dwell_ms !== undefined) content.dwell_ms = value.dwell_ms;
+  const primitiveFields: Record<string, unknown> = { primitive, selector: value.selector };
+  if (primitive === "image") {
+    if (value.alt !== undefined) primitiveFields.alt = value.alt;
+    if (value.dwell_ms !== undefined) primitiveFields.dwell_ms = value.dwell_ms;
   } else {
-    if (value.muted !== undefined) content.muted = value.muted;
-    if (value.loop !== undefined) content.loop = value.loop;
+    if (value.muted !== undefined) primitiveFields.muted = value.muted;
+    if (value.loop !== undefined) primitiveFields.loop = value.loop;
   }
-  return { content, content_fit };
+  return { primitive: primitiveFields, content_fit };
 }
 
 function readContentFit(slot: PictureSlotDef, value: unknown): "cover" | "contain" {
@@ -830,13 +842,13 @@ function readContentFit(slot: PictureSlotDef, value: unknown): "cover" | "contai
   return value;
 }
 
-function picturePlacement(
+function picturePrimitive(
   slot: PictureSlotDef,
-  pictured: { content: Record<string, unknown>; content_fit: "cover" | "contain" },
+  pictured: { primitive: Record<string, unknown>; content_fit: "cover" | "contain" },
 ): Record<string, unknown> {
   return {
     id: slot.id,
-    content: pictured.content,
+    ...pictured.primitive,
     rect: { ...slot.rect },
     layer: slot.layer,
     content_fit: pictured.content_fit,

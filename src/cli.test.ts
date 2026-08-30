@@ -1597,10 +1597,10 @@ test("formatEventLine prints logfmt, never canned messages", () => {
       type: "application.event",
       severity: "info",
       message: "Application emitted an event",
-      details: { extra: { nested: true }, count: 2, placement_id: "weather", code: "cta.pressed" },
+      details: { extra: { nested: true }, count: 2, primitive_id: "weather", code: "cta.pressed" },
       at: "2026-08-14T17:00:00.000Z",
     }),
-    "at=2026-08-14T17:00:00.000Z type=application.event severity=info code=cta.pressed placement_id=weather count=2",
+    "at=2026-08-14T17:00:00.000Z type=application.event severity=info code=cta.pressed primitive_id=weather count=2",
   );
   assert.equal(
     formatEventLine({
@@ -1677,10 +1677,10 @@ test("formatEventLine prints logfmt, never canned messages", () => {
       severity: "info",
       message: "Doors open",
       resource: { type: "screen", id: "scr_1", revision: 3 },
-      details: { code: "cta.pressed", placement_id: "weather", note: 'said "hi"' },
+      details: { code: "cta.pressed", primitive_id: "weather", note: 'said "hi"' },
       at: "2026-08-18T19:30:48.471Z",
     }),
-    'at=2026-08-18T19:30:48.471Z type=application.event severity=info resource_type=screen resource_id=scr_1 code=cta.pressed placement_id=weather note="said \\"hi\\"" message="Doors open"',
+    'at=2026-08-18T19:30:48.471Z type=application.event severity=info resource_type=screen resource_id=scr_1 code=cta.pressed primitive_id=weather note="said \\"hi\\"" message="Doors open"',
   );
   assert.equal(
     formatEventLine({
@@ -1707,10 +1707,10 @@ test("formatEventLine prints logfmt, never canned messages", () => {
       type: "application.event",
       severity: "info",
       message: "cta.pressed",
-      details: { code: "cta.pressed", placement_id: "weather" },
+      details: { code: "cta.pressed", primitive_id: "weather" },
       at: "2026-08-14T17:00:07.000Z",
     }),
-    "at=2026-08-14T17:00:07.000Z type=application.event severity=info code=cta.pressed placement_id=weather",
+    "at=2026-08-14T17:00:07.000Z type=application.event severity=info code=cta.pressed primitive_id=weather",
   );
   assert.equal(
     formatEventLine({
@@ -1812,7 +1812,7 @@ test("events list prints data or silence", async () => {
           type: "application.event",
           severity: "info",
           message: "Application emitted an event",
-          details: { code: "cta.pressed", placement_id: "weather" },
+          details: { code: "cta.pressed", primitive_id: "weather" },
           at: "2026-08-14T17:00:00.000Z",
         },
         {
@@ -1847,7 +1847,7 @@ test("events list prints data or silence", async () => {
   assert.equal(printed.code, 0, printed.stdout);
   assert.equal(
     printed.stdout,
-    "at=2026-08-14T17:00:00.000Z type=application.event severity=info code=cta.pressed placement_id=weather\nat=2026-08-14T17:00:01.000Z type=runtime.reported severity=warning code=decoder.stalled\n",
+    "at=2026-08-14T17:00:00.000Z type=application.event severity=info code=cta.pressed primitive_id=weather\nat=2026-08-14T17:00:01.000Z type=runtime.reported severity=warning code=decoder.stalled\n",
   );
   assert.ok(!printed.stdout.includes("Application emitted an event"));
   assert.ok(!printed.stdout.includes("Runtime reported a bounded condition"));
@@ -2041,7 +2041,7 @@ test("events --json omits tokens, pixels, authorization, and object keys", async
 test("events follow prints scalar details and skips empty frames", async () => {
   const transport = memoryBackend();
   transport.pushStream(
-    "id: ev1_1\nevent: message\ndata: {\"cursor\":\"ev1_1\",\"type\":\"application.event\",\"severity\":\"info\",\"message\":\"Application emitted an event\",\"details\":{\"code\":\"cta.pressed\",\"placement_id\":\"weather\"},\"at\":\"2026-08-14T17:00:00.000Z\"}\n\n",
+    "id: ev1_1\nevent: message\ndata: {\"cursor\":\"ev1_1\",\"type\":\"application.event\",\"severity\":\"info\",\"message\":\"Application emitted an event\",\"details\":{\"code\":\"cta.pressed\",\"primitive_id\":\"weather\"},\"at\":\"2026-08-14T17:00:00.000Z\"}\n\n",
   );
   transport.pushStream(
     "id: ev1_2\nevent: message\ndata: {\"cursor\":\"ev1_2\",\"type\":\"runtime.reported\",\"severity\":\"warning\",\"message\":\"Runtime reported a bounded condition\",\"details\":{\"code\":\"decoder.stalled\"},\"at\":\"2026-08-14T17:00:01.000Z\"}\n\n",
@@ -2061,7 +2061,7 @@ test("events follow prints scalar details and skips empty frames", async () => {
   assert.equal(code, 0, stdout);
   assert.equal(
     stdout,
-    "at=2026-08-14T17:00:00.000Z type=application.event severity=info code=cta.pressed placement_id=weather\nat=2026-08-14T17:00:01.000Z type=runtime.reported severity=warning code=decoder.stalled\n",
+    "at=2026-08-14T17:00:00.000Z type=application.event severity=info code=cta.pressed primitive_id=weather\nat=2026-08-14T17:00:01.000Z type=runtime.reported severity=warning code=decoder.stalled\n",
   );
   assert.ok(!stdout.includes("Application emitted an event"));
   assert.ok(!stdout.includes("Runtime reported a bounded condition"));
@@ -3321,9 +3321,11 @@ test("comment show, set, and delete bind word commands to /api/v1/comment routes
       canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
       transition: { type: "crossfade", duration_ms: 200 },
       advance: { mode: "duration", after_ms: 8000 },
-      placements: [{
+      primitives: [{
         id: "hero",
-        content: { type: "iframe", src: "https://example.com/", title: "Lobby" },
+        primitive: "iframe",
+        src: "https://example.com/",
+        title: "Lobby",
         rect: { x: 0, y: 0, width: 1920, height: 1080 },
         layer: 0,
         content_fit: "fill",
@@ -3870,10 +3872,11 @@ async function scheduledPlaylistFixture(scheduled: boolean, dir: string) {
     transition: { type: "crossfade", duration_ms: 200 },
     advance: { mode: "duration", duration_ms: 8000 },
     ...(visibility ? { visibility } : {}),
-    placements: [
+    primitives: [
       {
         id: "poster",
-        content: { type: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
+        primitive: "image",
+        selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" },
         rect: { x: 0, y: 0, width: 1920, height: 1080 },
         layer: 0,
         content_fit: "contain",
@@ -3981,10 +3984,11 @@ test("a page disabled outright still counts as scheduled", async () => {
     canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
     transition: { type: "crossfade", duration_ms: 200 },
     advance: { mode: "duration", duration_ms: 8000 },
-    placements: [
+    primitives: [
       {
         id: "poster",
-        content: { type: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
+        primitive: "image",
+        selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" },
         rect: { x: 0, y: 0, width: 1920, height: 1080 },
         layer: 0,
         content_fit: "contain",
@@ -4348,7 +4352,7 @@ test("adding a schedule to a playlist an unzoned screen already runs is refused"
   await rm(scheduled.configDir, { recursive: true, force: true });
 });
 
-test("app upload reports the release id a playlist placement needs", async () => {
+test("app upload reports the release id an application primitive needs", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("release-id-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
@@ -4377,7 +4381,7 @@ test("playlist templates --json lists the fifteen closed ids without enrolling",
   const transport = memoryBackend();
   const { code, stdout, configDir } = await withRuntime(["--json", "playlist", "templates"], transport);
   assert.equal(code, ExitCode.Success, stdout);
-  const envelope = JSON.parse(stdout) as { ok: true; data: { templates: Array<{ id: string }>; compose: { wire_kinds: string[] } } };
+  const envelope = JSON.parse(stdout) as { ok: true; data: { templates: Array<{ id: string }>; compose: { wire_primitives: string[] } } };
   assert.deepEqual(envelope.data.templates.map((template) => template.id), [
     "slide-intro",
     "slide-text-only-1",
@@ -4395,10 +4399,10 @@ test("playlist templates --json lists the fifteen closed ids without enrolling",
     "slide-photo",
     "slide-full-bleed",
   ]);
-  assert.deepEqual(envelope.data.compose.wire_kinds, ["image", "video", "iframe", "application"]);
+  assert.deepEqual(envelope.data.compose.wire_primitives, ["image", "video", "iframe", "application"]);
   const catalog = envelope.data as {
     templates: Array<{ id: string }>;
-    compose: { wire_kinds: string[] };
+    compose: { wire_primitives: string[] };
     transition: { type: string; duration_ms: number };
     transition_types: string[];
     swipe_duration_ms: number;
@@ -4440,10 +4444,11 @@ test("playlist create expands a picture template and forwards a full page unchan
     canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
     transition: { type: "crossfade", duration_ms: 200 },
     advance: { mode: "duration", after_ms: 8000 },
-    placements: [
+    primitives: [
       {
         id: "hero",
-        content: { type: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
+        primitive: "image",
+        selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" },
         rect: { x: 0, y: 0, width: 1920, height: 1080 },
         layer: 0,
         content_fit: "contain",
@@ -4460,7 +4465,7 @@ test("playlist create expands a picture template and forwards a full page unchan
           id: "hero",
           template: "slide-full-bleed",
           slots: {
-            picture: { type: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
+            picture: { primitive: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
           },
         },
         fullPage,
@@ -4474,17 +4479,17 @@ test("playlist create expands a picture template and forwards a full page unchan
   assert.equal(body.pages.length, 2);
   assert.equal("template" in body.pages[0]!, false);
   assert.equal("slots" in body.pages[0]!, false);
-  const introPlacements = body.pages[0]!.placements as Array<{ id: string; content: { type: string } }>;
-  assert.deepEqual(introPlacements.map((placement) => placement.id), ["picture"]);
-  assert.ok(introPlacements.every((placement) => placement.content.type === "image"));
+  const introPrimitives = body.pages[0]!.primitives as Array<{ id: string; primitive: string }>;
+  assert.deepEqual(introPrimitives.map((primitive) => primitive.id), ["picture"]);
+  assert.ok(introPrimitives.every((primitive) => primitive.primitive === "image"));
   assert.deepEqual(body.pages[1], fullPage);
   assert.deepEqual(body.pages[0]!.transition, { type: "crossfade", duration_ms: 200 });
-  const heroPlacements = body.pages[0]!.placements as Array<Record<string, unknown>>;
-  assert.ok(heroPlacements.every((placement) => !("enter" in placement)));
+  const heroPrimitives = body.pages[0]!.primitives as Array<Record<string, unknown>>;
+  assert.ok(heroPrimitives.every((primitive) => !("enter" in primitive)));
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("playlist create forwards swipe transition and placement enter on a full page", async () => {
+test("playlist create forwards swipe transition and object enter on a full page", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("playlist-motion-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
@@ -4498,17 +4503,19 @@ test("playlist create forwards swipe transition and placement enter on a full pa
     canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
     transition: { type: "swipe-left", duration_ms: 600 },
     advance: { mode: "duration", after_ms: 8000 },
-    placements: [
+    primitives: [
       {
         id: "hero",
-        content: { type: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
+        primitive: "image",
+        selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" },
         rect: { x: 0, y: 0, width: 1920, height: 1080 },
         layer: 0,
         content_fit: "contain",
       },
       {
         id: "caption",
-        content: { type: "image", selector: { by: "id", media_id: "med_BBBBBBBBBBBBBBBBBBBBBBBB" } },
+        primitive: "image",
+        selector: { by: "id", media_id: "med_BBBBBBBBBBBBBBBBBBBBBBBB" },
         rect: { x: 80, y: 860, width: 1760, height: 160 },
         layer: 2,
         content_fit: "contain",
@@ -4574,10 +4581,11 @@ test("playlist create accepts a linear canvas.background on a picture template a
     canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: wash },
     transition: { type: "crossfade", duration_ms: 200 },
     advance: { mode: "duration", after_ms: 8000 },
-    placements: [
+    primitives: [
       {
         id: "hero",
-        content: { type: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
+        primitive: "image",
+        selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" },
         rect: { x: 0, y: 0, width: 1920, height: 1080 },
         layer: 0,
         content_fit: "contain",
@@ -4595,7 +4603,7 @@ test("playlist create accepts a linear canvas.background on a picture template a
           template: "slide-full-bleed",
           canvas: { background: wash },
           slots: {
-            picture: { type: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
+            picture: { primitive: "image", selector: { by: "id", media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" } },
           },
         },
         fullPage,
@@ -4671,13 +4679,13 @@ test("playback list, media filters, media update, and app --name bind the consum
 
     transport.calls.length = 0;
     const listed = await withRuntime(
-      ["--json", "media", "list", "--tag", "lobby", "--kind", "image"],
+      ["--json", "media", "list", "--tag", "lobby", "--primitive", "image"],
       transport,
       { fs: fsLike },
     );
     assert.equal(listed.code, ExitCode.Success, listed.stdout);
     const listCall = transport.calls.find((call) => call.method === "GET" && call.path === "/api/v1/media");
-    assert.deepEqual(listCall?.query, { tag: "lobby", kind: "image" });
+    assert.deepEqual(listCall?.query, { tag: "lobby", primitive: "image" });
     const listedEnvelope = JSON.parse(listed.stdout) as { data: { items: Array<{ tag?: string }> } };
     assert.equal(listedEnvelope.data.items[0]?.tag, "lobby");
 
@@ -4713,12 +4721,28 @@ test("playback list, media filters, media update, and app --name bind the consum
       { fs: fsLike },
     );
     assert.equal(badTag.code, ExitCode.Usage, badTag.stdout);
+
+    const badPrimitive = await withRuntime(
+      ["--json", "media", "list", "--primitive", "iframe"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(badPrimitive.code, ExitCode.Usage, badPrimitive.stdout);
+    assert.match(JSON.parse(badPrimitive.stdout).error.detail, /--primitive must be image or video/);
+
+    const retiredKind = await withRuntime(
+      ["--json", "media", "list", "--kind", "image"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(retiredKind.code, ExitCode.Usage, retiredKind.stdout);
+    assert.match(JSON.parse(retiredKind.stdout).error.detail, /uses --primitive image\|video, not --kind/);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
 });
 
-test("playlist create refuses a mixed template-and-placements page before the write", async () => {
+test("playlist create refuses a mixed template-and-primitives page before the write", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("playlist-mixed-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
@@ -4732,14 +4756,14 @@ test("playlist create refuses a mixed template-and-placements page before the wr
     file,
     JSON.stringify({
       name: "Lobby",
-      pages: [{ id: "intro", template: "slide-intro", slots: { title: { text: "Welcome" } }, placements: [] }],
+      pages: [{ id: "intro", template: "slide-intro", slots: { title: { text: "Welcome" } }, primitives: [] }],
     }),
   );
   const result = await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
   assert.equal(result.code, ExitCode.Usage, result.stdout);
   const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string } };
   assert.equal(envelope.error.code, "usage_error");
-  assert.match(envelope.error.detail, /mixes template and placements/);
+  assert.match(envelope.error.detail, /mixes template and primitives/);
   assert.equal(transport.calls.some((call) => call.method === "POST" && call.path === "/api/v1/playlists"), false);
   await rm(configDir, { recursive: true, force: true });
 });

@@ -26,9 +26,11 @@ function smokePlaylist(): Record<string, unknown> {
       },
       transition: { type: "crossfade", duration_ms: 0 },
       advance: { mode: "duration", after_ms: 5000 },
-      placements: [{
+      primitives: [{
         id: "smoke_item",
-        content: { type: "iframe", src: "https://example.com/", title: "ScreenRig smoke" },
+        primitive: "iframe",
+        src: "https://example.com/",
+        title: "ScreenRig smoke",
         rect: { x: 0, y: 0, width: 1920, height: 1080 },
         layer: 0,
         content_fit: "fill",

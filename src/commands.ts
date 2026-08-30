@@ -163,7 +163,7 @@ Commands:
                       [--no-transcode] [--codec h264|hevc] [--max-fps N]
                       [--max-edge PIXELS] [--webp-quality 1-100] [--no-progress]
   media show <id>
-  media list [--tag TAG] [--kind image|video]
+  media list [--tag TAG] [--primitive image|video]
   media update <id> (--tag TAG | --clear-tag) --if-match REVISION
   media delete <id> --if-match REVISION
   compose catalog
@@ -1643,7 +1643,7 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
       exitCode: ExitCode.Success,
       human: humanLines("Application uploaded", [
         ["application_id", body.id],
-        // The release id is the only handle a playlist placement accepts, so
+        // The release id is the only handle an application primitive accepts, so
         // report it here rather than making the caller read the operation
         // result to find it.
         ["release_id", body.release_id],
@@ -1717,16 +1717,16 @@ function applicationNameFromArgs(args: ParsedArgs): string | undefined {
   return name;
 }
 
-function mediaKindFromArgs(args: ParsedArgs): "image" | "video" | undefined {
-  requireFlagValue(args, "kind", "image");
-  const kind = flagString(args.flags, "kind");
-  if (kind === undefined) {
+function mediaPrimitiveFromArgs(args: ParsedArgs): "image" | "video" | undefined {
+  requireFlagValue(args, "primitive", "image");
+  const primitive = flagString(args.flags, "primitive");
+  if (primitive === undefined) {
     return undefined;
   }
-  if (kind !== "image" && kind !== "video") {
-    throw usageError("--kind must be image or video.");
+  if (primitive !== "image" && primitive !== "video") {
+    throw usageError("--primitive must be image or video.");
   }
-  return kind;
+  return primitive;
 }
 
 function screenListStateFromArgs(args: ParsedArgs): "archived" | undefined {
@@ -1748,9 +1748,12 @@ async function mediaCommand(
   action: string | undefined,
 ): Promise<CommandResult> {
   if (action === "list") {
+    if (Object.hasOwn(args.flags, "kind")) {
+      throw usageError("media list uses --primitive image|video, not --kind.");
+    }
     return simpleGet(args, runtime, resolved, "/api/v1/media", "Media", {
       tag: mediaTagFromArgs(args),
-      kind: mediaKindFromArgs(args),
+      primitive: mediaPrimitiveFromArgs(args),
     });
   }
   const token = requireToken(resolved.token);
@@ -3084,7 +3087,7 @@ export function formatEventLine(event: AccountEvent): string | undefined {
 
   const details = event.details ?? {};
   const used = new Set<string>();
-  for (const key of ["code", "placement_id"]) {
+  for (const key of ["code", "primitive_id"]) {
     if (!pushLogfmtField(parts, key, details[key])) continue;
     used.add(key);
     payload += 1;

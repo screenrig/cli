@@ -126,7 +126,7 @@ async function main(): Promise<void> {
     await run("app", "pack", app);
     // This is the documented "web app on a screen" path: upload the directory,
     // take the release id from the publication operation result, and pin that
-    // release in an application placement. The release id is the only handle a
+    // release in an application primitive. The release id is the only handle a
     // playlist accepts; the application id is for `kv` alone.
     const upload = await run("app", "upload", app, "--name", "Smoke board", "--poll-ms", "1");
     const uploadData = upload.data as {
@@ -139,7 +139,7 @@ async function main(): Promise<void> {
     await run("app", "list");
     await run("app", "show", "app_AAAAAAAAAAAAAAAAAAAAAAAA");
     // An application-advance page requires exactly one controller application
-    // placement, `content_fit: "fill"`, and a `max_ms` backstop for an app that
+    // primitive, `content_fit: "fill"`, and a `max_ms` backstop for an app that
     // never calls nextPage().
     await writeFile(playlist, JSON.stringify({
       name: "Smoke application page",
@@ -149,10 +149,11 @@ async function main(): Promise<void> {
           canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
           transition: { type: "crossfade", duration_ms: 200 },
           advance: { mode: "application", max_ms: 60000 },
-          placements: [
+          primitives: [
             {
               id: "board",
-              content: { type: "application", release_id: releaseId },
+              primitive: "application",
+              release_id: releaseId,
               rect: { x: 0, y: 0, width: 1920, height: 1080 },
               layer: 0,
               content_fit: "fill",
@@ -174,10 +175,11 @@ async function main(): Promise<void> {
             enabled: true,
             windows: [{ days: ["fri", "sat"], start: "18:00", end: "02:00" }],
           },
-          placements: [
+          primitives: [
             {
               id: "after-hours",
-              content: { type: "application", release_id: releaseId },
+              primitive: "application",
+              release_id: releaseId,
               rect: { x: 0, y: 0, width: 1920, height: 1080 },
               layer: 0,
               content_fit: "fill",
@@ -244,7 +246,7 @@ async function main(): Promise<void> {
     const mediaOperation = (mediaUpload.data as { operation?: { result?: { media_id?: string } } }).operation;
     const mediaId = mediaOperation?.result?.media_id ?? "med_AAAAAAAAAAAAAAAAAAAAAAAA";
     await run("media", "show", mediaId);
-    await run("media", "list", "--tag", "lobby", "--kind", "image");
+    await run("media", "list", "--tag", "lobby", "--primitive", "image");
     await run("media", "update", mediaId, "--tag", "lobby2", "--if-match", "1");
     await run("playback", "list", "--screen-id", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--day", "2026-08-14");
     await run("kv", "set", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", "{\"message\":\"hello\"}");

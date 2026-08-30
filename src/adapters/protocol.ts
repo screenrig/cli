@@ -133,7 +133,7 @@ export interface OperationAccepted {
   id: string;
   /**
    * Release created by this upload. The server has always returned it and the
-   * contract now requires it. It is the only handle a playlist placement
+   * contract now requires it. It is the only handle an application primitive
    * accepts, so report it rather than making the caller poll the operation.
    */
   release_id: string;
@@ -238,11 +238,11 @@ export function limitsFromCapabilities(capabilities: Capabilities): ArchiveLimit
 /**
  * Full playlist pages stay opaque: the CLI forwards author-supplied playlist
  * JSON unchanged, including `transition.type` swipe variants and optional
- * placement `enter`. Templated pages are the exception — the CLI expands
+ * object `enter`. Templated pages are the exception — the CLI expands
  * `template` + `slots` into an ordinary write page in `playlist-templates.ts`
  * and never sends `template` to the server. Omitted templated transitions stay
  * `{ type: "crossfade", duration_ms: 200 }` with no `enter`. The contract's
- * page, placement, and content schemas are still not mirrored here except for
+ * page and primitive schemas are still not mirrored here except for
  * the fields that expander writes. Mirror a schema only when the CLI builds or
  * reads its fields.
  *

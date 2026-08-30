@@ -14,13 +14,13 @@ import {
 } from "./playlist-templates.js";
 
 const MEDIA = {
-  type: "image" as const,
+  primitive: "image" as const,
   selector: { by: "id" as const, media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA" },
   alt: "Lobby still",
 };
 
 const VIDEO = {
-  type: "video" as const,
+  primitive: "video" as const,
   selector: { by: "id" as const, media_id: "med_BBBBBBBBBBBBBBBBBBBBBBBB" },
   loop: false,
 };
@@ -52,20 +52,20 @@ function assertUsage(fn: () => unknown, pattern: RegExp): void {
   });
 }
 
-function asPlacements(value: unknown): Array<{
+function asPrimitives(value: unknown): Array<{
   id: string;
+  primitive: string;
   layer: number;
   content_fit?: string;
   rect: { x: number; y: number; width: number; height: number };
-  content: { type: string };
 }> {
-  return (value as { placements: Array<{
+  return (value as { primitives: Array<{
     id: string;
+    primitive: string;
     layer: number;
     content_fit?: string;
     rect: { x: number; y: number; width: number; height: number };
-    content: { type: string };
-  }> }).placements;
+  }> }).primitives;
 }
 
 test("the catalog lists the fifteen slide ids and points copy at compose", () => {
@@ -75,7 +75,7 @@ test("the catalog lists the fifteen slide ids and points copy at compose", () =>
   assert.equal(catalog.canvas.background, SLIDE_BACKGROUND);
   assert.equal(catalog.canvas.width, 1920);
   assert.equal(catalog.canvas.height, 1080);
-  assert.deepEqual(catalog.compose.wire_kinds, ["image", "video", "iframe", "application"]);
+  assert.deepEqual(catalog.compose.wire_primitives, ["image", "video", "iframe", "application"]);
   assert.deepEqual(catalog.transition, { type: "crossfade", duration_ms: 200 });
   assert.deepEqual(catalog.transition, SLIDE_DEFAULT_TRANSITION);
   assert.deepEqual(catalog.transition_types, [
@@ -101,7 +101,7 @@ test("the catalog lists the fifteen slide ids and points copy at compose", () =>
   const formatted = formatTemplateCatalog(catalog);
   assert.match(formatted, /composed locally/);
   assert.match(formatted, /compose catalog/);
-  assert.match(formatted, /Default page transition is crossfade 200 ms with no placement enter/);
+  assert.match(formatted, /Default page transition is crossfade 200 ms with no object enter/);
   assert.doesNotMatch(formatted, /title \(text, required/);
   assert.doesNotMatch(formatted, /emit native text/);
   const intro = catalog.templates.find((template) => template.id === "slide-intro");
@@ -135,22 +135,22 @@ test("slide-full-bleed expands picture and logo only, with no text box or line",
     template: "slide-full-bleed",
     slots: { picture: MEDIA, logo: MEDIA },
   });
-  const placements = asPlacements(expanded);
-  assert.deepEqual(placements.map((item) => item.id), ["picture", "logo"]);
-  assert.ok(placements.every((item) => item.content.type === "image" || item.content.type === "video"));
-  assert.deepEqual(placements.find((item) => item.id === "picture")?.rect, {
+  const primitives = asPrimitives(expanded);
+  assert.deepEqual(primitives.map((item) => item.id), ["picture", "logo"]);
+  assert.ok(primitives.every((item) => item.primitive === "image" || item.primitive === "video"));
+  assert.deepEqual(primitives.find((item) => item.id === "picture")?.rect, {
     x: 0,
     y: 0,
     width: 1920,
     height: 1080,
   });
-  assert.deepEqual(placements.find((item) => item.id === "logo")?.rect, SHARED_LOGO_RECT);
-  assert.equal(placements.find((item) => item.id === "logo")?.layer, 2);
-  assert.equal(placements.find((item) => item.id === "logo")?.content_fit, "contain");
+  assert.deepEqual(primitives.find((item) => item.id === "logo")?.rect, SHARED_LOGO_RECT);
+  assert.equal(primitives.find((item) => item.id === "logo")?.layer, 2);
+  assert.equal(primitives.find((item) => item.id === "logo")?.content_fit, "contain");
 });
 
 test("slide-photo expands picture-only when caption is omitted; caption is compose", () => {
-  const photo = asPlacements(expandPlaylistPage({
+  const photo = asPrimitives(expandPlaylistPage({
     id: "still",
     template: "slide-photo",
     slots: { picture: MEDIA, logo: MEDIA },
@@ -167,7 +167,7 @@ test("slide-photo expands picture-only when caption is omitted; caption is compo
 });
 
 test("a picture slot may override content_fit; omitted optional picture is dropped", () => {
-  const overridden = asPlacements(expandPlaylistPage({
+  const overridden = asPrimitives(expandPlaylistPage({
     id: "hero",
     template: "slide-full-bleed",
     slots: { picture: { ...MEDIA, content_fit: "contain" } },
@@ -195,16 +195,16 @@ test("logo rejects video; required picture is still required", () => {
   );
 });
 
-test("a page without template is forwarded unchanged when placements are wire kinds", () => {
+test("a page without template is forwarded unchanged when primitives use the wire vocabulary", () => {
   const full = {
     id: "poster",
     canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
     transition: { type: "crossfade", duration_ms: 200 },
     advance: { mode: "duration", after_ms: 8000 },
-    placements: [
+    primitives: [
       {
         id: "hero",
-        content: MEDIA,
+        ...MEDIA,
         rect: { x: 0, y: 0, width: 1920, height: 1080 },
         layer: 0,
         content_fit: "contain",
@@ -221,19 +221,56 @@ test("a full page that authors text, box, or line is refused", () => {
       () => expandPlaylistPage({
         id: "poster",
         canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
-        placements: [
+        primitives: [
           {
             id: "chrome",
-            content: { type, text: "nope" },
+            primitive: type,
+            text: "nope",
             rect: { x: 0, y: 0, width: 1920, height: 16 },
             layer: 1,
             content_fit: "fill",
           },
         ],
       }),
-      /content\.type must be image\|video\|iframe\|application/,
+      /primitive must be image\|video\|iframe\|application/,
     );
   }
+});
+
+test("only image and video primitives take selectors", () => {
+  const page = (primitive: Record<string, unknown>) => ({
+    id: "poster",
+    canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
+    transition: { type: "crossfade", duration_ms: 200 },
+    advance: { mode: "duration", after_ms: 8000 },
+    primitives: [{
+      id: "hero",
+      rect: { x: 0, y: 0, width: 1920, height: 1080 },
+      layer: 0,
+      content_fit: "fill",
+      ...primitive,
+    }],
+  });
+  assertUsage(
+    () => expandPlaylistPage(page({ primitive: "image" })),
+    /image requires a selector with by id\|ids\|all\|tag/,
+  );
+  assertUsage(
+    () => expandPlaylistPage(page({ primitive: "video", media_id: "med_A" })),
+    /video requires a selector/,
+  );
+  assertUsage(
+    () => expandPlaylistPage(page({ primitive: "image", selector: { by: "all" }, items: [] })),
+    /puts media selection in selector, not items/,
+  );
+  assertUsage(
+    () => expandPlaylistPage(page({ primitive: "iframe", selector: { by: "all" }, src: "https:\/\/example.com" })),
+    /iframe does not take a selector/,
+  );
+  assertUsage(
+    () => expandPlaylistPage(page({ primitive: "application", selector: { by: "id", media_id: "med_A" }, release_id: "rel_A" })),
+    /application does not take a selector/,
+  );
 });
 
 test("unknown and retired template ids name playlist templates", () => {
@@ -273,9 +310,9 @@ test("templated page usage errors name the offending field", () => {
       id: "intro",
       template: "slide-intro",
       slots: { title: { text: "Welcome" } },
-      placements: [],
+      primitives: [],
     }),
-    /mixes template and placements/,
+    /mixes template and primitives/,
   );
   assertUsage(
     () => expandPlaylistPage({
@@ -304,9 +341,9 @@ test("omitted transition and advance take the slide defaults; supplied values re
     id: "hero",
     template: "slide-full-bleed",
     slots: { picture: MEDIA },
-  }) as { transition: unknown; placements: Array<Record<string, unknown>> };
+  }) as { transition: unknown; primitives: Array<Record<string, unknown>> };
   assert.deepEqual(omitted.transition, { type: "crossfade", duration_ms: 200 });
-  assert.ok(omitted.placements.every((placement) => !("enter" in placement)));
+  assert.ok(omitted.primitives.every((primitive) => !("enter" in primitive)));
   const custom = expandPlaylistPage({
     id: "hero",
     template: "slide-full-bleed",
@@ -326,9 +363,9 @@ test("a templated page forwards a supplied swipe transition and never invents en
     template: "slide-full-bleed",
     transition: { type: "swipe-left", duration_ms: 600 },
     slots: { picture: MEDIA },
-  }) as { transition: unknown; placements: Array<Record<string, unknown>> };
+  }) as { transition: unknown; primitives: Array<Record<string, unknown>> };
   assert.deepEqual(expanded.transition, { type: "swipe-left", duration_ms: 600 });
-  assert.ok(expanded.placements.every((placement) => !("enter" in placement)));
+  assert.ok(expanded.primitives.every((primitive) => !("enter" in primitive)));
 });
 
 test("a full page with swipe and enter is forwarded unchanged", () => {
@@ -337,17 +374,17 @@ test("a full page with swipe and enter is forwarded unchanged", () => {
     canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
     transition: { type: "swipe-left", duration_ms: 600 },
     advance: { mode: "duration", after_ms: 8000 },
-    placements: [
+    primitives: [
       {
         id: "hero",
-        content: MEDIA,
+        ...MEDIA,
         rect: { x: 0, y: 0, width: 1920, height: 1080 },
         layer: 0,
         content_fit: "contain",
       },
       {
         id: "caption",
-        content: MEDIA,
+        ...MEDIA,
         rect: { x: 80, y: 860, width: 1760, height: 160 },
         layer: 2,
         content_fit: "contain",
@@ -399,13 +436,13 @@ test("every template uses the shared bottom-left logo rect", () => {
 test("no expanded template emits text, box, or line", () => {
   const pictureOnly = ["slide-photo", "slide-full-bleed"] as const;
   for (const id of pictureOnly) {
-    const placements = asPlacements(expandPlaylistPage({
+    const primitives = asPrimitives(expandPlaylistPage({
       id,
       template: id,
       slots: { picture: MEDIA, logo: MEDIA },
     }));
-    for (const item of placements) {
-      assert.ok(["image", "video", "iframe", "application"].includes(item.content.type), `${id} ${item.id}`);
+    for (const item of primitives) {
+      assert.ok(["image", "video", "iframe", "application"].includes(item.primitive), `${id} ${item.id}`);
     }
   }
   for (const template of SLIDE_TEMPLATES) {

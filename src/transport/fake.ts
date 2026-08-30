@@ -448,7 +448,7 @@ export function memoryBackend(): FakeTransport {
       updated_at: "2026-08-14T17:00:01.000Z",
       // A published application release reports both identifiers here. An
       // application id cannot be placed in a playlist; the release id can, so
-      // the operation result is where the placement's release_id comes from.
+      // the operation result is where the application primitive's release_id comes from.
       result: { application_id: id, release_id: releaseId },
     });
     return {
@@ -733,12 +733,12 @@ export function memoryBackend(): FakeTransport {
 
   transport.on("GET", "/api/v1/media", (req) => {
     const tag = req.query?.tag;
-    const kind = req.query?.kind;
+    const primitive = req.query?.primitive;
     const items = [...media.values()].filter((item) => {
-      const record = item as { tag?: string; kind?: string; declaration?: unknown };
+      const record = item as { tag?: string; primitive?: string; declaration?: unknown };
       if (record.declaration) return false;
       if (tag && record.tag !== tag) return false;
-      if (kind && record.kind !== kind) return false;
+      if (primitive && record.primitive !== primitive) return false;
       return true;
     });
     return { status: 200, headers: {}, body: { items } };
@@ -780,7 +780,7 @@ export function memoryBackend(): FakeTransport {
     const item = {
       id,
       filename: stored.declaration.filename,
-      kind: commit.content_type.startsWith("image/") ? "image" : "video",
+      primitive: commit.content_type.startsWith("image/") ? "image" : "video",
       content_type: commit.content_type,
       operation_id: operationId,
       sha256: commit.sha256,

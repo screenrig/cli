@@ -102,7 +102,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "updated_at",
   ]);
   // release_id is required, not optional. The server has always returned it and
-  // it is the only handle a playlist placement accepts, so a caller must never
+  // it is the only handle an application primitive accepts, so a caller must never
   // have to poll the operation to learn it.
   const operationAccepted = interfaceBody(source, "OperationAccepted");
   assert.deepEqual(quotedProperties(operationAccepted), [
@@ -501,7 +501,7 @@ test("published problem codes include payment_required at 402", () => {
   assert.doesNotMatch(source, /stripe|x402/i);
 });
 
-test("playlist transition types include swipe and optional placement enter", () => {
+test("pinned backend snapshot includes swipe and its legacy placement enter schema", () => {
   const generated = readFileSync(GENERATED_CONTRACT, "utf8");
   const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
 
@@ -570,7 +570,7 @@ test("playlist writes send a media selector and media_end, not a singular media_
   assert.doesNotMatch(openapi, /enum: \[video_end\]/);
 });
 
-test("playlist and runtime placements are image, video, iframe, and application only", () => {
+test("pinned backend snapshot still carries the pre-primitive placement unions", () => {
   const generated = readFileSync(GENERATED_CONTRACT, "utf8");
   const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
 

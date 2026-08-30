@@ -164,23 +164,23 @@ ScreenRig content has three families: static images, including stills produced
 by local compose; motion video; and web content delivered as an `iframe` or
 `application`.
 
-Playlist pages on the wire use `image`, `video`, `iframe`, and `application`
-only. Copy and chrome are composed locally, uploaded as `image`, then placed
-as one image. `playlist templates` is a local catalog of slide ids; templates
-that would emit native `text`, `box`, or `line` fail with a pointer at
+Four wire primitives are supported: `image`, `video`, `iframe`, and
+`application`. Copy and chrome are composed locally, uploaded as `image`,
+then used as one image primitive. `playlist templates` is a local catalog of
+slide ids; templates that would emit native `text`, `box`, or `line` fail with a pointer at
 `compose catalog` and `compose render`. Picture-only templates still expand
-to image or video placements with selectors. A page without `template` is
-forwarded unchanged when its placements are those wire kinds.
+to image or video primitives with selectors. A page without `template` is
+forwarded unchanged when its `primitives` use those four wire primitives.
 `canvas.background` is a solid uppercase `#RRGGBBAA` or a top-to-bottom
 linear gradient (`type` `linear`, 2 through 8 strictly increasing stops,
-first `at` 0, last `at` 1, no angle). Image and video placements write a
+first `at` 0, last `at` 1, no angle). Image and video primitives write a
 `selector` (`by` is `id`, `ids`, `all`, or `tag`). Do not put `media_id` on
-the content object, and do not send server-resolved `items`. Page advance
-uses `duration`, `application`, or `media_end`. There is no `video_end`
-mode.
+the primitive itself; it belongs inside the selector. Iframe and application
+primitives do not take a selector. Page advance uses `duration`, `application`,
+or `media_end`. There is no `video_end` mode.
 
 Default pages use `{ "type": "crossfade", "duration_ms": 200 }` and put no
-`enter` on placements. `transition.type` may also be `swipe-left`,
+`enter` on objects. `transition.type` may also be `swipe-left`,
 `swipe-right`, `swipe-up`, or `swipe-down`. `duration_ms` is required and
 runs from 0 through 60000. When a swipe type is chosen, write
 `duration_ms: 600`. That is the authoring default for swipe, not a schema
@@ -188,17 +188,17 @@ default, and it does not change the template default. Swipe is the incoming
 page's type. The outgoing page follows so the edges stay touching. The name
 is motion direction: `swipe-left` moves content left.
 
-Optional placement `enter` is `{ "type": "..." }` with that same object
-name on playlist JSON. There is no snake_case rename inside it. Types are
+Optional object `enter` is `{ "type": "..." }` with that same object name on
+playlist JSON. There is no snake_case rename inside it. Types are
 `fade-up`, `fade-down`, `fade-left`, `fade-right`, `fade-in`, `zoom-in`,
 and `zoom-out`. Absent means no object animation. Use swipe and `enter`
 sparingly, for emphasis or a particular style, not on every page. If you
-want object animation, layer the content and put the motion on the
-top-layer text or images. Do not animate every placement. Object enter
+want object animation, layer the primitives and put the motion on the
+top-layer text or images. Do not animate every object. Object enter
 starts invisible. It runs 500 ms after the page occupies the full
 viewport, for 400 ms. Those delays are contract constants, not author
 fields and not CLI flags. The pinned CLI implements these playlist document
-fields, and the control plane accepts swipe types and placement `enter`. This
+fields, and the control plane accepts swipe types and object `enter`. This
 does not establish marketplace availability or deployment.
 
 The ordinary pair command currently accepts six canonical characters:
@@ -412,7 +412,7 @@ renames it into place. The bundle contains `screenrig-bundle.json`,
 `playlist.json`, and content-addressed `media/<sha256>.<canonical-ext>` files.
 The manifest records `selector_policy: "snapshot"` and
 `comments_policy: "excluded"`. Dynamic `all` and `tag` selectors become exact
-`id` or `ids` snapshots. Iframes remain URLs. Application placements are
+`id` or `ids` snapshots. Iframes remain URLs. Application primitives are
 rejected before any media download because v1 has no application-package
 export.
 
@@ -516,7 +516,7 @@ relative to the spec file. The CLI does not fetch URLs.
 `--open` is only for viewing the still on this computer. Agent vision reads
 the file path. Do not cat pixels into chat.
 
-A playlist page for that still is one `image` placement whose `rect` is the
+A playlist page for that still is one `image` primitive whose `rect` is the
 canvas and whose `content_fit` is `fill`.
 
 ## Events
@@ -537,7 +537,7 @@ screenrig --json playback list --screen-id scr_01 --day 2026-08-14
 ```
 
 A human line looks like
-`at=2026-08-14T17:00:00.000Z type=application.event severity=info code=cta.pressed placement_id=weather`.
+`at=2026-08-14T17:00:00.000Z type=application.event severity=info code=cta.pressed primitive_id=weather`.
 It carries `at`, `type`, `severity`, optional resource fields, scalar
 details, and a non-canned `message`. Canned server sentences are omitted. An
 `application.event` or `runtime.reported` with no remaining data is silent. A
@@ -677,12 +677,13 @@ screenrig --json media upload ./clip.mov
 screenrig --json media upload ./clip.mov --codec hevc
 screenrig --json media upload ./poster.png --no-transcode
 screenrig --json media upload ./lobby-welcome.png --tag lobby
-screenrig --json media list --tag lobby --kind image
+screenrig --json media list --tag lobby --primitive image
 screenrig --json media update med_01 --tag lobby --if-match 1
 screenrig --json media update med_01 --clear-tag --if-match 2
 ```
 
-`media list` forwards `--tag` and `--kind image|video` as query filters.
+`media list` forwards `--tag` and `--primitive image|video` to
+`GET /api/v1/media` as `tag` and `primitive` parameters.
 Untagged objects are omitted when `--tag` is present. `media update` patches
 the tag only; `--clear-tag` sends `null`. There is no other media metadata
 patch.
