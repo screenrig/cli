@@ -603,6 +603,18 @@ function assertWirePrimitives(page: unknown, index: number): void {
         },
       );
     }
+    if (category === "image" || category === "video") {
+      if (!isRecord(primitive.selector) || !["id", "ids", "all", "tag"].includes(String(primitive.selector.by))) {
+        throw usageError(`${label} primitives[${primitiveIndex}] ${category} requires a selector with by id|ids|all|tag.`);
+      }
+      for (const retired of ["query", "filter", "items", "media_id", "media_ids"]) {
+        if (retired in primitive) {
+          throw usageError(`${label} primitives[${primitiveIndex}] puts media selection in selector, not ${retired}.`);
+        }
+      }
+    } else if ("selector" in primitive) {
+      throw usageError(`${label} primitives[${primitiveIndex}] ${category} does not take a selector.`);
+    }
   }
 }
 

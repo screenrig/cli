@@ -237,6 +237,42 @@ test("a full page that authors text, box, or line is refused", () => {
   }
 });
 
+test("only image and video primitives take selectors", () => {
+  const page = (primitive: Record<string, unknown>) => ({
+    id: "poster",
+    canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
+    transition: { type: "crossfade", duration_ms: 200 },
+    advance: { mode: "duration", after_ms: 8000 },
+    primitives: [{
+      id: "hero",
+      rect: { x: 0, y: 0, width: 1920, height: 1080 },
+      layer: 0,
+      content_fit: "fill",
+      ...primitive,
+    }],
+  });
+  assertUsage(
+    () => expandPlaylistPage(page({ primitive: "image" })),
+    /image requires a selector with by id\|ids\|all\|tag/,
+  );
+  assertUsage(
+    () => expandPlaylistPage(page({ primitive: "video", media_id: "med_A" })),
+    /video requires a selector/,
+  );
+  assertUsage(
+    () => expandPlaylistPage(page({ primitive: "image", selector: { by: "all" }, items: [] })),
+    /puts media selection in selector, not items/,
+  );
+  assertUsage(
+    () => expandPlaylistPage(page({ primitive: "iframe", selector: { by: "all" }, src: "https:\/\/example.com" })),
+    /iframe does not take a selector/,
+  );
+  assertUsage(
+    () => expandPlaylistPage(page({ primitive: "application", selector: { by: "id", media_id: "med_A" }, release_id: "rel_A" })),
+    /application does not take a selector/,
+  );
+});
+
 test("unknown and retired template ids name playlist templates", () => {
   for (const id of ["slide-hero", "slide-title"]) {
     assert.throws(
