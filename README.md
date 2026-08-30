@@ -562,6 +562,12 @@ through the npm package — passes even when optional pieces are absent. Stdout
 is a success envelope either way: branch on `data.status` and the rows, not on
 `ok`.
 
+The `token` row reports presence and nothing else: `present` when this
+installation holds a credential, `(none)` when it does not. Every segment of a
+credential is secret, including the lookup id ahead of the final underscore, so
+no prefix, suffix, or redacted form of the stored value appears in `doctor`
+output in either mode. `account show` reports the same fact as `token_present`.
+
 `node`, `config_permissions`, `token`, `api_url`, `ffmpeg`, `ffprobe`,
 `encoder_libx264`, `health`, `ready`, `version`, and `capabilities` fail when
 they are not satisfied. These rows warn instead:

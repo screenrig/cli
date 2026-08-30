@@ -407,6 +407,15 @@ installation, players, backend services, the site, or production deployment.
   provisioning material, customer content, or secret-bearing headers/bodies.
   ffmpeg diagnostics reach the user only through `summarizeFfmpegError`, which
   redacts and bounds the stderr tail; keep it on that path.
+- **No part of a stored credential reaches stdout, including the lookup
+  segment.** `redactToken` is gone: a redacted credential is `sr_live_***`
+  with no lookup id, and `redactText` / `redactValue` emit exactly that. A
+  command that wants to report a credential reports presence through
+  `hasToken` or `describeTokenPresence` (`present` / `(none)`), which is what
+  the `doctor` `token` row and `account show`'s `token_present` do. Never
+  reintroduce a truncated `sr_live_` value in a check detail, a human line, an
+  envelope, a log, or a problem detail. `tokenLookupId` stays for internal
+  correlation that never reaches output.
 - Transcoded bytes live in a `mkdtemp` directory the caller removes. Every
   failure path after that directory exists must remove it.
 - Playlist pages the CLI emits may use only `image`, `video`, `iframe`, and

@@ -2409,6 +2409,63 @@ test("doctor fails a missing libx264 because it is the default video profile", a
   }
 });
 
+/**
+ * ENG-5821. Every segment of a live credential is secret, including the lookup
+ * id ahead of the final underscore, so doctor reports presence and no part of
+ * the stored value reaches stdout in either output mode.
+ */
+test("doctor reports a configured credential as presence only", async () => {
+  resetFfmpegToolchainCache();
+  const configDir = await testTemp("doctor-token-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const probe = fakeToolchainProbe({
+    encoders: ["libx264", "libx265", "libwebp", "libwebp_anim"],
+    filters: ["scale", "zscale", "tonemap"],
+    cwebp: true,
+  }) as unknown as NonNullable<CliRuntime["runProcess"]>;
+  try {
+    const json = await withRuntime(["--json", "doctor"], memoryBackend(), { fs: fsLike, runProcess: probe });
+    const envelope = JSON.parse(json.stdout) as {
+      data: { checks: Array<{ name: string; status: string; detail: string }> };
+    };
+    const token = envelope.data.checks.find((check) => check.name === "token");
+    assert.ok(token, json.stdout);
+    assert.equal(token.status, "pass");
+    assert.equal(token.detail, "present");
+    for (const pattern of [/sr_live_/, /tokidAAAA/, /secretsecret/]) {
+      assert.doesNotMatch(json.stdout, pattern);
+    }
+
+    const human = await withRuntime(["doctor"], memoryBackend(), { fs: fsLike, runProcess: probe });
+    assert.match(human.stdout, /^PASS token: present$/m);
+    for (const pattern of [/sr_live_/, /tokidAAAA/, /secretsecret/]) {
+      assert.doesNotMatch(human.stdout, pattern);
+    }
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("doctor fails the token check without a credential", async () => {
+  resetFfmpegToolchainCache();
+  const { code, stdout, configDir } = await withRuntime(["--json", "doctor"], memoryBackend());
+  assert.equal(code, ExitCode.Unexpected);
+  const envelope = JSON.parse(stdout) as {
+    data: { status: string; checks: Array<{ name: string; status: string; detail: string }> };
+  };
+  const token = envelope.data.checks.find((check) => check.name === "token");
+  assert.ok(token, stdout);
+  assert.equal(token.status, "fail");
+  assert.equal(token.detail, "(none)");
+  assert.doesNotMatch(stdout, /sr_live_/);
+  await rm(configDir, { recursive: true, force: true });
+});
+
 test("control-plane payloads and mutation idempotency match the v0.2 architecture", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("contract-");
@@ -2843,11 +2900,14 @@ test("account show reports integer credit_remaining and warns when remaining is 
   assert.equal(json.code, 0, json.stdout);
   const envelope = JSON.parse(json.stdout) as {
     ok: boolean;
-    data: { credit_remaining: number };
+    data: { credit_remaining: number; token_present: boolean };
     warnings: Array<{ code: string; message: string }>;
   };
   assert.equal(envelope.ok, true);
   assert.equal(envelope.data.credit_remaining, 0);
+  // ENG-5821: the credential is reported as presence, never as a token shape.
+  assert.equal(envelope.data.token_present, true);
+  assert.doesNotMatch(json.stdout, /sr_live_|tokidAAAA/);
   const warning = envelope.warnings.find((item) => item.code === "credits_low");
   assert.ok(warning, json.stdout);
   assert.match(warning.message, /\b0\b/);
@@ -2857,6 +2917,8 @@ test("account show reports integer credit_remaining and warns when remaining is 
   const human = await withTokenConfig(transport, ["account", "show"]);
   assert.equal(human.code, 0, human.stdout);
   assert.match(human.stdout, /credit_remaining: 0/);
+  assert.match(human.stdout, /^token: present$/m);
+  assert.doesNotMatch(human.stdout, /sr_live_|tokidAAAA/);
   assert.match(human.stdout, /warning: Remaining prepaid credit is 0, below 1000 credits\./);
   assert.doesNotMatch(human.stdout, /kCr|stripe|x402|mcr|millicredit|\$/i);
 });

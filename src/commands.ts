@@ -45,7 +45,8 @@ import { ApiClient, requireToken } from "./client.js";
 import {
   preserveLogSocket,
   resolveConfig,
-  describeToken,
+  describeTokenPresence,
+  hasToken,
   readConfigFile,
   withConfigLock,
   writeConfigAtomic,
@@ -1548,7 +1549,9 @@ async function accountShow(args: ParsedArgs, runtime: CliRuntime, resolved: Awai
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const response = await client.call({ method: "GET", path: "/api/v1/account" });
-  const envelope = jsonBody(response, client.requestId, { token_lookup: describeToken(token) });
+  // Presence only. The lookup segment of a credential identifies the live
+  // token, so no part of the stored value is reported on stdout.
+  const envelope = jsonBody(response, client.requestId, { token_present: hasToken(token) });
   const account = response.body as Account;
   if (headerValue(response.headers, CREDITS_REMAINING_HEADER) === undefined) {
     observeCreditsRemaining(runtime, parseCreditsInteger(account.credit_remaining));
@@ -1560,7 +1563,7 @@ async function accountShow(args: ParsedArgs, runtime: CliRuntime, resolved: Awai
       ["id", account.id],
       ["revision", account.revision !== undefined ? String(account.revision) : undefined],
       ["credit_remaining", account.credit_remaining !== undefined ? String(account.credit_remaining) : undefined],
-      ["token", describeToken(token)],
+      ["token", describeTokenPresence(token)],
       ["request_id", client.requestId],
     ]),
   };
@@ -3317,8 +3320,8 @@ async function doctor(
   }
   checks.push({
     name: "token",
-    status: resolved.token ? "pass" : "fail",
-    detail: describeToken(resolved.token),
+    status: hasToken(resolved.token) ? "pass" : "fail",
+    detail: describeTokenPresence(resolved.token),
   });
   checks.push({
     name: "api_url",
