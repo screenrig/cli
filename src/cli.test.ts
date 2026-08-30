@@ -3141,7 +3141,7 @@ test("customer-facing credit copy is fail-open until 1 Jan 2027", () => {
     assert.match(text, /not rejected for empty\s+remaining/, `${name} must say billed work is not rejected yet`);
     assert.match(text, /payment_required/, `${name} must keep payment_required as the after-cutoff code`);
     assert.match(text, /402/, `${name} must name HTTP 402 as after-cutoff, not current`);
-    assert.match(text, /does not stop or shut off screens/, `${name} must not claim screens stop for empty remaining`);
+    assert.match(text, /does not stop or\s+shut off screens/, `${name} must not claim screens stop for empty remaining`);
   }
   assert.match(USAGE, /feedback list \[--kind bug\|feature\]/);
 });
