@@ -3138,7 +3138,7 @@ test("customer-facing credit copy is fail-open until 1 Jan 2027", () => {
     assert.match(text, /1000 credits/, `${name} must name the live 1000-credit warning threshold`);
     assert.match(text, /1 Jan(?:uary)? 2027|2027-01-01/, `${name} must name the 1 Jan 2027 cutoff`);
     assert.match(text, /fails open/, `${name} must say production fails open until the cutoff`);
-    assert.match(text, /not rejected for empty remaining/, `${name} must say billed work is not rejected yet`);
+    assert.match(text, /not rejected for empty\s+remaining/, `${name} must say billed work is not rejected yet`);
     assert.match(text, /payment_required/, `${name} must keep payment_required as the after-cutoff code`);
     assert.match(text, /402/, `${name} must name HTTP 402 as after-cutoff, not current`);
     assert.match(text, /does not stop or shut off screens/, `${name} must not claim screens stop for empty remaining`);
