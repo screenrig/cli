@@ -215,6 +215,14 @@ Commands:
   feedback list [--kind bug|feature]
   doctor [--repair-config]
   version
+
+Credits:
+  Remaining is a nonnegative whole number (never negative; empty remaining
+  displays 0). Below 1000 credits, authenticated responses may warn
+  credits_low. Until 1 Jan 2027 08:00 UTC (midnight PT), production fails open:
+  billed commands are not rejected for empty remaining and do not return
+  HTTP 402. After that instant, remaining below 1 credit is payment_required.
+  Empty remaining does not stop or shut off screens in this window.
 `;
 
 export interface CommandResult {

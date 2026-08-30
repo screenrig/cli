@@ -253,6 +253,8 @@ installation, players, backend services, the site, or production deployment.
   `passkeys_disabled` belong to that origin; the CLI cannot receive them and must
   not pretend to map them. The mint call returns `invalid_request`,
   `unauthorized`, `payment_required`, `rate_limited`, or `not_ready`.
+  Production does not send `payment_required` (HTTP 402) until LaunchCreditEnforcementAt
+  (2027-01-01 08:00 UTC / midnight PT).
 - Writes carry `Idempotency-Key`. An exact retry returns the original link and
   expiry for twenty-four hours, so a retry is safe and does not mint a second
   live link.
@@ -423,12 +425,18 @@ installation, players, backend services, the site, or production deployment.
   simply causes the server to derive `hvc1.*` instead.
 - The default plan has no product storage cap (`account_content_bytes` and
   `content_limit_bytes` are 0). A custom storage ceiling, when present, is
-  checked first and rejected with `quota_exceeded`. Remaining prepaid credit of
-  below 1 whole credit rejects billed `/api/v1` work with `payment_required`.
-  Keep the 1 GiB local check as a plan-independent transport bound. Keep
-  `quota_exceeded` and `payment_required` guidance pointing at `account show`.
+  checked first and rejected with `quota_exceeded`. Remaining prepaid credit is
+  a nonnegative whole integer; empty remaining displays `0`, never negative.
   `account show` prints integer `credit_remaining` and does not debit.
   Remaining below 1000 credits adds `credits_low` to envelope `warnings[]`.
+  Until LaunchCreditEnforcementAt (2027-01-01 08:00 UTC / midnight PT),
+  production fails open: billed `/api/v1` work is not rejected for empty
+  remaining and does not return HTTP 402. Empty remaining does not stop or
+  shut off screens in this window. After that instant, remaining below 1
+  whole credit rejects billed `/api/v1` work with `payment_required`. Keep
+  mapping 402 to `payment_required` in the client; do not weaken handling of
+  a real 402. Keep the 1 GiB local check as a plan-independent transport bound.
+  Keep `quota_exceeded` and `payment_required` guidance pointing at `account show`.
   Screen toast and screenshot are exempt from the 1-credit API meter. Do not
   add pay, Stripe, or x402 commands.
 - Screenshotting is in v1. `screen screenshot <id>` blocks on a still WebP and
