@@ -1,7 +1,7 @@
 import { PINS, ROLES, SPACES } from "./tokens.js";
 
 export const COMPOSE_TYPES = ["Frame", "Column", "Row", "Box", "Spacer", "Text", "Image"] as const;
-export const WIRE_PLACEMENT_KINDS = ["image", "video", "iframe", "application"] as const;
+export const WIRE_PRIMITIVES = ["image", "video", "iframe", "application"] as const;
 export const FONT_FALLBACKS = ["Helvetica Neue", "Helvetica", "Arial", "DejaVu Sans", "Liberation Sans"] as const;
 
 export interface ComposeCatalog {
@@ -18,7 +18,7 @@ export interface ComposeCatalog {
     envelope: string;
     textShadow: string;
   };
-  wire_kinds: typeof WIRE_PLACEMENT_KINDS[number][];
+  wire_primitives: typeof WIRE_PRIMITIVES[number][];
   font_fallbacks: typeof FONT_FALLBACKS[number][];
 }
 
@@ -37,7 +37,7 @@ export function composeCatalog(): ComposeCatalog {
       envelope: "structured JSON, not pixels",
       textShadow: "optional Text object { x, y, blur?, color }; omitted paints without a shadow",
     },
-    wire_kinds: [...WIRE_PLACEMENT_KINDS],
+    wire_primitives: [...WIRE_PRIMITIVES],
     font_fallbacks: [...FONT_FALLBACKS],
   };
 }
@@ -55,7 +55,7 @@ export function formatComposeCatalog(catalog: ComposeCatalog): string {
     "fontSize: not authorable",
     `image_src: ${catalog.rules.image_src}`,
     `textShadow: ${catalog.rules.textShadow}`,
-    `wire_kinds: ${catalog.wire_kinds.join("|")}`,
+    `wire_primitives: ${catalog.wire_primitives.join("|")}`,
     "envelope: structured JSON, not pixels",
   ];
   return lines.join("\n");

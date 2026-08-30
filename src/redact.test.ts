@@ -67,7 +67,7 @@ test("sensitive keys match embedded names, not only exact tokens", () => {
   }
   assert.equal(isSensitiveKey("capture_id"), false);
   assert.equal(isSensitiveKey("code"), false);
-  assert.equal(isSensitiveKey("placement_id"), false);
+  assert.equal(isSensitiveKey("primitive_id"), false);
 });
 
 test("sensitive values match embedded credentials, not only at the start", () => {

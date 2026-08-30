@@ -40,15 +40,12 @@ function sha(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-function mediaPlacement(selector: Record<string, unknown>, items?: string[]) {
+function mediaPrimitive(selector: Record<string, unknown>) {
   return {
     id: "hero",
-    content: {
-      type: "image",
-      selector,
-      ...(items ? { items: items.map((media_id) => ({ media_id, intrinsic_size: { width: 1, height: 1 } })) } : {}),
-      alt: "Hero",
-    },
+    primitive: "image",
+    selector,
+    alt: "Hero",
     rect: { x: 0, y: 0, width: 1920, height: 1080 },
     layer: 0,
     content_fit: "fill",
@@ -56,7 +53,7 @@ function mediaPlacement(selector: Record<string, unknown>, items?: string[]) {
   };
 }
 
-function playlist(placement: Record<string, unknown>) {
+function playlist(primitive: Record<string, unknown>) {
   return {
     id: "pl_SOURCE",
     name: "Portable playlist",
@@ -68,9 +65,11 @@ function playlist(placement: Record<string, unknown>) {
       transition: { type: "crossfade", duration_ms: 200 },
       advance: { mode: "duration", after_ms: 5000 },
       comments: { private: "excluded" },
-      placements: [placement, {
+      primitives: [primitive, {
         id: "web",
-        content: { type: "iframe", src: "https://example.com/", title: "Example" },
+        primitive: "iframe",
+        src: "https://example.com/",
+        title: "Example",
         rect: { x: 0, y: 0, width: 100, height: 100 },
         layer: 1,
         content_fit: "fill",
@@ -84,7 +83,7 @@ function remoteMedia(id: string, bytes: Uint8Array, overrides: Record<string, un
   return {
     id,
     filename: "hero.png",
-    kind: "image",
+    primitive: "image",
     content_type: "image/png",
     operation_id: `op_${id}`,
     sha256: sha(bytes),
@@ -121,7 +120,7 @@ function exportTransport(bytes: Uint8Array, options: { playlist?: unknown; heade
     .on("GET", "/api/v1/playlists/pl_SOURCE", () => ({
       status: 200,
       headers: {},
-      body: options.playlist ?? playlist(mediaPlacement({ by: "tag", tag: "Lobby", one_at_a_time: false }, [id])),
+      body: options.playlist ?? playlist(mediaPrimitive({ by: "id", media_id: id })),
     }))
     .on("GET", `/api/v1/media/${id}`, () => ({ status: 200, headers: {}, body: item }))
     .on("HEAD", `/api/v1/media/${id}/content`, () => ({ status: 200, headers, body: undefined }))
@@ -132,23 +131,24 @@ function exportTransport(bytes: Uint8Array, options: { playlist?: unknown; heade
     }));
 }
 
-test("normalizes server playlists, snapshots dynamic selectors, preserves iframes, and removes response-only fields", () => {
+test("normalizes server playlists, preserves snapshotted selectors and iframes, and removes response-only fields", () => {
   const normalized = normalizePlaylistForBundle(playlist(
-    mediaPlacement({ by: "tag", tag: "Lobby", one_at_a_time: true }, ["med_B", "med_A"]),
+    mediaPrimitive({ by: "ids", media_ids: ["med_B", "med_A"], one_at_a_time: true }),
   ));
   assert.deepEqual(normalized.mediaIds, ["med_A", "med_B"]);
   const text = JSON.stringify(normalized.playlist);
-  assert.doesNotMatch(text, /comments|controller|"items"|"by":"tag"/);
+  assert.doesNotMatch(text, /comments|controller|"by":"tag"/);
   assert.match(text, /"by":"ids","media_ids":\["med_B","med_A"\],"one_at_a_time":true/);
   assert.match(text, /"type":"iframe"/);
 });
 
-test("rejects application placements before any media lookup or local output", async () => {
+test("rejects application primitives before any media lookup or local output", async () => {
   const dir = await testTemp("bundle-app-");
   const output = path.join(dir, "export");
   const source = playlist({
     id: "app",
-    content: { type: "application", release_id: "rel_1" },
+    primitive: "application",
+    release_id: "rel_1",
     rect: { x: 0, y: 0, width: 1, height: 1 },
     layer: 0,
     content_fit: "fill",
@@ -156,7 +156,7 @@ test("rejects application placements before any media lookup or local output", a
   });
   const transport = new FakeTransport().on("GET", "/api/v1/playlists/pl_SOURCE", () => ({ status: 200, headers: {}, body: source }));
   const client = new ApiClient({ transport, token: "token" });
-  await assert.rejects(() => exportPlaylistBundle({ playlistId: "pl_SOURCE", outputDirectory: output, client }), /application placements/);
+  await assert.rejects(() => exportPlaylistBundle({ playlistId: "pl_SOURCE", outputDirectory: output, client }), /application primitives/);
   assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), ["GET /api/v1/playlists/pl_SOURCE"]);
   await assert.rejects(() => lstat(output), /ENOENT/);
   await rm(dir, { recursive: true, force: true });
@@ -181,7 +181,7 @@ test("exports through a private sibling, streams bytes, verifies headers and has
   assert.equal((await stat(path.join(output, "media", `${sha(bytes)}.png`))).mode & 0o777, 0o600);
   const savedPlaylist = JSON.parse(await readFile(path.join(output, PLAYLIST_BUNDLE_PLAYLIST), "utf8"));
   const savedManifest = JSON.parse(await readFile(path.join(output, PLAYLIST_BUNDLE_MANIFEST), "utf8"));
-  assert.equal(savedPlaylist.pages[0].placements[0].content.selector.by, "id");
+  assert.equal(savedPlaylist.pages[0].primitives[0].selector.by, "id");
   assert.equal(savedManifest.selector_policy, "snapshot");
   assert.equal(savedManifest.comments_policy, "excluded");
   assert.deepEqual(transport.calls.map((call) => call.method), ["GET", "GET", "HEAD", "GET"]);
@@ -227,10 +227,10 @@ interface BundleSource {
 
 async function writeBundle(root: string, sources: BundleSource[]): Promise<PlaylistBundleManifest> {
   await mkdir(path.join(root, "media"), { recursive: true });
-  const placements = sources.map((source, index) => ({
-    ...mediaPlacement({ by: "id", media_id: source.id }),
+  const primitives = sources.map((source, index) => ({
+    ...mediaPrimitive({ by: "id", media_id: source.id }),
     id: `media_${index}`,
-  })).map(({ controller: _controller, ...placement }) => placement);
+  })).map(({ controller: _controller, ...primitive }) => primitive);
   const playlistJson = {
     name: "Imported",
     pages: [{
@@ -238,7 +238,7 @@ async function writeBundle(root: string, sources: BundleSource[]): Promise<Playl
       canvas: { width: 1, height: 1, background: "#000000FF" },
       transition: { type: "crossfade", duration_ms: 200 },
       advance: { mode: "duration", after_ms: 1000 },
-      placements,
+      primitives,
     }],
   };
   const media = sources.map((source) => ({
@@ -310,27 +310,36 @@ test("preflight rejects traversal, backslash, absolute, control, and noncanonica
   }
 });
 
-test("preflight validates the complete playlist write surface and media kinds before network use", async () => {
+test("preflight validates the complete playlist write surface and media primitives before network use", async () => {
   const cases: Array<[string, (playlist: any) => void]> = [
     ["canvas", (value) => { value.pages[0].canvas.width = 0; }],
     ["transition", (value) => { value.pages[0].transition.duration_ms = 60_001; }],
     ["advance", (value) => { value.pages[0].advance.after_ms = 999; }],
     ["visibility", (value) => { value.pages[0].visibility = { enabled: true }; }],
-    ["rect", (value) => { value.pages[0].placements[0].rect.width = 0; }],
-    ["layer", (value) => { value.pages[0].placements[0].layer = 1025; }],
-    ["content_fit", (value) => { value.pages[0].placements[0].content_fit = "stretch"; }],
-    ["enter", (value) => { value.pages[0].placements[0].enter = { type: "spin" }; }],
+    ["rect", (value) => { value.pages[0].primitives[0].rect.width = 0; }],
+    ["layer", (value) => { value.pages[0].primitives[0].layer = 1025; }],
+    ["content_fit", (value) => { value.pages[0].primitives[0].content_fit = "stretch"; }],
+    ["enter", (value) => { value.pages[0].primitives[0].enter = { type: "spin" }; }],
     ["iframe", (value) => {
-      value.pages[0].placements[0].content = { type: "iframe", src: "http://127.0.0.1/private", title: "Private" };
-      value.pages[0].placements[0].content_fit = "fill";
+      value.pages[0].primitives[0] = {
+        ...value.pages[0].primitives[0],
+        primitive: "iframe",
+        src: "http://127.0.0.1/private",
+        title: "Private",
+      };
+      delete value.pages[0].primitives[0].selector;
+      delete value.pages[0].primitives[0].alt;
+      value.pages[0].primitives[0].content_fit = "fill";
     }],
-    ["media-kind", (value) => {
-      value.pages[0].placements[0].content = {
-        type: "video",
+    ["media-primitive", (value) => {
+      value.pages[0].primitives[0] = {
+        ...value.pages[0].primitives[0],
+        primitive: "video",
         selector: { by: "id", media_id: "med_SOURCE" },
         muted: true,
         loop: false,
       };
+      delete value.pages[0].primitives[0].alt;
     }],
   ];
   for (const [name, mutate] of cases) {

@@ -307,13 +307,13 @@ installation, players, backend services, the site, or production deployment.
 - `media upload --tag TAG` stores a 1–32 letter-or-digit tag on the ready
   object at declare. It is not redeclared at commit. Pattern
   `^[A-Za-z0-9]{1,32}$`; reject other values locally as `usage_error`.
-- `media list [--tag TAG] [--kind image|video]` forwards those query
-  filters to `GET /api/v1/media`. Untagged objects are omitted when `--tag`
+- `media list [--tag TAG] [--primitive image|video]` forwards `tag` and
+  `primitive` parameters to `GET /api/v1/media`. Untagged objects are omitted when `--tag`
   is present.
 - `media update <id> (--tag TAG | --clear-tag) --if-match REVISION` binds
   `PATCH /api/v1/media/{id}`. Exactly one of `--tag` or `--clear-tag`.
   `--clear-tag` sends `null`. There is no other media metadata patch. Do
-  not add an update path for filename, kind, or codecs.
+  not add an update path for filename, primitive, or codecs.
 - This surface is **repository-ready** on public `main`. It is not in the
   locked plugin bundle. Do not claim marketplace or deployed.
 
@@ -342,10 +342,10 @@ installation, players, backend services, the site, or production deployment.
 ## Page motion
 
 - Default templated pages stay `{ type: "crossfade", duration_ms: 200 }` with
-  no placement `enter`. Do not flip that default to swipe.
+  no object `enter`. Do not flip that default to swipe.
 - Full pages are opaque: the CLI forwards `transition.type` swipe variants
   (`swipe-left`, `swipe-right`, `swipe-up`, `swipe-down`) and optional
-  placement `enter: { type }` with that same object name. No snake_case
+  object `enter: { type }` with that same object name. No snake_case
   inside `enter`. `duration_ms` is required, 0 through 60000. Swipe
   authoring default when chosen is `duration_ms: 600`.
 - Teach swipe and `enter` as spare emphasis, not as the ordinary page.
@@ -354,6 +354,7 @@ installation, players, backend services, the site, or production deployment.
 - `Application` carries no `state` and no `release_id`. It reports
   `latest_ready_release`. `OperationAccepted.release_id` is required, so
   `app upload` reports the release id without waiting on the operation result.
+  An application primitive pins that `release_id`; it has no selector.
   Knowing the id is not readiness; the operation still decides that.
   Optional `--name` (at most 120 characters, no line break) is sent as
   `ScreenRig-Application-Name`. Every upload still creates a new
@@ -407,10 +408,13 @@ installation, players, backend services, the site, or production deployment.
   redacts and bounds the stderr tail; keep it on that path.
 - Transcoded bytes live in a `mkdtemp` directory the caller removes. Every
   failure path after that directory exists must remove it.
-- Playlist pages the CLI emits may use only `image`, `video`, `iframe`, and
-  `application`. Do not emit native `text`, `box`, or `line`. Copy and chrome
+- Playlist pages the CLI emits use `primitives[]`. Four wire primitives exist:
+  `image`, `video`, `iframe`, and `application`, named by the `primitive`
+  field. Image and video require a `selector` whose `by` is `id`, `ids`, `all`,
+  or `tag`; iframe and application do not take selectors. Do not emit native
+  `text`, `box`, or `line`. Copy and chrome
   are composed locally with `compose catalog` / `compose render`, uploaded as
-  `image`, then placed as one image. `playlist templates` is a local catalog.
+  `image`, then used as one image primitive. `playlist templates` is a local catalog.
   Templated pages that would emit vector chrome fail with `usage_error`
   pointing at those compose commands. Do not silently rasterize and upload.
 - `canvas.background` is a solid uppercase `#RRGGBBAA` or a top-to-bottom

@@ -62,6 +62,7 @@ const VALUE_FLAGS = new Set([
   "body-file",
   "command",
   "kind",
+  "primitive",
   "level",
   "text",
   "duration-ms",
