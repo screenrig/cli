@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { createCipheriv, createHash, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync } from "node:crypto";
 import { PassThrough } from "node:stream";
+import { readFileSync } from "node:fs";
 import { mkdir, open, readFile, rename, chmod, stat, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, USAGE, formatEventLine } from "./commands.js";
 import { run, type CliRuntime } from "./main.js";
@@ -3121,6 +3123,27 @@ test("media upload warns on a low-information filename without blocking the uplo
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
+});
+
+test("customer-facing credit copy is fail-open until 1 Jan 2027", () => {
+  const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const documents: Array<[string, string]> = [
+    ["USAGE", USAGE],
+    ["README.md", readFileSync(path.join(repoRoot, "README.md"), "utf8")],
+    ["AGENTS.md", readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8")],
+  ];
+  for (const [name, text] of documents) {
+    assert.match(text, /nonnegative/, `${name} must say remaining is nonnegative`);
+    assert.match(text, /credits_low/, `${name} must name the live credits_low warning`);
+    assert.match(text, /1000 credits/, `${name} must name the live 1000-credit warning threshold`);
+    assert.match(text, /1 Jan(?:uary)? 2027|2027-01-01/, `${name} must name the 1 Jan 2027 cutoff`);
+    assert.match(text, /fails open/, `${name} must say production fails open until the cutoff`);
+    assert.match(text, /not rejected for empty remaining/, `${name} must say billed work is not rejected yet`);
+    assert.match(text, /payment_required/, `${name} must keep payment_required as the after-cutoff code`);
+    assert.match(text, /402/, `${name} must name HTTP 402 as after-cutoff, not current`);
+    assert.match(text, /does not stop or shut off screens/, `${name} must not claim screens stop for empty remaining`);
+  }
+  assert.match(USAGE, /feedback list \[--kind bug\|feature\]/);
 });
 
 test("credits_low appends beside generic_filename instead of replacing it", async () => {

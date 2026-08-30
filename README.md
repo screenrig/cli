@@ -258,12 +258,18 @@ days first. Filter with `--screen-id`, `--media-id`, and `--day YYYY-MM-DD`.
 Those identifiers select the caller's own rows and are never a cross-account
 lookup.
 
-Authenticated responses may carry remaining prepaid credits as an integer.
+Authenticated responses may carry remaining prepaid credits as a nonnegative
+whole integer. Remaining never displays negative; empty remaining is `0`.
 Remaining below 1000 credits adds a `credits_low` warning to the envelope
-`warnings[]` array; the message includes the integer remaining. A 402
-`payment_required` problem means remaining is below 1 credit and billed
-control-plane commands are rejected. Both signals can appear together on a
-402 envelope. `account show`, `agent status`, `agent disconnect --yes`,
+`warnings[]` array; the message includes the integer remaining. Until
+1 January 2027 08:00 UTC (midnight Pacific Time), production fails open:
+billed commands are not rejected for empty remaining, and the server does
+not return HTTP 402. Empty remaining does not stop or shut off screens in
+this window. After that instant, remaining below 1 credit rejects billed
+control-plane commands with `payment_required` (HTTP 402). The CLI still
+maps a 402 to `payment_required` if the server sends one. Both
+`credits_low` and `payment_required` can appear together on a 402 envelope.
+`account show`, `agent status`, `agent disconnect --yes`,
 `auth status`, `auth revoke --yes [--allow-lockout]`, `screen toast`,
 `screen screenshot`, `compose catalog`, and `compose render` do not debit
 that meter. Opening `events follow` costs 1 credit. There is no pay command.
@@ -307,7 +313,8 @@ dashboard origin, so the CLI never presents a link token and never sees
 `dashboard_link_expired` or `dashboard_link_consumed`. What the mint call can
 return is `invalid_request`, `unauthorized`, `payment_required`,
 `rate_limited`, and `not_ready`; the CLI renders each with the server's own
-detail and guidance.
+detail and guidance. Production does not send `payment_required` (HTTP 402)
+until 1 January 2027 08:00 UTC.
 
 Production links require HTTPS. Local development has one exact exception:
 `http://api.screenrig.localhost:8088` may return and open
