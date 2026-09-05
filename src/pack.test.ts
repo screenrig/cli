@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdir, writeFile, readFile, readdir, symlink, link, rm } from "node:fs/promises";
+import { mkdir, open, writeFile, readFile, readdir, symlink, link, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { packDirectory, parseTar, gzipDeterministic } from "./pack/index.js";
+import { DEFAULT_ARCHIVE_LIMITS, walkDirectory, packDirectory, parseTar, gzipDeterministic } from "./pack/index.js";
 import { crc32 } from "./pack/archive.js";
 import { gunzipSync } from "node:zlib";
 import { CliError } from "./problems.js";
@@ -223,3 +223,27 @@ test("sparse files are rejected when detectable", async () => {
   });
   await rm(dir, { recursive: true, force: true });
 });
+
+
+for (const [limit, value, code] of [
+  ["application_file_count", 1, "too_many_files"],
+  ["application_expanded_bytes", 5, "expanded_too_large"],
+] as const) {
+  test(`packer enforces ${limit} before reading the rejected file`, async (t) => {
+    const dir = await tempDir();
+    await writeFile(path.join(dir, "a.txt"), "1234");
+    await writeFile(path.join(dir, "index.html"), "5678");
+    const handle = await open(path.join(dir, "a.txt"));
+    const prototype = Object.getPrototypeOf(handle);
+    await handle.close();
+    const read = prototype.read;
+    const reads = t.mock.method(prototype, "read", read);
+    try {
+      await assert.rejects(walkDirectory(dir, { ...DEFAULT_ARCHIVE_LIMITS, [limit]: value }),
+        (error: unknown) => error instanceof CliError && error.problem.code === code);
+      assert.equal(reads.mock.callCount(), 1, "only the admitted first file is read");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+}

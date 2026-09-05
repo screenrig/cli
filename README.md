@@ -52,7 +52,9 @@ domain socket at that path and writes one JSON object per line. Stdout stays
 the single command envelope; `--json` and stderr progress are unchanged. There
 is no `--log-socket` flag and no `SCREENRIG_LOG_SOCKET` override. If the field
 is absent or empty, behavior is unchanged. If it is set and connect or write
-fails, the command fails: the consumer must already be listening.
+fails, the command fails: the consumer must already be listening. Completed writes are not retained.
+A consumer that stops reading fails when the pending buffer exceeds 1 MiB;
+closing waits at most five seconds for accepted writes to drain.
 
 ```json
 {
@@ -238,7 +240,9 @@ availability, deployment, or hardware validation.
 
 Application packing accepts an already-built static directory. It produces
 deterministic bounded archives, injects the pinned browser SDK runtime, and
-never builds or executes uploaded source. `app upload` accepts optional
+never builds or executes uploaded source. File-count and expanded-byte limits are
+checked before each file is read; source files are read through bounded descriptors
+and changes during reading are rejected. `app upload` accepts optional
 `--name` (at most 120 Unicode characters after trimming). ASCII names use
 the application name header; Unicode names use its RFC 8187 UTF-8 extended
 header so punctuation, accents, emoji and non-Latin text survive HTTP transport. Runtime
@@ -618,7 +622,7 @@ code.
 
 Video becomes an MP4:
 
-- H.264 by default (`libx264`, High profile, level 4.2), or H.265 with
+- H.264 by default (`libx264`, High profile), or H.265 with
   `--codec hevc` (`libx265`, `hvc1` tag, Main profile).
 - `-preset fast`, CRF 23 for H.264 and CRF 28 for H.265, `-maxrate 8M`,
   `-bufsize 16M`, 2 B-frames, and a keyframe interval of two seconds.
@@ -628,7 +632,10 @@ Video becomes an MP4:
 - Audio, where the source has any, is AAC at 192 kbit/s, 48 kHz, stereo.
   Players play from a complete cached file, so the encode does not remux
   for progressive download.
-- The frame rate is capped at 30 fps by default.
+- The frame rate is capped at 30 fps by default. H.264 level is selected from
+  4.2, 5.1, or 5.2 to fit the output dimensions, rate, and decoder buffer budget;
+  4K at 30 fps uses 5.1. H.265 uses 5.1 or 5.2. Unsupported combinations fail
+  before encoding instead of writing a misleading level header.
 
 Images become lossy WebP at quality 90, in `yuva420p` when the source carries an
 alpha channel and `yuv420p` otherwise. An animated source uses `libwebp_anim`
@@ -638,17 +645,58 @@ WebP source that already fits the size bound is passed through unchanged instead
 of re-encoded. `--no-transcode` is the escape hatch for already-correct delivery
 WebP, not the recovery for a missing libwebp encoder.
 
-Both families bound **each** edge to 3840 pixels, so a portrait source is capped
-exactly like a landscape one. Aspect ratio is preserved, and a source smaller
-than the bound is never upscaled.
+Both families bound **each** edge to 3840 pixels. Video also has a total budget
+of 3840 × 2160 pixels, so square content cannot produce a 3840-square frame.
+Aspect ratio and orientation are preserved, with even video dimensions rounded
+down, and sources are never upscaled.
+
+For a smaller decode surface, use `--preset signage-1080p30`: it bounds the long
+edge to 1920, the short edge to 1080, and the rate to 30 fps. For 4K delivery,
+`--preset signage-4k30` bounds the long edge to 3840, the short edge to 2160, and
+the rate to 30 fps. Both work with landscape, portrait, and square content.
+`--max-edge` and `--max-fps` can tighten a preset but cannot enlarge it. Use
+`--no-audio` for silent content to omit audio encoding and the player audio
+track. These options apply only to video and cannot be combined with
+`--no-transcode`. They are delivery bounds, not certification for any device;
+verify representative content on the intended players.
+
+Already suitable H.264 MP4s can pass through automatically without re-encoding.
+The CLI checks the entire compressed stream: High profile at a supported level
+from 3.1 to 5.2, 8-bit 4:2:0 progressive pictures, stable Rec.709 headers, at most
+four decoder-buffer/reference frames and two reordered frames, constant frame
+cadence, and IDR random-access intervals within the rounded two-second GOP.
+It checks every packet against the 8 Mbit/s video / 16 Mbit buffer envelope;
+AAC-LC stereo at 48 kHz must also fit a 192 kbit/s / 384 kbit packet envelope.
+The file must already fit the requested size, FPS, codec, and audio options.
+Extra streams, unsupported or incomplete required evidence, changed parameters,
+or failed checks take the normal encode path. HEVC currently always takes that path.
+
+Inspection uses ffprobe packets and FFmpeg `trace_headers` in stream-copy mode,
+without decoding pictures. Each compressed-stream pass has a 15-second limit;
+large or unusual inputs may be re-encoded when inspection exceeds that limit.
+The CLI validates a private temporary snapshot and checks its SHA-256 against
+the exact buffered upload bytes. Successful passthrough preserves the original
+file bytes; the snapshot is removed after upload. Files over the 1 GiB transport
+ceiling do not take this fast path. No media cache or verification records are
+retained. Average bitrate alone is never enough to pass; these conservative
+checks still do not constitute formal HRD conformance or hardware certification.
+`--no-transcode` remains the explicit way to bypass transcoding and these checks.
+
+Upload preparation rejects non-files and files over 1 GiB before allocating their
+payload. It retains one verified byte snapshot and sends bounded views of those
+bytes to storage, avoiding additional whole-file copies in the Fetch body adapter.
+Signed transfers stop at session expiry and release their input and response
+streams on completion or failure. Playlist exports also cancel downloads if
+headers or local file creation fail before reading starts. Operation polling
+bounds requests and sleep intervals by the remaining `--timeout` budget.
 
 ### Why H.264 is the default
 
 ScreenRig stores exactly one rendition per media object, and the layout contract
 carries no codec parameter. There is no per-client fallback: whatever the CLI
-uploads is what every player has to decode. H.264 High profile level 4.2 is the
-default because it has broad decode support across current browser and platform
-combinations.
+uploads is what every player has to decode. H.264 High profile is the default
+for broad browser and platform support; the required level rises with the
+output size and frame rate.
 
 H.265 support is not universal:
 
@@ -668,6 +716,8 @@ link, but that saving does not outrank playback on the browser path.
 | --- | --- |
 | `--no-transcode` | Upload accepted delivery bytes unchanged. ffmpeg, ffprobe, and cwebp are not run; lossless WebP is still rejected. |
 | `--codec h264\|hevc` | Video codec. Default `h264`. `avc` and `h265` are accepted as aliases. |
+| `--preset signage-1080p30\|signage-4k30` | Optional orientation-aware video size and 30 fps caps. |
+| `--no-audio` | Remove the audio track from video delivery. |
 | `--max-fps N` | Frame-rate cap, greater than 0 and at most 240. Default 30. |
 | `--max-edge PIXELS` | Bound on each edge, 16 to 3840. Default 3840. |
 | `--webp-quality 1-100` | WebP quality. Default 90. |
@@ -677,6 +727,8 @@ link, but that saving does not outrank playback on the browser path.
 ```sh
 screenrig --json media upload ./clip.mov
 screenrig --json media upload ./clip.mov --codec hevc
+screenrig --json media upload ./lobby.mov --preset signage-1080p30 --no-audio
+screenrig --json media upload ./portrait.mov --preset signage-4k30
 screenrig --json media upload ./poster.png --no-transcode
 screenrig --json media upload ./lobby-welcome.png --tag lobby
 screenrig --json media list --tag lobby --primitive image
@@ -701,10 +753,15 @@ an ETA, redrawn in place on a TTY and throttled when stderr is not a TTY.
 The envelope carries a `transcode` block with `applied`, `stage`, `reason`,
 `source_bytes`, `output_bytes`, `width`, `height`, `dimensions_measured`, and
 `duration_ms`. `width` and `height` are read back from the produced file with a
-follow-up probe rather than predicted from the plan, because ffmpeg's rounding
-does not match the planner's. If that read-back fails, the CLI reports the
-planned size, sets `dimensions_measured` to `false`, and adds a warning instead
-of presenting an estimate as a measurement.
+follow-up probe. Video read-back must confirm the codec, profile/level, pixel
+format, exact planned dimensions, rate, color tags, and expected audio layout
+before any upload starts. Known interlaced output is rejected; unavailable HEVC
+scan metadata is reported as `unknown`. A failed video probe or mismatch aborts
+the upload and removes the temporary output. The optional `video` object reports
+`codec`, `profile`, `level`, `fps`, `audio`, `scan`, and the selected `preset`.
+These metadata checks do not measure peak bitrate or prove hardware playback.
+For images only, an unavailable size read-back falls back to the planned size,
+sets `dimensions_measured` to `false`, and adds a warning.
 `transcode.duration_ms` is the wall-clock encode time in milliseconds, and is
 `0` for a passthrough. Under `--no-transcode` the block reduces to `applied`
 and `reason`. Warnings such as a missing tone mapping filter appear as

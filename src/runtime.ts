@@ -33,6 +33,8 @@ export interface SignedRawPutRequest {
   body: Uint8Array | AsyncIterable<Uint8Array>;
   credentials: "omit";
   redirect: "error";
+  /** End the transfer when its signed upload session expires. */
+  expiresAt?: number;
 }
 
 export interface SignedRawPutResponse {
@@ -46,7 +48,11 @@ export interface RunProcessRequest {
   command: string;
   args: string[];
   /** Receives each complete stdout line. When set, stdout is streamed instead of captured. */
-  onStdoutLine?: (line: string) => void;
+  onStdoutLine?: (line: string) => void | boolean;
+  /** Stream stderr without retaining it; return false to stop a rejected inspection. */
+  onStderrLine?: (line: string) => void | boolean;
+  /** Bound pending streamed lines; exceeding this aborts the process. */
+  maxLineChars?: number;
   timeoutMs?: number;
 }
 
@@ -61,6 +67,8 @@ export interface RunProcessResult {
   /** Set when the process could not be started at all. */
   spawnError?: string;
   timedOut?: boolean;
+  outputTruncated?: boolean;
+  stoppedEarly?: boolean;
 }
 
 export type RunProcess = (request: RunProcessRequest) => Promise<RunProcessResult>;
@@ -90,6 +98,9 @@ export function spawnRunProcess(): RunProcess {
       const streaming = typeof request.onStdoutLine === "function";
       let stdout = "";
       let pending = "";
+      let stderrPending = "";
+      let outputTruncated = false;
+      let stoppedEarly = false;
       let stderrTail = "";
       let settled = false;
       let timedOut = false;
@@ -102,24 +113,43 @@ export function spawnRunProcess(): RunProcess {
             }, request.timeoutMs)
           : undefined;
 
+      const emit = (line: string, callback: (line: string) => void | boolean) => {
+        if (stoppedEarly) return;
+        if (request.maxLineChars && line.length > request.maxLineChars) {
+          outputTruncated = true;
+          stoppedEarly = true;
+        } else if (callback(line.replace(/\r$/, "")) === false) {
+          stoppedEarly = true;
+        }
+        if (stoppedEarly) child.kill("SIGKILL");
+      };
+      const lines = (previous: string, chunk: string, callback: (line: string) => void | boolean): string => {
+        if (stoppedEarly) return "";
+        const text = previous + chunk;
+        let start = 0;
+        for (let end = text.indexOf("\n"); end >= 0; end = text.indexOf("\n", start)) {
+          emit(text.slice(start, end), callback);
+          start = end + 1;
+          if (stoppedEarly) return "";
+        }
+        const rest = text.slice(start);
+        if (request.maxLineChars && rest.length > request.maxLineChars) {
+          outputTruncated = true;
+          stoppedEarly = true;
+          child.kill("SIGKILL");
+          return "";
+        }
+        return rest;
+      };
       child.stdout?.setEncoding("utf8");
       child.stdout?.on("data", (chunk: string) => {
-        if (!streaming) {
-          stdout += chunk;
-          return;
-        }
-        pending += chunk;
-        let newline = pending.indexOf("\n");
-        while (newline >= 0) {
-          request.onStdoutLine?.(pending.slice(0, newline).replace(/\r$/, ""));
-          pending = pending.slice(newline + 1);
-          newline = pending.indexOf("\n");
-        }
+        if (!streaming) { stdout += chunk; return; }
+        pending = lines(pending, chunk, request.onStdoutLine!);
       });
-
       child.stderr?.setEncoding("utf8");
       child.stderr?.on("data", (chunk: string) => {
-        stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_LIMIT);
+        if (request.onStderrLine) stderrPending = lines(stderrPending, chunk, request.onStderrLine);
+        else stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_LIMIT);
       });
 
       const settle = (result: RunProcessResult) => {
@@ -127,10 +157,11 @@ export function spawnRunProcess(): RunProcess {
         settled = true;
         if (timer) clearTimeout(timer);
         if (streaming && pending.length > 0) {
-          request.onStdoutLine?.(pending.replace(/\r$/, ""));
+          emit(pending, request.onStdoutLine!);
           pending = "";
         }
-        resolve(result);
+        if (request.onStderrLine && stderrPending) emit(stderrPending, request.onStderrLine);
+        resolve({ ...result, outputTruncated, stoppedEarly });
       };
 
       child.on("error", (error) => {
@@ -151,20 +182,42 @@ export function spawnRunProcess(): RunProcess {
 
 export function fetchSignedRawPut(fetchImpl: typeof fetch = fetch): SignedRawPut {
   return async (request) => {
-    const streaming = !(request.body instanceof Uint8Array);
-    const body: Buffer | Readable = request.body instanceof Uint8Array
-      ? Buffer.from(request.body)
-      : Readable.from(request.body);
-    const init = {
-      method: request.method,
-      headers: request.headers,
-      body,
-      credentials: request.credentials,
-      redirect: request.redirect,
-      ...(streaming ? { duplex: "half" } : {}),
-    } as RequestInit;
-    const response = await fetchImpl(request.url, init);
-    return { status: response.status, bodyText: await response.text() };
+    const source = request.body;
+    // Fetch copies BufferSource bodies. Stream views of the held, verified
+    // bytes instead, keeping read-ahead bounded without reopening the path.
+    const chunks = source instanceof Uint8Array ? (function* () {
+      for (let offset = 0; offset < source.byteLength; offset += 256 * 1024) {
+        yield source.subarray(offset, Math.min(offset + 256 * 1024, source.byteLength));
+      }
+    })() : source;
+    const body = Readable.from(chunks, { objectMode: false, highWaterMark: 256 * 1024 });
+    const controller = new AbortController();
+    const remaining = request.expiresAt === undefined ? undefined : request.expiresAt - Date.now();
+    const timer = remaining === undefined ? undefined : setTimeout(
+      () => controller.abort(), Math.max(1, Math.min(remaining, 2_147_483_647)),
+    );
+    try {
+      if (remaining !== undefined && remaining <= 0) throw new Error("Media upload session expired.");
+      const response = await fetchImpl(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body,
+        credentials: request.credentials,
+        redirect: request.redirect,
+        signal: controller.signal,
+        duplex: "half",
+      } as RequestInit);
+      // Only status is part of the PUT contract. Do not buffer an untrusted,
+      // potentially unending storage response or retain its signed diagnostics.
+      await response.body?.cancel();
+      return { status: response.status };
+    } finally {
+      if (timer) clearTimeout(timer);
+      body.destroy();
+      // Readable.from may not start its input before a rejected fetch. Close a
+      // caller-owned stream as well so an unopened wrapper cannot leak its fd.
+      if (source instanceof Readable) source.destroy();
+    }
   };
 }
 

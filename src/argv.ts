@@ -58,6 +58,7 @@ const VALUE_FLAGS = new Set([
   "content-type",
   "code",
   "codec",
+  "preset",
   "max-fps",
   "max-edge",
   "webp-quality",

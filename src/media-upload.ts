@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { constants, createReadStream } from "node:fs";
+import { open } from "node:fs/promises";
 import path from "node:path";
 import type { MediaCommit, MediaUploadDeclaration, MediaUploadSession } from "./adapters/protocol.js";
 import { isValidIdempotencyKey } from "./ids.js";
 import { readWebpContainer } from "./media/webp.js";
-import { networkError, usageError } from "./problems.js";
+import { CliError, networkError, usageError } from "./problems.js";
 import type { SignedRawPut } from "./runtime.js";
 
 const MEDIA_PUT_NOT_READY =
@@ -50,38 +50,64 @@ function supported(value: string): value is SupportedMediaContentType {
   return (SUPPORTED_MEDIA_CONTENT_TYPES as readonly string[]).includes(value);
 }
 
-export async function prepareMediaUpload(filePath: string, explicitContentType?: string): Promise<PreparedMediaUpload> {
+export async function prepareMediaUpload(filePath: string, explicitContentType?: string, expectedSha256?: string): Promise<PreparedMediaUpload> {
   const filename = path.basename(filePath);
   if (!filename || Buffer.byteLength(filename, "utf8") > 255) throw usageError("Media filename must be 1 to 255 bytes.");
   const contentType = explicitContentType ?? EXTENSIONS[path.extname(filename).toLowerCase()];
   if (!contentType || !supported(contentType)) {
     throw usageError(`Unsupported media type; use one of: ${SUPPORTED_MEDIA_CONTENT_TYPES.join(", ")}.`);
   }
-  let bytes: Buffer;
-  try {
-    bytes = await readFile(filePath);
-  } catch (error) {
-    throw usageError(`Cannot read media file: ${error instanceof Error ? error.message : "read failed"}`);
-  }
-  if (bytes.length < 1) throw usageError("Media file must not be empty.");
+  const bytes = await readMediaSnapshot(filePath);
   if (contentType === "image/webp" && readWebpContainer(bytes)?.lossless) {
     throw usageError(
       "Lossless WebP (VP8L) is not accepted. Encode lossy WebP that keeps alpha, then upload with --no-transcode.",
     );
   }
-  // 1 GiB is a plan-independent transport ceiling. The default plan has no
-  // product storage cap. A custom ceiling, when present, is checked first and
-  // rejected with quota_exceeded. Remaining prepaid credit of zero rejects
-  // declare and commit with payment_required.
-  if (bytes.length > 1_073_741_824) {
-    throw usageError(
-      "Media file exceeds the 1 GiB per-upload transport ceiling. Run screenrig account show " +
-        "to inspect used_bytes, any content_limit_bytes ceiling, and credit_remaining.",
-    );
-  }
   const sha256 = createHash("sha256").update(bytes).digest("hex");
+  if (expectedSha256 !== undefined && sha256 !== expectedSha256) {
+    throw usageError("Video bytes changed after delivery verification; retry the upload. No upload was started.");
+  }
   const commit: MediaCommit = { content_type: contentType, bytes: bytes.length, sha256 };
   return { bytes, commit, declaration: { filename, ...commit } };
+}
+
+async function readMediaSnapshot(filePath: string): Promise<Buffer> {
+  // Open first so admission and reads address the same file. NONBLOCK lets us
+  // reject FIFOs without waiting for a writer; regular file reads are unaffected.
+  let handle;
+  try {
+    handle = await open(filePath, constants.O_RDONLY | constants.O_NONBLOCK);
+  } catch {
+    throw usageError("Cannot open media file for reading.");
+  }
+  try {
+    const before = await handle.stat();
+    if (!before.isFile()) throw usageError("Media input must be a regular file.");
+    if (before.size < 1) throw usageError("Media file must not be empty.");
+    if (before.size > 1_073_741_824) {
+      throw usageError(
+        "Media file exceeds the 1 GiB per-upload transport ceiling. Run screenrig account show " +
+          "to inspect used_bytes, any content_limit_bytes ceiling, and credit_remaining.",
+      );
+    }
+    const bytes = Buffer.allocUnsafe(before.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const { bytesRead } = await handle.read(bytes, offset, Math.min(256 * 1024, bytes.length - offset), offset);
+      if (bytesRead === 0) throw usageError("Media file changed while reading; retry the upload.");
+      offset += bytesRead;
+    }
+    const after = await handle.stat();
+    if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) {
+      throw usageError("Media file changed while reading; retry the upload.");
+    }
+    return bytes;
+  } catch (error) {
+    if (error instanceof CliError) throw error;
+    throw usageError("Cannot read media file.");
+  } finally {
+    await handle.close();
+  }
 }
 
 export function validateMediaUploadSession(input: MediaUploadSession, nowMs = Date.now()): ValidatedMediaUploadSession {
@@ -148,6 +174,7 @@ async function performSignedMediaBodyPut(
       body,
       credentials: "omit",
       redirect: "error",
+      expiresAt: session.expiresAt,
     });
   } catch {
     throw networkError(MEDIA_PUT_NOT_READY);

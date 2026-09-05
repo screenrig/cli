@@ -501,7 +501,7 @@ test("published problem codes include payment_required at 402", () => {
   assert.doesNotMatch(source, /stripe|x402/i);
 });
 
-test("pinned backend snapshot includes swipe and primitive enter schema", () => {
+test("pinned backend snapshot includes swipe and primitive enter", () => {
   const generated = readFileSync(GENERATED_CONTRACT, "utf8");
   const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
 
@@ -570,7 +570,7 @@ test("playlist writes send a media selector and media_end, not a singular media_
   assert.doesNotMatch(openapi, /enum: \[video_end\]/);
 });
 
-test("pinned backend snapshot carries flat primitive unions", () => {
+test("pinned backend snapshot uses the four canonical primitive unions", () => {
   const generated = readFileSync(GENERATED_CONTRACT, "utf8");
   const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
 

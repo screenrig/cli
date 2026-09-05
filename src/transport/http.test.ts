@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { FetchTransport } from "./http.js";
+import { CliError } from "../problems.js";
 
 function spyResponse(body: Uint8Array | string, init: ResponseInit): {
   response: Response;
@@ -122,4 +123,114 @@ test("media download exposes response chunks without calling text or arrayBuffer
   assert.deepEqual(received, [1, 2, 3, 4, 5]);
   assert.equal(textCalls, 0);
   assert.equal(arrayBufferCalls, 0);
+});
+
+for (const method of ["request", "download"] as const) {
+  test(`${method} keeps its deadline when the caller supplies an abort signal`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let fetchSignal: AbortSignal | undefined;
+    const transport = new FetchTransport("https://api.screenrig.ai/", undefined, async (_input, init) => {
+      fetchSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        fetchSignal?.addEventListener("abort", () => reject(fetchSignal?.reason), { once: true });
+      });
+    });
+    const caller = new AbortController();
+    const rejected = assert.rejects(transport[method]({ method: "GET", path: "/api/v1/media", timeout_ms: 5, signal: caller.signal }),
+      (err: unknown) => err instanceof CliError && err.problem.code === "timeout");
+    t.mock.timers.tick(5);
+    const timedOut = fetchSignal?.aborted;
+    if (!timedOut) caller.abort(); // Settle the request even on a regression.
+    await rejected;
+    assert.equal(timedOut, true, "the request deadline must abort the fetch");
+    assert.equal(caller.signal.aborted, false, "the deadline must leave the caller signal alone");
+  });
+
+  test(`${method} also respects caller cancellation with a custom reason`, async () => {
+    const caller = new AbortController();
+    const transport = new FetchTransport("https://api.screenrig.ai/", undefined, async (_input, init) => {
+      const signal = init?.signal;
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    const rejected = assert.rejects(transport[method]({ method: "GET", path: "/api/v1/media", timeout_ms: 30_000, signal: caller.signal }),
+      (err: unknown) => err instanceof CliError && err.problem.code === "timeout");
+    caller.abort(new Error("Cancelled by caller"));
+    await rejected;
+  });
+}
+
+test("media download keeps its deadline while reading an error response", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let abortSignal: AbortSignal | undefined;
+  let releaseBody: (() => void) | undefined;
+  const transport = new FetchTransport("https://api.screenrig.ai/", undefined, async (_input, init) => {
+    abortSignal = init?.signal ?? undefined;
+    return {
+      status: 503,
+      headers: new Headers({ "content-type": "application/problem+json" }),
+      text: () => new Promise<string>((resolve, reject) => {
+        releaseBody = () => resolve('{}');
+        abortSignal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      }),
+    } as Response;
+  });
+  const rejected = assert.rejects(transport.download({ method: "GET", path: "/api/v1/media/med_1/content", timeout_ms: 5 }),
+    (err: unknown) => err instanceof CliError && err.problem.code === "timeout");
+  await Promise.resolve();
+  assert.ok(releaseBody, "the response body must be pending before the deadline");
+  t.mock.timers.tick(5);
+  if (!abortSignal?.aborted) releaseBody();
+  await rejected;
+  assert.equal(abortSignal?.aborted, true);
+});
+
+
+for (const kind of ["download", "stream"] as const) {
+  test(`${kind} cancels an unfinished response when its consumer stops`, async () => {
+    let cancelled = false;
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(Uint8Array.from([1, 2])); },
+      cancel() { cancelled = true; },
+    }));
+    const transport = new FetchTransport("https://api.screenrig.ai", undefined, async () => response);
+    const result = kind === "download"
+      ? (await transport.download({ method: "GET", path: "/media" })).body!
+      : await transport.stream({ method: "GET", path: "/events" });
+    for await (const _chunk of result) break;
+    assert.equal(cancelled, true);
+    assert.equal(response.body?.locked, false);
+  });
+}
+
+test("an unused download can be cancelled before iteration and clears its deadline", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let cancelled = 0;
+  let signal: AbortSignal | null | undefined;
+  const response = new Response(new ReadableStream({ cancel() { cancelled += 1; } }));
+  const transport = new FetchTransport("https://api.screenrig.ai", undefined, async (_url, init) => {
+    signal = init?.signal;
+    return response;
+  });
+  const result = await transport.download({ method: "GET", path: "/media", timeout_ms: 5 });
+  await result.body?.cancel?.();
+  await result.body?.cancel?.();
+  t.mock.timers.tick(5);
+  assert.equal(cancelled, 1);
+  assert.equal(response.body?.locked, false);
+  assert.equal(signal?.aborted, false, "cancelled response must not leave a request timer behind");
+});
+
+test("download cancellation does not replace the consumer's original error", async () => {
+  const response = new Response(new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(Uint8Array.from([1])); },
+    cancel() { throw new Error("cancel failed"); },
+  }));
+  const transport = new FetchTransport("https://api.screenrig.ai", undefined, async () => response);
+  const result = await transport.download({ method: "GET", path: "/media" });
+  await assert.rejects(async () => {
+    for await (const _chunk of result.body!) throw new Error("consumer failed");
+  }, /consumer failed/);
+  assert.equal(response.body?.locked, false);
 });

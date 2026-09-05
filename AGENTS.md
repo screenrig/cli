@@ -84,18 +84,27 @@ installation, players, backend services, the site, or production deployment.
   `token`, `api_url`, and the four control-plane rows stay `fail`. Never widen
   a `fail` to something the host cannot fix or a supported command never needs;
   never soften a piece a default path requires.
-- Delivery profiles are fixed. Video defaults to H.264 (`libx264`, High, level
-  4.2, `-preset fast -crf 23 -maxrate 8M -bufsize 16M`, `-bf 2`, GOP two
+- Delivery profiles are fixed. Video defaults to H.264 (`libx264`, High, output-dependent level
+  4.2/5.1/5.2, `-preset fast -crf 23 -maxrate 8M -bufsize 16M`, `-bf 2`, GOP two
   seconds, `yuv420p`, Rec. 709 limited range, AAC 192 kbit/s 48 kHz stereo),
   with H.265 (`libx265`, `hvc1`, Main, CRF 28) under `--codec hevc`. Players
   play from a complete cached file, so the encode does not remux for
   progressive download (`+faststart`). Images are lossy WebP quality 90,
   `yuva420p` when the source has alpha, `libwebp_anim` for animation. When
   ffmpeg has no libwebp encoder, stills use `cwebp` (`-q 90 -alpha_q 100`,
-  never lossless). Both bound **each** edge to 3840 px,
+  never lossless). Both bound **each** edge to 3840 px; video also
+  bounds total pixels to 3840×2160,
   preserve aspect, and never upscale. HDR is tone mapped to Rec. 709, with a
   warning-and-fallback path when the build has no libzimg. Do not retune these
-  values here; they are a product decision, not a local one.
+  quality/bitrate/GOP values here; they are a product decision, not a local one.
+  Optional `--preset signage-1080p30` and `signage-4k30` cap the long/short
+  edges to 1920/1080 or 3840/2160 and FPS to 30, preserving orientation.
+  Explicit max-edge/FPS flags can tighten these bounds. `--no-audio` removes
+  the video audio track. Neither option accepts images or `--no-transcode`.
+  Do not describe these presets as hardware certified. Select levels that fit
+  macroblock/pixel throughput and the existing VBV/DPB budgets; never label 4K
+  H.264 as level 4.2. x265 needs explicit `level-idc`; both encoders carry
+  explicit Rec.709 VUI parameters because wrapper color flags may be omitted.
 - **H.264 is the default deliberately.** ScreenRig stores one rendition per
   media object and the layout contract carries no codec parameter, so there is
   no per-client fallback. A browser that cannot decode the rendition stalls
@@ -111,12 +120,27 @@ installation, players, backend services, the site, or production deployment.
   `transcode` block reports `applied`, `stage`, `reason`, `source_bytes`,
   `output_bytes`, `width`, `height`, `dimensions_measured`, and `duration_ms`.
 - `width`/`height` are measured from the produced file, never predicted.
-  `boundedSize` plans the encode; ffmpeg rounds differently, so the envelope
-  must carry a read-back. Keep the honest fallback: on a failed read-back,
-  report the planned size with `dimensions_measured: false` and a warning.
+  Video output must pass a read-back of codec, profile/level, pixel format,
+  exact planned size, FPS, Rec.709 tags, and expected audio before upload.
+  Reject known interlaced output; absent HEVC scan metadata remains unknown.
+  The `video` object reports codec/profile/level/FPS/audio/scan/preset. These
+  facts do not prove peak VBV bitrate or hardware performance. For images only,
+  keep the planned-size fallback with `dimensions_measured: false` and a warning.
+- H.264 MP4 may pass through automatically only after `video-inspection.ts`
+  validates every packet and all SPS/PPS/slice headers from a private snapshot.
+  Keep the supported lower source levels separate from encoder level floors.
+  Enforce policy size/FPS/audio, level/DPB/reference limits, stable colour/geometry,
+  constant cadence, IDR GOPs, B-frame runs, and video/AAC packet rate envelopes.
+  Missing evidence, trace errors, unsupported inputs, or a 15-second per-pass
+  timeout fall back to encoding. Never substitute average bitrate for this scan,
+  use full picture decoding as a mandatory check, or retain a media cache.
+  Bind accepted snapshot bytes to `prepareMediaUpload` with `verifiedSha256`;
+  the signed PUT must use that exact verified Buffer. The caller removes the
+  snapshot on success/failure. These checks are not formal HRD or hardware proof.
 - `--no-transcode` uploads accepted source bytes unchanged and never runs ffmpeg.
   It does not bypass the lossy-WebP delivery policy: VP8L input is rejected.
-  Any gate or test that asserts raw-byte upload identity must pass it.
+  Raw-byte tests unrelated to inspection must pass it; automatic passthrough
+  tests must prove the full inspection path and exact original-byte identity.
 - `npm run smoke:mock` must stay independent of a host ffmpeg. It uses
   `--no-transcode` for `media upload` and ignores the toolchain checks in
   `doctor`. The transcode paths are covered by `src/media/transcode.test.ts` and

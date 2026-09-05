@@ -166,6 +166,7 @@ Commands:
   media upload <file> [--content-type TYPE] [--tag TAG] [--no-wait] [--poll-ms MS]
                       [--no-transcode] [--codec h264|hevc] [--max-fps N]
                       [--max-edge PIXELS] [--webp-quality 1-100] [--no-progress]
+                      [--preset signage-1080p30|signage-4k30] [--no-audio]
   media show <id>
   media list [--tag TAG] [--primitive image|video]
   media update <id> (--tag TAG | --clear-tag) --if-match REVISION
@@ -1886,6 +1887,21 @@ function readyMediaId(operation: Operation): string | undefined {
 
 /** Flags that shape the pre-upload transcode. */
 export function transcodeOptionsFromArgs(args: ParsedArgs): TranscodeOptions {
+  const preset = flagString(args.flags, "preset");
+  if (args.flags.preset !== undefined && preset !== "signage-1080p30" && preset !== "signage-4k30") {
+    throw usageError("--preset accepts signage-1080p30 or signage-4k30.");
+  }
+  if (args.flags["no-audio"] !== undefined && args.flags["no-audio"] !== true) throw usageError("--no-audio takes no value.");
+  const noAudio = flagBool(args.flags, "no-audio");
+  if (flagBool(args.flags, "no-transcode") && (preset || noAudio)) {
+    throw usageError("--preset and --no-audio require transcoding; remove --no-transcode.");
+  }
+  for (const flag of ["max-fps", "max-edge", "webp-quality"]) {
+    const raw = args.flags[flag];
+    if (raw !== undefined && (typeof raw !== "string" || !Number.isFinite(Number(raw)))) {
+      throw usageError(`--${flag} requires a numeric value.`);
+    }
+  }
   const codecFlag = flagString(args.flags, "codec")?.toLowerCase();
   let codec: TranscodeCodec = DEFAULT_CODEC;
   if (codecFlag !== undefined) {
@@ -1910,7 +1926,8 @@ export function transcodeOptionsFromArgs(args: ParsedArgs): TranscodeOptions {
   if (!Number.isInteger(webpQuality) || webpQuality < 1 || webpQuality > 100) {
     throw usageError("--webp-quality must be a whole number between 1 and 100.");
   }
-  return { codec, maxFps, maxEdge, webpQuality };
+  return { codec, maxFps, maxEdge, webpQuality,
+    preset: preset === "signage-1080p30" || preset === "signage-4k30" ? preset : undefined, noAudio };
 }
 
 function progressReporterFor(args: ParsedArgs, runtime: CliRuntime): ProgressReporter {
@@ -1949,7 +1966,7 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
 
   try {
     const prepared = transcode
-      ? await prepareMediaUpload(transcode.filePath, transcode.contentType)
+      ? await prepareMediaUpload(transcode.filePath, transcode.contentType, transcode.verifiedSha256)
       : await prepareMediaUpload(sourcePath, explicitContentType);
     const tag = mediaTagFromArgs(args);
     if (tag !== undefined) {
@@ -2003,6 +2020,7 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
             height: transcode.height,
             dimensions_measured: transcode.dimensionsMeasured,
             duration_ms: transcode.durationMs,
+            ...(transcode.video ? { video: transcode.video } : {}),
           }
         : { applied: false, reason: "--no-transcode uploaded the source bytes unchanged" },
     };

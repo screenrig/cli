@@ -234,6 +234,21 @@ export interface MediaProbe {
   hasVideo: boolean;
   hasAudio: boolean;
   codec: string;
+  codecTag: string;
+  streamCount: number;
+  videoStreamIndex: number;
+  audioStreamIndex: number;
+  audioProfile: string;
+  timeBase: number;
+  profile: string;
+  level: number;
+  fieldOrder: string;
+  colorRange: string;
+  videoStreams: number;
+  audioStreams: number;
+  audioCodec: string;
+  audioSampleRate: number;
+  audioChannels: number;
   formatNames: readonly string[];
   pixelFormat: string;
   /** Coded dimensions, before any display-matrix rotation. */
@@ -253,8 +268,17 @@ export interface MediaProbe {
 }
 
 interface ProbeStream {
+  index?: number;
+  time_base?: string;
   codec_type?: string;
   codec_name?: string;
+  codec_tag_string?: string;
+  profile?: string;
+  level?: number;
+  field_order?: string;
+  color_range?: string;
+  sample_rate?: string;
+  channels?: number;
   width?: number;
   height?: number;
   pix_fmt?: string;
@@ -312,6 +336,21 @@ export function parseProbePayload(raw: string): MediaProbe {
     hasVideo: video !== undefined && codedWidth > 0 && codedHeight > 0,
     hasAudio: audio !== undefined,
     codec: normalizeField(video?.codec_name),
+    codecTag: normalizeField(video?.codec_tag_string),
+    streamCount: streams.length,
+    videoStreamIndex: video?.index ?? streams.indexOf(video!),
+    audioStreamIndex: audio?.index ?? streams.indexOf(audio!),
+    audioProfile: normalizeField(audio?.profile),
+    timeBase: parseRate(video?.time_base),
+    profile: normalizeField(video?.profile),
+    level: video?.level ?? 0,
+    fieldOrder: normalizeField(video?.field_order),
+    colorRange: normalizeField(video?.color_range),
+    videoStreams: streams.filter((stream) => stream.codec_type === "video").length,
+    audioStreams: streams.filter((stream) => stream.codec_type === "audio").length,
+    audioCodec: normalizeField(audio?.codec_name),
+    audioSampleRate: Number(audio?.sample_rate ?? 0),
+    audioChannels: audio?.channels ?? 0,
     formatNames: (payload.format?.format_name ?? "").split(",").filter((name) => name.length > 0),
     pixelFormat,
     codedWidth,

@@ -1018,7 +1018,7 @@ paths:
       operationId: startBrowserLink
       x-rate-limit-policies: [{ name: browser-link-session-ip, quota: 20, windowSeconds: 60 }, { name: browser-link-session-outstanding, quota: 5, windowSeconds: 600 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
-      description: Strict same-origin no-JavaScript-compatible POST that creates or reuses a thirty-minute unclaimed browser-link session. Claiming within that window creates a fresh, independent ten-minute protected provisioning-delivery window; cookie Player pairing remains ten minutes. Native pairing is a separate seventy-two-hour unclaimed locator plus a fresh independent seventy-two-hour collection window after claim. It sets exactly the apex host-only Secure HttpOnly SameSite=Strict Path=/ __Host-screenrig-browser-link cookie with no Domain. JSON clients receive 201; Accept text/html receives a bodyless 303 to /setup. No insecure localhost fallback exists; development requires the configured HTTPS loopback origin.
+      description: Strict same-origin no-JavaScript-compatible POST that creates or reuses a thirty-minute unclaimed browser-link session. Claiming within that window creates a fresh, independent ten-minute protected provisioning-delivery window; cookie Player pairing remains ten minutes. Native pairing is a separate seventy-two-hour unclaimed locator; claimed native delivery remains durable until signed completion or explicit on-player reset. It sets exactly the apex host-only Secure HttpOnly SameSite=Strict Path=/ __Host-screenrig-browser-link cookie with no Domain. JSON clients receive 201; Accept text/html receives a bodyless 303 to /setup. No insecure localhost fallback exists; development requires the configured HTTPS loopback origin.
       responses:
         "201": { description: Safe browser-link code/status metadata., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, Set-Cookie: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserLinkSession" } } } }
         "303": { description: No-JavaScript form continuation to the read-only setup page., headers: { Location: { schema: { type: string, enum: [/setup] } }, Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, Set-Cookie: { schema: { type: string } } } }
@@ -1111,7 +1111,7 @@ paths:
       operationId: startNativePairingSession
       x-rate-limit-policies: [{ name: native-pairing-start-ip, quota: 20, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
-      description: Creates a native-only pairing session from a player Ed25519 public key. Unclaimed native pairing lasts seventy-two hours. A successful claim starts a fresh independent seventy-two-hour collection window and does not inherit leftover unclaimed time. Cookies, query credentials, cross-site origins, and Authorization are rejected. Exact Idempotency-Key replay precedes new abuse admission. The response never sets a cookie. An already-bound public key returns enrollment_bound.
+      description: Creates a native-only pairing session from a player Ed25519 public key. Unclaimed native pairing lasts seventy-two hours. A successful claim reserves a screen and stores durable encrypted delivery independently of the locator expiry. It does not bind the public key to an account until signed completion for that exact pairing credential and nonce. Cookies, query credentials, cross-site origins, and Authorization are rejected. Exact Idempotency-Key replay precedes new abuse admission. The response never sets a cookie. An already-bound or explicitly retired public key returns enrollment_bound.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingStart" } } } }
       responses:
@@ -1142,7 +1142,7 @@ paths:
       operationId: completeNativePairingSession
       x-rate-limit-policies: [{ name: native-pairing-complete-ip, quota: 30, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
-      description: Completes native pairing with a completion nonce and an EdDSA compact JWS (op=pairing.complete). No cookie is accepted or set. No ScreenRig-Device credential is issued. The player next mints ScreenRig-Session from a possession proof.
+      description: Completes native pairing with a completion nonce and an EdDSA compact JWS (op=pairing.complete) whose request_hash binds the exact pairing credential and completion nonce. No cookie is accepted or set. No ScreenRig-Device credential is issued. The player next mints ScreenRig-Session from a possession proof.
       security: [{ nativePairingAuthorization: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingComplete" } } } }
       responses:
@@ -1176,7 +1176,7 @@ paths:
       operationId: createNativeIdentityRuntimeSession
       x-rate-limit-policies: [{ name: native-identity-session-ip, quota: 60, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
-      description: Verifies an EdDSA compact JWS (op=session.mint) against the enrolled public key and returns a signed 24-hour ScreenRig-Session. Cookies are neither accepted nor set. Exact Idempotency-Key replay precedes new abuse admission. An archived screen still mints a session so the player can show the archived glass.
+      description: Verifies an EdDSA compact JWS (op=session.mint) against the enrolled public key and returns a signed 24-hour ScreenRig-Session. Cookies are neither accepted nor set. Exact Idempotency-Key replay precedes new abuse admission. An archived screen still mints a session so the player can show the archived glass. Session mint requires the exact durable account and screen binding established by signed completion; pending claim offers have no session authority. Exact replay rechecks that binding and rejects retired identities.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityProof" } } } }
       responses:
@@ -1195,10 +1195,10 @@ paths:
       operationId: resetNativeIdentity
       x-rate-limit-policies: [{ name: native-identity-reset-ip, quota: 60, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
-      description: The only de-associate. Verifies an EdDSA compact JWS (op=identity.reset), deletes the enrollment, and tombstones the bound screen. No account bearer. Cookies are neither accepted nor set. A missing local key without this proof is not a reset.
+      description: The only de-associate, invoked by an explicit confirmed on-player reset. Verifies an EdDSA compact JWS (op=identity.reset), retires the public key, and tombstones its bound screen and pending native claim offers. The terminal enrollment retains key and prior account/screen history so a fresh signed reset can safely retry a lost response; the retired key cannot pair or mint sessions again. No account bearer. Cookies are neither accepted nor set. A missing local key or network error is not a reset.
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityProof" } } } }
       responses:
-        "204": { description: Enrollment deleted and screen tombstoned; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
+        "204": { description: "Identity retired and screen tombstoned, or an authenticated retry of the same retired identity; no Set-Cookie.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -1234,7 +1234,7 @@ paths:
         - { $ref: "#/components/parameters/AfterCursor" }
         - { $ref: "#/components/parameters/LastEventID" }
       responses:
-        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.archived and screen.unarchived are runtime audience events; they do not wipe credentials. screen.deleted is a runtime audience event delivered when signed identity reset tombstones the screen, so the player must discard its identity file after a successful reset rather than retry. account.suspended and account.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
+        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.archived and screen.unarchived are runtime audience events; they do not wipe credentials. screen.deleted is a runtime audience event delivered when signed identity reset tombstones the screen. No runtime event authorizes clearing local identity. Only successful signed reset initiated by a confirmed local player action permits local identity rotation. account.suspended and account.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/reports:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -3007,7 +3007,7 @@ components:
         created_at: { type: string, format: date-time }
     FeedbackList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/FeedbackSubmission" } } } }
     PairingSession: { type: object, additionalProperties: false, required: [code, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, expires_at: { type: string, format: date-time } } }
-    NativePairingSession: { type: object, additionalProperties: false, required: [code, pairing_credential, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, pairing_credential: { type: string, pattern: "^srp_[A-Za-z0-9_-]{43}$" }, expires_at: { type: string, format: date-time, description: Unclaimed native pairing deadline; seventy-two hours after issuance. A successful claim starts a fresh independent seventy-two-hour collection window. } } }
+    NativePairingSession: { type: object, additionalProperties: false, required: [code, pairing_credential, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, pairing_credential: { type: string, pattern: "^srp_[A-Za-z0-9_-]{43}$" }, expires_at: { type: string, format: date-time, description: Unclaimed native pairing deadline; seventy-two hours after issuance. After claim this deadline does not expire native delivery or device identity. } } }
     PairingClaimedEvent: { type: object, additionalProperties: false, required: [type, completion_nonce], properties: { type: { type: string, enum: [pairing.claimed] }, completion_nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
     PairingClaim: { type: object, additionalProperties: false, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri } } }
     PairingComplete: { type: object, additionalProperties: false, required: [completion_nonce], properties: { completion_nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
@@ -3024,36 +3024,60 @@ components:
     NativePairingStart:
       type: object
       additionalProperties: false
-      required: [public_key]
+      required: [kid, public_key, signature]
+      description: Proof of private-key possession is required before enrollment or locator creation. Sign a fresh pairing.start challenge bound to the exact Idempotency-Key; unsigned starts are rejected.
       properties:
+        kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
         public_key: { $ref: "#/components/schemas/PlayerPublicKey" }
+        signature: { type: string, minLength: 80, maxLength: 4096 }
     NativePairingComplete:
       type: object
       additionalProperties: false
       required: [completion_nonce, public_key, signature]
       properties:
+        kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
         completion_nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
         public_key: { $ref: "#/components/schemas/PlayerPublicKey" }
-        signature: { type: string, minLength: 80, maxLength: 4096, description: Compact EdDSA JWS with op=pairing.complete. }
+        signature: { type: string, minLength: 80, maxLength: 4096, description: Compact EdDSA JWS with op=pairing.complete and request_hash binding the exact pairing credential and completion nonce. }
     NativeIdentityChallengeRequest:
       type: object
       additionalProperties: false
       required: [kid]
+      description: Explicit requests require op and request_hash together. An unknown key also requires public_key and op=pairing.start; challenge issuance does not enroll it. The kid-only compatibility request is restricted to already-bound or retired keys and permits only session.mint or identity.reset proofs.
       properties:
-        kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$", description: RFC 7638 SHA-256 JWK thumbprint of the enrolled public key. }
+        kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$", description: RFC 7638 SHA-256 JWK thumbprint. }
+        public_key: { $ref: "#/components/schemas/PlayerPublicKey" }
+        op: { type: string, enum: [pairing.start, pairing.complete, session.mint, identity.reset] }
+        request_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
     NativeIdentityChallenge:
       type: object
       additionalProperties: false
       required: [nonce, expires_at, aud, op]
+      description: Explicit challenges echo op and request_hash; compare both against locally computed values before signing. Independent nonces expire in 120 seconds and can be consumed once. Legacy kid-only responses omit request_hash.
       properties:
         nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
         expires_at: { type: string, format: date-time }
         aud: { type: string, enum: [screenrig-runtime] }
-        op: { type: string, enum: [pairing.complete, session.mint, identity.reset] }
+        op: { type: string, enum: [pairing.start, pairing.complete, session.mint, identity.reset] }
+        request_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
     NativeIdentityProof:
       type: object
       additionalProperties: false
       required: [kid, public_key, signature]
+      description: >-
+        Compact JWS protected header is exactly {"alg":"EdDSA"}. Claims are kid,
+        nonce, aud=screenrig-runtime, op, integer iat/exp, nonempty jti, and
+        request_hash. Contextual proofs last at most 120 seconds and expire no
+        later than their issued challenge. request_hash is lowercase SHA-256 hex
+        of UTF-8 strings joined by one NUL, with no trailing NUL, starting with
+        screenrig.native.identity.request.v1 and op. Append Idempotency-Key for
+        pairing.start and session.mint; append the exact srp_ pairing credential
+        then completion_nonce for pairing.complete; append nothing for identity.reset.
+        Only already-bound or retired keys may use context-free legacy session/reset
+        proofs, at most 300 seconds, against a legacy-issued challenge. A cached
+        operation result still requires a fresh issued proof or the exact accepted
+        proof while its short-lived receipt remains valid. Duplicate or unknown
+        JWS/JWK members, noncanonical base64url, and non-prime-order keys are rejected.
       properties:
         kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
         public_key: { $ref: "#/components/schemas/PlayerPublicKey" }

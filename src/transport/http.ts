@@ -76,6 +76,7 @@ export class FetchTransport implements Transport {
 
   async request(req: TransportRequest): Promise<TransportResponse> {
     const controller = new AbortController();
+    const signal = req.signal ? AbortSignal.any([req.signal, controller.signal]) : controller.signal;
     const timer =
       req.timeout_ms && req.timeout_ms > 0
         ? setTimeout(() => controller.abort(), req.timeout_ms)
@@ -85,7 +86,7 @@ export class FetchTransport implements Transport {
         method: req.method,
         headers: this.headers(req),
         body: this.serialize(req.body),
-        signal: req.signal ?? controller.signal,
+        signal,
       });
       const headers = headerMap(response.headers);
       if (req.binary) {
@@ -99,7 +100,7 @@ export class FetchTransport implements Transport {
       const text = await response.text();
       return { status: response.status, headers, body: decodeTextBody(text, headers["content-type"] ?? ""), rawText: text };
     } catch (err) {
-      if ((err as Error).name === "AbortError") {
+      if (signal.aborted || (err as Error).name === "AbortError") {
         throw timeoutError("API request timed out", req.headers?.["x-request-id"]);
       }
       throw networkError(
@@ -159,6 +160,7 @@ export class FetchTransport implements Transport {
           }
           throw networkError(err instanceof Error ? err.message : "SSE stream failed", requestId);
         } finally {
+          try { await reader.cancel(); } catch { /* Preserve the original stream error. */ }
           reader.releaseLock();
         }
       },
@@ -167,6 +169,7 @@ export class FetchTransport implements Transport {
 
   async download(req: TransportRequest): Promise<TransportDownloadResponse> {
     const controller = new AbortController();
+    const signal = req.signal ? AbortSignal.any([req.signal, controller.signal]) : controller.signal;
     const timer =
       req.timeout_ms && req.timeout_ms > 0
         ? setTimeout(() => controller.abort(), req.timeout_ms)
@@ -176,11 +179,11 @@ export class FetchTransport implements Transport {
       response = await this.fetchImpl(buildUrl(this.apiUrl, req.path, req.query), {
         method: req.method,
         headers: { ...this.headers(req), accept: "*/*" },
-        signal: req.signal ?? controller.signal,
+        signal,
       });
     } catch (err) {
       if (timer) clearTimeout(timer);
-      if ((err as Error).name === "AbortError") {
+      if (signal.aborted || (err as Error).name === "AbortError") {
         throw timeoutError("Media download timed out", req.headers?.["x-request-id"]);
       }
       throw networkError(err instanceof Error ? err.message : "Media download failed", req.headers?.["x-request-id"]);
@@ -188,14 +191,22 @@ export class FetchTransport implements Transport {
 
     const headers = headerMap(response.headers);
     if (response.status >= 400) {
-      if (timer) clearTimeout(timer);
-      const text = await response.text();
-      return {
-        status: response.status,
-        headers,
-        problem: decodeTextBody(text, headers["content-type"] ?? ""),
-        rawText: text,
-      };
+      try {
+        const text = await response.text();
+        return {
+          status: response.status,
+          headers,
+          problem: decodeTextBody(text, headers["content-type"] ?? ""),
+          rawText: text,
+        };
+      } catch (err) {
+        if (signal.aborted || (err as Error).name === "AbortError") {
+          throw timeoutError("Media download timed out", req.headers?.["x-request-id"]);
+        }
+        throw networkError(err instanceof Error ? err.message : "Media download failed", req.headers?.["x-request-id"]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     }
     if (!response.body) {
       if (timer) clearTimeout(timer);
@@ -204,7 +215,16 @@ export class FetchTransport implements Transport {
 
     const reader = response.body.getReader();
     const requestId = req.headers?.["x-request-id"];
+    let released = false;
+    const cancel = async () => {
+      if (released) return;
+      released = true;
+      if (timer) clearTimeout(timer);
+      try { await reader.cancel(); } catch { /* Preserve the caller's original failure. */ }
+      reader.releaseLock();
+    };
     const body: TransportByteStream = {
+      cancel,
       async *[Symbol.asyncIterator]() {
         try {
           while (true) {
@@ -213,11 +233,10 @@ export class FetchTransport implements Transport {
             yield value;
           }
         } catch (err) {
-          if ((err as Error).name === "AbortError") throw timeoutError("Media download timed out", requestId);
+          if (signal.aborted || (err as Error).name === "AbortError") throw timeoutError("Media download timed out", requestId);
           throw networkError(err instanceof Error ? err.message : "Media download stream failed", requestId);
         } finally {
-          if (timer) clearTimeout(timer);
-          reader.releaseLock();
+          await cancel();
         }
       },
     };

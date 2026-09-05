@@ -92,6 +92,18 @@ function probeJson(overrides: Record<string, unknown> = {}, format: Record<strin
   });
 }
 
+function encodedVideoProbe(overrides: Record<string, unknown> = {}, audio = true): string {
+  const payload = JSON.parse(probeJson({
+    codec_tag_string: "avc1", profile: "High", level: 42, field_order: "progressive",
+    color_range: "tv", color_space: "bt709", color_transfer: "bt709", color_primaries: "bt709",
+    avg_frame_rate: "30/1", r_frame_rate: "30/1", ...overrides,
+  }));
+  payload.streams = [payload.streams[0], ...(audio ? [{
+    codec_type: "audio", codec_name: "aac", sample_rate: "48000", channels: 2,
+  }] : [])];
+  return JSON.stringify(payload);
+}
+
 interface FakeOptions {
   probe: string;
   /**
@@ -185,7 +197,7 @@ function fakeRuntime(options: FakeOptions): { runtime: CliRuntime; calls: RunPro
       if (measuring && options.outputProbe !== undefined) {
         return { code: 0, signal: null, stdout: options.outputProbe, stderrTail: "" };
       }
-      return { code: 0, signal: null, stdout: options.probe, stderrTail: "" };
+      return { code: 0, signal: null, stdout: measuring && encodedOutput.endsWith(".mp4") ? encodedVideoProbe() : options.probe, stderrTail: "" };
     }
     if (isCwebpVersionProbe(request)) {
       if (!options.cwebp) {
@@ -420,14 +432,14 @@ test("reads WebP containers that ffmpeg cannot demux", () => {
   assert.deepEqual(readWebpContainer(vp8xThenLossless), { animated: false, width: 16, height: 32, lossless: true });
 });
 
-test("video transcode defaults to the universally playable H.264 profile and reports progress", async () => {
+test("video transcode defaults to H.264 and selects a level that fits the output", async () => {
   resetFfmpegToolchainCache();
   const dir = await testTemp("transcode-");
   const source = path.join(dir, "clip.mov");
   await writeFile(source, Buffer.alloc(2048, 3));
   const { runtime, calls, stderr } = fakeRuntime({
     probe: probeJson({ width: 6000, height: 2400, avg_frame_rate: "60/1" }),
-    outputProbe: probeJson({ width: 3840, height: 1536, avg_frame_rate: "30/1" }),
+    outputProbe: encodedVideoProbe({ width: 3840, height: 1536, level: 51 }),
     progressSeconds: [3, 6, 9],
   });
   const seen: string[] = [];
@@ -462,11 +474,13 @@ test("video transcode defaults to the universally playable H.264 profile and rep
     assert.ok(encode);
     const args = encode.args;
     const valueAfter = (flag: string) => args[args.indexOf(flag) + 1];
-    assert.equal(defaultTranscodeOptions().codec, "h264", "the default must play in every browser");
+    assert.equal(defaultTranscodeOptions().codec, "h264", "the default stays H.264");
     assert.equal(valueAfter("-c:v"), "libx264");
     assert.equal(valueAfter("-profile:v"), "high");
-    assert.equal(valueAfter("-level:v"), "4.2");
+    assert.equal(valueAfter("-level:v"), "5.1");
     assert.equal(valueAfter("-crf"), "23");
+    assert.equal(valueAfter("-refs"), "2");
+    assert.match(String(valueAfter("-x264-params")), /colorprim=bt709:transfer=bt709:colormatrix=bt709/);
     assert.ok(!args.includes("-tag:v"), "the H.264 profile carries no hvc1 tag");
     assert.equal(valueAfter("-pix_fmt"), "yuv420p");
     assert.ok(!args.includes("-movflags"), "cached playback does not remux for progressive download");
@@ -474,8 +488,7 @@ test("video transcode defaults to the universally playable H.264 profile and rep
     assert.equal(valueAfter("-r"), "30");
     assert.equal(valueAfter("-c:a"), "aac");
     assert.equal(valueAfter("-colorspace"), "bt709");
-    assert.match(String(valueAfter("-vf")), /min\(3840,iw\)/);
-    assert.match(String(valueAfter("-vf")), /min\(3840,ih\)/);
+    assert.equal(valueAfter("-vf"), "scale=w=3840:h=1536");
     assert.ok(args.includes("-progress") && args.includes("pipe:1"));
     assert.ok(args.includes("-nostdin"));
 
@@ -502,7 +515,7 @@ test("--codec hevc opts in to the H.265 delivery profile", async () => {
   await writeFile(source, Buffer.alloc(2048, 3));
   const { runtime, calls } = fakeRuntime({
     probe: probeJson({ width: 6000, height: 2400, avg_frame_rate: "60/1" }),
-    outputProbe: probeJson({ width: 3840, height: 1536, avg_frame_rate: "30/1" }),
+    outputProbe: encodedVideoProbe({ width: 3840, height: 1536, codec_name: "hevc", codec_tag_string: "hvc1", profile: "Main", level: 153 }),
     progressSeconds: [6],
   });
 
@@ -527,6 +540,8 @@ test("--codec hevc opts in to the H.265 delivery profile", async () => {
     assert.ok(!args.includes("+faststart"));
     assert.equal(valueAfter("-r"), "30");
     assert.match(String(valueAfter("-x265-params")), /min-keyint=60/);
+    assert.match(String(valueAfter("-x265-params")), /level-idc=5.1:colorprim=bt709:transfer=bt709:colormatrix=bt709/);
+    assert.doesNotMatch(String(valueAfter("-x265-params")), /output-depth/);
     assert.match(result.reason, /H\.265/);
     assert.doesNotMatch(result.reason, /faststart/);
   } finally {
@@ -1000,11 +1015,11 @@ test("reported dimensions are measured from the output, not predicted from the p
   const dir = await testTemp("transcode-measured-");
   const source = path.join(dir, "clip.mp4");
   await writeFile(source, Buffer.alloc(256, 6));
-  // The planner predicts 3840x2160 here, but ffmpeg floors to a multiple of two
-  // from a slightly different rounding, so the delivered file is 3840x2158.
+  // The old nearest-even helper predicts 2160; the video plan now floors to 2158.
+  // The result still comes from a validated probe of the produced file.
   const { runtime } = fakeRuntime({
     probe: probeJson({ width: 3841, height: 2160 }),
-    outputProbe: probeJson({ width: 3840, height: 2158 }),
+    outputProbe: encodedVideoProbe({ width: 3840, height: 2158, level: 51 }),
     progressSeconds: [6],
   });
   const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() });
@@ -1020,23 +1035,61 @@ test("reported dimensions are measured from the output, not predicted from the p
   }
 });
 
-test("an unmeasurable output falls back to the planned size and says so", async () => {
+test("an unmeasurable video fails closed and deletes its output", async () => {
   resetFfmpegToolchainCache();
   const dir = await testTemp("transcode-unmeasured-");
   const source = path.join(dir, "clip.mp4");
   await writeFile(source, Buffer.alloc(256, 7));
-  const { runtime } = fakeRuntime({
-    probe: probeJson({ width: 6000, height: 2400 }),
-    failOutputProbe: true,
-    progressSeconds: [6],
-  });
-  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() });
+  const { runtime, calls } = fakeRuntime({ probe: probeJson(), failOutputProbe: true });
   try {
-    assert.equal(result.width, 3840);
-    assert.equal(result.height, 1536);
-    assert.equal(result.dimensionsMeasured, false, "a fallback must never claim to be measured");
-    assert.equal(result.warnings.length, 1);
-    assert.match(String(result.warnings[0]), /could not measure/);
+    await assert.rejects(() => transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() }));
+    const output = encodeCall(calls)?.args.at(-1);
+    assert.ok(output);
+    await assert.rejects(() => stat(output));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a noncompliant video never reports completion and deletes its output", async () => {
+  resetFfmpegToolchainCache();
+  const dir = await testTemp("transcode-invalid-");
+  const source = path.join(dir, "clip.mp4");
+  await writeFile(source, Buffer.alloc(256, 7));
+  const { runtime, calls } = fakeRuntime({ probe: probeJson(), outputProbe: encodedVideoProbe({ level: 31 }) });
+  let finished = false;
+  try {
+    await assert.rejects(() => transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions(),
+      reporter: { start() {}, update() {}, finish() { finished = true; }, failed() {} },
+    }), /delivery validation/);
+    assert.equal(finished, false);
+    const output = encodeCall(calls)?.args.at(-1);
+    assert.ok(output);
+    await assert.rejects(() => stat(output));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("signage preset bounds portrait video and strips audio when requested", async () => {
+  resetFfmpegToolchainCache();
+  const dir = await testTemp("transcode-signage-");
+  const source = path.join(dir, "portrait.mov");
+  await writeFile(source, Buffer.alloc(256, 7));
+  const { runtime, calls } = fakeRuntime({
+    probe: probeJson({ width: 2160, height: 3840 }),
+    outputProbe: encodedVideoProbe({ width: 1080, height: 1920 }, false),
+  });
+  const result = await transcodeForUpload({ runtime, filePath: source,
+    options: { ...defaultTranscodeOptions(), preset: "signage-1080p30", noAudio: true, maxFps: 60 },
+  });
+  try {
+    const args = encodeCall(calls)?.args ?? [];
+    assert.ok(args.includes("-an"));
+    assert.ok(!args.includes("-c:a") && !args.includes("0:a:0?"));
+    assert.equal(args[args.indexOf("-vf") + 1], "scale=w=1080:h=1920");
+    assert.deepEqual(result.video, { codec: "h264", profile: "high", level: "4.2", fps: 30,
+      audio: false, scan: "progressive", preset: "signage-1080p30" });
   } finally {
     await rm(dir, { recursive: true, force: true });
     if (result.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });

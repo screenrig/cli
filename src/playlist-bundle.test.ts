@@ -8,6 +8,7 @@ import {
   mkdir,
   open,
   readFile,
+  readdir,
   rename,
   rm,
   stat,
@@ -34,6 +35,7 @@ import {
 import { CliError } from "./problems.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
+import { FetchTransport } from "./transport/http.js";
 import type { TransportRequest, TransportResponse } from "./transport/types.js";
 
 function sha(bytes: Uint8Array): string {
@@ -946,3 +948,40 @@ test("command parser and JSON help expose playlist export/import including updat
   assert.match(envelope.data.usage, /playlist export/);
   assert.equal(await errors, "");
 });
+
+
+for (const failure of ["headers", "open"] as const) {
+  test(`export releases a real download body when ${failure} fails before iteration`, async () => {
+    const dir = await testTemp("bundle-cancel-");
+    const bytes = Uint8Array.from([1, 2, 3, 4]);
+    const transport = exportTransport(bytes);
+    let cancelled = false;
+    let reads = 0;
+    const download = new FetchTransport("https://api.screenrig.ai", undefined, async () => {
+      if (failure === "open") {
+        const temporary = (await readdir(dir)).find((entry) => entry.startsWith(".export.tmp-"));
+        assert.ok(temporary);
+        await writeFile(path.join(dir, temporary, "media", `${sha(bytes)}.png`), "collision");
+      }
+      return new Response(new ReadableStream<Uint8Array>({
+        pull(controller) { reads += 1; controller.enqueue(bytes); },
+        cancel() { cancelled = true; },
+      }, { highWaterMark: 0 }), { headers: {
+        "content-type": failure === "headers" ? "video/mp4" : "image/png",
+        "content-length": String(bytes.length), etag: `"${sha(bytes)}"`,
+      } });
+    });
+    transport.download = download.download.bind(download);
+    try {
+      await assert.rejects(exportPlaylistBundle({
+        playlistId: "pl_SOURCE", outputDirectory: path.join(dir, "export"),
+        client: new ApiClient({ transport }),
+      }), failure === "headers" ? /content.type/i : /EEXIST/);
+      assert.equal(cancelled, true);
+      assert.equal(reads, 0, "rejection must release the response without starting a media read");
+      assert.deepEqual(await readdir(dir), [], "temporary export must also be removed");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+}

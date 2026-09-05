@@ -3178,7 +3178,7 @@ test("media upload validates transcode flags even when transcoding is off", asyn
   const file = path.join(configDir, "pixel.png");
   await writeFile(file, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3]));
   try {
-    for (const bad of [["--webp-quality", "500"], ["--codec", "vp9"], ["--max-edge", "99999"], ["--max-fps", "0"]]) {
+    for (const bad of [["--webp-quality", "500"], ["--codec", "vp9"], ["--max-edge", "99999"], ["--max-fps", "0"], ["--max-fps", "oops"], ["--max-edge"], ["--preset"], ["--preset", "unknown"], ["--preset", "signage-1080p30"], ["--no-audio"], ["--no-audio=false"]]) {
       const result = await withRuntime(
         ["--json", "media", "upload", file, "--no-transcode", ...bad],
         transport,
