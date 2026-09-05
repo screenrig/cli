@@ -53,6 +53,21 @@ function session(headers: Record<string, unknown> = { "content-type": "image/png
   };
 }
 
+test("verified video hash binds the exact buffered upload bytes", async () => {
+  const dir = await testTemp("media-verified-");
+  const file = path.join(dir, "clip.mp4");
+  try {
+    await writeFile(file, Buffer.from("verified video bytes"));
+    const original = await prepareMediaUpload(file);
+    const prepared = await prepareMediaUpload(file, "video/mp4", original.declaration.sha256);
+    await writeFile(file, Buffer.from("changed after verification"));
+    assert.deepEqual(prepared.bytes, original.bytes, "the signed PUT retains the verified Buffer despite later path changes");
+    await assert.rejects(() => prepareMediaUpload(file, "video/mp4", original.declaration.sha256), /changed after delivery verification/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("prepares supported media with inferred or explicit content type", async () => {
   const dir = await testTemp("media-");
   await mkdir(dir, { recursive: true });

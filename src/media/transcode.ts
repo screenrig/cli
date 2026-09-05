@@ -18,6 +18,7 @@ import { silentProgressReporter, type ProgressReporter } from "./progress.js";
 import { readWebpContainer } from "./webp.js";
 import type { LocalSpan } from "../log/types.js";
 import { planVideoDelivery, validateVideoOutput, type SignagePreset, type VideoDelivery } from "./video-profile.js";
+import { inspectH264Passthrough } from "./video-inspection.js";
 
 function loggingProgressReporter(inner: ProgressReporter, span: LocalSpan): ProgressReporter {
   let lastPercent = -1;
@@ -132,6 +133,8 @@ export interface TranscodeResult {
   warnings: string[];
   /** Directory the caller must remove once the upload completes. */
   cleanupDir?: string;
+  /** Bind a verified snapshot to the exact bytes subsequently prepared for upload. */
+  verifiedSha256?: string;
 }
 
 export interface TranscodeRequest {
@@ -216,15 +219,20 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
     );
   }
 
-  const passthrough = passthroughReason(kind, probe, options, sourceWebp);
+  const verified = kind === "video" ? await inspectH264Passthrough(runtime, toolchain, filePath, probe, options) : undefined;
+  const passthrough = verified
+    ? "source H.264 passed full compressed-stream delivery checks; original bytes preserved"
+    : passthroughReason(kind, probe, options, sourceWebp);
   if (passthrough) {
+    const passedProbe = verified?.probe ?? probe;
+    const passedBytes = verified?.bytes ?? sourceBytes;
     transcodeSpan.finish({
       passthrough: true,
       stage: kind,
-      source_bytes: sourceBytes,
-      output_bytes: sourceBytes,
-      width: probe.displayWidth,
-      height: probe.displayHeight,
+      source_bytes: passedBytes,
+      output_bytes: passedBytes,
+      width: passedProbe.displayWidth,
+      height: passedProbe.displayHeight,
       reason: passthrough,
     });
     return {
@@ -233,12 +241,14 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
       contentType: kind === "video" ? "video/mp4" : "image/webp",
       passthrough: true,
       reason: passthrough,
+      ...(verified ? { filePath: verified.filePath, filename: path.basename(verified.filePath), cleanupDir: verified.cleanupDir,
+        verifiedSha256: verified.sha256, video: videoSummary(verified.probe, options) } : {}),
       stage: kind,
-      sourceBytes,
-      outputBytes: sourceBytes,
+      sourceBytes: passedBytes,
+      outputBytes: passedBytes,
       durationMs: 0,
-      width: probe.displayWidth,
-      height: probe.displayHeight,
+      width: passedProbe.displayWidth,
+      height: passedProbe.displayHeight,
       // A passthrough uploads the probed source verbatim, so this is measured.
       dimensionsMeasured: true,
       warnings: [],
@@ -304,8 +314,7 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
       const outputProbe = await probeMedia(runtime, toolchain, outputPath);
       validateVideoOutput(outputProbe, plan.delivery, options);
       measured = { width: outputProbe.displayWidth, height: outputProbe.displayHeight };
-      video = { codec: options.codec, profile: outputProbe.profile, level: plan.delivery.level,
-        fps: outputProbe.fps, audio: outputProbe.hasAudio, scan: outputProbe.fieldOrder || "unknown", ...(options.preset ? { preset: options.preset } : {}) };
+      video = videoSummary(outputProbe, options);
     } else {
       measured = await measureOutput(runtime, toolchain, outputPath, kind);
     }
@@ -353,6 +362,11 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
   }
     },
   );
+}
+
+function videoSummary(probe: MediaProbe, options: TranscodeOptions): NonNullable<TranscodeResult["video"]> {
+  return { codec: options.codec, profile: probe.profile, level: String(probe.level / (options.codec === "h264" ? 10 : 30)),
+    fps: probe.fps, audio: probe.hasAudio, scan: probe.fieldOrder || "unknown", ...(options.preset ? { preset: options.preset } : {}) };
 }
 
 /**

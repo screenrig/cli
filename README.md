@@ -654,9 +654,27 @@ track. These options apply only to video and cannot be combined with
 `--no-transcode`. They are delivery bounds, not certification for any device;
 verify representative content on the intended players.
 
-Videos are always re-encoded unless `--no-transcode` is explicit. Average source
-bitrate and codec labels alone do not prove peak bitrate or decoder-buffer
-compliance, so the CLI does not automatically pass through a matching MP4.
+Already suitable H.264 MP4s can pass through automatically without re-encoding.
+The CLI checks the entire compressed stream: High profile at a supported level
+from 3.1 to 5.2, 8-bit 4:2:0 progressive pictures, stable Rec.709 headers, at most
+four decoder-buffer/reference frames and two reordered frames, constant frame
+cadence, and IDR random-access intervals within the rounded two-second GOP.
+It checks every packet against the 8 Mbit/s video / 16 Mbit buffer envelope;
+AAC-LC stereo at 48 kHz must also fit a 192 kbit/s / 384 kbit packet envelope.
+The file must already fit the requested size, FPS, codec, and audio options.
+Extra streams, unsupported or incomplete required evidence, changed parameters,
+or failed checks take the normal encode path. HEVC currently always takes that path.
+
+Inspection uses ffprobe packets and FFmpeg `trace_headers` in stream-copy mode,
+without decoding pictures. Each compressed-stream pass has a 15-second limit;
+large or unusual inputs may be re-encoded when inspection exceeds that limit.
+The CLI validates a private temporary snapshot and checks its SHA-256 against
+the exact buffered upload bytes. Successful passthrough preserves the original
+file bytes; the snapshot is removed after upload. Files over the 1 GiB transport
+ceiling do not take this fast path. No media cache or verification records are
+retained. Average bitrate alone is never enough to pass; these conservative
+checks still do not constitute formal HRD conformance or hardware certification.
+`--no-transcode` remains the explicit way to bypass transcoding and these checks.
 
 ### Why H.264 is the default
 

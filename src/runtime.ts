@@ -46,7 +46,11 @@ export interface RunProcessRequest {
   command: string;
   args: string[];
   /** Receives each complete stdout line. When set, stdout is streamed instead of captured. */
-  onStdoutLine?: (line: string) => void;
+  onStdoutLine?: (line: string) => void | boolean;
+  /** Stream stderr without retaining it; return false to stop a rejected inspection. */
+  onStderrLine?: (line: string) => void | boolean;
+  /** Bound pending streamed lines; exceeding this aborts the process. */
+  maxLineChars?: number;
   timeoutMs?: number;
 }
 
@@ -61,6 +65,8 @@ export interface RunProcessResult {
   /** Set when the process could not be started at all. */
   spawnError?: string;
   timedOut?: boolean;
+  outputTruncated?: boolean;
+  stoppedEarly?: boolean;
 }
 
 export type RunProcess = (request: RunProcessRequest) => Promise<RunProcessResult>;
@@ -90,6 +96,9 @@ export function spawnRunProcess(): RunProcess {
       const streaming = typeof request.onStdoutLine === "function";
       let stdout = "";
       let pending = "";
+      let stderrPending = "";
+      let outputTruncated = false;
+      let stoppedEarly = false;
       let stderrTail = "";
       let settled = false;
       let timedOut = false;
@@ -102,24 +111,43 @@ export function spawnRunProcess(): RunProcess {
             }, request.timeoutMs)
           : undefined;
 
+      const emit = (line: string, callback: (line: string) => void | boolean) => {
+        if (stoppedEarly) return;
+        if (request.maxLineChars && line.length > request.maxLineChars) {
+          outputTruncated = true;
+          stoppedEarly = true;
+        } else if (callback(line.replace(/\r$/, "")) === false) {
+          stoppedEarly = true;
+        }
+        if (stoppedEarly) child.kill("SIGKILL");
+      };
+      const lines = (previous: string, chunk: string, callback: (line: string) => void | boolean): string => {
+        if (stoppedEarly) return "";
+        const text = previous + chunk;
+        let start = 0;
+        for (let end = text.indexOf("\n"); end >= 0; end = text.indexOf("\n", start)) {
+          emit(text.slice(start, end), callback);
+          start = end + 1;
+          if (stoppedEarly) return "";
+        }
+        const rest = text.slice(start);
+        if (request.maxLineChars && rest.length > request.maxLineChars) {
+          outputTruncated = true;
+          stoppedEarly = true;
+          child.kill("SIGKILL");
+          return "";
+        }
+        return rest;
+      };
       child.stdout?.setEncoding("utf8");
       child.stdout?.on("data", (chunk: string) => {
-        if (!streaming) {
-          stdout += chunk;
-          return;
-        }
-        pending += chunk;
-        let newline = pending.indexOf("\n");
-        while (newline >= 0) {
-          request.onStdoutLine?.(pending.slice(0, newline).replace(/\r$/, ""));
-          pending = pending.slice(newline + 1);
-          newline = pending.indexOf("\n");
-        }
+        if (!streaming) { stdout += chunk; return; }
+        pending = lines(pending, chunk, request.onStdoutLine!);
       });
-
       child.stderr?.setEncoding("utf8");
       child.stderr?.on("data", (chunk: string) => {
-        stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_LIMIT);
+        if (request.onStderrLine) stderrPending = lines(stderrPending, chunk, request.onStderrLine);
+        else stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_LIMIT);
       });
 
       const settle = (result: RunProcessResult) => {
@@ -127,10 +155,11 @@ export function spawnRunProcess(): RunProcess {
         settled = true;
         if (timer) clearTimeout(timer);
         if (streaming && pending.length > 0) {
-          request.onStdoutLine?.(pending.replace(/\r$/, ""));
+          emit(pending, request.onStdoutLine!);
           pending = "";
         }
-        resolve(result);
+        if (request.onStderrLine && stderrPending) emit(stderrPending, request.onStderrLine);
+        resolve({ ...result, outputTruncated, stoppedEarly });
       };
 
       child.on("error", (error) => {

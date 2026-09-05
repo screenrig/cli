@@ -126,9 +126,21 @@ installation, players, backend services, the site, or production deployment.
   The `video` object reports codec/profile/level/FPS/audio/scan/preset. These
   facts do not prove peak VBV bitrate or hardware performance. For images only,
   keep the planned-size fallback with `dimensions_measured: false` and a warning.
+- H.264 MP4 may pass through automatically only after `video-inspection.ts`
+  validates every packet and all SPS/PPS/slice headers from a private snapshot.
+  Keep the supported lower source levels separate from encoder level floors.
+  Enforce policy size/FPS/audio, level/DPB/reference limits, stable colour/geometry,
+  constant cadence, IDR GOPs, B-frame runs, and video/AAC packet rate envelopes.
+  Missing evidence, trace errors, unsupported inputs, or a 15-second per-pass
+  timeout fall back to encoding. Never substitute average bitrate for this scan,
+  use full picture decoding as a mandatory check, or retain a media cache.
+  Bind accepted snapshot bytes to `prepareMediaUpload` with `verifiedSha256`;
+  the signed PUT must use that exact verified Buffer. The caller removes the
+  snapshot on success/failure. These checks are not formal HRD or hardware proof.
 - `--no-transcode` uploads accepted source bytes unchanged and never runs ffmpeg.
   It does not bypass the lossy-WebP delivery policy: VP8L input is rejected.
-  Any gate or test that asserts raw-byte upload identity must pass it.
+  Raw-byte tests unrelated to inspection must pass it; automatic passthrough
+  tests must prove the full inspection path and exact original-byte identity.
 - `npm run smoke:mock` must stay independent of a host ffmpeg. It uses
   `--no-transcode` for `media upload` and ignores the toolchain checks in
   `doctor`. The transcode paths are covered by `src/media/transcode.test.ts` and

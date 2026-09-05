@@ -1926,7 +1926,7 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
 
   try {
     const prepared = transcode
-      ? await prepareMediaUpload(transcode.filePath, transcode.contentType)
+      ? await prepareMediaUpload(transcode.filePath, transcode.contentType, transcode.verifiedSha256)
       : await prepareMediaUpload(sourcePath, explicitContentType);
     const tag = mediaTagFromArgs(args);
     if (tag !== undefined) {

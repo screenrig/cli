@@ -235,6 +235,11 @@ export interface MediaProbe {
   hasAudio: boolean;
   codec: string;
   codecTag: string;
+  streamCount: number;
+  videoStreamIndex: number;
+  audioStreamIndex: number;
+  audioProfile: string;
+  timeBase: number;
   profile: string;
   level: number;
   fieldOrder: string;
@@ -263,6 +268,8 @@ export interface MediaProbe {
 }
 
 interface ProbeStream {
+  index?: number;
+  time_base?: string;
   codec_type?: string;
   codec_name?: string;
   codec_tag_string?: string;
@@ -330,6 +337,11 @@ export function parseProbePayload(raw: string): MediaProbe {
     hasAudio: audio !== undefined,
     codec: normalizeField(video?.codec_name),
     codecTag: normalizeField(video?.codec_tag_string),
+    streamCount: streams.length,
+    videoStreamIndex: video?.index ?? streams.indexOf(video!),
+    audioStreamIndex: audio?.index ?? streams.indexOf(audio!),
+    audioProfile: normalizeField(audio?.profile),
+    timeBase: parseRate(video?.time_base),
     profile: normalizeField(video?.profile),
     level: video?.level ?? 0,
     fieldOrder: normalizeField(video?.field_order),

@@ -50,7 +50,7 @@ function supported(value: string): value is SupportedMediaContentType {
   return (SUPPORTED_MEDIA_CONTENT_TYPES as readonly string[]).includes(value);
 }
 
-export async function prepareMediaUpload(filePath: string, explicitContentType?: string): Promise<PreparedMediaUpload> {
+export async function prepareMediaUpload(filePath: string, explicitContentType?: string, expectedSha256?: string): Promise<PreparedMediaUpload> {
   const filename = path.basename(filePath);
   if (!filename || Buffer.byteLength(filename, "utf8") > 255) throw usageError("Media filename must be 1 to 255 bytes.");
   const contentType = explicitContentType ?? EXTENSIONS[path.extname(filename).toLowerCase()];
@@ -80,6 +80,9 @@ export async function prepareMediaUpload(filePath: string, explicitContentType?:
     );
   }
   const sha256 = createHash("sha256").update(bytes).digest("hex");
+  if (expectedSha256 !== undefined && sha256 !== expectedSha256) {
+    throw usageError("Video bytes changed after delivery verification; retry the upload. No upload was started.");
+  }
   const commit: MediaCommit = { content_type: contentType, bytes: bytes.length, sha256 };
   return { bytes, commit, declaration: { filename, ...commit } };
 }
