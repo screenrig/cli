@@ -185,3 +185,52 @@ test("media download keeps its deadline while reading an error response", async 
   await rejected;
   assert.equal(abortSignal?.aborted, true);
 });
+
+
+for (const kind of ["download", "stream"] as const) {
+  test(`${kind} cancels an unfinished response when its consumer stops`, async () => {
+    let cancelled = false;
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(Uint8Array.from([1, 2])); },
+      cancel() { cancelled = true; },
+    }));
+    const transport = new FetchTransport("https://api.screenrig.ai", undefined, async () => response);
+    const result = kind === "download"
+      ? (await transport.download({ method: "GET", path: "/media" })).body!
+      : await transport.stream({ method: "GET", path: "/events" });
+    for await (const _chunk of result) break;
+    assert.equal(cancelled, true);
+    assert.equal(response.body?.locked, false);
+  });
+}
+
+test("an unused download can be cancelled before iteration and clears its deadline", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let cancelled = 0;
+  let signal: AbortSignal | null | undefined;
+  const response = new Response(new ReadableStream({ cancel() { cancelled += 1; } }));
+  const transport = new FetchTransport("https://api.screenrig.ai", undefined, async (_url, init) => {
+    signal = init?.signal;
+    return response;
+  });
+  const result = await transport.download({ method: "GET", path: "/media", timeout_ms: 5 });
+  await result.body?.cancel?.();
+  await result.body?.cancel?.();
+  t.mock.timers.tick(5);
+  assert.equal(cancelled, 1);
+  assert.equal(response.body?.locked, false);
+  assert.equal(signal?.aborted, false, "cancelled response must not leave a request timer behind");
+});
+
+test("download cancellation does not replace the consumer's original error", async () => {
+  const response = new Response(new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(Uint8Array.from([1])); },
+    cancel() { throw new Error("cancel failed"); },
+  }));
+  const transport = new FetchTransport("https://api.screenrig.ai", undefined, async () => response);
+  const result = await transport.download({ method: "GET", path: "/media" });
+  await assert.rejects(async () => {
+    for await (const _chunk of result.body!) throw new Error("consumer failed");
+  }, /consumer failed/);
+  assert.equal(response.body?.locked, false);
+});

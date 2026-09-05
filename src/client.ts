@@ -191,8 +191,8 @@ export class ApiClient {
     return response;
   }
 
-  async getOperation(id: string): Promise<Operation> {
-    const response = await this.call({ method: "GET", path: `/api/v1/operations/${id}` });
+  async getOperation(id: string, timeoutMs?: number): Promise<Operation> {
+    const response = await this.call({ method: "GET", path: `/api/v1/operations/${id}`, timeout_ms: timeoutMs });
     return response.body as Operation;
   }
 
@@ -202,8 +202,18 @@ export class ApiClient {
   ): Promise<Operation> {
     return this.logger.withLocal({ op: "operations.wait", message: `wait for ${id}`, operation_id: id }, async (span) => {
       const deadline = Date.now() + options.timeoutMs;
+      const remaining = () => {
+        const budget = deadline - Date.now();
+        if (budget <= 0) {
+          const err = timeoutError(`Timed out waiting for operation ${id}`, this.requestId);
+          span.error(err);
+          throw err;
+        }
+        return budget;
+      };
       while (true) {
-        const operation = await this.getOperation(id);
+        const operation = await this.getOperation(id, Math.min(this.timeoutMs, remaining()));
+        remaining();
         span.progress({ operation_id: operation.id, state: operation.state });
         if (operation.state === "succeeded" || operation.state === "failed" || operation.state === "cancelled") {
           if (operation.state !== "succeeded") {
@@ -226,12 +236,7 @@ export class ApiClient {
           span.finish({ operation_id: operation.id, state: operation.state });
           return operation;
         }
-        if (Date.now() >= deadline) {
-          const err = timeoutError(`Timed out waiting for operation ${id}`, this.requestId);
-          span.error(err);
-          throw err;
-        }
-        await options.sleep(options.pollMs);
+        await options.sleep(Math.min(options.pollMs, remaining()));
       }
     });
   }

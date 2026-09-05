@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import type { MediaUploadSession } from "./adapters/protocol.js";
@@ -189,4 +189,75 @@ test("commit idempotency key is deterministic, distinct, valid, and honored per 
   const client = new ApiClient({ transport, idempotencyKey: base });
   await client.call({ method: "POST", path: "/commit", idempotent: true, idempotencyKey: derived });
   assert.equal(transport.calls[0]?.headers?.["idempotency-key"], derived);
+});
+
+
+test("media admission rejects oversized files before reading or allocating their payload", async (t) => {
+  const dir = await testTemp("media-limit-");
+  const file = path.join(dir, "oversized.mp4");
+  const handle = await open(file, "w");
+  const prototype = Object.getPrototypeOf(handle);
+  await handle.truncate(1_073_741_825);
+  await handle.close();
+  const reads = t.mock.method(prototype, "read", () => { throw new Error("oversized payload must not be read"); });
+  try {
+    await assert.rejects(prepareMediaUpload(file), /1 GiB per-upload transport ceiling/);
+    assert.equal(reads.mock.callCount(), 0);
+    await assert.rejects(prepareMediaUpload(dir, "video/mp4"), /regular file/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("media snapshot rejects growth during a bounded descriptor read", async (t) => {
+  const dir = await testTemp("media-growth-");
+  const file = path.join(dir, "clip.mp4");
+  const handle = await open(file, "w+");
+  await handle.writeFile(Buffer.alloc(300_000, 7));
+  const prototype = Object.getPrototypeOf(handle);
+  const read = prototype.read;
+  let requested = 0;
+  let changed = false;
+  t.mock.method(prototype, "read", async function (this: typeof handle, ...args: [Buffer, number, number, number]) {
+    requested += Number(args[2]);
+    const result = await read.apply(this, args);
+    if (!changed) {
+      changed = true;
+      await handle.truncate(2_000_000);
+    }
+    return result;
+  });
+  try {
+    await assert.rejects(prepareMediaUpload(file), /changed while reading/);
+    assert.equal(requested, 300_000, "file growth cannot enlarge the admitted allocation/read budget");
+  } finally {
+    await handle.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("media read errors preserve the usage envelope and close the descriptor", async (t) => {
+  const dir = await testTemp("media-read-error-");
+  const file = path.join(dir, "clip.mp4");
+  const handle = await open(file, "w");
+  await handle.writeFile("bytes");
+  const prototype = Object.getPrototypeOf(handle);
+  await handle.close();
+  let failedHandle: typeof handle | undefined;
+  t.mock.method(prototype, "read", function (this: typeof handle) {
+    failedHandle = this;
+    throw new Error("untrusted read diagnostic");
+  });
+  try {
+    await assert.rejects(prepareMediaUpload(file), (error: unknown) => {
+      assert.ok(error instanceof CliError);
+      assert.equal(error.problem.code, "usage_error");
+      assert.doesNotMatch(error.message, /untrusted/);
+      return true;
+    });
+    assert.equal(failedHandle?.fd, -1, "the failed read descriptor must be closed");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

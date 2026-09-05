@@ -26,6 +26,8 @@ export interface TransportStream {
 
 export interface TransportByteStream {
   [Symbol.asyncIterator](): AsyncIterator<Uint8Array>;
+  /** Release an unused response, including before iteration starts. */
+  cancel?: () => Promise<void>;
 }
 
 export interface TransportDownloadResponse {

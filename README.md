@@ -52,7 +52,9 @@ domain socket at that path and writes one JSON object per line. Stdout stays
 the single command envelope; `--json` and stderr progress are unchanged. There
 is no `--log-socket` flag and no `SCREENRIG_LOG_SOCKET` override. If the field
 is absent or empty, behavior is unchanged. If it is set and connect or write
-fails, the command fails: the consumer must already be listening.
+fails, the command fails: the consumer must already be listening. Completed writes are not retained.
+A consumer that stops reading fails when the pending buffer exceeds 1 MiB;
+closing waits at most five seconds for accepted writes to drain.
 
 ```json
 {
@@ -238,7 +240,9 @@ availability, deployment, or hardware validation.
 
 Application packing accepts an already-built static directory. It produces
 deterministic bounded archives, injects the pinned browser SDK runtime, and
-never builds or executes uploaded source. `app upload` accepts optional
+never builds or executes uploaded source. File-count and expanded-byte limits are
+checked before each file is read; source files are read through bounded descriptors
+and changes during reading are rejected. `app upload` accepts optional
 `--name` (at most 120 characters) as the application name header. Runtime
 pages use `screenrig.canvas/v1`; protected content and
 `screenrig.webapp-package/v1` delivery are backend/player concerns. `screen
@@ -675,6 +679,14 @@ ceiling do not take this fast path. No media cache or verification records are
 retained. Average bitrate alone is never enough to pass; these conservative
 checks still do not constitute formal HRD conformance or hardware certification.
 `--no-transcode` remains the explicit way to bypass transcoding and these checks.
+
+Upload preparation rejects non-files and files over 1 GiB before allocating their
+payload. It retains one verified byte snapshot and sends bounded views of those
+bytes to storage, avoiding additional whole-file copies in the Fetch body adapter.
+Signed transfers stop at session expiry and release their input and response
+streams on completion or failure. Playlist exports also cancel downloads if
+headers or local file creation fail before reading starts. Operation polling
+bounds requests and sleep intervals by the remaining `--timeout` budget.
 
 ### Why H.264 is the default
 

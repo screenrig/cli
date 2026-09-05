@@ -33,6 +33,8 @@ export interface SignedRawPutRequest {
   body: Uint8Array | AsyncIterable<Uint8Array>;
   credentials: "omit";
   redirect: "error";
+  /** End the transfer when its signed upload session expires. */
+  expiresAt?: number;
 }
 
 export interface SignedRawPutResponse {
@@ -180,20 +182,42 @@ export function spawnRunProcess(): RunProcess {
 
 export function fetchSignedRawPut(fetchImpl: typeof fetch = fetch): SignedRawPut {
   return async (request) => {
-    const streaming = !(request.body instanceof Uint8Array);
-    const body: Buffer | Readable = request.body instanceof Uint8Array
-      ? Buffer.from(request.body)
-      : Readable.from(request.body);
-    const init = {
-      method: request.method,
-      headers: request.headers,
-      body,
-      credentials: request.credentials,
-      redirect: request.redirect,
-      ...(streaming ? { duplex: "half" } : {}),
-    } as RequestInit;
-    const response = await fetchImpl(request.url, init);
-    return { status: response.status, bodyText: await response.text() };
+    const source = request.body;
+    // Fetch copies BufferSource bodies. Stream views of the held, verified
+    // bytes instead, keeping read-ahead bounded without reopening the path.
+    const chunks = source instanceof Uint8Array ? (function* () {
+      for (let offset = 0; offset < source.byteLength; offset += 256 * 1024) {
+        yield source.subarray(offset, Math.min(offset + 256 * 1024, source.byteLength));
+      }
+    })() : source;
+    const body = Readable.from(chunks, { objectMode: false, highWaterMark: 256 * 1024 });
+    const controller = new AbortController();
+    const remaining = request.expiresAt === undefined ? undefined : request.expiresAt - Date.now();
+    const timer = remaining === undefined ? undefined : setTimeout(
+      () => controller.abort(), Math.max(1, Math.min(remaining, 2_147_483_647)),
+    );
+    try {
+      if (remaining !== undefined && remaining <= 0) throw new Error("Media upload session expired.");
+      const response = await fetchImpl(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body,
+        credentials: request.credentials,
+        redirect: request.redirect,
+        signal: controller.signal,
+        duplex: "half",
+      } as RequestInit);
+      // Only status is part of the PUT contract. Do not buffer an untrusted,
+      // potentially unending storage response or retain its signed diagnostics.
+      await response.body?.cancel();
+      return { status: response.status };
+    } finally {
+      if (timer) clearTimeout(timer);
+      body.destroy();
+      // Readable.from may not start its input before a rejected fetch. Close a
+      // caller-owned stream as well so an unopened wrapper cannot leak its fd.
+      if (source instanceof Readable) source.destroy();
+    }
   };
 }
 

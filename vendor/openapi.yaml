@@ -124,9 +124,10 @@ paths:
         the rejection never echoes it. The address is unique across accounts, so a second
         enrollment with the same normalized address is rejected with email_conflict, which
         the same cli-enrollment-client and cli-enrollment-ip policies bound. The address is
-        stored unverified and is never authorization, never a login identifier, and never a
-        way to reach an existing account; attaching another installation to an existing
-        account stays the passkey-approved agent-connection path. Persist client_id, the
+        stored unverified and grants no authority by itself. After an authenticated dashboard
+        user sets a password on this same account, the normalized address identifies the
+        account for password login; there is no email-based signup, recovery, or account
+        attachment. Persist client_id, the
         email, and Idempotency-Key before sending; an exact retry redelivers the same
         permanent credential from its encrypted issuance for ten minutes without creating
         another account and without tripping the email conflict. After that delivery window
@@ -189,7 +190,7 @@ paths:
   /api/v1/agents/self:
     get:
       operationId: getCurrentAgent
-      description: Returns the agent installation linked to the calling account bearer plus connection_ready. connection_ready is true only when this account has at least one persisted WebAuthn credential and can authorize another agent through the production passkey flow; dashboard users or sessions without a passkey never make it true. Identity status is diagnostic and does not debit the API meter.
+      description: Returns the agent installation linked to the calling account bearer plus connection_ready. connection_ready is true when this same account has either a persisted WebAuthn credential or an account password owned by a dashboard user and can therefore authorize another agent. Identity status is diagnostic and does not debit the API meter.
       security: [{ accountBearer: [] }]
       responses:
         "200": { description: Current agent and production connection readiness., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSelfStatus" } } } }
@@ -595,7 +596,7 @@ paths:
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Posts one transient stage-chrome toast to the named screen. A toast is
-        not a placement: it does not occupy a canvas slot, has no layer, and
+        not a primitive: it does not occupy a canvas slot, has no layer, and
         never participates in readiness or crossfade. The durable event type is
         screen.toast on the existing runtime SSE stream. Runtime scan never
         delivers a toast after expires_at, so a persisted cursor cannot replay
@@ -766,7 +767,7 @@ paths:
     get:
       operationId: listMedia
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/MediaTagQuery" }, { $ref: "#/components/parameters/MediaKindQuery" }]
+      parameters: [{ $ref: "#/components/parameters/MediaTagQuery" }, { $ref: "#/components/parameters/MediaPrimitiveQuery" }]
       responses:
         "200": { description: Media, content: { application/json: { schema: { $ref: "#/components/schemas/MediaList" } } } }
   /api/v1/media/uploads:
@@ -1344,7 +1345,7 @@ paths:
         can retain its authorized last-known-good release across process restart and temporary network loss. The
         paired-device cookie, exact screen grant, manifest revision, content-access generation, release membership,
         and ready package metadata are checked on every request. Account tokens, anonymous runtime cookies, release
-        cookies, external iframe placements, and direct object-storage access never authorize package bytes.
+        cookies, external iframe primitives, and direct object-storage access never authorize package bytes.
       security: [{ pairedDeviceCookie: [] }, { nativeSessionAuthorization: [] }]
       responses:
         "200":
@@ -1444,11 +1445,11 @@ paths:
     get:
       operationId: listRuntimeKV
       description: >-
-        Lists metadata for the application placement named by the current manifest. Requires the HttpOnly runtime
-        session and the parent-only ScreenRig-Placement-Capability handle issued on the application placement.
+        Lists metadata for the application primitive named by the current manifest. Requires the HttpOnly runtime
+        session and the parent-only ScreenRig-Primitive-Capability handle issued on the application primitive.
         Handles expire after five minutes and are refreshed by fetching the current runtime manifest; uploaded frames
         never receive the handle and must use the validated parent SDK bridge.
-      security: [{ runtimeCookie: [], placementCapability: [] }, { nativeSessionAuthorization: [], placementCapability: [] }]
+      security: [{ runtimeCookie: [], primitiveCapability: [] }, { nativeSessionAuthorization: [], primitiveCapability: [] }]
       parameters: [{ $ref: "#/components/parameters/ApplicationID" }]
       responses:
         "200": { description: Manifest-authorized application KV, content: { application/json: { schema: { $ref: "#/components/schemas/KVList" } } } }
@@ -1458,7 +1459,7 @@ paths:
     parameters: [{ $ref: "#/components/parameters/ApplicationID" }, { name: key, in: path, required: true, schema: { type: string } }]
     get:
       operationId: getRuntimeKV
-      security: [{ runtimeCookie: [], placementCapability: [] }, { nativeSessionAuthorization: [], placementCapability: [] }]
+      security: [{ runtimeCookie: [], primitiveCapability: [] }, { nativeSessionAuthorization: [], primitiveCapability: [] }]
       responses:
         "200": { description: Manifest-authorized application KV value, content: { application/json: { schema: { $ref: "#/components/schemas/KVEntry" } } } }
         default: { $ref: "#/components/responses/Problem" }
@@ -1466,7 +1467,7 @@ paths:
       operationId: putRuntimeKV
       x-rate-limit-policies: [{ name: runtime-kv-write, quota: 120, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
-      security: [{ pairedRuntimeCookie: [], placementCapability: [] }, { nativeSessionAuthorization: [], placementCapability: [] }]
+      security: [{ pairedRuntimeCookie: [], primitiveCapability: [] }, { nativeSessionAuthorization: [], primitiveCapability: [] }]
       parameters: [{ $ref: "#/components/parameters/OptionalIfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/KVWrite" } } } }
       responses:
@@ -1476,7 +1477,7 @@ paths:
       operationId: deleteRuntimeKV
       x-rate-limit-policies: [{ name: runtime-kv-write, quota: 120, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
-      security: [{ pairedRuntimeCookie: [], placementCapability: [] }, { nativeSessionAuthorization: [], placementCapability: [] }]
+      security: [{ pairedRuntimeCookie: [], primitiveCapability: [] }, { nativeSessionAuthorization: [], primitiveCapability: [] }]
       parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       responses:
         "204": { description: Paired-device KV deletion, headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
@@ -1620,25 +1621,57 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
     post:
       operationId: createDashboardSession
+      x-rate-limit-policies: [{ name: dashboard-password-email, quota: 10, windowSeconds: 600 }, { name: dashboard-password-ip, quota: 30, windowSeconds: 600 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
-        Development-authentication-only session mint. It exists so that a local
-        loop needs no WebAuthn secure context and no stable relying-party
-        identifier, and so that event attribution still records a display name.
-        It creates the user named by display_name and mints the session cookie
-        directly from the setup cookie, with no credential and no proof of
-        possession. When the server does not run dashboard development
-        authentication this route returns forbidden, unconditionally and before
-        it reads the body. The flag defaults to off, and the server refuses to
-        start with the flag on unless every configured public origin is a
-        .localhost host.
-      security: [{ dashboardSetup: [] }]
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardSessionCreate" } } } }
+        With email and password, verifies the password credential on the
+        existing account identified by its normalized enrolled email. It never
+        creates an account, dashboard user, tenant, or agent and provides no
+        signup or recovery behavior. Unknown emails, accounts without a
+        password, and mismatches all return the same unauthorized response.
+        Admission is limited independently by normalized email and client IP.
+        Success mints exactly the same __Host-screenrig-dashboard cookie and
+        server-side account session as a verified passkey assertion.
+
+        The display_name body is a separate localhost-only
+        development-authentication shape requiring the setup cookie. It mints a
+        no-proof development user and session only when DashboardDevAuth is on;
+        production explicitly refuses that shape. DashboardDevAuth is never
+        consulted or accepted as password proof.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - { $ref: "#/components/schemas/DashboardPasswordLogin" }
+                - { $ref: "#/components/schemas/DashboardSessionCreate" }
       responses:
-        "201": { description: Development-mode session cookie minted., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Set-Cookie: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardSession" } } } }
+        "200": { description: Existing account session minted from a verified password., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Set-Cookie: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardSession" } } } }
+        "201": { description: Local development-mode session cookie minted from a setup cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Set-Cookie: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardSession" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/password:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    put:
+      operationId: setDashboardPassword
+      description: >-
+        Adds or replaces the Argon2id password credential on the signed-in
+        user's existing account. The account must already carry its enrolled
+        email. This creates no account or dashboard user and does not remove or
+        alter any passkey. Replacing the password makes this session user the
+        actor for later password sessions on the same account.
+      security: [{ dashboardSession: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardPasswordSet" } } } }
+      responses:
+        "204": { description: Account password added or replaced. }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "503": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/session:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
@@ -1648,8 +1681,8 @@ paths:
         Returns the current dashboard session. Authority is the session cookie
         and the server-side session row it names; the user identifier in the
         body is descriptive and is never authorization. A returning visit calls
-        this first, and treats 401 as the signal to run a usernameless
-        assertion ceremony. dev_auth reports the server mode so the client
+        this first, and treats 401 as the signal to offer password login or a
+        usernameless assertion ceremony. dev_auth reports the server mode so the client
         needs no build-time flag, environment check, or hostname test.
       security: [{ dashboardSession: [] }]
       responses:
@@ -1697,41 +1730,61 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
     get:
       operationId: listDashboardAgentEvents
-      description: Recent lifecycle events for this agent plus events directly caused by its authenticated bearer. Worker, player, and dashboard-only activity is never inferred as agent activity.
-      security: [{ dashboardSession: [] }]
-      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }]
-      responses:
-        "200": { description: Agent events., content: { application/json: { schema: { $ref: "#/components/schemas/EventList" } } } }
-        default: { $ref: "#/components/responses/Problem" }
-  /dashboard/v1/agents/{id}/commands:
-    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
-    get:
-      operationId: listDashboardAgentCommands
       description: >-
-        What this agent asked for, newest first, as distinct from the events
-        above which describe what changed as a result. One entry per mutating
-        request authenticated as that agent, including activation, self-disconnect,
-        and the legacy credential-revoke alias. Reads are not recorded, because
-        they change nothing and a polling agent would bury every real action.
+        This agent's history, newest first, as ONE record per trigger. It carries
+        both what the agent asked for and what changed as a result. A request that
+        changed something is its domain event, stamped with the command that caused
+        it. A request that changed nothing — refused, failed, or an event-less
+        success — is one agent.command event. There is no separate commands
+        endpoint; showing the same trigger on two panels was the defect this
+        replaced.
 
-        Anonymous enrollment and connection creation are excluded. Requests using
-        temporary ScreenRig-Agent-Connect authority are also excluded because that
-        authority has not authenticated an account agent installation.
+        Lifecycle events for this agent are included. Worker, player, and
+        dashboard-only activity is never inferred as agent activity.
 
-        Every field is derived from the route this server matched. There is no
-        argument vector, no request body, no header, and no free text anywhere in
-        an entry, so nothing needs redacting and no caller can write chosen text
-        into an operator-visible surface. Resource identifiers appear because an
+        Two requests are two triggers. A retry after a refusal is a second record,
+        never a rewrite of the first.
+
+        Reads are not recorded, because they change nothing and a polling agent
+        would bury every real action. Anonymous enrollment and connection creation
+        are excluded. Requests using temporary ScreenRig-Agent-Connect authority
+        are also excluded, because that authority has not authenticated an account
+        agent installation.
+
+        Every part of the command stamp is derived from the route this server
+        matched or from the problem registry. There is no argument vector, no
+        request body, no header, and no free text anywhere in a record, so nothing
+        needs redacting and no caller can write chosen text into an
+        operator-visible surface. Resource identifiers appear because an
         identifier is never authorization and is already published on events.
 
-        Entries expire on the account's own event retention window, so the
-        command log and the events it corresponds to disappear together.
+        Paging keys on sequence, descending. Pass the returned next_cursor as
+        after to continue. next_cursor is empty when the page is short, which is
+        the end of the history: a concurrent append only takes a higher sequence,
+        and retention removes the lowest sequences first, so a cursor never
+        duplicates or skips a surviving record. Offset paging is not supported.
+
+        Every search parameter is an exact-match or range predicate on a
+        server-written token. A malformed cursor or filter value is refused with
+        invalid_request. A limit outside 1-200 is clamped to the default rather
+        than refused.
+
+        Records expire on the account's own event retention window.
       security: [{ dashboardSession: [] }]
-      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }]
+      parameters:
+        - { $ref: "#/components/parameters/ResourceID" }
+        - { name: after, in: query, description: "Cursor from a previous page's next_cursor.", schema: { type: string, pattern: "^ev1_" } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: command, in: query, description: "Exact route-derived command name, such as screens.archive.", schema: { type: string, maxLength: 80, pattern: "^[a-z0-9_-]+(\\.[a-z0-9_-]+)*$" } }
+        - { name: type, in: query, description: "Exact event type, such as agent.command or screen.archived.", schema: { type: string, maxLength: 80, pattern: "^[a-z0-9_-]+(\\.[a-z0-9_-]+)*$" } }
+        - { name: resource_type, in: query, description: "Exact kind of object the request acted on.", schema: { type: string, pattern: "^[a-z_]{1,32}$" } }
+        - { name: resource_id, in: query, description: "Exact identifier of the object the request acted on.", schema: { type: string, pattern: "^[a-z]+_[A-Za-z0-9_-]{1,60}$" } }
+        - { name: outcome, in: query, description: "Present only on agent.command records; a domain event implies ok.", schema: { type: string, enum: [ok, blocked, failed] } }
+        - { name: problem_code, in: query, description: "Exact stable problem code the server refused with.", schema: { type: string, pattern: "^[a-z_]{1,64}$" } }
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+        - { name: until, in: query, schema: { type: string, format: date-time } }
       responses:
-        "200": { description: Agent command history., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/AgentCommandList" } } } }
-        "401": { $ref: "#/components/responses/Problem" }
-        "404": { $ref: "#/components/responses/Problem" }
+        "200": { description: "Agent history.", content: { application/json: { schema: { $ref: "#/components/schemas/EventList" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/agents/{id}/disconnect/assertions:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
@@ -1759,7 +1812,7 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
     get:
       operationId: getDashboardAgentConnection
-      description: Safe review metadata for a connection id opened by the CLI. The id is not authority; the authenticated user selects the account only through a fresh approval assertion.
+      description: Safe review metadata for a connection id opened by the CLI. The id is not authority; the authenticated dashboard session selects the account.
       security: [{ dashboardSession: [] }]
       parameters: [{ $ref: "#/components/parameters/ResourceID" }]
       responses:
@@ -1769,18 +1822,18 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
     post:
       operationId: startDashboardAgentApprovalAssertion
-      description: Starts a fresh five-minute passkey assertion bound to this exact connection approval. An existing dashboard session alone is insufficient. Production accounts without a registered passkey cannot approve another agent.
+      description: Starts a fresh five-minute passkey assertion bound to this exact connection approval for a passkey session. A password-authenticated session instead receives explicit password-session confirmation metadata; its existing account session authorizes approval without invoking the development-authentication bypass.
       security: [{ dashboardSession: [] }]
       parameters: [{ $ref: "#/components/parameters/ResourceID" }]
       responses:
         "201": { description: Fresh passkey assertion., content: { application/json: { schema: { $ref: "#/components/schemas/DashboardAgentAuthorization" } } } }
-        "200": { description: Guarded development confirmation., content: { application/json: { schema: { $ref: "#/components/schemas/DashboardAgentAuthorization" } } } }
+        "200": { description: Guarded password-session or development confirmation., content: { application/json: { schema: { $ref: "#/components/schemas/DashboardAgentAuthorization" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/agent-connections/{id}/approve:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
     post:
       operationId: approveDashboardAgentConnection
-      description: Completes the fresh passkey assertion, binds the connection to the session account, and creates a pending agent and pending bearer. At most 200 live pending or active agents count toward admission; cancelled, revoked, and expired agents do not. The dashboard response contains safe agent metadata only; it never contains the bearer or credential envelope.
+      description: Completes the fresh passkey assertion or confirms an authenticated password session, binds the connection to that same session account, and creates a pending agent and pending bearer. Dashboard development authentication remains a separately guarded localhost-only exception and is never the password path. At most 200 live pending or active agents count toward admission; cancelled, revoked, and expired agents do not. The dashboard response contains safe agent metadata only; it never contains the bearer or credential envelope.
       security: [{ dashboardSession: [] }]
       parameters: [{ $ref: "#/components/parameters/ResourceID" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardAgentAuthorizationComplete" } } } }
@@ -2026,7 +2079,7 @@ paths:
       operationId: listDashboardMedia
       description: Lists ready media of the session's account. The backend holds one rendition per object and publishes no thumbnail.
       security: [{ dashboardSession: [] }]
-      parameters: [{ $ref: "#/components/parameters/MediaTagQuery" }, { $ref: "#/components/parameters/MediaKindQuery" }]
+      parameters: [{ $ref: "#/components/parameters/MediaTagQuery" }, { $ref: "#/components/parameters/MediaPrimitiveQuery" }]
       responses:
         "200": { description: Media, headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/MediaList" } } } }
         "401": { $ref: "#/components/responses/Problem" }
@@ -2125,7 +2178,7 @@ paths:
       operationId: getDashboardPlaylist
       description: >-
         Returns one playlist owned by the session's account, with its pages and
-        their placements. Authority is the session's account owning the
+        their primitives. Authority is the session's account owning the
         playlist; the identifier is not authorization, so a playlist of any
         other account is not_found. There is no dashboard playlist write of any
         kind.
@@ -2163,7 +2216,7 @@ paths:
         Tombstones one application of the session's account together with its
         releases. It returns application_in_use while a live manifest still
         references any of those releases; the caller must first remove the
-        placement through the authoring surface. The durable account event
+        primitive through the authoring surface. The durable account event
         carries the acting dashboard user as actor.
       security: [{ dashboardSession: [] }]
       parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
@@ -2295,7 +2348,7 @@ components:
     PlaybackScreenID: { name: screen_id, in: query, required: false, schema: { type: string, pattern: "^scr_" } }
     PlaybackMediaID: { name: media_id, in: query, required: false, schema: { type: string, pattern: "^med_" } }
     MediaTagQuery: { name: tag, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, description: Exact media tag. Untagged objects are omitted when this filter is present. }
-    MediaKindQuery: { name: kind, in: query, required: false, schema: { type: string, enum: [image, video] } }
+    MediaPrimitiveQuery: { name: primitive, in: query, required: false, schema: { type: string, enum: [image, video] } }
     PlaybackDay: { name: day, in: query, required: false, schema: { type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, description: UTC calendar day of the aggregate. }
     LastEventID: { name: Last-Event-ID, in: header, required: false, schema: { type: string }, description: Durable cursor used when after is absent. }
     Range: { name: Range, in: header, required: false, schema: { type: string, pattern: "^bytes=[0-9]*-[0-9]*$" }, description: V1 accepts one byte range only. }
@@ -2327,13 +2380,13 @@ components:
     pairedDeviceCookie: { type: apiKey, in: cookie, name: __Host-screenrig-device }
     pairingCookie: { type: apiKey, in: cookie, name: __Host-screenrig-pairing, description: "Signed ten-minute pairing session; never grants account, content, or runtime authority." }
     browserLinkCookie: { type: apiKey, in: cookie, name: __Host-screenrig-browser-link, description: "Apex host-only Secure HttpOnly SameSite=Strict Path=/ browser-link owner cookie; it authenticates a thirty-minute unclaimed locator and, when claimed near the boundary, its fresh ten-minute protected delivery window. It has no Domain and is never accepted as a Player cookie." }
-    placementCapability:
+    primitiveCapability:
       type: apiKey
       in: header
-      name: ScreenRig-Placement-Capability
+      name: ScreenRig-Primitive-Capability
       description: >-
-        Parent-only signed five-minute placement capability bound to the runtime
-        session, screen, application release, placement, manifest revision,
+        Parent-only signed five-minute primitive capability bound to the runtime
+        session, screen, application release, primitive, manifest revision,
         content-access generation, and allowed KV operations. Refresh by fetching
         the current manifest.
     dashboardSession:
@@ -2400,10 +2453,10 @@ components:
         screens_per_account: { type: integer, enum: [100], description: "Screen limit of the default plan. Unarchived pairing_pending and active screens count. Archived screens do not. Zero on an account means no screen cap." }
         account_content_bytes: { type: integer, enum: [0], description: "Storage limit of the default plan. Zero means no product storage cap. A custom storage ceiling, when present, still counts committed media, expanded application release trees, and application key/value entries together, including bytes reserved by an upload in flight. The per-request ceilings above are plan-independent transport bounds." }
         features: { type: object, additionalProperties: { type: boolean } }
-    CLIEnrollmentRequest: { type: object, additionalProperties: false, required: [client_id, email], properties: { client_id: { type: string, pattern: "^cli_[A-Za-z0-9_-]{43}$", description: "Stable anonymous installation identity generated from 32 CSPRNG bytes and persisted before the first request. It is rate-limit material, not an account credential." }, email: { type: string, format: email, minLength: 3, maxLength: 254, description: "Required account contact address: one plain ASCII addr-spec with an unquoted local part and dotted DNS domain, with no display name, angle bracket, comma, quote, whitespace, or control character. The server trims surrounding whitespace, lowercases the address into a private uniqueness key, and preserves the trimmed capitalization for display. It is unique across accounts: a second enrollment with the same normalized address is rejected with email_conflict. A malformed or missing address is rejected with invalid_request, and the rejection never echoes the address. It is stored unverified, email_verified stays false, and ScreenRig sends no mail. It is contact metadata only: it is never an authorization factor, never a login identifier, and no route accepts an address to look up, log into, or attach to an existing account." }, beta_key: { type: string, description: "Required when the server has a configured enrollment beta key. Omit when the server does not gate enrollment." }, name: { type: string, minLength: 1, maxLength: 80, default: "ScreenRig CLI" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
+    CLIEnrollmentRequest: { type: object, additionalProperties: false, required: [client_id, email], properties: { client_id: { type: string, pattern: "^cli_[A-Za-z0-9_-]{43}$", description: "Stable anonymous installation identity generated from 32 CSPRNG bytes and persisted before the first request. It is rate-limit material, not an account credential." }, email: { type: string, format: email, minLength: 3, maxLength: 254, description: "Required account contact address: one plain ASCII addr-spec with an unquoted local part and dotted DNS domain, with no display name, angle bracket, comma, quote, whitespace, or control character. The server trims surrounding whitespace, lowercases the address into a private uniqueness key, and preserves the trimmed capitalization for display. It is unique across accounts: a second enrollment with the same normalized address is rejected with email_conflict. A malformed or missing address is rejected with invalid_request, and the rejection never echoes the address. It is stored unverified, email_verified stays false, and ScreenRig sends no mail. It grants no authority by itself. After an authenticated dashboard user sets a password, the normalized address identifies this same account for password login; it provides no signup, recovery, or attach-by-address behavior." }, beta_key: { type: string, description: "Required when the server has a configured enrollment beta key. Omit when the server does not gate enrollment." }, name: { type: string, minLength: 1, maxLength: 80, default: "ScreenRig CLI" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
     Account: { type: object, additionalProperties: false, required: [id, revision, status, email, email_verified, used_bytes, reserved_bytes, screen_count, content_limit_bytes, screen_limit, credit_remaining, created_at, updated_at], properties: { id: { type: string }, revision: { type: integer }, status: { type: string, enum: [active, cancelled, deleted] }, email: { type: string, minLength: 3, maxLength: 254, description: "Required contact address supplied at enrollment, preserving its capitalization after surrounding whitespace is trimmed. Read-only: no route updates it, and it is published only on an authenticated read of the caller's own account." }, email_verified: { type: boolean, enum: [false], description: "Always false. The address is stored unverified, ScreenRig sends no mail, and no flow sets this true. It is published so a later recovery feature cannot mistake an unverified string for authority. It is not an authorization factor." }, used_bytes: { type: integer, description: "Durable bytes the account owns across media, expanded application release trees, and application key/value entries." }, reserved_bytes: { type: integer, description: "Bytes held by uploads in flight. They count against a custom storage ceiling until the upload commits or its reservation is released." }, screen_count: { type: integer }, content_limit_bytes: { type: integer, description: "Storage ceiling the account's plan allows. Zero means no product storage cap." }, screen_limit: { type: integer, description: "Screen limit the account's plan allows. Zero means no screen cap." }, credit_remaining: { type: integer, minimum: 0, description: "Remaining prepaid credits as a whole integer. Never negative. Enrollment grants the Standard included remainder of 10000 credits." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     RuntimeChrome: { type: object, additionalProperties: false, required: [schema_version, banner], properties: { schema_version: { type: integer, enum: [1] }, banner: { type: "null" } } }
-    CLIEnrollment: { type: object, additionalProperties: false, required: [account, agent, connection_ready, token, issuance_id, issuance_expires_at], properties: { account: { $ref: "#/components/schemas/Account" }, agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, enum: [false], description: "A newly enrolled account has no registered dashboard passkey yet, so production approval of another agent is not ready. Re-read GET /api/v1/agents/self after passkey registration." }, token: { type: string, minLength: 32, description: Permanent bearer credential for exactly this first agent. It has no scheduled expiry and is redelivered only through this short-lived encrypted issuance envelope. }, issuance_id: { type: string, description: Opaque identifier for the encrypted exact-retry delivery envelope. }, issuance_expires_at: { type: string, format: date-time, description: Exact-retry redelivery deadline for this credential issuance; ten minutes after first enrollment. Later exact retries return credential_issuance_expired while the permanent token remains valid. } } }
+    CLIEnrollment: { type: object, additionalProperties: false, required: [account, agent, connection_ready, token, issuance_id, issuance_expires_at], properties: { account: { $ref: "#/components/schemas/Account" }, agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, enum: [false], description: "A newly enrolled account has neither a registered dashboard passkey nor password, so approval of another agent is not ready. Re-read GET /api/v1/agents/self after configuring either retained dashboard credential." }, token: { type: string, minLength: 32, description: Permanent bearer credential for exactly this first agent. It has no scheduled expiry and is redelivered only through this short-lived encrypted issuance envelope. }, issuance_id: { type: string, description: Opaque identifier for the encrypted exact-retry delivery envelope. }, issuance_expires_at: { type: string, format: date-time, description: Exact-retry redelivery deadline for this credential issuance; ten minutes after first enrollment. Later exact retries return credential_issuance_expired while the permanent token remains valid. } } }
     AgentInput: { type: object, additionalProperties: false, properties: { name: { type: string, minLength: 1, maxLength: 80, default: "ScreenRig CLI" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
     Agent:
       type: object
@@ -2424,36 +2477,7 @@ components:
         last_used_at: { type: string, format: date-time }
         revoked_at: { type: string, format: date-time }
     AgentList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Agent" } } } }
-    AgentCommandEntry:
-      type: object
-      additionalProperties: false
-      required: [id, command, method, outcome, status, at]
-      description: >-
-        One mutating request an agent made. Every field is derived from the route
-        the server matched, never from the request the agent sent, so an entry
-        cannot carry an argument vector, a body, a header, or any text the caller
-        chose. There is deliberately no field for one.
-      properties:
-        id: { type: string }
-        command:
-          type: string
-          description: >-
-            Route-derived operation name such as screens.archive or media.create.
-            Built from the matched pattern's literal segments, so every part of it
-            is a string the server published. A route with no recognizable shape
-            is reported as unknown rather than echoing the request.
-        method: { type: string, enum: [POST, PUT, PATCH, DELETE], description: "Reads are not recorded: they change nothing." }
-        resource_id: { type: string, description: "Identifier the route matched, when it had one. An identifier is never authorization and is already published on events." }
-        outcome:
-          type: string
-          enum: [ok, blocked, failed]
-          description: "ok is a 2xx or 3xx. blocked is a 4xx, meaning the server refused it. failed is a 5xx, meaning the server broke. The distinction is the first thing an operator wants."
-        problem_code: { type: string, description: "Stable problem code when the request was refused, such as application_in_use. Absent on success." }
-        status: { type: integer, description: HTTP status this server produced. }
-        request_id: { type: string }
-        at: { type: string, format: date-time }
-    AgentCommandList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/AgentCommandEntry" } } } }
-    AgentSelfStatus: { type: object, additionalProperties: false, required: [agent, connection_ready], properties: { agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, description: True only when the account has at least one persisted WebAuthn credential and can authorize another agent through the production passkey flow. Dashboard users and sessions without a passkey do not count. } } }
+    AgentSelfStatus: { type: object, additionalProperties: false, required: [agent, connection_ready], properties: { agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, description: True when the existing account has either a persisted WebAuthn credential or an Argon2id password credential owned by a dashboard user and can authorize another agent. } } }
     X25519PublicJWK: { type: object, additionalProperties: false, required: [kty, crv, x], properties: { kty: { type: string, enum: [OKP] }, crv: { type: string, enum: [X25519] }, x: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
     AgentConnectionRequest: { type: object, additionalProperties: false, required: [recipient_public_key], properties: { name: { type: string, minLength: 1, maxLength: 80 }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$" }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 }, recipient_public_key: { $ref: "#/components/schemas/X25519PublicJWK" } } }
     AgentConnectionStart: { type: object, additionalProperties: false, required: [connection_id, connection_token, approval_url, expires_at], properties: { connection_id: { type: string, pattern: "^acn_" }, connection_token: { type: string, pattern: "^sac_[A-Za-z0-9_-]{43}$", description: Temporary header credential. Never place in a URL or log. }, approval_url: { type: string, format: uri, description: Safe URL containing only the non-authority connection id. }, expires_at: { type: string, format: date-time } } }
@@ -2485,25 +2509,25 @@ components:
     PlaylistPageWrite:
       type: object
       additionalProperties: false
-      required: [id, canvas, transition, advance, placements]
+      required: [id, canvas, transition, advance, primitives]
       properties:
         id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }
         canvas: { $ref: "#/components/schemas/PlaylistCanvas" }
         transition: { $ref: "#/components/schemas/PlaylistTransition" }
         advance: { $ref: "#/components/schemas/PlaylistAdvanceWrite" }
         visibility: { $ref: "#/components/schemas/PageVisibility" }
-        placements: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/PlaylistPlacementWrite" } }
+        primitives: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/PlaylistPrimitiveWrite" } }
     PlaylistPage:
       type: object
       additionalProperties: false
-      required: [id, canvas, transition, advance, placements]
+      required: [id, canvas, transition, advance, primitives]
       properties:
         id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }
         canvas: { $ref: "#/components/schemas/PlaylistCanvas" }
         transition: { $ref: "#/components/schemas/PlaylistTransition" }
         advance: { $ref: "#/components/schemas/PlaylistAdvance" }
         visibility: { $ref: "#/components/schemas/PageVisibility" }
-        placements: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/PlaylistPlacement" } }
+        primitives: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/PlaylistPrimitive" } }
         comments: { type: object, additionalProperties: true, description: "Opaque agent JSON object, compact UTF-8 ≤ 1024 bytes. Absent when unset. ScreenRig never reads or uses it. PlaylistPageWrite cannot set it. Copied across playlist updates by page id. Not on the runtime manifest." }
     PageVisibility:
       type: object
@@ -2563,14 +2587,14 @@ components:
       properties:
         type: { type: string, enum: [crossfade, swipe-left, swipe-right, swipe-up, swipe-down] }
         duration_ms: { type: integer, minimum: 0, maximum: 60000 }
-    PlacementEnter:
+    PrimitiveEnter:
       type: object
       additionalProperties: false
       required: [type]
       description: >-
         Optional object enter. Playlist write and the runtime manifest use this object as-is;
         there is no snake_case rename inside it. Absent means paint at rest, full opacity.
-        No per-placement duration or delay; those are named constants in screenrig.canvas/v1.
+        No per-primitive duration or delay; those are named constants in screenrig.canvas/v1.
       properties:
         type: { type: string, enum: [fade-up, fade-down, fade-left, fade-right, fade-in, zoom-in, zoom-out] }
     PlaylistAdvanceWrite:
@@ -2589,27 +2613,28 @@ components:
     PlaylistApplicationAdvance: { type: object, additionalProperties: false, required: [mode, max_ms], properties: { mode: { type: string, enum: [application] }, max_ms: { type: integer, minimum: 1000, maximum: 86400000 } } }
     PlaylistMediaEndAdvanceWrite: { type: object, additionalProperties: false, required: [mode], properties: { mode: { type: string, enum: [media_end] }, max_ms: { type: integer, minimum: 1000, maximum: 86400000, description: Optional client safety hint; the server resolves the authoritative deadline from resolved item lengths. } } }
     PlaylistMediaEndAdvance: { type: object, additionalProperties: false, required: [mode, max_ms], properties: { mode: { type: string, enum: [media_end] }, max_ms: { type: integer, minimum: 1000, maximum: 86400000 } } }
-    PlaylistPlacementWrite:
+    PlaylistPrimitiveWrite:
       oneOf:
-        - { $ref: "#/components/schemas/PlaylistApplicationPlacementWrite" }
-        - { $ref: "#/components/schemas/PlaylistImagePlacementWrite" }
-        - { $ref: "#/components/schemas/PlaylistVideoPlacementWrite" }
-        - { $ref: "#/components/schemas/PlaylistIframePlacementWrite" }
-    PlaylistPlacement:
+        - { $ref: "#/components/schemas/PlaylistApplicationPrimitiveWrite" }
+        - { $ref: "#/components/schemas/PlaylistImagePrimitiveWrite" }
+        - { $ref: "#/components/schemas/PlaylistVideoPrimitiveWrite" }
+        - { $ref: "#/components/schemas/PlaylistIframePrimitiveWrite" }
+      discriminator: { propertyName: primitive }
+    PlaylistPrimitive:
       oneOf:
-        - { $ref: "#/components/schemas/PlaylistApplicationPlacement" }
-        - { $ref: "#/components/schemas/PlaylistImagePlacement" }
-        - { $ref: "#/components/schemas/PlaylistVideoPlacement" }
-        - { $ref: "#/components/schemas/PlaylistIframePlacement" }
-    PlaylistApplicationPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistApplicationContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, default: false }, enter: { $ref: "#/components/schemas/PlacementEnter" } } }
-    PlaylistImagePlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistImageContentWrite" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, enter: { $ref: "#/components/schemas/PlacementEnter" } } }
-    PlaylistVideoPlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistVideoContentWrite" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, enter: { $ref: "#/components/schemas/PlacementEnter" } } }
-    PlaylistIframePlacementWrite: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, content: { $ref: "#/components/schemas/PlaylistIframeContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, enter: { $ref: "#/components/schemas/PlacementEnter" } } }
-    PlaylistApplicationPlacement: { allOf: [{ $ref: "#/components/schemas/PlaylistApplicationPlacementWrite" }] }
-    PlaylistImagePlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistImageContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PlacementEnter" } } }
-    PlaylistVideoPlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistVideoContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PlacementEnter" } } }
-    PlaylistIframePlacement: { type: object, additionalProperties: false, required: [id, content, rect, layer, content_fit, controller], properties: { id: { type: string }, content: { $ref: "#/components/schemas/PlaylistIframeContent" }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PlacementEnter" } } }
-    PlaylistApplicationContent: { type: object, additionalProperties: false, required: [type, release_id], properties: { type: { type: string, enum: [application] }, application_id: { type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id. }, release_id: { type: string } } }
+        - { $ref: "#/components/schemas/PlaylistApplicationPrimitive" }
+        - { $ref: "#/components/schemas/PlaylistImagePrimitive" }
+        - { $ref: "#/components/schemas/PlaylistVideoPrimitive" }
+        - { $ref: "#/components/schemas/PlaylistIframePrimitive" }
+      discriminator: { propertyName: primitive }
+    PlaylistApplicationPrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, release_id, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [application] }, application_id: { type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id. }, release_id: { type: string }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, default: false }, enter: { $ref: "#/components/schemas/PrimitiveEnter" } } }
+    PlaylistImagePrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, selector, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [image] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, alt: { type: string, maxLength: 300 }, dwell_ms: { type: integer, minimum: 1000, maximum: 86400000, description: Required on media_end image primitives. Forbidden on duration and application pages. }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" } } }
+    PlaylistVideoPrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, selector, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, muted: { type: boolean, enum: [true], default: true }, loop: { type: boolean, default: false }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" } } }
+    PlaylistIframePrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [iframe] }, src: { type: string, format: uri, pattern: "^https://" }, title: { type: string, minLength: 1, maxLength: 200 }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" } } }
+    PlaylistApplicationPrimitive: { allOf: [{ $ref: "#/components/schemas/PlaylistApplicationPrimitiveWrite" }] }
+    PlaylistImagePrimitive: { type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [image] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, resolved_media: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistResolvedMedia" }, description: Server-resolved selector matches. Clients must not send this field. }, alt: { type: string, maxLength: 300 }, dwell_ms: { type: integer, minimum: 1000, maximum: 86400000 }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" } } }
+    PlaylistVideoPrimitive: { type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, muted, loop, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, resolved_media: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistResolvedMedia" }, description: Server-resolved selector matches. Clients must not send this field. }, muted: { type: boolean, enum: [true] }, loop: { type: boolean }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" } } }
+    PlaylistIframePrimitive: { type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [iframe] }, src: { type: string, format: uri, pattern: "^https://" }, title: { type: string, minLength: 1, maxLength: 200 }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" } } }
     PlaylistMediaSelector:
       oneOf:
         - { $ref: "#/components/schemas/PlaylistMediaSelectorByID" }
@@ -2621,12 +2646,7 @@ components:
     PlaylistMediaSelectorByIDs: { type: object, additionalProperties: false, required: [by, media_ids], properties: { by: { type: string, enum: [ids] }, media_ids: { type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^med_" } }, one_at_a_time: { type: boolean, default: false } } }
     PlaylistMediaSelectorByAll: { type: object, additionalProperties: false, required: [by], properties: { by: { type: string, enum: [all] }, one_at_a_time: { type: boolean, default: false } } }
     PlaylistMediaSelectorByTag: { type: object, additionalProperties: false, required: [by, tag], properties: { by: { type: string, enum: [tag] }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, one_at_a_time: { type: boolean, default: false } } }
-    PlaylistMediaItem: { type: object, additionalProperties: false, required: [media_id, intrinsic_size], properties: { media_id: { type: string, pattern: "^med_" }, intrinsic_size: { $ref: "#/components/schemas/PlaylistIntrinsicSize" } } }
-    PlaylistImageContentWrite: { type: object, additionalProperties: false, required: [type, selector], properties: { type: { type: string, enum: [image] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, alt: { type: string, maxLength: 300 }, dwell_ms: { type: integer, minimum: 1000, maximum: 86400000, description: Required on media_end image placements. Forbidden on duration and application pages. } } }
-    PlaylistVideoContentWrite: { type: object, additionalProperties: false, required: [type, selector], properties: { type: { type: string, enum: [video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, muted: { type: boolean, enum: [true], default: true }, loop: { type: boolean, default: false } } }
-    PlaylistImageContent: { type: object, additionalProperties: false, required: [type, selector, items], properties: { type: { type: string, enum: [image] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, items: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistMediaItem" }, description: Server-resolved matches. Clients must not send this field. }, alt: { type: string, maxLength: 300 }, dwell_ms: { type: integer, minimum: 1000, maximum: 86400000 } } }
-    PlaylistVideoContent: { type: object, additionalProperties: false, required: [type, selector, items, muted, loop], properties: { type: { type: string, enum: [video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, items: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistMediaItem" }, description: Server-resolved matches. Clients must not send this field. }, muted: { type: boolean, enum: [true] }, loop: { type: boolean } } }
-    PlaylistIframeContent: { type: object, additionalProperties: false, required: [type, src, title], properties: { type: { type: string, enum: [iframe] }, src: { type: string, format: uri, pattern: "^https://" }, title: { type: string, minLength: 1, maxLength: 200 } } }
+    PlaylistResolvedMedia: { type: object, additionalProperties: false, required: [media_id, intrinsic_size], properties: { media_id: { type: string, pattern: "^med_" }, intrinsic_size: { $ref: "#/components/schemas/PlaylistIntrinsicSize" } } }
     CanvasColor: { type: string, pattern: "^#[0-9A-F]{8}$", description: Canonical uppercase sRGB RRGGBBAA. }
     LinearGradientStop:
       type: object
@@ -2825,7 +2845,49 @@ components:
       properties:
         capture_id: { $ref: "#/components/schemas/ScreenshotCaptureID" }
         reason: { type: string, enum: [expired] }
-    Event: { type: object, additionalProperties: true, required: [cursor, sequence, type, severity, message, at], properties: { cursor: { type: string }, sequence: { type: integer }, type: { type: string }, severity: { type: string }, request_id: { type: string }, operation_id: { type: string }, message: { type: string }, actor: { $ref: "#/components/schemas/EventActor" }, agent: { $ref: "#/components/schemas/EventAgent" }, resource: { type: object, additionalProperties: true }, details: { type: object, additionalProperties: true }, at: { type: string } } }
+    Event: { type: object, additionalProperties: true, required: [cursor, sequence, type, severity, message, at], properties: { cursor: { type: string }, sequence: { type: integer }, type: { type: string }, severity: { type: string }, request_id: { type: string }, operation_id: { type: string }, message: { type: string }, actor: { $ref: "#/components/schemas/EventActor" }, agent: { $ref: "#/components/schemas/EventAgent" }, command: { $ref: "#/components/schemas/EventCommand" }, resource: { type: object, additionalProperties: true }, details: { type: object, additionalProperties: true }, at: { type: string } } }
+    EventCommand:
+      type: object
+      additionalProperties: false
+      required: [name, method]
+      description: >-
+        The agent request that caused this event. Optional and absent on every
+        event a dashboard user, a player, or a worker produced. It is descriptive
+        attribution only and is never authorization.
+
+        Every field is written by the server from the route it matched or from the
+        problem registry. A command object cannot carry an argument vector, a
+        request body, a header, or any text the caller chose, and there is
+        deliberately no field for one.
+
+        name and method appear on every event an agent request committed. The
+        outcome fields appear ONLY on an agent.command event, which is the record
+        for a request that committed no domain event: a committed domain event is
+        itself the proof that the request succeeded.
+      properties:
+        name:
+          type: string
+          description: >-
+            Route-derived operation name such as screens.archive or media.create.
+            Built from the matched pattern's literal segments, so every part of it
+            is a string the server published. A route with no recognizable shape
+            is reported as unknown rather than echoing the request.
+        method: { type: string, enum: [POST, PUT, PATCH, DELETE], description: "Reads are not recorded: they change nothing." }
+        outcome:
+          type: string
+          enum: [ok, blocked, failed]
+          description: "agent.command only. ok is a 2xx or 3xx. blocked is a 4xx, meaning the server refused it. failed is a 5xx, meaning the server broke. The distinction is the first thing an operator wants."
+        status: { type: integer, description: "agent.command only. The one authoritative status. When a problem was recorded this is the status the problem registry assigns that code, not a status observed on the way out." }
+        problem_code: { type: string, description: "agent.command only. Stable problem code the server refused with, such as application_in_use. Absent on success. Use it to look up current copy for a code." }
+        error:
+          type: string
+          description: >-
+            agent.command only, and present only alongside problem_code. The
+            problem registry TITLE for that code, captured when the record was
+            written. It is never the problem document's detail, because detail is
+            free text supplied per call site and can be built from request bytes.
+            Storing the title at write time also means reworded copy does not
+            rewrite history and a retired code stays readable.
     EventActor:
       type: object
       additionalProperties: false
@@ -2863,7 +2925,7 @@ components:
     MediaTagPatch: { type: object, additionalProperties: false, required: [tag], properties: { tag: { oneOf: [{ type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, { type: "null" }], description: "Replacement tag or null to clear it." } } }
     MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], description: "Declares only what the server can re-verify against the stored object byte for byte. Codec identity is not declared here: the server derives it from the container during asynchronous verification, so a client cannot assert a codec that drives player behaviour.", properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
     MediaUploadSession: { type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: { id: { type: string }, operation: { $ref: "#/components/schemas/Operation" }, upload_url: { type: string, format: uri }, method: { type: string, enum: [PUT] }, headers: { type: object, additionalProperties: { type: string }, description: Exact signed request headers; clients must send every field verbatim. }, expires_at: { type: string, format: date-time } } }
-    Media: { type: object, additionalProperties: false, required: [id, filename, kind, content_type, operation_id, sha256, bytes, width, height, revision, state, created_at, updated_at], properties: { id: { type: string }, filename: { type: string }, kind: { type: string, enum: [image, video] }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: Verified immutable intrinsic width in pixels. }, height: { type: integer, minimum: 1, description: Verified immutable intrinsic height in pixels. }, duration_ms: { type: integer, minimum: 1, description: "Verified container duration; present for ready video media." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable query tag. Absent when the object is untagged. }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, width, height, revision, state, created_at, updated_at], properties: { id: { type: string }, filename: { type: string }, primitive: { type: string, enum: [image, video] }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: Verified immutable intrinsic width in pixels. }, height: { type: integer, minimum: 1, description: Verified immutable intrinsic height in pixels. }, duration_ms: { type: integer, minimum: 1, description: "Verified container duration; present for ready video media." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Media" } } } }
     FeedbackWrite:
       type: object
@@ -2985,7 +3047,7 @@ components:
     RuntimePage:
       type: object
       additionalProperties: false
-      required: [contractVersion, id, canvas, transition, advance, placements]
+      required: [contractVersion, id, canvas, transition, advance, primitives]
       properties:
         contractVersion: { type: string, enum: [screenrig.canvas/v1] }
         id: { type: string }
@@ -2993,7 +3055,7 @@ components:
         transition: { $ref: "#/components/schemas/RuntimeTransition" }
         advance: { $ref: "#/components/schemas/RuntimeAdvance" }
         visibility: { $ref: "#/components/schemas/PageVisibility", description: "Emitted only on pages that author a schedule. It is the identical snake_case object stored on the playlist page, deliberately outside contractVersion screenrig.canvas/v1." }
-        placements: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/RuntimePlacement" }, description: Source array order is the deterministic tie-breaker for equal layers. }
+        primitives: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/RuntimePrimitive" }, description: Source array order is the deterministic tie-breaker for equal layers. }
     RuntimeCanvas:
       type: object
       additionalProperties: false
@@ -3035,72 +3097,20 @@ components:
         mode: { type: string, enum: [duration, application, media_end] }
         afterMs: { type: integer }
         maxMs: { type: integer }
-    RuntimePlacement:
+    RuntimePrimitive:
       oneOf:
-        - { $ref: "#/components/schemas/RuntimeApplicationPlacement" }
-        - { $ref: "#/components/schemas/RuntimeImagePlacement" }
-        - { $ref: "#/components/schemas/RuntimeVideoPlacement" }
-        - { $ref: "#/components/schemas/RuntimeIframePlacement" }
-    RuntimeApplicationPlacement:
+        - { $ref: "#/components/schemas/RuntimeApplicationPrimitive" }
+        - { $ref: "#/components/schemas/RuntimeImagePrimitive" }
+        - { $ref: "#/components/schemas/RuntimeVideoPrimitive" }
+        - { $ref: "#/components/schemas/RuntimeIframePrimitive" }
+      discriminator: { propertyName: primitive }
+    RuntimeApplicationPrimitive:
       type: object
       additionalProperties: false
-      required: [id, content, rect, layer, contentFit, capabilityHandle, capabilityExpiresAt]
+      required: [id, primitive, applicationId, releaseId, launchUrl, origin, protocol, grantId, package, rect, layer, contentFit, capabilityHandle, capabilityExpiresAt]
       properties:
         id: { type: string }
-        content: { $ref: "#/components/schemas/RuntimeApplicationContent" }
-        rect: { $ref: "#/components/schemas/RuntimeRect" }
-        layer: { type: integer, minimum: 0, maximum: 1024 }
-        contentFit: { type: string, enum: [fill] }
-        controller: { type: boolean }
-        enter: { $ref: "#/components/schemas/PlacementEnter" }
-        capabilityHandle: { type: string, minLength: 32, description: Opaque parent-only capability; never forward it into the uploaded iframe. }
-        capabilityExpiresAt: { type: string, format: date-time, description: Five-minute expiry. Refresh the manifest before this time to obtain a replacement handle. }
-    RuntimeImagePlacement:
-      type: object
-      additionalProperties: false
-      required: [id, content, rect, layer, contentFit]
-      properties:
-        id: { type: string }
-        content: { $ref: "#/components/schemas/RuntimeImageContent" }
-        rect: { $ref: "#/components/schemas/RuntimeRect" }
-        layer: { type: integer, minimum: 0, maximum: 1024 }
-        contentFit: { type: string, enum: [contain, cover, fill] }
-        enter: { $ref: "#/components/schemas/PlacementEnter" }
-    RuntimeVideoPlacement:
-      type: object
-      additionalProperties: false
-      required: [id, content, rect, layer, contentFit]
-      properties:
-        id: { type: string }
-        content: { $ref: "#/components/schemas/RuntimeVideoContent" }
-        rect: { $ref: "#/components/schemas/RuntimeRect" }
-        layer: { type: integer, minimum: 0, maximum: 1024 }
-        contentFit: { type: string, enum: [contain, cover, fill] }
-        enter: { $ref: "#/components/schemas/PlacementEnter" }
-    RuntimeIframePlacement:
-      type: object
-      additionalProperties: false
-      required: [id, content, rect, layer, contentFit]
-      properties:
-        id: { type: string }
-        content: { $ref: "#/components/schemas/RuntimeIframeContent" }
-        rect: { $ref: "#/components/schemas/RuntimeRect" }
-        layer: { type: integer, minimum: 0, maximum: 1024 }
-        contentFit: { type: string, enum: [fill] }
-        enter: { $ref: "#/components/schemas/PlacementEnter" }
-    RuntimeContent:
-      oneOf:
-        - { $ref: "#/components/schemas/RuntimeApplicationContent" }
-        - { $ref: "#/components/schemas/RuntimeImageContent" }
-        - { $ref: "#/components/schemas/RuntimeVideoContent" }
-        - { $ref: "#/components/schemas/RuntimeIframeContent" }
-      discriminator: { propertyName: type }
-    RuntimeApplicationContent:
-      type: object
-      additionalProperties: false
-      required: [type, applicationId, releaseId, launchUrl, origin, protocol, grantId, package]
-      properties:
-        type: { type: string, enum: [application] }
+        primitive: { type: string, enum: [application] }
         applicationId: { type: string }
         releaseId: { type: string }
         launchUrl: { type: string }
@@ -3108,6 +3118,69 @@ components:
         protocol: { type: string, enum: ["1"] }
         grantId: { type: string }
         package: { $ref: "#/components/schemas/RuntimeApplicationPackage" }
+        rect: { $ref: "#/components/schemas/RuntimeRect" }
+        layer: { type: integer, minimum: 0, maximum: 1024 }
+        contentFit: { type: string, enum: [fill] }
+        controller: { type: boolean }
+        enter: { $ref: "#/components/schemas/PrimitiveEnter" }
+        capabilityHandle: { type: string, minLength: 32, description: Opaque parent-only capability; never forward it into the uploaded iframe. }
+        capabilityExpiresAt: { type: string, format: date-time, description: Five-minute expiry. Refresh the manifest before this time to obtain a replacement handle. }
+    RuntimeImagePrimitive:
+      type: object
+      additionalProperties: false
+      required: [id, primitive, selector, resolvedMedia, grantId, rect, layer, contentFit]
+      properties:
+        id: { type: string }
+        primitive: { type: string, enum: [image] }
+        selector: { $ref: "#/components/schemas/RuntimeMediaSelector" }
+        resolvedMedia: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/RuntimeImageResolvedMedia" } }
+        grantId: { type: string }
+        alt: { type: string }
+        dwellMs: { type: integer, minimum: 1000, maximum: 86400000 }
+        rect: { $ref: "#/components/schemas/RuntimeRect" }
+        layer: { type: integer, minimum: 0, maximum: 1024 }
+        contentFit: { type: string, enum: [contain, cover, fill] }
+        enter: { $ref: "#/components/schemas/PrimitiveEnter" }
+    RuntimeVideoPrimitive:
+      type: object
+      additionalProperties: false
+      required: [id, primitive, selector, resolvedMedia, muted, loop, grantId, rect, layer, contentFit]
+      properties:
+        id: { type: string }
+        primitive: { type: string, enum: [video] }
+        selector: { $ref: "#/components/schemas/RuntimeMediaSelector" }
+        resolvedMedia: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/RuntimeVideoResolvedMedia" } }
+        muted: { type: boolean }
+        loop: { type: boolean }
+        grantId: { type: string }
+        rect: { $ref: "#/components/schemas/RuntimeRect" }
+        layer: { type: integer, minimum: 0, maximum: 1024 }
+        contentFit: { type: string, enum: [contain, cover, fill] }
+        enter: { $ref: "#/components/schemas/PrimitiveEnter" }
+    RuntimeIframePrimitive:
+      type: object
+      additionalProperties: false
+      required: [id, primitive, src, title, rect, layer, contentFit]
+      properties:
+        id: { type: string }
+        primitive: { type: string, enum: [iframe] }
+        src: { type: string }
+        title: { type: string }
+        rect: { $ref: "#/components/schemas/RuntimeRect" }
+        layer: { type: integer, minimum: 0, maximum: 1024 }
+        contentFit: { type: string, enum: [fill] }
+        enter: { $ref: "#/components/schemas/PrimitiveEnter" }
+    RuntimeMediaSelector:
+      oneOf:
+        - { $ref: "#/components/schemas/RuntimeMediaSelectorByID" }
+        - { $ref: "#/components/schemas/RuntimeMediaSelectorByIDs" }
+        - { $ref: "#/components/schemas/RuntimeMediaSelectorByAll" }
+        - { $ref: "#/components/schemas/RuntimeMediaSelectorByTag" }
+      discriminator: { propertyName: by }
+    RuntimeMediaSelectorByID: { type: object, additionalProperties: false, required: [by, mediaId, oneAtATime], properties: { by: { type: string, enum: [id] }, mediaId: { type: string, pattern: "^med_" }, oneAtATime: { type: boolean, enum: [false] } } }
+    RuntimeMediaSelectorByIDs: { type: object, additionalProperties: false, required: [by, mediaIds, oneAtATime], properties: { by: { type: string, enum: [ids] }, mediaIds: { type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^med_" } }, oneAtATime: { type: boolean } } }
+    RuntimeMediaSelectorByAll: { type: object, additionalProperties: false, required: [by, oneAtATime], properties: { by: { type: string, enum: [all] }, oneAtATime: { type: boolean } } }
+    RuntimeMediaSelectorByTag: { type: object, additionalProperties: false, required: [by, tag, oneAtATime], properties: { by: { type: string, enum: [tag] }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, oneAtATime: { type: boolean } } }
     RuntimeApplicationPackage:
       type: object
       additionalProperties: false
@@ -3146,18 +3219,7 @@ components:
         sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
         entrypoint: { type: string, enum: [index.html] }
         contentType: { type: string, enum: ["application/vnd.screenrig.webapp-package+tar+gzip"] }
-    RuntimeImageContent:
-      type: object
-      additionalProperties: false
-      required: [type, items, oneAtATime, grantId]
-      properties:
-        type: { type: string, enum: [image] }
-        items: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/RuntimeImageItem" } }
-        oneAtATime: { type: boolean }
-        grantId: { type: string }
-        alt: { type: string }
-        dwellMs: { type: integer, minimum: 1000, maximum: 86400000 }
-    RuntimeImageItem:
+    RuntimeImageResolvedMedia:
       type: object
       additionalProperties: false
       required: [mediaId, src, intrinsicSize, sha256, bytes, contentType]
@@ -3168,18 +3230,7 @@ components:
         sha256: { type: string, pattern: "^[a-f0-9]{64}$", description: Immutable content digest for integrity and optional native caching; not an authorization capability. }
         bytes: { type: integer, minimum: 1, maximum: 1073741824 }
         contentType: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif] }
-    RuntimeVideoContent:
-      type: object
-      additionalProperties: false
-      required: [type, items, oneAtATime, muted, loop, grantId]
-      properties:
-        type: { type: string, enum: [video] }
-        items: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/RuntimeVideoItem" } }
-        oneAtATime: { type: boolean }
-        muted: { type: boolean }
-        loop: { type: boolean }
-        grantId: { type: string }
-    RuntimeVideoItem:
+    RuntimeVideoResolvedMedia:
       type: object
       additionalProperties: false
       required: [mediaId, src, intrinsicSize, sha256, bytes, contentType]
@@ -3208,14 +3259,6 @@ components:
         absent value as an unsupported codec. This release emits exactly one
         video-track entry; the comma-separated grammar is published now so a later
         audio entry is additive.
-    RuntimeIframeContent:
-      type: object
-      additionalProperties: false
-      required: [type, src, title]
-      properties:
-        type: { type: string, enum: [iframe] }
-        src: { type: string }
-        title: { type: string }
     RuntimeReport:
       oneOf:
         - { $ref: "#/components/schemas/ManifestActivatedReport" }
@@ -3227,7 +3270,7 @@ components:
     PlaybackVideoStartedReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [playback.video_started] }, context: { $ref: "#/components/schemas/PlaybackVideoStartedContext" } } }
     PlaybackVideoStartedContext: { type: object, additionalProperties: false, required: [media_id, manifest_revision, page_id], properties: { media_id: { type: string, pattern: "^med_" }, manifest_revision: { type: string, pattern: "^man_" }, page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" } } }
     ApplicationEventReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [application.event] }, context: { $ref: "#/components/schemas/ApplicationEventContext" } } }
-    ApplicationEventContext: { type: object, additionalProperties: false, required: [placement_id, code], properties: { placement_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, code: { type: string, pattern: "^[A-Za-z0-9._-]{1,64}$" } } }
+    ApplicationEventContext: { type: object, additionalProperties: false, required: [primitive_id, code], properties: { primitive_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, code: { type: string, pattern: "^[A-Za-z0-9._-]{1,64}$" } } }
     RuntimeConditionReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info, warning, error] }, code: { type: string, pattern: "^[a-z0-9._-]{1,80}$", not: { enum: [manifest.activated, playback.video_started, application.event] } }, context: { type: object, additionalProperties: true } } }
     ReleaseLaunch: { type: object, additionalProperties: false, required: [launch_url, expires_at], properties: { launch_url: { type: string }, expires_at: { type: string } } }
     DashboardDisplayName:
@@ -3273,7 +3316,7 @@ components:
         provisioning material.
       properties:
         next: { type: string, enum: [ready, register_passkey, create_session], description: "ready is a no-op sign-in on an existing same-account session. register_passkey is production mode with no session. create_session is dashboard development-authentication mode." }
-        dev_auth: { type: boolean, description: "True when the server runs dashboard development authentication and the four WebAuthn ceremony routes therefore return passkeys_disabled. False in production, where POST /dashboard/v1/sessions returns forbidden." }
+        dev_auth: { type: boolean, description: "True when the server runs dashboard development authentication and the four WebAuthn ceremony routes therefore return passkeys_disabled. False in production, where the display_name development shape of POST /dashboard/v1/sessions returns forbidden; its email/password shape remains real password verification." }
     DashboardPasskeyRegistrationStart:
       type: object
       additionalProperties: false
@@ -3324,6 +3367,19 @@ components:
       description: Development-authentication-only session mint body. It carries no credential and no proof of possession, which is why the route is forbidden outside development authentication.
       properties:
         display_name: { $ref: "#/components/schemas/DashboardDisplayName" }
+    DashboardPasswordLogin:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, minLength: 3, maxLength: 254, description: Existing account email supplied at enrollment. Normalization matches enrollment and the value is never echoed in a problem response or log. }
+        password: { type: string, minLength: 12, maxLength: 128, writeOnly: true }
+    DashboardPasswordSet:
+      type: object
+      additionalProperties: false
+      required: [password]
+      properties:
+        password: { type: string, minLength: 12, maxLength: 128, writeOnly: true, description: Stored only as a fixed-parameter Argon2id hash. }
     DashboardSession:
       type: object
       additionalProperties: false
@@ -3353,10 +3409,11 @@ components:
     DashboardAgentAuthorization:
       type: object
       additionalProperties: false
-      description: Production returns ceremony_id and request_options. Development-authentication mode returns dev_auth=true and confirmation_required=true instead; that exception is server-gated and unavailable in production.
+      description: A passkey session returns ceremony_id and request_options. A password session returns password_session=true and confirmation_required=true. Development-authentication mode returns dev_auth=true and confirmation_required=true as a distinct localhost-only exception.
       properties:
         ceremony_id: { type: string }
         request_options: { type: object, additionalProperties: true }
+        password_session: { type: boolean, enum: [true] }
         dev_auth: { type: boolean, enum: [true] }
         confirmation_required: { type: boolean, enum: [true] }
     DashboardAgentAuthorizationComplete:
@@ -3366,6 +3423,7 @@ components:
         ceremony_id: { type: string }
         credential: { type: object, additionalProperties: true }
         dev_confirm: { type: boolean, description: Must be true only on a server running dashboard development authentication; rejected as a substitute for a production passkey assertion. }
+        session_confirm: { type: boolean, description: Must be true only to approve an agent connection from a password-authenticated account session; it is not accepted as passkey proof or development confirmation. }
     DashboardSummary:
       type: object
       additionalProperties: false
@@ -3382,7 +3440,7 @@ components:
       properties:
         status: { type: string, enum: [active, cancelled, deleted] }
         created_at: { type: string, format: date-time }
-        email: { type: string, minLength: 3, maxLength: 254, description: "Required contact address supplied at enrollment, preserving its capitalization after surrounding whitespace is trimmed. Display only. No dashboard route updates it, and it is never an authorization factor: the dashboard signs in with a passkey, never with an address." }
+        email: { type: string, minLength: 3, maxLength: 254, description: "Required contact address supplied at enrollment, preserving its capitalization after surrounding whitespace is trimmed. No dashboard route updates it. It identifies this same account for password login only after an authenticated user sets a password; possession of the address alone grants nothing." }
         email_verified: { type: boolean, enum: [false], description: "Always false. The address is stored unverified and ScreenRig sends no mail. Show it as unverified; do not present it as a recovery channel." }
         screen_count: { type: integer, minimum: 0, description: Paired and pairing-pending screens together. Archived screens are excluded. }
         screen_limit: { type: integer, minimum: 0, description: "Plan screen cap. Zero means no cap, not a cap of zero." }

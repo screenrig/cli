@@ -514,30 +514,34 @@ async function streamMediaToFile(client: ApiClient, media: RemoteMedia, filename
   const head = await client.call({ method: "HEAD", path: `/api/v1/media/${media.id}/content` });
   validateMediaHeaders(head.headers, media);
   const response = await client.download({ method: "GET", path: `/api/v1/media/${media.id}/content` });
-  validateMediaHeaders(response.headers, media);
-  if (!response.body) throw usageError(`Media ${media.id} export returned no body.`);
-
-  const handle = await open(filename, "wx", 0o600);
-  const hash = createHash("sha256");
-  let bytes = 0;
   try {
-    for await (const chunk of response.body) {
-      let offset = 0;
-      while (offset < chunk.byteLength) {
-        const written = await handle.write(chunk, offset, chunk.byteLength - offset);
-        offset += written.bytesWritten;
+    validateMediaHeaders(response.headers, media);
+    if (!response.body) throw usageError(`Media ${media.id} export returned no body.`);
+
+    const handle = await open(filename, "wx", 0o600);
+    const hash = createHash("sha256");
+    let bytes = 0;
+    try {
+      for await (const chunk of response.body) {
+        let offset = 0;
+        while (offset < chunk.byteLength) {
+          const written = await handle.write(chunk, offset, chunk.byteLength - offset);
+          offset += written.bytesWritten;
+        }
+        hash.update(chunk);
+        bytes += chunk.byteLength;
+        if (bytes > media.bytes) throw usageError(`Media ${media.id} export exceeded the declared length.`);
       }
-      hash.update(chunk);
-      bytes += chunk.byteLength;
-      if (bytes > media.bytes) throw usageError(`Media ${media.id} export exceeded the declared length.`);
+      await handle.sync();
+    } finally {
+      await handle.close();
     }
-    await handle.sync();
+    if (bytes !== media.bytes) throw usageError(`Media ${media.id} export ended before the declared length.`);
+    if (hash.digest("hex") !== media.sha256) throw usageError(`Media ${media.id} export SHA-256 did not match metadata.`);
+    await chmod(filename, 0o600);
   } finally {
-    await handle.close();
+    await response.body?.cancel?.();
   }
-  if (bytes !== media.bytes) throw usageError(`Media ${media.id} export ended before the declared length.`);
-  if (hash.digest("hex") !== media.sha256) throw usageError(`Media ${media.id} export SHA-256 did not match metadata.`);
-  await chmod(filename, 0o600);
 }
 
 async function destinationAbsent(destination: string): Promise<void> {
