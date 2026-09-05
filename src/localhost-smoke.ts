@@ -170,7 +170,7 @@ async function main(): Promise<void> {
           id: "after-hours",
           canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
           transition: { type: "crossfade", duration_ms: 200 },
-          advance: { mode: "duration", duration_ms: 8000 },
+          advance: { mode: "duration", after_ms: 8000 },
           visibility: {
             enabled: true,
             windows: [{ days: ["fri", "sat"], start: "18:00", end: "02:00" }],

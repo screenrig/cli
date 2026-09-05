@@ -121,8 +121,8 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "filename",
     "height",
     "id",
-    "kind",
     "operation_id",
+    "primitive",
     "revision",
     "sha256",
     "state",
@@ -501,7 +501,7 @@ test("published problem codes include payment_required at 402", () => {
   assert.doesNotMatch(source, /stripe|x402/i);
 });
 
-test("pinned backend snapshot includes swipe and its legacy placement enter schema", () => {
+test("pinned backend snapshot includes swipe and primitive enter schema", () => {
   const generated = readFileSync(GENERATED_CONTRACT, "utf8");
   const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
 
@@ -518,19 +518,19 @@ test("pinned backend snapshot includes swipe and its legacy placement enter sche
     /"type": "crossfade" \| "swipe-left" \| "swipe-right" \| "swipe-up" \| "swipe-down"/,
   );
 
-  const enter = interfaceBody(generated, "PlacementEnter");
+  const enter = interfaceBody(generated, "PrimitiveEnter");
   assert.deepEqual(quotedProperties(enter), ["type"]);
   assert.match(
     enter,
     /"type": "fade-up" \| "fade-down" \| "fade-left" \| "fade-right" \| "fade-in" \| "zoom-in" \| "zoom-out"/,
   );
 
-  const imageWrite = interfaceBody(generated, "PlaylistImagePlacementWrite");
-  assert.deepEqual(quotedProperties(imageWrite), ["content", "content_fit", "enter", "id", "layer", "rect"]);
-  assert.match(imageWrite, /"enter"\?: PlacementEnter/);
+  const imageWrite = interfaceBody(generated, "PlaylistImagePrimitiveWrite");
+  assert.deepEqual(quotedProperties(imageWrite), ["alt", "content_fit", "dwell_ms", "enter", "id", "layer", "primitive", "rect", "selector"]);
+  assert.match(imageWrite, /"enter"\?: PrimitiveEnter/);
 
   assert.match(openapi, /enum: \[crossfade, swipe-left, swipe-right, swipe-up, swipe-down\]/);
-  assert.match(openapi, /PlacementEnter:/);
+  assert.match(openapi, /PrimitiveEnter:/);
   assert.match(openapi, /enum: \[fade-up, fade-down, fade-left, fade-right, fade-in, zoom-in, zoom-out\]/);
   assert.match(openapi, /there is no snake_case rename inside it/);
   assert.doesNotMatch(openapi, /enter_type|object_enter_delay_ms|enter_delay_ms/);
@@ -540,14 +540,14 @@ test("playlist writes send a media selector and media_end, not a singular media_
   const generated = readFileSync(GENERATED_CONTRACT, "utf8");
   const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
 
-  const imageWrite = interfaceBody(generated, "PlaylistImageContentWrite");
-  assert.deepEqual(quotedProperties(imageWrite), ["alt", "dwell_ms", "selector", "type"]);
-  assert.match(imageWrite, /"type": "image"/);
+  const imageWrite = interfaceBody(generated, "PlaylistImagePrimitiveWrite");
+  assert.deepEqual(quotedProperties(imageWrite), ["alt", "content_fit", "dwell_ms", "enter", "id", "layer", "primitive", "rect", "selector"]);
+  assert.match(imageWrite, /"primitive": "image"/);
   assert.doesNotMatch(imageWrite, /"media_id"/);
 
-  const videoWrite = interfaceBody(generated, "PlaylistVideoContentWrite");
-  assert.deepEqual(quotedProperties(videoWrite), ["loop", "muted", "selector", "type"]);
-  assert.match(videoWrite, /"type": "video"/);
+  const videoWrite = interfaceBody(generated, "PlaylistVideoPrimitiveWrite");
+  assert.deepEqual(quotedProperties(videoWrite), ["content_fit", "enter", "id", "layer", "loop", "muted", "primitive", "rect", "selector"]);
+  assert.match(videoWrite, /"primitive": "video"/);
   assert.doesNotMatch(videoWrite, /"media_id"/);
 
   const selectorById = interfaceBody(generated, "PlaylistMediaSelectorByID");
@@ -563,39 +563,39 @@ test("playlist writes send a media selector and media_end, not a singular media_
 
   assert.doesNotMatch(generated, /PlaylistVideoEndAdvance/);
   assert.doesNotMatch(generated, /video_end/);
-  assert.match(openapi, /PlaylistImageContentWrite:[\s\S]*?required: \[type, selector\]/);
-  assert.match(openapi, /PlaylistVideoContentWrite:[\s\S]*?required: \[type, selector\]/);
+  assert.match(openapi, /PlaylistImagePrimitiveWrite:[\s\S]*?required: \[id, primitive, selector, rect, layer, content_fit\]/);
+  assert.match(openapi, /PlaylistVideoPrimitiveWrite:[\s\S]*?required: \[id, primitive, selector, rect, layer, content_fit\]/);
   assert.match(openapi, /PlaylistMediaEndAdvanceWrite:[\s\S]*?enum: \[media_end\]/);
   assert.doesNotMatch(openapi, /PlaylistVideoEndAdvance/);
   assert.doesNotMatch(openapi, /enum: \[video_end\]/);
 });
 
-test("pinned backend snapshot still carries the pre-primitive placement unions", () => {
+test("pinned backend snapshot carries flat primitive unions", () => {
   const generated = readFileSync(GENERATED_CONTRACT, "utf8");
   const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
 
   assert.match(
     generated,
-    /export type PlaylistPlacementWrite = PlaylistApplicationPlacementWrite \| PlaylistImagePlacementWrite \| PlaylistVideoPlacementWrite \| PlaylistIframePlacementWrite;/,
+    /export type PlaylistPrimitiveWrite = PlaylistApplicationPrimitiveWrite \| PlaylistImagePrimitiveWrite \| PlaylistVideoPrimitiveWrite \| PlaylistIframePrimitiveWrite;/,
   );
   assert.match(
     generated,
-    /export type PlaylistPlacement = PlaylistApplicationPlacement \| PlaylistImagePlacement \| PlaylistVideoPlacement \| PlaylistIframePlacement;/,
+    /export type PlaylistPrimitive = PlaylistApplicationPrimitive \| PlaylistImagePrimitive \| PlaylistVideoPrimitive \| PlaylistIframePrimitive;/,
   );
   assert.match(
     generated,
-    /export type RuntimePlacement = RuntimeApplicationPlacement \| RuntimeImagePlacement \| RuntimeVideoPlacement \| RuntimeIframePlacement;/,
+    /export type RuntimePrimitive = RuntimeApplicationPrimitive \| RuntimeImagePrimitive \| RuntimeVideoPrimitive \| RuntimeIframePrimitive;/,
   );
   for (const name of [
-    "PlaylistTextPlacementWrite",
-    "PlaylistBoxPlacementWrite",
-    "PlaylistLinePlacementWrite",
+    "PlaylistTextPrimitiveWrite",
+    "PlaylistBoxPrimitiveWrite",
+    "PlaylistLinePrimitiveWrite",
     "PlaylistTextContent",
     "PlaylistBoxContent",
     "PlaylistLineContent",
-    "RuntimeTextPlacement",
-    "RuntimeBoxPlacement",
-    "RuntimeLinePlacement",
+    "RuntimeTextPrimitive",
+    "RuntimeBoxPrimitive",
+    "RuntimeLinePrimitive",
   ]) {
     assert.doesNotMatch(generated, new RegExp(`export (type|interface) ${name}\\b`));
     assert.doesNotMatch(openapi, new RegExp(`${name}:`));
@@ -685,7 +685,7 @@ test("toast contract is a closed POST with idempotency, no queue, and no colour 
   assert.match(route, /IdempotencyKey/);
   assert.match(route, /"202":/);
   assert.match(route, /RateLimitedProblem/);
-  assert.match(route, /not a placement/);
+  assert.match(route, /not a primitive/);
   assert.match(route, /screen\.toast/);
   assert.match(route, /expires_at/);
   assert.doesNotMatch(route, /color/);

@@ -26,6 +26,7 @@
   "files": [
     "SECURITY.md",
     "assets/screenrig.runtime.js",
+    "assets/playlist-write.schema.json",
     "dist/**/*.js",
     "dist/**/*.d.ts",
     "dist/**/*.js.map",
@@ -93,6 +94,8 @@
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.7",
+    "ajv": "8.18.0",
+    "ajv-formats": "3.0.1",
     "yoga-layout": "^3.2.1"
   }
 }

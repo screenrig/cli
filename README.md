@@ -239,7 +239,9 @@ availability, deployment, or hardware validation.
 Application packing accepts an already-built static directory. It produces
 deterministic bounded archives, injects the pinned browser SDK runtime, and
 never builds or executes uploaded source. `app upload` accepts optional
-`--name` (at most 120 characters) as the application name header. Runtime
+`--name` (at most 120 Unicode characters after trimming). ASCII names use
+the application name header; Unicode names use its RFC 8187 UTF-8 extended
+header so punctuation, accents, emoji and non-Latin text survive HTTP transport. Runtime
 pages use `screenrig.canvas/v1`; protected content and
 `screenrig.webapp-package/v1` delivery are backend/player concerns. `screen
 screenshot <id>` requests one still WebP of an active screen, waits until it
@@ -795,3 +797,53 @@ See the repository [security policy](SECURITY.md). Security reports belong in
 [GitHub Private Vulnerability Reporting](https://github.com/screenrig/cli/security/advisories/new).
 The Apache-2.0 license covers this public CLI,
 not other ScreenRig services or repositories.
+
+### Compose quality and application revisions
+
+`compose catalog` includes installed font families, validator-backed node
+attributes, and complete slide and transparent-overlay examples.
+`compose render spec.json --target-width 3840 --target-height 2160` checks the
+physical content viewport without resizing the output. Nonblocking warnings
+identify decoded image upscaling above 1.25×, fill aspect distortion above 1%,
+and flattened output upscaling above 1.25×. Measurements are returned in
+`data.quality` and the layout JSON; an omitted target is explicitly unknown.
+Use `contain` for a complete logo and `cover` for proportional cropping.
+Re-render from originals at the required Frame dimensions to recover detail.
+Optional `--safe-area` flags measured text ink outside a 5% TV-safe margin.
+
+To publish a replacement package under the same application identity, run
+`app show app_EXAMPLE` to obtain its revision, then
+`app update app_EXAMPLE ./built-app --if-match 3`. This command waits for
+publication by default and returns the new `release_id`. It preserves the
+application name and K/V. Existing playlists remain pinned to the old release;
+update their application primitive explicitly after the operation succeeds.
+
+### Local deck authoring
+
+`compose render` accepts ordinary Frame specs or semantic recipes from
+`compose catalog`: `title`, `split-image`, `cards`, `table`, and `overlay`.
+Recipes retain native measured Text nodes, 5% content insets and readable type
+floors. They accept explicit physical `width`/`height` (default 1920×1080).
+Images preserve aspect; overlays keep text opaque over a translucent plate.
+
+`compose batch deck.json --output ./rendered --safe-area` accepts
+`{"pages":[{"id":"intro","spec":{"recipe":"title","title":"Welcome","body":"A useful introduction."}}]}`.
+Each spec may also be a relative JSON file path. One command returns ordered
+results, PNGs, measured layout diagnostics, a contact-sheet preview and a
+manifest. Failures retain successful pages; `--only intro` selectively retries
+one page and marks other pages `not_selected` in a separate correction manifest.
+Rendering is serial to bound full-resolution memory, with at most 100 pages.
+
+Diagnostics distinguish measured text overflow, truncation, crowding and text
+collisions from intentional text/media overlays. Missing-glyph raster detection
+selects a complete installed fallback before measurement and paint, preserving
+the requested weight and reporting its node and font. Unresolved glyphs are
+warned explicitly. This is not a language-shaping guarantee. Full-resolution
+visual review remains useful; contact sheets are reduced-resolution previews.
+
+`playlist validate playlist.json` performs offline canonical schema and
+cross-field validation before upload or publication. Create/update run the same
+check. JSON errors identify exact fields, including unsupported entry timing.
+A local pass does not resolve authorization, reference readiness, dynamic
+selectors, media durations or remote availability. The schema and semantics
+come from the backend snapshots tracked by `vendor/manifest.json`.

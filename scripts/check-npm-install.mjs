@@ -18,7 +18,7 @@ function run(args, options = {}) {
 }
 
 function successfulEnvelope(args, cwd, environment) {
-  const result = run(["exec", "--offline", "--yes=false", "--", "screenrig", "--json", ...args], {
+  const result = run(["exec", "--loglevel=error", "--offline", "--yes=false", "--", "screenrig", "--json", ...args], {
     cwd,
     env: environment,
   });
@@ -52,7 +52,8 @@ try {
   if (!spec) {
     const packed = run(["pack", "--json", "--pack-destination", temporary], { cwd: root, env: environment });
     const inventory = JSON.parse(packed.stdout);
-    const filename = Array.isArray(inventory) ? inventory[0]?.filename : inventory?.filename;
+    // npm 12 keys pack results by package name; earlier npm returns an array.
+    const filename = Array.isArray(inventory) ? inventory[0]?.filename : inventory?.filename ?? inventory?.[packageJson.name]?.filename;
     if (!filename) throw new Error("npm pack did not report an archive filename");
     spec = path.join(temporary, filename);
   }
@@ -68,6 +69,9 @@ try {
     throw new Error(`installed CLI returned version ${version.data?.version}; expected ${packageJson.version}`);
   }
   successfulEnvelope(["compose", "catalog"], consumer, environment);
+  const playlistFile = path.join(temporary, "playlist.json");
+  await writeFile(playlistFile, JSON.stringify({ name: "Offline validation", pages: [{ id: "page", canvas: { width: 1920, height: 1080, background: "#000000FF" }, transition: { type: "crossfade", duration_ms: 200 }, advance: { mode: "application", max_ms: 60000 }, primitives: [{ id: "app", primitive: "application", release_id: "rel_EXAMPLE", controller: true, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "fill" }] }] }));
+  successfulEnvelope(["playlist", "validate", playlistFile], consumer, environment);
 } finally {
   await rm(temporary, { recursive: true, force: true });
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -78,6 +78,9 @@ async function main() {
     const version = successfulEnvelope(packageRoot, ["version"], environment);
     if (version.data?.version !== "0.1.0") throw new Error("offline bundled CLI returned the wrong version");
     successfulEnvelope(packageRoot, ["compose", "catalog"], environment);
+  const playlistFile = path.join(temporary, "playlist.json");
+  await writeFile(playlistFile, JSON.stringify({ name: "Offline validation", pages: [{ id: "page", canvas: { width: 1920, height: 1080, background: "#000000FF" }, transition: { type: "crossfade", duration_ms: 200 }, advance: { mode: "application", max_ms: 60000 }, primitives: [{ id: "app", primitive: "application", release_id: "rel_EXAMPLE", controller: true, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "fill" }] }] }));
+    successfulEnvelope(packageRoot, ["playlist", "validate", playlistFile], environment);
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }

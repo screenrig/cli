@@ -20,6 +20,14 @@ const sourceRoot = sourceRootGiven
 
 const snapshots = [
   {
+    path: 'assets/playlist-write.schema.json',
+    source: 'packages/protocol/schema/playlist-write.schema.json',
+  },
+  {
+    path: 'src/generated/playlist-write-semantics.ts',
+    source: 'packages/protocol/src/playlist-write-semantics.ts',
+  },
+  {
     path: 'vendor/protocol/openapi.gen.ts',
     source: 'packages/protocol/src/openapi.gen.ts',
   },

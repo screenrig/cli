@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
+import { createCanvas, GlobalFonts, loadImage } from "@napi-rs/canvas";
 import { composeCatalog, formatComposeCatalog } from "./catalog.js";
 import { composeSpec, resolveFontFamily } from "./compose.js";
 import { REFERENCE_CANVAS, rampRoot, typeRamp } from "./tokens.js";
@@ -116,6 +117,24 @@ test("composeSpec writes a PNG and layout dump without returning pixels in the l
   assert.ok(result.font_family.length > 0);
   assert.doesNotMatch(layoutText, /\u0089PNG/);
   await rm(dir, { recursive: true, force: true });
+});
+
+test("Frame backgrounds preserve authored alpha and paint translucent child plates once", async () => {
+  const alphaOf = async (spec: unknown): Promise<number | undefined> => {
+    const result = await composeSpec(spec, { baseDir: process.cwd() });
+    const image = await loadImage(result.png);
+    const ctx = createCanvas(8, 8).getContext("2d");
+    ctx.drawImage(image, 0, 0);
+    return ctx.getImageData(0, 0, 1, 1).data[3];
+  };
+  for (const [background, alpha] of [["#2A3547E6", 230], ["#2A354780", 128], ["#00000000", 0], ["#2A3547FF", 255]] as const) {
+    assert.equal(await alphaOf({ type: "Frame", width: 8, height: 8, background }), alpha, background);
+  }
+  assert.equal(await alphaOf({ type: "Frame", width: 8, height: 8 }), 255, "default Frame remains opaque");
+  assert.equal(await alphaOf({
+    type: "Frame", width: 8, height: 8, background: "#00000000",
+    children: [{ type: "Box", width: 8, height: 8, background: "#2A3547E6" }],
+  }), 230, "transparent Frame preserves child plate alpha");
 });
 
 test("Image.src rejects URLs and missing local files", async () => {
@@ -447,4 +466,87 @@ test("invalid textShadow shapes are usage_error", () => {
     () => validateSpec(textFrame({ textShadow: { x: 2, y: 2, color: "#000" }, x: 10 })),
     /must not set x/,
   );
+});
+
+test("quality warnings measure actual contain, cover and fill paint without leaking paths", async () => {
+  const dir = await testTemp("compose-quality-");
+  await composeSpec({ type: "Frame", width: 100, height: 50, background: "#f00" }, { baseDir: dir, outPath: path.join(dir, "private-source.png") });
+  for (const fit of ["contain", "cover", "fill"] as const) {
+    const result = await composeSpec({ type: "Frame", width: 200, height: 200, children: [{ type: "Image", src: "private-source.png", flex: 1, objectFit: fit }] }, { baseDir: dir, target: { width: 400, height: 400 } });
+    const q = result.quality.images[0]!;
+    assert.deepEqual(q.source, { width: 100, height: 50 });
+    assert.deepEqual(q.painted, fit === "contain" ? { width: 200, height: 100 } : fit === "cover" ? { width: 400, height: 200 } : { width: 200, height: 200 });
+    assert.equal(result.warnings.filter((w) => w.code === "image_upscaled").length, 1);
+    assert.equal(result.warnings.some((w) => w.code === "image_aspect_stretched"), fit === "fill");
+    assert.ok(result.warnings.some((w) => w.code === "compose_output_upscaled"));
+    assert.doesNotMatch(JSON.stringify({ quality: result.quality, warnings: result.warnings }), /private-source|compose-quality|data:|base64/);
+  }
+  const atThreshold = await composeSpec({ type: "Frame", width: 125, height: 50, children: [{ type: "Image", src: "private-source.png", flex: 1 }] }, { baseDir: dir, target: { width: 125, height: 50 } });
+  assert.deepEqual(atThreshold.warnings, []);
+  const unknown = await composeSpec({ type: "Frame", width: 100, height: 50 }, { baseDir: dir });
+  assert.equal(unknown.quality.target_status, "unknown");
+  assert.equal(unknown.quality.target, undefined);
+  await assert.rejects(composeSpec({ type: "Frame", width: 100, height: 50 }, { baseDir: dir, target: { width: NaN, height: 50 } }), /positive integers/);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("TV safe-area warnings are opt-in and catalog examples are valid renderable specs", async () => {
+  const spec = { type: "Frame", width: 320, height: 180, children: [{ type: "Text", role: "title", text: "Edge" }] };
+  assert.deepEqual((await composeSpec(spec, { baseDir: process.cwd() })).warnings, []);
+  assert.ok((await composeSpec(spec, { baseDir: process.cwd(), safeArea: true })).warnings.some((w) => w.code === "text_outside_safe_area"));
+  const catalog = composeCatalog();
+  assert.ok(catalog.installed_fonts.length > 0);
+  for (const example of Object.values(catalog.examples)) {
+    validateSpec(example);
+    assert.ok((await composeSpec(example, { baseDir: process.cwd() })).png.length > 0);
+  }
+  assert.deepEqual(catalog.attributes.Text, ["type", "text", "role", "color", "align", "flex", "textShadow"]);
+});
+
+test("measured diagnostics expose long-word overflow and distinguish intentional media overlays", async () => {
+  const dir = await testTemp("measured-layout-");
+  await composeSpec({ type: "Frame", width: 100, height: 100, background: "#123456" }, { baseDir: dir, outPath: path.join(dir, "image.png") });
+  const result = await composeSpec({ type: "Frame", width: 400, height: 200, children: [
+    { type: "Image", src: "image.png", flex: 1 },
+    { type: "Box", pin: "bottom", height: 120, background: "#000000E3", children: [{ type: "Text", text: "Supercalifragilisticexpialidocious".repeat(5), role: "title" }] },
+  ] }, { baseDir: dir });
+  assert.ok(result.warnings.some((warning) => warning.code === "text_overflow" && warning.message.includes("Frame.children[1].children[0]")));
+  assert.ok(result.warnings.some((warning) => warning.code === "image_upscaled"));
+  assert.ok(result.quality.overlaps.some((overlap) => overlap.kind === "text_media"));
+  assert.equal(result.warnings.some((warning) => warning.code === "text_overlap"), false);
+  assert.ok(result.quality.text[0]!.ink.width > result.quality.text[0]!.box.width);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("recipes retain native measured text at 1080p and 4K with safe geometry and plate alpha", async () => {
+  for (const [width, height] of [[1920, 1080], [3840, 2160]]) {
+    const overlay = await composeSpec({ recipe: "overlay", width, height, title: "Prepare, activate, observe", body: "Keep the current experience visible until the replacement is ready." }, { baseDir: process.cwd(), safeArea: true });
+    assert.equal(overlay.quality.text.length, 2);
+    assert.deepEqual(overlay.warnings, []);
+    const picture = await loadImage(overlay.png), ctx = createCanvas(width!, height!).getContext("2d"); ctx.drawImage(picture, 0, 0);
+    assert.equal(ctx.getImageData(0, height! - 1, 1, 1).data[3], 227);
+    assert.equal(ctx.getImageData(0, 0, 1, 1).data[3], 0);
+    const ink = overlay.quality.text[0]!.ink;
+    const pixels = ctx.getImageData(Math.floor(ink.x), Math.floor(ink.y), Math.ceil(ink.width), Math.ceil(ink.height)).data;
+    assert.ok(pixels.some((value, index) => index % 4 === 3 && value === 255), "text remains opaque on translucent plate");
+  }
+});
+
+
+test("missing glyphs produce node-specific diagnostics even when geometric text fits", async () => {
+  const result = await composeSpec({ type: "Frame", width: 1920, height: 1080, children: [{ type: "Text", text: "A \u{10ffff}", role: "title" }] }, { baseDir: process.cwd() });
+  assert.ok(result.warnings.some((warning) => warning.code === "font_glyph_missing" && warning.message.includes("Frame.children[0]") && warning.message.includes("U+10FFFF")));
+});
+
+test("Agave bold missing arrow falls back before layout and paints the selected complete font", async (context) => {
+  resolveFontFamily(undefined);
+  if (!GlobalFonts.has("Agave Nerd Font")) { context.skip("Agave UAT regression requires its installed font"); return; }
+  const spec = { type: "Frame", width: 1920, height: 1080, fontFamily: "Agave Nerd Font", children: [{ type: "Text", text: "Prepare → activate → observe", role: "title" }] };
+  const result = await composeSpec(spec, { baseDir: process.cwd() });
+  const font = result.quality.fonts[0]!;
+  assert.equal(font.fallback_from, "Agave Nerd Font");
+  assert.deepEqual(font.missing_codepoints, ["U+2192"]);
+  assert.ok(result.warnings.some((warning) => warning.code === "font_glyph_fallback"));
+  const explicit = await composeSpec({ ...spec, fontFamily: font.family }, { baseDir: process.cwd() });
+  assert.deepEqual(result.png, explicit.png, "both measurement and painting use the complete fallback at the requested weight");
 });

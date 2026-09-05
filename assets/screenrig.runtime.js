@@ -50,7 +50,7 @@
     }
   }
   var ID_RE = /^[A-Za-z0-9._-]{8,128}$/;
-  var PLACEMENT_ID_RE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+  var PRIMITIVE_ID_RE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
   var NONCE_RE = /^[A-Za-z0-9_-]{22,128}$/;
   function isOpaqueOrigin(origin) {
     if (origin === "null") return true;
@@ -104,7 +104,7 @@
     const protocol = data.protocol;
     const message_id = data.message_id;
     const kind = data.kind;
-    const placement_id = data.placement_id;
+    const primitive_id = data.primitive_id;
     const payload = data.payload;
     if (protocol !== PROTOCOL) {
       throw new SdkValidationError("protocol_mismatch", "Unsupported protocol");
@@ -115,19 +115,19 @@
     if (typeof kind !== "string" || kind.length === 0 || kind.length > 64) {
       throw new SdkValidationError("invalid_kind", "Invalid kind");
     }
-    if (typeof placement_id !== "string" || !PLACEMENT_ID_RE.test(placement_id)) {
-      throw new SdkValidationError("invalid_placement", "Invalid placement_id");
+    if (typeof primitive_id !== "string" || !PRIMITIVE_ID_RE.test(primitive_id)) {
+      throw new SdkValidationError("invalid_primitive", "Invalid primitive_id");
     }
     if (!isRecord(payload)) {
       throw new SdkValidationError("invalid_payload", "payload must be an object");
     }
-    const allowed = /* @__PURE__ */ new Set(["protocol", "message_id", "kind", "placement_id", "payload"]);
+    const allowed = /* @__PURE__ */ new Set(["protocol", "message_id", "kind", "primitive_id", "payload"]);
     for (const key of Object.keys(data)) {
       if (!allowed.has(key)) {
         throw new SdkValidationError("invalid_shape", `Unexpected field ${key}`);
       }
     }
-    return { protocol, message_id, kind, placement_id, payload };
+    return { protocol, message_id, kind, primitive_id, payload };
   }
   function parseSize(value, name) {
     if (!isRecord(value)) {
@@ -156,7 +156,7 @@
   function parseContextPayload(payload, expectedOrigin) {
     const application_id = payload.application_id;
     const release_id = payload.release_id;
-    const placement_id = payload.placement_id;
+    const primitive_id = payload.primitive_id;
     const generation = payload.generation;
     const nonce = payload.nonce;
     const player_origin = payload.player_origin;
@@ -166,8 +166,8 @@
     if (typeof release_id !== "string" || !ID_RE.test(release_id)) {
       throw new SdkValidationError("invalid_release", "Invalid release_id");
     }
-    if (typeof placement_id !== "string" || !PLACEMENT_ID_RE.test(placement_id)) {
-      throw new SdkValidationError("invalid_placement", "Invalid placement_id");
+    if (typeof primitive_id !== "string" || !PRIMITIVE_ID_RE.test(primitive_id)) {
+      throw new SdkValidationError("invalid_primitive", "Invalid primitive_id");
     }
     if (typeof generation !== "number" || !Number.isInteger(generation) || generation < 0 || generation > Number.MAX_SAFE_INTEGER) {
       throw new SdkValidationError("invalid_generation", "Invalid generation");
@@ -184,13 +184,13 @@
     return {
       application_id,
       release_id,
-      placement_id,
+      primitive_id,
       generation,
       nonce,
       player_origin,
       capabilities: parseCapabilities(payload.capabilities),
       viewport: parseSize(payload.viewport, "viewport"),
-      placement: parseSize(payload.placement, "placement"),
+      primitive: parseSize(payload.primitive, "primitive"),
       screen_id: typeof payload.screen_id === "string" && ID_RE.test(payload.screen_id) ? payload.screen_id : void 0
     };
   }
@@ -274,6 +274,18 @@
     return output;
   }
   var ScreenRigClient = class {
+    constructor(options, allowOpaqueNativeParent = false, nativeParentOrigin) {
+      this.nativeParentOrigin = nativeParentOrigin;
+      this.host = options.host;
+      this.trustedPlayerOrigins = options.trustedPlayerOrigins ?? [options.trustedPlayerOrigin ?? DEFAULT_PLAYER_ORIGIN];
+      if (this.trustedPlayerOrigins.length === 0 || this.trustedPlayerOrigins.some((origin) => !origin || origin === "*")) {
+        throw new SdkValidationError("wildcard_origin", "Wildcard origins are not allowed");
+      }
+      this.idFactory = options.idFactory ?? randomId;
+      this.ackTimeoutMs = options.ackTimeoutMs ?? 1e4;
+      this.allowOpaqueNativeParent = allowOpaqueNativeParent;
+      this.unsubscribe = this.host.addMessageListener((event) => this.onMessage(event));
+    }
     readyState = "inert";
     context = null;
     capabilities = { ...EMPTY_CAPABILITIES };
@@ -282,6 +294,8 @@
     idFactory;
     ackTimeoutMs;
     allowOpaqueNativeParent;
+    destroyed = false;
+    activeWaiters = /* @__PURE__ */ new Set();
     pending = /* @__PURE__ */ new Map();
     resizeHandlers = /* @__PURE__ */ new Set();
     capabilityHandlers = /* @__PURE__ */ new Set();
@@ -298,19 +312,14 @@
       set: (key, value, options) => this.kvSet(key, value, options),
       delete: (key, expectedRevision, options) => this.kvDelete(key, expectedRevision, options)
     };
-    constructor(options, allowOpaqueNativeParent = false) {
-      this.host = options.host;
-      this.trustedPlayerOrigins = options.trustedPlayerOrigins ?? [options.trustedPlayerOrigin ?? DEFAULT_PLAYER_ORIGIN];
-      if (this.trustedPlayerOrigins.length === 0 || this.trustedPlayerOrigins.some((origin) => !origin || origin === "*")) {
-        throw new SdkValidationError("wildcard_origin", "Wildcard origins are not allowed");
-      }
-      this.idFactory = options.idFactory ?? randomId;
-      this.ackTimeoutMs = options.ackTimeoutMs ?? 1e4;
-      this.allowOpaqueNativeParent = allowOpaqueNativeParent;
-      this.unsubscribe = this.host.addMessageListener((event) => this.onMessage(event));
-    }
     destroy() {
+      this.destroyed = true;
       this.unsubscribe();
+      for (const waiter of this.activeWaiters) {
+        clearTimeout(waiter.timer);
+        waiter.reject(new SdkValidationError("destroyed", "SDK was destroyed before activation"));
+      }
+      this.activeWaiters.clear();
       for (const waiter of this.pending.values()) {
         clearTimeout(waiter.timer);
         waiter.reject(new SdkValidationError("destroyed", "SDK was destroyed before the parent acknowledged the request"));
@@ -350,8 +359,8 @@
           this.report("debug", "inert", "Ignored message while SDK is inert");
           return;
         }
-        if (message.placement_id !== this.context.placement_id) {
-          this.report("debug", "stale_placement", "Ignored message for another placement");
+        if (message.primitive_id !== this.context.primitive_id) {
+          this.report("debug", "stale_primitive", "Ignored message for another primitive");
           return;
         }
         if (message.kind === "response.ack" || message.kind === "response.problem") {
@@ -378,13 +387,13 @@
         if (message.kind === "viewport.changed") {
           if (!this.matchesRuntime(message.payload.generation, message.payload.nonce)) return;
           const viewport = message.payload.viewport;
-          const placement = message.payload.placement;
-          if (!viewport || !placement) {
+          const primitive = message.payload.primitive;
+          if (!viewport || !primitive) {
             return;
           }
-          this.context = { ...this.context, viewport, placement };
+          this.context = { ...this.context, viewport, primitive };
           for (const handler of this.resizeHandlers) {
-            handler({ viewport, placement });
+            handler({ viewport, primitive });
           }
           return;
         }
@@ -401,7 +410,8 @@
         return;
       }
       const opaque = isOpaqueOrigin(event.origin);
-      if (opaque) {
+      if (event.origin === this.nativeParentOrigin) {
+      } else if (opaque) {
         if (!this.allowOpaqueNativeParent) {
           throw new SdkValidationError("untrusted_origin", "Opaque parent is not allowed for this application origin");
         }
@@ -431,12 +441,17 @@
       if (context.nonce !== this.handshakeChallenge) {
         throw new SdkValidationError("invalid_nonce", "Context nonce does not match the parent challenge");
       }
-      if (message.placement_id !== context.placement_id) {
-        throw new SdkValidationError("invalid_placement", "Envelope placement_id does not match payload");
+      if (message.primitive_id !== context.primitive_id) {
+        throw new SdkValidationError("invalid_primitive", "Envelope primitive_id does not match payload");
       }
       this.context = context;
       this.capabilities = negotiateCapabilities(context.capabilities);
       this.readyState = "active";
+      for (const waiter of this.activeWaiters) {
+        clearTimeout(waiter.timer);
+        waiter.resolve();
+      }
+      this.activeWaiters.clear();
       this.advanced = false;
       for (const handler of this.capabilityHandlers) {
         handler(this.capabilities);
@@ -446,8 +461,8 @@
       if (this.targetOrigin === null || this.handshakeChallenge === null) {
         throw new SdkValidationError("inert", "SDK has not bound a parent handshake");
       }
-      this.host.postToParent(message, this.targetOrigin, this.opaqueSourceBound);
       if (!wait) {
+        this.host.postToParent(message, this.targetOrigin, this.opaqueSourceBound);
         return Promise.resolve(void 0);
       }
       return new Promise((resolve, reject) => {
@@ -456,6 +471,13 @@
           reject(new SdkValidationError("ack_timeout", `Parent did not acknowledge ${message.kind}`));
         }, this.ackTimeoutMs);
         this.pending.set(message.message_id, { resolve, reject, timer });
+        try {
+          this.host.postToParent(message, this.targetOrigin, this.opaqueSourceBound);
+        } catch (err) {
+          clearTimeout(timer);
+          this.pending.delete(message.message_id);
+          reject(err);
+        }
       });
     }
     matchesRuntime(generation, nonce) {
@@ -477,6 +499,21 @@
       }
       return this.context;
     }
+    /** Wait for the authenticated parent context, without declaring the app rendered. */
+    waitUntilActive(timeoutMs = 1e4) {
+      if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 3e5) {
+        return Promise.reject(new SdkValidationError("invalid_timeout", "Activation timeout must be between 1 and 300000 milliseconds"));
+      }
+      if (this.destroyed) return Promise.reject(new SdkValidationError("destroyed", "SDK was destroyed"));
+      if (this.readyState === "active") return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const waiter = { resolve, reject, timer: setTimeout(() => {
+          this.activeWaiters.delete(waiter);
+          reject(new SdkValidationError("activation_timeout", "Parent context did not become active"));
+        }, timeoutMs) };
+        this.activeWaiters.add(waiter);
+      });
+    }
     async ready() {
       const context = this.requireActive();
       await this.post(
@@ -484,7 +521,7 @@
           protocol: PROTOCOL,
           message_id: this.idFactory(),
           kind: "ready",
-          placement_id: context.placement_id,
+          primitive_id: context.primitive_id,
           payload: { generation: context.generation, nonce: context.nonce }
         },
         true
@@ -503,33 +540,40 @@
           protocol: PROTOCOL,
           message_id: this.idFactory(),
           kind: "log",
-          placement_id: context.placement_id,
+          primitive_id: context.primitive_id,
           payload: { level, code, message, generation: context.generation, nonce: context.nonce }
         },
         false
       );
     }
     emit(code) {
+      void this.emitEvent(code, false);
+    }
+    /** Resolves only when the parent confirms backend acceptance, not merely local send. */
+    async emitConfirmed(code) {
+      await this.emitEvent(code, true);
+    }
+    emitEvent(code, confirmed) {
       const context = this.requireActive();
       const sanitized = code.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 64);
       if (!sanitized) {
         throw new SdkValidationError("invalid_event", "Invalid event code");
       }
-      void this.post(
+      return this.post(
         {
           protocol: PROTOCOL,
           message_id: this.idFactory(),
           kind: "event.emit",
-          placement_id: context.placement_id,
+          primitive_id: context.primitive_id,
           payload: { code: sanitized, generation: context.generation, nonce: context.nonce }
         },
-        false
+        confirmed
       );
     }
     async nextPage() {
       const context = this.requireActive();
       if (!this.capabilities["page.advance"]) {
-        throw new SdkValidationError("capability_denied", "This placement cannot advance the page");
+        throw new SdkValidationError("capability_denied", "This primitive cannot advance the page");
       }
       if (this.advanced) {
         this.report("debug", "advance_one_shot", "nextPage already used for this activation");
@@ -541,7 +585,7 @@
           protocol: PROTOCOL,
           message_id: this.idFactory(),
           kind: "page.advance",
-          placement_id: context.placement_id,
+          primitive_id: context.primitive_id,
           payload: { generation: context.generation, nonce: context.nonce }
         },
         true
@@ -557,18 +601,18 @@
     requireCapability(capability) {
       const context = this.requireActive();
       if (!this.capabilities[capability]) {
-        throw new SdkValidationError("capability_denied", `This placement does not have ${capability}`);
+        throw new SdkValidationError("capability_denied", `This primitive does not have ${capability}`);
       }
       return context;
     }
     async kvGet(key) {
       const context = this.requireCapability("kv.read");
       const payload = { key: this.requireKey(key), generation: context.generation, nonce: context.nonce };
-      return this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "kv.get", placement_id: context.placement_id, payload: { ...payload } }, true);
+      return this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "kv.get", primitive_id: context.primitive_id, payload: { ...payload } }, true);
     }
     async kvList() {
       const context = this.requireCapability("kv.read");
-      return this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "kv.list", placement_id: context.placement_id, payload: { generation: context.generation, nonce: context.nonce } }, true);
+      return this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "kv.list", primitive_id: context.primitive_id, payload: { generation: context.generation, nonce: context.nonce } }, true);
     }
     async kvSet(key, value, options = {}) {
       const context = this.requireCapability("kv.write");
@@ -582,7 +626,7 @@
         nonce: context.nonce,
         ...options.expectedRevision === void 0 ? {} : { expected_revision: options.expectedRevision }
       };
-      return this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "kv.set", placement_id: context.placement_id, payload: { ...payload } }, true);
+      return this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "kv.set", primitive_id: context.primitive_id, payload: { ...payload } }, true);
     }
     async kvDelete(key, expectedRevision, options = {}) {
       const context = this.requireCapability("kv.write");
@@ -596,7 +640,7 @@
         generation: context.generation,
         nonce: context.nonce
       };
-      return this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "kv.delete", placement_id: context.placement_id, payload: { ...payload } }, true);
+      return this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "kv.delete", primitive_id: context.primitive_id, payload: { ...payload } }, true);
     }
     onResize(handler) {
       this.resizeHandlers.add(handler);
@@ -607,8 +651,8 @@
       return () => this.capabilityHandlers.delete(handler);
     }
   };
-  function createAttachedScreenRig(options, allowOpaqueNativeParent) {
-    return new ScreenRigClient(options, allowOpaqueNativeParent);
+  function createAttachedScreenRig(options, allowOpaqueNativeParent, nativeParentOrigin) {
+    return new ScreenRigClient(options, allowOpaqueNativeParent, nativeParentOrigin);
   }
 
   // src/host.ts
@@ -654,9 +698,11 @@
     return [DEFAULT_PLAYER_ORIGIN];
   }
   function resolveTrustedParentPolicy(location) {
+    const namedQtPackage = location?.protocol === "screenrig-app:" && /^[a-f0-9]{32}\.[a-f0-9]{32}$/.test(location.hostname) && location.port === "" && location.origin === `screenrig-app://${location.hostname}`;
     return {
       origins: resolveTrustedPlayerOrigins(location),
-      allowOpaqueNativeParent: location?.protocol === "screenrig-app:" && location.origin === "null"
+      allowOpaqueNativeParent: location?.protocol === "screenrig-app:" && location.origin === "null",
+      ...namedQtPackage ? { nativeParentOrigin: "qrc:" } : {}
     };
   }
 
@@ -669,7 +715,7 @@
     const client = createAttachedScreenRig({
       host: new BrowserHost(windowLike),
       trustedPlayerOrigins: policy.origins
-    }, policy.allowOpaqueNativeParent);
+    }, policy.allowOpaqueNativeParent, policy.nativeParentOrigin);
     Object.defineProperty(windowLike, "screenrig", { value: client, enumerable: true, configurable: false, writable: false });
     return client;
   }

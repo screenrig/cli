@@ -517,3 +517,26 @@ above; run it explicitly when one is available.
 Report exact source/docs/vendor files changed, vendored provenance and hashes,
 all command results, package inventory, stale-language scan, repository status,
 and skipped live-server/plugin/player/native/deployment checks.
+
+## Executing changed source during local development
+
+For work explicitly testing this checkout, build it and invoke its executable
+from this repository directory:
+
+```sh
+npm run build
+node ./dist/bin.js --json version
+node ./dist/bin.js --help
+```
+
+From another directory, use `node <cli-checkout>/dist/bin.js` with the actual
+checkout path. Keep that executable stable while other agents are using it:
+`npm run build` cleans `dist/` first, so coordinate builds with live UAT commands.
+A global `screenrig` command is not required for this source workflow.
+
+Canonical plugin skill text can update independently of the installed pinned
+CLI. New guidance does not upgrade that executable; check its help/catalog
+before relying on new commands. Source builds and local test packages are
+unreleased. Do not overwrite the installed plugin cache or copy a mutable build
+into its bundle. A bundled CLI refresh requires a reviewed CLI artifact, an
+intentional component-lock update, normal plugin generation, and installation.

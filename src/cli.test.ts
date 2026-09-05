@@ -2293,6 +2293,7 @@ function fakeToolchainProbe(options: { encoders: string[]; filters: string[]; cw
 async function doctorWithToolchain(
   prefix: string,
   options: { encoders: string[]; filters: string[]; cwebp: boolean },
+  readiness?: { status: number; body: unknown },
 ): Promise<{
   code: number;
   status: string;
@@ -2301,6 +2302,12 @@ async function doctorWithToolchain(
 }> {
   resetFfmpegToolchainCache();
   const transport = memoryBackend();
+  if (readiness) {
+    const request = transport.request.bind(transport);
+    transport.request = async (req) => req.path === "/.ready"
+      ? { ...readiness, headers: {} }
+      : request(req);
+  }
   const configDir = await testTemp(prefix);
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
@@ -2323,6 +2330,43 @@ async function doctorWithToolchain(
     cleanup: () => rm(configDir, { recursive: true, force: true }),
   };
 }
+
+test("doctor warns about degraded application workers without failing HTTP readiness", async () => {
+  const { code, status, byName, cleanup } = await doctorWithToolchain("doctor-degraded-", {
+    encoders: ["libx264", "libx265", "libwebp"], filters: ["zscale", "tonemap"], cwebp: true,
+  }, { status: 200, body: { status: "ready", degraded: ["application_processing", "valkey", "private-probe-value"] } });
+  try {
+    assert.equal(code, ExitCode.Success);
+    assert.equal(status, "warn");
+    assert.equal(byName.ready?.status, "warn");
+    assert.match(byName.ready?.detail ?? "", /service ready with degraded dependencies/);
+    assert.match(byName.ready?.detail ?? "", /application_processing:.*restore application workers.*rerun doctor/);
+    assert.match(byName.ready?.detail ?? "", /valkey:.*restore Valkey connectivity/);
+    assert.match(byName.ready?.detail ?? "", /another optional dependency/);
+    assert.doesNotMatch(byName.ready?.detail ?? "", /private-probe-value/);
+    assert.equal(byName.health?.status, "pass");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("doctor passes healthy readiness and still fails HTTP 503 readiness", async () => {
+  for (const response of [
+    { status: 200, body: { status: "ready", degraded: [] } },
+    { status: 503, body: { code: "not_ready", status: 503, detail: "The service is not ready to accept traffic." } },
+  ]) {
+    const { code, status, byName, cleanup } = await doctorWithToolchain("doctor-ready-status-", {
+      encoders: ["libx264", "libx265", "libwebp"], filters: ["zscale", "tonemap"], cwebp: true,
+    }, response);
+    try {
+      assert.equal(code, response.status === 200 ? ExitCode.Success : ExitCode.Unexpected);
+      assert.equal(status, response.status === 200 ? "pass" : "fail");
+      assert.equal(byName.ready?.status, response.status === 200 ? "pass" : "fail");
+    } finally {
+      await cleanup();
+    }
+  }
+});
 
 test("doctor exits 0 on a clean host whose ffmpeg has libwebp and which has no cwebp", async () => {
   const { code, status, byName, cleanup } = await doctorWithToolchain("doctor-no-cwebp-", {
@@ -3870,7 +3914,7 @@ async function scheduledPlaylistFixture(scheduled: boolean, dir: string) {
     id,
     canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
     transition: { type: "crossfade", duration_ms: 200 },
-    advance: { mode: "duration", duration_ms: 8000 },
+    advance: { mode: "duration", after_ms: 8000 },
     ...(visibility ? { visibility } : {}),
     primitives: [
       {
@@ -3983,7 +4027,7 @@ test("a page disabled outright still counts as scheduled", async () => {
     id: "always",
     canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
     transition: { type: "crossfade", duration_ms: 200 },
-    advance: { mode: "duration", duration_ms: 8000 },
+    advance: { mode: "duration", after_ms: 8000 },
     primitives: [
       {
         id: "poster",
@@ -4377,6 +4421,34 @@ test("app upload reports the release id an application primitive needs", async (
   await rm(configDir, { recursive: true, force: true });
 });
 
+test("app update publishes to the existing application with revision and release output", async () => {
+  const transport = memoryBackend();
+  transport.on("POST", "/api/v1/applications/app_EXISTING/releases", (request) => {
+    assert.equal(request.headers?.["if-match"], '\"7\"');
+    assert.ok(request.headers?.["idempotency-key"]);
+    assert.equal(request.headers?.["screenrig-application-name"], undefined);
+    assert.ok(request.body instanceof Uint8Array);
+    return { status: 202, headers: {}, body: { id: "app_EXISTING", release_id: "rel_NEW", operation_id: "op_NEW" } };
+  });
+  const configDir = await testTemp("app-update-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), { api_url: "https://api.screenrig.ai", token: "sr_live_existing_secret" }, fsLike);
+  const appDir = path.join(configDir, "app");
+  await mkdir(appDir);
+  await writeFile(path.join(appDir, "index.html"), "<!doctype html><html><head></head><body>updated</body></html>");
+  const result = await withRuntime(["--json", "app", "update", "app_EXISTING", appDir, "--if-match", "7", "--no-wait"], transport, { fs: fsLike });
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  assert.equal(JSON.parse(result.stdout).data.id, "app_EXISTING");
+  assert.equal(JSON.parse(result.stdout).data.release_id, "rel_NEW");
+  const count = transport.calls.length;
+  for (const flags of [[], ["--if-match", "0"], ["--if-match", "7", "--name", "changed"]]) {
+    const invalid = await withRuntime(["--json", "app", "update", "app_EXISTING", appDir, ...flags], transport, { fs: fsLike });
+    assert.equal(invalid.code, ExitCode.Usage, invalid.stdout);
+    assert.equal(transport.calls.length, count, "invalid update does not upload or request capabilities");
+  }
+  await rm(configDir, { recursive: true, force: true });
+});
+
 test("playlist templates --json lists the fifteen closed ids without enrolling", async () => {
   const transport = memoryBackend();
   const { code, stdout, configDir } = await withRuntime(["--json", "playlist", "templates"], transport);
@@ -4578,7 +4650,7 @@ test("playlist create accepts a linear canvas.background on a picture template a
   };
   const fullPage = {
     id: "poster",
-    canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: wash },
+    canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: { ...wash, stops: wash.stops.map((stop) => ({ ...stop, color: stop.color.toUpperCase() })) } },
     transition: { type: "crossfade", duration_ms: 200 },
     advance: { mode: "duration", after_ms: 8000 },
     primitives: [
@@ -4665,6 +4737,14 @@ test("playback list, media filters, media update, and app --name bind the consum
     assert.equal(namedUpload.code, ExitCode.Success, namedUpload.stdout);
     const appCall = transport.calls.find((call) => call.method === "POST" && call.path === "/api/v1/applications");
     assert.equal(appCall?.headers?.["screenrig-application-name"], "Lobby board");
+    const unicodeName = "Engineering — Fleet and usage lab";
+    const unicodeUpload = await withRuntime(["--json", "app", "upload", appDir, "--name", unicodeName, "--no-wait"], transport, { fs: fsLike });
+    assert.equal(unicodeUpload.code, ExitCode.Success, unicodeUpload.stdout);
+    const unicodeCall = transport.calls.filter((call) => call.method === "POST" && call.path === "/api/v1/applications").at(-1)!;
+    assert.equal(unicodeCall.headers?.["screenrig-application-name"], undefined);
+    assert.equal(decodeURIComponent(unicodeCall.headers!["screenrig-application-name*"]!.slice(7)), unicodeName);
+    assert.doesNotThrow(() => new Headers(unicodeCall.headers));
+
 
     const mediaUpload = await withRuntime(
       ["--json", "media", "upload", mediaFile, "--no-transcode", "--tag", "lobby"],

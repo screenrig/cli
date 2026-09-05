@@ -71,6 +71,9 @@ import { parseSse } from "./sse.js";
 import { kvWriteFromArgs } from "./kv-write.js";
 import { commentsWriteFromArgs } from "./comments-write.js";
 import { quotedRevision } from "./if-match.js";
+import { applicationNameHeaders } from "./application-name.js";
+import { composeBatch } from "./compose/batch.js";
+import { assertPlaylistValid, PLAYLIST_SERVER_CHECKS } from "./playlist-validate.js";
 import { lowInformationFilenameWarning } from "./media-filename.js";
 import {
   deriveCommitIdempotencyKey,
@@ -157,6 +160,7 @@ Commands:
   dashboard [--print-url]
   app pack <directory> [--output FILE]
   app upload <directory> [--name NAME] [--no-wait] [--poll-ms MS]
+  app update <id> <directory> --if-match REVISION [--no-wait] [--poll-ms MS]
   app list
   app show <id>
   media upload <file> [--content-type TYPE] [--tag TAG] [--no-wait] [--poll-ms MS]
@@ -167,7 +171,9 @@ Commands:
   media update <id> (--tag TAG | --clear-tag) --if-match REVISION
   media delete <id> --if-match REVISION
   compose catalog
-  compose render <file> [--output FILE] [--open]
+  compose batch <file> --output DIRECTORY [--only ID] [--target-width PX --target-height PX] [--safe-area]
+  playlist validate <file>
+  compose render <file> [--output FILE] [--target-width PX --target-height PX] [--safe-area] [--open]
   playlist templates
   playlist create <file>
   playlist update <id> <file> --if-match REVISION
@@ -298,6 +304,14 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
     throw usageError("compose render --output must not contain a NUL byte.");
   }
   const layoutOutput = `${output}.layout.json`;
+  requireFlagValue(args, "target-width", "3840");
+  requireFlagValue(args, "target-height", "2160");
+  const targetWidth = args.flags["target-width"] === undefined ? undefined : Number(flagString(args.flags, "target-width"));
+  const targetHeight = args.flags["target-height"] === undefined ? undefined : Number(flagString(args.flags, "target-height"));
+  if ((targetWidth === undefined) !== (targetHeight === undefined)) {
+    throw usageError("Provide both --target-width and --target-height for the physical content viewport.");
+  }
+  const target = targetWidth !== undefined && targetHeight !== undefined ? { width: targetWidth, height: targetHeight } : undefined;
   let spec: unknown;
   try {
     spec = JSON.parse(await readFile(specPath, "utf8"));
@@ -314,6 +328,8 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
           baseDir: path.dirname(specPath),
           outPath: output,
           layoutOutPath: layoutOutput,
+          target,
+          safeArea: flagBool(args.flags, "safe-area"),
         });
         span.finish({
           output,
@@ -341,10 +357,11 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
     ramp_root: result.ramp_root,
     ramp_at_1080: result.ramp_at_1080,
     truncated: result.truncated,
+    quality: result.quality,
     ...(opened !== undefined ? { opened } : {}),
   };
   return {
-    envelope: successEnvelope(data),
+    envelope: successEnvelope(data, { warnings: result.warnings }),
     exitCode: ExitCode.Success,
     human: humanLines("Composed still", [
       ["output", output],
@@ -353,6 +370,7 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
       ["height", String(result.height)],
       ["font_family", result.font_family],
       ["truncated", result.truncated ? "true" : "false"],
+      ...result.warnings.map((warning): [string, string] => ["warning", warning.message]),
       ...(opened !== undefined ? [["opened", opened ? "true" : "false"] as [string, string]] : []),
     ]),
   };
@@ -431,6 +449,32 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
       };
     });
   }
+  if (group === "playlist" && action === "validate") {
+    const file = args.positionals[2];
+    if (!file || args.positionals.length !== 3) throw usageError("playlist validate requires one JSON file.");
+    let parsed: Record<string, unknown>;
+    try { parsed = JSON.parse(await readFile(path.resolve(runtime.cwd(), file), "utf8")); }
+    catch { throw usageError("Cannot read playlist JSON."); }
+    const body = parsed && typeof parsed === "object" && Array.isArray(parsed.pages) ? { ...parsed, pages: expandPlaylistPages(parsed.pages) } : parsed;
+    assertPlaylistValid(body);
+    return { envelope: successEnvelope({ valid: true, scope: "local_schema_and_semantics", server_checks: PLAYLIST_SERVER_CHECKS }), exitCode: ExitCode.Success, human: "Playlist passed local canonical validation. Reference authorization and runtime readiness require server checks." };
+  }
+  if (group === "compose" && action === "batch") {
+    const file = args.positionals[2];
+    requireFlagValue(args, "output", "./rendered");
+    const output = flagString(args.flags, "output");
+    if (!file || !output || args.positionals.length !== 3) throw usageError("compose batch requires one JSON file and --output DIRECTORY.");
+    requireFlagValue(args, "target-width", "3840"); requireFlagValue(args, "target-height", "2160"); requireFlagValue(args, "only", "page-id");
+    const tw = flagString(args.flags, "target-width"), th = flagString(args.flags, "target-height");
+    if ((tw === undefined) !== (th === undefined)) throw usageError("Provide both target dimensions.");
+    const target = tw !== undefined && th !== undefined ? { width: Number(tw), height: Number(th) } : undefined;
+    let result;
+    try { result = await composeBatch(path.resolve(runtime.cwd(), file), path.resolve(runtime.cwd(), output), { target, safeArea: flagBool(args.flags, "safe-area"), only: flagString(args.flags, "only") }); }
+    catch (error) { rethrowCompose(error); }
+    const warnings = result.pages.flatMap((page) => (page.warnings ?? []).map((warning) => ({ ...warning, message: `${page.id}: ${warning.message}` })));
+    if (result.failed) throw new CliError(makeProblem("usage_error", "Some pages could not render", 400, `${result.failed} page(s) failed. Successful outputs are retained. See ${result.manifest} and ${result.preview}.`, { errors: result.pages.filter((page) => page.status === "failed").map((page) => ({ page_id: page.id, ...page.error })) }), ExitCode.Usage, warnings);
+    return { envelope: successEnvelope(result, { warnings }), exitCode: ExitCode.Success, human: `Rendered ${result.rendered} page(s). Preview: ${result.preview}. Details: ${result.manifest}.` };
+  }
   if (group === "compose" && action === "render") {
     return composeRender(args, runtime);
   }
@@ -508,8 +552,8 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
   if (group === "dashboard") {
     return dashboardCommand(args, runtime, resolved);
   }
-  if (group === "app" && action === "upload") {
-    return loggerOf(runtime).withLocal({ op: "app.upload", message: "app upload" }, () =>
+  if (group === "app" && (action === "upload" || action === "update")) {
+    return loggerOf(runtime).withLocal({ op: `app.${action}`, message: `app ${action}` }, () =>
       appUpload(args, runtime, resolved),
     );
   }
@@ -1602,10 +1646,18 @@ async function appPack(args: ParsedArgs, runtime: CliRuntime): Promise<CommandRe
 }
 
 async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>): Promise<CommandResult> {
-  const dir = args.positionals[2];
-  if (!dir) {
-    throw usageError("app upload requires a directory.");
+  const update = args.positionals[1] === "update";
+  const id = update ? args.positionals[2] : undefined;
+  const dir = args.positionals[update ? 3 : 2];
+  requireFlagValue(args, "if-match", "1");
+  const revision = flagString(args.flags, "if-match");
+  if (!dir || args.positionals.length !== (update ? 4 : 3) || (update && (!id || !revision))) {
+    throw usageError(update ? "app update requires <id> <directory> --if-match REVISION." : "app upload requires one directory.");
   }
+  if (update && args.flags.name !== undefined) throw usageError("app update preserves the application name; omit --name.");
+  const ifMatch = update ? quotedRevision(revision!) : undefined;
+  requireFlagValue(args, "name", "Lobby board");
+  const nameHeaders = applicationNameHeaders(flagString(args.flags, "name"));
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const capabilitiesResponse = await client.call({ method: "GET", path: "/api/v1/capabilities" });
@@ -1613,10 +1665,9 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
     limits: limitsFromCapabilities(capabilitiesResponse.body as Capabilities),
     logger: loggerOf(runtime),
   });
-  const name = applicationNameFromArgs(args);
   const response = await client.call({
     method: "POST",
-    path: "/api/v1/applications",
+    path: update ? `/api/v1/applications/${encodeURIComponent(id!)}/releases` : "/api/v1/applications",
     idempotent: true,
     headers: {
       "content-type": "application/gzip",
@@ -1624,7 +1675,8 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
       "screenrig-expanded-bytes": String(packed.expanded_bytes),
       "screenrig-file-count": String(packed.file_count),
       "screenrig-sdk-version": SDK_PROTOCOL_VERSION,
-      ...(name ? { "screenrig-application-name": name } : {}),
+      ...(ifMatch ? { "if-match": ifMatch } : {}),
+      ...nameHeaders,
     },
     body: packed.archive,
   });
@@ -1641,7 +1693,7 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
         { request_id: client.requestId, operation_id: operation.id },
       ),
       exitCode: ExitCode.Success,
-      human: humanLines("Application uploaded", [
+      human: humanLines(update ? "Application release uploaded" : "Application uploaded", [
         ["application_id", body.id],
         // The release id is the only handle an application primitive accepts, so
         // report it here rather than making the caller read the operation
@@ -1656,7 +1708,7 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
   return {
     envelope: jsonBody(response, client.requestId, { sha256: packed.sha256 }),
     exitCode: ExitCode.Success,
-    human: humanLines("Application upload accepted", [
+    human: humanLines(update ? "Application release accepted" : "Application upload accepted", [
       ["application_id", body.id],
       ["release_id", body.release_id],
       ["operation_id", body.operation_id],
@@ -1684,7 +1736,6 @@ async function simpleGet(
 }
 
 const MEDIA_TAG_PATTERN = /^[A-Za-z0-9]{1,32}$/;
-const APPLICATION_NAME_MAX = 120;
 const PLAYBACK_DAY_PATTERN = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
 
 function requireFlagValue(args: ParsedArgs, name: string, example: string): void {
@@ -1705,17 +1756,6 @@ function mediaTagFromArgs(args: ParsedArgs): string | undefined {
   return tag;
 }
 
-function applicationNameFromArgs(args: ParsedArgs): string | undefined {
-  requireFlagValue(args, "name", "Lobby board");
-  const name = flagString(args.flags, "name");
-  if (name === undefined) {
-    return undefined;
-  }
-  if (name.length > APPLICATION_NAME_MAX || /[\r\n]/.test(name)) {
-    throw usageError("--name must be at most 120 characters and must not contain a line break.");
-  }
-  return name;
-}
 
 function mediaPrimitiveFromArgs(args: ParsedArgs): "image" | "video" | undefined {
   requireFlagValue(args, "primitive", "image");
@@ -2284,6 +2324,7 @@ async function playlistCommand(
     }
     const pages = expandPlaylistPages(parsed.pages);
     const body = { name: parsed.name, pages };
+    assertPlaylistValid(body);
     // A create has no assigned screen yet, so there is nothing to check. An
     // update can add a schedule to a playlist screens are already running.
     if (action === "update" && id) {
@@ -3273,9 +3314,8 @@ async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awa
 
 /**
  * `pass` is present and usable and `fail` is a defect the operator has to fix.
- * `warn` is an optional piece the CLI has a documented path without, so it is
- * reported without moving the exit code: a host that is missing nothing
- * required exits 0.
+ * `warn` is an optional piece or degraded server dependency, reported without
+ * moving the exit code: a host that is missing nothing required exits 0.
  */
 type DoctorStatus = "pass" | "warn" | "fail";
 
@@ -3442,7 +3482,25 @@ async function doctor(
     try {
       const response = await client.call({ method: "GET", path: route });
       const name = route === "/api/v1/capabilities" ? "capabilities" : route.slice(2);
-      checks.push({ name, status: "pass", detail: `status ${response.status}` });
+      const body = response.body;
+      const degraded = route === "/.ready" && body !== null && typeof body === "object"
+        && "degraded" in body && Array.isArray(body.degraded) ? body.degraded : [];
+      const guidance = [...new Set(degraded.map((dependency): string => {
+        switch (dependency) {
+          case "application_processing":
+            return "application_processing: new applications cannot become ready; ask the service operator to restore application workers, then rerun doctor";
+          case "valkey":
+            return "valkey: ask the service operator to restore Valkey connectivity, then rerun doctor";
+          default:
+            // Probe names are server input; do not echo arbitrary values into diagnostics.
+            return "another optional dependency is unavailable; ask the service operator to inspect readiness diagnostics, then rerun doctor";
+        }
+      }))];
+      checks.push({
+        name,
+        status: degraded.length > 0 ? "warn" : "pass",
+        detail: `status ${response.status}${guidance.length > 0 ? `; service ready with degraded dependencies. ${guidance.join(". ")}` : ""}`,
+      });
       if (route === "/api/v1/capabilities") {
         // Probe feedback support from the advertised feature map rather than
         // assuming the routes exist on every deployment.
