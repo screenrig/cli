@@ -17,6 +17,7 @@ import {
 import { silentProgressReporter, type ProgressReporter } from "./progress.js";
 import { readWebpContainer } from "./webp.js";
 import type { LocalSpan } from "../log/types.js";
+import { planVideoDelivery, validateVideoOutput, type SignagePreset, type VideoDelivery } from "./video-profile.js";
 
 function loggingProgressReporter(inner: ProgressReporter, span: LocalSpan): ProgressReporter {
   let lastPercent = -1;
@@ -66,6 +67,8 @@ export interface TranscodeOptions {
   maxFps: number;
   webpQuality: number;
   maxEdge: number;
+  preset?: SignagePreset;
+  noAudio?: boolean;
 }
 
 /**
@@ -125,6 +128,7 @@ export interface TranscodeResult {
   height: number;
   /** True when width/height were read back from the produced file. */
   dimensionsMeasured: boolean;
+  video?: { codec: TranscodeCodec; profile: string; level: string; fps: number; audio: boolean; scan: string; preset?: SignagePreset };
   warnings: string[];
   /** Directory the caller must remove once the upload completes. */
   cleanupDir?: string;
@@ -146,6 +150,7 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
     async (transcodeSpan) => {
   const reporter = loggingProgressReporter(request.reporter ?? silentProgressReporter(), transcodeSpan);
   const kind = classifySource(filePath, request.explicitContentType);
+  if (kind !== "video" && (options.preset || options.noAudio)) throw usageError("--preset and --no-audio apply to video uploads only.");
   const toolchain = await resolveFfmpegToolchain(runtime);
   const probe = await probeMedia(runtime, toolchain, filePath);
   const sourceBytes = (await stat(filePath)).size;
@@ -288,13 +293,22 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
     }
 
     const durationMs = runtime.now().getTime() - startedAt;
-    reporter.finish({ outputBytes, elapsedMs: durationMs });
 
     if (kind === "image") {
       await requireLossyDeliveryWebp(outputPath);
     }
 
-    const measured = await measureOutput(runtime, toolchain, outputPath, kind);
+    let video: TranscodeResult["video"];
+    let measured: { width: number; height: number } | undefined;
+    if (plan.delivery) {
+      const outputProbe = await probeMedia(runtime, toolchain, outputPath);
+      validateVideoOutput(outputProbe, plan.delivery, options);
+      measured = { width: outputProbe.displayWidth, height: outputProbe.displayHeight };
+      video = { codec: options.codec, profile: outputProbe.profile, level: plan.delivery.level,
+        fps: outputProbe.fps, audio: outputProbe.hasAudio, scan: outputProbe.fieldOrder || "unknown", ...(options.preset ? { preset: options.preset } : {}) };
+    } else {
+      measured = await measureOutput(runtime, toolchain, outputPath, kind);
+    }
     const warnings = [...plan.warnings];
     if (!measured) {
       warnings.push(
@@ -303,6 +317,7 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
       );
     }
 
+    reporter.finish({ outputBytes, elapsedMs: durationMs });
     transcodeSpan.finish({
       passthrough: false,
       stage: kind,
@@ -327,6 +342,7 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
       width: measured?.width ?? plan.outputWidth,
       height: measured?.height ?? plan.outputHeight,
       dimensionsMeasured: measured !== undefined,
+      ...(video ? { video } : {}),
       warnings,
       cleanupDir,
     };
@@ -429,6 +445,7 @@ function passthroughReason(
 }
 
 interface EncodePlan {
+  delivery?: VideoDelivery;
   command: string;
   args: string[];
   target: string;
@@ -519,8 +536,9 @@ export function videoFilterChain(
   toolchain: FfmpegToolchain,
   probe: MediaProbe,
   maxEdge: number,
+  outputSize?: { width: number; height: number },
 ): { filter: string; warnings: string[] } {
-  const scale = boundedScaleFilter(maxEdge);
+  const scale = outputSize ? `scale=w=${outputSize.width}:h=${outputSize.height}` : boundedScaleFilter(maxEdge);
   if (!isHdr(probe)) {
     return { filter: scale, warnings: [] };
   }
@@ -597,16 +615,17 @@ function planVideo(
     );
   }
 
-  const { filter, warnings } = videoFilterChain(toolchain, probe, options.maxEdge);
-  const { rate, gop } = encodeTiming(probe, options.maxFps);
-  const size = boundedSize(probe.displayWidth, probe.displayHeight, options.maxEdge);
+  const delivery = planVideoDelivery(probe, options);
+  const { filter, warnings } = videoFilterChain(toolchain, probe, options.maxEdge, delivery);
+  const { rate, gop } = encodeTiming(probe, delivery.fps);
+  const size = delivery;
 
   const args = [
     "-i", input,
     "-f", "mp4",
     "-vf", filter,
     "-map", "0:v:0",
-    "-map", "0:a:0?",
+    ...(delivery.audio ? ["-map", "0:a:0?"] : []),
     "-c:v", encoder,
   ];
 
@@ -614,7 +633,7 @@ function planVideo(
     args.push(
       "-tag:v", "hvc1",
       "-profile:v", "main",
-      "-level:v", "5.1",
+      "-level:v", delivery.level,
       "-preset", "fast",
       "-crf", "28",
       "-maxrate", "8M",
@@ -624,12 +643,12 @@ function planVideo(
       "-bf", "2",
       "-r", rate,
       "-g", String(gop),
-      "-x265-params", `output-depth=8:min-keyint=${gop}:scenecut=0:log-level=error`,
+      "-x265-params", `level-idc=${delivery.level}:colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited:min-keyint=${gop}:scenecut=0:log-level=error`,
     );
   } else {
     args.push(
       "-profile:v", "high",
-      "-level:v", "4.2",
+      "-level:v", delivery.level,
       "-preset", "fast",
       "-crf", "23",
       "-maxrate", "8M",
@@ -639,6 +658,8 @@ function planVideo(
       "-bf", "2",
       "-r", rate,
       "-g", String(gop),
+      "-x264-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709:fullrange=off",
+      "-refs", "2", // Match the fast preset; allow four DPB frames including B-frame reordering.
       "-keyint_min", String(gop),
       "-sc_threshold", "0",
     );
@@ -647,10 +668,7 @@ function planVideo(
   // Players play a complete cached file, so a faststart remux is wasted work.
   args.push(
     "-avoid_negative_ts", "make_zero",
-    "-c:a", "aac",
-    "-b:a", "192k",
-    "-ar", "48000",
-    "-ac", "2",
+    ...(delivery.audio ? ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"] : ["-an"]),
     "-write_tmcd", "0",
     "-threads", "0",
     "-progress", "pipe:1",
@@ -660,12 +678,13 @@ function planVideo(
   );
 
   return {
+    delivery,
     command: toolchain.ffmpeg,
     args,
     target: options.codec === "hevc" ? "H.265 MP4" : "H.264 MP4",
     reason:
-      `re-encoded to ${options.codec === "hevc" ? "H.265" : "H.264"} MP4, bounded to ${options.maxEdge}px ` +
-      `on both edges, capped at ${options.maxFps} fps`,
+      `re-encoded to ${options.codec === "hevc" ? "H.265" : "H.264"} MP4, level ${delivery.level}, ` +
+      `${delivery.width}x${delivery.height} at ${rate} fps${options.preset ? ` (${options.preset})` : ""}${options.noAudio ? ", without audio" : ""}`,
     progressDurationSeconds: probe.durationSeconds,
     outputWidth: size.width,
     outputHeight: size.height,
