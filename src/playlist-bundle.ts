@@ -447,6 +447,7 @@ export function normalizePlaylistForBundle(input: unknown): { id: string; revisi
         layer: primitive.layer,
         content_fit: primitive.content_fit,
         ...(primitive.enter !== undefined ? { enter: cloneJson(primitive.enter) } : {}),
+        ...(primitive.motion !== undefined ? { motion: cloneJson(primitive.motion) } : {}),
       };
     });
     return {

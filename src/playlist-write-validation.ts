@@ -146,10 +146,56 @@ function validateRect(value: unknown, name: string): void {
 
 function validateEnter(value: unknown, name: string): void {
   const enter = record(value, name);
-  exact(enter, ["type"], name);
+  exact(enter, ["type", "stagger"], name);
   if (!["fade-up", "fade-down", "fade-left", "fade-right", "fade-in", "zoom-in", "zoom-out"].includes(String(enter.type))) {
     throw usageError(`${name}.type is invalid.`);
   }
+  if (enter.stagger !== undefined) number(enter, "stagger", name, { integer: true, min: 0, max: 8 });
+}
+
+function validateMotion(value: unknown, name: string, primitive: string): void {
+  const motion = record(value, name);
+  if (motion.type === "spin") {
+    exact(motion, ["type", "direction", "speed"], name);
+    if (primitive === "application" || primitive === "iframe") {
+      throw usageError(`${name} spin is not allowed for application and iframe primitives.`);
+    }
+    if (!["cw", "ccw"].includes(String(motion.direction))) throw usageError(`${name}.direction is invalid.`);
+    if (!["slow", "medium", "fast"].includes(String(motion.speed))) throw usageError(`${name}.speed is invalid.`);
+    return;
+  }
+  if (motion.type === "path") {
+    exact(motion, ["type", "points", "rate", "loop"], name);
+    if (!Array.isArray(motion.points) || motion.points.length < 1 || motion.points.length > 64) {
+      throw usageError(`${name}.points must contain 1 to 64 waypoints.`);
+    }
+    for (const [index, pointValue] of motion.points.entries()) {
+      const pointName = `${name}.points[${index}]`;
+      const point = record(pointValue, pointName);
+      exact(point, ["x", "y"], pointName);
+      number(point, "x", pointName);
+      number(point, "y", pointName);
+    }
+    const rate = motion.rate;
+    if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0 || rate > 10_000) {
+      throw usageError(`${name}.rate is invalid.`);
+    }
+    if (motion.loop !== undefined && !["loop", "ping-pong", "once"].includes(String(motion.loop))) {
+      throw usageError(`${name}.loop is invalid.`);
+    }
+    return;
+  }
+  if (motion.type === "drift") {
+    exact(motion, ["type", "zoom", "direction", "speed"], name);
+    if (primitive === "application" || primitive === "iframe") {
+      throw usageError(`${name} drift is not allowed for application and iframe primitives.`);
+    }
+    if (!["in", "out"].includes(String(motion.zoom))) throw usageError(`${name}.zoom is invalid.`);
+    if (!["left", "right", "up", "down", "none"].includes(String(motion.direction))) throw usageError(`${name}.direction is invalid.`);
+    if (!["slow", "medium", "fast"].includes(String(motion.speed))) throw usageError(`${name}.speed is invalid.`);
+    return;
+  }
+  throw usageError(`${name}.type is invalid.`);
 }
 
 function validateIframe(value: JsonRecord, name: string): void {
@@ -278,9 +324,10 @@ export function validatePlaylistWrite(
       if (primitive.enter !== undefined) validateEnter(primitive.enter, `${primitiveName}.enter`);
       if (primitive.primitive === "application") throw usageError("Playlist bundles do not support application primitives.");
       if (primitive.primitive === "iframe") {
-        exact(primitive, ["id", "primitive", "src", "title", "rect", "layer", "content_fit", "enter"], primitiveName);
+        exact(primitive, ["id", "primitive", "src", "title", "rect", "layer", "content_fit", "enter", "motion"], primitiveName);
         validateIframe({ type: "iframe", src: primitive.src, title: primitive.title }, primitiveName);
         if (primitive.content_fit !== "fill") throw usageError(`${primitiveName}.content_fit must be fill for an iframe.`);
+        if (primitive.motion !== undefined) validateMotion(primitive.motion, `${primitiveName}.motion`, "iframe");
         iframeCount += 1;
         continue;
       }
@@ -290,10 +337,11 @@ export function validatePlaylistWrite(
       exact(
         primitive,
         category === "image"
-          ? ["id", "primitive", "selector", "alt", "dwell_ms", "rect", "layer", "content_fit", "enter"]
-          : ["id", "primitive", "selector", "muted", "loop", "rect", "layer", "content_fit", "enter"],
+          ? ["id", "primitive", "selector", "alt", "dwell_ms", "rect", "layer", "content_fit", "enter", "motion"]
+          : ["id", "primitive", "selector", "muted", "loop", "rect", "layer", "content_fit", "enter", "motion"],
         primitiveName,
       );
+      if (primitive.motion !== undefined) validateMotion(primitive.motion, `${primitiveName}.motion`, category);
       const selector = validateSelector(primitive.selector, `${primitiveName}.selector`, category, mediaPrimitives, referenced);
       if (category === "image") {
         if (primitive.alt !== undefined && (typeof primitive.alt !== "string" || primitive.alt.length > 300)) throw usageError(`${primitiveName}.alt is invalid.`);

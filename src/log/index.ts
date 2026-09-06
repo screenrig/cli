@@ -7,12 +7,14 @@ export {
   loggingRunProcess,
   loggingSignedRawPut,
   loggingTransport,
+  logSinkDegradedWarning,
+  LOG_SINK_DEGRADED_CODE,
   noopLogger,
   queryKeys,
   requestSummary,
   responseSummary,
 } from "./logger.js";
-export { connectUnixLogSocket } from "./socket.js";
+export { connectUnixLogSocket, DroppingLogSink } from "./socket.js";
 export { httpResourceId, httpTag, localTag } from "./tag.js";
 export { LOG_EVENT_VERSION } from "./types.js";
 export type {

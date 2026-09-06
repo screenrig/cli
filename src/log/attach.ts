@@ -2,7 +2,7 @@ import type { ParsedArgs } from "../argv.js";
 import type { ResolvedConfig } from "../config.js";
 import { fetchSignedRawPut, type CliRuntime } from "../runtime.js";
 import { commandWords, createSinkLogger, loggingSignedRawPut, noopLogger } from "./logger.js";
-import { connectUnixLogSocket } from "./socket.js";
+import { connectUnixLogSocket, DroppingLogSink } from "./socket.js";
 import type { OperationLogger } from "./types.js";
 
 function bindLogger(runtime: CliRuntime, logger: OperationLogger): void {
@@ -30,7 +30,12 @@ export async function attachOperationLogger(
     runtime.logger = noopLogger;
     return;
   }
-  const sink = await connectUnixLogSocket(socketPath);
+  let sink;
+  try {
+    sink = await connectUnixLogSocket(socketPath);
+  } catch {
+    sink = new DroppingLogSink();
+  }
   const logger = createSinkLogger({
     sink,
     command,

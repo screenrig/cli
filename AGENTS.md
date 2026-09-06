@@ -368,15 +368,21 @@ installation, players, backend services, the site, or production deployment.
 ## Page motion
 
 - Default templated pages stay `{ type: "crossfade", duration_ms: 200 }` with
-  no object `enter`. Do not flip that default to swipe.
+  no object `enter` and no object `motion`. Do not flip that default to swipe.
 - Full pages are opaque: the CLI forwards `transition.type` swipe variants
-  (`swipe-left`, `swipe-right`, `swipe-up`, `swipe-down`) and optional
-  object `enter: { type }` with that same object name. No snake_case
-  inside `enter`. `duration_ms` is required, 0 through 60000. Swipe
-  authoring default when chosen is `duration_ms: 600`.
-- Teach swipe and `enter` as spare emphasis, not as the ordinary page.
-  Object enter delay 500 ms and duration 400 ms are contract constants, not
-  author fields and not CLI flags.
+  (`swipe-left`, `swipe-right`, `swipe-up`, `swipe-down`), optional
+  object `enter: { type, stagger? }` with that same object name, and optional
+  object `motion` (`spin`, `path`, `drift`). No snake_case inside `enter` or
+  `motion`. `duration_ms` is required, 0 through 60000. Swipe authoring
+  default when chosen is `duration_ms: 600`. Optional `enter.stagger` is an
+  integer 0 through 8. `spin` is `cw|ccw` and `slow|medium|fast` on image
+  and video only. `drift` is `zoom in|out`, `direction left|right|up|down|none`,
+  and the same speed tokens, on image and video only. `path` is 1 through 64
+  points, `rate` greater than 0 and at most 10000, and `loop|ping-pong|once`.
+- Teach swipe, `enter`, and persistent `motion` as spare emphasis, not as the
+  ordinary page. Object enter delay 500 ms and duration 400 ms are contract
+  constants, not author fields and not CLI flags. One moving element per page
+  is the norm.
 - `Application` carries no `state` and no `release_id`. It reports
   `latest_ready_release`. `OperationAccepted.release_id` is required, so
   `app upload` reports the release id without waiting on the operation result.
@@ -483,10 +489,27 @@ installation, players, backend services, the site, or production deployment.
   stdout, the envelope, or human text. `--open` opens a local path through
   `CliRuntime.openPath`; it is not the agent vision loop.
 - Optional Text `textShadow` is local `compose render` paint only. Author
-  `{ x, y, blur?, color }` in px; omit it to paint without a shadow. It is
-  not `screenrig.canvas/v1` and not a player feature. Layout `x`/`y` on Text
-  stay forbidden. This is **source-ready** in the working tree. It is not in
-  the locked plugin bundle. Do not claim marketplace or deployed.
+  `{ x, y, blur?, color }` in px; omit it to paint without a shadow. Optional
+  Text `effects` is the newer home for the same shadow plus `weight`
+  (`regular`|`bold`), `italic`, `underline`, `outline` `{ width, color }`
+  (width 0.5–12 px), `arc` `{ degrees }` (−180–180, smile is positive,
+  single line, centre aligned), and `texture` `{ src, objectFit? }` (clip-to-text,
+  path relative to the spec like `Image.src`). `textShadow` maps onto
+  `effects.shadow`. Missing bold/italic faces synthesise and warn
+  `synthetic_face`. Use text effects sparingly, when the design calls for
+  them (a headline, a badge); body copy and prices stay plain for
+  readability. Optional Text `scale: "display-xl"` raises that node's type
+  wish to 60% of the shorter edge when the Frame's only child is that Text
+  node; other roles and layouts keep the 12% cap. `compose render --ink-tight
+  [--ink-padding PX]` (and the same flags on `compose batch`, per page) crops
+  transparent output to measured ink of all layers plus optional padding
+  (default 0, 0 through 8192). The envelope reports original frame size, ink
+  rect, final size, overhang (retained ink past the authored frame) and
+  clipped (ink the frame actually cut). Preserve glyph fallback and overflow
+  diagnostics. It is not `screenrig.canvas/v1` and not a player feature.
+  Layout `x`/`y` on Text stay forbidden. This is **source-ready** in the
+  working tree. It is not in the locked plugin bundle. Do not claim
+  marketplace or deployed.
 
 ## Follow operation logs
 
@@ -496,8 +519,9 @@ There is no `--log-socket` flag and no `SCREENRIG_LOG_SOCKET` override
 (`src/commands.ts` USAGE).
 
 If `log_socket` is absent or empty, commands work unchanged. If it is set,
-connect or write failure fails the command: the consumer must already be
-listening (`src/log/attach.ts`, `src/log/socket.ts`).
+connect or write failure never fails the command: lines are dropped, counted,
+and one envelope warning `{ code: "log_sink_degraded", dropped: N }` is
+emitted at the end (`src/log/attach.ts`, `src/log/socket.ts`).
 
 Each line is one v1 NDJSON object (`src/log/types.ts`): `v`, `ts`,
 `event_id`, `correlation_id`, `run_id`, `command`, `kind` (`http` or

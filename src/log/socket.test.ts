@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import net from "node:net";
 import { Writable } from "node:stream";
 import { test, type TestContext } from "node:test";
-import { CliError } from "../problems.js";
 import { connectUnixLogSocket } from "./socket.js";
 
 class HeldSocket extends Writable {
@@ -40,32 +39,34 @@ test("log close waits for every accepted write and preserves line order", async 
   assert.equal(socket.destroyed, true);
 });
 
-test("a stalled log consumer fails at the bounded backlog instead of buffering forever", async (t) => {
+test("a stalled log consumer drops lines at the bounded backlog instead of failing the command", async (t) => {
   const { socket, sink } = await heldSink(t);
-  assert.throws(() => {
-    for (let i = 0; i < 40; i += 1) sink.writeLine("x".repeat(32 * 1024));
-  }, (error: unknown) => error instanceof CliError && /bounded write buffer/.test(error.message));
+  for (let i = 0; i < 40; i += 1) sink.writeLine("x".repeat(32 * 1024));
+  assert.ok(sink.droppedCount() > 0);
   assert.ok(socket.writableLength <= 1024 * 1024);
+  assert.equal(socket.destroyed, false);
+  await sink.close();
   assert.equal(socket.destroyed, true);
-  await assert.rejects(sink.close(), /bounded write buffer/);
 });
 
 test("log close cannot hang forever on a consumer that stops draining", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const { socket, sink } = await heldSink(t);
   sink.writeLine("held");
-  const closing = assert.rejects(sink.close(), /timed out/);
+  const closing = sink.close();
   t.mock.timers.tick(5000);
   await closing;
   assert.equal(socket.destroyed, true);
 });
 
-test("a write failure remains visible at close after its callback completes", async (t) => {
+test("a write failure drops later lines and close still resolves", async (t) => {
   const { socket, sink } = await heldSink(t);
   sink.writeLine("held");
   const failed = new Promise<void>((resolve) => socket.once("error", () => resolve()));
   socket.callbacks.shift()!(new Error("consumer disconnected"));
   await failed;
-  await assert.rejects(sink.close(), /consumer disconnected/);
+  sink.writeLine("after-error");
+  assert.ok(sink.droppedCount() >= 1);
+  await sink.close();
   assert.equal(socket.destroyed, true);
 });

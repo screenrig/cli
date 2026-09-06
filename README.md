@@ -51,10 +51,12 @@ operation log. The CLI connects as a **client** to an already-listening Unix
 domain socket at that path and writes one JSON object per line. Stdout stays
 the single command envelope; `--json` and stderr progress are unchanged. There
 is no `--log-socket` flag and no `SCREENRIG_LOG_SOCKET` override. If the field
-is absent or empty, behavior is unchanged. If it is set and connect or write
-fails, the command fails: the consumer must already be listening. Completed writes are not retained.
-A consumer that stops reading fails when the pending buffer exceeds 1 MiB;
-closing waits at most five seconds for accepted writes to drain.
+is absent or empty, behavior is unchanged. Connect failure or back-pressure
+never fails the command: lines are dropped and counted, and the envelope
+includes one warning `{ "code": "log_sink_degraded", "dropped": N }`. Completed
+writes are not retained. A consumer that stops reading causes further lines to
+be dropped once the pending buffer exceeds 1 MiB; closing waits at most five
+seconds for accepted writes to drain.
 
 ```json
 {
@@ -158,9 +160,19 @@ semantics as `agent disconnect`.
 `compose catalog` and `compose render` run locally. They do not enroll. They
 do not debit credits. `compose render` reads a JSON spec, writes a PNG, and
 writes `<output>.layout.json` next to it. The envelope carries paths, canvas
-size, the resolved font family, space tokens, the type ramp, and whether any
-text was truncated. It never prints image bytes. `--open` opens the local PNG
-with the OS opener when the user asked to view the still on this computer.
+size, the resolved font family, space tokens, the type ramp, whether any
+text was truncated, and visual `lint` findings ordered by page. It never
+prints image bytes. `--open` opens the local PNG with the OS opener when the
+user asked to view the still on this computer. `--lint-only` still composes
+in memory and reports `lint` without writing the PNG or layout JSON.
+Optional Text `scale: "display-xl"` raises that node's type wish to 60% of
+the shorter edge when the Frame has that single Text child; every other role
+and layout keeps the 12% cap. `compose render --ink-tight [--ink-padding PX]`
+crops a transparent still to the measured ink of every layer, then adds
+optional padding (default 0) for animated entry. The envelope reports the
+original `frame` size, the `ink` rect, the final size, `overhang` (ink past
+the authored frame that was retained) and `clipped` (ink the frame actually
+cut). Glyph fallback and overflow diagnostics stay on the authored layout.
 
 ScreenRig content has three families: static images, including stills produced
 by local compose; motion video; and web content delivered as an `iframe` or
@@ -191,17 +203,87 @@ page's type. The outgoing page follows so the edges stay touching. The name
 is motion direction: `swipe-left` moves content left.
 
 Optional object `enter` is `{ "type": "..." }` with that same object name on
-playlist JSON. There is no snake_case rename inside it. Types are
-`fade-up`, `fade-down`, `fade-left`, `fade-right`, `fade-in`, `zoom-in`,
-and `zoom-out`. Absent means no object animation. Use swipe and `enter`
-sparingly, for emphasis or a particular style, not on every page. If you
-want object animation, layer the primitives and put the motion on the
-top-layer text or images. Do not animate every object. Object enter
-starts invisible. It runs 500 ms after the page occupies the full
-viewport, for 400 ms. Those delays are contract constants, not author
-fields and not CLI flags. The pinned CLI implements these playlist document
-fields, and the control plane accepts swipe types and object `enter`. This
-does not establish marketplace availability or deployment.
+playlist JSON. Optional integer `stagger` is 0 through 8. There is no
+snake_case rename inside it. Types are `fade-up`, `fade-down`,
+`fade-left`, `fade-right`, `fade-in`, `zoom-in`, and `zoom-out`. Absent
+means no object animation. Use swipe and `enter` sparingly, for emphasis
+or a particular style, not on every page. If you want object animation,
+layer the primitives and put the motion on the top-layer text or images.
+Do not animate every object. Object enter starts invisible. It runs
+500 ms after the page occupies the full viewport, for 400 ms, plus
+`stagger * 120` ms when `stagger` is present. Those delays are contract
+constants, not author fields and not CLI flags.
+
+Optional object `motion` is a discriminated object on `type`: `spin`,
+`path`, or `drift`. There is no snake_case rename inside it. Absent means
+the primitive stays at rest after enter. `spin` takes `direction`
+`cw` or `ccw` and `speed` `slow`, `medium`, or `fast`, and applies to
+`image` and `video` only. `drift` takes `zoom` `in` or `out`, `direction`
+`left`, `right`, `up`, `down`, or `none`, and the same `speed` tokens,
+and applies to `image` and `video` only. `path` takes 1 through 64
+`points`, `rate` greater than 0 and at most 10000, and optional `loop`
+`loop`, `ping-pong`, or `once`; it applies to `image`, `video`,
+`application`, and `iframe`. `playlist templates` prints the two examples
+below. The pinned CLI implements these playlist document fields, and the
+control plane accepts swipe types, object `enter`, and object `motion`.
+This does not establish marketplace availability or deployment.
+
+A panning background:
+
+```json
+{
+  "id": "pan",
+  "canvas": { "width": 1920, "height": 1080, "viewport_fit": "contain", "background": "#000000FF" },
+  "transition": { "type": "crossfade", "duration_ms": 200 },
+  "advance": { "mode": "duration", "after_ms": 8000 },
+  "primitives": [
+    {
+      "id": "background",
+      "primitive": "image",
+      "selector": { "by": "id", "media_id": "med_background" },
+      "rect": { "x": 0, "y": 0, "width": 2400, "height": 1080 },
+      "layer": 0,
+      "content_fit": "cover",
+      "motion": {
+        "type": "path",
+        "points": [{ "x": -480, "y": 0 }],
+        "rate": 40,
+        "loop": "loop"
+      }
+    }
+  ]
+}
+```
+
+Persistent motion is for designs that call for it; one moving element per page is the norm.
+
+A slowly spinning badge:
+
+```json
+{
+  "id": "badge",
+  "canvas": { "width": 1920, "height": 1080, "viewport_fit": "contain", "background": "#1B2632FF" },
+  "transition": { "type": "crossfade", "duration_ms": 200 },
+  "advance": { "mode": "duration", "after_ms": 8000 },
+  "primitives": [
+    {
+      "id": "badge",
+      "primitive": "image",
+      "selector": { "by": "id", "media_id": "med_badge" },
+      "rect": { "x": 1640, "y": 80, "width": 200, "height": 200 },
+      "layer": 1,
+      "content_fit": "contain",
+      "motion": {
+        "type": "spin",
+        "direction": "cw",
+        "speed": "slow"
+      }
+    }
+  ]
+}
+```
+
+Persistent motion is for designs that call for it; one moving element per page is the norm.
 
 The ordinary pair command currently accepts six canonical characters:
 
@@ -506,18 +588,72 @@ screenrig --json media upload ./still.png
 ```
 
 The spec is a fail-closed tree of `Frame`, `Column`, `Row`, `Box`, `Spacer`,
-`Text`, and `Image`. Roles are `display`, `title`, `body`, `caption`, and
+`Text`, `Image`, `Icon`, `Divider`, and `Pill`. Roles are `display`, `title`, `body`, `caption`, and
 `label`. Spacing tokens are `xs`, `s`, `m`, `l`, and `xl`. Pins are `top`,
 `bottom`, `left`, and `right`. Do not author `x` or `y` on any node. The root
-`Frame` defines the canvas through required `width` and `height`. Do not author
+`Frame` defines the canvas through required `width` and `height`. Optional
+`Frame.theme` selects one curated palette (`warm-cafe`, `bakery-cream`,
+`midnight-neon`, `clean-corporate`, `earthy-market`, `ocean-calm`,
+`bold-retail`, `cinema-noir`, `pastel-kiosk`, `forest-lodge`, `sunset-promo`,
+`monochrome-ink`, `sport-arena`, `healthcare-soft`, `festival-pop`,
+`luxury-gold`). A theme fills unset `background`, `color`, and `fontFamily` on
+`Frame` / `Box` / `Text`; explicit values still win. `color` and solid
+`background` also accept the named tokens `accent`, `ink`, `inkMuted`,
+`surface`, `accentInk`, and `background`. Pick one theme per deck; use accent
+for one element per page. `Icon` paints a Font Awesome glyph by `name` (Free
+map plus installed Pro metadata; unknown names list the nearest three).
+`Divider` is a horizontal or vertical rule from the parent direction.
+`Pill` is a padded badge. `Frame.background` and `Box.background` accept a
+linear gradient `{ "type": "linear", "angle": 0-360, "stops": [ { "at": 0, "color": "#…" }, … ] }`
+with 2–8 strictly increasing stops. Do not author
 `fontSize`. The pinned CLI accepts positive `width` and `height` values in px on
 `Image`, `Box`, `Row`, `Column`, and `Spacer`. Keep `flex` for remaining space.
 `pin` `top` or `bottom` stretches the full width; `left` or `right` stretches
 the full height. Size a wordmark with `width` and `height`, not `pin`.
 Optional Text `textShadow` is
 `{ "x": 2, "y": 2, "blur": 4, "color": "#00000080" }`; omit it to paint
-without a shadow. `Image.src` is a local filesystem path
+without a shadow. Optional Text `effects` is the newer home for local
+paint treatments, all off by default:
+
+```json
+"effects": {
+  "weight": "regular",
+  "italic": true,
+  "underline": true,
+  "outline": { "width": 2, "color": "#000000" },
+  "shadow": { "x": 2, "y": 2, "blur": 4, "color": "#00000080" },
+  "arc": { "degrees": 40 },
+  "texture": { "src": "./paper.png", "objectFit": "cover" }
+}
+```
+
+`weight` is `regular` or `bold`. `outline.width` is 0.5–12 px at the
+rendered size. `arc.degrees` is −180–180 (positive is a smile), centre
+aligned, and single-line only. `texture.src` is a local path relative to
+the spec, like `Image.src`, and fills the glyphs (clip-to-text); combining
+it with `outline` is allowed. `textShadow` still maps onto `effects.shadow`.
+Real bold and italic faces are used when the chosen font has them;
+otherwise the rasteriser synthesises a face and emits a `synthetic_face`
+warning. Use text effects sparingly, when the design calls for them (a
+headline, a badge); body copy and prices stay plain for readability.
+`Image.src` is a local filesystem path
 relative to the spec file. The CLI does not fetch URLs.
+Optional Text `plate` is `"auto"`, `"none"` (the default), or
+`{ "color": "#000000B3", "radius": "s", "padding": "s" }`. With `"auto"`,
+after layout the renderer samples pixels behind the text ink box, measures
+contrast against the region's mean luminance and 90th percentile, and paints
+a plate only when that ratio is below 4.5. A themed frame uses `surface` at
+about 85% alpha; otherwise it chooses black or white at 70% from the text
+colour, with radius and padding `s`. `plate.color` accepts a hex colour or a
+theme token (`accent`, `ink`, `inkMuted`, `surface`, `accentInk`,
+`background`) when `Frame.theme` is set. Diagnostics report `plate_applied` or
+`plate_skipped` with the measured ratio. Compose emits a `low_contrast`
+warning when the ratio after plating is below 3.0 on that node. Visual lint
+emits `low_contrast_rendered` when sampled finished pixels are below 4.5:1.
+Recipes `hero`, `promo`, and `quote`
+set `"auto"`. Optional Image `focal` is `{ "x": 0.5, "y": 0.5 }` (0 through 1,
+default centre). For `objectFit: "cover"` the crop window stays on that
+point, clamped to the image, and the crop rect is reported in diagnostics.
 
 `--open` is only for viewing the still on this computer. Agent vision reads
 the file path. Do not cat pixels into chat.
@@ -731,10 +867,39 @@ screenrig --json media upload ./lobby.mov --preset signage-1080p30 --no-audio
 screenrig --json media upload ./portrait.mov --preset signage-4k30
 screenrig --json media upload ./poster.png --no-transcode
 screenrig --json media upload ./lobby-welcome.png --tag lobby
+screenrig --json media upload-batch ./images.json --state ./upload-state.json
+screenrig --json media upload-batch ./images.json --state ./upload-state.json --concurrency 4 --no-transcode --tag lobby
 screenrig --json media list --tag lobby --primitive image
 screenrig --json media update med_01 --tag lobby --if-match 1
 screenrig --json media update med_01 --clear-tag --if-match 2
 ```
+
+`media upload-batch` uploads many local files through the same declare / transcode
+/ PUT / wait path as `media upload`. The manifest is
+`{ "items": [ { "path": "./a.png", "tag"?: "lobby", "content_type"?: "image/png" } ] }`
+with 1 to 1000 items. Paths are resolved relative to the manifest file.
+`--state FILE` is required: a 0600 JSON file keyed by the SHA-256 of each
+source file's local bytes, bound to this API URL and account. Items already
+present with a `media_id` are skipped and reported as `resumed`. The file
+records the operation id as soon as declare succeeds, before the signed PUT,
+so a crash mid-flight can recover on resume. Do not share one state file
+across accounts.
+
+Each item's idempotency key is derived from its content hash, so a retry of
+the same bytes does not create a duplicate. A 409 `resource_conflict` whose
+detail is a terminal operation first tries to recover the media id (from the
+stored operation, or by matching `sha256` on `GET /api/v1/media`); if none
+exists the item re-declares with a fresh key derived from `sha256` plus an
+attempt counter and records that in state. A 429 honours `Retry-After`
+(delta-seconds or HTTP-date) when the server sends it; otherwise the command
+uses bounded exponential backoff starting at 1 second, capped at 30 seconds,
+with jitter, and at most 8 attempts per item. 5xx responses use the same
+backoff. `--concurrency` defaults to 4 and accepts 1 through 8.
+
+The envelope reports `attempts`, `rate_limited`, `wait_ms` (backoff sleeps),
+`transfer_ms` (request time), `accepted`, `resumed`, and `failed` (the last
+problem per failed item). Progress goes to stderr; `--no-progress` silences
+it. `--tag` is the default tag when an item omits one.
 
 `media list` forwards `--tag` and `--primitive image|video` to
 `GET /api/v1/media` as `tag` and `primitive` parameters.
@@ -858,15 +1023,31 @@ not other ScreenRig services or repositories.
 ### Compose quality and application revisions
 
 `compose catalog` includes installed font families, validator-backed node
-attributes, and complete slide and transparent-overlay examples.
+attributes, curated `themes` with `theme_guidance` to pick one theme per deck
+and use accent for one element per page, signage recipes with fields, variants,
+and one example each, `recipe_guidance` to alternate variants or recipes on
+adjacent pages, complete slide, transparent-overlay, effects-headline,
+themed-slide, gradient-band, and icon-row examples, `effects_guidance` to
+use text effects sparingly, `Frame.viewing` (`near`/`mid`/`far`, default `mid`)
+for distance-based type floors applied at layout (fit-text will not size below
+the x-height floor) and again as visual `lint` (`too_small_for_distance`),
+visual `lint` codes, and the preview reminder
+to look at the contact sheet.
 `compose render spec.json --target-width 3840 --target-height 2160` checks the
 physical content viewport without resizing the output. Nonblocking warnings
 identify decoded image upscaling above 1.25×, fill aspect distortion above 1%,
 and flattened output upscaling above 1.25×. Measurements are returned in
 `data.quality` and the layout JSON; an omitted target is explicitly unknown.
 Use `contain` for a complete logo and `cover` for proportional cropping.
+`Image.focal` `{ x, y }` (0 through 1, default 0.5, 0.5) keeps a subject
+inside a cover crop. `Text.plate` `"auto"` paints a readability plate under
+copy over busy imagery when sampled contrast is below 4.5.
 Re-render from originals at the required Frame dimensions to recover detail.
 Optional `--safe-area` flags measured text ink outside a 5% TV-safe margin.
+Optional `--ink-tight` crops the PNG to measured ink; `--ink-padding PX` (0
+to 8192, default 0) adds transparent margin around that crop and requires
+`--ink-tight`. `compose batch` accepts the same flags and applies them per
+page.
 
 To publish a replacement package under the same application identity, run
 `app show app_EXAMPLE` to obtain its revision, then
@@ -878,18 +1059,31 @@ update their application primitive explicitly after the operation succeeds.
 ### Local deck authoring
 
 `compose render` accepts ordinary Frame specs or semantic recipes from
-`compose catalog`: `title`, `split-image`, `cards`, `table`, and `overlay`.
-Recipes retain native measured Text nodes, 5% content insets and readable type
-floors. They accept explicit physical `width`/`height` (default 1920×1080).
+`compose catalog`: `title`, `split-image`, `cards`, `table`, `overlay`, and the
+signage recipes `hero`, `price-list`, `menu-board`, `promo`, `event`, `quote`,
+and `schedule`. Generic recipes retain native measured Text nodes, 5% content
+insets and readable type floors. Signage recipes accept `theme`, leave an 8%
+safe margin, and take `variant` `a` (default), `b`, or `c` so the same content
+can change arrangement. Optional `subtitle` and `footnote` sit in the title
+block and at caption size bottom-left. Quote is intentionally airy. They warn
+`too_dense` when copy exceeds that recipe's word budget. They accept explicit
+physical `width`/`height` (default 1920×1080).
 Images preserve aspect; overlays keep text opaque over a translucent plate.
+Alternate variants or recipes on adjacent pages; a deck that repeats one layout
+reads as a slideshow, not signage.
 
-`compose batch deck.json --output ./rendered --safe-area` accepts
-`{"pages":[{"id":"intro","spec":{"recipe":"title","title":"Welcome","body":"A useful introduction."}}]}`.
-Each spec may also be a relative JSON file path. One command returns ordered
-results, PNGs, measured layout diagnostics, a contact-sheet preview and a
-manifest. Failures retain successful pages; `--only intro` selectively retries
-one page and marks other pages `not_selected` in a separate correction manifest.
-Rendering is serial to bound full-resolution memory, with at most 100 pages.
+`compose batch deck.json --output ./rendered --safe-area --ink-tight` accepts
+`{"pages":[{"id":"intro","spec":{"recipe":"title","title":"Welcome","body":"A useful introduction."}},{"id":"hero-a","spec":{"recipe":"hero","variant":"a","theme":"warm-cafe","headline":"Tonight","subhead":"Pies until ten.","image":"./photo.png"}},{"id":"hero-b","spec":{"recipe":"hero","variant":"b","theme":"warm-cafe","headline":"Tonight","subhead":"Pies until ten.","image":"./photo.png"}}]}`.
+Each spec may also be a relative JSON file path. One command accepts 1 to 2000
+pages and returns ordered results, PNGs, measured layout diagnostics, a
+contact-sheet preview and a manifest. Larger inputs are processed in internal
+chunks of 100 so peak full-resolution memory stays bounded; rendering stays
+serial. The JSON envelope adds `chunks` and `chunk_timings` and keeps the
+existing fields. Batches that span more than one chunk write extra contact
+sheets (`preview-2.png`, …) alongside `preview.png`. Failures retain successful
+pages; `--only intro` selectively retries one page, including across chunk
+boundaries, and marks other pages `not_selected` in a separate correction
+manifest.
 
 Diagnostics distinguish measured text overflow, truncation, crowding and text
 collisions from intentional text/media overlays. Missing-glyph raster detection
@@ -904,3 +1098,25 @@ check. JSON errors identify exact fields, including unsupported entry timing.
 A local pass does not resolve authorization, reference readiness, dynamic
 selectors, media durations or remote availability. The schema and semantics
 come from the backend snapshots tracked by `vendor/manifest.json`.
+Validate, `compose render`, and `compose batch` also emit visual `lint`
+warnings (never errors) under `data.lint`, ordered by page:
+`low_contrast_rendered` (finished pixels below 4.5:1; compose paint-time
+contrast below 3.0 after plating remains `low_contrast` on `data.warnings`),
+`text_over_busy_image`, `too_small_for_distance`, `too_dense`, `collision`,
+`motion_overuse`, `effects_overuse`, `adjacent_repeat`, and `safe_margin`.
+`--lint-only` is accepted on those commands and on `playlist preview`.
+
+`playlist preview playlist.json --output ./frames --contact-sheet` composites
+every page at 1920×1080 using `screenrig.canvas/v1` canvas-to-viewport,
+layer order, content fit, and clipping. It writes three PNGs per page with
+stable names `<page-id>.rest.png`, `<page-id>.entry.png`, and
+`<page-id>.motion-mid.png`. `rest` is after all object enters; `entry` is
+700 ms into the enter timeline; `motion-mid` is path/spin/drift at half
+cycle. Local compose outputs or fetched media fill image and video regions
+(video uses an ffmpeg poster at `--frame-ms`, default 1000); iframe and
+application regions are labelled grey placeholders. `--contact-sheet` writes
+one 6-column PNG of every `rest` frame with the page id and lint count under
+each tile. Preview of a `pl_…` id uses the account API; a JSON file does not
+enroll.
+
+Look at the contact sheet before publishing. Fix what the lint names, then look again.

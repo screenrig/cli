@@ -799,7 +799,7 @@ paths:
   /api/v1/media/uploads:
     post:
       operationId: createMediaUpload
-      x-rate-limit-policies: [{ name: media-upload-admission, quota: 20, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: media-upload-admission, quota: 120, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ accountBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
@@ -2638,9 +2638,60 @@ components:
       description: >-
         Optional object enter. Playlist write and the runtime manifest use this object as-is;
         there is no snake_case rename inside it. Absent means paint at rest, full opacity.
-        No per-primitive duration or delay; those are named constants in screenrig.canvas/v1.
+        Optional integer stagger 0 through 8 delays start by stagger*120 ms after the shared
+        500 ms delay. Absent or 0 is today's start. Duration is a named constant in
+        screenrig.canvas/v1.
       properties:
         type: { type: string, enum: [fade-up, fade-down, fade-left, fade-right, fade-in, zoom-in, zoom-out] }
+        stagger: { type: integer, minimum: 0, maximum: 8, description: Optional per-primitive enter delay in steps of 120 ms after OBJECT_ENTER_DELAY_MS. Absent or 0 is the same start as today. }
+    PrimitiveMotionPoint:
+      type: object
+      additionalProperties: false
+      required: [x, y]
+      properties:
+        x: { type: number }
+        y: { type: number }
+    PrimitiveMotionSpin:
+      type: object
+      additionalProperties: false
+      required: [type, direction, speed]
+      description: Continuous rotation about the clipRect centre. Image and video only; the server rejects spin on application and iframe.
+      properties:
+        type: { type: string, enum: [spin] }
+        direction: { type: string, enum: [cw, ccw] }
+        speed: { type: string, enum: [slow, medium, fast] }
+    PrimitiveMotionPath:
+      type: object
+      additionalProperties: false
+      required: [type, points, rate]
+      description: Translation along a polyline of canvas-unit waypoints after the authored rect. loop defaults to loop when omitted. Valid on image, video, application, and iframe.
+      properties:
+        type: { type: string, enum: [path] }
+        points: { type: array, minItems: 1, maxItems: 64, items: { $ref: "#/components/schemas/PrimitiveMotionPoint" } }
+        rate: { type: number, exclusiveMinimum: 0, maximum: 10000 }
+        loop: { type: string, enum: [loop, ping-pong, once], default: loop }
+    PrimitiveMotionDrift:
+      type: object
+      additionalProperties: false
+      required: [type, zoom, direction, speed]
+      description: Continuous slow scale about the clipRect centre combined with a slow translate. Image and video only; the server rejects drift on application and iframe. Ping-pongs; never jumps.
+      properties:
+        type: { type: string, enum: [drift] }
+        zoom: { type: string, enum: [in, out] }
+        direction: { type: string, enum: [left, right, up, down, none] }
+        speed: { type: string, enum: [slow, medium, fast] }
+    PrimitiveMotion:
+      oneOf:
+        - { $ref: "#/components/schemas/PrimitiveMotionSpin" }
+        - { $ref: "#/components/schemas/PrimitiveMotionPath" }
+        - { $ref: "#/components/schemas/PrimitiveMotionDrift" }
+      discriminator: { propertyName: type }
+      description: >-
+        Optional persistent object motion. Playlist write and the runtime manifest use this object as-is;
+        there is no snake_case rename inside it. Absent means the primitive stays at rest after enter.
+        Copied through uninterpolated. spin and drift apply to image and video only; application and
+        iframe with spin or drift are rejected by the server (motion_not_allowed_for_primitive).
+        path applies to image, video, application, and iframe. This restriction is not encoded as OpenAPI if/then.
     PlaylistAdvanceWrite:
       oneOf:
         - { $ref: "#/components/schemas/PlaylistDurationAdvance" }
@@ -2671,14 +2722,14 @@ components:
         - { $ref: "#/components/schemas/PlaylistVideoPrimitive" }
         - { $ref: "#/components/schemas/PlaylistIframePrimitive" }
       discriminator: { propertyName: primitive }
-    PlaylistApplicationPrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, release_id, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [application] }, application_id: { type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id. }, release_id: { type: string }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, default: false }, enter: { $ref: "#/components/schemas/PrimitiveEnter" } } }
-    PlaylistImagePrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, selector, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [image] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, alt: { type: string, maxLength: 300 }, dwell_ms: { type: integer, minimum: 1000, maximum: 86400000, description: Required on media_end image primitives. Forbidden on duration and application pages. }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" } } }
-    PlaylistVideoPrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, selector, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, muted: { type: boolean, enum: [true], default: true }, loop: { type: boolean, default: false }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" } } }
-    PlaylistIframePrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [iframe] }, src: { type: string, format: uri, pattern: "^https://" }, title: { type: string, minLength: 1, maxLength: 200 }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" } } }
+    PlaylistApplicationPrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, release_id, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [application] }, application_id: { type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id. }, release_id: { type: string }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, default: false }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
+    PlaylistImagePrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, selector, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [image] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, alt: { type: string, maxLength: 300 }, dwell_ms: { type: integer, minimum: 1000, maximum: 86400000, description: Required on media_end image primitives. Forbidden on duration and application pages. }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
+    PlaylistVideoPrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, selector, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, muted: { type: boolean, enum: [true], default: true }, loop: { type: boolean, default: false }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
+    PlaylistIframePrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [iframe] }, src: { type: string, format: uri, pattern: "^https://" }, title: { type: string, minLength: 1, maxLength: 200 }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
     PlaylistApplicationPrimitive: { allOf: [{ $ref: "#/components/schemas/PlaylistApplicationPrimitiveWrite" }] }
-    PlaylistImagePrimitive: { type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [image] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, resolved_media: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistResolvedMedia" }, description: Server-resolved selector matches. Clients must not send this field. }, alt: { type: string, maxLength: 300 }, dwell_ms: { type: integer, minimum: 1000, maximum: 86400000 }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" } } }
-    PlaylistVideoPrimitive: { type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, muted, loop, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, resolved_media: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistResolvedMedia" }, description: Server-resolved selector matches. Clients must not send this field. }, muted: { type: boolean, enum: [true] }, loop: { type: boolean }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" } } }
-    PlaylistIframePrimitive: { type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [iframe] }, src: { type: string, format: uri, pattern: "^https://" }, title: { type: string, minLength: 1, maxLength: 200 }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" } } }
+    PlaylistImagePrimitive: { type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [image] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, resolved_media: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistResolvedMedia" }, description: Server-resolved selector matches. Clients must not send this field. }, alt: { type: string, maxLength: 300 }, dwell_ms: { type: integer, minimum: 1000, maximum: 86400000 }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
+    PlaylistVideoPrimitive: { type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, muted, loop, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, resolved_media: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistResolvedMedia" }, description: Server-resolved selector matches. Clients must not send this field. }, muted: { type: boolean, enum: [true] }, loop: { type: boolean }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
+    PlaylistIframePrimitive: { type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [iframe] }, src: { type: string, format: uri, pattern: "^https://" }, title: { type: string, minLength: 1, maxLength: 200 }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
     PlaylistMediaSelector:
       oneOf:
         - { $ref: "#/components/schemas/PlaylistMediaSelectorByID" }
@@ -3191,6 +3242,7 @@ components:
         contentFit: { type: string, enum: [fill] }
         controller: { type: boolean }
         enter: { $ref: "#/components/schemas/PrimitiveEnter" }
+        motion: { $ref: "#/components/schemas/PrimitiveMotion" }
         capabilityHandle: { type: string, minLength: 32, description: Opaque parent-only capability; never forward it into the uploaded iframe. }
         capabilityExpiresAt: { type: string, format: date-time, description: Five-minute expiry. Refresh the manifest before this time to obtain a replacement handle. }
     RuntimeImagePrimitive:
@@ -3209,6 +3261,7 @@ components:
         layer: { type: integer, minimum: 0, maximum: 1024 }
         contentFit: { type: string, enum: [contain, cover, fill] }
         enter: { $ref: "#/components/schemas/PrimitiveEnter" }
+        motion: { $ref: "#/components/schemas/PrimitiveMotion" }
     RuntimeVideoPrimitive:
       type: object
       additionalProperties: false
@@ -3225,6 +3278,7 @@ components:
         layer: { type: integer, minimum: 0, maximum: 1024 }
         contentFit: { type: string, enum: [contain, cover, fill] }
         enter: { $ref: "#/components/schemas/PrimitiveEnter" }
+        motion: { $ref: "#/components/schemas/PrimitiveMotion" }
     RuntimeIframePrimitive:
       type: object
       additionalProperties: false
@@ -3238,6 +3292,7 @@ components:
         layer: { type: integer, minimum: 0, maximum: 1024 }
         contentFit: { type: string, enum: [fill] }
         enter: { $ref: "#/components/schemas/PrimitiveEnter" }
+        motion: { $ref: "#/components/schemas/PrimitiveMotion" }
     RuntimeMediaSelector:
       oneOf:
         - { $ref: "#/components/schemas/RuntimeMediaSelectorByID" }

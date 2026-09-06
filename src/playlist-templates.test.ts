@@ -5,12 +5,14 @@ import {
   expandPlaylistPage,
   expandPlaylistPages,
   formatTemplateCatalog,
+  PANNING_BACKGROUND_EXAMPLE_PAGE,
   playlistTemplateCatalog,
   SHARED_LOGO_RECT,
   SLIDE_BACKGROUND,
   SLIDE_DEFAULT_TRANSITION,
   SLIDE_SWIPE_AUTHORING_DURATION_MS,
   SLIDE_TEMPLATES,
+  SPINNING_BADGE_EXAMPLE_PAGE,
 } from "./playlist-templates.js";
 
 const MEDIA = {
@@ -96,12 +98,31 @@ test("the catalog lists the fifteen slide ids and points copy at compose", () =>
     "zoom-in",
     "zoom-out",
   ]);
+  assert.deepEqual(catalog.motion_types, ["spin", "path", "drift"]);
+  assert.equal(
+    catalog.motion_guidance,
+    "Persistent motion is for designs that call for it; one moving element per page is the norm.",
+  );
+  assert.equal(catalog.motion_examples.panning_background.primitives[0]?.motion.type, "path");
+  assert.equal(catalog.motion_examples.panning_background.primitives[0]?.motion.loop, "loop");
+  assert.equal(catalog.motion_examples.spinning_badge.primitives[0]?.motion.type, "spin");
+  assert.equal(catalog.motion_examples.spinning_badge.primitives[0]?.motion.speed, "slow");
   assert.match(catalog.compose.catalog_command, /compose catalog/);
   assert.match(catalog.compose.render_command, /compose render/);
   const formatted = formatTemplateCatalog(catalog);
   assert.match(formatted, /composed locally/);
   assert.match(formatted, /compose catalog/);
   assert.match(formatted, /Default page transition is crossfade 200 ms with no object enter/);
+  assert.match(formatted, /Panning background \(path, loop\):/);
+  assert.match(formatted, /"type": "path"/);
+  assert.match(formatted, /"loop": "loop"/);
+  assert.match(formatted, /Spinning badge \(spin, slow\):/);
+  assert.match(formatted, /"type": "spin"/);
+  assert.match(formatted, /"speed": "slow"/);
+  assert.equal(
+    [...formatted.matchAll(/Persistent motion is for designs that call for it; one moving element per page is the norm\./g)].length,
+    2,
+  );
   assert.doesNotMatch(formatted, /title \(text, required/);
   assert.doesNotMatch(formatted, /emit native text/);
   const intro = catalog.templates.find((template) => template.id === "slide-intro");
@@ -366,6 +387,12 @@ test("a templated page forwards a supplied swipe transition and never invents en
   }) as { transition: unknown; primitives: Array<Record<string, unknown>> };
   assert.deepEqual(expanded.transition, { type: "swipe-left", duration_ms: 600 });
   assert.ok(expanded.primitives.every((primitive) => !("enter" in primitive)));
+});
+
+test("a full page with path or spin motion is forwarded unchanged", () => {
+  for (const full of [PANNING_BACKGROUND_EXAMPLE_PAGE, SPINNING_BADGE_EXAMPLE_PAGE]) {
+    assert.equal(expandPlaylistPage(full), full);
+  }
 });
 
 test("a full page with swipe and enter is forwarded unchanged", () => {

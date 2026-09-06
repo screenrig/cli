@@ -10,7 +10,6 @@ import { parseArgv } from "../argv.js";
 import { USAGE } from "../commands.js";
 import { preserveLogSocket, readConfigFile, resolveConfig, writeConfigAtomic, type ConfigFs } from "../config.js";
 import { ensureCredential } from "../enrollment.js";
-import { ExitCode } from "../exit-codes.js";
 import { run, type CliRuntime } from "../main.js";
 import { packDirectory } from "../pack/index.js";
 import { CliError } from "../problems.js";
@@ -359,7 +358,7 @@ test("no log_socket leaves commands working without a socket connect", async () 
   await rm(home, { recursive: true, force: true });
 });
 
-test("log_socket without a listener fails the command", async () => {
+test("log_socket without a listener keeps the command and warns once", async () => {
   const transport = memoryBackend();
   const home = await testTemp("log-missing-");
   const socketPath = path.join(home, "screenrig.sock");
@@ -374,10 +373,14 @@ test("log_socket without a listener fails the command", async () => {
     fsLike,
   );
   const result = await withRuntime(["--json", "screen", "list"], transport, { fs: fsLike });
-  assert.equal(result.code, ExitCode.Config, result.stdout);
-  const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string } };
-  assert.equal(envelope.error.code, "config_error");
-  assert.match(envelope.error.detail, /log_socket|listening/i);
+  assert.equal(result.code, 0, result.stdout);
+  const envelope = JSON.parse(result.stdout) as {
+    ok: true;
+    warnings: Array<{ code: string; dropped?: number; message: string }>;
+  };
+  assert.equal(envelope.warnings.length, 1);
+  assert.equal(envelope.warnings[0]?.code, "log_sink_degraded");
+  assert.ok((envelope.warnings[0]?.dropped ?? 0) >= 1);
   assert.doesNotMatch(result.stdout, /sr_live_/);
   await rm(home, { recursive: true, force: true });
 });
@@ -474,6 +477,23 @@ test("agent connect rewrite keeps log_socket", async () => {
   const stored = await readConfigFile(configPath, fsLike);
   assert.equal(stored?.log_socket, "/tmp/screenrig.sock");
   await rm(home, { recursive: true, force: true });
+});
+
+test("quiet local spans emit start/finish only and suppress nested progress", () => {
+  const { logger, events } = createMemoryLogger({ command: ["media", "upload-batch"] });
+  const item = logger.startLocal({ op: "media.upload.batch.item", quiet: true, message: "still.png" });
+  item.progress({ percent: 10 });
+  const nested = logger.startLocal({ op: "media.transcode" });
+  nested.progress({ percent: 50 });
+  nested.finish();
+  const http = logger.startHttp({ op: "POST /api/v1/media/uploads", method: "POST", path: "/api/v1/media/uploads" });
+  http.response(201);
+  item.finish({ params: { outcome: "accepted" } });
+  assert.deepEqual(
+    events.map((event) => `${event.op}:${event.phase}`),
+    ["media.upload.batch.item:start", "media.upload.batch.item:finish"],
+  );
+  assert.equal(events.some((event) => event.phase === "progress"), false);
 });
 
 test("local spans tag start, progress, finish, and error from op", () => {

@@ -22,6 +22,8 @@ export interface NormalizedProblem {
 export interface Warning {
   code: string;
   message: string;
+  /** Present on `log_sink_degraded`: count of operation-log lines that were dropped. */
+  dropped?: number;
 }
 
 export interface SuccessEnvelope<T> {

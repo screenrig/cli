@@ -61,6 +61,12 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
         if (primitive.primitive !== "application" || mode !== "application") fail(`${itemPath}/controller`, "is valid only on an application in application advance mode");
       }
       if (primitive.primitive === "application" && typeof primitive.release_id === "string" && !primitive.release_id) fail(`${itemPath}/release_id`, "is required");
+      if (Object.hasOwn(primitive, "motion")) {
+        const motionType = object(primitive.motion).type;
+        if ((motionType === "spin" || motionType === "drift") && (primitive.primitive === "application" || primitive.primitive === "iframe")) {
+          fail(`${itemPath}/motion`, `${String(motionType)} is not allowed for application and iframe primitives`);
+        }
+      }
       if (primitive.primitive === "image" || primitive.primitive === "video") {
         if (mode === "duration" || mode === "application") {
           if (Object.hasOwn(primitive, "dwell_ms")) fail(`${itemPath}/dwell_ms`, "is forbidden on duration and application pages");

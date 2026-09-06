@@ -33,6 +33,7 @@ const VALUE_FLAGS = new Set([
   "only",
   "target-width",
   "target-height",
+  "ink-padding",
   "cursor",
   "after",
   "limit",
@@ -75,6 +76,8 @@ const VALUE_FLAGS = new Set([
   "state",
   "page",
   "update",
+  "concurrency",
+  "frame-ms",
 ]);
 
 export function parseArgv(argv: string[]): ParsedArgs {

@@ -73,17 +73,16 @@ import { commentsWriteFromArgs } from "./comments-write.js";
 import { quotedRevision } from "./if-match.js";
 import { applicationNameHeaders } from "./application-name.js";
 import { composeBatch } from "./compose/batch.js";
-import { assertPlaylistValid, PLAYLIST_SERVER_CHECKS } from "./playlist-validate.js";
-import { lowInformationFilenameWarning } from "./media-filename.js";
+import { assertPlaylistValid, PLAYLIST_SERVER_CHECKS, playlistLint } from "./playlist-validate.js";
 import {
-  deriveCommitIdempotencyKey,
-  performSignedMediaPut,
-  prepareMediaUpload,
-  validateMediaUploadSession,
-} from "./media-upload.js";
-import { fetchSignedRawPut } from "./runtime.js";
-import type { MediaUploadSession } from "./adapters/protocol.js";
-import { newIdempotencyKey } from "./ids.js";
+  lintComposedPage,
+  pixelsFromPng,
+  sortLint,
+  viewingOf,
+} from "./compose/lint.js";
+import { LOOK_AT_THE_CONTACT_SHEET, PREVIEW_VIEWPORT, previewPlaylist } from "./playlist-preview.js";
+import { uploadMediaFile } from "./media-upload.js";
+import { runMediaUploadBatch, UPLOAD_BATCH_DEFAULT_CONCURRENCY, UPLOAD_BATCH_MAX_CONCURRENCY, UPLOAD_BATCH_MIN_CONCURRENCY } from "./media-upload-batch.js";
 import { clearProvisionRetryState, provisionRetryState } from "./provisioning-state.js";
 import { validateProvisioningUrls } from "./provisioning-url.js";
 import { validateDashboardLink } from "./dashboard-link.js";
@@ -115,10 +114,8 @@ import {
   DEFAULT_MAX_FPS,
   DEFAULT_WEBP_QUALITY,
   MAX_EDGE,
-  transcodeForUpload,
   type TranscodeCodec,
   type TranscodeOptions,
-  type TranscodeResult,
 } from "./media/transcode.js";
 import { exportPlaylistBundle, importPlaylistBundle } from "./playlist-bundle.js";
 import {
@@ -147,6 +144,8 @@ Configuration (user config JSON, not flags):
   log_socket   optional path to an already-listening Unix socket. The CLI
                connects as a client and writes one NDJSON operation-log
                object per line. Absent or empty keeps current behavior.
+               Connect or back-pressure drops lines and warns
+               log_sink_degraded; it does not fail the command.
                This is a config field only, not a command-line switch.
 
 Commands:
@@ -167,14 +166,21 @@ Commands:
                       [--no-transcode] [--codec h264|hevc] [--max-fps N]
                       [--max-edge PIXELS] [--webp-quality 1-100] [--no-progress]
                       [--preset signage-1080p30|signage-4k30] [--no-audio]
+  media upload-batch <manifest.json> --state FILE [--concurrency N]
+                     [--no-transcode] [--tag TAG] [--no-progress]
   media show <id>
   media list [--tag TAG] [--primitive image|video]
   media update <id> (--tag TAG | --clear-tag) --if-match REVISION
   media delete <id> --if-match REVISION
   compose catalog
+                      (local types, themes, recipes, fonts, examples; no network)
   compose batch <file> --output DIRECTORY [--only ID] [--target-width PX --target-height PX] [--safe-area]
-  playlist validate <file>
-  compose render <file> [--output FILE] [--target-width PX --target-height PX] [--safe-area] [--open]
+                      [--ink-tight] [--ink-padding PX] [--lint-only]
+                      (1 to 2000 pages)
+  playlist validate <file> [--lint-only]
+  compose render <file> [--output FILE] [--target-width PX --target-height PX] [--safe-area]
+                      [--ink-tight] [--ink-padding PX] [--open] [--lint-only]
+  playlist preview <file|id> --output DIR [--frame-ms MS] [--contact-sheet] [--lint-only]
   playlist templates
   playlist create <file>
   playlist update <id> <file> --if-match REVISION
@@ -231,6 +237,8 @@ Credits:
   billed commands are not rejected for empty remaining and do not return
   HTTP 402. After that instant, remaining below 1 credit is payment_required.
   Empty remaining does not stop or shut off screens in this window.
+
+${LOOK_AT_THE_CONTACT_SHEET}
 `;
 
 export interface CommandResult {
@@ -261,6 +269,22 @@ function enrollmentEmail(value: string | undefined): string {
     throw usageError("agent enroll --email must be one plain ASCII address with an unquoted local part and dotted DNS domain.");
   }
   return email;
+}
+
+function composeInkOptions(args: ParsedArgs, command: "render" | "batch"): { inkTight?: boolean; inkPadding?: number } {
+  const inkTight = flagBool(args.flags, "ink-tight");
+  requireFlagValue(args, "ink-padding", "8");
+  const raw = flagString(args.flags, "ink-padding");
+  if (raw !== undefined && !inkTight) {
+    throw usageError(`compose ${command} --ink-padding requires --ink-tight.`);
+  }
+  if (!inkTight) return {};
+  if (raw === undefined) return { inkTight: true, inkPadding: 0 };
+  const n = Number(raw);
+  if (!Number.isSafeInteger(n) || n < 0 || n > 8192) {
+    throw usageError(`compose ${command} --ink-padding must be an integer from 0 to 8192.`);
+  }
+  return { inkTight: true, inkPadding: n };
 }
 
 function rethrowCompose(err: unknown): never {
@@ -305,6 +329,7 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
     throw usageError("compose render --output must not contain a NUL byte.");
   }
   const layoutOutput = `${output}.layout.json`;
+  const lintOnly = flagBool(args.flags, "lint-only");
   requireFlagValue(args, "target-width", "3840");
   requireFlagValue(args, "target-height", "2160");
   const targetWidth = args.flags["target-width"] === undefined ? undefined : Number(flagString(args.flags, "target-width"));
@@ -327,10 +352,11 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
       async (span) => {
         const rendered = await composeSpec(spec, {
           baseDir: path.dirname(specPath),
-          outPath: output,
-          layoutOutPath: layoutOutput,
+          outPath: lintOnly ? undefined : output,
+          layoutOutPath: lintOnly ? undefined : layoutOutput,
           target,
           safeArea: flagBool(args.flags, "safe-area"),
+          ...composeInkOptions(args, "render"),
         });
         span.finish({
           output,
@@ -344,9 +370,22 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
   } catch (err) {
     rethrowCompose(err);
   }
-  const opened = flagBool(args.flags, "open")
+  const opened = !lintOnly && flagBool(args.flags, "open")
     ? await (runtime.openPath?.(output) ?? Promise.resolve(false))
     : undefined;
+  const pixels = await pixelsFromPng(result.png);
+  const pageId = path.basename(specPath, path.extname(specPath)) || "page";
+  const lint = sortLint(
+    lintComposedPage({
+      page_id: pageId,
+      spec,
+      layout: result.layout,
+      quality: result.quality,
+      pixels,
+      viewing: viewingOf(spec),
+    }),
+    [pageId],
+  );
   const data = {
     output,
     layout_output: layoutOutput,
@@ -359,6 +398,14 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
     ramp_at_1080: result.ramp_at_1080,
     truncated: result.truncated,
     quality: result.quality,
+    lint,
+    ...(result.ink_tight ? {
+      frame: result.ink_tight.frame,
+      ink: result.ink_tight.ink,
+      overhang: result.ink_tight.overhang,
+      clipped: result.ink_tight.clipped,
+      ink_tight: result.ink_tight,
+    } : {}),
     ...(opened !== undefined ? { opened } : {}),
   };
   return {
@@ -371,7 +418,14 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
       ["height", String(result.height)],
       ["font_family", result.font_family],
       ["truncated", result.truncated ? "true" : "false"],
+      ...(result.ink_tight ? [
+        ["frame", `${result.ink_tight.frame.width}×${result.ink_tight.frame.height}`],
+        ["ink", `${result.ink_tight.ink.width}×${result.ink_tight.ink.height} at ${result.ink_tight.ink.x},${result.ink_tight.ink.y}`],
+        ["overhang", `${result.ink_tight.overhang.left},${result.ink_tight.overhang.top},${result.ink_tight.overhang.right},${result.ink_tight.overhang.bottom}`],
+        ["clipped", `${result.ink_tight.clipped.left},${result.ink_tight.clipped.top},${result.ink_tight.clipped.right},${result.ink_tight.clipped.bottom}`],
+      ] as Array<[string, string]> : []),
       ...result.warnings.map((warning): [string, string] => ["warning", warning.message]),
+      ...lint.map((item): [string, string] => ["lint", `${item.code} ${item.id}`]),
       ...(opened !== undefined ? [["opened", opened ? "true" : "false"] as [string, string]] : []),
     ]),
   };
@@ -458,7 +512,19 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
     catch { throw usageError("Cannot read playlist JSON."); }
     const body = parsed && typeof parsed === "object" && Array.isArray(parsed.pages) ? { ...parsed, pages: expandPlaylistPages(parsed.pages) } : parsed;
     assertPlaylistValid(body);
-    return { envelope: successEnvelope({ valid: true, scope: "local_schema_and_semantics", server_checks: PLAYLIST_SERVER_CHECKS }), exitCode: ExitCode.Success, human: "Playlist passed local canonical validation. Reference authorization and runtime readiness require server checks." };
+    const lint = playlistLint(body);
+    return {
+      envelope: successEnvelope({ valid: true, scope: "local_schema_and_semantics", server_checks: PLAYLIST_SERVER_CHECKS, lint }),
+      exitCode: ExitCode.Success,
+      human: [
+        "Playlist passed local canonical validation. Reference authorization and runtime readiness require server checks.",
+        ...lint.map((item) => `lint: ${item.page_id} ${item.code} ${item.id}`),
+        LOOK_AT_THE_CONTACT_SHEET,
+      ].join("\n"),
+    };
+  }
+  if (group === "playlist" && action === "preview") {
+    return playlistPreviewCommand(args, runtime, resolved);
   }
   if (group === "compose" && action === "batch") {
     const file = args.positionals[2];
@@ -470,11 +536,27 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
     if ((tw === undefined) !== (th === undefined)) throw usageError("Provide both target dimensions.");
     const target = tw !== undefined && th !== undefined ? { width: Number(tw), height: Number(th) } : undefined;
     let result;
-    try { result = await composeBatch(path.resolve(runtime.cwd(), file), path.resolve(runtime.cwd(), output), { target, safeArea: flagBool(args.flags, "safe-area"), only: flagString(args.flags, "only") }); }
+    try {
+      result = await composeBatch(path.resolve(runtime.cwd(), file), path.resolve(runtime.cwd(), output), {
+        target,
+        safeArea: flagBool(args.flags, "safe-area"),
+        only: flagString(args.flags, "only"),
+        lintOnly: flagBool(args.flags, "lint-only"),
+        ...composeInkOptions(args, "batch"),
+      });
+    }
     catch (error) { rethrowCompose(error); }
     const warnings = result.pages.flatMap((page) => (page.warnings ?? []).map((warning) => ({ ...warning, message: `${page.id}: ${warning.message}` })));
     if (result.failed) throw new CliError(makeProblem("usage_error", "Some pages could not render", 400, `${result.failed} page(s) failed. Successful outputs are retained. See ${result.manifest} and ${result.preview}.`, { errors: result.pages.filter((page) => page.status === "failed").map((page) => ({ page_id: page.id, ...page.error })) }), ExitCode.Usage, warnings);
-    return { envelope: successEnvelope(result, { warnings }), exitCode: ExitCode.Success, human: `Rendered ${result.rendered} page(s). Preview: ${result.preview}. Details: ${result.manifest}.` };
+    return {
+      envelope: successEnvelope(result, { warnings }),
+      exitCode: ExitCode.Success,
+      human: [
+        `Rendered ${result.rendered} page(s). Preview: ${result.preview}. Details: ${result.manifest}.`,
+        ...result.lint.map((item) => `lint: ${item.page_id} ${item.code} ${item.id}`),
+        LOOK_AT_THE_CONTACT_SHEET,
+      ].join("\n"),
+    };
   }
   if (group === "compose" && action === "render") {
     return composeRender(args, runtime);
@@ -1824,6 +1906,9 @@ async function mediaCommand(
       mediaUpload(args, runtime, client),
     );
   }
+  if (action === "upload-batch") {
+    return mediaUploadBatch(args, runtime, client, resolved);
+  }
   throw usageError("Unknown media command.");
 }
 
@@ -1878,11 +1963,6 @@ async function playbackList(
     media_id: mediaId,
     day,
   });
-}
-
-function readyMediaId(operation: Operation): string | undefined {
-  const mediaId = operation.result?.media_id;
-  return typeof mediaId === "string" && mediaId.length > 0 ? mediaId : undefined;
 }
 
 /** Flags that shape the pre-upload transcode. */
@@ -1952,105 +2032,99 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
   // Validate unconditionally so a typo such as --webp-quality 500 is rejected
   // whether or not transcoding runs. The result is unused under --no-transcode.
   const transcodeOptions = transcodeOptionsFromArgs(args);
+  const uploaded = await uploadMediaFile({
+    runtime,
+    client,
+    sourcePath,
+    explicitContentType,
+    tag: mediaTagFromArgs(args),
+    transcodeOptions,
+    noTranscode: flagBool(args.flags, "no-transcode"),
+    reporter: progressReporterFor(args, runtime),
+    noWait: flagBool(args.flags, "no-wait"),
+    timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000,
+    pollMs: flagNumber(args.flags, "poll-ms") ?? 1000,
+  });
+  const mediaId = uploaded.mediaId;
+  const data = {
+    ...(mediaId ? { media_id: mediaId, id: mediaId } : {}),
+    operation: uploaded.operation,
+    upload: uploaded.upload,
+    transcode: uploaded.transcode,
+  };
+  return {
+    envelope: successEnvelope(data, {
+      request_id: client.requestId,
+      operation_id: uploaded.operation.id,
+      warnings: uploaded.warnings,
+    }),
+    exitCode: ExitCode.Success,
+    human: humanLines(flagBool(args.flags, "no-wait") ? "Media upload committed" : "Media uploaded", [
+      ["media_id", mediaId],
+      ["operation_id", uploaded.operation.id],
+      ["state", uploaded.operation.state],
+      ["filename", uploaded.upload.filename],
+      ["content_type", uploaded.upload.content_type],
+      ["tag", uploaded.upload.tag],
+      ["transcode", typeof uploaded.transcode.duration_ms === "number" ? `${uploaded.transcode.reason} in ${uploaded.transcode.duration_ms} ms` : "skipped"],
+      ["sha256", uploaded.upload.sha256],
+      ...uploaded.warnings.map((warning): [string, string] => ["warning", warning.message]),
+    ]),
+  };
+}
 
-  let transcode: TranscodeResult | undefined;
-  if (!flagBool(args.flags, "no-transcode")) {
-    transcode = await transcodeForUpload({
-      runtime,
-      filePath: sourcePath,
-      explicitContentType,
-      options: transcodeOptions,
-      reporter: progressReporterFor(args, runtime),
-    });
+async function mediaUploadBatch(
+  args: ParsedArgs,
+  runtime: CliRuntime,
+  client: ApiClient,
+  resolved: Awaited<ReturnType<typeof resolveConfig>>,
+): Promise<CommandResult> {
+  const manifest = args.positionals[2];
+  if (!manifest || args.positionals.length !== 3) {
+    throw usageError("media upload-batch requires one manifest JSON file.");
   }
-
-  try {
-    const prepared = transcode
-      ? await prepareMediaUpload(transcode.filePath, transcode.contentType, transcode.verifiedSha256)
-      : await prepareMediaUpload(sourcePath, explicitContentType);
-    const tag = mediaTagFromArgs(args);
-    if (tag !== undefined) {
-      prepared.declaration.tag = tag;
-    }
-    const declarationResponse = await client.call({
-      method: "POST",
-      path: "/api/v1/media/uploads",
-      idempotent: true,
-      body: prepared.declaration,
-    });
-    if (declarationResponse.headers["cache-control"] !== "private, no-store") {
-      throw usageError("Media upload declaration did not return the required private, no-store cache policy.");
-    }
-    const session = validateMediaUploadSession(declarationResponse.body as MediaUploadSession, runtime.now().getTime());
-    await performSignedMediaPut(prepared, session, runtime.signedRawPut ?? fetchSignedRawPut());
-    const commitResponse = await client.call({
-      method: "POST",
-      path: `/api/v1/media/uploads/${session.id}/commit`,
-      idempotent: true,
-      idempotencyKey: deriveCommitIdempotencyKey(client.idempotencyKey),
-      body: prepared.commit,
-    });
-    let operation = commitResponse.body as Operation;
-    if (!flagBool(args.flags, "no-wait")) {
-      operation = await client.waitForOperation(operation.id, {
-        timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000,
-        pollMs: flagNumber(args.flags, "poll-ms") ?? 1000,
-        sleep: runtime.sleep,
-      });
-    }
-    const mediaId = readyMediaId(operation);
-    const data = {
-      ...(mediaId ? { media_id: mediaId, id: mediaId } : {}),
-      operation,
-      upload: {
-        filename: prepared.declaration.filename,
-        content_type: prepared.declaration.content_type,
-        bytes: prepared.declaration.bytes,
-        sha256: prepared.declaration.sha256,
-        ...(prepared.declaration.tag ? { tag: prepared.declaration.tag } : {}),
-      },
-      transcode: transcode
-        ? {
-            applied: !transcode.passthrough,
-            stage: transcode.stage,
-            reason: transcode.reason,
-            source_bytes: transcode.sourceBytes,
-            output_bytes: transcode.outputBytes,
-            width: transcode.width,
-            height: transcode.height,
-            dimensions_measured: transcode.dimensionsMeasured,
-            duration_ms: transcode.durationMs,
-            ...(transcode.video ? { video: transcode.video } : {}),
-          }
-        : { applied: false, reason: "--no-transcode uploaded the source bytes unchanged" },
-    };
-    const warnings = (transcode?.warnings ?? []).map((message) => ({ code: "transcode_warning", message }));
-    const filenameWarning = lowInformationFilenameWarning(prepared.declaration.filename);
-    if (filenameWarning) warnings.push({ code: "generic_filename", message: filenameWarning });
-    return {
-      envelope: successEnvelope(data, {
-        request_id: client.requestId,
-        operation_id: operation.id,
-        warnings,
-      }),
-      exitCode: ExitCode.Success,
-      human: humanLines(flagBool(args.flags, "no-wait") ? "Media upload committed" : "Media uploaded", [
-        ["media_id", mediaId],
-        ["operation_id", operation.id],
-        ["state", operation.state],
-        ["filename", prepared.declaration.filename],
-        ["content_type", prepared.declaration.content_type],
-        ["tag", prepared.declaration.tag],
-        ["transcode", transcode ? `${transcode.reason} in ${transcode.durationMs} ms` : "skipped"],
-        ["sha256", prepared.declaration.sha256],
-        ...warnings.map((warning): [string, string] => ["warning", warning.message]),
-      ]),
-    };
-  } finally {
-    if (transcode?.cleanupDir) {
-      await rm(transcode.cleanupDir, { recursive: true, force: true });
-    }
+  requireFlagValue(args, "state", "./upload-state.json");
+  requireFlagValue(args, "concurrency", "4");
+  const state = flagString(args.flags, "state");
+  if (!state) {
+    throw usageError("media upload-batch requires --state FILE.");
   }
+  const concurrency = flagNumber(args.flags, "concurrency") ?? UPLOAD_BATCH_DEFAULT_CONCURRENCY;
+  if (
+    !Number.isInteger(concurrency) ||
+    concurrency < UPLOAD_BATCH_MIN_CONCURRENCY ||
+    concurrency > UPLOAD_BATCH_MAX_CONCURRENCY
+  ) {
+    throw usageError(
+      `--concurrency must be a whole number from ${UPLOAD_BATCH_MIN_CONCURRENCY} to ${UPLOAD_BATCH_MAX_CONCURRENCY}.`,
+    );
+  }
+  const transcodeOptions = transcodeOptionsFromArgs(args);
+  const result = await runMediaUploadBatch({
+    runtime,
+    client,
+    manifestPath: path.resolve(runtime.cwd(), manifest),
+    statePath: path.resolve(runtime.cwd(), state),
+    apiUrl: resolved.apiUrl,
+    accountId: resolved.accountId,
+    concurrency,
+    defaultTag: mediaTagFromArgs(args),
+    transcodeOptions,
+    noTranscode: flagBool(args.flags, "no-transcode"),
+    reporter: progressReporterFor(args, runtime),
+    json: flagBool(args.flags, "json"),
+    noProgress: flagBool(args.flags, "no-progress"),
+    timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000,
+    pollMs: flagNumber(args.flags, "poll-ms") ?? 1000,
+  });
+  return {
+    envelope: successEnvelope(result.data, {
+      request_id: client.requestId,
+      warnings: result.warnings,
+    }),
+    exitCode: result.exitCode,
+    human: result.human,
+  };
 }
 
 /**
@@ -2254,6 +2328,71 @@ async function feedbackList(args: ParsedArgs, client: ApiClient): Promise<Comman
             `Feedback submissions (${items.length})`,
             ...items.map((item) => `${item.created_at}  ${item.kind.padEnd(7)}  ${item.id}  ${item.title}`),
           ].join("\n"),
+  };
+}
+
+async function playlistPreviewCommand(
+  args: ParsedArgs,
+  runtime: CliRuntime,
+  resolved: Awaited<ReturnType<typeof resolveConfig>>,
+): Promise<CommandResult> {
+  const target = args.positionals[2];
+  requireFlagValue(args, "output", "./preview");
+  requireFlagValue(args, "frame-ms", "1000");
+  const output = flagString(args.flags, "output");
+  if (!target || !output || args.positionals.length !== 3) {
+    throw usageError("playlist preview requires <file|id> and --output DIR.");
+  }
+  if (target.includes("\0") || output.includes("\0")) {
+    throw usageError("playlist preview paths must not contain a NUL byte.");
+  }
+  const frameRaw = flagString(args.flags, "frame-ms");
+  const frameMs = frameRaw === undefined ? 1000 : Number(frameRaw);
+  if (!Number.isSafeInteger(frameMs) || frameMs < 0 || frameMs > 60_000) {
+    throw usageError("playlist preview --frame-ms must be an integer from 0 to 60000.");
+  }
+  const outputDir = path.resolve(runtime.cwd(), output);
+  const filePath = path.resolve(runtime.cwd(), target);
+  let playlist: unknown;
+  let searchDirs = [path.dirname(filePath), runtime.cwd(), outputDir];
+  let client: ApiClient | undefined;
+  let fromFile = false;
+  try {
+    playlist = JSON.parse(await readFile(filePath, "utf8"));
+    fromFile = true;
+  } catch {
+    fromFile = false;
+  }
+  if (!fromFile) {
+    if (!/^pl_[A-Za-z0-9_-]+$/.test(target)) {
+      throw usageError("Cannot read playlist JSON.");
+    }
+    const token = requireToken(resolved.token);
+    client = clientFor(runtime, args, resolved.apiUrl, token);
+    const response = await client.call({ method: "GET", path: `/api/v1/playlists/${target}` });
+    playlist = response.body;
+    searchDirs = [runtime.cwd(), outputDir];
+  }
+  const result = await previewPlaylist({
+    playlist,
+    outputDirectory: outputDir,
+    viewport: PREVIEW_VIEWPORT,
+    frameMs,
+    contactSheet: flagBool(args.flags, "contact-sheet"),
+    lintOnly: flagBool(args.flags, "lint-only"),
+    searchDirs,
+    client,
+    runtime,
+  });
+  return {
+    envelope: successEnvelope(result, { request_id: client?.requestId }),
+    exitCode: ExitCode.Success,
+    human: [
+      `Previewed ${result.pages.length} page(s). Output: ${result.output}.`,
+      ...(result.contact_sheet ? [`contact_sheet: ${result.contact_sheet}`] : []),
+      ...result.lint.map((item) => `lint: ${item.page_id} ${item.code} ${item.id}`),
+      LOOK_AT_THE_CONTACT_SHEET,
+    ].join("\n"),
   };
 }
 

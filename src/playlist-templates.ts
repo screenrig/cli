@@ -31,6 +31,54 @@ export const OBJECT_ENTER_TYPES = [
   "zoom-in",
   "zoom-out",
 ] as const;
+export const OBJECT_MOTION_TYPES = ["spin", "path", "drift"] as const;
+export const OBJECT_MOTION_GUIDANCE =
+  "Persistent motion is for designs that call for it; one moving element per page is the norm.";
+/** Full-page example: one panning background on `path` / `loop`. */
+export const PANNING_BACKGROUND_EXAMPLE_PAGE = {
+  id: "pan",
+  canvas: { width: 1920, height: 1080, viewport_fit: "contain" as const, background: "#000000FF" },
+  transition: { type: "crossfade" as const, duration_ms: 200 },
+  advance: { mode: "duration" as const, after_ms: 8000 },
+  primitives: [
+    {
+      id: "background",
+      primitive: "image" as const,
+      selector: { by: "id" as const, media_id: "med_background" },
+      rect: { x: 0, y: 0, width: 2400, height: 1080 },
+      layer: 0,
+      content_fit: "cover" as const,
+      motion: {
+        type: "path" as const,
+        points: [{ x: -480, y: 0 }],
+        rate: 40,
+        loop: "loop" as const,
+      },
+    },
+  ],
+};
+/** Full-page example: one slowly spinning badge. */
+export const SPINNING_BADGE_EXAMPLE_PAGE = {
+  id: "badge",
+  canvas: { width: 1920, height: 1080, viewport_fit: "contain" as const, background: "#1B2632FF" },
+  transition: { type: "crossfade" as const, duration_ms: 200 },
+  advance: { mode: "duration" as const, after_ms: 8000 },
+  primitives: [
+    {
+      id: "badge",
+      primitive: "image" as const,
+      selector: { by: "id" as const, media_id: "med_badge" },
+      rect: { x: 1640, y: 80, width: 200, height: 200 },
+      layer: 1,
+      content_fit: "contain" as const,
+      motion: {
+        type: "spin" as const,
+        direction: "cw" as const,
+        speed: "slow" as const,
+      },
+    },
+  ],
+};
 export const SLIDE_DEFAULT_ADVANCE = { mode: "duration" as const, after_ms: 8000 };
 export const SLIDE_PLATE_FILL = "#243040FF";
 export const SLIDE_PLATE_RADIUS = 24;
@@ -510,6 +558,12 @@ export interface TemplateCatalog {
   transition_types: readonly typeof PLAYLIST_TRANSITION_TYPES[number][];
   swipe_duration_ms: number;
   enter_types: readonly typeof OBJECT_ENTER_TYPES[number][];
+  motion_types: readonly typeof OBJECT_MOTION_TYPES[number][];
+  motion_guidance: string;
+  motion_examples: {
+    panning_background: typeof PANNING_BACKGROUND_EXAMPLE_PAGE;
+    spinning_badge: typeof SPINNING_BADGE_EXAMPLE_PAGE;
+  };
   advance: { mode: "duration"; after_ms: number };
   templates: TemplateCatalogEntry[];
 }
@@ -531,6 +585,12 @@ export function playlistTemplateCatalog(): TemplateCatalog {
     transition_types: [...PLAYLIST_TRANSITION_TYPES],
     swipe_duration_ms: SLIDE_SWIPE_AUTHORING_DURATION_MS,
     enter_types: [...OBJECT_ENTER_TYPES],
+    motion_types: [...OBJECT_MOTION_TYPES],
+    motion_guidance: OBJECT_MOTION_GUIDANCE,
+    motion_examples: {
+      panning_background: PANNING_BACKGROUND_EXAMPLE_PAGE,
+      spinning_badge: SPINNING_BADGE_EXAMPLE_PAGE,
+    },
     advance: { ...SLIDE_DEFAULT_ADVANCE },
     templates: SLIDE_TEMPLATES.map((template) => ({
       id: template.id,
@@ -561,6 +621,12 @@ export function formatTemplateCatalog(catalog: TemplateCatalog): string {
     `Wire primitives: ${catalog.compose.wire_primitives.join(", ")}.`,
     `Compose: ${catalog.compose.catalog_command}`,
     `Default page transition is ${catalog.transition.type} ${catalog.transition.duration_ms} ms with no object enter. Swipe and enter are optional and spare.`,
+    "Panning background (path, loop):",
+    JSON.stringify(catalog.motion_examples.panning_background, null, 2),
+    catalog.motion_guidance,
+    "Spinning badge (spin, slow):",
+    JSON.stringify(catalog.motion_examples.spinning_badge, null, 2),
+    catalog.motion_guidance,
   ];
   for (const template of catalog.templates) {
     const slots = template.slots.map((slot) => formatCatalogSlot(slot)).join("; ");

@@ -1,12 +1,16 @@
 import { createHash } from "node:crypto";
 import { constants, createReadStream } from "node:fs";
-import { open } from "node:fs/promises";
+import { open, rm } from "node:fs/promises";
 import path from "node:path";
-import type { MediaCommit, MediaUploadDeclaration, MediaUploadSession } from "./adapters/protocol.js";
+import type { MediaCommit, MediaUploadDeclaration, MediaUploadSession, Operation } from "./adapters/protocol.js";
+import type { ApiClient } from "./client.js";
 import { isValidIdempotencyKey } from "./ids.js";
+import { lowInformationFilenameWarning } from "./media-filename.js";
+import type { ProgressReporter } from "./media/progress.js";
+import { transcodeForUpload, type TranscodeOptions, type TranscodeResult } from "./media/transcode.js";
 import { readWebpContainer } from "./media/webp.js";
 import { CliError, networkError, usageError } from "./problems.js";
-import type { SignedRawPut } from "./runtime.js";
+import { fetchSignedRawPut, type CliRuntime, type SignedRawPut } from "./runtime.js";
 
 const MEDIA_PUT_NOT_READY =
   "Private media upload did not complete because the service is not ready. Run screenrig --json doctor and check the ready result before retrying.";
@@ -192,4 +196,187 @@ export function deriveCommitIdempotencyKey(base: string): string {
   const derived = createHash("sha256").update("screenrig.media.commit\0").update(base).digest("base64url");
   if (derived === base || !isValidIdempotencyKey(derived)) throw usageError("Could not derive media commit idempotency key.");
   return derived;
+}
+
+/** SHA-256 of the local source bytes. Batch resume keys this, not the transcoded digest. */
+export async function hashLocalMediaFile(filePath: string): Promise<string> {
+  const bytes = await readMediaSnapshot(filePath);
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+export function readyMediaId(operation: Operation): string | undefined {
+  const mediaId = operation.result?.media_id;
+  return typeof mediaId === "string" && mediaId.length > 0 ? mediaId : undefined;
+}
+
+export interface MediaFileUploadInput {
+  runtime: CliRuntime;
+  client: ApiClient;
+  sourcePath: string;
+  explicitContentType?: string;
+  tag?: string;
+  transcodeOptions: TranscodeOptions;
+  noTranscode: boolean;
+  reporter: ProgressReporter;
+  noWait?: boolean;
+  timeoutMs?: number;
+  pollMs?: number;
+  /** Declare key; commit is derived from this. Defaults to `client.idempotencyKey`. */
+  idempotencyKey?: string;
+  /** Called after declare succeeds and before the signed PUT. */
+  onDeclared?: (session: ValidatedMediaUploadSession) => Promise<void>;
+}
+
+export interface MediaFileUploadResult {
+  mediaId?: string;
+  operation: Operation;
+  upload: {
+    filename: string;
+    content_type: string;
+    bytes: number;
+    sha256: string;
+    tag?: string;
+  };
+  transcode: {
+    applied: boolean;
+    stage?: string;
+    reason: string;
+    source_bytes?: number;
+    output_bytes?: number;
+    width?: number;
+    height?: number;
+    dimensions_measured?: boolean;
+    duration_ms?: number;
+    video?: TranscodeResult["video"];
+  };
+  warnings: { code: string; message: string }[];
+}
+
+export interface PreparedMediaFile {
+  prepared: PreparedMediaUpload;
+  transcode?: TranscodeResult;
+}
+
+/**
+ * Transcode (unless `--no-transcode`) and snapshot the bytes that will be
+ * declared. The caller must `cleanupPreparedMediaFile` after submit/failure.
+ */
+export async function prepareMediaFileForUpload(input: MediaFileUploadInput): Promise<PreparedMediaFile> {
+  let transcode: TranscodeResult | undefined;
+  if (!input.noTranscode) {
+    transcode = await transcodeForUpload({
+      runtime: input.runtime,
+      filePath: input.sourcePath,
+      explicitContentType: input.explicitContentType,
+      options: input.transcodeOptions,
+      reporter: input.reporter,
+    });
+  }
+  try {
+    const prepared = transcode
+      ? await prepareMediaUpload(transcode.filePath, transcode.contentType, transcode.verifiedSha256)
+      : await prepareMediaUpload(input.sourcePath, input.explicitContentType);
+    if (input.tag !== undefined) {
+      prepared.declaration.tag = input.tag;
+    }
+    return { prepared, transcode };
+  } catch (error) {
+    if (transcode?.cleanupDir) {
+      await rm(transcode.cleanupDir, { recursive: true, force: true });
+    }
+    throw error;
+  }
+}
+
+export async function cleanupPreparedMediaFile(prepared: PreparedMediaFile | undefined): Promise<void> {
+  if (prepared?.transcode?.cleanupDir) {
+    await rm(prepared.transcode.cleanupDir, { recursive: true, force: true });
+  }
+}
+
+function transcodeEnvelope(transcode: TranscodeResult | undefined): MediaFileUploadResult["transcode"] {
+  if (!transcode) {
+    return { applied: false, reason: "--no-transcode uploaded the source bytes unchanged" };
+  }
+  return {
+    applied: !transcode.passthrough,
+    stage: transcode.stage,
+    reason: transcode.reason,
+    source_bytes: transcode.sourceBytes,
+    output_bytes: transcode.outputBytes,
+    width: transcode.width,
+    height: transcode.height,
+    dimensions_measured: transcode.dimensionsMeasured,
+    duration_ms: transcode.durationMs,
+    ...(transcode.video ? { video: transcode.video } : {}),
+  };
+}
+
+function uploadWarnings(prepared: PreparedMediaUpload, transcode: TranscodeResult | undefined): MediaFileUploadResult["warnings"] {
+  const warnings = (transcode?.warnings ?? []).map((message) => ({ code: "transcode_warning", message }));
+  const filenameWarning = lowInformationFilenameWarning(prepared.declaration.filename);
+  if (filenameWarning) warnings.push({ code: "generic_filename", message: filenameWarning });
+  return warnings;
+}
+
+/** Declare, signed PUT, commit, and optionally wait. Same path as `media upload`. */
+export async function submitPreparedMedia(
+  input: MediaFileUploadInput,
+  preparedFile: PreparedMediaFile,
+): Promise<Pick<MediaFileUploadResult, "mediaId" | "operation">> {
+  const { runtime, client } = input;
+  const { prepared } = preparedFile;
+  const declareKey = input.idempotencyKey ?? client.idempotencyKey;
+  const declarationResponse = await client.call({
+    method: "POST",
+    path: "/api/v1/media/uploads",
+    idempotent: true,
+    idempotencyKey: declareKey,
+    body: prepared.declaration,
+  });
+  if (declarationResponse.headers["cache-control"] !== "private, no-store") {
+    throw usageError("Media upload declaration did not return the required private, no-store cache policy.");
+  }
+  const session = validateMediaUploadSession(declarationResponse.body as MediaUploadSession, runtime.now().getTime());
+  if (input.onDeclared) {
+    await input.onDeclared(session);
+  }
+  await performSignedMediaPut(prepared, session, runtime.signedRawPut ?? fetchSignedRawPut());
+  const commitResponse = await client.call({
+    method: "POST",
+    path: `/api/v1/media/uploads/${session.id}/commit`,
+    idempotent: true,
+    idempotencyKey: deriveCommitIdempotencyKey(declareKey),
+    body: prepared.commit,
+  });
+  let operation = commitResponse.body as Operation;
+  if (!input.noWait) {
+    operation = await client.waitForOperation(operation.id, {
+      timeoutMs: input.timeoutMs ?? 120_000,
+      pollMs: input.pollMs ?? 1000,
+      sleep: runtime.sleep,
+    });
+  }
+  return { mediaId: readyMediaId(operation), operation };
+}
+
+export async function uploadMediaFile(input: MediaFileUploadInput): Promise<MediaFileUploadResult> {
+  const preparedFile = await prepareMediaFileForUpload(input);
+  try {
+    const submitted = await submitPreparedMedia(input, preparedFile);
+    return {
+      ...submitted,
+      upload: {
+        filename: preparedFile.prepared.declaration.filename,
+        content_type: preparedFile.prepared.declaration.content_type,
+        bytes: preparedFile.prepared.declaration.bytes,
+        sha256: preparedFile.prepared.declaration.sha256,
+        ...(preparedFile.prepared.declaration.tag ? { tag: preparedFile.prepared.declaration.tag } : {}),
+      },
+      transcode: transcodeEnvelope(preparedFile.transcode),
+      warnings: uploadWarnings(preparedFile.prepared, preparedFile.transcode),
+    };
+  } finally {
+    await cleanupPreparedMediaFile(preparedFile);
+  }
 }

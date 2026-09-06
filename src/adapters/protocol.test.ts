@@ -519,19 +519,34 @@ test("pinned backend snapshot includes swipe and primitive enter", () => {
   );
 
   const enter = interfaceBody(generated, "PrimitiveEnter");
-  assert.deepEqual(quotedProperties(enter), ["type"]);
+  assert.deepEqual(quotedProperties(enter), ["stagger", "type"]);
   assert.match(
     enter,
     /"type": "fade-up" \| "fade-down" \| "fade-left" \| "fade-right" \| "fade-in" \| "zoom-in" \| "zoom-out"/,
   );
+  assert.match(enter, /"stagger"\?: number/);
 
   const imageWrite = interfaceBody(generated, "PlaylistImagePrimitiveWrite");
-  assert.deepEqual(quotedProperties(imageWrite), ["alt", "content_fit", "dwell_ms", "enter", "id", "layer", "primitive", "rect", "selector"]);
+  assert.deepEqual(quotedProperties(imageWrite), ["alt", "content_fit", "dwell_ms", "enter", "id", "layer", "motion", "primitive", "rect", "selector"]);
   assert.match(imageWrite, /"enter"\?: PrimitiveEnter/);
+  assert.match(imageWrite, /"motion"\?: PrimitiveMotion/);
+
+  const spin = interfaceBody(generated, "PrimitiveMotionSpin");
+  assert.deepEqual(quotedProperties(spin), ["direction", "speed", "type"]);
+  assert.match(spin, /"direction": "cw" \| "ccw"/);
+  assert.match(spin, /"speed": "slow" \| "medium" \| "fast"/);
+  const pathMotion = interfaceBody(generated, "PrimitiveMotionPath");
+  assert.deepEqual(quotedProperties(pathMotion), ["loop", "points", "rate", "type"]);
+  const drift = interfaceBody(generated, "PrimitiveMotionDrift");
+  assert.deepEqual(quotedProperties(drift), ["direction", "speed", "type", "zoom"]);
 
   assert.match(openapi, /enum: \[crossfade, swipe-left, swipe-right, swipe-up, swipe-down\]/);
   assert.match(openapi, /PrimitiveEnter:/);
   assert.match(openapi, /enum: \[fade-up, fade-down, fade-left, fade-right, fade-in, zoom-in, zoom-out\]/);
+  assert.match(openapi, /PrimitiveMotion:/);
+  assert.match(openapi, /enum: \[spin\]/);
+  assert.match(openapi, /enum: \[path\]/);
+  assert.match(openapi, /enum: \[drift\]/);
   assert.match(openapi, /there is no snake_case rename inside it/);
   assert.doesNotMatch(openapi, /enter_type|object_enter_delay_ms|enter_delay_ms/);
 });
@@ -541,12 +556,12 @@ test("playlist writes send a media selector and media_end, not a singular media_
   const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
 
   const imageWrite = interfaceBody(generated, "PlaylistImagePrimitiveWrite");
-  assert.deepEqual(quotedProperties(imageWrite), ["alt", "content_fit", "dwell_ms", "enter", "id", "layer", "primitive", "rect", "selector"]);
+  assert.deepEqual(quotedProperties(imageWrite), ["alt", "content_fit", "dwell_ms", "enter", "id", "layer", "motion", "primitive", "rect", "selector"]);
   assert.match(imageWrite, /"primitive": "image"/);
   assert.doesNotMatch(imageWrite, /"media_id"/);
 
   const videoWrite = interfaceBody(generated, "PlaylistVideoPrimitiveWrite");
-  assert.deepEqual(quotedProperties(videoWrite), ["content_fit", "enter", "id", "layer", "loop", "muted", "primitive", "rect", "selector"]);
+  assert.deepEqual(quotedProperties(videoWrite), ["content_fit", "enter", "id", "layer", "loop", "motion", "muted", "primitive", "rect", "selector"]);
   assert.match(videoWrite, /"primitive": "video"/);
   assert.doesNotMatch(videoWrite, /"media_id"/);
 

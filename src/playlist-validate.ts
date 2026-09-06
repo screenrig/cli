@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { validatePlaylistWriteSemantics } from "./generated/playlist-write-semantics.js";
+import { lintPlaylistPages, type LintFinding } from "./compose/lint.js";
 import { ExitCode } from "./exit-codes.js";
 import { CliError, makeProblem } from "./problems.js";
 
@@ -42,7 +43,7 @@ export function playlistIssues(value: unknown): Array<{ path: string; message: s
     // leaf issues, deduplicated, while the canonical schema remains authoritative.
     const issues = errors.filter((error) => error.keyword !== "oneOf" && error.keyword !== "anyOf").map((error) => ({
       path: error.instancePath + (error.keyword === "additionalProperties" ? `/${String(error.params.additionalProperty).replaceAll("~", "~0").replaceAll("/", "~1")}` : error.keyword === "required" ? `/${String(error.params.missingProperty)}` : ""),
-      message: error.keyword === "additionalProperties" && error.instancePath.endsWith("/enter") ? "unsupported entry field; keep only type (player timing is fixed)" : error.message ?? "does not match the canonical playlist schema",
+      message: error.keyword === "additionalProperties" && error.instancePath.endsWith("/enter") ? "unsupported entry field; keep only type and optional stagger (player timing is fixed)" : error.message ?? "does not match the canonical playlist schema",
     }));
     return [...new Map(issues.map((issue) => [`${issue.path}:${issue.message}`, issue])).values()];
   }
@@ -52,4 +53,9 @@ export function assertPlaylistValid(value: unknown): void {
   const errors = playlistIssues(value);
   if (errors.length) throw new CliError(makeProblem("usage_error", "Playlist is not valid", 400,
     `Local canonical validation found ${errors.length} issue(s). Fix the reported JSON paths before uploading or publishing.`, { errors }), ExitCode.Usage);
+}
+export function playlistLint(value: unknown): LintFinding[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const pages = (value as { pages?: unknown }).pages;
+  return Array.isArray(pages) ? lintPlaylistPages(pages) : [];
 }

@@ -6,66 +6,76 @@ import type { LogSink } from "./types.js";
 const MAX_PENDING_LOG_BYTES = 1024 * 1024;
 const LOG_CLOSE_TIMEOUT_MS = 5000;
 
-class UnixSocketSink implements LogSink {
-  private failed: Error | undefined;
+/** Counts every line and never writes. Used when connect fails. */
+export class DroppingLogSink implements LogSink {
+  private dropped = 0;
 
-  constructor(
-    private readonly socket: net.Socket,
-    private readonly socketPath: string,
-  ) {
-    this.socket.on("error", (err) => { this.failed = err; });
+  writeLine(_line: string): void {
+    this.dropped += 1;
   }
 
-  private writeError() {
-    return configError(
-      `Failed to write operation log to ${this.socketPath}: ${redactText(this.failed?.message ?? "socket closed")}. ` +
-        "The consumer must already be listening and reading.",
-    );
+  async close(): Promise<void> {}
+
+  droppedCount(): number {
+    return this.dropped;
+  }
+}
+
+class UnixSocketSink implements LogSink {
+  private failed = false;
+  private dropped = 0;
+
+  constructor(private readonly socket: net.Socket) {
+    this.socket.on("error", () => {
+      this.failed = true;
+    });
   }
 
   writeLine(line: string): void {
-    if (this.failed || this.socket.destroyed) throw this.writeError();
+    if (this.failed || this.socket.destroyed) {
+      this.dropped += 1;
+      return;
+    }
     const payload = line.endsWith("\n") ? line : `${line}\n`;
     if (this.socket.writableLength + Buffer.byteLength(payload) > MAX_PENDING_LOG_BYTES) {
-      this.failed = new Error("log consumer is not draining the bounded write buffer");
-      this.socket.destroy();
-      throw this.writeError();
+      this.dropped += 1;
+      return;
     }
     // Socket end waits for all write callbacks. Keeping a Promise per completed
     // line would retain the entire history of a long-running events command.
-    this.socket.write(payload, (err) => { if (err) this.failed = err; });
+    this.socket.write(payload, (err) => {
+      if (err) {
+        this.failed = true;
+      }
+    });
+  }
+
+  droppedCount(): number {
+    return this.dropped;
   }
 
   async close(): Promise<void> {
-    if (this.failed) {
-      this.socket.destroy();
-      throw this.writeError();
+    if (this.socket.destroyed) {
+      return;
     }
-    if (this.socket.destroyed) return;
     try {
-      await new Promise<void>((resolve, reject) => {
-        const finish = (error?: Error) => {
+      await new Promise<void>((resolve) => {
+        const finish = () => {
           clearTimeout(timer);
           this.socket.removeListener("finish", onFinish);
           this.socket.removeListener("error", onError);
           this.socket.removeListener("close", onClose);
-          if (error) reject(error);
-          else if (this.failed) reject(this.writeError());
-          else resolve();
+          resolve();
         };
         const onFinish = () => finish();
-        const onError = (error: Error) => finish(error);
-        const onClose = () => finish(this.socket.writableFinished ? undefined : new Error("socket closed before log flush"));
-        const timer = setTimeout(() => finish(new Error("log consumer did not drain before close timed out")), LOG_CLOSE_TIMEOUT_MS);
+        const onError = () => finish();
+        const onClose = () => finish();
+        const timer = setTimeout(finish, LOG_CLOSE_TIMEOUT_MS);
         this.socket.once("finish", onFinish);
         this.socket.once("error", onError);
         this.socket.once("close", onClose);
         this.socket.end();
       });
-    } catch (error) {
-      throw configError(
-        `Failed to close log_socket ${this.socketPath}: ${redactText(error instanceof Error ? error.message : "socket close failed")}.`,
-      );
     } finally {
       this.socket.destroy();
     }
@@ -100,7 +110,7 @@ export async function connectUnixLogSocket(socketPath: string): Promise<LogSink>
       }
       settled = true;
       socket.removeListener("error", fail);
-      resolve(new UnixSocketSink(socket, socketPath));
+      resolve(new UnixSocketSink(socket));
     });
   });
 }

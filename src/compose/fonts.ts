@@ -38,6 +38,28 @@ export function resolveFontFamily(name: string | undefined): string {
 }
 
 
+export function cssFont(weight: string, size: number, family: string, italic = false): string {
+  return `${italic ? "italic " : ""}${weight} ${size}px "${family}"`;
+}
+
+export function familyHasFace(family: string, weight: number, italic: boolean): boolean {
+  loadUserFonts();
+  const entry = GlobalFonts.families.find((item) => item.family === family);
+  if (!entry) return false;
+  return entry.styles.some((style) => {
+    const isItalic = /italic|oblique/i.test(style.style);
+    if (isItalic !== italic) return false;
+    return weight >= 600 ? style.weight >= 600 : style.weight < 600;
+  });
+}
+
+export function isSyntheticFace(family: string, weight: string, italic: boolean): boolean {
+  const numeric = Number(weight);
+  const wantBold = Number.isFinite(numeric) && numeric >= 600;
+  if (!wantBold && !italic) return false;
+  return !familyHasFace(family, wantBold ? 700 : 400, italic);
+}
+
 interface TextFontResolution { family: string; fallback_from?: string; missing_codepoints: string[] }
 const glyphCache = new Map<string, string>();
 function glyphSignature(character: string, family: string, weight: string): string {
@@ -51,6 +73,12 @@ function glyphSignature(character: string, family: string, weight: string): stri
   glyphCache.set(key, signature);
   return signature;
 }
+export function familyRendersText(family: string, text: string, weight: string): boolean {
+  loadUserFonts();
+  if (!GlobalFonts.has(family)) return false;
+  return missingCharacters(text, family, weight).length === 0;
+}
+
 function missingCharacters(text: string, family: string, weight: string): string[] {
   const missing = glyphSignature("\u{10ffff}", family, weight);
   // Two unassigned sentinels must agree before treating their raster as .notdef.

@@ -3,6 +3,7 @@ import { mkdir, open, readFile, rename, chmod, stat, writeFile, rm } from "node:
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
+import { USAGE } from "../commands.js";
 import { ExitCode } from "../exit-codes.js";
 import { run, type CliRuntime } from "../main.js";
 import { testTemp } from "../test-temp.js";
@@ -67,13 +68,22 @@ test("compose catalog does not enroll", async () => {
     ok: true;
     data: {
       types: string[];
-      rules: { fontSize: boolean; textShadow: string; child_size: string; pin_stretch: string };
+      rules: { fontSize: boolean; textShadow: string; effects: string; effects_guidance: string; child_size: string; pin_stretch: string; recipe_guidance: string };
     };
   };
   assert.equal(envelope.ok, true);
-  assert.deepEqual(envelope.data.types, ["Frame", "Column", "Row", "Box", "Spacer", "Text", "Image"]);
+  assert.equal(
+    envelope.data.rules.recipe_guidance,
+    "Alternate variants or recipes on adjacent pages; a deck that repeats one layout reads as a slideshow, not signage.",
+  );
+  assert.deepEqual(envelope.data.types, ["Frame", "Column", "Row", "Box", "Spacer", "Text", "Image", "Icon", "Divider", "Pill"]);
   assert.equal(envelope.data.rules.fontSize, false);
   assert.match(envelope.data.rules.textShadow, /optional Text object \{ x, y, blur\?, color \}/);
+  assert.match(envelope.data.rules.effects, /every effect is off by default/);
+  assert.equal(
+    envelope.data.rules.effects_guidance,
+    "Use text effects sparingly, when the design calls for them (a headline, a badge); body copy and prices stay plain for readability.",
+  );
   assert.match(envelope.data.rules.child_size, /honor width and height/);
   assert.match(envelope.data.rules.pin_stretch, /Size a wordmark with width and height, not pin/);
   assert.equal(transport.calls.length, 0);
@@ -204,6 +214,63 @@ test("compose target flags dispatch separately and return nonblocking warnings w
   await rm(cwdDir, { recursive: true, force: true });
 });
 
+test("USAGE documents compose batch page limit", () => {
+  assert.match(USAGE, /compose batch <file> --output DIRECTORY \[--only ID\]/);
+  assert.match(USAGE, /1 to 2000 pages/);
+  assert.doesNotMatch(USAGE, /1 to 100 pages/);
+  assert.match(USAGE, /\[--ink-tight\] \[--ink-padding PX\] \[--lint-only\]/);
+  assert.match(USAGE, /compose render <file> \[--output FILE\] \[--target-width PX --target-height PX\] \[--safe-area\]/);
+  assert.match(USAGE, /playlist preview <file\|id> --output DIR \[--frame-ms MS\] \[--contact-sheet\] \[--lint-only\]/);
+});
+
+test("compose render --ink-tight reports frame, ink, overhang, and clipped", async () => {
+  const cwdDir = await testTemp("compose-ink-cli-");
+  await writeFile(path.join(cwdDir, "spec.json"), JSON.stringify({
+    type: "Frame",
+    width: 320,
+    height: 180,
+    background: "#00000000",
+    children: [{ type: "Text", text: "Hello", role: "title" }],
+  }));
+  const { code, stdout } = await withRuntime(
+    ["--json", "compose", "render", "spec.json", "--ink-tight", "--ink-padding", "6"],
+    { cwdDir },
+  );
+  assert.equal(code, ExitCode.Success, stdout);
+  const envelope = JSON.parse(stdout) as {
+    ok: true;
+    data: {
+      width: number;
+      height: number;
+      frame: { width: number; height: number };
+      ink: { x: number; y: number; width: number; height: number };
+      overhang: { left: number; top: number; right: number; bottom: number };
+      clipped: { left: number; top: number; right: number; bottom: number };
+      ink_tight: { padding: number };
+    };
+  };
+  assert.equal(envelope.ok, true);
+  assert.deepEqual(envelope.data.frame, { width: 320, height: 180 });
+  assert.equal(envelope.data.width, envelope.data.ink.width + 12);
+  assert.equal(envelope.data.height, envelope.data.ink.height + 12);
+  assert.equal(envelope.data.ink_tight.padding, 6);
+  assert.equal(typeof envelope.data.overhang.left, "number");
+  assert.equal(typeof envelope.data.clipped.right, "number");
+  assert.doesNotMatch(stdout, /\u0089PNG/);
+  const missingTight = await withRuntime(
+    ["--json", "compose", "render", "spec.json", "--ink-padding", "6"],
+    { cwdDir },
+  );
+  assert.equal(missingTight.code, ExitCode.Usage, missingTight.stdout);
+  assert.match(JSON.parse(missingTight.stdout).error.detail, /--ink-padding requires --ink-tight/);
+  const badPadding = await withRuntime(
+    ["--json", "compose", "render", "spec.json", "--ink-tight", "--ink-padding", "-1"],
+    { cwdDir },
+  );
+  assert.equal(badPadding.code, ExitCode.Usage, badPadding.stdout);
+  await rm(cwdDir, { recursive: true, force: true });
+});
+
 test("batch render returns ordered results, preview and supports one-page correction", async () => {
   const cwdDir = await testTemp("batch-compose-");
   const input = path.join(cwdDir, "batch.json"), output = path.join(cwdDir, "rendered");
@@ -213,6 +280,10 @@ test("batch render returns ordered results, preview and supports one-page correc
   assert.equal(first.code, ExitCode.Usage, first.stdout);
   const manifest = JSON.parse(await readFile(path.join(output, "compose-batch.json"), "utf8"));
   assert.deepEqual(manifest.pages.map((page: { status: string }) => page.status), ["rendered", "failed"]);
+  assert.equal(manifest.chunks, 1);
+  assert.equal(manifest.chunk_timings.length, 1);
+  assert.equal(manifest.chunk_timings[0].pages, 2);
+  assert.equal(typeof manifest.chunk_timings[0].duration_ms, "number");
   assert.ok((await readFile(manifest.preview)).subarray(0, 8).equals(PNG_HEADER));
   const unchanged = await readFile(path.join(output, "title.png"));
   delete (pages[1]!.spec as Record<string, unknown>).extra;
@@ -221,6 +292,8 @@ test("batch render returns ordered results, preview and supports one-page correc
   assert.equal(retry.code, ExitCode.Success, retry.stdout);
   const result = JSON.parse(retry.stdout).data;
   assert.equal(result.rendered, 1); assert.equal(result.not_selected, 1);
+  assert.equal(result.chunks, 1);
+  assert.equal(result.chunk_timings.length, 1);
   assert.deepEqual(await readFile(path.join(output, "title.png")), unchanged);
   await rm(cwdDir, { recursive: true, force: true });
 });
