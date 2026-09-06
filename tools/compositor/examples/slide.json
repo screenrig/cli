@@ -1,0 +1,17 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "font": "Noto Serif",
+  "background": "#12151C",
+  "brand": "#E2B15A",
+  "text": "#F3EEE6",
+  "image": "./title-boardroom.jpg",
+  "left": {
+    "title": "The room is the product",
+    "text": [
+      "Agents prepare the screen.",
+      "People walk in and see it."
+    ],
+    "footer": "ScreenRig"
+  }
+}

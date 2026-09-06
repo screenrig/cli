@@ -60,45 +60,35 @@ async function withRuntime(
   return { code, stdout: await outP, stderr: await errP, cwdDir };
 }
 
-test("compose catalog does not enroll", async () => {
+test("compose catalog does not enroll and documents regions", async () => {
   const transport = new FakeTransport();
   const { code, stdout, cwdDir } = await withRuntime(["--json", "compose", "catalog"], { transport });
   assert.equal(code, ExitCode.Success, stdout);
   const envelope = JSON.parse(stdout) as {
     ok: true;
-    data: {
-      types: string[];
-      rules: { fontSize: boolean; textShadow: string; effects: string; effects_guidance: string; child_size: string; pin_stretch: string; recipe_guidance: string };
-    };
+    data: { regions: string[]; rules: { fontSize: boolean; xy: boolean } };
   };
   assert.equal(envelope.ok, true);
-  assert.equal(
-    envelope.data.rules.recipe_guidance,
-    "Alternate variants or recipes on adjacent pages; a deck that repeats one layout reads as a slideshow, not signage.",
-  );
-  assert.deepEqual(envelope.data.types, ["Frame", "Column", "Row", "Box", "Spacer", "Text", "Image", "Icon", "Divider", "Pill"]);
+  assert.ok(envelope.data.regions.includes("fullpage"));
+  assert.ok(envelope.data.regions.includes("left"));
   assert.equal(envelope.data.rules.fontSize, false);
-  assert.match(envelope.data.rules.textShadow, /optional Text object \{ x, y, blur\?, color \}/);
-  assert.match(envelope.data.rules.effects, /every effect is off by default/);
-  assert.equal(
-    envelope.data.rules.effects_guidance,
-    "Use text effects sparingly, when the design calls for them (a headline, a badge); body copy and prices stay plain for readability.",
-  );
-  assert.match(envelope.data.rules.child_size, /honor width and height/);
-  assert.match(envelope.data.rules.pin_stretch, /Size a wordmark with width and height, not pin/);
+  assert.equal(envelope.data.rules.xy, false);
+  assert.doesNotMatch(stdout, /Frame/);
+  assert.doesNotMatch(stdout, /warm-cafe/);
   assert.equal(transport.calls.length, 0);
   assert.doesNotMatch(stdout, /\u0089PNG/);
   await rm(cwdDir, { recursive: true, force: true });
 });
 
-test("compose render writes a PNG and layout.json; envelope has paths and no image bytes", async () => {
+test("compose render writes layered PNGs and a manifest; envelope has paths and no image bytes", async () => {
   const cwdDir = await testTemp("compose-render-");
   const specPath = path.join(cwdDir, "spec.json");
   await writeFile(specPath, JSON.stringify({
-    type: "Frame",
     width: 320,
     height: 180,
-    children: [{ type: "Text", text: "Hello", role: "title" }],
+    background: "#1C1410",
+    text: "#F3E6D0",
+    left: { title: "Hello" },
   }));
   const { code, stdout } = await withRuntime(["--json", "compose", "render", specPath], { cwdDir });
   assert.equal(code, ExitCode.Success, stdout);
@@ -106,81 +96,59 @@ test("compose render writes a PNG and layout.json; envelope has paths and no ima
     ok: true;
     data: {
       output: string;
-      layout_output: string;
       width: number;
       height: number;
       font_family: string;
-      truncated: boolean;
-      opened?: boolean;
+      files: string[];
+      manifest: { version: number; layers: Array<{ id: string; file: string; rect: { width: number } }> };
     };
   };
   assert.equal(envelope.ok, true);
   assert.equal(envelope.data.width, 320);
   assert.equal(envelope.data.height, 180);
-  assert.equal(envelope.data.truncated, false);
-  assert.equal(envelope.data.opened, undefined);
-  assert.equal(envelope.data.output, path.join(cwdDir, "spec.png"));
-  assert.equal(envelope.data.layout_output, `${envelope.data.output}.layout.json`);
-  const png = await readFile(envelope.data.output);
+  assert.equal(envelope.data.output, path.join(cwdDir, "spec"));
+  assert.ok(envelope.data.files.includes("manifest.json"));
+  assert.ok(envelope.data.files.includes("left.png"));
+  const png = await readFile(path.join(envelope.data.output, "left.png"));
   assert.ok(png.subarray(0, 8).equals(PNG_HEADER));
-  const layout = JSON.parse(await readFile(envelope.data.layout_output, "utf8")) as {
-    tree: { type: string };
-    ramp_root: number;
-    ramp: { title: { wish: number } };
-    ramp_at_1080: { title: { wish: number } };
-  };
-  assert.equal(layout.tree.type, "Frame");
-  assert.equal(layout.ramp_root, 180);
-  assert.equal(layout.ramp_at_1080.title.wish, 86);
-  assert.equal(typeof layout.ramp.title.wish, "number");
-  const envelopeData = envelope.data as typeof envelope.data & {
-    ramp_root: number;
-    ramp_at_1080: { title: { wish: number } };
-  };
-  assert.equal(envelopeData.ramp_root, 180);
-  assert.equal(envelopeData.ramp_at_1080.title.wish, 86);
+  const manifest = JSON.parse(await readFile(path.join(envelope.data.output, "manifest.json"), "utf8"));
+  assert.equal(manifest.version, 1);
   assert.doesNotMatch(stdout, /\u0089PNG/);
   assert.equal(stdout.includes(png.toString("base64")), false);
   await rm(cwdDir, { recursive: true, force: true });
 });
 
-test("compose render unknown key and fontSize are usage_error", async () => {
+test("compose render old Frame JSON is usage_error pointing at compose catalog", async () => {
   const cwdDir = await testTemp("compose-bad-");
-  await writeFile(path.join(cwdDir, "mystery.json"), JSON.stringify({
-    type: "Frame", width: 64, height: 64, mystery: true,
+  await writeFile(path.join(cwdDir, "frame.json"), JSON.stringify({
+    type: "Frame", width: 64, height: 64, children: [{ type: "Text", text: "Hi", role: "title" }],
   }));
   await writeFile(path.join(cwdDir, "font.json"), JSON.stringify({
-    type: "Frame", width: 64, height: 64, fontSize: 48,
+    width: 64, height: 64, fontSize: 48, left: { title: "Hi" },
   }));
-  await writeFile(path.join(cwdDir, "xy.json"), JSON.stringify({
-    type: "Frame",
-    width: 64,
-    height: 64,
-    children: [{ type: "Text", text: "Hi", role: "title", x: 1, y: 2 }],
-  }));
-  const mystery = await withRuntime(["--json", "compose", "render", "mystery.json"], { cwdDir });
-  assert.equal(mystery.code, ExitCode.Usage, mystery.stdout);
-  assert.match(JSON.parse(mystery.stdout).error.detail, /unknown keys: mystery/);
+  const frame = await withRuntime(["--json", "compose", "render", "frame.json"], { cwdDir });
+  assert.equal(frame.code, ExitCode.Usage, frame.stdout);
+  const body = JSON.parse(frame.stdout);
+  assert.match(body.error.detail, /old Frame\/recipe language|compose catalog/);
+  assert.equal(body.error.next?.command, "screenrig --json compose catalog");
   const font = await withRuntime(["--json", "compose", "render", "font.json"], { cwdDir });
   assert.equal(font.code, ExitCode.Usage, font.stdout);
   assert.match(JSON.parse(font.stdout).error.detail, /fontSize/);
-  const xy = await withRuntime(["--json", "compose", "render", "xy.json"], { cwdDir });
-  assert.equal(xy.code, ExitCode.Usage, xy.stdout);
-  assert.match(JSON.parse(xy.stdout).error.detail, /must not set x/);
   await rm(cwdDir, { recursive: true, force: true });
 });
 
-test("compose render --open calls the stubbed opener with the output path", async () => {
+test("compose render --open calls the stubbed opener with combined.png", async () => {
   const cwdDir = await testTemp("compose-open-");
   await writeFile(path.join(cwdDir, "spec.json"), JSON.stringify({
-    type: "Frame",
     width: 64,
     height: 64,
-    children: [{ type: "Text", text: "Hi", role: "label" }],
+    background: "#1C1410",
+    text: "#F3E6D0",
+    fullpage: { title: "Hi" },
   }));
   const opened: string[] = [];
   const { code, stdout } = await withRuntime(
-    ["--json", "compose", "render", "spec.json", "--output", "still.png", "--open"],
+    ["--json", "compose", "render", "spec.json", "--output", "still", "--open"],
     {
       cwdDir,
       openPath: async (filePath) => {
@@ -192,14 +160,16 @@ test("compose render --open calls the stubbed opener with the output path", asyn
   assert.equal(code, ExitCode.Success, stdout);
   const envelope = JSON.parse(stdout) as { data: { output: string; opened: boolean } };
   assert.equal(envelope.data.opened, true);
-  assert.deepEqual(opened, [path.join(cwdDir, "still.png")]);
+  assert.deepEqual(opened, [path.join(cwdDir, "still", "combined.png")]);
   await rm(cwdDir, { recursive: true, force: true });
 });
 
 test("compose target flags dispatch separately and return nonblocking warnings without resizing", async () => {
   const cwdDir = await testTemp("compose-target-cli-");
   const spec = path.join(cwdDir, "spec.json");
-  await writeFile(spec, JSON.stringify({ type: "Frame", width: 320, height: 180, children: [{ type: "Text", text: "Edge" }] }));
+  await writeFile(spec, JSON.stringify({
+    width: 320, height: 180, background: "#1C1410", text: "#F3E6D0", left: { title: "Edge" },
+  }));
   const result = await withRuntime(["--json", "compose", "render", spec, "--target-width", "640", "--target-height", "360", "--safe-area"], { cwdDir });
   assert.equal(result.code, ExitCode.Success, result.stdout);
   const envelope = JSON.parse(result.stdout);
@@ -214,87 +184,36 @@ test("compose target flags dispatch separately and return nonblocking warnings w
   await rm(cwdDir, { recursive: true, force: true });
 });
 
-test("USAGE documents compose batch page limit", () => {
+test("USAGE documents compose batch page limit and layered render", () => {
   assert.match(USAGE, /compose batch <file> --output DIRECTORY \[--only ID\]/);
   assert.match(USAGE, /1 to 2000 pages/);
   assert.doesNotMatch(USAGE, /1 to 100 pages/);
-  assert.match(USAGE, /\[--ink-tight\] \[--ink-padding PX\] \[--lint-only\]/);
-  assert.match(USAGE, /compose render <file> \[--output FILE\] \[--target-width PX --target-height PX\] \[--safe-area\]/);
+  assert.match(USAGE, /compose render <file> \[--output DIRECTORY\] \[--combined\]/);
+  assert.doesNotMatch(USAGE, /\[--ink-tight\]/);
   assert.match(USAGE, /playlist preview <file\|id> --output DIR \[--frame-ms MS\] \[--contact-sheet\] \[--lint-only\]/);
-});
-
-test("compose render --ink-tight reports frame, ink, overhang, and clipped", async () => {
-  const cwdDir = await testTemp("compose-ink-cli-");
-  await writeFile(path.join(cwdDir, "spec.json"), JSON.stringify({
-    type: "Frame",
-    width: 320,
-    height: 180,
-    background: "#00000000",
-    children: [{ type: "Text", text: "Hello", role: "title" }],
-  }));
-  const { code, stdout } = await withRuntime(
-    ["--json", "compose", "render", "spec.json", "--ink-tight", "--ink-padding", "6"],
-    { cwdDir },
-  );
-  assert.equal(code, ExitCode.Success, stdout);
-  const envelope = JSON.parse(stdout) as {
-    ok: true;
-    data: {
-      width: number;
-      height: number;
-      frame: { width: number; height: number };
-      ink: { x: number; y: number; width: number; height: number };
-      overhang: { left: number; top: number; right: number; bottom: number };
-      clipped: { left: number; top: number; right: number; bottom: number };
-      ink_tight: { padding: number };
-    };
-  };
-  assert.equal(envelope.ok, true);
-  assert.deepEqual(envelope.data.frame, { width: 320, height: 180 });
-  assert.equal(envelope.data.width, envelope.data.ink.width + 12);
-  assert.equal(envelope.data.height, envelope.data.ink.height + 12);
-  assert.equal(envelope.data.ink_tight.padding, 6);
-  assert.equal(typeof envelope.data.overhang.left, "number");
-  assert.equal(typeof envelope.data.clipped.right, "number");
-  assert.doesNotMatch(stdout, /\u0089PNG/);
-  const missingTight = await withRuntime(
-    ["--json", "compose", "render", "spec.json", "--ink-padding", "6"],
-    { cwdDir },
-  );
-  assert.equal(missingTight.code, ExitCode.Usage, missingTight.stdout);
-  assert.match(JSON.parse(missingTight.stdout).error.detail, /--ink-padding requires --ink-tight/);
-  const badPadding = await withRuntime(
-    ["--json", "compose", "render", "spec.json", "--ink-tight", "--ink-padding", "-1"],
-    { cwdDir },
-  );
-  assert.equal(badPadding.code, ExitCode.Usage, badPadding.stdout);
-  await rm(cwdDir, { recursive: true, force: true });
 });
 
 test("batch render returns ordered results, preview and supports one-page correction", async () => {
   const cwdDir = await testTemp("batch-compose-");
-  const input = path.join(cwdDir, "batch.json"), output = path.join(cwdDir, "rendered");
-  const pages = [{ id: "title", spec: { recipe: "title", title: "A clear point", body: "A useful explanation." } }, { id: "bad", spec: { recipe: "title", title: "Fix me", body: "A useful explanation.", extra: true } }];
-  await writeFile(input, JSON.stringify({ pages }));
+  const input = path.join(cwdDir, "batch.json");
+  const output = path.join(cwdDir, "rendered");
+  const pages = [
+    { id: "title", left: { title: "A clear point", text: "A useful explanation." } },
+    { id: "bad", left: { title: "Fix me", extra: true } },
+  ];
+  await writeFile(input, JSON.stringify({ width: 320, height: 180, background: "#111", text: "#eee", pages }));
   const first = await withRuntime(["--json", "compose", "batch", input, "--output", output], { cwdDir });
   assert.equal(first.code, ExitCode.Usage, first.stdout);
-  const manifest = JSON.parse(await readFile(path.join(output, "compose-batch.json"), "utf8"));
-  assert.deepEqual(manifest.pages.map((page: { status: string }) => page.status), ["rendered", "failed"]);
-  assert.equal(manifest.chunks, 1);
-  assert.equal(manifest.chunk_timings.length, 1);
-  assert.equal(manifest.chunk_timings[0].pages, 2);
-  assert.equal(typeof manifest.chunk_timings[0].duration_ms, "number");
-  assert.ok((await readFile(manifest.preview)).subarray(0, 8).equals(PNG_HEADER));
-  const unchanged = await readFile(path.join(output, "title.png"));
-  delete (pages[1]!.spec as Record<string, unknown>).extra;
-  await writeFile(input, JSON.stringify({ pages }));
+  const retryPages = [
+    { id: "title", left: { title: "A clear point", text: "A useful explanation." } },
+    { id: "bad", left: { title: "Fix me", text: "A useful explanation." } },
+  ];
+  await writeFile(input, JSON.stringify({ width: 320, height: 180, background: "#111", text: "#eee", pages: retryPages }));
   const retry = await withRuntime(["--json", "compose", "batch", input, "--output", output, "--only", "bad"], { cwdDir });
   assert.equal(retry.code, ExitCode.Success, retry.stdout);
   const result = JSON.parse(retry.stdout).data;
-  assert.equal(result.rendered, 1); assert.equal(result.not_selected, 1);
-  assert.equal(result.chunks, 1);
-  assert.equal(result.chunk_timings.length, 1);
-  assert.deepEqual(await readFile(path.join(output, "title.png")), unchanged);
+  assert.equal(result.rendered, 1);
+  assert.equal(result.not_selected, 1);
   await rm(cwdDir, { recursive: true, force: true });
 });
 

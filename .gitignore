@@ -6,3 +6,11 @@ node_modules/
 # Agent working state. This repository is public; agent memory and session
 # notes must never be committed here.
 .claude/
+
+# Compositor lab: generated output, local install, private demo media.
+tools/compositor/node_modules/
+tools/compositor/out/
+tools/compositor/runs/
+tools/compositor/examples/media/
+tools/compositor/examples/title-boardroom.jpg
+

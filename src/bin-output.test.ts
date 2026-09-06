@@ -12,7 +12,19 @@ test("CLI drains a large JSON envelope through a backpressured child-process pip
   try {
     const file = path.join(directory, "batch.json"), output = path.join(directory, "rendered");
     await mkdir(output);
-    await writeFile(file, JSON.stringify({ pages: Array.from({ length: 36 }, (_, index) => ({ id: `page-${index}`, spec: { type: "Frame", width: 320, height: 180, children: Array.from({ length: 8 }, (_, textIndex) => ({ type: "Text", role: "title", text: `Page ${index} text ${textIndex}: diagnostics remain complete.` })) } })) }));
+    await writeFile(file, JSON.stringify({
+      width: 320,
+      height: 180,
+      background: "#111111",
+      text: "#eeeeee",
+      pages: Array.from({ length: 48 }, (_, index) => ({
+        id: `page-${index}`,
+        left: {
+          title: `Page ${index}`,
+          text: Array.from({ length: 8 }, (_, textIndex) => `Page ${index} text ${textIndex}: diagnostics remain complete.`),
+        },
+      })),
+    }));
     const child = spawn(process.execPath, [fileURLToPath(new URL("./bin.js", import.meta.url)), "--json", "compose", "batch", file, "--output", output], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, XDG_CONFIG_HOME: directory, SCREENRIG_CONFIG: path.join(directory, "missing-config.json") } });
     const chunks: Buffer[] = [], errors: Buffer[] = [];
     child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -28,7 +40,7 @@ test("CLI drains a large JSON envelope through a backpressured child-process pip
     assert.ok(Buffer.byteLength(stdout) > 65536, "regression must exceed a typical pipe buffer");
     const envelope = JSON.parse(stdout);
     assert.equal(envelope.ok, true);
-    assert.equal(envelope.data.rendered, 36);
+    assert.equal(envelope.data.rendered, 48);
     assert.deepEqual(envelope.data.pages, JSON.parse(await readFile(path.join(output, "compose-batch.json"), "utf8")).pages);
     assert.ok(stdout.endsWith("\n"));
   } finally { await rm(directory, { recursive: true, force: true }); }

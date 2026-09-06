@@ -1,0 +1,21 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "font": "Noto Serif",
+  "background": "#1C1410",
+  "brand": "#C9A227",
+  "text": "#F3E6D0",
+  "left": {
+    "enter": "fade-up",
+    "title": "FIRE AT THE TABLE",
+    "text": "A four-course supper cooked over live coals, from Hearth Company."
+  },
+  "right": {
+    "enter": "fade-up",
+    "stagger": 2,
+    "valign": "bottom",
+    "subtitle": "Saturday 17 October",
+    "text": "19:00–22:30",
+    "footer": "The Kiln Room · £86"
+  }
+}

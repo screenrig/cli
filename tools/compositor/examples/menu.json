@@ -1,0 +1,19 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "font": "Noto Serif",
+  "background": "#14110C",
+  "brand": "#C9A227",
+  "text": "#F3E6D0",
+  "fullpage": {
+    "title": "Char & Bone",
+    "cards": [
+      { "title": "Coal-seared ribeye", "price": "28" },
+      { "title": "Ember chicken, brown butter", "price": "19" },
+      { "title": "Fire-caught mackerel", "price": "17" },
+      { "title": "Charred hispi", "price": "8" },
+      { "title": "Beetroot, goat curd", "price": "9" },
+      { "title": "Burnt honey tart", "price": "8" }
+    ]
+  }
+}

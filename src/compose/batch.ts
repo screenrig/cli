@@ -1,9 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-import { composeSpec, type ComposeResult, type InkTightReport } from "./compose.js";
-import { expandComposeRecipe } from "./recipes.js";
-import { validateSpec } from "./validate.js";
+import { composeAndWrite, type ComposeQuality, type ComposeWarning } from "./compose.js";
+import { parseComposeSpec } from "./parse.js";
 import {
   lintAdjacentComposePages,
   lintComposedPage,
@@ -13,7 +12,9 @@ import {
   type LintFinding,
 } from "./lint.js";
 
-function invalid(message: string): never { throw Object.assign(new Error(message), { code: "usage_error" }); }
+function invalid(message: string): never {
+  throw Object.assign(new Error(message), { code: "usage_error" });
+}
 
 export const COMPOSE_BATCH_MIN_PAGES = 1;
 export const COMPOSE_BATCH_MAX_PAGES = 2000;
@@ -23,12 +24,10 @@ export interface BatchPage {
   id: string;
   status: "rendered" | "failed" | "not_selected";
   output?: string;
-  layout_output?: string;
   width?: number;
   height?: number;
-  warnings?: ComposeResult["warnings"];
-  quality?: ComposeResult["quality"];
-  ink_tight?: InkTightReport;
+  warnings?: ComposeWarning[];
+  quality?: ComposeQuality;
   lint?: LintFinding[];
   error?: { code: string; message: string };
 }
@@ -51,100 +50,141 @@ export interface BatchResult {
   lint: LintFinding[];
 }
 
-interface BatchItem {
-  id: string;
-  spec: unknown;
+function filterSource(input: unknown, only?: string): unknown {
+  if (!only || !input || typeof input !== "object" || Array.isArray(input)) return input;
+  const record = input as Record<string, unknown>;
+  if (!Array.isArray(record.pages)) return input;
+  return { ...record, pages: record.pages.filter((page) => page && typeof page === "object" && (page as { id?: string }).id === only) };
 }
 
-function chunkPreviewPath(directory: string, chunkIndex: number, only?: string): string {
-  if (only) return path.join(directory, `preview-${only}.png`);
-  if (chunkIndex === 0) return path.join(directory, "preview.png");
-  return path.join(directory, `preview-${chunkIndex + 1}.png`);
-}
-
-async function renderBatchChunk(
-  items: BatchItem[],
-  inputFile: string,
-  directory: string,
-  options: { target?: { width: number; height: number }; safeArea?: boolean; only?: string; inkTight?: boolean; inkPadding?: number; lintOnly?: boolean },
+async function writeContactSheet(
+  items: Array<{ id: string; png: Buffer; status: string; warnings: number; lint: number }>,
   previewPath: string,
-): Promise<BatchPage[]> {
-  const pages: BatchPage[] = [];
-  const columns = Math.min(items.length <= 8 ? 2 : 4, items.length), rows = Math.ceil(items.length / columns);
-  const thumbWidth = 640, thumbHeight = 360, cellHeight = 388;
-  const canvas = createCanvas(columns * thumbWidth, rows * cellHeight), ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#17202A"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-  // Serial rendering bounds peak memory to one full-size page and the sheet.
+): Promise<void> {
+  const columns = Math.min(items.length <= 8 ? 2 : 4, Math.max(1, items.length));
+  const rows = Math.max(1, Math.ceil(items.length / columns));
+  const thumbWidth = 640;
+  const thumbHeight = 360;
+  const cellHeight = 388;
+  const canvas = createCanvas(columns * thumbWidth, rows * cellHeight);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#17202A";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
   for (const [index, item] of items.entries()) {
-    const x = (index % columns) * thumbWidth, y = Math.floor(index / columns) * cellHeight;
-    const row: BatchPage = { id: item.id, status: "not_selected" };
-    if (!options.only || options.only === item.id) {
-      try {
-        const specPath = typeof item.spec === "string" ? path.resolve(path.dirname(inputFile), item.spec) : inputFile;
-        const spec = typeof item.spec === "string" ? JSON.parse(await readFile(specPath, "utf8")) : item.spec;
-        validateSpec(expandComposeRecipe(spec));
-        row.output = path.join(directory, `${item.id}.png`);
-        row.layout_output = `${row.output}.layout.json`;
-        const result = await composeSpec(spec, {
-          baseDir: path.dirname(specPath),
-          outPath: options.lintOnly ? undefined : row.output,
-          layoutOutPath: options.lintOnly ? undefined : row.layout_output,
-          ...options,
-        });
-        row.status = "rendered"; row.width = result.width; row.height = result.height; row.warnings = result.warnings; row.quality = result.quality;
-        if (result.ink_tight) row.ink_tight = result.ink_tight;
-        const pixels = await pixelsFromPng(result.png);
-        row.lint = lintComposedPage({ page_id: item.id, spec, layout: result.layout, quality: result.quality, pixels, viewing: viewingOf(spec) });
-        if (!options.lintOnly) {
-          for (let tx = 0; tx < thumbWidth; tx += 16) for (let ty = 0; ty < thumbHeight; ty += 16) { ctx.fillStyle = (tx / 16 + ty / 16) % 2 ? "#58616D" : "#3D4550"; ctx.fillRect(x + tx, y + ty, 16, 16); }
-          const image = await loadImage(result.png), scale = Math.min(thumbWidth / image.width, thumbHeight / image.height);
-          ctx.drawImage(image, x + (thumbWidth - image.width * scale) / 2, y + (thumbHeight - image.height * scale) / 2, image.width * scale, image.height * scale);
-        }
-      } catch (error) {
-        row.status = "failed";
-        row.error = { code: (error as { code?: string }).code ?? "compose_failed", message: error instanceof Error ? error.message : "Compose failed" };
+    const x = (index % columns) * thumbWidth;
+    const y = Math.floor(index / columns) * cellHeight;
+    for (let tx = 0; tx < thumbWidth; tx += 16) {
+      for (let ty = 0; ty < thumbHeight; ty += 16) {
+        ctx.fillStyle = (tx / 16 + ty / 16) % 2 ? "#58616D" : "#3D4550";
+        ctx.fillRect(x + tx, y + ty, 16, 16);
       }
     }
-    ctx.fillStyle = row.status === "failed" ? "#FF8A80" : "#FFFFFF"; ctx.font = "17px sans-serif";
-    ctx.fillText(`${item.id} · ${row.status}${row.warnings?.length ? ` · ${row.warnings.length} warnings` : ""}${row.lint?.length ? ` · ${row.lint.length} lint` : ""}`, x + 5, y + cellHeight - 8, thumbWidth - 10);
-    pages.push(row);
+    const image = await loadImage(item.png);
+    const scale = Math.min(thumbWidth / image.width, thumbHeight / image.height);
+    ctx.drawImage(
+      image,
+      x + (thumbWidth - image.width * scale) / 2,
+      y + (thumbHeight - image.height * scale) / 2,
+      image.width * scale,
+      image.height * scale,
+    );
+    ctx.fillStyle = item.status === "failed" ? "#FF8A80" : "#FFFFFF";
+    ctx.font = "17px sans-serif";
+    ctx.fillText(
+      `${item.id} · ${item.status}${item.warnings ? ` · ${item.warnings} warnings` : ""}${item.lint ? ` · ${item.lint} lint` : ""}`,
+      x + 5,
+      y + cellHeight - 8,
+      thumbWidth - 10,
+    );
   }
-  if (!options.lintOnly) await writeFile(previewPath, canvas.toBuffer("image/png"));
-  return pages;
+  await writeFile(previewPath, canvas.toBuffer("image/png"));
 }
 
-export async function composeBatch(inputFile: string, directory: string, options: { target?: { width: number; height: number }; safeArea?: boolean; only?: string; inkTight?: boolean; inkPadding?: number; lintOnly?: boolean } = {}): Promise<BatchResult> {
-  const input = JSON.parse(await readFile(inputFile, "utf8"));
-  if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => key !== "pages") || !Array.isArray(input.pages) || input.pages.length < COMPOSE_BATCH_MIN_PAGES || input.pages.length > COMPOSE_BATCH_MAX_PAGES) invalid(`Compose batch must be {pages:[{id,spec}]} with ${COMPOSE_BATCH_MIN_PAGES} to ${COMPOSE_BATCH_MAX_PAGES} pages. spec is a Frame/recipe object or a relative JSON file path.`);
-  const ids = new Set<string>();
-  for (const item of input.pages) {
-    if (!item || typeof item !== "object" || Array.isArray(item) || Object.keys(item).some((key) => key !== "id" && key !== "spec") || typeof item.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(item.id) || ids.has(item.id) || item.spec === undefined) invalid("Each batch page needs a unique safe id and spec; only id and spec are accepted.");
-    ids.add(item.id);
+export async function composeBatch(
+  inputFile: string,
+  directory: string,
+  options: { target?: { width: number; height: number }; safeArea?: boolean; only?: string; lintOnly?: boolean } = {},
+): Promise<BatchResult> {
+  let input: unknown;
+  try {
+    input = JSON.parse(await readFile(inputFile, "utf8"));
+  } catch (err) {
+    invalid(`Cannot read compose spec: ${err instanceof Error ? err.message : "invalid JSON"}`);
   }
-  if (options.only && !ids.has(options.only)) invalid("--only must name an id present in the batch.");
+  const document = parseComposeSpec(input);
+  if (document.pages.length < COMPOSE_BATCH_MIN_PAGES || document.pages.length > COMPOSE_BATCH_MAX_PAGES) {
+    invalid(`Compose batch must have ${COMPOSE_BATCH_MIN_PAGES} to ${COMPOSE_BATCH_MAX_PAGES} pages.`);
+  }
+  const ids = document.pages.map((page) => page.id);
+  if (options.only && !ids.includes(options.only)) invalid("--only must name an id present in the deck.");
   await mkdir(directory, { recursive: true });
-  const items = input.pages as BatchItem[];
-  const chunkCount = Math.ceil(items.length / COMPOSE_BATCH_CHUNK_SIZE);
   const previewPath = path.join(directory, options.only ? `preview-${options.only}.png` : "preview.png");
   const manifestPath = path.join(directory, options.only ? `compose-batch-${options.only}.json` : "compose-batch.json");
+  const chunkCount = Math.ceil(ids.length / COMPOSE_BATCH_CHUNK_SIZE);
   const pages: BatchPage[] = [];
   const chunk_timings: BatchChunkTiming[] = [];
-  for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
-    const slice = items.slice(chunkIndex * COMPOSE_BATCH_CHUNK_SIZE, (chunkIndex + 1) * COMPOSE_BATCH_CHUNK_SIZE);
-    const started = Date.now();
-    if (options.only && !slice.some((item) => item.id === options.only)) {
-      pages.push(...slice.map((item) => ({ id: item.id, status: "not_selected" as const })));
-    } else {
-      pages.push(...await renderBatchChunk(slice, inputFile, directory, options, chunkPreviewPath(directory, chunkIndex, options.only)));
+  const thumbs: Array<{ id: string; png: Buffer; status: string; warnings: number; lint: number }> = [];
+  const startedAll = Date.now();
+  try {
+    const written = await composeAndWrite(filterSource(input, options.only), {
+      baseDir: path.dirname(inputFile),
+      outDir: directory,
+      combined: !options.lintOnly,
+      target: options.target,
+      safeArea: options.safeArea,
+      lintOnly: options.lintOnly,
+    });
+    for (const id of ids) {
+      if (options.only && options.only !== id) {
+        pages.push({ id, status: "not_selected" });
+        continue;
+      }
+      const page = written.result.pages.find((item) => item.id === id) ?? written.result.pages[0];
+      if (!page) {
+        pages.push({ id, status: "failed", error: { code: "compose_failed", message: `page ${id} missing after render` } });
+        continue;
+      }
+      const pixels = await pixelsFromPng(page.combined);
+      const lint = lintComposedPage({
+        page_id: id,
+        spec: input,
+        quality: page.quality,
+        pixels,
+        viewing: viewingOf(input),
+      });
+      pages.push({
+        id,
+        status: "rendered",
+        output: written.pages.length === 1 ? directory : path.join(directory, id),
+        width: page.manifest.canvas.width,
+        height: page.manifest.canvas.height,
+        warnings: page.warnings,
+        quality: page.quality,
+        lint,
+      });
+      thumbs.push({ id, png: page.combined, status: "rendered", warnings: page.warnings.length, lint: lint.length });
     }
-    chunk_timings.push({ index: chunkIndex, pages: slice.length, duration_ms: Math.max(0, Date.now() - started) });
+  } catch (error) {
+    for (const id of ids) {
+      if (options.only && options.only !== id) {
+        pages.push({ id, status: "not_selected" });
+        continue;
+      }
+      pages.push({
+        id,
+        status: "failed",
+        error: { code: (error as { code?: string }).code ?? "compose_failed", message: error instanceof Error ? error.message : "Compose failed" },
+      });
+    }
   }
+  chunk_timings.push({ index: 0, pages: ids.length, duration_ms: Math.max(0, Date.now() - startedAll) });
+  if (!options.lintOnly && thumbs.length) await writeContactSheet(thumbs, previewPath);
   const lint = sortLint(
     [
       ...pages.flatMap((page) => page.lint ?? []),
-      ...lintAdjacentComposePages(items.map((item) => ({ id: item.id, spec: item.spec }))),
+      ...lintAdjacentComposePages(document.pages.map((page) => ({ id: page.id, spec: input }))),
     ],
-    items.map((item) => item.id),
+    ids,
   );
   const result: BatchResult = {
     manifest: manifestPath,

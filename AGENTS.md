@@ -488,28 +488,23 @@ installation, players, backend services, the site, or production deployment.
   render envelope is paths and layout metadata only. Never put PNG bytes in
   stdout, the envelope, or human text. `--open` opens a local path through
   `CliRuntime.openPath`; it is not the agent vision loop.
-- Optional Text `textShadow` is local `compose render` paint only. Author
-  `{ x, y, blur?, color }` in px; omit it to paint without a shadow. Optional
-  Text `effects` is the newer home for the same shadow plus `weight`
-  (`regular`|`bold`), `italic`, `underline`, `outline` `{ width, color }`
-  (width 0.5–12 px), `arc` `{ degrees }` (−180–180, smile is positive,
-  single line, centre aligned), and `texture` `{ src, objectFit? }` (clip-to-text,
-  path relative to the spec like `Image.src`). `textShadow` maps onto
-  `effects.shadow`. Missing bold/italic faces synthesise and warn
-  `synthetic_face`. Use text effects sparingly, when the design calls for
-  them (a headline, a badge); body copy and prices stay plain for
-  readability. Optional Text `scale: "display-xl"` raises that node's type
-  wish to 60% of the shorter edge when the Frame's only child is that Text
-  node; other roles and layouts keep the 12% cap. `compose render --ink-tight
-  [--ink-padding PX]` (and the same flags on `compose batch`, per page) crops
-  transparent output to measured ink of all layers plus optional padding
-  (default 0, 0 through 8192). The envelope reports original frame size, ink
-  rect, final size, overhang (retained ink past the authored frame) and
-  clipped (ink the frame actually cut). Preserve glyph fallback and overflow
-  diagnostics. It is not `screenrig.canvas/v1` and not a player feature.
-  Layout `x`/`y` on Text stay forbidden. This is **source-ready** in the
-  working tree. It is not in the locked plugin bundle. Do not claim
-  marketplace or deployed.
+- Compose authoring is named regions, not Frame/Row/Column/Box trees. Page
+  rails are `width`, `height`, `font`, `background`, `brand`, `text`, optional
+  `image`/`video`/`motion`/`viewing`/`pages`/`logo`. Regions are `fullpage`,
+  `left`, `right`, thirds, halves, `top`, and `bottom`. Do not author
+  `fontSize`, `x`, or `y`. Type size is procedural. Titles default to `brand`.
+  `card` is a plate (`fit` `region` or `ink`, default `region`, fill
+  background+B3). `logo` sits 32 px inset, contained to 200×100. Copy accepts
+  `**bold**` `*italic*` `__underline__`. iframe/webapp are manifest holes, not
+  painted PNGs. Text over a page `image` or `video` with no `fill` gets a 1 px
+  unblurred drop shadow (`#000000E6` on light type, `#FFFFFFE6` on dark type).
+  Set region `shadow` to `"none"` or `{ x, y, color }` to override. Region
+  `outline` is `{ width: 0.5-12, color }` and is off unless set. `--combined`
+  is inspection-only; default output is layered PNGs plus `manifest.json`.
+  Preserve glyph fallback, upscale, painted-pixel contrast, and
+  viewing-distance floor diagnostics. It is not `screenrig.canvas/v1` and not
+  a player feature. This is **source-ready** in the working tree. It is not
+  in the locked plugin bundle. Do not claim marketplace or deployed.
 
 ## Follow operation logs
 

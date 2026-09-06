@@ -1,0 +1,25 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "font": "Noto Serif",
+  "background": "#F4F6F8",
+  "brand": "#0B5CAB",
+  "text": "#1C2330",
+  "left": {
+    "title": "Monday 14 September",
+    "subtitle": "Campus board",
+    "table": {
+      "columns": ["Time", "Where"],
+      "rows": [
+        ["08:30", "Hall breakfast"],
+        ["09:15", "Year 1 induction"],
+        ["10:00", "Library tour"],
+        ["13:00", "Lunch service"],
+        ["16:30", "Hall dinner"]
+      ]
+    }
+  },
+  "right": {
+    "iframe": "https://example.com/campus"
+  }
+}

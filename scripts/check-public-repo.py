@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 EXPECTED_REPOSITORY = "git+https://github.com/screenrig/cli.git"
 EXPECTED_VERSION = "0.1.0"
 TEXT_SUFFIXES = {"", ".cjs", ".js", ".json", ".md", ".mjs", ".py", ".sh", ".toml", ".ts", ".yaml", ".yml"}
-IGNORED_PARTS = {".git", ".tmp", "dist", "node_modules"}
+IGNORED_PARTS = {".git", ".tmp", "dist", "node_modules", "out", "runs"}
 
 
 def git(*args: str) -> subprocess.CompletedProcess[str]:

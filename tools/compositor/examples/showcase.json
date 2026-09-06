@@ -1,0 +1,584 @@
+{
+  "name": "Signage showcase v2",
+  "width": 1920,
+  "height": 1080,
+  "font": "Noto Serif",
+  "pages": [
+    {
+      "id": "fire-at-the-table",
+      "video": "./media/ember-hearth.mp4",
+      "motion": { "type": "drift", "zoom": "in", "direction": "none", "speed": "slow" },
+      "background": "#0D0D0D",
+      "brand": "#D4AF37",
+      "text": "#F2EDE4",
+      "left": {
+        "enter": "fade-up",
+        "card": {
+          "title": "FIRE AT THE TABLE",
+          "subtitle": "Four courses over live coals",
+          "cards": [
+            { "title": "Ember bread, smoked butter" },
+            { "title": "Humber mussels, kelp butter" },
+            { "title": "Coal ribeye, hispi, bone sauce" },
+            { "title": "Burnt honey tart, bay cream" }
+          ],
+          "footer": "Hearth Company · book at the Kiln desk"
+        }
+      },
+      "right": {
+        "enter": "fade-up",
+        "stagger": 2,
+        "valign": "bottom",
+        "card": {
+          "fit": "ink",
+          "title": "Saturday 17 October",
+          "text": [
+            "19:00–22:30",
+            "The Kiln Room",
+            "14 Humber Dock, Hull HU1 1TB",
+            "01482 550 441",
+            "Tickets **£86**"
+          ]
+        }
+      }
+    },
+    {
+      "id": "lantern-row",
+      "video": "./media/lantern-row-market.mp4",
+      "background": "#1C1410",
+      "brand": "#C9A227",
+      "text": "#F3E6D0",
+      "right": {
+        "valign": "top",
+        "title": ["LANTERN", "ROW"]
+      },
+      "left": {
+        "valign": "bottom",
+        "card": {
+          "fit": "ink",
+          "title": "Night market on the old wharf",
+          "text": [
+            "Fridays in October · 16:00–21:00",
+            "Old Wharf, Garrison Side, Hull HU1",
+            "Free to enter · food tokens at the kiosk"
+          ],
+          "footer": "Bring a coat. Last tokens 20:30."
+        }
+      }
+    },
+    {
+      "id": "ashline-circuit",
+      "font": "Noto Sans",
+      "video": "./media/ashline-circuit.mp4",
+      "background": "#0B1220",
+      "brand": "#E8EEF6",
+      "text": "#F4F7FB",
+      "left": {
+        "card": {
+          "title": "ASHLINE CIRCUIT",
+          "subtitle": "Closed-road city ride",
+          "text": [
+            "Sunday 4 October",
+            "Sign-on 07:00 · start 08:00",
+            "North Quay, Hull HU1 2AB",
+            "40 km **£18** · 80 km **£28**"
+          ],
+          "footer": "Collect numbers at the shed. Helmets required."
+        }
+      }
+    },
+    {
+      "id": "night-garden",
+      "background": "#142018",
+      "brand": "#C9A227",
+      "text": "#E7F0E4",
+      "left": {
+        "image": "./media/fern-spray.png",
+        "enter": "fade-right"
+      },
+      "right": {
+        "image": "./media/orchid-stem.png",
+        "enter": "zoom-in"
+      },
+      "middle-half": {
+        "align": "center",
+        "valign": "bottom",
+        "card": {
+          "fit": "ink",
+          "title": "Night Garden",
+          "text": [
+            "An evening among the glasshouse collections",
+            "Thursday 8 October · 18:30",
+            "Vellum Conservatory, Pearson Park, Hull HU5",
+            "**£22** · 40 seats · doors 18:00"
+          ]
+        }
+      }
+    },
+    {
+      "id": "look-what-we-made",
+      "video": "./media/science-fair-workshop.mp4",
+      "background": "#F4EFE6",
+      "brand": "#5C2E6B",
+      "text": "#2A1B33",
+      "left": {
+        "valign": "bottom",
+        "card": {
+          "title": "LOOK WHAT WE MADE",
+          "subtitle": "Willowmere Primary science fair",
+          "text": [
+            "Wednesday 14 October · 15:30–18:00",
+            "Lime Street hall, Hull HU8",
+            "Free entry · prizes at 17:45",
+            "Families welcome. Leave bikes in the yard."
+          ]
+        }
+      }
+    },
+    {
+      "id": "silverthread",
+      "video": "./media/silverthread-cinema.mp4",
+      "motion": { "type": "drift", "zoom": "out", "direction": "none", "speed": "slow" },
+      "background": "#0D0D0D",
+      "brand": "#D4AF37",
+      "text": "#F2EDE4",
+      "left": {
+        "enter": "fade-up",
+        "card": {
+          "title": "Silverthread",
+          "subtitle": "Five nights of new student cinema",
+          "text": [
+            "21–25 October · doors 19:00",
+            "Hartley Theatre, Cottingham Road, Hull HU6",
+            "Festival pass **£32** · single **£7**"
+          ],
+          "footer": "Box office in the foyer from 17:30"
+        }
+      }
+    },
+    {
+      "id": "afterimage",
+      "background": "#0B1020",
+      "brand": "#7DFFC8",
+      "text": "#F4F7FB",
+      "left": {
+        "title": "AFTER IMAGE"
+      },
+      "right": {
+        "image": "./media/performer-figure.png",
+        "enter": "fade-left"
+      },
+      "bottom-half": {
+        "image": "./media/collage-shape.png",
+        "enter": "fade-up"
+      },
+      "bottom": {
+        "valign": "bottom",
+        "card": {
+          "fit": "ink",
+          "title": "Split Stage at The Brick Kiln",
+          "text": "6–18 October · forty minutes · **£14** / **£9**"
+        }
+      }
+    },
+    {
+      "id": "tide-table",
+      "background": "#87A8C1",
+      "brand": "#1B3A4A",
+      "text": "#10222C",
+      "left": {
+        "card": {
+          "title": "Tide Table",
+          "subtitle": "A harbour lunch as the tide turns",
+          "text": [
+            "Saturday 10 October · 12:00–16:00",
+            "Harbour Shed, Berth 2, Hull HU1 1UH",
+            "Four courses **£38** · book by 3 October"
+          ],
+          "footer": "Walk-ins after 15:00 if seats remain"
+        }
+      },
+      "right": {
+        "image": "./media/boat.png",
+        "enter": "fade-left",
+        "motion": { "type": "drift", "zoom": "in", "direction": "left", "speed": "slow" }
+      },
+      "bottom": {
+        "image": "./media/fish.png",
+        "enter": "fade-up"
+      }
+    },
+    {
+      "id": "mothlight",
+      "video": "./media/mothlight-field.mp4",
+      "background": "#1A1024",
+      "brand": "#F4F0FF",
+      "text": "#F8F4FF",
+      "top": {
+        "align": "center",
+        "title": "MOTHLIGHT",
+        "outline": { "width": 2, "color": "#1A1024" },
+        "subtitle": "Three days in Hollow Field"
+      },
+      "bottom": {
+        "align": "center",
+        "valign": "bottom",
+        "card": {
+          "fit": "ink",
+          "text": [
+            "Red Kite Choir · The Low Antennas · Marrow & Glass",
+            "Night Orchard · HVN Sunday · Coral Static",
+            "11–13 September · Hollow Field, east of Beverley",
+            "Weekend **£95** · day **£42** · camping extra"
+          ]
+        }
+      }
+    },
+    {
+      "id": "open-night",
+      "background": "#1A120C",
+      "brand": "#D4AF37",
+      "text": "#F2EDE4",
+      "left": {
+        "z": 2,
+        "card": {
+          "title": "OPEN NIGHT",
+          "text": [
+            "Northspire Observatory opens the dome for one evening.",
+            "Friday 23 October · 19:30–22:30",
+            "Beacon Lane, Hull HU6",
+            "Free, ticketed. Bring a coat."
+          ],
+          "footer": "Collect tickets from the lodge from 18:45"
+        }
+      },
+      "left-third": {
+        "z": 1,
+        "image": "./media/planet.png",
+        "enter": "fade-right",
+        "motion": { "type": "spin", "direction": "cw", "speed": "slow" }
+      },
+      "right": {
+        "image": "./media/telescope.png",
+        "enter": "zoom-in"
+      }
+    },
+    {
+      "id": "harborfield",
+      "video": "./media/harborfield-sports.mp4",
+      "background": "#0B1220",
+      "brand": "#F4F7FB",
+      "text": "#F4F7FB",
+      "left": {
+        "valign": "bottom",
+        "card": {
+          "fit": "ink",
+          "title": "HARBORFIELD SPORTS DAY",
+          "text": [
+            "Saturday 19 September · 10:00–15:00",
+            "the Green, Harborfield, Hull HU9",
+            "Free · medals at 15:00 · tea tent from 11:00"
+          ]
+        }
+      }
+    },
+    {
+      "id": "char-and-bone",
+      "background": "#14110C",
+      "brand": "#C9A227",
+      "text": "#F3E6D0",
+      "left": {
+        "card": {
+          "title": "Char & Bone",
+          "cards": [
+            { "title": "Coal-seared ribeye", "price": "28" },
+            { "title": "Ember chicken, brown butter", "price": "19" },
+            { "title": "Fire-caught mackerel", "price": "17" },
+            { "title": "Charred hispi", "price": "8" },
+            { "title": "Beetroot, goat curd", "price": "9" },
+            { "title": "Burnt honey tart", "price": "8" }
+          ],
+          "footer": "8 Posterngate, Hull HU1 2JN · 17:00–22:30 · ask about allergens"
+        }
+      },
+      "right": {
+        "image": "./media/small-grill-dish.png"
+      }
+    },
+    {
+      "id": "saltglass",
+      "image": "./media/coastal-lunch-room.png",
+      "background": "#F3E6D0",
+      "brand": "#A3471A",
+      "text": "#3B2A1A",
+      "left": {
+        "card": {
+          "title": "Saltglass",
+          "subtitle": "The Lookout, Minerva Terrace",
+          "cards": [
+            { "title": "Dressed crab", "price": "14" },
+            { "title": "Haddock chowder", "price": "9" },
+            { "title": "Day-boat plaice", "price": "18" }
+          ]
+        }
+      },
+      "right": {
+        "card": {
+          "cards": [
+            { "title": "Tomato and rye", "price": "8" },
+            { "title": "Mint courgette", "price": "9" },
+            { "title": "Garden leaves", "price": "5" }
+          ],
+          "footer": "Lunch by the water · Wed–Sun 12:00–15:00 · Hull HU1 1TJ"
+        }
+      }
+    },
+    {
+      "id": "casa-velluto",
+      "font": "Liberation Serif",
+      "background": "#EDE4D4",
+      "brand": "#6B2B1A",
+      "text": "#2C1810",
+      "left": {
+        "card": {
+          "title": "Casa Velluto",
+          "cards": [
+            { "title": "Burrata", "price": "11" },
+            { "title": "Crostini", "price": "8" },
+            { "title": "Tagliatelle", "price": "16" }
+          ]
+        }
+      },
+      "right": {
+        "card": {
+          "cards": [
+            { "title": "Risotto", "price": "17" },
+            { "title": "Veal cutlet", "price": "24" },
+            { "title": "Sea bream", "price": "22" }
+          ],
+          "footer": "22 Scale Lane, Hull HU1 1LF · kitchen 18:00 · closed Monday"
+        }
+      }
+    },
+    {
+      "id": "stackhouse",
+      "background": "#1A120C",
+      "brand": "#F3E6D0",
+      "text": "#F3E6D0",
+      "left": {
+        "card": {
+          "title": "Stackhouse",
+          "cards": [
+            { "title": "1 House smash", "price": "9.50" },
+            { "title": "2 Melt", "price": "10.50" },
+            { "title": "3 Crisp chicken", "price": "10.00" },
+            { "title": "4 Garden stack", "price": "9.00" },
+            { "title": "Fries", "price": "3.00" },
+            { "title": "Slaw", "price": "2.50" },
+            { "title": "Shake", "price": "3.80" }
+          ],
+          "footer": "3 Paragon Street, Hull HU1 3NA · combos include fries and a drink"
+        }
+      },
+      "right": {
+        "image": "./media/stackhouse-tray.png"
+      }
+    },
+    {
+      "id": "oven-and-oak",
+      "background": "#F3E6D0",
+      "brand": "#6B2B1A",
+      "text": "#2C1810",
+      "left": {
+        "card": {
+          "title": "Oven & Oak",
+          "cards": [
+            { "title": "Plain", "price": "3.80 / 11.50" },
+            { "title": "Nduja", "price": "4.60 / 14.00" },
+            { "title": "Mushroom", "price": "4.40 / 13.50" },
+            { "title": "Red onion", "price": "4.20 / 13.00" },
+            { "title": "Anchovy", "price": "4.80 / 14.50" }
+          ]
+        }
+      },
+      "right": {
+        "image": "./media/pizza.png"
+      },
+      "bottom": {
+        "valign": "bottom",
+        "card": {
+          "fit": "ink",
+          "cards": [
+            { "title": "Green salad", "price": "3.50" },
+            { "title": "Olives", "price": "3.00" },
+            { "title": "Dough balls", "price": "4.00" }
+          ],
+          "footer": "11 Princes Avenue, Hull HU5 3QA · Tuesday meal **£14**"
+        }
+      }
+    },
+    {
+      "id": "mill-and-steam",
+      "background": "#14110C",
+      "brand": "#C9A227",
+      "text": "#F3E6D0",
+      "left": {
+        "card": {
+          "title": "Mill & Steam",
+          "cards": [
+            { "title": "Filter", "price": "2.40 / 3.20" },
+            { "title": "Americano", "price": "2.60 / 3.40" },
+            { "title": "Flat white", "price": "3.20 / 3.50" },
+            { "title": "Latte", "price": "3.20 / 4.10" }
+          ]
+        }
+      },
+      "right": {
+        "card": {
+          "cards": [
+            { "title": "Croissant", "price": "2.80" },
+            { "title": "Almond roll", "price": "3.40" },
+            { "title": "Sticky bun", "price": "3.20" },
+            { "title": "Cheese twist", "price": "2.90" },
+            { "title": "Seed loaf", "price": "2.20" }
+          ],
+          "footer": "5 Whitefriargate, Hull HU1 2ER · oat or extra shot +0.50"
+        }
+      }
+    },
+    {
+      "id": "today-on-campus",
+      "font": "Liberation Sans",
+      "image": "./media/campus-noticeboard-bg.png",
+      "background": "#EEF1F4",
+      "brand": "#1B3654",
+      "text": "#1B3654",
+      "left": {
+        "card": {
+          "title": "Monday 14 September",
+          "table": {
+            "columns": ["Time", "Event", "Room"],
+            "rows": [
+              ["08:30", "Hall breakfast", "Refectory"],
+              ["09:15", "Year 1 induction", "Hall A"],
+              ["10:00", "Library tour", "Library"],
+              ["11:30", "Campus tour", "Quad"],
+              ["13:00", "Lunch service", "Refectory"],
+              ["14:15", "Study skills clinic", "Room 204"],
+              ["16:00", "Sports hall open", "Sports Hall"],
+              ["18:30", "Hall dinner", "Refectory"]
+            ]
+          },
+          "footer": "Eastmere College · changes go on the afternoon slip at the porter’s desk"
+        }
+      }
+    },
+    {
+      "id": "maker-labs",
+      "font": "Liberation Sans",
+      "image": "./media/maker-workshop-bg.png",
+      "background": "#E8E4DC",
+      "brand": "#1A1A1A",
+      "text": "#1A1A1A",
+      "left": {
+        "card": {
+          "title": "MAKER LABS THIS WEEK",
+          "table": {
+            "columns": ["Day", "Session", "Room"],
+            "rows": [
+              ["Mon", "16:00 Introduction to the laser bed", "NW-1"],
+              ["Tue", "17:00 Sewing machines, basic seams", "NW-3"],
+              ["Wed", "16:30 Electronics bench, continuity", "NW-2"],
+              ["Thu", "14:00 Print studio, one-colour poster", "NW-4"],
+              ["Fri", "16:00 Open bench, staffed", "NW block"]
+            ]
+          },
+          "footer": "NW block · 14–18 September · book a bench · sign the door by 17:00 the day before"
+        }
+      }
+    },
+    {
+      "id": "marlow-lane",
+      "image": "./media/clinic-waiting.png",
+      "background": "#E8F0EE",
+      "brand": "#2A6B62",
+      "text": "#1C3330",
+      "left": {
+        "card": {
+          "title": "Welcome to Marlow Lane",
+          "text": [
+            "2 Marlow Lane, Hull HU5",
+            "01482 661 090",
+            "1 Press the bell at the inner door",
+            "2 Give your name at the desk",
+            "3 Take a seat in the garden room"
+          ],
+          "footer": "Check in, then wait — we will come and find you"
+        }
+      }
+    },
+    {
+      "id": "clinic-hours",
+      "image": "./media/clinic-seasonal.png",
+      "background": "#E8F0EE",
+      "brand": "#2A6B62",
+      "text": "#1C3330",
+      "left": {
+        "card": {
+          "title": "Clinic hours this fortnight",
+          "text": [
+            "Closes 12:00 Friday 18 September.",
+            "Closed 19–21 September.",
+            "Reopens 08:00 Tuesday 22 September."
+          ],
+          "footer": "Duty line **01482 661 090** while the building is closed"
+        }
+      }
+    },
+    {
+      "id": "aurel-quietly",
+      "image": "./media/aurel-product.png",
+      "background": "#0D0D0D",
+      "brand": "#D4AF37",
+      "text": "#F2EDE4",
+      "left": {
+        "enter": "fade-up",
+        "valign": "bottom",
+        "card": {
+          "fit": "ink",
+          "title": "Aurel, quietly",
+          "text": [
+            "*Fictional product for demonstration*",
+            "A small bottle for the evening shelf.",
+            "Lumenwell, 8 Cloth Street, Hull HU1"
+          ]
+        }
+      }
+    },
+    {
+      "id": "solenne",
+      "background": "#6B1F4A",
+      "brand": "#F8F4FF",
+      "text": "#F8F4FF",
+      "left": {
+        "card": {
+          "title": "SOLENNE",
+          "subtitle": "Hold the colour. Keep the calm.",
+          "text": [
+            "*Fictional product for demonstration*",
+            "Solenne Gel · 50 ml",
+            "Helixwell Counter, Whitefriargate"
+          ]
+        }
+      },
+      "right": {
+        "image": "./media/sculptural-form.png",
+        "enter": "fade-left"
+      },
+      "right-third": {
+        "image": "./media/solenne-bottle.png",
+        "enter": "fade-up"
+      }
+    }
+  ]
+}

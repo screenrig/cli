@@ -158,21 +158,17 @@ compatibility aliases. Revoke uses the same last-agent guard and local cleanup
 semantics as `agent disconnect`.
 
 `compose catalog` and `compose render` run locally. They do not enroll. They
-do not debit credits. `compose render` reads a JSON spec, writes a PNG, and
-writes `<output>.layout.json` next to it. The envelope carries paths, canvas
-size, the resolved font family, space tokens, the type ramp, whether any
-text was truncated, and visual `lint` findings ordered by page. It never
-prints image bytes. `--open` opens the local PNG with the OS opener when the
-user asked to view the still on this computer. `--lint-only` still composes
-in memory and reports `lint` without writing the PNG or layout JSON.
-Optional Text `scale: "display-xl"` raises that node's type wish to 60% of
-the shorter edge when the Frame has that single Text child; every other role
-and layout keeps the 12% cap. `compose render --ink-tight [--ink-padding PX]`
-crops a transparent still to the measured ink of every layer, then adds
-optional padding (default 0) for animated entry. The envelope reports the
-original `frame` size, the `ink` rect, the final size, `overhang` (ink past
-the authored frame that was retained) and `clipped` (ink the frame actually
-cut). Glyph fallback and overflow diagnostics stay on the authored layout.
+do not debit credits. `compose render` reads a JSON page, writes one PNG per
+region plus `manifest.json`, and optionally `--combined` for a flattened
+inspection PNG. The envelope carries the output directory, file list, canvas
+size, the resolved font family, the layered manifest, and visual `lint`
+findings ordered by page. It never prints image bytes. `--open` opens the
+combined PNG with the OS opener when the user asked to view the still on this
+computer. `--lint-only` still composes in memory and reports `lint` without
+writing files. Type size is procedural from page width/height and optional
+`viewing` (`near`/`mid`/`far`, default `mid`). Do not author `fontSize`, `x`,
+or `y`. A named `font` that is not installed is `usage_error`, not a silent
+fallback. Glyph fallback and overflow diagnostics stay on the authored page.
 
 ScreenRig content has three families: static images, including stills produced
 by local compose; motion video; and web content delivered as an `iframe` or
@@ -583,80 +579,54 @@ Compose a still on this machine, look at the PNG, then upload it as media.
 
 ```sh
 screenrig --json compose catalog
-screenrig --json compose render ./spec.json --output ./still.png
-screenrig --json media upload ./still.png
+screenrig --json compose render ./spec.json --output ./still
+screenrig --json media upload ./still/left.png
 ```
 
-The spec is a fail-closed tree of `Frame`, `Column`, `Row`, `Box`, `Spacer`,
-`Text`, `Image`, `Icon`, `Divider`, and `Pill`. Roles are `display`, `title`, `body`, `caption`, and
-`label`. Spacing tokens are `xs`, `s`, `m`, `l`, and `xl`. Pins are `top`,
-`bottom`, `left`, and `right`. Do not author `x` or `y` on any node. The root
-`Frame` defines the canvas through required `width` and `height`. Optional
-`Frame.theme` selects one curated palette (`warm-cafe`, `bakery-cream`,
-`midnight-neon`, `clean-corporate`, `earthy-market`, `ocean-calm`,
-`bold-retail`, `cinema-noir`, `pastel-kiosk`, `forest-lodge`, `sunset-promo`,
-`monochrome-ink`, `sport-arena`, `healthcare-soft`, `festival-pop`,
-`luxury-gold`). A theme fills unset `background`, `color`, and `fontFamily` on
-`Frame` / `Box` / `Text`; explicit values still win. `color` and solid
-`background` also accept the named tokens `accent`, `ink`, `inkMuted`,
-`surface`, `accentInk`, and `background`. Pick one theme per deck; use accent
-for one element per page. `Icon` paints a Font Awesome glyph by `name` (Free
-map plus installed Pro metadata; unknown names list the nearest three).
-`Divider` is a horizontal or vertical rule from the parent direction.
-`Pill` is a padded badge. `Frame.background` and `Box.background` accept a
-linear gradient `{ "type": "linear", "angle": 0-360, "stops": [ { "at": 0, "color": "#…" }, … ] }`
-with 2–8 strictly increasing stops. Do not author
-`fontSize`. The pinned CLI accepts positive `width` and `height` values in px on
-`Image`, `Box`, `Row`, `Column`, and `Spacer`. Keep `flex` for remaining space.
-`pin` `top` or `bottom` stretches the full width; `left` or `right` stretches
-the full height. Size a wordmark with `width` and `height`, not `pin`.
-Optional Text `textShadow` is
-`{ "x": 2, "y": 2, "blur": 4, "color": "#00000080" }`; omit it to paint
-without a shadow. Optional Text `effects` is the newer home for local
-paint treatments, all off by default:
+The spec is a fail-closed JSON page. Page rails are `width`, `height`
+(default 1920×1080), `font`, `background`, `brand`, `text` (the copy color),
+optional `image` or `video` (local full-bleed paths), optional `motion`,
+optional `viewing` (`near`/`mid`/`far`, default `mid`), and optional `pages`.
+Regions are `fullpage`, `left`, `right`, `left-third`, `middle-third`,
+`right-third`, `middle-half`, `top-half`, `bottom-half`, `top`, and `bottom`.
+Inside a region: `title`, `subtitle`, `text` (body copy: a string or an array
+of lines), `footer`, `image`, `video`, `iframe`, `webapp`, `cards`, `card`,
+`table`, plus `enter`, `stagger`, `motion`, `align`, `valign`, `fill`, `color`,
+`z`, `shadow`, and `outline`. Unknown keys fail. Do not author `fontSize`,
+`x`, or `y`. On the page, `text` is the copy color. In a region, `text` is
+body copy. Region title and card-item title default to `brand`; body roles
+default to `text`. Optional region or `card` `color` overrides the box. A
+named `font` must be installed on this host. Text over a page `image` or
+`video` with no `fill` gets a 1 px unblurred drop shadow (`#000000E6` on
+light type, `#FFFFFFE6` on dark type). Set `shadow` to `"none"` or
+`{ x, y, color }` to override. `outline` is `{ width: 0.5-12, color }` and
+is off unless set.
 
-```json
-"effects": {
-  "weight": "regular",
-  "italic": true,
-  "underline": true,
-  "outline": { "width": 2, "color": "#000000" },
-  "shadow": { "x": 2, "y": 2, "blur": 4, "color": "#00000080" },
-  "arc": { "degrees": 40 },
-  "texture": { "src": "./paper.png", "objectFit": "cover" }
-}
-```
+`card` is a plate. `card.fit` is `region` (default, fills the region rect) or
+`ink` (hugs measured type plus 24 px pad, placed with `align`/`valign`).
+Default fill is the page background + B3. Override with `card.fill`. `cards`
+(plural) is an array of `{ title, subtitle?, text?, price?, image? }` and can
+sit inside `card`. Copy accepts `**bold**`, `*italic*`, and `__underline__`.
+`table` is `{ columns, rows }` with 1 to 8 columns; every column is sized
+from its content. Page `logo` is a path or `{ src, corner }` (`top-left` /
+`top-right` / `bottom-left` / `bottom-right`, default `bottom-right`). The
+mark sits 32 px inset from that corner, contained to 200×100, never
+upscaled. `iframe` and `webapp` are not painted: the manifest carries
+`media: { type, src, rect }` in page coordinates and omits `file` when the
+layer is hole-only. `enter` is a playlist `PrimitiveEnter` type (`fade-up`
+through `zoom-out`) with optional integer `stagger` 0 through 8. `motion` is
+playlist `spin` or `drift` (same fields as the wire). `compose render`
+writes one PNG per region and `manifest.json` with `version`, `canvas`, and
+`layers[]` each `{ id, file?, z, rect, enter?, motion?, media? }`. Rects are
+integers. `--combined` writes a flattened PNG for inspection. Default for
+agent work is layered. Image paths are local filesystem paths relative to
+the spec file. The CLI does not fetch URLs. Visual lint emits
+`low_contrast_rendered` when sampled finished pixels are below 4.5:1. A
+poor type-on-plate contrast emits a nonblocking `card_low_contrast`
+warning.
 
-`weight` is `regular` or `bold`. `outline.width` is 0.5–12 px at the
-rendered size. `arc.degrees` is −180–180 (positive is a smile), centre
-aligned, and single-line only. `texture.src` is a local path relative to
-the spec, like `Image.src`, and fills the glyphs (clip-to-text); combining
-it with `outline` is allowed. `textShadow` still maps onto `effects.shadow`.
-Real bold and italic faces are used when the chosen font has them;
-otherwise the rasteriser synthesises a face and emits a `synthetic_face`
-warning. Use text effects sparingly, when the design calls for them (a
-headline, a badge); body copy and prices stay plain for readability.
-`Image.src` is a local filesystem path
-relative to the spec file. The CLI does not fetch URLs.
-Optional Text `plate` is `"auto"`, `"none"` (the default), or
-`{ "color": "#000000B3", "radius": "s", "padding": "s" }`. With `"auto"`,
-after layout the renderer samples pixels behind the text ink box, measures
-contrast against the region's mean luminance and 90th percentile, and paints
-a plate only when that ratio is below 4.5. A themed frame uses `surface` at
-about 85% alpha; otherwise it chooses black or white at 70% from the text
-colour, with radius and padding `s`. `plate.color` accepts a hex colour or a
-theme token (`accent`, `ink`, `inkMuted`, `surface`, `accentInk`,
-`background`) when `Frame.theme` is set. Diagnostics report `plate_applied` or
-`plate_skipped` with the measured ratio. Compose emits a `low_contrast`
-warning when the ratio after plating is below 3.0 on that node. Visual lint
-emits `low_contrast_rendered` when sampled finished pixels are below 4.5:1.
-Recipes `hero`, `promo`, and `quote`
-set `"auto"`. Optional Image `focal` is `{ "x": 0.5, "y": 0.5 }` (0 through 1,
-default centre). For `objectFit: "cover"` the crop window stays on that
-point, clamped to the image, and the crop rect is reported in diagnostics.
-
-`--open` is only for viewing the still on this computer. Agent vision reads
-the file path. Do not cat pixels into chat.
+`--open` is only for viewing the combined still on this computer. Agent vision
+reads the file path. Do not cat pixels into chat.
 
 A playlist page for that still is one `image` primitive whose `rect` is the
 canvas and whose `content_fit` is `fill`.
@@ -1022,32 +992,21 @@ not other ScreenRig services or repositories.
 
 ### Compose quality and application revisions
 
-`compose catalog` includes installed font families, validator-backed node
-attributes, curated `themes` with `theme_guidance` to pick one theme per deck
-and use accent for one element per page, signage recipes with fields, variants,
-and one example each, `recipe_guidance` to alternate variants or recipes on
-adjacent pages, complete slide, transparent-overlay, effects-headline,
-themed-slide, gradient-band, and icon-row examples, `effects_guidance` to
-use text effects sparingly, `Frame.viewing` (`near`/`mid`/`far`, default `mid`)
-for distance-based type floors applied at layout (fit-text will not size below
-the x-height floor) and again as visual `lint` (`too_small_for_distance`),
-visual `lint` codes, and the preview reminder
-to look at the contact sheet.
+`compose catalog` includes installed font families, page keys, named regions,
+region fields, enter and motion enums, `viewing` (`near`/`mid`/`far`, default
+`mid`) for distance-based type floors applied at layout (1080p mid body wish
+is about 45 px) and again as visual `lint` (`too_small_for_distance`),
+layered examples, visual `lint` codes, and the preview reminder to look at
+the contact sheet.
 `compose render spec.json --target-width 3840 --target-height 2160` checks the
 physical content viewport without resizing the output. Nonblocking warnings
-identify decoded image upscaling above 1.25×, fill aspect distortion above 1%,
-and flattened output upscaling above 1.25×. Measurements are returned in
-`data.quality` and the layout JSON; an omitted target is explicitly unknown.
-Use `contain` for a complete logo and `cover` for proportional cropping.
-`Image.focal` `{ x, y }` (0 through 1, default 0.5, 0.5) keeps a subject
-inside a cover crop. `Text.plate` `"auto"` paints a readability plate under
-copy over busy imagery when sampled contrast is below 4.5.
-Re-render from originals at the required Frame dimensions to recover detail.
+identify decoded image upscaling above 1.25× and output upscaling above 1.25×.
+Measurements are returned in `data.quality` and `manifest.json`; an omitted
+target is explicitly unknown. Cover crops fill a region without stretching.
+Re-render from originals at the required canvas dimensions to recover detail.
 Optional `--safe-area` flags measured text ink outside a 5% TV-safe margin.
-Optional `--ink-tight` crops the PNG to measured ink; `--ink-padding PX` (0
-to 8192, default 0) adds transparent margin around that crop and requires
-`--ink-tight`. `compose batch` accepts the same flags and applies them per
-page.
+`compose batch` accepts the same flags, writes a contact sheet, and supports
+`--only ID`.
 
 To publish a replacement package under the same application identity, run
 `app show app_EXAMPLE` to obtain its revision, then
@@ -1058,32 +1017,19 @@ update their application primitive explicitly after the operation succeeds.
 
 ### Local deck authoring
 
-`compose render` accepts ordinary Frame specs or semantic recipes from
-`compose catalog`: `title`, `split-image`, `cards`, `table`, `overlay`, and the
-signage recipes `hero`, `price-list`, `menu-board`, `promo`, `event`, `quote`,
-and `schedule`. Generic recipes retain native measured Text nodes, 5% content
-insets and readable type floors. Signage recipes accept `theme`, leave an 8%
-safe margin, and take `variant` `a` (default), `b`, or `c` so the same content
-can change arrangement. Optional `subtitle` and `footnote` sit in the title
-block and at caption size bottom-left. Quote is intentionally airy. They warn
-`too_dense` when copy exceeds that recipe's word budget. They accept explicit
-physical `width`/`height` (default 1920×1080).
-Images preserve aspect; overlays keep text opaque over a translucent plate.
-Alternate variants or recipes on adjacent pages; a deck that repeats one layout
+`compose render` accepts a JSON page or a deck `{ "pages": [ { "id": "intro", ...region overrides } ] }`.
+A deck file is enough; `compose batch` adds a contact-sheet preview and
+`--only ID`. Type size follows the canvas. Images cover their region.
+Overlays keep text opaque; set region `fill` when a plate is needed.
+Alternate region sets on adjacent pages; a deck that repeats one layout
 reads as a slideshow, not signage.
 
-`compose batch deck.json --output ./rendered --safe-area --ink-tight` accepts
-`{"pages":[{"id":"intro","spec":{"recipe":"title","title":"Welcome","body":"A useful introduction."}},{"id":"hero-a","spec":{"recipe":"hero","variant":"a","theme":"warm-cafe","headline":"Tonight","subhead":"Pies until ten.","image":"./photo.png"}},{"id":"hero-b","spec":{"recipe":"hero","variant":"b","theme":"warm-cafe","headline":"Tonight","subhead":"Pies until ten.","image":"./photo.png"}}]}`.
-Each spec may also be a relative JSON file path. One command accepts 1 to 2000
-pages and returns ordered results, PNGs, measured layout diagnostics, a
-contact-sheet preview and a manifest. Larger inputs are processed in internal
-chunks of 100 so peak full-resolution memory stays bounded; rendering stays
-serial. The JSON envelope adds `chunks` and `chunk_timings` and keeps the
-existing fields. Batches that span more than one chunk write extra contact
-sheets (`preview-2.png`, …) alongside `preview.png`. Failures retain successful
-pages; `--only intro` selectively retries one page, including across chunk
-boundaries, and marks other pages `not_selected` in a separate correction
-manifest.
+`compose batch deck.json --output ./rendered --safe-area` accepts the same
+JSON as `compose render`, including `{ "pages": [ { "id": "intro", "left": { "title": "Welcome", "text": "A useful introduction." } } ] }`.
+One command accepts 1 to 2000 pages and returns ordered results, layered
+PNGs, `manifest.json`, a contact-sheet preview and a batch manifest.
+`--only intro` selectively retries one page and marks other pages
+`not_selected` in a separate correction manifest.
 
 Diagnostics distinguish measured text overflow, truncation, crowding and text
 collisions from intentional text/media overlays. Missing-glyph raster detection
@@ -1100,10 +1046,9 @@ selectors, media durations or remote availability. The schema and semantics
 come from the backend snapshots tracked by `vendor/manifest.json`.
 Validate, `compose render`, and `compose batch` also emit visual `lint`
 warnings (never errors) under `data.lint`, ordered by page:
-`low_contrast_rendered` (finished pixels below 4.5:1; compose paint-time
-contrast below 3.0 after plating remains `low_contrast` on `data.warnings`),
+`low_contrast_rendered` (finished pixels below 4.5:1),
 `text_over_busy_image`, `too_small_for_distance`, `too_dense`, `collision`,
-`motion_overuse`, `effects_overuse`, `adjacent_repeat`, and `safe_margin`.
+`motion_overuse`, `adjacent_repeat`, and `safe_margin`.
 `--lint-only` is accepted on those commands and on `playlist preview`.
 
 `playlist preview playlist.json --output ./frames --contact-sheet` composites

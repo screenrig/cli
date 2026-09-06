@@ -1,166 +1,181 @@
-export const ROLES = ["display", "title", "body", "caption", "label"] as const;
-export type Role = (typeof ROLES)[number];
-export const TEXT_SCALES = ["display-xl"] as const;
-export type TextScale = (typeof TEXT_SCALES)[number];
-export const SPACES = ["xs", "s", "m", "l", "xl"] as const;
-export type SpaceToken = (typeof SPACES)[number];
-export const PINS = ["top", "bottom", "left", "right"] as const;
-export type Pin = (typeof PINS)[number];
-export const COLOR_TOKENS = ["accent", "ink", "inkMuted", "surface", "accentInk", "background"] as const;
-export type ColorToken = (typeof COLOR_TOKENS)[number];
+export const REGIONS = [
+  "fullpage",
+  "left",
+  "right",
+  "left-third",
+  "middle-third",
+  "right-third",
+  "middle-half",
+  "top-half",
+  "bottom-half",
+  "top",
+  "bottom",
+] as const;
+export type RegionName = (typeof REGIONS)[number];
+
+export const ENTER_TYPES = [
+  "fade-up",
+  "fade-down",
+  "fade-left",
+  "fade-right",
+  "fade-in",
+  "zoom-in",
+  "zoom-out",
+] as const;
+export type EnterType = (typeof ENTER_TYPES)[number];
+
+export const ALIGN = ["left", "center", "right"] as const;
+export type Align = (typeof ALIGN)[number];
+
+export const VALIGN = ["auto", "top", "center", "bottom"] as const;
+export type Valign = (typeof VALIGN)[number];
+
+export const SPIN_DIR = ["cw", "ccw"] as const;
+export const DRIFT_ZOOM = ["in", "out"] as const;
+export const DRIFT_DIR = ["left", "right", "up", "down", "none"] as const;
+export const SPEED = ["slow", "medium", "fast"] as const;
 export const VIEWING_DISTANCES = ["near", "mid", "far"] as const;
 export type ViewingDistance = (typeof VIEWING_DISTANCES)[number];
-export const THEME_NAMES = [
-  "warm-cafe",
-  "bakery-cream",
-  "midnight-neon",
-  "clean-corporate",
-  "earthy-market",
-  "ocean-calm",
-  "bold-retail",
-  "cinema-noir",
-  "pastel-kiosk",
-  "forest-lodge",
-  "sunset-promo",
-  "monochrome-ink",
-  "sport-arena",
-  "healthcare-soft",
-  "festival-pop",
-  "luxury-gold",
-] as const;
-export type ThemeName = (typeof THEME_NAMES)[number];
 
-export type Align = "start" | "center" | "end" | "stretch";
-export type Justify = "start" | "center" | "end" | "space-between" | "space-around" | "space-evenly";
-export type TextAlign = "left" | "center" | "right";
-export type ObjectFit = "cover" | "contain" | "fill";
+export const TYPE_ROLES = ["title", "subtitle", "text", "footer", "card", "small", "table"] as const;
+export type TypeRole = (typeof TYPE_ROLES)[number];
 
-export interface GradientStop {
-  at: number;
-  color: string;
+export const LOGO_CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"] as const;
+export type LogoCorner = (typeof LOGO_CORNERS)[number];
+
+export const CARD_FITS = ["region", "ink"] as const;
+export type CardFit = (typeof CARD_FITS)[number];
+
+export const LOGO_INSET = 32;
+export const LOGO_MAX = { width: 200, height: 100 } as const;
+export const CARD_INK_PAD = 24;
+
+export const WIRE_PRIMITIVES = ["image", "video", "iframe", "application"] as const;
+export type WirePrimitive = (typeof WIRE_PRIMITIVES)[number];
+
+/** Playlist PrimitiveEnter, field-for-field. */
+export interface PrimitiveEnter {
+  type: EnterType;
+  stagger?: number;
 }
 
-export interface LinearGradient {
-  type: "linear";
-  angle: number;
-  stops: GradientStop[];
+/** Playlist PrimitiveMotionSpin, field-for-field. */
+export interface PrimitiveMotionSpin {
+  type: "spin";
+  direction: (typeof SPIN_DIR)[number];
+  speed: (typeof SPEED)[number];
 }
 
-export type Paint = string | LinearGradient;
-
-export interface ComposeTheme {
-  background: string;
-  surface: string;
-  ink: string;
-  inkMuted: string;
-  accent: string;
-  accentInk: string;
-  fontDisplay: string;
-  fontBody: string;
+/** Playlist PrimitiveMotionDrift, field-for-field. */
+export interface PrimitiveMotionDrift {
+  type: "drift";
+  zoom: (typeof DRIFT_ZOOM)[number];
+  direction: (typeof DRIFT_DIR)[number];
+  speed: (typeof SPEED)[number];
 }
 
-export interface TextShadow {
+export type PrimitiveMotion = PrimitiveMotionSpin | PrimitiveMotionDrift;
+
+/** Playlist PlaylistRect with integer fields. */
+export interface PlaylistRect {
   x: number;
   y: number;
-  blur?: number;
-  color: string;
-}
-
-export type TextWeight = "regular" | "bold";
-
-export interface TextOutline {
-  width: number;
-  color: string;
-}
-
-export interface TextArc {
-  degrees: number;
-}
-
-export interface TextTexture {
-  src: string;
-  objectFit?: ObjectFit;
-}
-
-export interface TextEffects {
-  weight?: TextWeight;
-  italic?: boolean;
-  underline?: boolean;
-  outline?: TextOutline;
-  shadow?: TextShadow;
-  arc?: TextArc;
-  texture?: TextTexture;
-}
-
-export type TextPlate =
-  | "auto"
-  | "none"
-  | {
-      color: string;
-      radius?: SpaceToken;
-      padding?: SpaceToken;
-    };
-
-export interface ImageFocal {
-  x: number;
-  y: number;
-}
-
-export interface ComposeNode {
-  type: string;
-  width?: number;
-  height?: number;
-  background?: Paint;
-  fontFamily?: string;
-  direction?: "row" | "column";
-  padding?: SpaceToken;
-  gap?: SpaceToken;
-  radius?: SpaceToken;
-  pin?: Pin;
-  flex?: number;
-  align?: Align | TextAlign;
-  justify?: Justify;
-  children?: ComposeNode[];
-  text?: string;
-  role?: Role;
-  scale?: TextScale;
-  color?: string;
-  textShadow?: TextShadow;
-  effects?: TextEffects;
-  plate?: TextPlate;
-  letterSpacing?: number;
-  src?: string;
-  objectFit?: ObjectFit;
-  focal?: ImageFocal;
-  name?: string;
-  size?: number;
-  thickness?: number;
-  length?: number;
-  style?: "solid" | "dotted";
-  theme?: string;
-  [key: string]: unknown;
-}
-
-export interface ComposeFrame extends ComposeNode {
-  type: "Frame";
   width: number;
   height: number;
-  theme?: ThemeName | string;
-  viewing?: ViewingDistance;
 }
 
-export interface SpaceScale {
-  xs: number;
-  s: number;
-  m: number;
-  l: number;
-  xl: number;
+export interface CardItem {
+  title: string;
+  subtitle?: string | null;
+  text?: string | null;
+  price?: string | null;
+  image?: string | null;
 }
 
-export interface TypeRoleRamp {
-  wish: number;
-  min: number;
-  weight: "400" | "700";
+/** Unblurred drop shadow. `"none"` disables the automatic media shadow. */
+export type LayerShadow = "none" | { x: number; y: number; color: string };
+
+/** Stroke around glyphs. Off unless set. Width is 0.5–12 px. */
+export interface LayerOutline {
+  width: number;
+  color: string;
 }
 
-export type TypeRamp = Record<Role, TypeRoleRamp>;
+export interface TableBlock {
+  columns: string[];
+  rows: string[][];
+}
+
+export type LayerBlock =
+  | { role: "title" | "subtitle" | "text" | "footer"; text: string }
+  | { role: "image"; src: string }
+  | { role: "placeholder"; kind: "video" | "iframe" | "application"; src: string; label: string }
+  | { role: "cards"; items: CardItem[] }
+  | ({ role: "table" } & TableBlock);
+
+export interface LayerMedia {
+  type: WirePrimitive;
+  src: string;
+  rect?: PlaylistRect;
+}
+
+export interface LayerSpec {
+  id: string;
+  region: RegionName | "background" | "logo";
+  z: number;
+  order: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  pad: number;
+  fill: string | null;
+  ink: string | null;
+  cardFit: CardFit | null;
+  surface: string;
+  shadow: LayerShadow | null;
+  outline: LayerOutline | null;
+  overMedia: boolean;
+  align: Align;
+  valign: Valign;
+  font: string | null;
+  text: string;
+  muted: string;
+  brand: string;
+  root: number;
+  viewing: ViewingDistance;
+  enter: PrimitiveEnter | null;
+  motion: PrimitiveMotion | null;
+  media: LayerMedia | null;
+  blocks: LayerBlock[];
+  logoCorner?: LogoCorner | null;
+}
+
+export interface PageSpec {
+  id: string;
+  layers: LayerSpec[];
+}
+
+export interface ComposeDocument {
+  canvas: { width: number; height: number };
+  name: string | null;
+  viewing: ViewingDistance;
+  pages: PageSpec[];
+}
+
+export interface LayerManifest {
+  id: string;
+  file?: string;
+  z: number;
+  rect: PlaylistRect;
+  enter?: PrimitiveEnter;
+  motion?: PrimitiveMotion;
+  media?: LayerMedia;
+  overflow?: boolean;
+}
+
+export interface PageManifest {
+  version: 1;
+  canvas: { width: number; height: number };
+  layers: LayerManifest[];
+}

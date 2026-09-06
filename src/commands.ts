@@ -99,7 +99,7 @@ import {
   playlistTemplateCatalog,
 } from "./playlist-templates.js";
 import { composeCatalog, formatComposeCatalog } from "./compose/catalog.js";
-import { composeSpec } from "./compose/compose.js";
+import { composeAndWrite, defaultComposeOutDir } from "./compose/compose.js";
 import {
   cwebpLookup,
   ffmpegLookup,
@@ -173,13 +173,13 @@ Commands:
   media update <id> (--tag TAG | --clear-tag) --if-match REVISION
   media delete <id> --if-match REVISION
   compose catalog
-                      (local types, themes, recipes, fonts, examples; no network)
+                      (local regions, enter/motion, fonts, examples; no network)
   compose batch <file> --output DIRECTORY [--only ID] [--target-width PX --target-height PX] [--safe-area]
-                      [--ink-tight] [--ink-padding PX] [--lint-only]
-                      (1 to 2000 pages)
+                      [--lint-only]
+                      (contact sheet; 1 to 2000 pages)
   playlist validate <file> [--lint-only]
-  compose render <file> [--output FILE] [--target-width PX --target-height PX] [--safe-area]
-                      [--ink-tight] [--ink-padding PX] [--open] [--lint-only]
+  compose render <file> [--output DIRECTORY] [--combined] [--target-width PX --target-height PX] [--safe-area]
+                      [--open] [--lint-only]
   playlist preview <file|id> --output DIR [--frame-ms MS] [--contact-sheet] [--lint-only]
   playlist templates
   playlist create <file>
@@ -271,22 +271,6 @@ function enrollmentEmail(value: string | undefined): string {
   return email;
 }
 
-function composeInkOptions(args: ParsedArgs, command: "render" | "batch"): { inkTight?: boolean; inkPadding?: number } {
-  const inkTight = flagBool(args.flags, "ink-tight");
-  requireFlagValue(args, "ink-padding", "8");
-  const raw = flagString(args.flags, "ink-padding");
-  if (raw !== undefined && !inkTight) {
-    throw usageError(`compose ${command} --ink-padding requires --ink-tight.`);
-  }
-  if (!inkTight) return {};
-  if (raw === undefined) return { inkTight: true, inkPadding: 0 };
-  const n = Number(raw);
-  if (!Number.isSafeInteger(n) || n < 0 || n > 8192) {
-    throw usageError(`compose ${command} --ink-padding must be an integer from 0 to 8192.`);
-  }
-  return { inkTight: true, inkPadding: n };
-}
-
 function rethrowCompose(err: unknown): never {
   if (err instanceof CliError) {
     throw err;
@@ -298,10 +282,6 @@ function rethrowCompose(err: unknown): never {
     });
   }
   throw err;
-}
-
-function defaultComposePngPath(specPath: string): string {
-  return specPath.toLowerCase().endsWith(".json") ? `${specPath.slice(0, -5)}.png` : `${specPath}.png`;
 }
 
 async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<CommandResult> {
@@ -318,18 +298,21 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
   if (file.includes("\0")) {
     throw usageError("compose render spec path must not contain a NUL byte.");
   }
-  requireFlagValue(args, "output", "./still.png");
+  requireFlagValue(args, "output", "./still");
   const specPath = path.resolve(runtime.cwd(), file);
   const outputFlag = flagString(args.flags, "output");
   if (outputFlag?.includes("\0")) {
     throw usageError("compose render --output must not contain a NUL byte.");
   }
-  const output = path.resolve(runtime.cwd(), outputFlag ?? defaultComposePngPath(file));
+  const output = path.resolve(runtime.cwd(), outputFlag ?? defaultComposeOutDir(file));
   if (output.includes("\0")) {
     throw usageError("compose render --output must not contain a NUL byte.");
   }
-  const layoutOutput = `${output}.layout.json`;
+  if (flagBool(args.flags, "ink-tight") || flagString(args.flags, "ink-padding") !== undefined) {
+    throw usageError("compose render no longer crops with --ink-tight; layered region PNGs are the publishing model. Run compose catalog.");
+  }
   const lintOnly = flagBool(args.flags, "lint-only");
+  const combined = flagBool(args.flags, "combined") || flagBool(args.flags, "open");
   requireFlagValue(args, "target-width", "3840");
   requireFlagValue(args, "target-height", "2160");
   const targetWidth = args.flags["target-width"] === undefined ? undefined : Number(flagString(args.flags, "target-width"));
@@ -345,24 +328,24 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
     throw usageError(`Cannot read compose spec: ${err instanceof Error ? err.message : "invalid JSON"}`);
   }
   const logger = loggerOf(runtime);
-  let result;
+  let written;
   try {
-    result = await logger.withLocal(
+    written = await logger.withLocal(
       { op: "compose.render", message: `render ${path.basename(specPath)}` },
       async (span) => {
-        const rendered = await composeSpec(spec, {
+        const rendered = await composeAndWrite(spec, {
           baseDir: path.dirname(specPath),
-          outPath: lintOnly ? undefined : output,
-          layoutOutPath: lintOnly ? undefined : layoutOutput,
+          outDir: output,
+          combined,
           target,
           safeArea: flagBool(args.flags, "safe-area"),
-          ...composeInkOptions(args, "render"),
+          lintOnly,
         });
         span.finish({
           output,
-          width: rendered.width,
-          height: rendered.height,
-          truncated: rendered.truncated,
+          width: rendered.canvas.width,
+          height: rendered.canvas.height,
+          pages: rendered.pages.length,
         });
         return rendered;
       },
@@ -370,62 +353,55 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
   } catch (err) {
     rethrowCompose(err);
   }
-  const opened = !lintOnly && flagBool(args.flags, "open")
-    ? await (runtime.openPath?.(output) ?? Promise.resolve(false))
+  const combinedPath = written.pages[0]?.combined ? path.join(written.pages[0].dir, "combined.png") : undefined;
+  const opened = !lintOnly && flagBool(args.flags, "open") && combinedPath
+    ? await (runtime.openPath?.(combinedPath) ?? Promise.resolve(false))
     : undefined;
-  const pixels = await pixelsFromPng(result.png);
-  const pageId = path.basename(specPath, path.extname(specPath)) || "page";
-  const lint = sortLint(
-    lintComposedPage({
-      page_id: pageId,
+  const lintWithPixels = [];
+  for (const page of written.result.pages) {
+    const pixels = await pixelsFromPng(page.combined);
+    lintWithPixels.push(...lintComposedPage({
+      page_id: page.id,
       spec,
-      layout: result.layout,
-      quality: result.quality,
+      quality: page.quality,
       pixels,
       viewing: viewingOf(spec),
-    }),
-    [pageId],
-  );
+    }));
+  }
+  const ordered = sortLint(lintWithPixels, written.result.pages.map((page) => page.id));
   const data = {
     output,
-    layout_output: layoutOutput,
-    width: result.width,
-    height: result.height,
-    font_family: result.font_family,
-    space: result.space,
-    ramp: result.ramp,
-    ramp_root: result.ramp_root,
-    ramp_at_1080: result.ramp_at_1080,
-    truncated: result.truncated,
-    quality: result.quality,
-    lint,
-    ...(result.ink_tight ? {
-      frame: result.ink_tight.frame,
-      ink: result.ink_tight.ink,
-      overhang: result.ink_tight.overhang,
-      clipped: result.ink_tight.clipped,
-      ink_tight: result.ink_tight,
-    } : {}),
+    files: written.files,
+    canvas: written.canvas,
+    name: written.name,
+    manifest: written.manifest,
+    pages: written.pages.map((page) => ({
+      id: page.id,
+      dir: page.dir,
+      manifest: page.manifest,
+      images: page.images,
+      combined: page.combined,
+      scale: page.scale,
+    })),
+    width: written.canvas.width,
+    height: written.canvas.height,
+    font_family: written.font_family,
+    quality: written.quality,
+    lint: ordered,
     ...(opened !== undefined ? { opened } : {}),
   };
   return {
-    envelope: successEnvelope(data, { warnings: result.warnings }),
+    envelope: successEnvelope(data, { warnings: written.warnings }),
     exitCode: ExitCode.Success,
     human: humanLines("Composed still", [
       ["output", output],
-      ["layout_output", layoutOutput],
-      ["width", String(result.width)],
-      ["height", String(result.height)],
-      ["font_family", result.font_family],
-      ["truncated", result.truncated ? "true" : "false"],
-      ...(result.ink_tight ? [
-        ["frame", `${result.ink_tight.frame.width}×${result.ink_tight.frame.height}`],
-        ["ink", `${result.ink_tight.ink.width}×${result.ink_tight.ink.height} at ${result.ink_tight.ink.x},${result.ink_tight.ink.y}`],
-        ["overhang", `${result.ink_tight.overhang.left},${result.ink_tight.overhang.top},${result.ink_tight.overhang.right},${result.ink_tight.overhang.bottom}`],
-        ["clipped", `${result.ink_tight.clipped.left},${result.ink_tight.clipped.top},${result.ink_tight.clipped.right},${result.ink_tight.clipped.bottom}`],
-      ] as Array<[string, string]> : []),
-      ...result.warnings.map((warning): [string, string] => ["warning", warning.message]),
-      ...lint.map((item): [string, string] => ["lint", `${item.code} ${item.id}`]),
+      ["name", written.name ?? undefined],
+      ["width", String(written.canvas.width)],
+      ["height", String(written.canvas.height)],
+      ["font_family", written.font_family],
+      ["files", written.files.join(", ")],
+      ...written.warnings.map((warning): [string, string] => ["warning", warning.message]),
+      ...ordered.map((item): [string, string] => ["lint", `${item.code} ${item.id}`]),
       ...(opened !== undefined ? [["opened", opened ? "true" : "false"] as [string, string]] : []),
     ]),
   };
@@ -542,7 +518,6 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
         safeArea: flagBool(args.flags, "safe-area"),
         only: flagString(args.flags, "only"),
         lintOnly: flagBool(args.flags, "lint-only"),
-        ...composeInkOptions(args, "batch"),
       });
     }
     catch (error) { rethrowCompose(error); }

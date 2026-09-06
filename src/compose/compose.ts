@@ -1,96 +1,62 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
-import { createCanvas, loadImage, type DOMMatrix, type Image, type SKRSContext2D } from "@napi-rs/canvas";
-import Yoga, {
-  Align as YogaAlign,
-  Direction,
-  Edge,
-  FlexDirection,
-  Gutter,
-  Justify as YogaJustify,
-  MeasureMode,
-  PositionType,
-  type Node as YogaNode,
-} from "yoga-layout";
-import { cssFont, isSyntheticFace, resolveFontFamily, resolveTextFont } from "./fonts.js";
+import { createCanvas, loadImage, type Image, type SKRSContext2D } from "@napi-rs/canvas";
+import { resolveFontFamily, resolveTextFont } from "./fonts.js";
+import {
+  measureMarkdown,
+  measureSpans,
+  spanFont,
+  stripMarkdown,
+  wrapMarkdown,
+  type MarkdownSpan,
+} from "./markdown.js";
+import { parseComposeSpec } from "./parse.js";
+import {
+  SCALE_MAX,
+  SCALE_MIN,
+  leadingOf,
+  sizesFor,
+  textHeight,
+  wrapLines,
+  type TypeRamp,
+} from "./type.js";
+import type {
+  Align,
+  CardItem,
+  ComposeDocument,
+  LayerBlock,
+  LayerManifest,
+  LayerOutline,
+  LayerSpec,
+  LogoCorner,
+  PageManifest,
+  PageSpec,
+  PlaylistRect,
+  TableBlock,
+} from "./types.js";
+import { CARD_INK_PAD, LOGO_INSET, LOGO_MAX } from "./types.js";
+
 export { resolveFontFamily } from "./fonts.js";
-import { resolveIconCodepoint, resolveIconFont } from "./icons.js";
-import { arcSagitta, fitType, underlineThickness, type FittedText } from "./fit-text.js";
-import { displayXlWish, REFERENCE_CANVAS, rampRoot, relativeLuminance, resolveSpace, spaceScale, themeOf, typeRamp } from "./tokens.js";
-import { applyComposeTheme } from "./theme.js";
-import type { Align, ComposeFrame, ComposeNode, ImageFocal, ObjectFit, Paint, Pin, Role, SpaceScale, TextEffects, TextPlate, TextShadow, TypeRamp } from "./types.js";
-import { validateSpec } from "./validate.js";
-import { expandComposeRecipe } from "./recipes.js";
-import { parseViewing, VIEWING_XHEIGHT_RATIO, XHEIGHT_FALLBACK } from "./lint.js";
+export { parseComposeSpec } from "./parse.js";
+export { regionRect } from "./parse.js";
 
-const ALIGN: Record<string, YogaAlign> = {
-  start: YogaAlign.FlexStart,
-  center: YogaAlign.Center,
-  end: YogaAlign.FlexEnd,
-  stretch: YogaAlign.Stretch,
-};
+function usage(message: string): Error {
+  return Object.assign(new Error(message), { code: "usage_error" });
+}
 
-const JUSTIFY: Record<string, YogaJustify> = {
-  start: YogaJustify.FlexStart,
-  center: YogaJustify.Center,
-  end: YogaJustify.FlexEnd,
-  "space-between": YogaJustify.SpaceBetween,
-  "space-around": YogaJustify.SpaceAround,
-  "space-evenly": YogaJustify.SpaceEvenly,
-};
+export function resolveImagePath(src: string, baseDir: string, field = "image"): string {
+  if (src.includes("\0")) throw usage(`${field} must not contain a NUL byte`);
+  if (src.includes("://") || /^(https?|file|data):/i.test(src)) {
+    throw usage(`${field} must be a local filesystem path, not a URL`);
+  }
+  return isAbsolute(src) ? src : join(baseDir, src);
+}
 
-interface Box {
+export interface Box {
   x: number;
   y: number;
   width: number;
   height: number;
-}
-
-interface LayoutNode extends ComposeNode {
-  _yoga?: YogaNode;
-  _box?: Box;
-  _fit?: FittedText;
-  _ink?: Box;
-  _textFont?: ReturnType<typeof resolveTextFont>;
-  _textFace?: { weight: string; italic: boolean; synthetic: boolean };
-  _icon?: { family: string; weight: string; glyph: string; size: number };
-  _pillPad?: number;
-  _plate?: { code: "plate_applied" | "plate_skipped"; contrast_ratio: number };
-  _crop?: Box;
-  children?: LayoutNode[];
-}
-
-function textEffectsOf(node: ComposeNode): TextEffects {
-  return node.effects ?? {};
-}
-
-function cssWeightOf(node: ComposeNode, rampWeight: string): string {
-  const weight = textEffectsOf(node).weight;
-  if (weight === "regular") return "400";
-  if (weight === "bold") return "700";
-  return rampWeight;
-}
-
-function resolvedShadow(node: ComposeNode): TextShadow | undefined {
-  return textEffectsOf(node).shadow ?? node.textShadow;
-}
-
-export interface LayoutDump {
-  type: string;
-  role?: string;
-  pin?: string;
-  box?: Box;
-  text_bounds?: Box;
-  text_font?: ReturnType<typeof resolveTextFont>;
-  plate?: { code: "plate_applied" | "plate_skipped"; contrast_ratio: number };
-  crop?: Box;
-  fit?: {
-    fontSize: number;
-    lineHeight: number;
-    lines: string[];
-    truncated: boolean;
-  };
-  children?: LayoutDump[];
 }
 
 export interface ComposeQuality {
@@ -99,258 +65,59 @@ export interface ComposeQuality {
   target?: { width: number; height: number };
   output_scale?: { x: number; y: number };
   text: Array<{
-    node: string;
+    layer: string;
+    role: string;
     box: Box;
     ink: Box;
     font_size: number;
-    preferred_font_size: number;
-    truncated: boolean;
-    plate?: { code: "plate_applied" | "plate_skipped"; contrast_ratio: number };
+    family: string;
   }>;
-  fonts: Array<{ node: string; family: string; fallback_from?: string; missing_codepoints: string[] }>;
-  overlaps: Array<{ first: string; second: string; kind: "text_text" | "text_media" | "media_media"; area: number }> ;
+  fonts: Array<{ layer: string; family: string; fallback_from?: string; missing_codepoints: string[] }>;
+  overlaps: Array<{ first: string; second: string; kind: "layer_layer"; area: number }>;
   images: Array<{
-    node: string;
+    layer: string;
     source: { width: number; height: number };
     box: { width: number; height: number };
     painted: { width: number; height: number };
-    object_fit: string;
+    object_fit: "cover";
     scale_x: number;
     scale_y: number;
-    crop?: Box;
   }>;
 }
 
-export interface ComposeWarning { code: string; message: string }
-
-export interface InkEdges {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
+export interface ComposeWarning {
+  code: string;
+  message: string;
 }
 
-export interface InkTightReport {
-  frame: { width: number; height: number };
-  ink: Box;
-  output: { width: number; height: number };
-  padding: number;
-  overhang: InkEdges;
-  clipped: InkEdges;
+export interface PaintedLayer {
+  id: string;
+  png: Buffer | null;
+  family: string;
+  overflow: boolean;
+  scale: number;
+  ink: Box[];
+}
+
+export interface ComposePageResult {
+  id: string;
+  layers: LayerSpec[];
+  painted: PaintedLayer[];
+  manifest: PageManifest;
+  combined: Buffer;
+  quality: ComposeQuality;
+  warnings: ComposeWarning[];
+  font_family: string;
 }
 
 export interface ComposeResult {
-  quality: ComposeQuality;
-  warnings: ComposeWarning[];
-  layout: LayoutDump;
-  space: SpaceScale;
-  ramp: TypeRamp;
-  ramp_root: number;
-  ramp_at_1080: TypeRamp;
-  font_family: string;
-  truncated: boolean;
-  width: number;
-  height: number;
-  ink_tight?: InkTightReport;
+  document: ComposeDocument;
+  pages: ComposePageResult[];
+  canvas: { width: number; height: number };
+  name: string | null;
 }
 
-function usage(message: string): Error {
-  const err = new Error(message) as Error & { code: string };
-  err.code = "usage_error";
-  return err;
-}
-
-export function resolveImagePath(src: string, baseDir: string, field = "Image.src"): string {
-  if (src.includes("\0")) {
-    throw usage(`${field} must not contain a NUL byte`);
-  }
-  if (src.includes("://") || /^(https?|file|data):/i.test(src)) {
-    throw usage(`${field} must be a local filesystem path, not a URL`);
-  }
-  return isAbsolute(src) ? src : join(baseDir, src);
-}
-
-function applyPin(yoga: YogaNode, pin: Pin): void {
-  yoga.setPositionType(PositionType.Absolute);
-  if (pin === "bottom" || pin === "top") {
-    yoga.setPosition(Edge.Left, 0);
-    yoga.setPosition(Edge.Right, 0);
-    yoga.setPosition(pin === "bottom" ? Edge.Bottom : Edge.Top, 0);
-  } else {
-    yoga.setPosition(Edge.Top, 0);
-    yoga.setPosition(Edge.Bottom, 0);
-    yoga.setPosition(pin === "right" ? Edge.Right : Edge.Left, 0);
-  }
-}
-
-function buildTree(
-  node: LayoutNode,
-  ctx: SKRSContext2D,
-  family: string,
-  ramp: TypeRamp,
-  space: SpaceScale,
-  parentDirection: "row" | "column" = "column",
-  minXHeight = 0,
-): YogaNode {
-  const yoga = Yoga.Node.create();
-  node._yoga = yoga;
-  const pad = resolveSpace(node.padding, space, "padding");
-  if (pad) {
-    yoga.setPadding(Edge.All, pad);
-  }
-  if (node.gap) yoga.setGap(Gutter.All, resolveSpace(node.gap, space, "gap"));
-  if (typeof node.flex === "number") {
-    yoga.setFlexGrow(node.flex);
-    yoga.setFlexShrink(1);
-    yoga.setFlexBasis(0);
-  }
-  if (node.align) yoga.setAlignItems(ALIGN[node.align] ?? YogaAlign.Stretch);
-  else if (node.type === "Row" || node.type === "Column" || node.type === "Frame" || node.type === "Box") {
-    yoga.setAlignItems(YogaAlign.Stretch);
-  }
-  if (node.justify) yoga.setJustifyContent(JUSTIFY[node.justify] ?? YogaJustify.FlexStart);
-  if (node.pin) applyPin(yoga, node.pin);
-  if (node.type !== "Frame") {
-    if (typeof node.width === "number") yoga.setWidth(node.width);
-    if (typeof node.height === "number") yoga.setHeight(node.height);
-  }
-
-  if (node.type === "Frame") {
-    yoga.setWidth(node.width ?? 0);
-    yoga.setHeight(node.height ?? 0);
-    yoga.setFlexDirection(node.direction === "row" ? FlexDirection.Row : FlexDirection.Column);
-  } else if (node.type === "Row") {
-    yoga.setFlexDirection(FlexDirection.Row);
-  } else if (node.type === "Column" || node.type === "Box") {
-    yoga.setFlexDirection(FlexDirection.Column);
-  } else if (node.type === "Spacer") {
-    if (typeof node.flex !== "number" && node.width == null && node.height == null) {
-      yoga.setFlexGrow(1);
-    }
-  } else if (node.type === "Text") {
-    const role = node.role ?? "body";
-    const effects = textEffectsOf(node);
-    const weight = cssWeightOf(node, ramp[role].weight);
-    const italic = effects.italic === true;
-    const textFamily = typeof node.fontFamily === "string" ? node.fontFamily : family;
-    node._textFont = resolveTextFont(String(node.text ?? ""), textFamily, weight);
-    node._textFace = {
-      weight,
-      italic,
-      synthetic: isSyntheticFace(node._textFont.family, weight, italic),
-    };
-    yoga.setMeasureFunc((width, widthMode, height, heightMode) => {
-      let maxWidth = width;
-      if (widthMode === MeasureMode.Undefined || maxWidth <= 0) maxWidth = 4096;
-      let maxHeight: number | null = null;
-      if (heightMode === MeasureMode.AtMost || heightMode === MeasureMode.Exactly) maxHeight = height;
-      const tracking = typeof node.letterSpacing === "number" ? node.letterSpacing : 0;
-      ctx.letterSpacing = `${tracking}px`;
-      const fitted = fitType(ctx, {
-        text: String(node.text ?? ""),
-        family: node._textFont!.family,
-        ramp,
-        role,
-        maxWidth,
-        maxHeight,
-        minXHeight,
-        weight,
-        italic,
-        outlineWidth: effects.outline?.width ?? 0,
-        underline: effects.underline === true,
-        arcDegrees: effects.arc?.degrees,
-      });
-      node._fit = fitted;
-      ctx.font = fitted.font;
-      const outlineWidth = effects.outline?.width ?? 0;
-      const contentWidth = Math.ceil(Math.max(0, ...fitted.lines.map((line) => ctx.measureText(line).width)) + outlineWidth);
-      ctx.letterSpacing = "0px";
-      return {
-        width: widthMode === MeasureMode.Exactly ? width : Math.min(maxWidth, contentWidth),
-        height: fitted.height,
-      };
-    });
-  } else if (node.type === "Image") {
-    yoga.setFlexGrow(node.flex ?? 0);
-    if (node.flex) yoga.setFlexShrink(1);
-  } else if (node.type === "Icon") {
-    const size = typeof node.size === "number" ? node.size : space.l;
-    yoga.setWidth(size);
-    yoga.setHeight(size);
-    const codepoint = resolveIconCodepoint(String(node.name ?? ""), "Icon");
-    const face = resolveIconFont(codepoint);
-    node._icon = { ...face, glyph: String.fromCodePoint(codepoint), size };
-  } else if (node.type === "Divider") {
-    const thickness = typeof node.thickness === "number" ? node.thickness : 2;
-    const horizontal = parentDirection !== "row" || node.style === "dotted";
-    if (typeof node.length === "number") {
-      if (horizontal) {
-        yoga.setWidth(node.length);
-        yoga.setHeight(thickness);
-      } else {
-        yoga.setWidth(thickness);
-        yoga.setHeight(node.length);
-      }
-    } else if (horizontal) {
-      yoga.setHeight(thickness);
-    } else {
-      yoga.setWidth(thickness);
-    }
-  } else if (node.type === "Pill") {
-    const role = (node.role ?? "label") as Role;
-    const weight = ramp[role].weight;
-    const pad = space.s;
-    node._pillPad = pad;
-    const textFamily = typeof node.fontFamily === "string" ? node.fontFamily : family;
-    node._textFont = resolveTextFont(String(node.text ?? ""), textFamily, weight);
-    yoga.setMeasureFunc((width, widthMode, height, heightMode) => {
-      let maxWidth = width;
-      if (widthMode === MeasureMode.Undefined || maxWidth <= 0) maxWidth = 4096;
-      let maxHeight: number | null = null;
-      if (heightMode === MeasureMode.AtMost || heightMode === MeasureMode.Exactly) maxHeight = height;
-      const innerWidth = Math.max(1, maxWidth - 2 * pad);
-      const innerHeight = maxHeight == null ? null : Math.max(1, maxHeight - 2 * pad);
-      const fitted = fitType(ctx, {
-        text: String(node.text ?? ""),
-        family: node._textFont!.family,
-        ramp,
-        role,
-        maxWidth: innerWidth,
-        maxHeight: innerHeight,
-        weight,
-        minXHeight,
-      });
-      node._fit = fitted;
-      ctx.font = fitted.font;
-      const contentWidth = Math.ceil(Math.max(0, ...fitted.lines.map((line) => ctx.measureText(line).width)) + 2 * pad);
-      return {
-        width: widthMode === MeasureMode.Exactly ? width : Math.min(maxWidth, contentWidth),
-        height: fitted.height + 2 * pad,
-      };
-    });
-  }
-
-  const childDirection: "row" | "column" =
-    node.type === "Row" || (node.type === "Frame" && node.direction === "row") ? "row" : "column";
-  (node.children ?? []).forEach((child, i) => {
-    yoga.insertChild(buildTree(child, ctx, family, ramp, space, childDirection, minXHeight), i);
-  });
-  return yoga;
-}
-
-function collectBoxes(node: LayoutNode, ox: number, oy: number): void {
-  const layout = node._yoga?.getComputedLayout();
-  if (!layout) return;
-  node._box = {
-    x: ox + layout.left,
-    y: oy + layout.top,
-    width: layout.width,
-    height: layout.height,
-  };
-  for (const child of node.children ?? []) collectBoxes(child, node._box.x, node._box.y);
-}
-
-function parseColor(value: string | undefined, fallback: string): string {
+function parseColor(value: string | null | undefined, fallback: string): string {
   if (!value) return fallback;
   const raw = value.replace("#", "");
   if (raw.length === 8) {
@@ -363,847 +130,1142 @@ function parseColor(value: string | undefined, fallback: string): string {
   return `#${raw}`;
 }
 
-function srgbChannel(value: number): number {
-  const c = value / 255;
-  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+function sortLayers(layers: LayerSpec[]): LayerSpec[] {
+  return [...layers].sort((a, b) => a.z - b.z || a.order - b.order);
 }
 
-function luminanceRgb(r: number, g: number, b: number): number {
-  return 0.2126 * srgbChannel(r) + 0.7152 * srgbChannel(g) + 0.0722 * srgbChannel(b);
-}
-
-function contrastFromLuminance(a: number, b: number): number {
-  const hi = Math.max(a, b);
-  const lo = Math.min(a, b);
-  return (hi + 0.05) / (lo + 0.05);
-}
-
-function withAlpha(hex: string, alphaByte: number): string {
-  const raw = hex.replace("#", "");
-  const rgb = raw.length === 3 ? raw.split("").map((ch) => `${ch}${ch}`).join("") : raw.slice(0, 6);
-  return `#${rgb}${alphaByte.toString(16).padStart(2, "0")}`;
-}
-
-function plateOf(node: ComposeNode): TextPlate {
-  return node.plate ?? "none";
-}
-
-function focalOf(node: ComposeNode): ImageFocal {
-  const focal = node.focal;
+function gapsFor(ramp: TypeRamp): Record<string, number> {
   return {
-    x: typeof focal?.x === "number" ? focal.x : 0.5,
-    y: typeof focal?.y === "number" ? focal.y : 0.5,
+    title: Math.round(ramp.title * 0.28),
+    subtitle: Math.round(ramp.subtitle * 0.35),
+    text: Math.round(ramp.text * 0.45),
+    cards: Math.round(ramp.card * 0.4),
+    table: Math.round(ramp.table * 0.4),
+    image: Math.round(ramp.text * 0.4),
+    placeholder: Math.round(ramp.text * 0.4),
   };
 }
 
-function autoPlateColor(textHex: string, themeSurface: string | undefined): string {
-  if (themeSurface) return withAlpha(themeSurface, 0xd9);
-  return relativeLuminance(textHex) >= 0.5 ? "#000000B3" : "#FFFFFFB3";
-}
-
-function clampBox(box: Box, width: number, height: number): Box | undefined {
-  const x = Math.max(0, Math.floor(box.x));
-  const y = Math.max(0, Math.floor(box.y));
-  const right = Math.min(width, Math.ceil(box.x + box.width));
-  const bottom = Math.min(height, Math.ceil(box.y + box.height));
-  if (right <= x || bottom <= y) return undefined;
-  return { x, y, width: right - x, height: bottom - y };
-}
-
-function canvasBox(ctx: SKRSContext2D, box: Box): Box | undefined {
-  return clampBox(transformBox(ctx.getTransform(), box), ctx.canvas.width, ctx.canvas.height);
-}
-
-function sampleContrast(ctx: SKRSContext2D, rect: Box, textLuminance: number): number {
-  const data = ctx.getImageData(rect.x, rect.y, rect.width, rect.height).data;
-  const lumas: number[] = [];
-  for (let i = 0; i < data.length; i += 4) {
-    if (data[i + 3]! === 0) continue;
-    lumas.push(luminanceRgb(data[i]!, data[i + 1]!, data[i + 2]!));
-  }
-  if (!lumas.length) lumas.push(0);
-  const mean = lumas.reduce((sum, value) => sum + value, 0) / lumas.length;
-  lumas.sort((a, b) => a - b);
-  const p90 = lumas[Math.floor((lumas.length - 1) * 0.9)]!;
-  return Math.min(contrastFromLuminance(textLuminance, mean), contrastFromLuminance(textLuminance, p90));
-}
-
-function coverSourceRect(
-  imageWidth: number,
-  imageHeight: number,
-  boxWidth: number,
-  boxHeight: number,
-  focalX: number,
-  focalY: number,
-): { sx: number; sy: number; sw: number; sh: number; scale: number } {
-  const scale = Math.max(boxWidth / imageWidth, boxHeight / imageHeight);
-  const sw = boxWidth / scale;
-  const sh = boxHeight / scale;
-  const sx = Math.min(Math.max(0, focalX * imageWidth - sw / 2), Math.max(0, imageWidth - sw));
-  const sy = Math.min(Math.max(0, focalY * imageHeight - sh / 2), Math.max(0, imageHeight - sh));
-  return { sx, sy, sw, sh, scale };
-}
-
-function fillPaint(
+function packInkWidth(
   ctx: SKRSContext2D,
-  box: Box,
-  paint: Paint | undefined,
-  fallback: string,
-  radius: number,
-): void {
-  if (!paint) return;
-  if (typeof paint === "string") {
-    ctx.fillStyle = parseColor(paint, fallback);
-  } else {
-    const angle = (paint.angle * Math.PI) / 180;
-    const cx = box.x + box.width / 2;
-    const cy = box.y + box.height / 2;
-    const len = Math.abs(box.width * Math.sin(angle)) + Math.abs(box.height * Math.cos(angle));
-    const dx = Math.sin(angle) * (len / 2);
-    const dy = -Math.cos(angle) * (len / 2);
-    const gradient = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
-    for (const stop of paint.stops) {
-      gradient.addColorStop(stop.at, parseColor(stop.color, fallback));
+  blocks: LayerBlock[],
+  innerW: number,
+  ramp: TypeRamp,
+  family: string,
+): number {
+  let maxW = 0;
+  const measure = (text: string, size: number, width = innerW) => {
+    for (const line of wrapMarkdown(ctx, text, width, size, family)) {
+      maxW = Math.max(maxW, measureSpans(ctx, line, size, family));
     }
-    ctx.fillStyle = gradient;
+  };
+  for (const block of blocks) {
+    if (block.role === "title" || block.role === "subtitle" || block.role === "text" || block.role === "footer") {
+      measure(block.text, ramp[block.role]);
+    } else if (block.role === "cards") {
+      if (block.items.some((item) => item.price || item.image)) {
+        maxW = Math.max(maxW, innerW);
+      } else {
+        for (const item of block.items) {
+          measure(item.title, ramp.card);
+          if (item.subtitle) measure(item.subtitle, ramp.small);
+          if (item.text) measure(item.text, ramp.small);
+        }
+      }
+    } else if (block.role === "table") {
+      maxW = Math.max(maxW, innerW);
+    }
   }
-  if (radius) {
-    roundRect(ctx, box.x, box.y, box.width, box.height, radius);
-    ctx.fill();
-  } else {
-    ctx.fillRect(box.x, box.y, box.width, box.height);
-  }
+  return Math.ceil(maxW);
 }
 
-function paintDottedDivider(ctx: SKRSContext2D, box: Box, color: string, thickness: number): void {
-  ctx.save();
-  ctx.fillStyle = parseColor(color, "#8A8A8A");
-  const horizontal = box.width >= box.height;
-  const radius = Math.max(1, thickness) / 2;
-  const period = Math.max(thickness * 3, 6);
-  if (horizontal) {
-    const cy = box.y + box.height / 2;
-    const end = box.x + box.width - radius;
-    for (let x = box.x + radius; x <= end + 0.01; x += period) {
-      ctx.beginPath();
-      ctx.arc(x, cy, radius, 0, Math.PI * 2);
-      ctx.fill();
+function packFixedHeight(
+  ctx: SKRSContext2D,
+  blocks: LayerBlock[],
+  innerW: number,
+  ramp: TypeRamp,
+  family: string,
+  itemGapBoost = 0,
+): number {
+  const gapAfter = gapsFor(ramp);
+  let height = 0;
+  for (const [i, block] of blocks.entries()) {
+    if (block.role === "title") height += textHeight(ctx, block.text, innerW, ramp.title, family, leadingOf(ramp.title));
+    else if (block.role === "subtitle") height += textHeight(ctx, block.text, innerW, ramp.subtitle, family, leadingOf(ramp.subtitle));
+    else if (block.role === "text") height += textHeight(ctx, block.text, innerW, ramp.text, family, leadingOf(ramp.text));
+    else if (block.role === "cards") {
+      height += measureCards(ctx, block.items, innerW, ramp, family);
+      if (itemGapBoost && block.items.length > 1) height += itemGapBoost * (block.items.length - 1);
+    } else if (block.role === "table") {
+      height += measureTable(ctx, block, innerW, ramp, family, itemGapBoost);
     }
-  } else {
-    const cx = box.x + box.width / 2;
-    const end = box.y + box.height - radius;
-    for (let y = box.y + radius; y <= end + 0.01; y += period) {
-      ctx.beginPath();
-      ctx.arc(cx, y, radius, 0, Math.PI * 2);
-      ctx.fill();
+    if (i < blocks.length - 1) height += gapAfter[block.role] ?? 0;
+  }
+  return height;
+}
+
+function isSingleLinePack(ctx: SKRSContext2D, blocks: LayerBlock[], innerW: number, ramp: TypeRamp, family: string): boolean {
+  if (blocks.length !== 1) return false;
+  const block = blocks[0]!;
+  if (block.role === "cards" || block.role === "table") return false;
+  if (block.role !== "title" && block.role !== "subtitle" && block.role !== "text") return false;
+  const size = ramp[block.role];
+  ctx.font = `${size}px "${family}"`;
+  return wrapLines(ctx, block.text, innerW).length <= 1;
+}
+
+function chooseScale(
+  ctx: SKRSContext2D,
+  layer: LayerSpec,
+  inner: { w: number; h: number },
+  family: string,
+  fixed: LayerBlock[],
+  footerText: string | undefined,
+): { ramp: TypeRamp; height: number; available: number; scale: number } {
+  const at = (scale: number) => {
+    const title = fixed.find((block) => block.role === "title");
+    const subtitle = fixed.find((block) => block.role === "subtitle");
+    const ramp = sizesFor(ctx, {
+      root: layer.root,
+      family,
+      width: inner.w,
+      viewing: layer.viewing,
+      title: title && title.role === "title" ? title.text : "",
+      subtitle: subtitle && subtitle.role === "subtitle" ? subtitle.text : "",
+      scale,
+    });
+    const footerH = footerText ? textHeight(ctx, footerText, inner.w, ramp.footer, family, leadingOf(ramp.footer)) : 0;
+    const footerGap = footerText ? Math.round(ramp.footer * 0.8) : 0;
+    const available = Math.max(1, inner.h - footerH - footerGap);
+    return { ramp, height: packFixedHeight(ctx, fixed, inner.w, ramp, family), available, scale };
+  };
+  const start = at(1);
+  if (isSingleLinePack(ctx, fixed, inner.w, start.ramp, family)) return start;
+  if (start.height > start.available) {
+    let lo = SCALE_MIN;
+    let hi = 1;
+    let best = start;
+    for (let i = 0; i < 16; i++) {
+      const mid = (lo + hi) / 2;
+      const trial = at(mid);
+      if (trial.height <= trial.available) {
+        best = trial;
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    return best;
+  }
+  let lo = 1;
+  let hi = SCALE_MAX;
+  let best = start;
+  for (let i = 0; i < 16; i++) {
+    const mid = (lo + hi) / 2;
+    const trial = at(mid);
+    if (trial.height <= trial.available) {
+      best = trial;
+      lo = mid;
+    } else {
+      hi = mid;
     }
   }
+  return best;
+}
+
+function numericColumn(rows: string[][], index: number): boolean {
+  return rows.every((row) => /^-?\d+(\.\d+)?$/.test(stripMarkdown(String(row[index] ?? "")).replace(/[,£$€]/g, "")));
+}
+
+function roleColor(
+  layer: LayerSpec,
+  role: "title" | "subtitle" | "text" | "footer" | "card" | "price" | "table-header" | "table-body",
+): string {
+  if (layer.ink) return layer.ink;
+  if (role === "title" || role === "card" || role === "price" || role === "table-header") return layer.brand;
+  return layer.text;
+}
+
+function holeOnly(layer: LayerSpec): boolean {
+  if (layer.fill || layer.region === "logo") return false;
+  return layer.blocks.length > 0 && layer.blocks.every((block) => (
+    block.role === "placeholder" && (block.kind === "iframe" || block.kind === "application")
+  ));
+}
+
+function shouldInsetForLogo(layer: LayerSpec): boolean {
+  if (layer.region === "background" || layer.region === "logo") return false;
+  if (layer.fill) return true;
+  return layer.blocks.some((block) => (
+    block.role === "title" || block.role === "subtitle" || block.role === "text" || block.role === "footer"
+    || block.role === "cards" || block.role === "table"
+    || (block.role === "placeholder" && (block.kind === "iframe" || block.kind === "application"))
+  ));
+}
+
+function extraPadForLogo(layer: LayerSpec, logo: Box | null): { top: number; right: number; bottom: number; left: number } {
+  const zero = { top: 0, right: 0, bottom: 0, left: 0 };
+  if (!logo || !shouldInsetForLogo(layer)) return zero;
+  const overlapX = Math.min(layer.x + layer.w, logo.x + logo.width) - Math.max(layer.x, logo.x);
+  const overlapY = Math.min(layer.y + layer.h, logo.y + logo.height) - Math.max(layer.y, logo.y);
+  if (overlapX <= 1 || overlapY <= 1) return zero;
+  const extra = { ...zero };
+  if (logo.x <= layer.x + 1) extra.left = Math.round(overlapX);
+  if (logo.x + logo.width >= layer.x + layer.w - 1) extra.right = Math.round(overlapX);
+  if (logo.y <= layer.y + 1) extra.top = Math.round(overlapY);
+  if (logo.y + logo.height >= layer.y + layer.h - 1) extra.bottom = Math.round(overlapY);
+  return extra;
+}
+
+export { LOGO_MAX, LOGO_INSET, CARD_INK_PAD };
+
+export function logoSize(img: { width: number; height: number }): { width: number; height: number } {
+  const scale = Math.min(1, LOGO_MAX.width / img.width, LOGO_MAX.height / img.height);
+  return {
+    width: Math.max(1, Math.round(img.width * scale)),
+    height: Math.max(1, Math.round(img.height * scale)),
+  };
+}
+
+export function placeLogo(
+  img: { width: number; height: number },
+  canvas: { width: number; height: number },
+  corner: LogoCorner,
+): Box {
+  const size = logoSize(img);
+  const x = corner.endsWith("right") ? canvas.width - size.width - LOGO_INSET : LOGO_INSET;
+  const y = corner.startsWith("bottom") ? canvas.height - size.height - LOGO_INSET : LOGO_INSET;
+  return { x, y, width: size.width, height: size.height };
+}
+
+/** Logo painted box plus the 32 px margin back to the chosen canvas edges. */
+export function reservedLogoBox(
+  logo: Box,
+  canvas: { width: number; height: number },
+  corner: LogoCorner,
+): Box {
+  const right = corner.endsWith("right");
+  const bottom = corner.startsWith("bottom");
+  return {
+    x: right ? logo.x : 0,
+    y: bottom ? logo.y : 0,
+    width: right ? canvas.width - logo.x : logo.x + logo.width,
+    height: bottom ? canvas.height - logo.y : logo.y + logo.height,
+  };
+}
+
+function measureCards(ctx: SKRSContext2D, items: CardItem[], maxW: number, ramp: TypeRamp, family: string): number {
+  let height = 0;
+  for (const [i, item] of items.entries()) {
+    const thumb = item.image ? Math.round(ramp.card * 2.2) : 0;
+    const copyW = Math.max(1, maxW - (thumb ? thumb + 16 : 0));
+    let itemH = textHeight(ctx, item.title, copyW * 0.75, ramp.card, family, leadingOf(ramp.card));
+    if (item.text) itemH += textHeight(ctx, item.text, copyW, ramp.small, family, leadingOf(ramp.small));
+    if (item.subtitle) itemH += textHeight(ctx, item.subtitle, copyW, ramp.small, family, leadingOf(ramp.small));
+    height += Math.max(itemH, thumb);
+    if (i < items.length - 1) height += Math.round(ramp.card * 0.55);
+  }
+  return height;
+}
+
+function columnWidths(
+  ctx: SKRSContext2D,
+  table: TableBlock,
+  innerW: number,
+  headerSize: number,
+  bodySize: number,
+  family: string,
+): { widths: number[]; numeric: boolean[] } {
+  const cols = table.columns.length;
+  const numeric = table.columns.map((_, i) => numericColumn(table.rows, i));
+  const header = table.columns.map((col) => measureMarkdown(ctx, col, headerSize, family));
+  const natural = table.columns.map((_, i) => {
+    const cell = Math.max(header[i] ?? 0, ...table.rows.map((row) => measureMarkdown(ctx, String(row[i] ?? ""), bodySize, family)));
+    return Math.ceil(cell) + 20;
+  });
+  const total = natural.reduce((sum, w) => sum + w, 0);
+  if (total <= innerW) {
+    const leftover = innerW - total;
+    const flex = numeric.lastIndexOf(false);
+    const idx = flex >= 0 ? flex : 0;
+    const widths = [...natural];
+    widths[idx] = (widths[idx] ?? 0) + leftover;
+    return { widths, numeric };
+  }
+  const numericTotal = natural.reduce((sum, w, i) => sum + (numeric[i] ? w : 0), 0);
+  const textTotal = total - numericTotal;
+  if (numericTotal < innerW * 0.7 && textTotal > 0) {
+    const scale = (innerW - numericTotal) / textTotal;
+    return { widths: natural.map((w, i) => (numeric[i] ? w : w * scale)), numeric };
+  }
+  const scale = innerW / total;
+  return { widths: natural.map((w) => w * scale), numeric };
+}
+
+function measureTable(
+  ctx: SKRSContext2D,
+  table: TableBlock,
+  innerW: number,
+  ramp: TypeRamp,
+  family: string,
+  itemGapBoost = 0,
+): number {
+  const { widths } = columnWidths(ctx, table, innerW, ramp.small, ramp.table, family);
+  const headerLead = leadingOf(ramp.small);
+  const rowLead = leadingOf(ramp.table);
+  let height = 0;
+  height += Math.max(headerLead, ...table.columns.map((col, i) => wrapMarkdown(ctx, col, widths[i] ?? 1, ramp.small, family).length * headerLead));
+  for (const [i, row] of table.rows.entries()) {
+    const lines = Math.max(1, ...row.map((cell, c) => wrapMarkdown(ctx, String(cell), widths[c] ?? 1, ramp.table, family).length));
+    height += lines * rowLead;
+    if (itemGapBoost && i < table.rows.length - 1) height += itemGapBoost;
+  }
+  return height;
+}
+
+function drawCover(ctx: SKRSContext2D, img: Image, x: number, y: number, w: number, h: number): { scaleX: number; scaleY: number } {
+  const scale = Math.max(w / img.width, h / img.height);
+  const dw = img.width * scale;
+  const dh = img.height * scale;
+  const sx = (dw - w) / 2 / scale;
+  const sy = (dh - h) / 2 / scale;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  ctx.drawImage(img, sx, sy, w / scale, h / scale, x, y, w, h);
+  ctx.restore();
+  return { scaleX: scale, scaleY: scale };
+}
+
+function drawPlaceholder(
+  ctx: SKRSContext2D,
+  args: { x: number; y: number; w: number; h: number; label: string; color: string; family: string; size: number },
+): void {
+  ctx.save();
+  ctx.strokeStyle = parseColor(args.color, "#F3E6D0");
+  ctx.globalAlpha = 0.45;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([10, 8]);
+  const r = Math.min(16, args.w / 12, args.h / 12);
+  ctx.beginPath();
+  ctx.moveTo(args.x + r, args.y);
+  ctx.arcTo(args.x + args.w, args.y, args.x + args.w, args.y + args.h, r);
+  ctx.arcTo(args.x + args.w, args.y + args.h, args.x, args.y + args.h, r);
+  ctx.arcTo(args.x, args.y + args.h, args.x, args.y, r);
+  ctx.arcTo(args.x, args.y, args.x + args.w, args.y, r);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.globalAlpha = 0.8;
+  ctx.setLineDash([]);
+  ctx.fillStyle = parseColor(args.color, "#F3E6D0");
+  ctx.font = `${args.size}px "${args.family}"`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(args.label, args.x + args.w / 2, args.y + args.h / 2, args.w - 24);
   ctx.restore();
 }
 
-function roundRect(ctx: SKRSContext2D, x: number, y: number, w: number, h: number, r: number): void {
-  const radius = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.arcTo(x + w, y, x + w, y + h, radius);
-  ctx.arcTo(x + w, y + h, x, y + h, radius);
-  ctx.arcTo(x, y + h, x, y, radius);
-  ctx.arcTo(x, y, x + w, y, radius);
-  ctx.closePath();
-}
-
-async function imageFor(src: string, baseDir: string, cache: Map<string, Promise<Image>>, field = "Image.src"): Promise<Image> {
+async function loadLocalImage(src: string, baseDir: string, field = "image"): Promise<Image> {
   const path = resolveImagePath(src, baseDir, field);
-  let pending = cache.get(path);
-  if (!pending) {
-    pending = loadImage(path).catch(() => {
-      throw usage(`${field} could not be read as a local file`);
-    });
-    cache.set(path, pending);
+  try {
+    return await loadImage(path);
+  } catch {
+    throw usage(`${field} could not be read: ${src}`);
   }
-  return pending;
 }
 
-function unionBox(a: Box | undefined, b: Box): Box {
-  if (!a) return b;
-  const x = Math.min(a.x, b.x);
-  const y = Math.min(a.y, b.y);
-  return {
-    x,
-    y,
-    width: Math.max(a.x + a.width, b.x + b.width) - x,
-    height: Math.max(a.y + a.height, b.y + b.height) - y,
-  };
+interface TextRun {
+  layer: string;
+  role: string;
+  box: Box;
+  ink: Box;
+  font_size: number;
+  family: string;
+  text: string;
 }
 
-function metricsInk(metrics: ReturnType<SKRSContext2D["measureText"]>, x: number, y: number): Box {
-  return {
-    x: x - metrics.actualBoundingBoxLeft,
-    y: y - metrics.actualBoundingBoxAscent,
-    width: metrics.actualBoundingBoxLeft + metrics.actualBoundingBoxRight,
-    height: metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent,
-  };
-}
-
-function expandInk(ink: Box, outlineWidth: number, underline: number): Box {
-  const pad = outlineWidth / 2;
-  return {
-    x: ink.x - pad,
-    y: ink.y - pad,
-    width: ink.width + outlineWidth,
-    height: ink.height + outlineWidth + underline,
-  };
-}
-
-function transformBox(matrix: DOMMatrix, box: Box): Box {
-  const corners = [
-    { x: box.x, y: box.y },
-    { x: box.x + box.width, y: box.y },
-    { x: box.x, y: box.y + box.height },
-    { x: box.x + box.width, y: box.y + box.height },
-  ].map((point) => ({
-    x: matrix.a * point.x + matrix.c * point.y + matrix.e,
-    y: matrix.b * point.x + matrix.d * point.y + matrix.f,
-  }));
-  const xs = corners.map((point) => point.x);
-  const ys = corners.map((point) => point.y);
-  const x = Math.min(...xs);
-  const y = Math.min(...ys);
-  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
-}
-
-function fittedTexturePattern(
+function noteText(
   ctx: SKRSContext2D,
-  img: Image,
-  box: Box,
-  fit: ObjectFit,
-): NonNullable<ReturnType<SKRSContext2D["createPattern"]>> {
-  const width = Math.max(1, Math.ceil(box.width));
-  const height = Math.max(1, Math.ceil(box.height));
-  const tile = createCanvas(width, height);
-  const tileCtx = tile.getContext("2d");
-  const scaleCover = Math.max(width / img.width, height / img.height);
-  const scaleContain = Math.min(width / img.width, height / img.height);
-  const scale = fit === "contain" ? scaleContain : fit === "fill" ? null : scaleCover;
-  const scaleX = scale ?? width / img.width;
-  const scaleY = scale ?? height / img.height;
-  if (scale == null) {
-    tileCtx.drawImage(img, 0, 0, width, height);
-  } else {
-    const dw = img.width * scaleX;
-    const dh = img.height * scaleY;
-    tileCtx.drawImage(img, (width - dw) / 2, (height - dh) / 2, dw, dh);
-  }
-  const pattern = ctx.createPattern(tile, "no-repeat");
-  if (!pattern) throw usage("effects.texture.src could not be used as a fill");
-  pattern.setTransform({ a: 1, b: 0, c: 0, d: 1, e: box.x, f: box.y });
-  return pattern;
-}
-
-function paintUnderline(
-  ctx: SKRSContext2D,
-  x: number,
-  y: number,
-  width: number,
-  fontSize: number,
-  color: string,
-  outline?: { width: number; color: string },
-): void {
-  const thickness = underlineThickness(fontSize);
-  const underlineY = y + Math.max(2, Math.round(fontSize * 0.08));
-  ctx.beginPath();
-  ctx.moveTo(x, underlineY);
-  ctx.lineTo(x + width, underlineY);
-  ctx.lineCap = "round";
-  if (outline) {
-    ctx.strokeStyle = parseColor(outline.color, "#000");
-    ctx.lineWidth = thickness + outline.width;
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(x, underlineY);
-    ctx.lineTo(x + width, underlineY);
-  }
-  ctx.strokeStyle = color;
-  ctx.lineWidth = thickness;
-  ctx.stroke();
-}
-
-function paintGlyphRun(
-  ctx: SKRSContext2D,
-  text: string,
-  x: number,
-  y: number,
-  fill: string | NonNullable<ReturnType<SKRSContext2D["createPattern"]>>,
-  outline: { width: number; color: string } | undefined,
-): void {
-  if (outline) {
-    ctx.strokeStyle = parseColor(outline.color, "#000");
-    ctx.lineWidth = outline.width;
-    ctx.lineJoin = "round";
-    ctx.miterLimit = 2;
-    ctx.strokeText(text, x, y);
-  }
-  ctx.fillStyle = fill;
-  ctx.fillText(text, x, y);
-}
-
-function eachArcGlyph(
-  ctx: SKRSContext2D,
-  text: string,
-  originX: number,
-  originY: number,
-  degrees: number,
-  visit: (glyph: string, localX: number, localY: number) => void,
-): void {
-  const theta = (degrees * Math.PI) / 180;
-  if (Math.abs(theta) < 1e-6) {
-    visit(text, originX, originY);
-    return;
-  }
-  const total = ctx.measureText(text).width;
-  if (total <= 0) return;
-  const radius = total / Math.abs(theta);
-  const smile = theta > 0;
-  let consumed = 0;
-  const glyphs = [...text];
-  let prefix = "";
-  for (const glyph of glyphs) {
-    prefix += glyph;
-    const next = ctx.measureText(prefix).width;
-    const width = next - consumed;
-    const mid = -theta / 2 + ((consumed + width / 2) / total) * theta;
-    ctx.save();
-    if (smile) {
-      ctx.translate(originX, originY + radius);
-      ctx.rotate(mid);
-      ctx.translate(0, -radius);
-    } else {
-      ctx.translate(originX, originY - radius);
-      ctx.rotate(mid);
-      ctx.translate(0, radius);
+  runs: TextRun[],
+  args: { layer: string; role: string; text: string; x: number; y: number; maxW: number; size: number; family: string; align: string; originX: number; originY: number },
+): number {
+  ctx.textBaseline = "top";
+  const lines = wrapMarkdown(ctx, args.text, args.maxW, args.size, args.family);
+  const leading = leadingOf(args.size);
+  let y = args.y;
+  let ink: Box | undefined;
+  for (const line of lines) {
+    const plain = line.map((span) => span.text).join("");
+    if (plain !== "") {
+      const width = Math.min(args.maxW, measureSpans(ctx, line, args.size, args.family));
+      let x = args.x;
+      if (args.align === "center") x = args.x + (args.maxW - width) / 2;
+      if (args.align === "right") x = args.x + args.maxW - width;
+      const box = { x: args.originX + x, y: args.originY + y, width, height: leading };
+      ink = ink
+        ? {
+            x: Math.min(ink.x, box.x),
+            y: Math.min(ink.y, box.y),
+            width: Math.max(ink.x + ink.width, box.x + box.width) - Math.min(ink.x, box.x),
+            height: Math.max(ink.y + ink.height, box.y + box.height) - Math.min(ink.y, box.y),
+          }
+        : box;
     }
-    ctx.textAlign = "center";
-    visit(glyph, 0, 0);
-    ctx.restore();
-    consumed = next;
+    y += leading;
+  }
+  if (ink) {
+    runs.push({
+      layer: args.layer,
+      role: args.role,
+      box: { x: args.originX + args.x, y: args.originY + args.y, width: args.maxW, height: y - args.y },
+      ink,
+      font_size: args.size,
+      family: args.family,
+      text: stripMarkdown(args.text),
+    });
+  }
+  return y;
+}
+
+function relativeLuminance(hex: string): number {
+  const raw = hex.replace("#", "");
+  const h = raw.length === 3 ? raw.split("").map((ch) => `${ch}${ch}`).join("") : raw.slice(0, 6);
+  const lin = (n: string) => {
+    const c = Number.parseInt(n, 16) / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(h.slice(0, 2)) + 0.7152 * lin(h.slice(2, 4)) + 0.0722 * lin(h.slice(4, 6));
+}
+
+function rgbaOf(value: string): { r: number; g: number; b: number; a: number } {
+  const raw = value.replace("#", "");
+  const hex6 = raw.length === 3 ? raw.split("").map((ch) => `${ch}${ch}`).join("") : raw.slice(0, 6);
+  const a = raw.length === 8 ? Number.parseInt(raw.slice(6, 8), 16) / 255 : 1;
+  return {
+    r: Number.parseInt(hex6.slice(0, 2), 16),
+    g: Number.parseInt(hex6.slice(2, 4), 16),
+    b: Number.parseInt(hex6.slice(4, 6), 16),
+    a: Number.isFinite(a) ? a : 1,
+  };
+}
+
+function compositeHex(fill: string, surface: string): string {
+  const f = rgbaOf(fill);
+  const s = rgbaOf(surface);
+  const ch = (n: number) => Math.round(n).toString(16).padStart(2, "0");
+  return `#${ch(f.r * f.a + s.r * (1 - f.a))}${ch(f.g * f.a + s.g * (1 - f.a))}${ch(f.b * f.a + s.b * (1 - f.a))}`;
+}
+
+function contrastRatio(a: string, b: string): number {
+  const left = relativeLuminance(a);
+  const right = relativeLuminance(b);
+  const hi = Math.max(left, right);
+  const lo = Math.min(left, right);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+function warnCardContrast(layer: LayerSpec, warnings: ComposeWarning[]): void {
+  if (!layer.cardFit || !layer.fill) return;
+  const plate = compositeHex(layer.fill, layer.surface);
+  const colors = [roleColor(layer, "title"), roleColor(layer, "text")];
+  for (const color of colors) {
+    if (contrastRatio(color, plate) < 4.5) {
+      warnings.push({
+        code: "card_low_contrast",
+        message: `${layer.id}: type on the card plate is below 4.5:1 contrast. Darken or lighten card.fill or the type color.`,
+      });
+      return;
+    }
   }
 }
 
-async function paint(
+function fillIsBacking(fill: string | null): boolean {
+  if (!fill) return false;
+  const raw = fill.replace("#", "");
+  if (raw.length === 8) return Number.parseInt(raw.slice(6, 8), 16) > 0;
+  return true;
+}
+
+function autoShadow(color: string): { x: number; y: number; color: string } {
+  return relativeLuminance(color) >= 0.5
+    ? { x: 1, y: 1, color: "#000000E6" }
+    : { x: 1, y: 1, color: "#FFFFFFE6" };
+}
+
+function resolveShadow(layer: LayerSpec, color: string): { x: number; y: number; color: string } | null {
+  if (layer.shadow === "none") return null;
+  if (layer.shadow) return layer.shadow;
+  if (!fillIsBacking(layer.fill) && layer.overMedia) return autoShadow(color);
+  return null;
+}
+
+function drawSpans(
   ctx: SKRSContext2D,
-  node: LayoutNode,
+  spans: MarkdownSpan[],
+  args: {
+    x: number;
+    y: number;
+    size: number;
+    family: string;
+    color: string;
+    shadow?: { x: number; y: number; color: string } | null;
+    outline?: LayerOutline | null;
+  },
+): void {
+  let x = args.x;
+  for (const span of spans) {
+    if (!span.text) continue;
+    ctx.font = spanFont(span, args.size, args.family);
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+    const width = ctx.measureText(span.text).width;
+    if (args.shadow) {
+      ctx.fillStyle = parseColor(args.shadow.color, "#000000E6");
+      ctx.fillText(span.text, x + args.shadow.x, args.y + args.shadow.y);
+    }
+    if (args.outline) {
+      ctx.strokeStyle = parseColor(args.outline.color, "#000000");
+      ctx.lineWidth = args.outline.width;
+      ctx.lineJoin = "round";
+      ctx.miterLimit = 2;
+      ctx.strokeText(span.text, x, args.y);
+    }
+    ctx.fillStyle = parseColor(args.color, "#F3E6D0");
+    ctx.fillText(span.text, x, args.y);
+    if (span.underline) {
+      const underlineY = args.y + Math.round(args.size * 0.92);
+      ctx.strokeStyle = parseColor(args.color, "#F3E6D0");
+      ctx.lineWidth = Math.max(1, Math.round(args.size / 16));
+      ctx.beginPath();
+      ctx.moveTo(x, underlineY);
+      ctx.lineTo(x + width, underlineY);
+      ctx.stroke();
+    }
+    x += width;
+  }
+}
+
+function drawText(
+  ctx: SKRSContext2D,
+  args: {
+    text: string;
+    x: number;
+    y: number;
+    maxW: number;
+    size: number;
+    family: string;
+    color: string;
+    align: Align;
+    leading: number;
+    shadow?: { x: number; y: number; color: string } | null;
+    outline?: LayerOutline | null;
+  },
+): number {
+  ctx.textBaseline = "top";
+  const lines = wrapMarkdown(ctx, args.text, args.maxW, args.size, args.family);
+  let y = args.y;
+  for (const line of lines) {
+    if (line.length) {
+      const width = measureSpans(ctx, line, args.size, args.family);
+      let x = args.x;
+      if (args.align === "center") x = args.x + (args.maxW - width) / 2;
+      if (args.align === "right") x = args.x + args.maxW - width;
+      drawSpans(ctx, line, {
+        x, y, size: args.size, family: args.family, color: args.color, shadow: args.shadow, outline: args.outline,
+      });
+    }
+    y += args.leading;
+  }
+  return y;
+}
+
+function recordFont(quality: ComposeQuality, warnings: ComposeWarning[], layer: string, text: string, family: string): string {
+  const resolved = resolveTextFont(text, family, "400");
+  quality.fonts.push({ layer, ...resolved });
+  if (resolved.fallback_from) {
+    warnings.push({
+      code: "font_glyph_fallback",
+      message: `${layer}: ${resolved.fallback_from} cannot render ${resolved.missing_codepoints.slice(0, 16).join(", ")} at this weight. Used ${resolved.family} for this text. Choose that font explicitly for consistent typography.`,
+    });
+  } else if (resolved.missing_codepoints.length) {
+    warnings.push({
+      code: "font_glyph_missing",
+      message: `${layer}: missing glyphs ${resolved.missing_codepoints.slice(0, 16).join(", ")} in ${resolved.family}; no installed fallback covers this text. Install a font with these characters or choose one from compose catalog.`,
+    });
+  }
+  return resolved.family;
+}
+
+async function paintLogoLayer(
+  layer: LayerSpec,
   baseDir: string,
-  space: SpaceScale,
-  cache: Map<string, Promise<Image>>,
   quality: ComposeQuality,
   warnings: ComposeWarning[],
-  nodePath = "Frame",
-  themeSurface?: string,
-): Promise<void> {
-  const box = node._box;
-  if (!box) return;
-  const radius = node.radius ? resolveSpace(node.radius, space, "radius") : 0;
-  const clipBox = Boolean(radius) && node.type !== "Text";
-  if (clipBox) {
-    ctx.save();
-    roundRect(ctx, box.x, box.y, box.width, box.height, radius);
-    ctx.clip();
+): Promise<PaintedLayer> {
+  const src = layer.media?.src ?? (layer.blocks[0] && layer.blocks[0].role === "image" ? layer.blocks[0].src : "");
+  const img = await loadLocalImage(src, baseDir, "logo");
+  const canvas = createCanvas(layer.w, layer.h);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0, layer.w, layer.h);
+  recordImage(quality, warnings, "logo", img, { width: layer.w, height: layer.h }, { scaleX: layer.w / img.width, scaleY: layer.h / img.height });
+  return {
+    id: layer.id,
+    png: Buffer.from(canvas.toBuffer("image/png")),
+    family: resolveFontFamily(layer.font ?? undefined),
+    overflow: false,
+    scale: 1,
+    ink: [],
+  };
+}
+
+async function paintLayer(
+  layer: LayerSpec,
+  baseDir: string,
+  quality: ComposeQuality,
+  warnings: ComposeWarning[],
+  logoBox: Box | null = null,
+): Promise<PaintedLayer> {
+  if (layer.region === "logo") return paintLogoLayer(layer, baseDir, quality, warnings);
+  const canvas = createCanvas(layer.w, layer.h);
+  const ctx = canvas.getContext("2d");
+  const extra = extraPadForLogo(layer, logoBox);
+  const area = {
+    x: extra.left,
+    y: extra.top,
+    w: Math.max(1, layer.w - extra.left - extra.right),
+    h: Math.max(1, layer.h - extra.top - extra.bottom),
+  };
+  const inkFit = layer.cardFit === "ink";
+  const pad = inkFit ? CARD_INK_PAD : layer.pad;
+  if (layer.fill && !inkFit) {
+    ctx.fillStyle = parseColor(layer.fill, "#000");
+    ctx.fillRect(area.x, area.y, area.w, area.h);
   }
-  if (node.background && node.type !== "Image" && node.type !== "Pill") {
-    fillPaint(ctx, box, node.background as Paint, "#000", radius);
+  warnCardContrast(layer, warnings);
+  const family = resolveFontFamily(layer.font ?? undefined);
+  let inner = {
+    x: area.x + pad,
+    y: area.y + pad,
+    w: Math.max(1, area.w - pad * 2),
+    h: Math.max(1, area.h - pad * 2),
+  };
+  const footer = layer.blocks.find((block) => block.role === "footer");
+  const flow = layer.blocks.filter((block) => block.role !== "footer");
+  const fluid = flow.filter((block) => block.role === "image" || block.role === "placeholder");
+  const fixed = flow.filter((block) => block.role !== "image" && block.role !== "placeholder");
+  const hasFluid = fluid.length > 0 && layer.region !== "background";
+  const footerText = footer && footer.role === "footer" ? footer.text : undefined;
+  const title = layer.blocks.find((block) => block.role === "title");
+  const subtitle = layer.blocks.find((block) => block.role === "subtitle");
+  let scale = 1;
+  let ramp = sizesFor(ctx, {
+    root: layer.root,
+    family,
+    width: inner.w,
+    viewing: layer.viewing,
+    title: title && title.role === "title" ? title.text : "",
+    subtitle: subtitle && subtitle.role === "subtitle" ? subtitle.text : "",
+    scale: 1,
+  });
+  if (!hasFluid && fixed.length) {
+    const chosen = chooseScale(ctx, layer, inner, family, fixed, footerText);
+    ramp = chosen.ramp;
+    scale = chosen.scale;
   }
-  if (node.type === "Image") {
-    const img = await imageFor(String(node.src ?? ""), baseDir, cache);
-    const fit = node.objectFit ?? "cover";
-    ctx.save();
-    if (radius) {
-      roundRect(ctx, box.x, box.y, box.width, box.height, radius);
-      ctx.clip();
-    } else {
-      ctx.beginPath();
-      ctx.rect(box.x, box.y, box.width, box.height);
-      ctx.clip();
+  const footerLead = leadingOf(ramp.footer);
+  const footerH = footerText ? textHeight(ctx, footerText, inner.w, ramp.footer, family, footerLead) : 0;
+  const footerGap = footerText ? Math.round(ramp.footer * 0.8) : 0;
+  const available = Math.max(1, inner.h - footerH - footerGap);
+  const gapAfter = gapsFor(ramp);
+  let itemGapBoost = 0;
+  let fixedH = packFixedHeight(ctx, fixed, inner.w, ramp, family, 0);
+  if (!hasFluid && fixed.length && !inkFit) {
+    const extraGap = Math.max(0, available - fixedH);
+    const list = fixed.find((block) => block.role === "cards" || block.role === "table");
+    const n = list?.role === "cards" ? list.items.length : list?.role === "table" ? list.rows.length : 0;
+    if (extraGap > 0 && n > 1) {
+      const cap = Math.round((list!.role === "cards" ? ramp.card : ramp.table) * 0.4);
+      itemGapBoost = Math.min(cap, Math.floor(extraGap / (n - 1)));
+      fixedH = packFixedHeight(ctx, fixed, inner.w, ramp, family, itemGapBoost);
     }
-    const scaleCover = Math.max(box.width / img.width, box.height / img.height);
-    const scaleContain = Math.min(box.width / img.width, box.height / img.height);
-    const scale = fit === "contain" ? scaleContain : fit === "fill" ? null : scaleCover;
-    const scaleX = scale ?? box.width / img.width;
-    const scaleY = scale ?? box.height / img.height;
-    const focal = focalOf(node);
-    const cover = fit === "cover" ? coverSourceRect(img.width, img.height, box.width, box.height, focal.x, focal.y) : undefined;
-    const crop = cover ? { x: cover.sx, y: cover.sy, width: cover.sw, height: cover.sh } : undefined;
-    if (crop) node._crop = crop;
-    quality.images.push({ node: nodePath, source: { width: img.width, height: img.height },
-      box: { width: box.width, height: box.height },
-      painted: { width: img.width * scaleX, height: img.height * scaleY },
-      object_fit: fit, scale_x: scaleX, scale_y: scaleY, ...(crop ? { crop } : {}) });
-    if (Math.max(scaleX, scaleY) > 1.25) warnings.push({ code: "image_upscaled",
-      message: `${nodePath}: ${img.width}×${img.height} source paints at ${Math.round(img.width * scaleX)}×${Math.round(img.height * scaleY)} (${Math.max(scaleX, scaleY).toFixed(2)}×). Use a higher-resolution original or reduce the image size.` });
-    if (fit === "fill" && scaleX > 0 && scaleY > 0 && Math.max(scaleX / scaleY, scaleY / scaleX) > 1.01) warnings.push({ code: "image_aspect_stretched",
-      message: `${nodePath}: fill stretches the image unevenly (${scaleX.toFixed(2)}× horizontally, ${scaleY.toFixed(2)}× vertically). Use contain to preserve the whole image or cover to crop without distortion.` });
-    if (scale == null) {
-      ctx.drawImage(img, box.x, box.y, box.width, box.height);
-    } else if (cover) {
-      ctx.drawImage(img, cover.sx, cover.sy, cover.sw, cover.sh, box.x, box.y, box.width, box.height);
-    } else {
-      const dw = img.width * scale;
-      const dh = img.height * scale;
-      ctx.drawImage(img, box.x + (box.width - dw) / 2, box.y + (box.height - dh) / 2, dw, dh);
-    }
-    ctx.restore();
   }
-  if (node.type === "Text" && node._fit) {
-    const fit = node._fit;
-    const effects = textEffectsOf(node);
-    if (effects.arc && fit.lines.length > 1) {
-      throw usage(`${nodePath} arc_single_line: arc text must be a single line`);
+  if (fixed.length && fluid.length) fixedH += gapAfter[fixed[fixed.length - 1]?.role ?? ""] ?? 0;
+  const leftover = Math.max(0, available - fixedH);
+  let packH = fixedH + (fluid.length ? leftover : 0);
+  if (!fluid.length) packH = fixedH;
+  if (inkFit) {
+    const flowBlocks = footerText ? [...fixed, footer!] : fixed;
+    const inkW = packInkWidth(ctx, flowBlocks, inner.w, ramp, family);
+    const contentH = packH + (footerText ? footerH + footerGap : 0);
+    const plateW = Math.min(area.w, Math.max(1, inkW + pad * 2));
+    const plateH = Math.min(area.h, Math.max(1, Math.ceil(contentH) + pad * 2));
+    let px = area.x;
+    if (layer.align === "center") px = area.x + Math.round((area.w - plateW) / 2);
+    if (layer.align === "right") px = area.x + area.w - plateW;
+    let py = area.y;
+    if (layer.valign === "bottom") py = area.y + area.h - plateH;
+    else if (layer.valign !== "top") py = area.y + Math.round((area.h - plateH) / 2);
+    if (layer.fill) {
+      ctx.fillStyle = parseColor(layer.fill, "#000");
+      ctx.fillRect(px, py, plateW, plateH);
     }
-    if (node._textFace?.synthetic) {
-      const wanted = [node._textFace.weight === "700" ? "bold" : null, node._textFace.italic ? "italic" : null].filter(Boolean).join(" ");
-      warnings.push({
-        code: "synthetic_face",
-        message: `${nodePath}: ${node._textFont?.family ?? "font"} has no installed ${wanted} face; used a synthetic face. Install a real ${wanted} face or omit effects.weight/italic.`,
-      });
-    }
-    ctx.save();
-    const fillColor = parseColor(node.color, "#EEE9DF");
-    ctx.fillStyle = fillColor;
-    ctx.font = fit.font;
-    ctx.letterSpacing = typeof node.letterSpacing === "number" ? `${node.letterSpacing}px` : "0px";
-    ctx.textBaseline = "alphabetic";
-    const arcing = effects.arc != null;
-    const align = arcing ? "center" : (node.align as Align | "left" | "center" | "right" | undefined) ?? "left";
-    ctx.textAlign = align === "center" ? "center" : align === "right" ? "right" : "left";
-    let x = box.x;
-    if (align === "center") x = box.x + box.width / 2;
-    if (align === "right") x = box.x + box.width;
-    const longest = Math.max(0, ...fit.lines.map((line) => ctx.measureText(line).width));
-    const sagitta = effects.arc ? arcSagitta(longest, effects.arc.degrees) : 0;
-    const blockHeight = fit.lines.length * fit.lineHeight;
-    let y = box.y + Math.round((box.height - blockHeight - sagitta) / 2) + Math.round(fit.fontSize * 0.8);
-    if (effects.arc && effects.arc.degrees < 0) y += sagitta;
-    if (box.height <= blockHeight + sagitta + 2) y = box.y + Math.round(fit.fontSize * 0.8) + (effects.arc && effects.arc.degrees < 0 ? sagitta : 0);
-    const outlineWidth = effects.outline?.width ?? 0;
-    const underlineExtra = effects.underline ? underlineThickness(fit.fontSize) + 2 : 0;
-    const recordInk = (glyph: string, gx: number, gy: number): Box | undefined => {
-      const raw = metricsInk(ctx.measureText(glyph), gx, gy);
-      const boxInk = arcing && Math.abs(effects.arc!.degrees) >= 1e-6 ? transformBox(ctx.getTransform(), raw) : raw;
-      if (boxInk.width <= 0 || boxInk.height <= 0) return undefined;
-      return expandInk(boxInk, outlineWidth, underlineExtra);
+    inner = {
+      x: px + pad,
+      y: py + pad,
+      w: Math.max(1, plateW - pad * 2),
+      h: Math.max(1, plateH - pad * 2),
     };
-    let measured: Box | undefined;
-    let lineY = y;
-    for (const line of fit.lines) {
-      if (arcing) {
-        eachArcGlyph(ctx, line, x, lineY, effects.arc!.degrees, (glyph, gx, gy) => {
-          const ink = recordInk(glyph, gx, gy);
-          if (ink) measured = unionBox(measured, ink);
+  }
+  const slack = Math.max(0, (inkFit ? inner.h - (footerText ? footerH + footerGap : 0) : available) - packH);
+  const originY = (() => {
+    if (inkFit || layer.valign === "top") return inner.y;
+    if (layer.valign === "bottom") return inner.y + slack;
+    return inner.y + Math.round(slack / 2);
+  })();
+  let y = originY;
+  let overflow = false;
+  const limit = inner.y + inner.h - footerH - footerGap;
+  const runs: TextRun[] = [];
+  const align = layer.align;
+  const sh = (color: string) => resolveShadow(layer, color);
+
+  const paintFlow = async (block: LayerBlock, height: number | null) => {
+    if (block.role === "title" || block.role === "subtitle" || block.role === "text") {
+      const size = ramp[block.role];
+      const color = roleColor(layer, block.role);
+      const face = recordFont(quality, warnings, `${layer.id}.${block.role}`, stripMarkdown(block.text), family);
+      noteText(ctx, runs, {
+        layer: layer.id, role: block.role, text: block.text, x: inner.x, y, maxW: inner.w, size, family: face, align, originX: layer.x, originY: layer.y,
+      });
+      y = drawText(ctx, {
+        text: block.text, x: inner.x, y, maxW: inner.w, size, family: face, color, align, leading: leadingOf(size),
+        shadow: sh(color), outline: layer.outline,
+      });
+    } else if (block.role === "cards") {
+      for (const [i, item] of block.items.entries()) {
+        const startY = y;
+        const thumb = item.image ? Math.round(ramp.card * 2.2) : 0;
+        const copyX = inner.x + (thumb ? thumb + 16 : 0);
+        const copyW = Math.max(1, inner.w - (thumb ? thumb + 16 : 0));
+        const priceW = item.price ? Math.ceil(measureMarkdown(ctx, item.price, ramp.card, family)) + 24 : 0;
+        const titleW = Math.max(1, copyW - priceW);
+        const titleFace = recordFont(quality, warnings, `${layer.id}.cards`, stripMarkdown(item.title), family);
+        const titleColor = roleColor(layer, "card");
+        noteText(ctx, runs, {
+          layer: layer.id, role: "card", text: item.title, x: copyX, y, maxW: titleW, size: ramp.card, family: titleFace, align: "left", originX: layer.x, originY: layer.y,
+        });
+        y = drawText(ctx, {
+          text: item.title, x: copyX, y, maxW: titleW, size: ramp.card, family: titleFace, color: titleColor, align: "left", leading: leadingOf(ramp.card),
+          shadow: sh(titleColor), outline: layer.outline,
+        });
+        if (item.price) {
+          const priceY = y - leadingOf(ramp.card);
+          const priceColor = roleColor(layer, "price");
+          drawText(ctx, {
+            text: item.price, x: copyX, y: priceY, maxW: copyW, size: ramp.card, family, color: priceColor, align: "right", leading: leadingOf(ramp.card),
+            shadow: sh(priceColor), outline: layer.outline,
+          });
+        }
+        if (item.subtitle) {
+          const subColor = roleColor(layer, "subtitle");
+          y = drawText(ctx, {
+            text: item.subtitle, x: copyX, y, maxW: copyW, size: ramp.small, family, color: subColor, align: "left", leading: leadingOf(ramp.small),
+            shadow: sh(subColor), outline: layer.outline,
+          });
+        }
+        if (item.text) {
+          const bodyColor = roleColor(layer, "text");
+          y = drawText(ctx, {
+            text: item.text, x: copyX, y, maxW: copyW, size: ramp.small, family, color: bodyColor, align: "left", leading: leadingOf(ramp.small),
+            shadow: sh(bodyColor), outline: layer.outline,
+          });
+        }
+        if (item.image) {
+          const img = await loadLocalImage(item.image, baseDir, `${layer.id}.cards.image`);
+          const h = Math.max(thumb, y - startY);
+          const painted = drawCover(ctx, img, inner.x, startY, thumb, h);
+          recordImage(quality, warnings, `${layer.id}.cards`, img, { width: thumb, height: h }, painted);
+          y = Math.max(y, startY + h);
+        }
+        if (i < block.items.length - 1) y += Math.round(ramp.card * 0.55) + itemGapBoost;
+      }
+    } else if (block.role === "table") {
+      const { widths, numeric } = columnWidths(ctx, block, inner.w, ramp.small, ramp.table, family);
+      const headerLead = leadingOf(ramp.small);
+      const rowLead = leadingOf(ramp.table);
+      const paintRow = (cells: string[], size: number, color: string, lead: number, role: string) => {
+        let x = inner.x;
+        let rowBottom = y;
+        for (let c = 0; c < block.columns.length; c++) {
+          const cellAlign = numeric[c] ? "right" : "left";
+          const face = recordFont(quality, warnings, `${layer.id}.table`, stripMarkdown(String(cells[c] ?? "")), family);
+          noteText(ctx, runs, {
+            layer: layer.id, role, text: String(cells[c] ?? ""), x, y, maxW: widths[c] ?? 1, size, family: face, align: cellAlign, originX: layer.x, originY: layer.y,
+          });
+          const bottom = drawText(ctx, {
+            text: String(cells[c] ?? ""), x, y, maxW: widths[c] ?? 1, size, family: face, color, align: cellAlign, leading: lead,
+            shadow: sh(color), outline: layer.outline,
+          });
+          rowBottom = Math.max(rowBottom, bottom);
+          x += widths[c] ?? 0;
+        }
+        y = rowBottom;
+      };
+      paintRow(block.columns, ramp.small, roleColor(layer, "table-header"), headerLead, "table");
+      for (const [i, row] of block.rows.entries()) {
+        paintRow(row, ramp.table, roleColor(layer, "table-body"), rowLead, "table");
+        if (itemGapBoost && i < block.rows.length - 1) y += itemGapBoost;
+      }
+    } else if (block.role === "image") {
+      const img = await loadLocalImage(block.src, baseDir, `${layer.id}.image`);
+      const h = height ?? Math.max(80, limit - y);
+      const painted = drawCover(ctx, img, inner.x, y, inner.w, h);
+      recordImage(quality, warnings, layer.id, img, { width: inner.w, height: h }, painted);
+      y += h;
+    } else if (block.role === "placeholder") {
+      if (block.kind === "iframe" || block.kind === "application") {
+        const h = height ?? Math.max(80, limit - y);
+        if (layer.media) layer.media.rect = { x: Math.round(layer.x + inner.x), y: Math.round(layer.y + y), width: Math.round(inner.w), height: Math.round(h) };
+        y += h;
+      } else if (layer.region === "background") {
+        y = drawText(ctx, {
+          text: block.label,
+          x: inner.x,
+          y: Math.max(y, inner.y + inner.h - leadingOf(ramp.small) - 8),
+          maxW: inner.w,
+          size: ramp.small,
+          family,
+          color: layer.muted,
+          align: "left",
+          leading: leadingOf(ramp.small),
+          shadow: sh(layer.muted),
+          outline: layer.outline,
         });
       } else {
-        const ink = recordInk(line, x, lineY);
-        if (ink) measured = unionBox(measured, ink);
-      }
-      lineY += fit.lineHeight;
-    }
-    const plateSpec = plateOf(node);
-    if (plateSpec !== "none" && measured) {
-      const pad = plateSpec === "auto" ? space.s : resolveSpace(plateSpec.padding, space, "plate.padding");
-      const plateRadius = plateSpec === "auto" ? space.s : resolveSpace(plateSpec.radius, space, "plate.radius");
-      const plateBox = {
-        x: measured.x - pad,
-        y: measured.y - pad,
-        width: measured.width + 2 * pad,
-        height: measured.height + 2 * pad,
-      };
-      const textHex = typeof node.color === "string" ? node.color : "#EEE9DF";
-      const textLum = relativeLuminance(textHex);
-      const sampleRect = canvasBox(ctx, measured);
-      const measuredRatio = sampleRect ? sampleContrast(ctx, sampleRect, textLum) : 21;
-      const apply = plateSpec !== "auto" || measuredRatio < 4.5;
-      let afterRatio = measuredRatio;
-      if (apply) {
-        const plateColor = plateSpec === "auto" ? autoPlateColor(textHex, themeSurface) : plateSpec.color;
-        fillPaint(ctx, plateBox, plateColor, "#000000B3", plateRadius);
-        const afterRect = canvasBox(ctx, measured);
-        afterRatio = afterRect ? sampleContrast(ctx, afterRect, textLum) : measuredRatio;
-      }
-      node._plate = { code: apply ? "plate_applied" : "plate_skipped", contrast_ratio: measuredRatio };
-      if (afterRatio < 3) {
-        warnings.push({
-          code: "low_contrast",
-          message: `${nodePath}: contrast ratio ${afterRatio.toFixed(2)} is below 3.0 after plating.`,
-        });
+        const h = height ?? Math.max(80, limit - y);
+        drawPlaceholder(ctx, { x: inner.x, y, w: inner.w, h, label: block.label, color: layer.muted, family, size: ramp.small });
+        y += h;
       }
     }
-    let fill: string | NonNullable<ReturnType<SKRSContext2D["createPattern"]>> = fillColor;
-    if (effects.texture && measured) {
-      const img = await imageFor(effects.texture.src, baseDir, cache, "effects.texture.src");
-      fill = fittedTexturePattern(ctx, img, measured, effects.texture.objectFit ?? "cover");
-    }
-    const shadow = resolvedShadow(node);
-    if (shadow) {
-      ctx.shadowOffsetX = shadow.x;
-      ctx.shadowOffsetY = shadow.y;
-      ctx.shadowBlur = shadow.blur ?? 0;
-      ctx.shadowColor = parseColor(shadow.color, "#000000");
-    }
-    lineY = y;
-    for (const line of fit.lines) {
-      const paintLine = (glyph: string, gx: number, gy: number): void => {
-        paintGlyphRun(ctx, glyph, gx, gy, fill, effects.outline);
-        if (effects.underline) {
-          const width = ctx.measureText(glyph).width;
-          const left = ctx.textAlign === "center" ? gx - width / 2 : ctx.textAlign === "right" ? gx - width : gx;
-          paintUnderline(ctx, left, gy, width, fit.fontSize, fillColor, effects.outline);
-        }
-        const ink = recordInk(glyph, gx, gy);
-        if (ink) node._ink = unionBox(node._ink, ink);
-      };
-      if (arcing) eachArcGlyph(ctx, line, x, lineY, effects.arc!.degrees, paintLine);
-      else paintLine(line, x, lineY);
-      lineY += fit.lineHeight;
-    }
-    ctx.restore();
-  }
-  if (node.type === "Icon" && node._icon) {
-    ctx.save();
-    ctx.fillStyle = parseColor(node.color, "#EEE9DF");
-    ctx.font = cssFont(node._icon.weight, node._icon.size, node._icon.family);
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(node._icon.glyph, box.x + box.width / 2, box.y + box.height / 2);
-    ctx.restore();
-  }
-  if (node.type === "Divider") {
-    if (node.style === "dotted") {
-      paintDottedDivider(ctx, box, node.color ?? "#8A8A8A", typeof node.thickness === "number" ? node.thickness : 2);
-    }
-    else fillPaint(ctx, box, node.color ?? "#8A8A8A", "#8A8A8A", 0);
-  }
-  if (node.type === "Pill" && node._fit) {
-    const pad = node._pillPad ?? 0;
-    const pillRadius = node.radius ? resolveSpace(node.radius, space, "radius") : Math.min(box.width, box.height) / 2;
-    fillPaint(ctx, box, (node.background as Paint | undefined) ?? "#FFC857", "#FFC857", pillRadius);
-    const fit = node._fit;
-    ctx.save();
-    const fillColor = parseColor(node.color, "#1B2632");
-    ctx.fillStyle = fillColor;
-    ctx.font = fit.font;
-    ctx.textBaseline = "alphabetic";
-    const align = (node.align as Align | "left" | "center" | "right" | undefined) ?? "center";
-    ctx.textAlign = align === "center" ? "center" : align === "right" ? "right" : "left";
-    const inner = { x: box.x + pad, y: box.y + pad, width: Math.max(0, box.width - 2 * pad), height: Math.max(0, box.height - 2 * pad) };
-    let x = inner.x;
-    if (align === "center") x = inner.x + inner.width / 2;
-    if (align === "right") x = inner.x + inner.width;
-    const blockHeight = fit.lines.length * fit.lineHeight;
-    let y = inner.y + Math.round((inner.height - blockHeight) / 2) + Math.round(fit.fontSize * 0.8);
-    if (inner.height <= blockHeight + 2) y = inner.y + Math.round(fit.fontSize * 0.8);
-    for (const line of fit.lines) {
-      ctx.fillText(line, x, y);
-      y += fit.lineHeight;
-    }
-    ctx.restore();
-  }
-  for (const [index, child] of (node.children ?? []).entries()) await paint(ctx, child, baseDir, space, cache, quality, warnings, `${nodePath}.children[${index}]`, themeSurface);
-  if (clipBox) ctx.restore();
-}
-
-function layoutDump(node: LayoutNode): LayoutDump {
-  const dump: LayoutDump = { type: node.type, role: node.role, pin: node.pin, box: node._box, text_bounds: node._ink, text_font: node._textFont };
-  if (node._plate) dump.plate = node._plate;
-  if (node._crop) dump.crop = node._crop;
-  if (node._fit) {
-    dump.fit = {
-      fontSize: node._fit.fontSize,
-      lineHeight: node._fit.lineHeight,
-      lines: node._fit.lines,
-      truncated: node._fit.truncated,
-    };
-  }
-  if (node.children) dump.children = node.children.map(layoutDump);
-  return dump;
-}
-
-function anyTruncated(dump: LayoutDump): boolean {
-  if (dump.fit?.truncated) return true;
-  return (dump.children ?? []).some(anyTruncated);
-}
-
-function assessComposition(layout: LayoutDump, quality: ComposeQuality, warnings: ComposeWarning[], ramp: TypeRamp, safeArea: boolean): void {
-  const output = { x: 0, y: 0, ...quality.output };
-  const inset = { x: output.width * 0.05, y: output.height * 0.05, width: output.width * 0.9, height: output.height * 0.9 };
-  const outside = (ink: Box, box: Box): boolean => ink.x < box.x - 1 || ink.y < box.y - 1 || ink.x + ink.width > box.x + box.width + 1 || ink.y + ink.height > box.y + box.height + 1;
-  const visible: Array<{ node: string; type: string; bounds: Box }> = [];
-  const visit = (node: LayoutDump, nodePath: string): void => {
-    if (node.type === "Text" && node.text_bounds && node.box && node.fit) {
-      const ink = node.text_bounds;
-      const preferred = ramp[(node.role ?? "body") as keyof TypeRamp].wish;
-      if (node.text_font) {
-        quality.fonts.push({ node: nodePath, ...node.text_font });
-        if (node.text_font.fallback_from) warnings.push({ code: "font_glyph_fallback", message: `${nodePath}: ${node.text_font.fallback_from} cannot render ${node.text_font.missing_codepoints.slice(0, 16).join(", ")} at this weight. Used ${node.text_font.family} for this text, then remeasured it. Choose that font explicitly for consistent typography.` });
-        else if (node.text_font.missing_codepoints.length) warnings.push({ code: "font_glyph_missing", message: `${nodePath}: missing glyphs ${node.text_font.missing_codepoints.slice(0, 16).join(", ")} in ${node.text_font.family}; no installed fallback covers this text. Install a font with these characters or choose one from compose catalog.` });
-      }
-      quality.text.push({
-        node: nodePath,
-        box: node.box,
-        ink,
-        font_size: node.fit.fontSize,
-        preferred_font_size: preferred,
-        truncated: node.fit.truncated,
-        ...(node.plate ? { plate: node.plate } : {}),
-      });
-      visible.push({ node: nodePath, type: "Text", bounds: ink });
-      if (outside(ink, node.box) || outside(ink, output)) warnings.push({ code: "text_overflow", message: `${nodePath}: measured text extends beyond its layout box or canvas. Shorten the copy, widen its container, or split it across pages.` });
-      if (node.fit.truncated) warnings.push({ code: "text_truncated", message: `${nodePath}: some copy was replaced by an ellipsis. Shorten it or give this text more space.` });
-      if (node.fit.fontSize < preferred * 0.8) warnings.push({ code: "text_dense", message: `${nodePath}: text shrank to ${node.fit.fontSize}px from its preferred ${preferred}px. Reduce copy or split this section; do not lower the readable type floor.` });
-      if (safeArea && outside(ink, inset)) warnings.push({ code: "text_outside_safe_area", message: `${nodePath}: measured text crosses the 5% TV-safe margin. Inset its container if the screen crops its edges.` });
-    } else if (node.type === "Image" && node.box) visible.push({ node: nodePath, type: "Image", bounds: node.box });
-    node.children?.forEach((child, index) => visit(child, `${nodePath}.children[${index}]`));
   };
-  visit(layout, "Frame");
-  for (let i = 0; i < visible.length; i++) for (let j = i + 1; j < visible.length; j++) {
-    const first = visible[i]!, second = visible[j]!;
-    const width = Math.min(first.bounds.x + first.bounds.width, second.bounds.x + second.bounds.width) - Math.max(first.bounds.x, second.bounds.x);
-    const height = Math.min(first.bounds.y + first.bounds.height, second.bounds.y + second.bounds.height) - Math.max(first.bounds.y, second.bounds.y);
-    if (width <= 1 || height <= 1) continue;
-    const kind = first.type === "Text" && second.type === "Text" ? "text_text" : first.type === "Image" && second.type === "Image" ? "media_media" : "text_media";
-    quality.overlaps.push({ first: first.node, second: second.node, kind, area: width * height });
-    if (kind === "text_text") warnings.push({ code: "text_overlap", message: `${first.node} overlaps ${second.node}. Separate the text containers or shorten their copy. Background plates and intentional text-over-media are not treated as text collisions.` });
+
+  for (const [i, block] of flow.entries()) {
+    const fluidSize = block.role === "image" || block.role === "placeholder"
+      ? (fluid.length ? Math.max(80, Math.floor((inner.h - footerH - footerGap - fixedH) / fluid.length)) : 80)
+      : null;
+    await paintFlow(block, fluidSize);
+    if (flow[i + 1]) y += gapAfter[block.role] ?? 0;
+    if (y > limit + 1) overflow = true;
   }
+
+  if (footer && footer.role === "footer") {
+    const face = recordFont(quality, warnings, `${layer.id}.footer`, stripMarkdown(footer.text), family);
+    const fy = inner.y + inner.h - footerH;
+    const footerColor = roleColor(layer, "footer");
+    noteText(ctx, runs, {
+      layer: layer.id, role: "footer", text: footer.text, x: inner.x, y: fy, maxW: inner.w, size: ramp.footer, family: face, align, originX: layer.x, originY: layer.y,
+    });
+    drawText(ctx, {
+      text: footer.text,
+      x: inner.x,
+      y: fy,
+      maxW: inner.w,
+      size: ramp.footer,
+      family: face,
+      color: footerColor,
+      align,
+      leading: footerLead,
+      shadow: sh(footerColor),
+      outline: layer.outline,
+    });
+  }
+
+  for (const run of runs) quality.text.push(run);
+  return {
+    id: layer.id,
+    png: holeOnly(layer) ? null : Buffer.from(canvas.toBuffer("image/png")),
+    family,
+    overflow,
+    scale,
+    ink: runs.map((run) => run.ink),
+  };
 }
 
-const INK_PADDING_MAX = 8192;
-
-function isFullyTransparent(color: Paint | undefined): boolean {
-  if (!color) return true;
-  if (typeof color !== "string") return false;
-  const raw = color.replace("#", "");
-  if (raw.length === 8) return Number.parseInt(raw.slice(6, 8), 16) === 0;
-  return false;
-}
-
-function inkWithShadow(ink: Box, shadow: TextShadow | undefined): Box {
-  if (!shadow) return ink;
-  const blur = shadow.blur ?? 0;
-  return unionBox(ink, {
-    x: ink.x + Math.min(0, shadow.x) - blur,
-    y: ink.y + Math.min(0, shadow.y) - blur,
-    width: ink.width + Math.abs(shadow.x) + 2 * blur,
-    height: ink.height + Math.abs(shadow.y) + 2 * blur,
+function recordImage(
+  quality: ComposeQuality,
+  warnings: ComposeWarning[],
+  layer: string,
+  img: Image,
+  box: { width: number; height: number },
+  painted: { scaleX: number; scaleY: number },
+): void {
+  quality.images.push({
+    layer,
+    source: { width: img.width, height: img.height },
+    box,
+    painted: { width: img.width * painted.scaleX, height: img.height * painted.scaleY },
+    object_fit: "cover",
+    scale_x: painted.scaleX,
+    scale_y: painted.scaleY,
   });
+  if (Math.max(painted.scaleX, painted.scaleY) > 1.25) {
+    warnings.push({
+      code: "image_upscaled",
+      message: `${layer}: ${img.width}×${img.height} source paints at ${Math.round(img.width * painted.scaleX)}×${Math.round(img.height * painted.scaleY)} (${Math.max(painted.scaleX, painted.scaleY).toFixed(2)}×). Use a higher-resolution original or reduce the image size.`,
+    });
+  }
 }
 
-function collectLayerInk(node: LayoutNode): Box | undefined {
-  let ink: Box | undefined;
-  if (node.type === "Text" && node._ink) {
-    ink = unionBox(ink, inkWithShadow(node._ink, resolvedShadow(node)));
-  } else if ((node.type === "Image" || node.type === "Icon" || node.type === "Divider" || node.type === "Pill") && node._box) {
-    ink = unionBox(ink, node._box);
-  }
-  if (node.type !== "Image" && node.background && node._box && !isFullyTransparent(node.background as Paint | undefined)) {
-    ink = unionBox(ink, node._box);
-  }
-  for (const child of node.children ?? []) {
-    const childInk = collectLayerInk(child);
-    if (childInk) ink = unionBox(ink, childInk);
-  }
-  return ink;
-}
-
-function integerBox(box: Box): Box {
-  const x = Math.floor(box.x);
-  const y = Math.floor(box.y);
-  const right = Math.ceil(box.x + box.width);
-  const bottom = Math.ceil(box.y + box.height);
-  return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
-}
-
-function overflowPast(content: Box, bounds: Box): InkEdges {
+function manifestOf(canvas: { width: number; height: number }, layers: LayerSpec[], painted: PaintedLayer[]): PageManifest {
+  const byId = new Map(painted.map((item) => [item.id, item]));
   return {
-    left: Math.max(0, Math.round(bounds.x - content.x)),
-    top: Math.max(0, Math.round(bounds.y - content.y)),
-    right: Math.max(0, Math.round(content.x + content.width - (bounds.x + bounds.width))),
-    bottom: Math.max(0, Math.round(content.y + content.height - (bounds.y + bounds.height))),
+    version: 1,
+    canvas,
+    layers: sortLayers(layers).map((layer) => {
+      const item = byId.get(layer.id);
+      const entry: LayerManifest = {
+        id: layer.id,
+        z: layer.z,
+        rect: { x: layer.x, y: layer.y, width: layer.w, height: layer.h },
+      };
+      if (item?.png) entry.file = `${layer.id}.png`;
+      if (layer.enter) entry.enter = layer.enter;
+      if (layer.motion) entry.motion = layer.motion;
+      if (layer.media) entry.media = layer.media;
+      if (item?.overflow) entry.overflow = true;
+      return entry;
+    }),
   };
 }
 
-function alphaBounds(ctx: SKRSContext2D, width: number, height: number): Box | undefined {
-  const data = ctx.getImageData(0, 0, width, height).data;
-  let minX = width;
-  let minY = height;
-  let maxX = -1;
-  let maxY = -1;
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      if (data[(y * width + x) * 4 + 3]! > 0) {
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-      }
+function layerOverlaps(layers: LayerSpec[], quality: ComposeQuality): void {
+  const visible = layers.filter((layer) => layer.region !== "background" && layer.fill);
+  for (let i = 0; i < visible.length; i++) {
+    for (let j = i + 1; j < visible.length; j++) {
+      const a = visible[i]!;
+      const b = visible[j]!;
+      const x = Math.max(a.x, b.x);
+      const y = Math.max(a.y, b.y);
+      const width = Math.min(a.x + a.w, b.x + b.w) - x;
+      const height = Math.min(a.y + a.h, b.y + b.h) - y;
+      if (width <= 1 || height <= 1) continue;
+      quality.overlaps.push({ first: a.id, second: b.id, kind: "layer_layer", area: width * height });
     }
   }
-  if (maxX < 0) return undefined;
-  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
 }
 
-function emptyQuality(): ComposeQuality {
-  return { target_status: "unknown", output: { width: 0, height: 0 }, images: [], text: [], overlaps: [], fonts: [] };
-}
-
-function singleTextDisplayXl(tree: LayoutNode): boolean {
-  return tree.children?.length === 1 && tree.children[0]?.type === "Text" && tree.children[0]?.scale === "display-xl";
-}
-
-async function applyInkTight(
-  tree: LayoutNode,
-  frameWidth: number,
-  frameHeight: number,
-  padding: number,
-  paintArgs: { baseDir: string; space: SpaceScale; cache: Map<string, Promise<Image>>; themeSurface?: string },
-): Promise<{ png: Uint8Array; output: { width: number; height: number }; report: InkTightReport }> {
-  if (!Number.isSafeInteger(padding) || padding < 0 || padding > INK_PADDING_MAX) {
-    throw usage(`--ink-padding must be an integer from 0 to ${INK_PADDING_MAX}`);
+function assessSafeArea(page: ComposePageResult, safeArea: boolean, warnings: ComposeWarning[]): void {
+  if (!safeArea) return;
+  const { width, height } = page.manifest.canvas;
+  const inset = { x: width * 0.05, y: height * 0.05, width: width * 0.9, height: height * 0.9 };
+  for (const run of page.quality.text) {
+    const ink = run.ink;
+    const outside = ink.x < inset.x - 1 || ink.y < inset.y - 1
+      || ink.x + ink.width > inset.x + inset.width + 1
+      || ink.y + ink.height > inset.y + inset.height + 1;
+    if (outside) {
+      warnings.push({
+        code: "text_outside_safe_area",
+        message: `${run.layer}: measured text crosses the 5% TV-safe margin. Inset its region if the screen crops its edges.`,
+      });
+    }
   }
-  const measured = collectLayerInk(tree);
-  const ink = measured ? integerBox(measured) : { x: 0, y: 0, width: 0, height: 0 };
-  const frame = { x: 0, y: 0, width: frameWidth, height: frameHeight };
-  const overhang = overflowPast(ink, frame);
-  const crop = {
-    x: ink.x - padding,
-    y: ink.y - padding,
-    width: Math.max(1, ink.width + 2 * padding),
-    height: Math.max(1, ink.height + 2 * padding),
-  };
-  const out = createCanvas(crop.width, crop.height);
-  const ctx = out.getContext("2d");
-  ctx.translate(-crop.x, -crop.y);
-  await paint(ctx, tree, paintArgs.baseDir, paintArgs.space, paintArgs.cache, emptyQuality(), [], "Frame", paintArgs.themeSurface);
-  const alpha = alphaBounds(ctx, crop.width, crop.height);
-  const painted = alpha
-    ? { x: crop.x + alpha.x, y: crop.y + alpha.y, width: alpha.width, height: alpha.height }
-    : undefined;
-  const clipped = painted ? overflowPast(ink, painted) : overflowPast(ink, { x: crop.x, y: crop.y, width: 0, height: 0 });
-  return {
-    png: Buffer.from(out.toBuffer("image/png")),
-    output: { width: crop.width, height: crop.height },
-    report: {
-      frame: { width: frameWidth, height: frameHeight },
-      ink,
-      output: { width: crop.width, height: crop.height },
-      padding,
-      overhang,
-      clipped,
-    },
-  };
 }
 
-export async function composeSpec(
-  spec: unknown,
+async function combinedPng(page: { layers: LayerSpec[]; painted: PaintedLayer[] }, canvasSize: { width: number; height: number }): Promise<Buffer> {
+  const canvas = createCanvas(canvasSize.width, canvasSize.height);
+  const ctx = canvas.getContext("2d");
+  const byId = new Map(page.painted.map((item) => [item.id, item]));
+  for (const layer of sortLayers(page.layers)) {
+    const item = byId.get(layer.id);
+    if (!item?.png) continue;
+    if (layer.media?.type === "video") continue;
+    const img = await loadImage(item.png);
+    ctx.drawImage(img, layer.x, layer.y);
+  }
+  return Buffer.from(canvas.toBuffer("image/png"));
+}
+
+function emptyQuality(canvas: { width: number; height: number }, target?: { width: number; height: number }): ComposeQuality {
+  const quality: ComposeQuality = {
+    target_status: target ? "known" : "unknown",
+    output: { ...canvas },
+    images: [],
+    text: [],
+    overlaps: [],
+    fonts: [],
+  };
+  if (target) {
+    quality.target = target;
+    quality.output_scale = { x: target.width / canvas.width, y: target.height / canvas.height };
+  }
+  return quality;
+}
+
+export async function composeDocument(
+  source: unknown,
   options: {
     baseDir: string;
-    outPath?: string;
-    layoutOutPath?: string;
-    safeArea?: boolean;
     target?: { width: number; height: number };
-    inkTight?: boolean;
-    inkPadding?: number;
+    safeArea?: boolean;
   },
-): Promise<ComposeResult & { png: Buffer }> {
-  const warnings: ComposeWarning[] = [];
-  const validated = validateSpec(expandComposeRecipe(spec, warnings));
-  const tree = structuredClone(validated) as LayoutNode;
-  applyComposeTheme(tree as ComposeFrame, warnings);
-  const family = resolveFontFamily(typeof tree.fontFamily === "string" ? tree.fontFamily : undefined);
-  const width = tree.width ?? 0;
-  const height = tree.height ?? 0;
-  if (options.target && (![options.target.width, options.target.height].every((n) => Number.isSafeInteger(n) && n > 0))) {
+): Promise<ComposeResult> {
+  const document = parseComposeSpec(source);
+  if (options.target && ![options.target.width, options.target.height].every((n) => Number.isSafeInteger(n) && n > 0)) {
     throw usage("physical target width and height must be positive integers");
   }
-  const quality: ComposeQuality = { target_status: options.target ? "known" : "unknown", output: { width, height }, images: [], text: [], overlaps: [], fonts: [] };
-  if (options.target) {
-    quality.target = options.target;
-    quality.output_scale = { x: options.target.width / width, y: options.target.height / height };
-    if (Math.max(quality.output_scale.x, quality.output_scale.y) > 1.25) warnings.push({ code: "compose_output_upscaled",
-      message: `Frame: ${width}×${height} output will display at ${options.target.width}×${options.target.height}. Re-render from original sources at target resolution; enlarging the finished PNG cannot recover detail.` });
-  }
-  const themeSurface = typeof tree.theme === "string" ? themeOf(tree.theme).surface : undefined;
-  const space = spaceScale(width, height);
-  const viewing = parseViewing(tree.viewing);
-  const minXHeight = Math.min(width, height) * VIEWING_XHEIGHT_RATIO[viewing];
-  const viewingFloor = Math.ceil(minXHeight / XHEIGHT_FALLBACK);
-  let ramp = typeRamp(width, height);
-  ramp = Object.fromEntries(
-    Object.entries(ramp).map(([role, scale]) => [role, { ...scale, min: Math.max(scale.min, viewingFloor) }]),
-  ) as TypeRamp;
-  if (singleTextDisplayXl(tree)) {
-    const role = (tree.children![0]!.role ?? "body") as Role;
-    ramp = { ...ramp, [role]: { ...ramp[role], wish: displayXlWish(width, height) } };
-  }
-  const ramp_root = rampRoot(width, height);
-  const ramp_at_1080 = typeRamp(REFERENCE_CANVAS.width, REFERENCE_CANVAS.height);
-  if (options.inkPadding != null && options.inkTight !== true) {
-    throw usage("--ink-padding requires --ink-tight");
-  }
-  const scratch = createCanvas(8, 8);
-  const measureCtx = scratch.getContext("2d");
-  const root = buildTree(tree, measureCtx, family, ramp, space, "column", minXHeight);
-  try {
-    root.calculateLayout(width, height, Direction.LTR);
-    collectBoxes(tree, 0, 0);
-    const canvas = createCanvas(width, height);
-    const ctx = canvas.getContext("2d");
-    const cache = new Map<string, Promise<Image>>();
-    // paint owns the Frame background too; pre-filling would apply its alpha twice.
-    await paint(ctx, tree, options.baseDir, space, cache, quality, warnings, "Frame", themeSurface);
-    const layout = layoutDump(tree);
-    assessComposition(layout, quality, warnings, ramp, options.safeArea === true);
-    let png: Buffer;
-    let outWidth = width;
-    let outHeight = height;
-    let ink_tight: InkTightReport | undefined;
-    if (options.inkTight === true) {
-      const applied = await applyInkTight(tree, width, height, options.inkPadding ?? 0, {
-        baseDir: options.baseDir,
-        space,
-        cache,
-        themeSurface,
+  const pages: ComposePageResult[] = [];
+  for (const page of document.pages) {
+    const warnings: ComposeWarning[] = [];
+    const quality = emptyQuality(document.canvas, options.target);
+    if (quality.output_scale && Math.max(quality.output_scale.x, quality.output_scale.y) > 1.25) {
+      warnings.push({
+        code: "compose_output_upscaled",
+        message: `page: ${document.canvas.width}×${document.canvas.height} output will display at ${options.target!.width}×${options.target!.height}. Re-render from original sources at target resolution; enlarging the finished PNG cannot recover detail.`,
       });
-      png = Buffer.from(applied.png);
-      outWidth = applied.output.width;
-      outHeight = applied.output.height;
-      ink_tight = applied.report;
-    } else {
-      png = Buffer.from(canvas.toBuffer("image/png"));
     }
-    if (options.outPath) {
-      await mkdir(dirname(options.outPath), { recursive: true });
-      await writeFile(options.outPath, png);
+    const painted: PaintedLayer[] = [];
+    const logoLayer = page.layers.find((layer) => layer.region === "logo");
+    let logoBox: Box | null = null;
+    if (logoLayer) {
+      const src = logoLayer.media?.src ?? "";
+      const img = await loadLocalImage(src, options.baseDir, "logo");
+      const painted = placeLogo(img, document.canvas, logoLayer.logoCorner ?? "bottom-right");
+      logoLayer.x = painted.x;
+      logoLayer.y = painted.y;
+      logoLayer.w = painted.width;
+      logoLayer.h = painted.height;
+      logoBox = reservedLogoBox(painted, document.canvas, logoLayer.logoCorner ?? "bottom-right");
     }
-    if (options.layoutOutPath) {
-      await mkdir(dirname(options.layoutOutPath), { recursive: true });
-      await writeFile(
-        options.layoutOutPath,
-        `${JSON.stringify({ space, ramp, ramp_root, ramp_at_1080, quality, warnings, tree: layout, ...(ink_tight ? { ink_tight } : {}) }, null, 2)}\n`,
-      );
-    }
-    return {
+    for (const layer of page.layers) painted.push(await paintLayer(layer, options.baseDir, quality, warnings, logoBox));
+    layerOverlaps(page.layers, quality);
+    const manifest = manifestOf(document.canvas, page.layers, painted);
+    const combined = await combinedPng({ layers: page.layers, painted }, document.canvas);
+    const result: ComposePageResult = {
+      id: page.id,
+      layers: page.layers,
+      painted,
+      manifest,
+      combined,
       quality,
       warnings,
-      png,
-      layout,
-      space,
-      ramp,
-      ramp_root,
-      ramp_at_1080,
-      font_family: family,
-      truncated: anyTruncated(layout),
-      width: outWidth,
-      height: outHeight,
-      ...(ink_tight ? { ink_tight } : {}),
+      font_family: painted.find((item) => item.family)?.family ?? resolveFontFamily(undefined),
     };
-  } finally {
-    root.freeRecursive();
+    assessSafeArea(result, options.safeArea === true, warnings);
+    pages.push(result);
   }
+  return { document, pages, canvas: document.canvas, name: document.name };
 }
+
+export interface WrittenCompose {
+  output: string;
+  canvas: { width: number; height: number };
+  name: string | null;
+  files: string[];
+  pages: Array<{
+    id: string;
+    dir: string;
+    manifest: PageManifest;
+    images: Array<{ id: string; file: string }>;
+    combined?: string;
+    quality: ComposeQuality;
+    warnings: ComposeWarning[];
+    font_family: string;
+    scale: Record<string, number>;
+  }>;
+  manifest: PageManifest | null;
+  images: Array<{ id: string; file: string }>;
+  quality: ComposeQuality;
+  warnings: ComposeWarning[];
+  font_family: string;
+}
+
+export async function composeAndWrite(
+  source: unknown,
+  options: {
+    baseDir: string;
+    outDir: string;
+    combined?: boolean;
+    target?: { width: number; height: number };
+    safeArea?: boolean;
+    lintOnly?: boolean;
+  },
+): Promise<WrittenCompose & { result: ComposeResult }> {
+  const result = await composeDocument(source, options);
+  const files: string[] = [];
+  const pages: WrittenCompose["pages"] = [];
+  if (!options.lintOnly) await mkdir(options.outDir, { recursive: true });
+  for (const page of result.pages) {
+    const dir = result.pages.length === 1 ? options.outDir : join(options.outDir, page.id);
+    const prefix = result.pages.length === 1 ? "" : `${page.id}/`;
+    if (!options.lintOnly) await mkdir(dir, { recursive: true });
+    const images: Array<{ id: string; file: string }> = [];
+    for (const item of page.painted) {
+      if (!item.png) continue;
+      const file = `${item.id}.png`;
+      if (!options.lintOnly) await writeFile(join(dir, file), item.png);
+      files.push(`${prefix}${file}`);
+      images.push({ id: item.id, file: `${prefix}${file}` });
+    }
+    const manifest = page.manifest;
+    if (!options.lintOnly) await writeFile(join(dir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+    files.push(`${prefix}manifest.json`);
+    const prefixed = structuredClone(manifest);
+    if (prefix) {
+      for (const layer of prefixed.layers) {
+        if (layer.file) layer.file = `${prefix}${layer.file}`;
+      }
+    }
+    let combinedPath: string | undefined;
+    if (options.combined) {
+      combinedPath = `${prefix}combined.png`;
+      if (!options.lintOnly) await writeFile(join(dir, "combined.png"), page.combined);
+      files.push(combinedPath);
+    }
+    pages.push({
+      id: page.id,
+      dir,
+      manifest: prefixed,
+      images,
+      combined: combinedPath,
+      quality: page.quality,
+      warnings: page.warnings,
+      font_family: page.font_family,
+      scale: Object.fromEntries(page.painted.map((item) => [item.id, item.scale])),
+    });
+  }
+  if (!options.lintOnly && result.pages.length > 1) {
+    const deck = {
+      version: 1,
+      name: result.name,
+      canvas: result.canvas,
+      pages: pages.map((page) => ({ id: page.id, manifest: page.manifest, images: page.images })),
+    };
+    await writeFile(join(options.outDir, "deck.json"), `${JSON.stringify(deck, null, 2)}\n`);
+    files.push("deck.json");
+  }
+  const first = pages[0];
+  return {
+    output: options.outDir,
+    canvas: result.canvas,
+    name: result.name,
+    files,
+    pages,
+    manifest: first?.manifest ?? null,
+    images: first?.images ?? [],
+    quality: first?.quality ?? emptyQuality(result.canvas, options.target),
+    warnings: pages.flatMap((page) => page.warnings.map((warning) => ({
+      ...warning,
+      message: result.pages.length > 1 ? `${page.id}: ${warning.message}` : warning.message,
+    }))),
+    font_family: first?.font_family ?? resolveFontFamily(undefined),
+    result,
+  };
+}
+
+export function defaultComposeOutDir(specPath: string): string {
+  return specPath.toLowerCase().endsWith(".json") ? specPath.slice(0, -5) : `${specPath}.out`;
+}
+
+export type { PlaylistRect, PageSpec };
