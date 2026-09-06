@@ -170,35 +170,38 @@ writing files. Type size is procedural from page width/height and optional
 or `y`. A named `font` that is not installed is `usage_error`, not a silent
 fallback. Glyph fallback and overflow diagnostics stay on the authored page.
 
-How to put content on a playlist page. Follow this order. Do not always
-generate first. Do not always compose first.
+How to put content on a playlist page. Choose by what the page is. Do not
+generate an atmosphere plate and compose type onto it. Do not compose a
+presentable poster as named regions + cards.
 
-1. **You already have the image or video.** Easiest path: `media upload`
-   (declare → PUT exact bytes → commit) and reference `med_…` on the
-   playlist. Do it yourself. No compositor. No generate.
-2. **You do not have assets, and the page is a simple slide deck or needs
-   multiple object types on one page** (`image` | `video` | `iframe` |
-   `application` / webapp). Use the compositor (`compose render`): named
-   regions, local, unbilled. Compose writes stills (and holes for
-   iframe/webapp/region video). Upload those stills if they need to play on
-   a screen. Mixed object types are why you compose instead of a single
-   poster.
-3. **You want public-facing compelling messages** — posters, announcements,
-   restaurant menus, rich static pieces. Generate a still with an advanced
-   image model yourself and upload, or call ScreenRig `media generate`.
-   ScreenRig generate is the recommended approach for most of these use
-   cases. There is a charge by quality. `low` is $0.06 (600 credits) for
-   backgrounds and unimportant images. `medium` is $0.12 (1200 credits) and
-   is the default for most cases. `high` is $0.50 (5000 credits) for
-   high-density text such as restaurant menus and complex posters. Quality
-   changes the image and the price. Most static content should use generate
-   when it works. The POST stores the PNG in the account media store and
-   returns `med_…`; the CLI does not re-upload. Fetch content only to
-   inspect. Own-gen-then-upload remains valid when you already have a
-   preferred model.
+1. **You already have the image or video.** `media upload` (declare → PUT
+   exact bytes → commit) and place `med_…` on the playlist. No compose. No
+   generate.
+2. **Anything presentable** — posters, announcements, restaurant menus,
+   event art, product stills, public-facing rich static pages. `media
+   generate` as the **whole page**. Put every fact and all copy in the
+   prompt so the image model typesets it. ScreenRig generate is the default
+   (current vendor model is GPT-image-2). Own-gen-then-upload remains valid
+   only if you already have a preferred model. Do not compose this page. Do
+   not generate atmosphere-only stills for later overlay. There is a charge
+   by quality. `low` is $0.06 (600 credits) for unimportant generated stills
+   only. `medium` is $0.12 (1200 credits) and is the default for most cases.
+   `high` is $0.50 (5000 credits) for dense text and complex posters. Quality
+   changes the image and the price. The POST stores the PNG in the account
+   media store and returns `med_…`; the CLI does not re-upload. Fetch content
+   only to inspect.
+3. **Slide-deck-like experiences** — title/body/table slides, internal
+   decks, measured type that must stay editable as compose JSON. Local
+   unbilled `compose render`. Named regions. Compose writes stills and holes
+   for iframe/webapp/region video. Upload those stills if they need to play
+   on a screen.
+4. **Live objects** — a playing video, iframe, or webapp as the page (or as
+   playlist primitives). Write playlist primitives. Upload the video if you
+   have it. Do not local-render stills merely to attach `enter` / `motion`.
+   Animation is not a reason to compose.
 
 ```sh
-screenrig --json media generate --prompt "A dusk lobby photograph, warm tungsten, no people" --aspect-ratio 16:9 --quality medium --tag LobbyDusk
+screenrig --json media generate --prompt "Finished 16:9 event poster with all copy typeset in the image. Title FIRE AT THE TABLE. Subtitle Four courses over live coals. Menu: Ember bread, smoked butter; Humber mussels, kelp butter; Coal ribeye, hispi, bone sauce; Burnt honey tart, bay cream. Saturday 17 October, 19:00-22:30, The Kiln Room, 14 Humber Dock, Hull HU1 1TB. Tickets 86 pounds. Book at the Kiln desk. Dark hearth photography, gold and cream type." --aspect-ratio 16:9 --quality high --tag FireAtTheTable
 ```
 
 `--prompt` is required. `--aspect-ratio` defaults to `16:9` (`1:1`, `16:9`,
@@ -217,8 +220,9 @@ by local compose or `media generate`; motion video; and web content delivered as
 `application`.
 
 Four wire primitives are supported: `image`, `video`, `iframe`, and
-`application`. Copy and chrome are composed locally, uploaded as `image`,
-then used as one image primitive. `playlist templates` is a local catalog of
+`application`. Presentable copy lives in the generated still. Deck copy and
+chrome are composed locally, uploaded as `image`, then used as one image
+primitive. `playlist templates` is a local catalog of
 slide ids; templates that would emit native `text`, `box`, or `line` fail with a pointer at
 `compose catalog` and `compose render`. Picture-only templates still expand
 to image or video primitives with selectors. A page without `template` is
@@ -622,10 +626,12 @@ CLI never prints image bytes, hex, or base64.
 
 ## Local compose
 
-Compose is the second authoring path: a simple slide deck, or mixed object
-types on one page. It is local and unbilled. It is not the first choice when
-you already have the image or video, and it is not the recommended path for
-a public-facing poster or menu.
+Compose is authoring path 3: slide-deck-like experiences — title/body/table
+slides, internal decks, measured type that must stay editable as compose
+JSON. It is local and unbilled. Presentable posters, menus, event art, and
+other public-facing rich static pages are generated finished stills, not
+composed pages. Overlay is a compose mechanic for decks; it is not the
+presentable-poster path. Animation is not a reason to compose.
 
 Compose a still on this machine, look at the PNG, then upload it as media.
 
@@ -890,7 +896,7 @@ screenrig --json media upload ./lobby.mov --preset signage-1080p30 --no-audio
 screenrig --json media upload ./portrait.mov --preset signage-4k30
 screenrig --json media upload ./poster.png --no-transcode
 screenrig --json media upload ./lobby-welcome.png --tag lobby
-screenrig --json media generate --prompt "A dusk lobby photograph, warm tungsten, no people" --tag LobbyDusk
+screenrig --json media generate --prompt "Finished 16:9 event poster with all copy typeset in the image. Title FIRE AT THE TABLE. Subtitle Four courses over live coals. Menu: Ember bread, smoked butter; Humber mussels, kelp butter; Coal ribeye, hispi, bone sauce; Burnt honey tart, bay cream. Saturday 17 October, 19:00-22:30, The Kiln Room, 14 Humber Dock, Hull HU1 1TB. Tickets 86 pounds. Book at the Kiln desk. Dark hearth photography, gold and cream type." --quality high --tag FireAtTheTable
 screenrig --json media upload-batch ./images.json --state ./upload-state.json
 screenrig --json media upload-batch ./images.json --state ./upload-state.json --concurrency 4 --no-transcode --tag lobby
 screenrig --json media list --tag lobby --primitive image
