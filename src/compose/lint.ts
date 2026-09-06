@@ -49,6 +49,20 @@ export function viewingOf(spec: unknown): ViewingDistance {
   return parseViewing((spec as { viewing?: unknown }).viewing);
 }
 
+/** Page object for lint: that page, with inherited `viewing` when the deck omits it. */
+export function pageSpecForLint(input: unknown, pageId: string): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const record = input as Record<string, unknown>;
+  if (!Array.isArray(record.pages)) return input;
+  const match = record.pages.find((item) => (
+    item && typeof item === "object" && !Array.isArray(item) && (item as { id?: string }).id === pageId
+  ));
+  if (!match || typeof match !== "object" || Array.isArray(match)) return input;
+  const page = match as Record<string, unknown>;
+  const viewing = page.viewing ?? record.viewing;
+  return viewing === undefined ? page : { ...page, viewing };
+}
+
 export function sortLint(findings: LintFinding[], pageOrder: string[]): LintFinding[] {
   const order = new Map(pageOrder.map((id, index) => [id, index]));
   const codeOrder = new Map(LINT_CODES.map((code, index) => [code, index]));
@@ -151,7 +165,6 @@ function countSpecWords(value: unknown): number {
   if (Array.isArray(record.cards)) n += countSpecWords(record.cards);
   if (record.card && typeof record.card === "object") n += countSpecWords(record.card);
   if (record.table && typeof record.table === "object") n += countSpecWords(record.table);
-  if (Array.isArray(record.pages)) n += countSpecWords(record.pages);
   for (const name of ["fullpage", "left", "right", "left-third", "middle-third", "right-third", "middle-half", "top-half", "bottom-half", "top", "bottom"]) {
     if (name in record) n += countSpecWords(record[name]);
   }
@@ -387,13 +400,13 @@ function measureXHeight(
   return size * XHEIGHT_FALLBACK;
 }
 
-function sampledContrast(pixels: PixelBuffer, box: Box): number | undefined {
+function collectLuminance(pixels: PixelBuffer, box: Box): number[] {
   const samples: number[] = [];
   const left = Math.max(0, Math.floor(box.x));
   const top = Math.max(0, Math.floor(box.y));
   const right = Math.min(pixels.width, Math.ceil(box.x + box.width));
   const bottom = Math.min(pixels.height, Math.ceil(box.y + box.height));
-  if (right <= left || bottom <= top) return undefined;
+  if (right <= left || bottom <= top) return samples;
   const step = Math.max(1, Math.floor(Math.max(right - left, bottom - top) / 48));
   for (let y = top; y < bottom; y += step) {
     for (let x = left; x < right; x += step) {
@@ -403,11 +416,51 @@ function sampledContrast(pixels: PixelBuffer, box: Box): number | undefined {
       samples.push(luminanceOf(pixels.data[i] ?? 0, pixels.data[i + 1] ?? 0, pixels.data[i + 2] ?? 0));
     }
   }
+  return samples;
+}
+
+function medianOf(sorted: number[]): number {
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2) return sorted[mid] ?? 0;
+  return ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
+}
+
+/** Two-class contrast: painted glyphs vs nearby non-glyph, not 15th/85th of the whole box. */
+function twoClassContrast(samples: number[]): number | undefined {
   if (samples.length < 4) return undefined;
-  samples.sort((a, b) => a - b);
-  const lo = samples[Math.floor(samples.length * 0.15)] ?? samples[0]!;
-  const hi = samples[Math.min(samples.length - 1, Math.floor(samples.length * 0.85))] ?? samples[samples.length - 1]!;
+  const sorted = [...samples].sort((a, b) => a - b);
+  const n = sorted.length;
+  const totalSum = sorted.reduce((sum, value) => sum + value, 0);
+  let leftSum = 0;
+  let bestVar = -1;
+  let bestSplit = Math.floor(n / 2);
+  for (let i = 1; i < n; i++) {
+    leftSum += sorted[i - 1]!;
+    const w0 = i;
+    const w1 = n - i;
+    const m0 = leftSum / w0;
+    const m1 = (totalSum - leftSum) / w1;
+    const between = w0 * w1 * (m0 - m1) ** 2;
+    if (between > bestVar) {
+      bestVar = between;
+      bestSplit = i;
+    }
+  }
+  const lo = medianOf(sorted.slice(0, bestSplit));
+  const hi = medianOf(sorted.slice(bestSplit));
   return (Math.max(hi, lo) + 0.05) / (Math.min(hi, lo) + 0.05);
+}
+
+function sampledContrast(pixels: PixelBuffer, box: Box): number | undefined {
+  const inner = collectLuminance(pixels, box);
+  const pad = Math.max(4, Math.round(Math.min(box.width, box.height) * 0.25));
+  const nearby = collectLuminance(pixels, {
+    x: box.x - pad,
+    y: box.y - pad,
+    width: box.width + pad * 2,
+    height: box.height + pad * 2,
+  });
+  return twoClassContrast(nearby.length >= 4 ? nearby : inner);
 }
 
 function luminanceStddev(pixels: PixelBuffer, box: Box): number {

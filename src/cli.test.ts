@@ -3248,6 +3248,18 @@ test("customer-facing credit copy is fail-open until 1 Jan 2027", () => {
     assert.match(text, /payment_required/, `${name} must keep payment_required as the after-cutoff code`);
     assert.match(text, /402/, `${name} must name HTTP 402 as after-cutoff, not current`);
     assert.match(text, /does not stop or\s+shut off screens/, `${name} must not claim screens stop for empty remaining`);
+    assert.match(text, /\$0\.06/, `${name} must name the low still-generation price`);
+    assert.match(text, /\$0\.12/, `${name} must name the medium still-generation price`);
+    assert.match(text, /\$0\.50/, `${name} must name the high still-generation price`);
+    assert.match(text, /600 credits/, `${name} must name the low still-generation debit`);
+    assert.match(text, /1200 credits/, `${name} must name the medium still-generation debit`);
+    assert.match(text, /5000 credits/, `${name} must name the high still-generation debit`);
+    assert.match(text, /changes the image and the price/, `${name} must say quality changes the image and the price`);
+    assert.doesNotMatch(text, /\$0\.10 per image/, `${name} must not name a flat still-generation price`);
+    assert.doesNotMatch(text, /change the image, not the price/, `${name} must not say quality is unpriced`);
+    assert.doesNotMatch(text, /gpt-image-2/, `${name} must not name gpt-image-2 as the price`);
+    assert.doesNotMatch(text, /\$30 per million/, `${name} must not name token-output rates as the price`);
+    assert.doesNotMatch(text, /OpenRouter/, `${name} must not name OpenRouter`);
   }
   assert.match(USAGE, /feedback list \[--kind bug\|feature\]/);
 });

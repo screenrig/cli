@@ -15,6 +15,7 @@ const HTTP_CASES: Array<[method: string, path: string, tag: string]> = [
   ["POST", "/api/v1/screens/scr_x/toast", "post_screen_toast"],
   ["POST", "/api/v1/screens/scr_x/public-id/rotate", "post_screen_public_id_rotate"],
   ["POST", "/api/v1/media/uploads/upl_1/commit", "post_media_upload_commit"],
+  ["POST", "/api/v1/media/generations", "post_media_generations"],
   ["GET", "/api/v1/operations/op_1", "get_operation"],
   ["POST", "/api/v1/account/dashboard-links", "post_account_dashboard_links"],
   ["GET", "/api/v1/events/stream", "get_events_stream"],
@@ -34,6 +35,7 @@ test("httpResourceId takes the first path segment that is not a kept route token
   assert.equal(httpResourceId("/api/v1/screens"), undefined);
   assert.equal(httpResourceId("/api/v1/playlists/pl_x"), "pl_x");
   assert.equal(httpResourceId("/api/v1/media/med_1/content"), "med_1");
+  assert.equal(httpResourceId("/api/v1/media/generations"), undefined);
   assert.equal(httpResourceId("/api/v1/operations/op_1"), "op_1");
   assert.equal(httpResourceId("/api/v1/applications/app_1"), "app_1");
   assert.equal(httpResourceId("/api/v1/screens/scr_x/screenshot/status"), "scr_x");

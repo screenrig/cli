@@ -70,6 +70,7 @@ test("sensitive keys match embedded names, not only exact tokens", () => {
     "upload_url",
     "image_bytes",
     "pixels",
+    "prompt",
   ]) {
     assert.equal(isSensitiveKey(key), true, key);
   }

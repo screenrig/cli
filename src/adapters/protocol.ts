@@ -442,6 +442,30 @@ export interface MediaTagPatch {
   tag: string | null;
 }
 
+export type MediaGenerationAspectRatio = "1:1" | "16:9" | "9:16" | "4:3" | "3:4" | "3:2" | "2:3";
+export type MediaGenerationQuality = "low" | "medium" | "high";
+
+/** POST /api/v1/media/generations. prompt is required; aspect_ratio and quality have server defaults. quality changes the image and the price. */
+export interface MediaGenerationRequest {
+  prompt: string;
+  aspect_ratio?: MediaGenerationAspectRatio;
+  quality?: MediaGenerationQuality;
+  tag?: string;
+}
+
+export interface MediaGenerationUsage {
+  credits: number;
+  usd: string;
+  quality?: MediaGenerationQuality;
+  aspect_ratio?: MediaGenerationAspectRatio;
+}
+
+/** 201 body. media.id is med_…. Never image bytes. */
+export interface MediaGeneration {
+  media: { id: string; [key: string]: unknown };
+  usage: MediaGenerationUsage;
+}
+
 export interface MediaUploadSession {
   expires_at: string;
   headers: Record<string, unknown>;

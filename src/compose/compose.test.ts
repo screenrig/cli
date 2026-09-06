@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-import { composeBatch } from "./batch.js";
+import { COMPOSE_BATCH_CHUNK_SIZE, composeBatch } from "./batch.js";
 import { composeCatalog, formatComposeCatalog } from "./catalog.js";
-import { composeAndWrite, composeDocument, LOGO_INSET, regionRect, resolveFontFamily } from "./compose.js";
+import { composeAndWrite, composeDocument, LOGO_INSET, regionRect, rejectImageLikeOutput, resolveFontFamily } from "./compose.js";
 import { defaultCardFill, parseComposeSpec } from "./parse.js";
-import { wishOf } from "./type.js";
+import { SCALE_MIN, wishOf } from "./type.js";
 import { REGIONS } from "./types.js";
 import { testTemp } from "../test-temp.js";
 
@@ -317,10 +318,69 @@ test("compose batch contact-sheet and --only use the same engine", async () => {
   assert.equal(first.rendered, 2);
   assert.equal(first.failed, 0);
   assert.ok((await readFile(first.preview)).subarray(0, 8).equals(PNG_HEADER));
+  assert.equal(existsSync(path.join(output, "one", "manifest.json")), true);
+  assert.equal(existsSync(path.join(output, "two", "manifest.json")), true);
+  assert.equal(existsSync(path.join(output, "manifest.json")), false);
   const retry = await composeBatch(input, output, { only: "two" });
   assert.equal(retry.rendered, 1);
   assert.equal(retry.not_selected, 1);
+  assert.equal(retry.pages.find((page) => page.id === "two")?.output, path.join(output, "two"));
+  assert.equal(existsSync(path.join(output, "two", "manifest.json")), true);
+  assert.equal(existsSync(path.join(output, "one", "manifest.json")), true);
+  assert.equal(existsSync(path.join(output, "manifest.json")), false);
   await rm(dir, { recursive: true, force: true });
+});
+
+test("compose batch continues after one page image fails", async () => {
+  const dir = await testTemp("compose-batch-fail-");
+  const input = path.join(dir, "deck.json");
+  await writeFile(input, JSON.stringify({
+    width: 64,
+    height: 36,
+    background: "#111111",
+    text: "#eeeeee",
+    pages: [
+      { id: "ok", left: { title: "Hello" } },
+      { id: "bad", left: { image: "./missing.png" } },
+      { id: "also", right: { title: "There" } },
+    ],
+  }));
+  const output = path.join(dir, "rendered");
+  const result = await composeBatch(input, output);
+  assert.equal(result.rendered, 2);
+  assert.equal(result.failed, 1);
+  assert.equal(result.pages.find((page) => page.id === "bad")?.status, "failed");
+  assert.equal(result.pages.find((page) => page.id === "ok")?.status, "rendered");
+  assert.equal(result.pages.find((page) => page.id === "also")?.status, "rendered");
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("compose batch chunk_timings has more than one chunk above 100 pages", { timeout: 120000 }, async () => {
+  const dir = await testTemp("compose-batch-chunks-");
+  const input = path.join(dir, "deck.json");
+  const count = COMPOSE_BATCH_CHUNK_SIZE + 1;
+  const pages = Array.from({ length: count }, (_, i) => ({ id: `p${i + 1}`, left: { title: "Hi" } }));
+  await writeFile(input, JSON.stringify({
+    width: 64,
+    height: 36,
+    background: "#111111",
+    text: "#eeeeee",
+    pages,
+  }));
+  const output = path.join(dir, "rendered");
+  const result = await composeBatch(input, output);
+  assert.equal(result.rendered, count);
+  assert.equal(result.failed, 0);
+  assert.ok(result.chunk_timings.length > 1, `expected multiple chunks, got ${result.chunk_timings.length}`);
+  assert.equal(result.chunks, result.chunk_timings.length);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("image-like --output is usage_error naming a directory", () => {
+  assertUsage(() => rejectImageLikeOutput("foo.png", "compose render"), /directory/);
+  assertUsage(() => rejectImageLikeOutput("still.webp", "compose render"), /directory/);
+  assertUsage(() => rejectImageLikeOutput("out.jpg", "compose batch"), /directory/);
+  rejectImageLikeOutput("still", "compose render");
 });
 
 test("resolveFontFamily still fails closed on a missing name", () => {
@@ -428,7 +488,11 @@ test("card.fit region fills the box; ink hugs type plus pad", async () => {
   const midY = Math.round(regionImg.height / 2);
   assert.ok(await sampleAlpha(regionPng, farX, midY) > 80, "region fit paints a full-width plate");
   assert.equal(await sampleAlpha(inkPng, farX, midY), 0, "ink fit does not paint a full-width band");
-  assert.ok(await sampleAlpha(inkPng, 40, regionImg.height - 40) > 80, "ink fit still paints around the type");
+  assert.equal(await sampleAlpha(inkPng, 0, regionImg.height - 1), 0, "ink-fit plate is not flush to x=0");
+  assert.equal(await sampleAlpha(inkPng, regionImg.width - 1, regionImg.height - 1), 0, "ink-fit plate is not flush to width");
+  const insetX = Math.round(regionImg.width * 0.12);
+  const insetY = Math.round(regionImg.height * 0.35);
+  assert.ok(await sampleAlpha(inkPng, insetX, insetY) > 80, "ink fit still paints around the type");
   const poor = await composeDocument({
     ...spec,
     left: { card: { fill: "#EEEEEE", title: "Hi", color: "#DDDDDD" } },
@@ -519,6 +583,78 @@ test("markdown bold paints and strips markers from measured copy", async () => {
   assert.ok(markedPng && plainPng);
   assert.equal(markedPng.equals(plainPng), false);
   assert.ok(marked.pages[0]!.quality.text.some((item) => item.layer === "left"));
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("a packed region that cannot fit at scale 1 renders below 1 and warns text_overflow", async () => {
+  const dir = await testTemp("compose-overflow-");
+  const result = await composeDocument({
+    width: 640,
+    height: 200,
+    background: "#1C1410",
+    text: "#F3E6D0",
+    left: {
+      title: "A packed title that will not fit",
+      text: Array.from({ length: 40 }, (_, i) => `Course ${i + 1} with a descriptive line of copy.`),
+    },
+  }, { baseDir: dir });
+  const left = result.pages[0]!.painted.find((item) => item.id === "left");
+  assert.ok(left);
+  assert.ok(left.scale < 1, `expected scale < 1, got ${left.scale}`);
+  assert.ok(left.scale <= SCALE_MIN + 0.01, `expected min scale, got ${left.scale}`);
+  assert.equal(left.overflow, true);
+  assert.ok(result.pages[0]!.warnings.some((warning) => warning.code === "text_overflow"));
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("region-only video is a hole with media.rect and no dashed placeholder PNG", async () => {
+  const dir = await testTemp("compose-region-video-");
+  const written = await composeAndWrite({
+    width: 640,
+    height: 360,
+    background: "#111111",
+    text: "#eeeeee",
+    left: { video: "./clip.mp4" },
+  }, { baseDir: dir, outDir: dir });
+  const layer = written.manifest?.layers.find((item) => item.id === "left");
+  assert.ok(layer);
+  assert.equal(layer.file, undefined);
+  assert.equal(layer.media?.type, "video");
+  assert.equal(layer.media?.src, "./clip.mp4");
+  assert.ok(layer.media?.rect);
+  assert.equal(layer.media?.rect?.width > 0, true);
+  assert.equal(written.files.includes("left.png"), false);
+  const painted = written.result.pages[0]!.painted.find((item) => item.id === "left");
+  assert.equal(painted?.png, null);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("numeric table column keeps a gutter from the next column", async () => {
+  const dir = await testTemp("compose-table-gutter-");
+  const result = await composeDocument({
+    width: 640,
+    height: 360,
+    background: "#0E1A2B",
+    brand: "#FFB800",
+    text: "#F4F7FA",
+    fullpage: {
+      table: {
+        columns: ["Count", "Event"],
+        rows: [
+          ["4", "On time"],
+          ["12", "Late"],
+        ],
+      },
+    },
+  }, { baseDir: dir });
+  const cells = result.pages[0]!.quality.text.filter((item) => item.layer === "fullpage" && item.role === "table");
+  assert.ok(cells.length >= 4, JSON.stringify(cells));
+  const firstRow = cells.filter((item) => Math.abs(item.ink.y - cells[0]!.ink.y) < 2).sort((a, b) => a.ink.x - b.ink.x);
+  assert.ok(firstRow.length >= 2);
+  const left = firstRow[0]!;
+  const right = firstRow[1]!;
+  const gap = right.ink.x - (left.ink.x + left.ink.width);
+  assert.ok(gap >= 8, `expected a gutter between columns, got ${gap} (${left.ink.x}+${left.ink.width} vs ${right.ink.x})`);
   await rm(dir, { recursive: true, force: true });
 });
 

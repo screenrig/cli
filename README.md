@@ -170,8 +170,50 @@ writing files. Type size is procedural from page width/height and optional
 or `y`. A named `font` that is not installed is `usage_error`, not a silent
 fallback. Glyph fallback and overflow diagnostics stay on the authored page.
 
+How to put content on a playlist page. Follow this order. Do not always
+generate first. Do not always compose first.
+
+1. **You already have the image or video.** Easiest path: `media upload`
+   (declare → PUT exact bytes → commit) and reference `med_…` on the
+   playlist. Do it yourself. No compositor. No generate.
+2. **You do not have assets, and the page is a simple slide deck or needs
+   multiple object types on one page** (`image` | `video` | `iframe` |
+   `application` / webapp). Use the compositor (`compose render`): named
+   regions, local, unbilled. Compose writes stills (and holes for
+   iframe/webapp/region video). Upload those stills if they need to play on
+   a screen. Mixed object types are why you compose instead of a single
+   poster.
+3. **You want public-facing compelling messages** — posters, announcements,
+   restaurant menus, rich static pieces. Generate a still with an advanced
+   image model yourself and upload, or call ScreenRig `media generate`.
+   ScreenRig generate is the recommended approach for most of these use
+   cases. There is a charge by quality. `low` is $0.06 (600 credits) for
+   backgrounds and unimportant images. `medium` is $0.12 (1200 credits) and
+   is the default for most cases. `high` is $0.50 (5000 credits) for
+   high-density text such as restaurant menus and complex posters. Quality
+   changes the image and the price. Most static content should use generate
+   when it works. The POST stores the PNG in the account media store and
+   returns `med_…`; the CLI does not re-upload. Fetch content only to
+   inspect. Own-gen-then-upload remains valid when you already have a
+   preferred model.
+
+```sh
+screenrig --json media generate --prompt "A dusk lobby photograph, warm tungsten, no people" --aspect-ratio 16:9 --quality medium --tag LobbyDusk
+```
+
+`--prompt` is required. `--aspect-ratio` defaults to `16:9` (`1:1`, `16:9`,
+`9:16`, `4:3`, `3:4`, `3:2`, `2:3`). `--quality` defaults to `medium`
+(`low`, `medium`, `high`). Quality changes the image and the price.
+Optional `--tag` is the same 1–32 letter-or-digit tag as upload. The command
+blocks until a `201` MediaGeneration `{ media, usage }`. `media.id` is
+`med_…`. There is no 202 poll and no client PUT. A 402 is
+`payment_required` even during the launch fail-open window. Envelope `usage`
+shows credits and usd for the chosen tier (600 credits / $0.06, 1200 credits
+/ $0.12, 5000 credits / $0.50). The envelope never prints image bytes or the
+prompt.
+
 ScreenRig content has three families: static images, including stills produced
-by local compose; motion video; and web content delivered as an `iframe` or
+by local compose or `media generate`; motion video; and web content delivered as an `iframe` or
 `application`.
 
 Four wire primitives are supported: `image`, `video`, `iframe`, and
@@ -353,6 +395,11 @@ this window. After that instant, remaining below 1 credit rejects billed
 control-plane commands with `payment_required` (HTTP 402). The CLI still
 maps a 402 to `payment_required` if the server sends one. Both
 `credits_low` and `payment_required` can appear together on a 402 envelope.
+`media generate` is the exception: it is billed per still by `--quality`
+(low $0.06 / 600 credits, medium $0.12 / 1200 credits, high $0.50 / 5000
+credits). Quality changes the image and the price. Remaining that cannot
+cover the chosen tier returns `payment_required` / 402, including during
+this window.
 `account show`, `agent status`, `agent disconnect --yes`,
 `auth status`, `auth revoke --yes [--allow-lockout]`, `screen toast`,
 `screen screenshot`, `compose catalog`, and `compose render` do not debit
@@ -575,6 +622,11 @@ CLI never prints image bytes, hex, or base64.
 
 ## Local compose
 
+Compose is the second authoring path: a simple slide deck, or mixed object
+types on one page. It is local and unbilled. It is not the first choice when
+you already have the image or video, and it is not the recommended path for
+a public-facing poster or menu.
+
 Compose a still on this machine, look at the PNG, then upload it as media.
 
 ```sh
@@ -611,9 +663,10 @@ sit inside `card`. Copy accepts `**bold**`, `*italic*`, and `__underline__`.
 from its content. Page `logo` is a path or `{ src, corner }` (`top-left` /
 `top-right` / `bottom-left` / `bottom-right`, default `bottom-right`). The
 mark sits 32 px inset from that corner, contained to 200×100, never
-upscaled. `iframe` and `webapp` are not painted: the manifest carries
+upscaled. `iframe`, `webapp`, and region `video` are not painted: the manifest carries
 `media: { type, src, rect }` in page coordinates and omits `file` when the
-layer is hole-only. `enter` is a playlist `PrimitiveEnter` type (`fade-up`
+layer is hole-only. Page-level `video` stays a transparent background for the
+player. `enter` is a playlist `PrimitiveEnter` type (`fade-up`
 through `zoom-out`) with optional integer `stagger` 0 through 8. `motion` is
 playlist `spin` or `drift` (same fields as the wire). `compose render`
 writes one PNG per region and `manifest.json` with `version`, `canvas`, and
@@ -837,6 +890,7 @@ screenrig --json media upload ./lobby.mov --preset signage-1080p30 --no-audio
 screenrig --json media upload ./portrait.mov --preset signage-4k30
 screenrig --json media upload ./poster.png --no-transcode
 screenrig --json media upload ./lobby-welcome.png --tag lobby
+screenrig --json media generate --prompt "A dusk lobby photograph, warm tungsten, no people" --tag LobbyDusk
 screenrig --json media upload-batch ./images.json --state ./upload-state.json
 screenrig --json media upload-batch ./images.json --state ./upload-state.json --concurrency 4 --no-transcode --tag lobby
 screenrig --json media list --tag lobby --primitive image
@@ -1001,8 +1055,9 @@ the contact sheet.
 `compose render spec.json --target-width 3840 --target-height 2160` checks the
 physical content viewport without resizing the output. Nonblocking warnings
 identify decoded image upscaling above 1.25× and output upscaling above 1.25×.
-Measurements are returned in `data.quality` and `manifest.json`; an omitted
-target is explicitly unknown. Cover crops fill a region without stretching.
+Measurements are returned in `data.quality` and visual `lint`; they are not
+`manifest.json` fields. An omitted target is explicitly unknown. Cover crops
+fill a region without stretching.
 Re-render from originals at the required canvas dimensions to recover detail.
 Optional `--safe-area` flags measured text ink outside a 5% TV-safe margin.
 `compose batch` accepts the same flags, writes a contact sheet, and supports
@@ -1020,7 +1075,7 @@ update their application primitive explicitly after the operation succeeds.
 `compose render` accepts a JSON page or a deck `{ "pages": [ { "id": "intro", ...region overrides } ] }`.
 A deck file is enough; `compose batch` adds a contact-sheet preview and
 `--only ID`. Type size follows the canvas. Images cover their region.
-Overlays keep text opaque; set region `fill` when a plate is needed.
+Overlays keep text opaque; set a `card` plate when backing is needed.
 Alternate region sets on adjacent pages; a deck that repeats one layout
 reads as a slideshow, not signage.
 
@@ -1031,12 +1086,13 @@ PNGs, `manifest.json`, a contact-sheet preview and a batch manifest.
 `--only intro` selectively retries one page and marks other pages
 `not_selected` in a separate correction manifest.
 
-Diagnostics distinguish measured text overflow, truncation, crowding and text
-collisions from intentional text/media overlays. Missing-glyph raster detection
-selects a complete installed fallback before measurement and paint, preserving
-the requested weight and reporting its node and font. Unresolved glyphs are
-warned explicitly. This is not a language-shaping guarantee. Full-resolution
-visual review remains useful; contact sheets are reduced-resolution previews.
+Missing-glyph raster detection selects a complete installed fallback before
+measurement and paint, preserving the requested weight and reporting its node
+and font. Unresolved glyphs are warned explicitly. This is not a
+language-shaping guarantee. Full-resolution visual review remains useful;
+contact sheets are reduced-resolution previews. Copy that still cannot fit at
+the minimum type scale paints at that scale and emits a nonblocking
+`text_overflow` warning.
 
 `playlist validate playlist.json` performs offline canonical schema and
 cross-field validation before upload or publication. Create/update run the same

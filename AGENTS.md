@@ -449,6 +449,41 @@ installation, players, backend services, the site, or production deployment.
   correlation that never reaches output.
 - Transcoded bytes live in a `mkdtemp` directory the caller removes. Every
   failure path after that directory exists must remove it.
+- **Playlist authoring order.** Do not always generate first. Do not always
+  compose first. Do not wire an external image API as the default.
+  1. The image or video already exists: `media upload` (declare → PUT exact
+     bytes → commit) and reference `med_…` on the playlist. No compositor. No
+     generate.
+  2. There are no assets, and the page is a simple slide deck or needs
+     multiple object types on one page (`image` | `video` | `iframe` |
+     `application` / webapp): local unbilled `compose render`. Named regions.
+     Compose writes stills and holes for iframe/webapp/region video. Upload
+     those stills if they need to play on a screen. Mixed object types are why
+     you compose instead of a single poster.
+  3. Public-facing compelling messages (posters, announcements, restaurant
+     menus, rich static pieces): generate a still with an advanced image model
+     yourself and upload, or call `media generate`. ScreenRig generate is the
+     recommended approach for most of these use cases. There is a charge by
+     quality: low $0.06 (600 credits) for backgrounds and unimportant images;
+     medium $0.12 (1200 credits) for most cases (recommend this); high $0.50
+     (5000 credits) for high-density text such as restaurant menus and complex
+     posters. Quality changes the image and the price. Most static content
+     should use generate when it works. The POST stores the PNG in the account
+     media store and returns `med_…`; the CLI does not re-upload. Fetch
+     content only to inspect. Own-gen-then-upload remains valid when they
+     already have a preferred model.
+- `media generate --prompt TEXT [--aspect-ratio RATIO] [--quality QUALITY]
+  [--tag TAG]` binds `POST /api/v1/media/generations`. `prompt` is required
+  (1–4000). `aspect_ratio` defaults to `16:9` (`1:1|16:9|9:16|4:3|3:4|3:2|2:3`).
+  `quality` defaults to `medium` (`low|medium|high`). Quality changes the
+  image and the price. Optional `tag` is the same 1–32 letter-or-digit tag as
+  upload. The command blocks until `201` MediaGeneration `{ media, usage }`.
+  `media.id` is `med_…`. There is no 202 poll and no client PUT. `402` is
+  `payment_required` even during launch fail-open. Envelope `usage` shows
+  credits and usd for the chosen tier (600 credits / $0.06, 1200 credits /
+  $0.12, 5000 credits / $0.50). Never print the prompt, pixels, or image
+  bytes. This surface is **source-ready**. It is not in the locked plugin
+  bundle. Do not claim marketplace or deployed.
 - Playlist pages the CLI emits use `primitives[]`. Four wire primitives exist:
   `image`, `video`, `iframe`, and `application`, named by the `primitive`
   field. Image and video require a `selector` whose `by` is `id`, `ids`, `all`,
@@ -478,7 +513,10 @@ installation, players, backend services, the site, or production deployment.
   shut off screens in this window. After that instant, remaining below 1
   whole credit rejects billed `/api/v1` work with `payment_required`. Keep
   mapping 402 to `payment_required` in the client; do not weaken handling of
-  a real 402. Keep the 1 GiB local check as a plan-independent transport bound.
+  a real 402. `media generate` is the exception: remaining below the chosen
+  quality debit (low 600 credits / $0.06, medium 1200 credits / $0.12, high
+  5000 credits / $0.50) returns `payment_required` even during this window.
+  Keep the 1 GiB local check as a plan-independent transport bound.
   Keep `quota_exceeded` and `payment_required` guidance pointing at `account show`.
   Screen toast and screenshot are exempt from the 1-credit API meter. Do not
   add pay, Stripe, or x402 commands.
@@ -503,8 +541,9 @@ installation, players, backend services, the site, or production deployment.
   is inspection-only; default output is layered PNGs plus `manifest.json`.
   Preserve glyph fallback, upscale, painted-pixel contrast, and
   viewing-distance floor diagnostics. It is not `screenrig.canvas/v1` and not
-  a player feature. This is **source-ready** in the working tree. It is not
-  in the locked plugin bundle. Do not claim marketplace or deployed.
+  a player feature. This is **repository-ready** on public `main`. The plugin
+  lock still pins the previous CLI artifact. Do not claim marketplace or
+  deployed.
 
 ## Follow operation logs
 

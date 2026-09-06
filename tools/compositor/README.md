@@ -17,7 +17,10 @@ cd tools/compositor
 node server.mjs
 ```
 
-`npm start` is the same as `node server.mjs` after that build. Do not install a second canvas package here.
+Do not install a second canvas package here. Showcase media under
+`examples/media/` is local and gitignored; the lab still runs without those
+files, but example pages that reference them will fail to generate until the
+files are present.
 
 Open http://127.0.0.1:4545/
 

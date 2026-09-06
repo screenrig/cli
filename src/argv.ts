@@ -78,6 +78,9 @@ const VALUE_FLAGS = new Set([
   "update",
   "concurrency",
   "frame-ms",
+  "prompt",
+  "aspect-ratio",
+  "quality",
 ]);
 
 export function parseArgv(argv: string[]): ParsedArgs {

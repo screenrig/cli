@@ -184,6 +184,18 @@ test("compose target flags dispatch separately and return nonblocking warnings w
   await rm(cwdDir, { recursive: true, force: true });
 });
 
+test("compose render --output foo.png is usage_error naming a directory", async () => {
+  const cwdDir = await testTemp("compose-output-png-");
+  await writeFile(path.join(cwdDir, "spec.json"), JSON.stringify({
+    width: 64, height: 64, background: "#1C1410", text: "#F3E6D0", fullpage: { title: "Hi" },
+  }));
+  const result = await withRuntime(["--json", "compose", "render", "spec.json", "--output", "foo.png"], { cwdDir });
+  assert.equal(result.code, ExitCode.Usage, result.stdout);
+  const body = JSON.parse(result.stdout);
+  assert.match(body.error.detail, /directory/);
+  await rm(cwdDir, { recursive: true, force: true });
+});
+
 test("USAGE documents compose batch page limit and layered render", () => {
   assert.match(USAGE, /compose batch <file> --output DIRECTORY \[--only ID\]/);
   assert.match(USAGE, /1 to 2000 pages/);

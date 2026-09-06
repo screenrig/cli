@@ -21,6 +21,10 @@ import {
   type FeedbackSubmission,
   type FeedbackWrite,
   type KVEntry,
+  type MediaGeneration,
+  type MediaGenerationAspectRatio,
+  type MediaGenerationQuality,
+  type MediaGenerationRequest,
   type MediaTagPatch,
   type Operation,
   type OperationAccepted,
@@ -76,6 +80,7 @@ import { composeBatch } from "./compose/batch.js";
 import { assertPlaylistValid, PLAYLIST_SERVER_CHECKS, playlistLint } from "./playlist-validate.js";
 import {
   lintComposedPage,
+  pageSpecForLint,
   pixelsFromPng,
   sortLint,
   viewingOf,
@@ -99,7 +104,7 @@ import {
   playlistTemplateCatalog,
 } from "./playlist-templates.js";
 import { composeCatalog, formatComposeCatalog } from "./compose/catalog.js";
-import { composeAndWrite, defaultComposeOutDir } from "./compose/compose.js";
+import { composeAndWrite, defaultComposeOutDir, rejectImageLikeOutput } from "./compose/compose.js";
 import {
   cwebpLookup,
   ffmpegLookup,
@@ -162,6 +167,7 @@ Commands:
   app update <id> <directory> --if-match REVISION [--no-wait] [--poll-ms MS]
   app list
   app show <id>
+  media generate --prompt TEXT [--aspect-ratio RATIO] [--quality low|medium|high] [--tag TAG]
   media upload <file> [--content-type TYPE] [--tag TAG] [--no-wait] [--poll-ms MS]
                       [--no-transcode] [--codec h264|hevc] [--max-fps N]
                       [--max-edge PIXELS] [--webp-quality 1-100] [--no-progress]
@@ -237,6 +243,13 @@ Credits:
   billed commands are not rejected for empty remaining and do not return
   HTTP 402. After that instant, remaining below 1 credit is payment_required.
   Empty remaining does not stop or shut off screens in this window.
+  media generate is the exception: it is billed per still by --quality.
+  low is $0.06 (600 credits) for backgrounds and unimportant images.
+  medium is $0.12 (1200 credits) and is the default for most cases.
+  high is $0.50 (5000 credits) for high-density text such as restaurant
+  menus and complex posters. Quality changes the image and the price.
+  Remaining that cannot cover the chosen tier returns payment_required / 402,
+  including during this window.
 
 ${LOOK_AT_THE_CONTACT_SHEET}
 `;
@@ -308,6 +321,11 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
   if (output.includes("\0")) {
     throw usageError("compose render --output must not contain a NUL byte.");
   }
+  try {
+    rejectImageLikeOutput(output, "compose render");
+  } catch (err) {
+    rethrowCompose(err);
+  }
   if (flagBool(args.flags, "ink-tight") || flagString(args.flags, "ink-padding") !== undefined) {
     throw usageError("compose render no longer crops with --ink-tight; layered region PNGs are the publishing model. Run compose catalog.");
   }
@@ -360,12 +378,13 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
   const lintWithPixels = [];
   for (const page of written.result.pages) {
     const pixels = await pixelsFromPng(page.combined);
+    const pageSpec = pageSpecForLint(spec, page.id);
     lintWithPixels.push(...lintComposedPage({
       page_id: page.id,
-      spec,
+      spec: pageSpec,
       quality: page.quality,
       pixels,
-      viewing: viewingOf(spec),
+      viewing: viewingOf(pageSpec),
     }));
   }
   const ordered = sortLint(lintWithPixels, written.result.pages.map((page) => page.id));
@@ -507,6 +526,9 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
     requireFlagValue(args, "output", "./rendered");
     const output = flagString(args.flags, "output");
     if (!file || !output || args.positionals.length !== 3) throw usageError("compose batch requires one JSON file and --output DIRECTORY.");
+    try {
+      rejectImageLikeOutput(path.resolve(runtime.cwd(), output), "compose batch");
+    } catch (error) { rethrowCompose(error); }
     requireFlagValue(args, "target-width", "3840"); requireFlagValue(args, "target-height", "2160"); requireFlagValue(args, "only", "page-id");
     const tw = flagString(args.flags, "target-width"), th = flagString(args.flags, "target-height");
     if ((tw === undefined) !== (th === undefined)) throw usageError("Provide both target dimensions.");
@@ -1876,6 +1898,11 @@ async function mediaCommand(
     });
     return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted media ${id}` };
   }
+  if (action === "generate") {
+    return loggerOf(runtime).withLocal({ op: "media.generate", message: "media generate" }, () =>
+      mediaGenerate(args, client),
+    );
+  }
   if (action === "upload") {
     return loggerOf(runtime).withLocal({ op: "media.upload", message: "media upload" }, () =>
       mediaUpload(args, runtime, client),
@@ -1885,6 +1912,98 @@ async function mediaCommand(
     return mediaUploadBatch(args, runtime, client, resolved);
   }
   throw usageError("Unknown media command.");
+}
+
+const GENERATE_ASPECT_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"] as const;
+const GENERATE_QUALITIES = ["low", "medium", "high"] as const;
+const GENERATE_PROMPT_MAX = 4000;
+const GENERATE_DEFAULT_TIMEOUT_MS = 60_000;
+
+function isGenerateAspectRatio(value: string): value is MediaGenerationAspectRatio {
+  return (GENERATE_ASPECT_RATIOS as readonly string[]).includes(value);
+}
+
+function isGenerateQuality(value: string): value is MediaGenerationQuality {
+  return (GENERATE_QUALITIES as readonly string[]).includes(value);
+}
+
+function mediaGenerationFromBody(body: unknown): MediaGeneration {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw usageError("Media generation response does not match the MediaGeneration contract.");
+  }
+  const rec = body as Record<string, unknown>;
+  const media = rec.media;
+  const usage = rec.usage;
+  if (!media || typeof media !== "object" || Array.isArray(media)) {
+    throw usageError("Media generation response does not match the MediaGeneration contract.");
+  }
+  const id = (media as { id?: unknown }).id;
+  if (typeof id !== "string" || !id.startsWith("med_")) {
+    throw usageError("Media generation response is missing a med_… media id.");
+  }
+  if (!usage || typeof usage !== "object" || Array.isArray(usage)) {
+    throw usageError("Media generation response does not match the MediaGeneration contract.");
+  }
+  const credits = (usage as { credits?: unknown }).credits;
+  const usd = (usage as { usd?: unknown }).usd;
+  if (typeof credits !== "number" || !Number.isInteger(credits) || credits < 1) {
+    throw usageError("Media generation response does not match the MediaGeneration contract.");
+  }
+  if (typeof usd !== "string" || usd.length < 1) {
+    throw usageError("Media generation response does not match the MediaGeneration contract.");
+  }
+  return {
+    media: media as MediaGeneration["media"],
+    usage: usage as MediaGeneration["usage"],
+  };
+}
+
+async function mediaGenerate(args: ParsedArgs, client: ApiClient): Promise<CommandResult> {
+  requireFlagValue(args, "prompt", `"A dusk lobby photograph"`);
+  requireFlagValue(args, "aspect-ratio", "16:9");
+  requireFlagValue(args, "quality", "medium");
+  const prompt = flagString(args.flags, "prompt");
+  if (prompt === undefined || prompt.length < 1 || prompt.length > GENERATE_PROMPT_MAX) {
+    throw usageError("media generate requires --prompt TEXT of 1 to 4000 characters.");
+  }
+  const aspectRatio = flagString(args.flags, "aspect-ratio") ?? "16:9";
+  if (!isGenerateAspectRatio(aspectRatio)) {
+    throw usageError("--aspect-ratio must be 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, or 2:3.");
+  }
+  const quality = flagString(args.flags, "quality") ?? "medium";
+  if (!isGenerateQuality(quality)) {
+    throw usageError("--quality must be low, medium, or high.");
+  }
+  const tag = mediaTagFromArgs(args);
+  const body: MediaGenerationRequest = {
+    prompt,
+    aspect_ratio: aspectRatio,
+    quality,
+    ...(tag ? { tag } : {}),
+  };
+  const timeoutMs = flagNumber(args.flags, "timeout") ?? GENERATE_DEFAULT_TIMEOUT_MS;
+  const response = await client.call({
+    method: "POST",
+    path: "/api/v1/media/generations",
+    idempotent: true,
+    timeout_ms: timeoutMs,
+    body,
+  });
+  if (response.status !== 201) {
+    throw usageError("media generate does not poll; the server must return 201 MediaGeneration.");
+  }
+  const generated = mediaGenerationFromBody(response.body);
+  const mediaId = generated.media.id;
+  return {
+    envelope: jsonBody(response, client.requestId, { id: mediaId, media_id: mediaId }),
+    exitCode: ExitCode.Success,
+    human: humanLines("Generated media", [
+      ["media_id", mediaId],
+      ["quality", generated.usage.quality ?? quality],
+      ["credits", String(generated.usage.credits)],
+      ["usd", generated.usage.usd],
+    ]),
+  };
 }
 
 async function mediaUpdate(args: ParsedArgs, client: ApiClient): Promise<CommandResult> {

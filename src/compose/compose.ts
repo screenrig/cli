@@ -44,6 +44,20 @@ function usage(message: string): Error {
   return Object.assign(new Error(message), { code: "usage_error" });
 }
 
+const IMAGE_OUTPUT_EXT = /\.(png|webp|jpe?g)$/i;
+const TABLE_CELL_PAD = 20;
+const HOLE_KINDS = new Set(["video", "iframe", "application"]);
+
+export function rejectImageLikeOutput(output: string, command: string): void {
+  if (IMAGE_OUTPUT_EXT.test(output.trim())) {
+    throw usage(`${command} --output is a directory, not an image file`);
+  }
+}
+
+function isDeckSource(source: unknown): boolean {
+  return Boolean(source && typeof source === "object" && !Array.isArray(source) && Array.isArray((source as { pages?: unknown }).pages));
+}
+
 export function resolveImagePath(src: string, baseDir: string, field = "image"): string {
   if (src.includes("\0")) throw usage(`${field} must not contain a NUL byte`);
   if (src.includes("://") || /^(https?|file|data):/i.test(src)) {
@@ -244,7 +258,7 @@ function chooseScale(
   if (start.height > start.available) {
     let lo = SCALE_MIN;
     let hi = 1;
-    let best = start;
+    let best = at(SCALE_MIN);
     for (let i = 0; i < 16; i++) {
       const mid = (lo + hi) / 2;
       const trial = at(mid);
@@ -289,7 +303,7 @@ function roleColor(
 function holeOnly(layer: LayerSpec): boolean {
   if (layer.fill || layer.region === "logo") return false;
   return layer.blocks.length > 0 && layer.blocks.every((block) => (
-    block.role === "placeholder" && (block.kind === "iframe" || block.kind === "application")
+    block.role === "placeholder" && HOLE_KINDS.has(block.kind)
   ));
 }
 
@@ -299,7 +313,7 @@ function shouldInsetForLogo(layer: LayerSpec): boolean {
   return layer.blocks.some((block) => (
     block.role === "title" || block.role === "subtitle" || block.role === "text" || block.role === "footer"
     || block.role === "cards" || block.role === "table"
-    || (block.role === "placeholder" && (block.kind === "iframe" || block.kind === "application"))
+    || (block.role === "placeholder" && HOLE_KINDS.has(block.kind))
   ));
 }
 
@@ -381,7 +395,7 @@ function columnWidths(
   const header = table.columns.map((col) => measureMarkdown(ctx, col, headerSize, family));
   const natural = table.columns.map((_, i) => {
     const cell = Math.max(header[i] ?? 0, ...table.rows.map((row) => measureMarkdown(ctx, String(row[i] ?? ""), bodySize, family)));
-    return Math.ceil(cell) + 20;
+    return Math.ceil(cell) + TABLE_CELL_PAD + (numeric[i] ? TABLE_CELL_PAD : 0);
   });
   const total = natural.reduce((sum, w) => sum + w, 0);
   if (total <= innerW) {
@@ -410,13 +424,14 @@ function measureTable(
   family: string,
   itemGapBoost = 0,
 ): number {
-  const { widths } = columnWidths(ctx, table, innerW, ramp.small, ramp.table, family);
+  const { widths, numeric } = columnWidths(ctx, table, innerW, ramp.small, ramp.table, family);
   const headerLead = leadingOf(ramp.small);
   const rowLead = leadingOf(ramp.table);
+  const cellW = (index: number) => Math.max(1, (widths[index] ?? 1) - TABLE_CELL_PAD - (numeric[index] ? TABLE_CELL_PAD : 0));
   let height = 0;
-  height += Math.max(headerLead, ...table.columns.map((col, i) => wrapMarkdown(ctx, col, widths[i] ?? 1, ramp.small, family).length * headerLead));
+  height += Math.max(headerLead, ...table.columns.map((col, i) => wrapMarkdown(ctx, col, cellW(i), ramp.small, family).length * headerLead));
   for (const [i, row] of table.rows.entries()) {
-    const lines = Math.max(1, ...row.map((cell, c) => wrapMarkdown(ctx, String(cell), widths[c] ?? 1, ramp.table, family).length));
+    const lines = Math.max(1, ...row.map((cell, c) => wrapMarkdown(ctx, String(cell), cellW(c), ramp.table, family).length));
     height += lines * rowLead;
     if (itemGapBoost && i < table.rows.length - 1) height += itemGapBoost;
   }
@@ -737,7 +752,7 @@ async function paintLayer(
     h: Math.max(1, layer.h - extra.top - extra.bottom),
   };
   const inkFit = layer.cardFit === "ink";
-  const pad = inkFit ? CARD_INK_PAD : layer.pad;
+  const pad = layer.pad;
   if (layer.fill && !inkFit) {
     ctx.fillStyle = parseColor(layer.fill, "#000");
     ctx.fillRect(area.x, area.y, area.w, area.h);
@@ -798,23 +813,23 @@ async function paintLayer(
     const flowBlocks = footerText ? [...fixed, footer!] : fixed;
     const inkW = packInkWidth(ctx, flowBlocks, inner.w, ramp, family);
     const contentH = packH + (footerText ? footerH + footerGap : 0);
-    const plateW = Math.min(area.w, Math.max(1, inkW + pad * 2));
-    const plateH = Math.min(area.h, Math.max(1, Math.ceil(contentH) + pad * 2));
-    let px = area.x;
-    if (layer.align === "center") px = area.x + Math.round((area.w - plateW) / 2);
-    if (layer.align === "right") px = area.x + area.w - plateW;
-    let py = area.y;
-    if (layer.valign === "bottom") py = area.y + area.h - plateH;
-    else if (layer.valign !== "top") py = area.y + Math.round((area.h - plateH) / 2);
+    const plateW = Math.min(inner.w, Math.max(1, inkW + CARD_INK_PAD * 2));
+    const plateH = Math.min(inner.h, Math.max(1, Math.ceil(contentH) + CARD_INK_PAD * 2));
+    let px = inner.x;
+    if (layer.align === "center") px = inner.x + Math.round((inner.w - plateW) / 2);
+    if (layer.align === "right") px = inner.x + inner.w - plateW;
+    let py = inner.y;
+    if (layer.valign === "bottom") py = inner.y + inner.h - plateH;
+    else if (layer.valign !== "top") py = inner.y + Math.round((inner.h - plateH) / 2);
     if (layer.fill) {
       ctx.fillStyle = parseColor(layer.fill, "#000");
       ctx.fillRect(px, py, plateW, plateH);
     }
     inner = {
-      x: px + pad,
-      y: py + pad,
-      w: Math.max(1, plateW - pad * 2),
-      h: Math.max(1, plateH - pad * 2),
+      x: px + CARD_INK_PAD,
+      y: py + CARD_INK_PAD,
+      w: Math.max(1, plateW - CARD_INK_PAD * 2),
+      h: Math.max(1, plateH - CARD_INK_PAD * 2),
     };
   }
   const slack = Math.max(0, (inkFit ? inner.h - (footerText ? footerH + footerGap : 0) : available) - packH);
@@ -899,12 +914,16 @@ async function paintLayer(
         let rowBottom = y;
         for (let c = 0; c < block.columns.length; c++) {
           const cellAlign = numeric[c] ? "right" : "left";
+          const padL = numeric[c] ? TABLE_CELL_PAD : 0;
+          const padR = TABLE_CELL_PAD;
+          const cellX = x + padL;
+          const cellW = Math.max(1, (widths[c] ?? 1) - padL - padR);
           const face = recordFont(quality, warnings, `${layer.id}.table`, stripMarkdown(String(cells[c] ?? "")), family);
           noteText(ctx, runs, {
-            layer: layer.id, role, text: String(cells[c] ?? ""), x, y, maxW: widths[c] ?? 1, size, family: face, align: cellAlign, originX: layer.x, originY: layer.y,
+            layer: layer.id, role, text: String(cells[c] ?? ""), x: cellX, y, maxW: cellW, size, family: face, align: cellAlign, originX: layer.x, originY: layer.y,
           });
           const bottom = drawText(ctx, {
-            text: String(cells[c] ?? ""), x, y, maxW: widths[c] ?? 1, size, family: face, color, align: cellAlign, leading: lead,
+            text: String(cells[c] ?? ""), x: cellX, y, maxW: cellW, size, family: face, color, align: cellAlign, leading: lead,
             shadow: sh(color), outline: layer.outline,
           });
           rowBottom = Math.max(rowBottom, bottom);
@@ -924,7 +943,7 @@ async function paintLayer(
       recordImage(quality, warnings, layer.id, img, { width: inner.w, height: h }, painted);
       y += h;
     } else if (block.role === "placeholder") {
-      if (block.kind === "iframe" || block.kind === "application") {
+      if (HOLE_KINDS.has(block.kind)) {
         const h = height ?? Math.max(80, limit - y);
         if (layer.media) layer.media.rect = { x: Math.round(layer.x + inner.x), y: Math.round(layer.y + y), width: Math.round(inner.w), height: Math.round(h) };
         y += h;
@@ -982,6 +1001,12 @@ async function paintLayer(
   }
 
   for (const run of runs) quality.text.push(run);
+  if (overflow) {
+    warnings.push({
+      code: "text_overflow",
+      message: `${layer.id}: copy overflows at ${scale.toFixed(2)}× type scale.`,
+    });
+  }
   return {
     id: layer.id,
     png: holeOnly(layer) ? null : Buffer.from(canvas.toBuffer("image/png")),
@@ -1080,7 +1105,7 @@ async function combinedPng(page: { layers: LayerSpec[]; painted: PaintedLayer[] 
   for (const layer of sortLayers(page.layers)) {
     const item = byId.get(layer.id);
     if (!item?.png) continue;
-    if (layer.media?.type === "video") continue;
+    if (layer.region === "background" && layer.media?.type === "video") continue;
     const img = await loadImage(item.png);
     ctx.drawImage(img, layer.x, layer.y);
   }
@@ -1196,9 +1221,10 @@ export async function composeAndWrite(
   const files: string[] = [];
   const pages: WrittenCompose["pages"] = [];
   if (!options.lintOnly) await mkdir(options.outDir, { recursive: true });
+  const nested = isDeckSource(source);
   for (const page of result.pages) {
-    const dir = result.pages.length === 1 ? options.outDir : join(options.outDir, page.id);
-    const prefix = result.pages.length === 1 ? "" : `${page.id}/`;
+    const dir = nested ? join(options.outDir, page.id) : options.outDir;
+    const prefix = nested ? `${page.id}/` : "";
     if (!options.lintOnly) await mkdir(dir, { recursive: true });
     const images: Array<{ id: string; file: string }> = [];
     for (const item of page.painted) {
@@ -1235,7 +1261,7 @@ export async function composeAndWrite(
       scale: Object.fromEntries(page.painted.map((item) => [item.id, item.scale])),
     });
   }
-  if (!options.lintOnly && result.pages.length > 1) {
+  if (!options.lintOnly && nested) {
     const deck = {
       version: 1,
       name: result.name,
