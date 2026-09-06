@@ -464,10 +464,10 @@ installation, players, backend services, the site, or production deployment.
      generate atmosphere-only stills for later overlay. There is a charge by
      quality: low $0.06 (600 credits) for unimportant generated stills only;
      medium $0.12 (1200 credits) for most cases (recommend this); high $0.50
-     (5000 credits) for dense text and complex posters. Quality changes the
-     image and the price. The POST stores the PNG in the account media store
-     and returns `med_…`; the CLI does not re-upload. Fetch content only to
-     inspect.
+     (5000 credits) for dense text and complex posters. Quality
+     changes the image and the price. The POST stores the PNG in the account
+     media store and returns `med_…`; the CLI does not re-upload. Fetch
+     content only to inspect.
   3. Slide-deck-like experiences (title/body/table slides, internal decks,
      measured type that must stay editable as compose JSON): local unbilled
      `compose render`. Named regions. Compose writes stills and holes for
@@ -480,8 +480,8 @@ installation, players, backend services, the site, or production deployment.
 - `media generate --prompt TEXT [--aspect-ratio RATIO] [--quality QUALITY]
   [--tag TAG]` binds `POST /api/v1/media/generations`. `prompt` is required
   (1–4000). `aspect_ratio` defaults to `16:9` (`1:1|16:9|9:16|4:3|3:4|3:2|2:3`).
-  `quality` defaults to `medium` (`low|medium|high`). Quality changes the
-  image and the price. Optional `tag` is the same 1–32 letter-or-digit tag as
+  `quality` defaults to `medium` (`low|medium|high`). Quality
+  changes the image and the price. Optional `tag` is the same 1–32 letter-or-digit tag as
   upload. The command blocks until `201` MediaGeneration `{ media, usage }`.
   `media.id` is `med_…`. There is no 202 poll and no client PUT. `402` is
   `payment_required` even during launch fail-open. Envelope `usage` shows
