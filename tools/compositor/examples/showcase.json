@@ -2,7 +2,7 @@
   "name": "Signage showcase v2",
   "width": 1920,
   "height": 1080,
-  "font": "Noto Serif",
+  "font": "Liberation Serif",
   "pages": [
     {
       "id": "fire-at-the-table",
@@ -84,7 +84,7 @@
     },
     {
       "id": "ashline-circuit",
-      "font": "Noto Sans",
+      "font": "Liberation Sans",
       "background": "#0B1220",
       "brand": "#E8EEF6",
       "text": "#F4F7FB",

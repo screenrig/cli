@@ -99,7 +99,7 @@ export function composeCatalog(): ComposeCatalog {
       slide: {
         width: 1920,
         height: 1080,
-        font: "Noto Serif",
+        font: "Liberation Serif",
         background: "#1C1410",
         brand: "#C9A227",
         text: "#F3E6D0",
@@ -118,7 +118,7 @@ export function composeCatalog(): ComposeCatalog {
       menu: {
         width: 1920,
         height: 1080,
-        font: "Noto Serif",
+        font: "Liberation Serif",
         background: "#14110C",
         brand: "#C9A227",
         text: "#F3E6D0",
@@ -137,7 +137,7 @@ export function composeCatalog(): ComposeCatalog {
       table: {
         width: 1920,
         height: 1080,
-        font: "Noto Sans",
+        font: "Liberation Sans",
         background: "#0E1A2B",
         brand: "#FFB800",
         text: "#F4F7FA",
@@ -156,7 +156,7 @@ export function composeCatalog(): ComposeCatalog {
       overlay: {
         width: 1920,
         height: 1080,
-        font: "Noto Serif",
+        font: "Liberation Serif",
         background: "#00000000",
         brand: "#C9A227",
         text: "#FFFFFF",
@@ -175,7 +175,7 @@ export function composeCatalog(): ComposeCatalog {
       "overlay-left": {
         width: 1920,
         height: 1080,
-        font: "Noto Sans",
+        font: "Liberation Sans",
         background: "#2A3547",
         brand: "#F8B334",
         text: "#F4F7FA",
@@ -194,7 +194,7 @@ export function composeCatalog(): ComposeCatalog {
       "overlay-right": {
         width: 1920,
         height: 1080,
-        font: "Noto Sans",
+        font: "Liberation Sans",
         background: "#2A3547",
         brand: "#F8B334",
         text: "#F4F7FA",
@@ -213,7 +213,7 @@ export function composeCatalog(): ComposeCatalog {
       "overlay-bottom": {
         width: 1920,
         height: 1080,
-        font: "Noto Sans",
+        font: "Liberation Sans",
         background: "#2A3547",
         brand: "#F8B334",
         text: "#F4F7FA",
@@ -232,7 +232,7 @@ export function composeCatalog(): ComposeCatalog {
       "overlay-title": {
         width: 1920,
         height: 1080,
-        font: "Noto Sans",
+        font: "Liberation Sans",
         background: "#2A3547",
         brand: "#F8B334",
         text: "#F4F7FA",
@@ -249,7 +249,7 @@ export function composeCatalog(): ComposeCatalog {
       "overlay-still": {
         width: 1920,
         height: 1080,
-        font: "Noto Sans",
+        font: "Liberation Sans",
         background: "#2A3547",
         brand: "#F8B334",
         text: "#F4F7FA",
@@ -263,7 +263,7 @@ export function composeCatalog(): ComposeCatalog {
       deck: {
         width: 1920,
         height: 1080,
-        font: "Noto Serif",
+        font: "Liberation Serif",
         background: "#0D0D0D",
         brand: "#D4AF37",
         text: "#F2EDE4",

@@ -29,6 +29,8 @@ jobs:
         run: python3 scripts/check-public-repo.py
       - name: Install dependencies
         run: npm ci
+      - name: Install Liberation fonts for compose examples
+        run: sudo apt-get update && sudo apt-get install -y fonts-liberation
       - name: Verify source and package
         run: |
           npm run typecheck

@@ -47,7 +47,7 @@ JSON. The page sets the rails. Every region inherits `font`, `background`, `bran
 {
   "width": 1920,
   "height": 1080,
-  "font": "Noto Serif",
+  "font": "Liberation Serif",
   "background": "#1C1410",
   "brand": "#C9A227",
   "text": "#F3E6D0",

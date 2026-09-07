@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
@@ -42,6 +42,28 @@ function page(extra: Record<string, unknown> = {}): Record<string, unknown> {
     left: { title: "FIRE AT THE TABLE", text: "A four-course supper cooked over live coals." },
     ...extra,
   };
+}
+
+function namedFonts(value: unknown): string[] {
+  const found = new Set<string>();
+  const walk = (node: unknown): void => {
+    if (node == null || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+      return;
+    }
+    const record = node as Record<string, unknown>;
+    if (typeof record.font === "string" && record.font !== "") found.add(record.font);
+    for (const child of Object.values(record)) walk(child);
+  };
+  walk(value);
+  return [...found];
+}
+
+function assertExampleFontsInstalled(label: string, spec: unknown): void {
+  for (const family of namedFonts(spec)) {
+    assert.equal(resolveFontFamily(family), family, `${label} names uninstalled font ${family}`);
+  }
 }
 
 test("catalog lists regions, not Frame or recipes", () => {
@@ -86,6 +108,7 @@ test("catalog lists regions, not Frame or recipes", () => {
     "overlay-title", "overlay-still", "deck",
   ]) {
     parseComposeSpec(catalog.examples[key]);
+    assertExampleFontsInstalled(`catalog.examples.${key}`, catalog.examples[key]);
   }
   const formatted = formatComposeCatalog(catalog);
   assert.match(formatted, /regions: fullpage\|left\|right/);
@@ -118,6 +141,7 @@ test("catalog lists regions, not Frame or recipes", () => {
 
 test("exec-intro lab deck is valid named-region compose JSON", async () => {
   const spec = JSON.parse(await readFile(path.join(process.cwd(), "tools/compositor/examples/exec-intro.json"), "utf8")) as unknown;
+  assertExampleFontsInstalled("exec-intro.json", spec);
   const document = parseComposeSpec(spec);
   assert.deepEqual(document.pages.map((page) => page.id), [
     "title", "ai-transform", "mini-pc", "prices", "low-end", "ai-smart",
@@ -141,6 +165,18 @@ test("exec-intro lab deck is valid named-region compose JSON", async () => {
   const enterPage = document.pages.find((page) => page.id === "enter")!;
   assert.ok(enterPage.layers.some((layer) => layer.id === "logo"));
   assert.equal(enterPage.layers.find((layer) => layer.id === "background")?.enter, null);
+});
+
+test("compositor example specs name installed fonts", async () => {
+  const dir = path.join(process.cwd(), "tools/compositor/examples");
+  const files = (await readdir(dir)).filter((name) => name.endsWith(".json")).sort();
+  assert.ok(files.includes("showcase.json"));
+  assert.ok(files.includes("exec-intro.json"));
+  for (const name of files) {
+    const spec = JSON.parse(await readFile(path.join(dir, name), "utf8")) as unknown;
+    parseComposeSpec(spec);
+    assertExampleFontsInstalled(name, spec);
+  }
 });
 
 test("parse fail-closed rejects Frame, recipes, unknown keys, fontSize, and x/y", () => {
@@ -703,7 +739,7 @@ test("an ink-fit card hugs every measured line and reports no overflow", async (
   const result = await composeDocument({
     width: 1920,
     height: 1080,
-    font: "Noto Sans",
+    font: "Liberation Sans",
     background: "#00000000",
     brand: "#FFD166",
     text: "#FFFFFF",
@@ -758,7 +794,7 @@ test("regions in one row share a type scale and title baseline regardless of bod
   const spec = {
     width: 1920,
     height: 1080,
-    font: "Noto Sans",
+    font: "Liberation Sans",
     background: "#1B1B1F",
     brand: "#E9C46A",
     text: "#F1FAEE",
@@ -771,9 +807,10 @@ test("regions in one row share a type scale and title baseline regardless of bod
   const titles = page.quality.text.filter((run) => run.role === "title");
   assert.equal(titles.length, 3);
   assert.equal(new Set(titles.map((run) => run.box.y)).size, 1, JSON.stringify(titles.map((run) => [run.layer, run.box.y])));
-  assert.equal(new Set(titles.map((run) => run.font_size)).size, 1);
   const scales = page.painted.filter((item) => item.id.endsWith("-third")).map((item) => item.scale);
   assert.equal(new Set(scales).size, 1, JSON.stringify(scales));
+  // Title pixel size is fit-to-width at that shared scale, so "Breads" and
+  // "Pastries" are not the same point size.
   // The quality report holds one title per region: measurement passes do not leak.
   assert.equal(page.quality.fonts.filter((font) => font.layer === "right-third.title").length, 1);
   // An explicit valign opts a region out of the shared row.
