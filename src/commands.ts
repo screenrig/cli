@@ -247,10 +247,10 @@ Credits:
   HTTP 402. After that instant, remaining below 1 credit is payment_required.
   Empty remaining does not stop or shut off screens in this window.
   media generate is the exception: it is billed per still by --quality.
-  low is $0.06 (600 credits) for backgrounds and unimportant images.
+  low is $0.06 (600 credits) for unimportant generated stills only.
   medium is $0.12 (1200 credits) and is the default for most cases.
-  high is $0.50 (5000 credits) for high-density text such as restaurant
-  menus and complex posters. Quality changes the image and the price.
+  high is $0.50 (5000 credits) for dense text and complex posters.
+  Quality changes the image and the price.
   Remaining that cannot cover the chosen tier returns payment_required / 402,
   including during this window.
 
@@ -2044,7 +2044,7 @@ async function mediaGenerate(
   client: ApiClient,
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<CommandResult> {
-  requireFlagValue(args, "prompt", `"A dusk lobby photograph"`);
+  requireFlagValue(args, "prompt", `"Finished event poster with title, facts, and type in the image"`);
   requireFlagValue(args, "aspect-ratio", "16:9");
   requireFlagValue(args, "quality", "medium");
   const prompt = flagString(args.flags, "prompt");

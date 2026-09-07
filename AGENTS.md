@@ -466,35 +466,40 @@ installation, players, backend services, the site, or production deployment.
   correlation that never reaches output.
 - Transcoded bytes live in a `mkdtemp` directory the caller removes. Every
   failure path after that directory exists must remove it.
-- **Playlist authoring order.** Do not always generate first. Do not always
-  compose first. Do not wire an external image API as the default.
-  1. The image or video already exists: `media upload` (declare → PUT exact
-     bytes → commit) and reference `med_…` on the playlist. No compositor. No
+- **Playlist authoring order.** Choose by what the page is. Do not generate
+  an atmosphere plate and compose type onto it. Do not compose a presentable
+  poster as named regions + cards.
+  1. You already have the image or video: `media upload` (declare → PUT exact
+     bytes → commit) and place `med_…` on the playlist. No compose. No
      generate.
-  2. There are no assets, and the page is a simple slide deck or needs
-     multiple object types on one page (`image` | `video` | `iframe` |
-     `application` / webapp): local unbilled `compose render`. Named regions.
-     Compose writes stills and holes for iframe/webapp/region video. Upload
-     those stills if they need to play on a screen. Mixed object types are why
-     you compose instead of a single poster.
-  3. Public-facing compelling messages (posters, announcements, restaurant
-     menus, rich static pieces): generate a still with an advanced image model
-     yourself and upload, or call `media generate`. ScreenRig generate is the
-     recommended approach for most of these use cases. There is a charge by
-     quality: low $0.06 (600 credits) for backgrounds and unimportant images;
+  2. Anything presentable (posters, announcements, restaurant menus, event
+     art, product stills, public-facing rich static pages): `media generate`
+     as the **whole page**. Put every fact and all copy in the prompt so the
+     image model typesets it. ScreenRig generate is the default.
+     Own-gen-then-upload remains valid only if
+     they already have a preferred model. Do not compose this page. Do not
+     generate atmosphere-only stills for later overlay. There is a charge by
+     quality: low $0.06 (600 credits) for unimportant generated stills only;
      medium $0.12 (1200 credits) for most cases (recommend this); high $0.50
      (5000 credits) for high-density text such as restaurant menus and complex
      posters. Quality changes the image and the price. Most static content
      should use generate when it works. The POST stores a lossy WebP in the
      account media store and returns `med_…`; the CLI does not re-upload.
      `media download <id>` fetches it when a composed page needs the file.
-     Own-gen-then-upload remains valid when they already have a preferred
-     model.
+  3. Slide-deck-like experiences (title/body/table slides, internal decks,
+     measured type that must stay editable as compose JSON): local unbilled
+     `compose render`. Named regions. Compose writes stills and holes for
+     iframe/webapp/region video. Upload those stills if they need to play on
+     a screen.
+  4. Live objects (a playing video, iframe, or webapp as the page or as
+     playlist primitives): write playlist primitives. Upload the video if you
+     have it. Do not local-render stills merely to attach `enter` / `motion`.
+     Animation is not a reason to compose.
 - `media generate --prompt TEXT [--aspect-ratio RATIO] [--quality QUALITY]
   [--tag TAG]` binds `POST /api/v1/media/generations`. `prompt` is required
   (1–4000). `aspect_ratio` defaults to `16:9` (`1:1|16:9|9:16|4:3|3:4|3:2|2:3`).
-  `quality` defaults to `medium` (`low|medium|high`). Quality changes the
-  image and the price. Optional `tag` is the same 1–32 letter-or-digit tag as
+  `quality` defaults to `medium` (`low|medium|high`). Quality
+  changes the image and the price. Optional `tag` is the same 1–32 letter-or-digit tag as
   upload. The command blocks until `201` MediaGeneration `{ media, usage }`.
   `media.id` is `med_…`. There is no 202 poll and no client PUT. `402` is
   `payment_required` even during launch fail-open. Envelope `usage` shows
@@ -515,9 +520,10 @@ installation, players, backend services, the site, or production deployment.
   `image`, `video`, `iframe`, and `application`, named by the `primitive`
   field. Image and video require a `selector` whose `by` is `id`, `ids`, `all`,
   or `tag`; iframe and application do not take selectors. Do not emit native
-  `text`, `box`, or `line`. Copy and chrome
-  are composed locally with `compose catalog` / `compose render`, uploaded as
-  `image`, then used as one image primitive. `playlist templates` is a local catalog.
+  `text`, `box`, or `line`. Presentable copy lives in the generated still.
+  Deck copy and chrome are composed locally with `compose catalog` /
+  `compose render`, uploaded as `image`, then used as one image primitive.
+  `playlist templates` is a local catalog.
   Templated pages that would emit vector chrome fail with `usage_error`
   pointing at those compose commands. Do not silently rasterize and upload.
 - `canvas.background` is a solid uppercase `#RRGGBBAA` or a top-to-bottom

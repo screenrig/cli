@@ -48,12 +48,12 @@ JSON. The page sets the rails. Every region inherits `font`, `background`, `bran
   "text": "#F3E6D0",
   "left": {
     "enter": "fade-up",
-    "title": "FIRE AT THE TABLE",
-    "text": "A four-course supper cooked over live coals."
+    "title": "COMMUNITY SUPPER",
+    "text": "Saturday 17 October at 19:00."
   },
   "right": {
     "valign": "bottom",
-    "footer": "The Kiln Room · £86"
+    "footer": "Main Hall · Reserve at welcome desk"
   }
 }
 ```
