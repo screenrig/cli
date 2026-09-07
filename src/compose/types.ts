@@ -37,7 +37,7 @@ export const SPEED = ["slow", "medium", "fast"] as const;
 export const VIEWING_DISTANCES = ["near", "mid", "far"] as const;
 export type ViewingDistance = (typeof VIEWING_DISTANCES)[number];
 
-export const TYPE_ROLES = ["title", "subtitle", "text", "footer", "card", "small", "table"] as const;
+export const TYPE_ROLES = ["eyebrow", "title", "subtitle", "text", "footer", "card", "small", "table"] as const;
 export type TypeRole = (typeof TYPE_ROLES)[number];
 
 export const LOGO_CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"] as const;
@@ -92,8 +92,8 @@ export interface CardItem {
   image?: string | null;
 }
 
-/** Unblurred drop shadow. `"none"` disables the automatic media shadow. */
-export type LayerShadow = "none" | { x: number; y: number; color: string };
+/** Drop shadow. Optional `blur` is 0–32 px; omit is 0 (unblurred offset fill). `"none"` disables the automatic media shadow. */
+export type LayerShadow = "none" | { x: number; y: number; color: string; blur?: number };
 
 /** Stroke around glyphs. Off unless set. Width is 0.5–12 px. */
 export interface LayerOutline {
@@ -107,7 +107,7 @@ export interface TableBlock {
 }
 
 export type LayerBlock =
-  | { role: "title" | "subtitle" | "text" | "footer"; text: string }
+  | { role: "eyebrow" | "title" | "subtitle" | "text" | "footer"; text: string }
   | { role: "image"; src: string }
   | { role: "placeholder"; kind: "video" | "iframe" | "application"; src: string; label: string }
   | { role: "cards"; items: CardItem[] }

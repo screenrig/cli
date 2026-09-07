@@ -4,7 +4,7 @@ Preview over `screenrig compose render`. Not a second compositor.
 
 The CLI owns parse, type, paint, fonts, and diagnostics. This directory is a local preview: examples, a static viewer, and a small HTTP server that shells out to the built CLI.
 
-Type size is procedural. Authors name a role (`title`, `subtitle`, `text`, `footer`). They do not set `fontSize`.
+Type size is procedural. Authors name a role (`eyebrow`, `title`, `subtitle`, `text`, `footer`). They do not set `fontSize`.
 
 ## Run
 
@@ -20,7 +20,12 @@ node server.mjs
 Do not install a second canvas package here. Showcase media under
 `examples/media/` is local and gitignored; the lab still runs without those
 files, but example pages that reference them will fail to generate until the
-files are present.
+files are present. `examples/exec-intro.json` is the overlay-family deck
+(named regions from `compose catalog`, `enter` on the copy, page `logo`).
+The title page matches `overlay-title` (no card). Status and close pages
+match `overlay-still`. Title uses `title-boardroom.jpg`. Other photo and
+video paths are stand-ins under `examples/media/` when that directory is
+present.
 
 Open http://127.0.0.1:4545/
 
@@ -64,7 +69,7 @@ On the page, `text` is the copy color. In a region, `text` is the body copy.
 
 Regions: `fullpage`, `left`, `right`, `left-third`, `middle-third`, `right-third`, `middle-half`, `top-half`, `bottom-half`, `top`, `bottom`.
 
-Inside a region: `title`, `subtitle`, `text`, `footer`, `image`, `video`, `iframe`, `webapp`, `cards`, `card`, `table`. Optional `enter`, `stagger`, `motion`, `align`, `valign`, `fill`, `color`, `z`, `shadow`, `outline`.
+Inside a region: `eyebrow`, `title`, `subtitle`, `text`, `footer`, `image`, `video`, `iframe`, `webapp`, `cards`, `card`, `table`. Optional `enter`, `stagger`, `motion`, `align`, `valign`, `fill`, `color`, `z`, `shadow`, `outline`.
 
 `card` is a plate. `card.fit` is `region` (default, fills the region) or `ink` (hugs measured type plus 24 px, placed with `align`/`valign`). Default fill is the page background + B3. `cards` (plural) is the menu-item list and can sit inside `card`. Copy strings accept `**bold**`, `*italic*`, and `__underline__`.
 

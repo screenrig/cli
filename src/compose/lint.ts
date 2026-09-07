@@ -161,7 +161,7 @@ function countSpecWords(value: unknown): number {
   if (!value || typeof value !== "object") return 0;
   const record = value as Record<string, unknown>;
   let n = 0;
-  for (const key of ["title", "subtitle", "text", "footer", "price"]) {
+  for (const key of ["eyebrow", "title", "subtitle", "text", "footer", "price"]) {
     if (key in record) n += countSpecWords(record[key]);
   }
   if (Array.isArray(record.cards)) n += countSpecWords(record.cards);

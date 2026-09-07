@@ -30,7 +30,8 @@ interface RoleSpec {
  * Title/subtitle width-fit between floor and wish; wrap roles use the scaled wish.
  */
 const ROLE: Record<TypeRole, RoleSpec> = {
-  title: { wish: 0.08, floor: 0.04, fit: "line", minWish: 48 },
+  eyebrow: { wish: 0.03, floor: 0.015, fit: "line", minWish: 22 },
+  title: { wish: 0.12, floor: 0.04, fit: "line", minWish: 48 },
   subtitle: { wish: 0.05, floor: 0.026, fit: "line", minWish: 32 },
   text: { wish: 0.042, floor: 0.021, fit: "wrap", minWish: 32 },
   footer: { wish: 0.03, floor: 0.015, fit: "wrap", minWish: 22 },
@@ -100,6 +101,7 @@ export function sizeFor(
 }
 
 export interface TypeRamp {
+  eyebrow: number;
   title: number;
   subtitle: number;
   text: number;
@@ -116,6 +118,7 @@ export function sizesFor(
     family: string;
     width: number;
     viewing: ViewingDistance;
+    eyebrow?: string;
     title?: string;
     subtitle?: string;
     scale?: number;
@@ -123,6 +126,7 @@ export function sizesFor(
 ): TypeRamp {
   const shared = { family: args.family, width: args.width, root: args.root, viewing: args.viewing, scale: args.scale ?? 1 };
   return {
+    eyebrow: sizeFor(ctx, { role: "eyebrow", text: args.eyebrow, ...shared }),
     title: sizeFor(ctx, { role: "title", text: args.title, ...shared }),
     subtitle: sizeFor(ctx, { role: "subtitle", text: args.subtitle, ...shared }),
     text: sizeFor(ctx, { role: "text", ...shared }),

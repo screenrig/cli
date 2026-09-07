@@ -1,0 +1,229 @@
+{
+  "name": "Exec intro",
+  "width": 1920,
+  "height": 1080,
+  "font": "Noto Sans",
+  "background": "#2A3547",
+  "brand": "#F8B334",
+  "text": "#F4F7FA",
+  "pages": [
+    {
+      "id": "title",
+      "image": "./title-boardroom.jpg",
+      "left": {
+        "enter": "fade-right",
+        "valign": "bottom",
+        "title": "New Initiative",
+        "eyebrow": "August 2026",
+        "text": "screenRIG is for screens that run without anyone tending them. A person places the stick and names the outcome. The agent enrolls, pairs, publishes, assigns, and verifies.",
+        "shadow": { "x": 0, "y": 2, "color": "#000000CC", "blur": 16 }
+      }
+    },
+    {
+      "id": "ai-transform",
+      "fullpage": {
+        "enter": "fade-in",
+        "title": "AI: from assistant to author",
+        "eyebrow": "AI TIMELINE",
+        "table": {
+          "columns": ["When", "Shift"],
+          "rows": [
+            ["2020", "Near-zero in production"],
+            ["2026", "Agents ship the work"],
+            ["2028", "Still climbing"]
+          ]
+        }
+      }
+    },
+    {
+      "id": "mini-pc",
+      "image": "media/stackhouse-tray.png",
+      "bottom": {
+        "enter": "fade-up",
+        "card": {
+          "fit": "region",
+          "fill": "#2A3547E6",
+          "title": "The Mini PC issue",
+          "eyebrow": "HARDWARE",
+          "text": "Stick hardware stayed put. Mini PCs did not. 4 GB is now a floor."
+        }
+      }
+    },
+    {
+      "id": "prices",
+      "fullpage": {
+        "enter": "fade-in",
+        "title": "The RAM floor moved",
+        "eyebrow": "DUMBBELL",
+        "text": "Mini PCs got more expensive. The stick did not. 4 GB is the cost floor."
+      }
+    },
+    {
+      "id": "low-end",
+      "image": "media/campus-noticeboard-bg.png",
+      "left": {
+        "enter": "fade-right",
+        "card": {
+          "fit": "region",
+          "fill": "#2A3547E6",
+          "title": "RAM is shrinking",
+          "eyebrow": "THE LOW END",
+          "text": "Cheap glass is the volume. The volume is where agents belong."
+        }
+      }
+    },
+    {
+      "id": "ai-smart",
+      "image": "media/maker-workshop-bg.png",
+      "right": {
+        "enter": "fade-left",
+        "card": {
+          "fit": "region",
+          "fill": "#2A3547E6",
+          "title": "AI is now pretty smart",
+          "eyebrow": "CAPABILITY",
+          "text": "Agents write the playlist, not just a caption. screenRIG is how it runs on the glass."
+        }
+      }
+    },
+    {
+      "id": "agent-rise",
+      "video": "media/ashline-circuit.mp4",
+      "right": {
+        "enter": "fade-left",
+        "card": {
+          "fit": "region",
+          "fill": "#2A3547E6",
+          "title": "The rise of agent-native",
+          "eyebrow": "OPERATOR SHIFT",
+          "text": "Agents do not click a UI. They speak an API. screenRIG is built so the operator is the agent."
+        }
+      }
+    },
+    {
+      "id": "enter",
+      "video": "media/lantern-row-market.mp4",
+      "logo": "./wordmark.png",
+      "bottom": {
+        "enter": "fade-up",
+        "card": {
+          "fit": "region",
+          "fill": "#2A3547E6",
+          "title": "Enter screenRIG",
+          "text": "A headless service for agents. Humans place the stick and name the outcome. The agent does the rest."
+        }
+      }
+    },
+    {
+      "id": "status",
+      "logo": "./wordmark.png",
+      "fullpage": {
+        "enter": "fade-in",
+        "valign": "top",
+        "title": ["This is screenRIG.", "It works today."],
+        "eyebrow": "STATUS",
+        "text": "The API, the skill, the CLI, and the players are in source and running."
+      }
+    },
+    {
+      "id": "platforms",
+      "logo": "./wordmark.png",
+      "fullpage": {
+        "enter": "fade-in",
+        "title": "Players in source today",
+        "eyebrow": "TREE",
+        "table": {
+          "columns": ["Player", "Notes"],
+          "rows": [
+            ["Android", "Launch family"],
+            ["Apple", "macOS, iPad, tvOS"],
+            ["Windows", "Kiosk mode"],
+            ["Linux / Qt", "Wayland, Pi target"],
+            ["PWA", "Browser path"]
+          ]
+        }
+      }
+    },
+    {
+      "id": "agent-how",
+      "video": "media/science-fair-workshop.mp4",
+      "logo": "./wordmark.png",
+      "right": {
+        "enter": "fade-left",
+        "card": {
+          "fit": "region",
+          "fill": "#2A3547E6",
+          "title": ["Humans place.", "Agents run."],
+          "eyebrow": "HOW IT WORKS",
+          "text": "A person puts the stick in the display and names the outcome. The agent enrolls, pairs, publishes, assigns, and checks the screen."
+        }
+      }
+    },
+    {
+      "id": "rendering",
+      "video": "media/harborfield-sports.mp4",
+      "logo": "./wordmark.png",
+      "left": {
+        "enter": "fade-right",
+        "card": {
+          "fit": "region",
+          "fill": "#2A3547E6",
+          "title": "Not the web.",
+          "eyebrow": "NATIVE FIRST",
+          "text": "Players are native. Stills and video decode on the device. Web is optional, not the product."
+        }
+      }
+    },
+    {
+      "id": "video",
+      "video": "media/silverthread-cinema.mp4",
+      "logo": "./wordmark.png",
+      "bottom": {
+        "enter": "fade-up",
+        "card": {
+          "fit": "region",
+          "fill": "#2A3547E6",
+          "title": "Native Video Playback",
+          "text": "Nothing streams. The player syncs the file, then plays from disk."
+        }
+      }
+    },
+    {
+      "id": "webapps",
+      "logo": "./wordmark.png",
+      "fullpage": {
+        "enter": "fade-in",
+        "title": "Sync first. Render on the device.",
+        "eyebrow": "WEBAPPS",
+        "text": "A focused webapp capability. Experimental, not the primary use case.",
+        "cards": [
+          { "title": "Package", "text": "The CLI packs a static directory. Native players sync, then paint from disk." },
+          { "title": "Not every platform", "text": "Some players omit web. The PWA is a different path." },
+          { "title": "Agent loop", "text": "This page was composed locally." }
+        ]
+      }
+    },
+    {
+      "id": "cli",
+      "logo": "./wordmark.png",
+      "fullpage": {
+        "enter": "fade-in",
+        "title": "The work stays on the agent machine.",
+        "eyebrow": "CLI OFFLOAD",
+        "text": "Video transcodes before upload. Layout composes locally. The agent sees the still, iterates, then hits the API."
+      }
+    },
+    {
+      "id": "close",
+      "logo": "./wordmark.png",
+      "fullpage": {
+        "enter": "fade-in",
+        "align": "center",
+        "valign": "center",
+        "title": ["Put your screens", "in the conversation."],
+        "eyebrow": "THE PROMISE",
+        "text": "Describe the outcome. The agent prepares, publishes, pairs, assigns, and verifies."
+      }
+    }
+  ]
+}

@@ -488,9 +488,9 @@ installation, players, backend services, the site, or production deployment.
      `media download <id>` fetches it when a composed page needs the file.
   3. Slide-deck-like experiences (title/body/table slides, internal decks,
      measured type that must stay editable as compose JSON): local unbilled
-     `compose render`. Named regions. Compose writes stills and holes for
-     iframe/webapp/region video. Upload those stills if they need to play on
-     a screen.
+     `compose render` from `compose catalog` examples. Named regions. Compose
+     writes stills and holes for iframe/webapp/region video. Upload those
+     stills if they need to play on a screen.
   4. Live objects (a playing video, iframe, or webapp as the page or as
      playlist primitives): write playlist primitives. Upload the video if you
      have it. Do not local-render stills merely to attach `enter` / `motion`.
@@ -521,9 +521,10 @@ installation, players, backend services, the site, or production deployment.
   field. Image and video require a `selector` whose `by` is `id`, `ids`, `all`,
   or `tag`; iframe and application do not take selectors. Do not emit native
   `text`, `box`, or `line`. Presentable copy lives in the generated still.
-  Deck copy and chrome are composed locally with `compose catalog` /
-  `compose render`, uploaded as `image`, then used as one image primitive.
-  `playlist templates` is a local catalog.
+  Decks are composed from `compose catalog` examples. Deck copy and chrome
+  are composed locally with `compose catalog` / `compose render`, uploaded as
+  `image`, then used as one image primitive. `playlist templates` is a local
+  catalog that refuses native text; it is not the authoring path.
   Templated pages that would emit vector chrome fail with `usage_error`
   pointing at those compose commands. Do not silently rasterize and upload.
 - `canvas.background` is a solid uppercase `#RRGGBBAA` or a top-to-bottom
@@ -563,13 +564,17 @@ installation, players, backend services, the site, or production deployment.
   rails are `width`, `height`, `font`, `background`, `brand`, `text`, optional
   `image`/`video`/`motion`/`viewing`/`pages`/`logo`. Regions are `fullpage`,
   `left`, `right`, thirds, halves, `top`, and `bottom`. Do not author
-  `fontSize`, `x`, or `y`. Type size is procedural. Titles default to `brand`.
-  `card` is a plate (`fit` `region` or `ink`, default `region`, fill
-  background+B3). `logo` sits 32 px inset, contained to 200×100. Copy accepts
-  `**bold**` `*italic*` `__underline__`. iframe/webapp are manifest holes, not
-  painted PNGs. Text over a page `image` or `video` with no `fill` gets a 1 px
-  unblurred drop shadow (`#000000E6` on light type, `#FFFFFFE6` on dark type).
-  Set region `shadow` to `"none"` or `{ x, y, color }` to override. Region
+  `fontSize`, `x`, or `y`. Type size is procedural. `eyebrow` is the kicker
+  above the headline and defaults to `brand`. Region `title` defaults to page
+  `text`. Body `text` uses muted. `subtitle` and `footer` use `text`. Card-item
+  titles, prices, and table headers stay `brand`. Optional region or `card`
+  `color` overrides every role in that box. `card` is a plate (`fit` `region`
+  or `ink`, default `region`, fill background+B3). `logo` sits 32 px inset,
+  contained to 200×100. Copy accepts `**bold**` `*italic*` `__underline__`.
+  iframe/webapp are manifest holes, not painted PNGs. Text over a page `image`
+  or `video` with no `fill` gets a 1 px unblurred drop shadow (`#000000E6` on
+  light type, `#FFFFFFE6` on dark type). Set region `shadow` to `"none"` or
+  `{ x, y, color, blur? }` to override (`blur` 0–32, omit is 0). Region
   `outline` is `{ width: 0.5-12, color }` and is off unless set. `--combined`
   is inspection-only; default output is layered PNGs plus `manifest.json`.
   Preserve glyph fallback, upscale, painted-pixel contrast, and

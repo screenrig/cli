@@ -53,21 +53,21 @@ const PAGE_RENAMES: Record<string, string> = {
   type: "Frame/Column/Row/Box/Text are removed; write regions from compose catalog",
 };
 const REGION_CONTENT_KEYS = new Set([
-  "title", "subtitle", "text", "footer",
+  "eyebrow", "title", "subtitle", "text", "footer",
   "image", "video", "iframe", "webapp",
   "cards", "table", "fill",
 ]);
 const REGION_KEYS = new Set([
-  "title", "subtitle", "text", "footer",
+  "eyebrow", "title", "subtitle", "text", "footer",
   "image", "video", "iframe", "webapp",
   "cards", "card", "table",
   "enter", "stagger", "motion",
   "align", "valign", "fill", "color", "z", "shadow", "outline",
 ]);
-const SHADOW_KEYS = new Set(["x", "y", "color"]);
+const SHADOW_KEYS = new Set(["x", "y", "color", "blur"]);
 const OUTLINE_KEYS = new Set(["width", "color"]);
 const CARD_KEYS = new Set(["title", "subtitle", "text", "price", "image"]);
-const CARD_PLATE_KEYS = new Set(["title", "subtitle", "text", "footer", "image", "cards", "table", "fill", "color", "fit"]);
+const CARD_PLATE_KEYS = new Set(["eyebrow", "title", "subtitle", "text", "footer", "image", "cards", "table", "fill", "color", "fit"]);
 const TABLE_KEYS = new Set(["columns", "rows"]);
 const OLD_LANGUAGE_KEYS = new Set(["type", "recipe", "children", "theme", "fontFamily", "fontSize", "padding", "gap", "pin", "flex"]);
 
@@ -235,12 +235,22 @@ export function regionRect(name: string, width: number, height: number): { x: nu
 
 function parseShadow(value: unknown, path: string): LayerShadow {
   if (value === "none") return "none";
-  if (!isTable(value)) fail(`${path} must be "none" or { x, y, color }`);
+  if (!isTable(value)) fail(`${path} must be "none" or { x, y, color, blur? }`);
   const extra = Object.keys(value).filter((key) => !SHADOW_KEYS.has(key));
   if (extra.length) fail(`${path} unknown keys: ${extra.join(", ")}`);
   if (!Number.isFinite(value.x) || !Number.isInteger(value.x)) fail(`${path}.x must be an integer`);
   if (!Number.isFinite(value.y) || !Number.isInteger(value.y)) fail(`${path}.y must be an integer`);
-  return { x: value.x as number, y: value.y as number, color: hex(value.color, `${path}.color`) };
+  const blur = value.blur == null ? 0 : value.blur;
+  if (typeof blur !== "number" || !Number.isInteger(blur) || blur < 0 || blur > 32) {
+    fail(`${path}.blur must be an integer 0..32`);
+  }
+  const shadow: { x: number; y: number; color: string; blur?: number } = {
+    x: value.x as number,
+    y: value.y as number,
+    color: hex(value.color, `${path}.color`),
+  };
+  if (blur > 0) shadow.blur = blur;
+  return shadow;
 }
 
 function parseOutline(value: unknown, path: string): LayerOutline {
@@ -370,10 +380,11 @@ function parseRegion(name: RegionName, value: unknown, canvas: { width: number; 
   const z = value.z == null ? order : int(value.z, `${name}.z`, -999, 999);
   const contentPad = Math.round(Math.min(canvas.width, canvas.height) * 0.055);
   const blocks: LayerSpec["blocks"] = [];
-  const pushText = (role: "title" | "subtitle" | "text" | "footer", raw: unknown) => {
+  const pushText = (role: "eyebrow" | "title" | "subtitle" | "text" | "footer", raw: unknown) => {
     if (raw == null) return;
     blocks.push({ role, text: copy(raw, `${contentPath}.${role}`) });
   };
+  pushText("eyebrow", content.eyebrow);
   pushText("title", content.title);
   pushText("subtitle", content.subtitle);
   pushText("text", content.text);

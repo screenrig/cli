@@ -162,6 +162,7 @@ function sortLayers(layers: LayerSpec[]): LayerSpec[] {
 
 function gapsFor(ramp: TypeRamp): Record<string, number> {
   return {
+    eyebrow: Math.round(ramp.eyebrow * 0.35),
     title: Math.round(ramp.title * 0.28),
     subtitle: Math.round(ramp.subtitle * 0.35),
     text: Math.round(ramp.text * 0.45),
@@ -186,7 +187,7 @@ function packInkWidth(
     }
   };
   for (const block of blocks) {
-    if (block.role === "title" || block.role === "subtitle" || block.role === "text" || block.role === "footer") {
+    if (block.role === "eyebrow" || block.role === "title" || block.role === "subtitle" || block.role === "text" || block.role === "footer") {
       measure(block.text, ramp[block.role]);
     } else if (block.role === "cards") {
       if (block.items.some((item) => item.price || item.image)) {
@@ -216,9 +217,9 @@ function packFixedHeight(
   const gapAfter = gapsFor(ramp);
   let height = 0;
   for (const [i, block] of blocks.entries()) {
-    if (block.role === "title") height += textHeight(ctx, block.text, innerW, ramp.title, family, leadingOf(ramp.title));
-    else if (block.role === "subtitle") height += textHeight(ctx, block.text, innerW, ramp.subtitle, family, leadingOf(ramp.subtitle));
-    else if (block.role === "text") height += textHeight(ctx, block.text, innerW, ramp.text, family, leadingOf(ramp.text));
+    if (block.role === "eyebrow" || block.role === "title" || block.role === "subtitle" || block.role === "text") {
+      height += textHeight(ctx, block.text, innerW, ramp[block.role], family, leadingOf(ramp[block.role]));
+    }
     else if (block.role === "cards") {
       height += measureCards(ctx, block.items, innerW, ramp, family);
       if (itemGapBoost && block.items.length > 1) height += itemGapBoost * (block.items.length - 1);
@@ -234,7 +235,7 @@ function isSingleLinePack(ctx: SKRSContext2D, blocks: LayerBlock[], innerW: numb
   if (blocks.length !== 1) return false;
   const block = blocks[0]!;
   if (block.role === "cards" || block.role === "table") return false;
-  if (block.role !== "title" && block.role !== "subtitle" && block.role !== "text") return false;
+  if (block.role !== "eyebrow" && block.role !== "title" && block.role !== "subtitle" && block.role !== "text") return false;
   const size = ramp[block.role];
   ctx.font = `${size}px "${family}"`;
   return wrapLines(ctx, block.text, innerW).length <= 1;
@@ -249,6 +250,7 @@ function chooseScale(
   footerText: string | undefined,
 ): { ramp: TypeRamp; height: number; available: number; scale: number } {
   const at = (scale: number) => {
+    const eyebrow = fixed.find((block) => block.role === "eyebrow");
     const title = fixed.find((block) => block.role === "title");
     const subtitle = fixed.find((block) => block.role === "subtitle");
     const ramp = sizesFor(ctx, {
@@ -256,6 +258,7 @@ function chooseScale(
       family,
       width: inner.w,
       viewing: layer.viewing,
+      eyebrow: eyebrow && eyebrow.role === "eyebrow" ? eyebrow.text : "",
       title: title && title.role === "title" ? title.text : "",
       subtitle: subtitle && subtitle.role === "subtitle" ? subtitle.text : "",
       scale,
@@ -305,10 +308,11 @@ function numericColumn(rows: string[][], index: number): boolean {
 
 function roleColor(
   layer: LayerSpec,
-  role: "title" | "subtitle" | "text" | "footer" | "card" | "price" | "table-header" | "table-body",
+  role: "eyebrow" | "title" | "subtitle" | "text" | "footer" | "card" | "price" | "table-header" | "table-body",
 ): string {
   if (layer.ink) return layer.ink;
-  if (role === "title" || role === "card" || role === "price" || role === "table-header") return layer.brand;
+  if (role === "eyebrow" || role === "card" || role === "price" || role === "table-header") return layer.brand;
+  if (role === "text") return layer.muted;
   return layer.text;
 }
 
@@ -323,7 +327,7 @@ function shouldInsetForLogo(layer: LayerSpec): boolean {
   if (layer.region === "background" || layer.region === "logo") return false;
   if (layer.fill) return true;
   return layer.blocks.some((block) => (
-    block.role === "title" || block.role === "subtitle" || block.role === "text" || block.role === "footer"
+    block.role === "eyebrow" || block.role === "title" || block.role === "subtitle" || block.role === "text" || block.role === "footer"
     || block.role === "cards" || block.role === "table"
     || (block.role === "placeholder" && HOLE_KINDS.has(block.kind))
   ));
@@ -595,7 +599,7 @@ function contrastRatio(a: string, b: string): number {
 function warnCardContrast(layer: LayerSpec, warnings: ComposeWarning[]): void {
   if (!layer.cardFit || !layer.fill) return;
   const plate = compositeHex(layer.fill, layer.surface);
-  const colors = [roleColor(layer, "title"), roleColor(layer, "text")];
+  const colors = [roleColor(layer, "eyebrow"), roleColor(layer, "title"), roleColor(layer, "text")];
   for (const color of colors) {
     if (contrastRatio(color, plate) < 4.5) {
       warnings.push({
@@ -614,13 +618,15 @@ function fillIsBacking(fill: string | null): boolean {
   return true;
 }
 
-function autoShadow(color: string): { x: number; y: number; color: string } {
+type PaintShadow = { x: number; y: number; color: string; blur?: number };
+
+function autoShadow(color: string): PaintShadow {
   return relativeLuminance(color) >= 0.5
     ? { x: 1, y: 1, color: "#000000E6" }
     : { x: 1, y: 1, color: "#FFFFFFE6" };
 }
 
-function resolveShadow(layer: LayerSpec, color: string): { x: number; y: number; color: string } | null {
+function resolveShadow(layer: LayerSpec, color: string): PaintShadow | null {
   if (layer.shadow === "none") return null;
   if (layer.shadow) return layer.shadow;
   if (!fillIsBacking(layer.fill) && layer.overMedia) return autoShadow(color);
@@ -636,7 +642,7 @@ function drawSpans(
     size: number;
     family: string;
     color: string;
-    shadow?: { x: number; y: number; color: string } | null;
+    shadow?: PaintShadow | null;
     outline?: LayerOutline | null;
   },
 ): void {
@@ -647,19 +653,38 @@ function drawSpans(
     ctx.textBaseline = "top";
     ctx.textAlign = "left";
     const width = ctx.measureText(span.text).width;
-    if (args.shadow) {
-      ctx.fillStyle = parseColor(args.shadow.color, "#000000E6");
-      ctx.fillText(span.text, x + args.shadow.x, args.y + args.shadow.y);
+    const blur = args.shadow?.blur ?? 0;
+    if (args.shadow && blur > 0) {
+      ctx.save();
+      ctx.shadowBlur = blur;
+      ctx.shadowOffsetX = args.shadow.x;
+      ctx.shadowOffsetY = args.shadow.y;
+      ctx.shadowColor = parseColor(args.shadow.color, "#000000E6");
+      if (args.outline) {
+        ctx.strokeStyle = parseColor(args.outline.color, "#000000");
+        ctx.lineWidth = args.outline.width;
+        ctx.lineJoin = "round";
+        ctx.miterLimit = 2;
+        ctx.strokeText(span.text, x, args.y);
+      }
+      ctx.fillStyle = parseColor(args.color, "#F3E6D0");
+      ctx.fillText(span.text, x, args.y);
+      ctx.restore();
+    } else {
+      if (args.shadow) {
+        ctx.fillStyle = parseColor(args.shadow.color, "#000000E6");
+        ctx.fillText(span.text, x + args.shadow.x, args.y + args.shadow.y);
+      }
+      if (args.outline) {
+        ctx.strokeStyle = parseColor(args.outline.color, "#000000");
+        ctx.lineWidth = args.outline.width;
+        ctx.lineJoin = "round";
+        ctx.miterLimit = 2;
+        ctx.strokeText(span.text, x, args.y);
+      }
+      ctx.fillStyle = parseColor(args.color, "#F3E6D0");
+      ctx.fillText(span.text, x, args.y);
     }
-    if (args.outline) {
-      ctx.strokeStyle = parseColor(args.outline.color, "#000000");
-      ctx.lineWidth = args.outline.width;
-      ctx.lineJoin = "round";
-      ctx.miterLimit = 2;
-      ctx.strokeText(span.text, x, args.y);
-    }
-    ctx.fillStyle = parseColor(args.color, "#F3E6D0");
-    ctx.fillText(span.text, x, args.y);
     if (span.underline) {
       const underlineY = args.y + Math.round(args.size * 0.92);
       ctx.strokeStyle = parseColor(args.color, "#F3E6D0");
@@ -685,7 +710,7 @@ function drawText(
     color: string;
     align: Align;
     leading: number;
-    shadow?: { x: number; y: number; color: string } | null;
+    shadow?: PaintShadow | null;
     outline?: LayerOutline | null;
   },
 ): number {
@@ -791,6 +816,7 @@ async function paintLayer(
   const fixed = flow.filter((block) => block.role !== "image" && block.role !== "placeholder");
   const hasFluid = fluid.length > 0 && layer.region !== "background";
   const footerText = footer && footer.role === "footer" ? footer.text : undefined;
+  const eyebrow = layer.blocks.find((block) => block.role === "eyebrow");
   const title = layer.blocks.find((block) => block.role === "title");
   const subtitle = layer.blocks.find((block) => block.role === "subtitle");
   let scale = shared.scale ?? 1;
@@ -799,6 +825,7 @@ async function paintLayer(
     family,
     width: fitBox.w,
     viewing: layer.viewing,
+    eyebrow: eyebrow && eyebrow.role === "eyebrow" ? eyebrow.text : "",
     title: title && title.role === "title" ? title.text : "",
     subtitle: subtitle && subtitle.role === "subtitle" ? subtitle.text : "",
     scale,
@@ -868,7 +895,7 @@ async function paintLayer(
   const sh = (color: string) => resolveShadow(layer, color);
 
   const paintFlow = async (block: LayerBlock, height: number | null) => {
-    if (block.role === "title" || block.role === "subtitle" || block.role === "text") {
+    if (block.role === "eyebrow" || block.role === "title" || block.role === "subtitle" || block.role === "text") {
       const size = ramp[block.role];
       const color = roleColor(layer, block.role);
       const face = recordFont(quality, warnings, `${layer.id}.${block.role}`, stripMarkdown(block.text), family);

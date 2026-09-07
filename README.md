@@ -250,13 +250,15 @@ by local compose or `media generate`; motion video; and web content delivered as
 `application`.
 
 Four wire primitives are supported: `image`, `video`, `iframe`, and
-`application`. Presentable copy lives in the generated still. Deck copy and
-chrome are composed locally, uploaded as `image`, then used as one image
-primitive. `playlist templates` is a local catalog of
-slide ids; templates that would emit native `text`, `box`, or `line` fail with a pointer at
-`compose catalog` and `compose render`. Picture-only templates still expand
-to image or video primitives with selectors. A page without `template` is
-forwarded unchanged when its `primitives` use those four wire primitives.
+`application`. Presentable copy lives in the generated still. Decks are
+composed from `compose catalog` examples. Deck copy and chrome are composed
+locally, uploaded as `image`, then used as one image primitive.
+`playlist templates` is a local catalog that refuses native text; it is not
+the authoring path. Templates that would emit native `text`, `box`, or `line`
+fail with a pointer at `compose catalog` and `compose render`. Picture-only
+templates still expand to image or video primitives with selectors. A page
+without `template` is forwarded unchanged when its `primitives` use those
+four wire primitives.
 `canvas.background` is a solid uppercase `#RRGGBBAA` or a top-to-bottom
 linear gradient (`type` `linear`, 2 through 8 strictly increasing stops,
 first `at` 0, last `at` 1, no angle). Image and video primitives write a
@@ -665,7 +667,8 @@ CLI never prints image bytes, hex, or base64.
 
 Compose is authoring path 3: slide-deck-like experiences — title/body/table
 slides, internal decks, measured type that must stay editable as compose
-JSON. It is local and unbilled. Presentable posters, menus, event art, and
+JSON. Decks are composed from `compose catalog` examples. It is local and
+unbilled. Presentable posters, menus, event art, and
 other public-facing rich static pages are generated finished stills, not
 composed pages. Overlay is a compose mechanic for decks; it is not the
 presentable-poster path. Animation is not a reason to compose.
@@ -684,18 +687,20 @@ optional `image` or `video` (local full-bleed paths), optional `motion`,
 optional `viewing` (`near`/`mid`/`far`, default `mid`), and optional `pages`.
 Regions are `fullpage`, `left`, `right`, `left-third`, `middle-third`,
 `right-third`, `middle-half`, `top-half`, `bottom-half`, `top`, and `bottom`.
-Inside a region: `title`, `subtitle`, `text` (body copy: a string or an array
-of lines), `footer`, `image`, `video`, `iframe`, `webapp`, `cards`, `card`,
-`table`, plus `enter`, `stagger`, `motion`, `align`, `valign`, `fill`, `color`,
-`z`, `shadow`, and `outline`. Unknown keys fail. Do not author `fontSize`,
-`x`, or `y`. On the page, `text` is the copy color. In a region, `text` is
-body copy. Region title and card-item title default to `brand`; body roles
-default to `text`. Optional region or `card` `color` overrides the box. A
-named `font` must be installed on this host. Text over a page `image` or
-`video` with no `fill` gets a 1 px unblurred drop shadow (`#000000E6` on
-light type, `#FFFFFFE6` on dark type). Set `shadow` to `"none"` or
-`{ x, y, color }` to override. `outline` is `{ width: 0.5-12, color }` and
-is off unless set.
+Inside a region: `eyebrow`, `title`, `subtitle`, `text` (body copy: a string or
+an array of lines), `footer`, `image`, `video`, `iframe`, `webapp`, `cards`,
+`card`, `table`, plus `enter`, `stagger`, `motion`, `align`, `valign`, `fill`,
+`color`, `z`, `shadow`, and `outline`. Unknown keys fail. Do not author
+`fontSize`, `x`, or `y`. On the page, `text` is the copy color. In a region,
+`text` is body copy. Parse order is `eyebrow`, `title`, `subtitle`, `text`,
+then image/cards/table, footer last. `eyebrow` and card-item titles, prices,
+and table headers default to `brand`. Region `title` defaults to page `text`.
+Body `text` uses muted. `subtitle` and `footer` use `text`. Optional region
+or `card` `color` overrides the box. A named `font` must be installed on this
+host. Text over a page `image` or `video` with no `fill` gets a 1 px unblurred
+drop shadow (`#000000E6` on light type, `#FFFFFFE6` on dark type). Set
+`shadow` to `"none"` or `{ x, y, color, blur? }` to override (`blur` 0–32,
+omit is 0). `outline` is `{ width: 0.5-12, color }` and is off unless set.
 
 `card` is a plate. `card.fit` is `region` (default, fills the region rect) or
 `ink` (hugs measured type plus 24 px pad, placed with `align`/`valign`).

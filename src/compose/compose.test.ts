@@ -53,6 +53,40 @@ test("catalog lists regions, not Frame or recipes", () => {
   assert.deepEqual(catalog.motion.types, ["spin", "drift"]);
   assert.ok(catalog.examples.slide);
   assert.ok((catalog.examples.slide as { left: unknown }).left);
+  const overlayLeft = catalog.examples["overlay-left"] as { image: string; left: { enter: string; card: { fit: string; eyebrow?: string } } };
+  const overlayRight = catalog.examples["overlay-right"] as { image: string; right: { enter: string; card: { fit: string; eyebrow?: string } } };
+  const overlayBottom = catalog.examples["overlay-bottom"] as { image: string; bottom: { enter: string; card: { fit: string; eyebrow?: string } } };
+  const overlayTitle = catalog.examples["overlay-title"] as {
+    image: string;
+    left: { enter: string; valign: string; eyebrow?: string; card?: unknown };
+  };
+  const overlayStill = catalog.examples["overlay-still"] as {
+    fullpage: { enter: string; eyebrow?: string; card?: unknown };
+    image?: unknown;
+  };
+  assert.equal(overlayLeft.left.enter, "fade-right");
+  assert.equal(overlayLeft.left.card.fit, "region");
+  assert.equal(overlayRight.right.enter, "fade-left");
+  assert.equal(overlayBottom.bottom.enter, "fade-up");
+  assert.equal(overlayBottom.bottom.card.fit, "region");
+  assert.ok(catalog.examples.overlay);
+  assert.ok(catalog.examples["overlay-title"]);
+  assert.ok(catalog.examples["overlay-still"]);
+  assert.equal(overlayTitle.left.enter, "fade-right");
+  assert.equal(overlayTitle.left.valign, "bottom");
+  assert.equal(overlayTitle.left.card, undefined);
+  assert.ok(overlayTitle.left.eyebrow);
+  assert.ok(overlayStill.fullpage);
+  assert.equal(overlayStill.fullpage.enter, "fade-in");
+  assert.equal(overlayStill.fullpage.card, undefined);
+  assert.ok(overlayStill.fullpage.eyebrow);
+  assert.equal(overlayStill.image, undefined);
+  for (const key of [
+    "slide", "menu", "table", "overlay", "overlay-left", "overlay-right", "overlay-bottom",
+    "overlay-title", "overlay-still", "deck",
+  ]) {
+    parseComposeSpec(catalog.examples[key]);
+  }
   const formatted = formatComposeCatalog(catalog);
   assert.match(formatted, /regions: fullpage\|left\|right/);
   assert.match(formatted, /fontSize: not authorable/);
@@ -60,6 +94,7 @@ test("catalog lists regions, not Frame or recipes", () => {
   assert.doesNotMatch(formatted, /warm-cafe/);
   assert.doesNotMatch(formatted, /recipe_guidance/);
   assert.doesNotMatch(formatted, /\bColumn\b/);
+  assert.ok(catalog.region_fields.includes("eyebrow"));
   assert.ok(catalog.region_fields.includes("shadow"));
   assert.ok(catalog.region_fields.includes("outline"));
   assert.ok(catalog.region_fields.includes("card"));
@@ -67,10 +102,45 @@ test("catalog lists regions, not Frame or recipes", () => {
   assert.ok(catalog.page_keys.includes("logo"));
   assert.deepEqual(catalog.card_fits, ["region", "ink"]);
   assert.ok(catalog.card_plate_fields.includes("fit"));
+  assert.ok(catalog.card_plate_fields.includes("eyebrow"));
+  assert.match(catalog.rules.title_color, /eyebrow/);
+  assert.match(catalog.rules.shadow, /blur/);
+  assert.equal(overlayLeft.left.card.eyebrow, "THE LOW END");
+  assert.equal(overlayRight.right.card.eyebrow, "CAPABILITY");
+  assert.equal(overlayBottom.bottom.card.eyebrow, "HARDWARE");
+  assert.equal(overlayTitle.left.eyebrow, "AUGUST 2026");
+  assert.equal(overlayStill.fullpage.eyebrow, "THE PROMISE");
   assert.match(formatted, /1px unblurred drop shadow/);
   assert.match(formatted, /\*\*bold\*\*/);
   assert.match(formatted, /card_fits: region\|ink/);
   assert.match(formatted, /32 px inset/);
+});
+
+test("exec-intro lab deck is valid named-region compose JSON", async () => {
+  const spec = JSON.parse(await readFile(path.join(process.cwd(), "tools/compositor/examples/exec-intro.json"), "utf8")) as unknown;
+  const document = parseComposeSpec(spec);
+  assert.deepEqual(document.pages.map((page) => page.id), [
+    "title", "ai-transform", "mini-pc", "prices", "low-end", "ai-smart",
+    "agent-rise", "enter", "status", "platforms", "agent-how", "rendering",
+    "video", "webapps", "cli", "close",
+  ]);
+  const titleCopy = document.pages[0]!.layers.find((layer) => layer.id === "left");
+  assert.equal(titleCopy?.enter?.type, "fade-right");
+  assert.equal(titleCopy?.cardFit, null);
+  assert.ok(titleCopy?.blocks.some((block) => block.role === "eyebrow"));
+  const stillCopy = document.pages.find((page) => page.id === "status")!.layers.find((layer) => layer.id === "fullpage");
+  assert.equal(stillCopy?.enter?.type, "fade-in");
+  assert.equal(stillCopy?.cardFit, null);
+  assert.ok(stillCopy?.blocks.some((block) => block.role === "eyebrow"));
+  const lowEnd = document.pages.find((page) => page.id === "low-end")!.layers.find((layer) => layer.id === "left");
+  assert.equal(lowEnd?.enter?.type, "fade-right");
+  assert.equal(lowEnd?.cardFit, "region");
+  const videoCopy = document.pages.find((page) => page.id === "video")!.layers.find((layer) => layer.id === "bottom");
+  assert.equal(videoCopy?.enter?.type, "fade-up");
+  assert.equal(videoCopy?.cardFit, "region");
+  const enterPage = document.pages.find((page) => page.id === "enter")!;
+  assert.ok(enterPage.layers.some((layer) => layer.id === "logo"));
+  assert.equal(enterPage.layers.find((layer) => layer.id === "background")?.enter, null);
 });
 
 test("parse fail-closed rejects Frame, recipes, unknown keys, fontSize, and x/y", () => {
@@ -287,7 +357,8 @@ test("table with more than two columns sizes every column", async () => {
 
 test("1080p mid body wish is in the CLI ~45 px class", () => {
   assert.equal(wishOf("text", 1080), 45);
-  assert.equal(wishOf("title", 1080), 86);
+  assert.equal(wishOf("title", 1080), 130);
+  assert.equal(wishOf("eyebrow", 1080), 32);
 });
 
 test("output-upscale and safe-area warnings stay nonblocking", async () => {
@@ -387,33 +458,53 @@ test("resolveFontFamily still fails closed on a missing name", () => {
   assertUsage(() => resolveFontFamily("DefinitelyNotAInstalledFamily"), /font family not installed/);
 });
 
-test("region title and card-item title default to brand; color overrides the box", async () => {
+test("region title follows text; card-item title and eyebrow follow brand; body uses muted", async () => {
   const dir = await testTemp("compose-title-color-");
   const base = { width: 640, height: 360, background: "#111111", brand: "#FF0000", text: "#0000FF" };
-  const brandTitle = await composeDocument({ ...base, left: { title: "HELLO" } }, { baseDir: dir });
-  const otherBrand = await composeDocument({ ...base, brand: "#00FF00", left: { title: "HELLO" } }, { baseDir: dir });
-  const otherText = await composeDocument({ ...base, text: "#00FFFF", left: { title: "HELLO" } }, { baseDir: dir });
-  const brandPng = brandTitle.pages[0]!.painted.find((item) => item.id === "left")!.png!;
-  const otherBrandPng = otherBrand.pages[0]!.painted.find((item) => item.id === "left")!.png!;
-  const otherTextPng = otherText.pages[0]!.painted.find((item) => item.id === "left")!.png!;
-  assert.equal(brandPng.equals(otherBrandPng), false);
-  assert.equal(brandPng.equals(otherTextPng), true);
-  const overridden = await composeDocument({
-    ...base,
-    left: { title: "HELLO", color: "#FFFFFF" },
-  }, { baseDir: dir });
-  const rebranded = await composeDocument({
-    ...base,
-    brand: "#00FF00",
-    left: { title: "HELLO", color: "#FFFFFF" },
-  }, { baseDir: dir });
-  assert.equal(
-    overridden.pages[0]!.painted.find((item) => item.id === "left")!.png!.equals(
-      rebranded.pages[0]!.painted.find((item) => item.id === "left")!.png!,
-    ),
-    true,
-  );
+  const png = async (spec: Record<string, unknown>) => {
+    const result = await composeDocument(spec, { baseDir: dir });
+    return result.pages[0]!.painted.find((item) => item.id === "left")!.png!;
+  };
+  const regionTitle = await png({ ...base, left: { title: "HELLO" } });
+  const otherBrandTitle = await png({ ...base, brand: "#00FF00", left: { title: "HELLO" } });
+  const otherTextTitle = await png({ ...base, text: "#00FFFF", left: { title: "HELLO" } });
+  assert.equal(regionTitle.equals(otherBrandTitle), true);
+  assert.equal(regionTitle.equals(otherTextTitle), false);
+  const cardTitle = await png({ ...base, left: { cards: [{ title: "HELLO" }] } });
+  const otherBrandCard = await png({ ...base, brand: "#00FF00", left: { cards: [{ title: "HELLO" }] } });
+  const otherTextCard = await png({ ...base, text: "#00FFFF", left: { cards: [{ title: "HELLO" }] } });
+  assert.equal(cardTitle.equals(otherBrandCard), false);
+  assert.equal(cardTitle.equals(otherTextCard), true);
+  const eyebrow = await png({ ...base, left: { eyebrow: "KICKER" } });
+  const otherBrandEyebrow = await png({ ...base, brand: "#00FF00", left: { eyebrow: "KICKER" } });
+  const otherTextEyebrow = await png({ ...base, text: "#00FFFF", left: { eyebrow: "KICKER" } });
+  assert.equal(eyebrow.equals(otherBrandEyebrow), false);
+  assert.equal(eyebrow.equals(otherTextEyebrow), true);
+  const body = await png({ ...base, left: { text: "BODY COPY HERE" } });
+  const otherBrandBody = await png({ ...base, brand: "#00FF00", left: { text: "BODY COPY HERE" } });
+  const otherTextBody = await png({ ...base, text: "#00FFFF", left: { text: "BODY COPY HERE" } });
+  const otherBgBody = await png({ ...base, background: "#FFFFFF", left: { text: "BODY COPY HERE" } });
+  assert.equal(body.equals(otherBrandBody), true);
+  assert.equal(body.equals(otherTextBody), false);
+  assert.equal(body.equals(otherBgBody), false);
+  const overridden = await png({ ...base, left: { title: "HELLO", color: "#FFFFFF" } });
+  const rebranded = await png({ ...base, brand: "#00FF00", left: { title: "HELLO", color: "#FFFFFF" } });
+  assert.equal(overridden.equals(rebranded), true);
   await rm(dir, { recursive: true, force: true });
+});
+
+test("eyebrow parses above title, then subtitle, then text", () => {
+  const document = parseComposeSpec({
+    width: 64,
+    height: 64,
+    left: { title: "Headline", subtitle: "Sub", eyebrow: "KICKER", text: "Body" },
+  });
+  const left = document.pages[0]!.layers.find((layer) => layer.id === "left");
+  assert.ok(left);
+  assert.deepEqual(
+    left.blocks.map((block) => block.role),
+    ["eyebrow", "title", "subtitle", "text"],
+  );
 });
 
 async function sampleAlpha(png: Buffer, x: number, y: number): Promise<number> {
@@ -790,6 +881,13 @@ test("text over video gets an automatic drop shadow unless shadow is none", asyn
   const explicitPng = explicit.pages[0]!.painted.find((item) => item.id === "top")!.png;
   assert.ok(explicitPng);
   assert.equal(explicitPng.equals(autoPng), false);
+  const blurred = await composeDocument({
+    ...spec,
+    top: { align: "center", title: "MOTHLIGHT", shadow: { x: 3, y: 3, color: "#FF00FF", blur: 8 } },
+  }, { baseDir: dir });
+  const blurredPng = blurred.pages[0]!.painted.find((item) => item.id === "top")!.png;
+  assert.ok(blurredPng);
+  assert.equal(blurredPng.equals(explicitPng), false);
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -816,9 +914,16 @@ test("outline is off unless set", async () => {
     () => parseComposeSpec({ width: 64, height: 64, left: { title: "Hi", outline: { width: 0.2, color: "#000000" } } }),
     /outline\.width/,
   );
+  const withBlur = parseComposeSpec({
+    width: 64,
+    height: 64,
+    left: { title: "Hi", shadow: { x: 1, y: 2, blur: 4, color: "#000000" } },
+  });
+  const leftShadow = withBlur.pages[0]!.layers.find((layer) => layer.id === "left")?.shadow;
+  assert.deepEqual(leftShadow, { x: 1, y: 2, color: "#000000", blur: 4 });
   assertUsage(
-    () => parseComposeSpec({ width: 64, height: 64, left: { title: "Hi", shadow: { blur: 4, color: "#000000" } } }),
-    /shadow unknown keys/,
+    () => parseComposeSpec({ width: 64, height: 64, left: { title: "Hi", shadow: { x: 1, y: 1, blur: 33, color: "#000000" } } }),
+    /shadow\.blur/,
   );
   await rm(dir, { recursive: true, force: true });
 });
