@@ -41,6 +41,39 @@ jobs:
       - name: Build npm artifact
         run: bash scripts/package-release.sh "${RUNNER_TEMP}/screenrig-cli.tgz"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: github.ref != 'refs/heads/main'
+        with:
+          name: screenrig-cli
+          path: ${{ runner.temp }}/screenrig-cli.tgz
+          if-no-files-found: error
+          retention-days: 14
+
+  distribute:
+    if: github.repository == 'screenrig/cli' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Tag this commit and stamp the distributing artifact
+        run: |
+          version="$(node scripts/calver.mjs tag)"
+          export SCREENRIG_VERSION="${version}"
+          bash scripts/package-release.sh "${RUNNER_TEMP}/screenrig-cli.tgz"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: screenrig-cli
           path: ${{ runner.temp }}/screenrig-cli.tgz

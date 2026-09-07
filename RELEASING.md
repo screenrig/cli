@@ -16,7 +16,9 @@ before the first release:
    repository `cli`, workflow filename `npm-release.yml`, environment `npm`, and
    allowed action `npm publish`.
 3. Create a protected GitHub environment named `npm` with required reviewers.
-4. Protect release tags matching `v*` so only release owners can create them.
+4. Allow GitHub Actions to create `v*` tags. The distributing `main` job creates
+   them. Humans create GitHub Releases from those tags; they do not invent a
+   second version.
 5. After trusted publishing works, require two-factor authentication and disallow
    token-based publishing for the npm package.
 
@@ -25,23 +27,37 @@ Trusted publishing requires a GitHub-hosted runner, `id-token: write`, Node
 11.5.1. It does not read an npm token. npm generates provenance automatically for
 the public package from this public repository.
 
+## Versioning
+
+Distributed CLI artifacts use calendar versioning `YY.MM.SERIAL` (UTC). The
+GitHub tag is `vYY.MM.N`. SERIAL starts at 1 each UTC month. 0 is not a release.
+Local, pull-request, and other untagged trees use `YY.MM.0-dev`. Do not publish
+a `-dev` version. `npm-release.yml` already rejects prerelease GitHub releases.
+
+Committed `package.json` stays `0.1.0`. Do not bump it on every commit. The
+distributing `main` job tags HEAD after tests pass and stamps that CalVer into
+the packed artifact. A rebuild of the same SHA reuses the tag. Failed jobs do
+not tag. SERIAL is not `github.run_number` and not a git commit count.
+
+`npm-release.yml` reuses the tag on that commit and stamps the published
+package. Plugin lock identity stays the CLI commit and SHA-256; it is not this
+CalVer string.
+
 ## Release procedure
 
-1. Update `package.json`, `package-lock.json`, `src/commands.ts` `CLI_VERSION`,
-   `scripts/check-public-repo.py` `EXPECTED_VERSION`, and
-   `scripts/check-release-artifact.mjs` together.
-2. Run the repository gates documented in `AGENTS.md`.
-3. Merge the reviewed release commit to `main`.
-4. Create a non-prerelease GitHub release whose immutable tag is exactly
-   `v<package.json version>` and targets that commit.
-5. Let `npm-release.yml` publish through OIDC. It rejects a tag/version mismatch,
-   runs the complete public gates, and publishes no secret token.
-6. Require all Linux, macOS, and Windows clean-install jobs to pass. Each installs
+1. Merge the reviewed commit to `main`. Do not rewrite `package.json`.
+2. Let the distributing `main` job tag `vYY.MM.N` and upload the stamped
+   `screenrig-cli.tgz`. A rebuild of the same SHA reuses the tag.
+3. Create a non-prerelease GitHub release on that existing tag when npm should
+   publish. Do not retag.
+4. Let `npm-release.yml` reuse the tag, stamp the package, publish through OIDC,
+   and attach the offline archive. It rejects a tag that is not `vYY.MM.N`.
+5. Require all Linux, macOS, and Windows clean-install jobs to pass. Each installs
    the exact registry version and runs `screenrig --json version` plus
    `screenrig --json compose catalog` on Node 20.11.1.
-7. Confirm the workflow attached `screenrig-cli.tgz` and its SHA-256 file to the
+6. Confirm the workflow attached `screenrig-cli.tgz` and its SHA-256 file to the
    same GitHub release.
-8. Verify the npm package page shows provenance before announcing availability.
+7. Verify the npm package page shows provenance before announcing availability.
 
 npm versions are immutable. Never move a release tag, replace an existing npm
 version, or use a mutable `latest` install in release verification.

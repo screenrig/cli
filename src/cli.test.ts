@@ -6,7 +6,7 @@ import { mkdir, open, readFile, rename, chmod, stat, writeFile, rm } from "node:
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, USAGE, formatEventLine } from "./commands.js";
+import { CLI_VERSION, EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, USAGE, formatEventLine } from "./commands.js";
 import { run, type CliRuntime } from "./main.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import { ExitCode } from "./exit-codes.js";
@@ -216,7 +216,7 @@ test("explicit enrollment includes beta_key from SCREENRIG_BETA_KEY when the fla
     beta_key: "screenrig-beta-program",
     agent_type: "cli",
     platform: `${process.platform}/${process.arch}`,
-    version: "0.1.0",
+    version: CLI_VERSION,
   });
   await rm(configDir, { recursive: true, force: true });
 });
@@ -260,7 +260,7 @@ test("agent enroll requires contact email, trims it, and creates the first named
     name: "Office Codex",
     agent_type: "cli",
     platform: `${process.platform}/${process.arch}`,
-    version: "0.1.0",
+    version: CLI_VERSION,
   });
   assert.deepEqual(transport.calls.map((call) => call.path), [
     "/api/v1/enrollments",
@@ -1461,7 +1461,7 @@ test("expired enrollment replay surfaces 410 and reuses the persisted identity w
     email: retryState.email,
     agent_type: "cli",
     platform: `${process.platform}/${process.arch}`,
-    version: "0.1.0",
+    version: CLI_VERSION,
   });
   assert.deepEqual((await readConfigFile(configPath, fsLike))?.enrollment, retryState);
   await rm(configDir, { recursive: true, force: true });
@@ -3027,7 +3027,7 @@ test("feedback takes its kind from the route, carries no argv, and stays idempot
     assert.equal(body.kind, undefined, "the kind comes from the route, never the body");
     assert.equal(body.title, "Playlist stalls after pairing");
     assert.equal(body.context?.command, "screen pair");
-    assert.equal(body.context?.cli_version, "0.1.0");
+    assert.equal(body.context?.cli_version, CLI_VERSION);
     assert.match(String(body.context?.platform), /^[a-z0-9]{1,16}\/[a-z0-9_]{1,16}$/);
     assert.deepEqual(Object.keys(body.context ?? {}).sort(), ["cli_version", "command", "platform"]);
     assert.ok(post.headers?.["idempotency-key"], "a write must carry an idempotency key");
@@ -3290,8 +3290,9 @@ test("unauthenticated version does not add credits_low", async () => {
   const json = await withRuntime(["--json", "version"], transport);
   try {
     assert.equal(json.code, 0, json.stdout);
-    const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string }> };
+    const envelope = JSON.parse(json.stdout) as { ok: boolean; data: { version: string }; warnings: Array<{ code: string }> };
     assert.equal(envelope.ok, true);
+    assert.equal(envelope.data.version, CLI_VERSION);
     assert.equal(envelope.warnings.some((item) => item.code === "credits_low"), false, json.stdout);
   } finally {
     await rm(json.configDir, { recursive: true, force: true });

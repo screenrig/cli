@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 EXPECTED_REPOSITORY = "git+https://github.com/screenrig/cli.git"
-EXPECTED_VERSION = "0.1.0"
+PLACEHOLDER_VERSION = "0.1.0"
 TEXT_SUFFIXES = {"", ".cjs", ".js", ".json", ".md", ".mjs", ".py", ".sh", ".toml", ".ts", ".yaml", ".yml"}
 IGNORED_PARTS = {".git", ".tmp", "dist", "node_modules", "out", "runs"}
 
@@ -46,7 +46,7 @@ def check_metadata(errors: list[str]) -> None:
 
     expected = {
         "name": "screenrig",
-        "version": EXPECTED_VERSION,
+        "version": PLACEHOLDER_VERSION,
         "private": False,
         "license": "Apache-2.0",
     }
@@ -67,11 +67,18 @@ def check_metadata(errors: list[str]) -> None:
         errors.append("package.json files must include SECURITY.md in the public npm package")
     try:
         commands = (ROOT / "src" / "commands.ts").read_text(encoding="utf-8")
+        version_source = (ROOT / "src" / "version.ts").read_text(encoding="utf-8")
     except OSError as exc:
-        errors.append(f"src/commands.ts is unreadable: {exc}")
+        errors.append(f"CLI version source is unreadable: {exc}")
     else:
-        if f'export const CLI_VERSION = "{EXPECTED_VERSION}";' not in commands:
-            errors.append("CLI_VERSION must match the public package version")
+        if 'from "./version.js"' not in commands or "CLI_VERSION" not in commands:
+            errors.append("commands.ts must read CLI_VERSION from src/version.ts")
+        if f'export const PLACEHOLDER_VERSION = "{PLACEHOLDER_VERSION}";' not in version_source:
+            errors.append("src/version.ts must keep the committed 0.1.0 placeholder")
+        if "export function resolveCliVersion" not in version_source:
+            errors.append("src/version.ts must resolve the stamped or YY.MM.0-dev product version")
+        if f'export const CLI_VERSION = "{PLACEHOLDER_VERSION}";' in commands:
+            errors.append("commands.ts must not freeze CLI_VERSION to the committed placeholder")
 
     root_lock = (lock.get("packages") or {}).get("") or {}
     for field in ("name", "version", "license"):
@@ -98,15 +105,26 @@ def check_public_tree(errors: list[str]) -> None:
             "os: [ubuntu-24.04, macos-14, windows-2022]",
             "npm run check:npm-install",
             "gitleaks\" git",
+            "contents: write",
+            "node scripts/calver.mjs tag",
+            "SCREENRIG_VERSION",
+            "github.ref == 'refs/heads/main'",
         ):
             if fact not in workflow:
                 errors.append(f"public CI is missing required gate: {fact}")
+        if "github.run_number" in workflow:
+            errors.append("public CI must not use github.run_number for CalVer")
     release_path = ROOT / "scripts" / "package-release.sh"
     if not release_path.is_file():
         errors.append("missing public packaging file: scripts/package-release.sh")
     else:
         release = release_path.read_text(encoding="utf-8")
-        for fact in ("scripts/vendor-runtime-dependencies.mjs", "scripts/check-release-artifact.mjs"):
+        for fact in (
+            "scripts/vendor-runtime-dependencies.mjs",
+            "scripts/check-release-artifact.mjs",
+            "scripts/calver.mjs",
+            "SCREENRIG_VERSION",
+        ):
             if fact not in release:
                 errors.append(f"CLI release packaging is missing required gate: {fact}")
 
@@ -122,6 +140,7 @@ def check_public_tree(errors: list[str]) -> None:
             "id-token: write",
             "npm install --global npm@11.5.1",
             "node scripts/check-release-tag.mjs",
+            "node scripts/calver.mjs stamp",
             "npm publish --access public",
             "screenrig@${{ needs.publish.outputs.version }}",
             "ubuntu-24.04, macos-14, windows-2022",
@@ -134,8 +153,10 @@ def check_public_tree(errors: list[str]) -> None:
 
     for required in (
         "RELEASING.md",
+        "scripts/calver.mjs",
         "scripts/check-release-tag.mjs",
         "scripts/check-npm-install.mjs",
+        "src/version.ts",
     ):
         if not (ROOT / required).is_file():
             errors.append(f"missing public npm release file: {required}")

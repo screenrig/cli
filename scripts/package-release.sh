@@ -18,6 +18,11 @@ tar --extract --gzip --file "${temporary}/${archive}" --directory "${temporary}/
 install -m 0644 "${root}/SECURITY.md" "${temporary}/normalized/package/SECURITY.md"
 node "${root}/scripts/vendor-runtime-dependencies.mjs" \
   --destination "${temporary}/normalized/package"
+version="${SCREENRIG_VERSION:-}"
+if [ -z "${version}" ]; then
+  version="$(node "${root}/scripts/calver.mjs" print --git "${root}")"
+fi
+node "${root}/scripts/calver.mjs" stamp --root "${temporary}/normalized/package" --version "${version}"
 node "${root}/scripts/normalize-release-tree.mjs" \
   "${temporary}/normalized/package"
 

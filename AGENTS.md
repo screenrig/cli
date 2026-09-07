@@ -20,11 +20,17 @@ installation, players, backend services, the site, or production deployment.
   production closure from `package-lock.json`; `scripts/check-release-artifact.mjs`
   rejects a release that cannot run offline.
 - `.github/workflows/ci.yml` defines public, test, package, and secret gates.
-  The `main` Action publishes the `screenrig-cli.tgz` CI artifact only.
+  The `main` Action tags CalVer `vYY.MM.N` and publishes the stamped
+  `screenrig-cli.tgz` CI artifact only. Pull requests pack `YY.MM.0-dev`.
 - `.github/workflows/npm-release.yml` is the only npm publication path. It runs
-  from a protected, non-prerelease GitHub release, requires an exact version tag,
-  uses npm trusted publishing and provenance, and performs post-publish clean
-  installs. Do not publish npm from a laptop or add a long-lived npm token.
+  from a protected, non-prerelease GitHub release, reuses the CalVer tag on that
+  commit, stamps the published package, uses npm trusted publishing and
+  provenance, and performs post-publish clean installs. Do not publish npm from
+  a laptop or add a long-lived npm token.
+- Distributed CLI versions are CalVer `YY.MM.SERIAL` (UTC). Tags are
+  `vYY.MM.N`. Committed `package.json` stays `0.1.0`; CI stamps the artifact.
+  Local and pull-request trees use `YY.MM.0-dev`. Plugin lock identity stays
+  commit plus SHA-256. See `RELEASING.md`.
 - **Deploys are independent** (operating rule). Do not pack siblings.
   Do not dispatch backend. Do not copy deploy tokens between repos.
   Coordinated multi-repo deploy is rare and only for a breaking contract

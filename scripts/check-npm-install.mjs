@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { PLACEHOLDER_VERSION, isReleaseVersion, resolvePackVersion, versionFromTag } from "./calver.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
@@ -32,9 +33,16 @@ let requestedSpec;
 if (process.argv.length === 4 && process.argv[2] === "--spec") requestedSpec = process.argv[3];
 else if (process.argv.length !== 2) throw new Error("usage: check-npm-install.mjs [--spec screenrig@VERSION]");
 
-const registrySpec = `${packageJson.name}@${packageJson.version}`;
-if (requestedSpec && requestedSpec !== registrySpec) {
-  throw new Error(`registry smoke must install the exact release ${registrySpec}`);
+let expectedVersion;
+if (requestedSpec) {
+  const match = /^screenrig@(v?.+)$/.exec(requestedSpec);
+  const specVersion = match?.[1]?.startsWith("v") ? versionFromTag(match[1]) : match?.[1];
+  if (!isReleaseVersion(specVersion)) {
+    throw new Error(`registry smoke must install an exact CalVer release; received ${requestedSpec}`);
+  }
+  expectedVersion = specVersion;
+} else {
+  expectedVersion = packageJson.version === PLACEHOLDER_VERSION ? resolvePackVersion({ env: {} }) : packageJson.version;
 }
 
 const temporary = await mkdtemp(path.join(process.env.RUNNER_TEMP || os.tmpdir(), "screenrig-npm-install."));
@@ -49,6 +57,7 @@ try {
 
   let spec = requestedSpec;
   const environment = { ...process.env, NPM_CONFIG_CACHE: cache };
+  delete environment.SCREENRIG_VERSION;
   if (!spec) {
     const packed = run(["pack", "--json", "--pack-destination", temporary], { cwd: root, env: environment });
     const inventory = JSON.parse(packed.stdout);
@@ -65,8 +74,8 @@ try {
   });
 
   const version = successfulEnvelope(["version"], consumer, environment);
-  if (version.data?.version !== packageJson.version) {
-    throw new Error(`installed CLI returned version ${version.data?.version}; expected ${packageJson.version}`);
+  if (version.data?.version !== expectedVersion) {
+    throw new Error(`installed CLI returned version ${version.data?.version}; expected ${expectedVersion}`);
   }
   successfulEnvelope(["compose", "catalog"], consumer, environment);
   const playlistFile = path.join(temporary, "playlist.json");
@@ -76,4 +85,4 @@ try {
   await rm(temporary, { recursive: true, force: true });
 }
 
-process.stdout.write(`clean npm install smoke passed for ${registrySpec}\n`);
+process.stdout.write(`clean npm install smoke passed for ${packageJson.name}@${expectedVersion}\n`);

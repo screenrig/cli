@@ -35,7 +35,7 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           node scripts/check-release-tag.mjs "${RELEASE_TAG}"
-          printf 'version=%s\n' "$(node -p "require('./package.json').version")" >> "${GITHUB_OUTPUT}"
+          printf 'version=%s\n' "$(node scripts/calver.mjs from-tag "${RELEASE_TAG}")" >> "${GITHUB_OUTPUT}"
       - name: Install exact dependencies without a release cache
         run: npm ci
       - name: Run complete public package gates
@@ -47,6 +47,10 @@ jobs:
           npm test
           npm run smoke:mock
           npm run pack:dry
+      - name: Stamp CalVer onto the npm package
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: node scripts/calver.mjs stamp --root . --version "$(node scripts/calver.mjs from-tag "${RELEASE_TAG}")"
       - name: Publish the exact public package with trusted OIDC
         run: npm publish --access public
 
@@ -78,6 +82,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+          fetch-tags: true
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"

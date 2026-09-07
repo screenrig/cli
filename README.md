@@ -8,11 +8,13 @@ through a package-relative launcher.
 
 ## Official npm installation for developer shells
 
-The public npm package is `screenrig`. Install an exact published version rather
-than a mutable range:
+The public npm package is `screenrig`. Install an exact published CalVer
+(`YY.MM.SERIAL`, UTC) rather than a mutable range. GitHub release tags are
+`vYY.MM.N`. Local and pull-request trees use `YY.MM.0-dev` and must not be
+published.
 
 ```sh
-npm install --global screenrig@0.1.0
+npm install --global screenrig@<YY.MM.SERIAL>
 screenrig --json version
 ```
 
@@ -1135,10 +1137,12 @@ is absent, valueless, not a directory, or missing a canonical input is an error,
 never a pass. Run it whenever the backend contract may have changed; a snapshot
 that passes `vendor:check` can still be superseded.
 
-The ordinary `main` workflow publishes deterministic `screenrig-cli.tgz` as a
-short-lived CI artifact. The plugin repository pins that artifact by CLI commit
-and SHA-256. A separate protected workflow publishes npm only after a
-non-prerelease GitHub release is published with a tag matching the package version.
+The ordinary `main` workflow tags `vYY.MM.N` and publishes deterministic
+`screenrig-cli.tgz` as a short-lived CI artifact. Committed `package.json` stays
+`0.1.0`; CI stamps the artifact. The plugin repository pins that artifact by CLI
+commit and SHA-256, not by CalVer. A separate protected workflow publishes npm
+only after a non-prerelease GitHub release is published on that existing CalVer
+tag. It reuses the tag and stamps the published package.
 It uses npm trusted publishing through GitHub OIDC, includes provenance, performs
 exact-version clean-install tests on Linux, macOS, and Windows, and attaches the
 offline archive plus its checksum to the stable GitHub release. See the

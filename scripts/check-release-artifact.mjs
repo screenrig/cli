@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isProductVersion } from "./calver.mjs";
 import { loadRuntimeDependencyLock, RUNTIME_LOCK_FILE } from "./runtime-dependencies.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -74,9 +75,21 @@ async function main() {
         throw new Error(`${dependency.path}: bundled package metadata differs from the runtime dependency manifest`);
       }
     }
+    let packaged;
+    try {
+      packaged = JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8"));
+    } catch {
+      throw new Error("release archive is missing package.json");
+    }
+    if (!isProductVersion(packaged.version)) {
+      throw new Error(`release archive package.json version must be YY.MM.N or YY.MM.0-dev; received ${packaged.version}`);
+    }
     const environment = { ...process.env, XDG_CONFIG_HOME: path.join(temporary, "config") };
+    delete environment.SCREENRIG_VERSION;
     const version = successfulEnvelope(packageRoot, ["version"], environment);
-    if (version.data?.version !== "0.1.0") throw new Error("offline bundled CLI returned the wrong version");
+    if (version.data?.version !== packaged.version) {
+      throw new Error(`offline bundled CLI returned ${version.data?.version}; package.json is ${packaged.version}`);
+    }
     successfulEnvelope(packageRoot, ["compose", "catalog"], environment);
   const playlistFile = path.join(temporary, "playlist.json");
   await writeFile(playlistFile, JSON.stringify({ name: "Offline validation", pages: [{ id: "page", canvas: { width: 1920, height: 1080, background: "#000000FF" }, transition: { type: "crossfade", duration_ms: 200 }, advance: { mode: "application", max_ms: 60000 }, primitives: [{ id: "app", primitive: "application", release_id: "rel_EXAMPLE", controller: true, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "fill" }] }] }));

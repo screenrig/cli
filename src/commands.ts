@@ -136,8 +136,9 @@ import {
   validateAgentConnectionStart,
   type AgentConnectionConfig,
 } from "./agent-identity.js";
+import { CLI_VERSION } from "./version.js";
 
-export const CLI_VERSION = "0.1.0";
+export { CLI_VERSION };
 
 export const USAGE = `screenrig — ScreenRig localhost v1 control-plane CLI
 
