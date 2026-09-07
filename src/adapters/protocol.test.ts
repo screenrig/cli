@@ -237,6 +237,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "label",
     "last_ip",
     "last_online_at",
+    "last_page_failure",
     "manifest_revision",
     "observation",
     "online",
@@ -246,6 +247,12 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "state",
     "timezone",
     "updated_at",
+  ]);
+  assert.match(screen, /"last_page_failure"\?: PageFailure/);
+  assert.deepEqual(quotedProperties(interfaceBody(source, "PageFailure")), [
+    "at",
+    "code",
+    "page_id",
   ]);
   assert.match(screen, /"comments"\?: Record<string, unknown>/);
   assert.match(screen, /"state": "pairing_pending" \| "active" \| "archived"/);
@@ -443,7 +450,7 @@ test("screen online is required, last_online_at and last_ip are optional, and Sc
   assert.match(commands, /screen update requires <id>, --if-match, and --name, --playlist-id, or --timezone/);
 });
 
-test("published problem codes include payment_required at 402", () => {
+test("published problem codes include payment_required and dependency_timeout", () => {
   const source = readFileSync(OPENAPI_CONTRACT, "utf8");
   const listed = source.match(/x-problem-codes: \[([^\]]+)\]/);
   assert.ok(listed?.[1], "missing x-problem-codes");

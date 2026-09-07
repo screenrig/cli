@@ -274,6 +274,13 @@ export interface ScreenObservation {
   surfaces: ScreenObservationSurface[];
 }
 
+/** Last durable page failure reported for a screen. Read-only on the account API. */
+export interface PageFailure {
+  at: string;
+  code: string;
+  page_id: string;
+}
+
 export interface Screen {
   content_access_generation: number;
   created_at: string;
@@ -289,6 +296,7 @@ export interface Screen {
    * after the first connect. When offline, last time the screen was online.
    */
   last_online_at?: string;
+  last_page_failure?: PageFailure;
   manifest_revision: number;
   observation?: ScreenObservation;
   /**

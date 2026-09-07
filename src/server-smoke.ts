@@ -271,7 +271,7 @@ async function main(): Promise<void> {
       pairing_session_manifest: "active schemaVersion 2",
       screen_archive: "state archived, revision advanced",
       events_cursor_resume: "durable K/V delete observed after listed cursor",
-      note: "real Compose API smoke passed; disposable account/application remain because v0.2.0 publishes no delete routes",
+      note: "real Compose API smoke passed; disposable account/application remain because this smoke has no account or application cleanup command",
     }) + "\n");
   } finally {
     if (applicationId && kvRevision) {

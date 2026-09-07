@@ -1,3 +1,5 @@
+# Managed by cmd/screenrig-openapi-writer from api/openapi.publication.yaml. DO NOT EDIT.
+# Run make openapi after changing the publication input; make generate only consumes this file.
 openapi: 3.1.0
 info:
   title: ScreenRig API
@@ -326,6 +328,21 @@ paths:
       parameters: [{ $ref: "#/components/parameters/ResourceID" }]
       responses:
         "200": { description: Application, content: { application/json: { schema: { $ref: "#/components/schemas/Application" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteApplication
+      description: >-
+        Tombstones one application owned by the authenticated account and
+        all of its releases. The account bearer is authoritative; an
+        unknown or other-account id is not_found. If-Match guards the
+        application revision. A live manifest reference blocks deletion
+        with application_in_use; there is no force-delete path.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "204": { description: Application and releases tombstoned. }
+        "409": { description: application_in_use — a live manifest still references one of the application's releases., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: revision_conflict — If-Match is stale; Problem.current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/operations/{id}:
     get:
@@ -1293,7 +1310,7 @@ paths:
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeReport" } } } }
       responses:
-        "202": { description: Accepted. manifest.activated is committed before this response and is idempotent for the current active revision. playback.media_started upserts the daily aggregate for an image or video start before this response; playback.video_started is the video-only legacy form of the same report and remains accepted. application.event appends a durable account event before this response., headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
+        "202": { description: Accepted. manifest.activated is committed before this response and is idempotent for the current active revision. playback.media_started upserts the daily aggregate for an image or video start before this response; playback.video_started is the video-only legacy form of the same report and remains accepted. playback.page_failed replaces the screen's latest page-failure slot and appends an account-only durable event in the same transaction without changing screen or manifest revision. application.event appends a durable account event before this response., headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/screenshot:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -2864,6 +2881,7 @@ components:
         playlist_id: { type: string }
         timezone: { type: string, description: "IANA time zone identifier. Absent until it is set. Page visibility rules are evaluated in this zone." }
         observation: { $ref: "#/components/schemas/ScreenObservation" }
+        last_page_failure: { $ref: "#/components/schemas/PageFailure" }
         comments: { type: object, additionalProperties: true, description: "Opaque agent JSON object, compact UTF-8 ≤ 1024 bytes. Absent when unset. ScreenRig never reads or uses it. ScreenPatch cannot write it. Not on the runtime manifest and never authorization." }
         revision: { type: integer }
         manifest_revision: { type: integer }
@@ -2908,6 +2926,18 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     ScreenList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Screen" } } } }
+    PageFailure:
+      type: object
+      additionalProperties: false
+      required: [page_id, code, at]
+      description: >-
+        Latest accepted playback.page_failed report for this screen.
+        Absent until a player reports one. Read-only account health
+        metadata; it does not change screen revision or manifest authority.
+      properties:
+        page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }
+        code: { type: string, pattern: "^[a-z0-9._-]{1,80}$" }
+        at: { type: string, format: date-time }
     ScreenObservation:
       type: object
       additionalProperties: false
@@ -3015,7 +3045,7 @@ components:
       properties:
         capture_id: { $ref: "#/components/schemas/ScreenshotCaptureID" }
         reason: { type: string, enum: [expired] }
-    Event: { type: object, additionalProperties: true, required: [cursor, sequence, type, severity, message, at], properties: { cursor: { type: string }, sequence: { type: integer }, type: { type: string }, severity: { type: string }, request_id: { type: string }, operation_id: { type: string }, message: { type: string }, actor: { $ref: "#/components/schemas/EventActor" }, agent: { $ref: "#/components/schemas/EventAgent" }, command: { $ref: "#/components/schemas/EventCommand" }, resource: { type: object, additionalProperties: true }, details: { type: object, additionalProperties: true }, at: { type: string } } }
+    Event: { type: object, additionalProperties: true, required: [cursor, sequence, type, severity, message, at], properties: { cursor: { type: string }, sequence: { type: integer }, type: { type: string }, tag: { type: string, description: "Operation-log alias of type with each dot replaced by an underscore." }, id: { type: string, description: "Operation-log alias of resource.id. Absent when resource has no string id." }, params: { type: object, additionalProperties: { oneOf: [{ type: string, minLength: 1 }, { type: number }, { type: boolean }] }, description: "Operation-log alias containing only non-secret, non-empty scalar details. Nested values and secret-looking keys or values are omitted." }, severity: { type: string }, request_id: { type: string }, operation_id: { type: string }, message: { type: string }, actor: { $ref: "#/components/schemas/EventActor" }, agent: { $ref: "#/components/schemas/EventAgent" }, command: { $ref: "#/components/schemas/EventCommand" }, resource: { type: object, additionalProperties: true }, details: { type: object, additionalProperties: true }, at: { type: string } } }
     EventCommand:
       type: object
       additionalProperties: false
@@ -3286,7 +3316,7 @@ components:
       type: object
       description: >-
         Immutable runtime manifest using the deterministic screenrig.canvas/v1 canvas, rectangle, fit, and source-order contract.
-        Read-side additional properties are permitted so a player pinned to this contract ignores unknown keys (compatibility rule 2). Write schemas stay closed.
+        Read-side additional properties are permitted so a player on this contract ignores unknown keys (compatibility rule 2). Write schemas stay closed.
       required: [schemaVersion, manifestRevision, grantId, contentGeneration, screenId, screenLabel, playlistRevision, generatedAt, pages]
       properties:
         schemaVersion: { type: integer, enum: [2] }
@@ -3531,6 +3561,7 @@ components:
         - { $ref: "#/components/schemas/ManifestActivatedReport" }
         - { $ref: "#/components/schemas/PlaybackMediaStartedReport" }
         - { $ref: "#/components/schemas/PlaybackVideoStartedReport" }
+        - { $ref: "#/components/schemas/PlaybackPageFailedReport" }
         - { $ref: "#/components/schemas/ApplicationEventReport" }
         - { $ref: "#/components/schemas/RuntimeConditionReport" }
     ManifestActivatedReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [manifest.activated] }, context: { $ref: "#/components/schemas/ManifestActivatedContext" } } }
@@ -3539,9 +3570,29 @@ components:
     PlaybackMediaStartedContext: { type: object, additionalProperties: false, required: [media_id, manifest_revision, page_id, primitive], properties: { media_id: { type: string, pattern: "^med_" }, manifest_revision: { type: string, pattern: "^man_" }, page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [image, video], description: The primitive kind of the media that started. Must match the ready media. } } }
     PlaybackVideoStartedReport: { type: object, additionalProperties: false, required: [severity, code, context], description: "Legacy video-only start report, equivalent to playback.media_started with primitive video. Still accepted so players shipped before media-neutral starts keep aggregating; new players send playback.media_started for both images and videos.", properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [playback.video_started] }, context: { $ref: "#/components/schemas/PlaybackVideoStartedContext" } } }
     PlaybackVideoStartedContext: { type: object, additionalProperties: false, required: [media_id, manifest_revision, page_id], properties: { media_id: { type: string, pattern: "^med_" }, manifest_revision: { type: string, pattern: "^man_" }, page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" } } }
+    PlaybackPageFailedReport:
+      type: object
+      additionalProperties: false
+      required: [severity, code, context]
+      description: >-
+        Reports that one page could not become ready. On acceptance the
+        server replaces Screen.last_page_failure and appends a durable
+        account-only playback.page_failed event in the same transaction.
+        It does not change screen revision or manifest authority.
+      properties:
+        severity: { type: string, enum: [error] }
+        code: { type: string, enum: [playback.page_failed] }
+        context: { $ref: "#/components/schemas/PlaybackPageFailedContext" }
+    PlaybackPageFailedContext:
+      type: object
+      additionalProperties: false
+      required: [page_id, code]
+      properties:
+        page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }
+        code: { type: string, pattern: "^[a-z0-9._-]{1,80}$" }
     ApplicationEventReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [application.event] }, context: { $ref: "#/components/schemas/ApplicationEventContext" } } }
     ApplicationEventContext: { type: object, additionalProperties: false, required: [primitive_id, code], properties: { primitive_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, code: { type: string, pattern: "^[A-Za-z0-9._-]{1,64}$" } } }
-    RuntimeConditionReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info, warning, error] }, code: { type: string, pattern: "^[a-z0-9._-]{1,80}$", not: { enum: [manifest.activated, playback.media_started, playback.video_started, application.event] } }, context: { type: object, additionalProperties: true } } }
+    RuntimeConditionReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info, warning, error] }, code: { type: string, pattern: "^[a-z0-9._-]{1,80}$", not: { enum: [manifest.activated, playback.media_started, playback.video_started, playback.page_failed, application.event] } }, context: { type: object, additionalProperties: true } } }
     ReleaseLaunch: { type: object, additionalProperties: false, required: [launch_url, expires_at], properties: { launch_url: { type: string }, expires_at: { type: string } } }
     DashboardDisplayName:
       type: string
@@ -3764,6 +3815,10 @@ components:
       type: object
       additionalProperties: true
       required: [type, title, status, detail, instance, code, request_id, errors]
+      allOf:
+        - if: { properties: { status: { type: integer, minimum: 500 } }, required: [status] }
+          then: { required: [retryable] }
+          else: { not: { required: [retryable] } }
       properties:
         type: { type: string, format: uri }
         title: { type: string }
@@ -3773,6 +3828,7 @@ components:
         code: { type: string }
         request_id: { type: string }
         trace_id: { type: string }
+        retryable: { type: boolean, description: "Present on every 5xx problem response and absent below 500. True when retrying the same operation may succeed without changing the request; false when the unchanged request is not retryable." }
         current_revision: { type: integer }
         errors: { type: array, items: { $ref: "#/components/schemas/ProblemField" } }
         next: { $ref: "#/components/schemas/NextAction" }
