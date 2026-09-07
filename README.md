@@ -2,9 +2,10 @@
 
 This repository implements the noninteractive ScreenRig control-plane CLI and
 deterministic web-application package packer. The supported customer
-distribution is the exact CI artifact pinned and bundled by
-[`screenrig/plugin`](https://github.com/screenrig/plugin); the plugin invokes it
-through a package-relative launcher.
+distribution is the CLI bundled by
+[`screenrig/plugin`](https://github.com/screenrig/plugin) from current
+`screenrig/cli` `main`; the plugin invokes it through a package-relative
+launcher.
 
 ## Official npm installation for developer shells
 
@@ -25,8 +26,8 @@ that is missing nothing required and reports the rest as warnings.
 
 This global package is the official developer-shell distribution. Agent workflows
 that load the ScreenRig plugin must keep using the plugin-relative launcher. The
-plugin pins and bundles an exact reviewed CLI artifact, so it never resolves a
-global `screenrig` from `PATH` and never substitutes the npm package at run time.
+plugin bundles current `screenrig/cli` `main`, so it never resolves a global
+`screenrig` from `PATH` and never substitutes the npm package at run time.
 
 ## Implemented behavior
 
@@ -300,7 +301,7 @@ and applies to `image` and `video` only. `path` takes 1 through 64
 `points`, `rate` greater than 0 and at most 10000, and optional `loop`
 `loop`, `ping-pong`, or `once`; it applies to `image`, `video`,
 `application`, and `iframe`. `playlist templates` prints the two examples
-below. The pinned CLI implements these playlist document fields, and the
+below. The bundled CLI implements these playlist document fields, and the
 control plane accepts swipe types, object `enter`, and object `motion`.
 This does not establish marketplace availability or deployment.
 
@@ -392,12 +393,12 @@ de-associate; the server returns `screen_archive_required`.
 Ed25519 identity with `ScreenRig-Pairing` and `ScreenRig-Session`;
 `ScreenRig-Device` is retired. Signed on-device reset is the only
 de-associate. The CLI is not a screen and holds no player keypair. `screen
-archive` and `screen unarchive` are implemented by the pinned CLI. Native
+archive` and `screen unarchive` are implemented by the bundled CLI. Native
 identity remains an owning-player claim; none of this establishes marketplace
 availability, deployment, or hardware validation.
 
 Application packing accepts an already-built static directory. It produces
-deterministic bounded archives, injects the pinned browser SDK runtime, and
+deterministic bounded archives, injects the browser SDK runtime, and
 never builds or executes uploaded source. File-count and expanded-byte limits are
 checked before each file is read; source files are read through bounded descriptors
 and changes during reading are rejected. `app upload` accepts optional
@@ -414,7 +415,7 @@ object on a screen, a playlist, or one playlist page. Compact UTF-8 of that
 object is at most 1 KiB. ScreenRig does not read or use it, does not send it
 to players, and does not treat it as authorization. Set takes `--json-value`
 or `--file`. Last write wins; there is no `--if-match`. These commands are
-implemented by the pinned CLI. Their inclusion does not establish marketplace
+implemented by the bundled CLI. Their inclusion does not establish marketplace
 availability or deployment.
 
 `playback list` returns daily playback aggregates for this account, newest
@@ -497,11 +498,10 @@ is safe: the request carries `Idempotency-Key`, and an exact retry returns the
 original link and expiry for twenty-four hours instead of minting a second live
 link.
 
-This command is implemented in current CLI source, but the current locked plugin
-bundle has not yet selected a reviewed artifact containing it. The dashboard
-origin is not deployed: no request has been served there, so a minted link does
-not resolve yet. Do not read this section as a working dashboard or marketplace
-availability claim.
+This command is implemented in current CLI source. The plugin bundles current
+`screenrig/cli` `main`. The dashboard origin is not deployed: no request has
+been served there, so a minted link does not resolve yet. Do not read this
+section as a working dashboard or marketplace availability claim.
 
 ## Feedback
 
@@ -1111,8 +1111,9 @@ npm run smoke:mock
 npm run pack:dry
 ```
 
-`vendor/manifest.json` pins backend OpenAPI/protocol inputs and the injected SDK
-runtime by path, byte count, and SHA-256. Refresh only with
+`vendor/manifest.json` records backend OpenAPI/protocol inputs and the injected SDK
+runtime by path, byte count, and SHA-256. That SHA-256 is a tamper check.
+Refresh only with
 `node scripts/sync-contract-snapshots.mjs --sync --source-root
 <backend-checkout>` and review every change. `dist/` is generated from
 `src/`.
@@ -1120,27 +1121,28 @@ runtime by path, byte count, and SHA-256. Refresh only with
 There are two vendor checks, and they answer different questions:
 
 ```sh
-npm run vendor:check                            # internal consistency
-npm run vendor:check:drift -- ../backend        # backend drift
+npm run vendor:check                            # tamper check; also drifts when ../backend exists
+npm run vendor:check:drift -- ../backend        # explicit backend drift
 ```
 
-`npm run vendor:check` proves **internal consistency only**: the vendored bytes
-still match `vendor/manifest.json`, so nobody hand-edited `vendor/`. It never
-reads a backend checkout, and therefore **cannot tell you the contract moved
-on**. It is the gate CI runs, because CI has no backend checkout.
+`npm run vendor:check` always proves the vendored bytes still match
+`vendor/manifest.json` (SHA-256 tamper check), so nobody hand-edited
+`vendor/`. When a sibling `../backend` directory exists, it also compares
+each file to that checkout. Public CLI GitHub Actions does not clone
+backend, so CI runs the tamper check only.
 
-`npm run vendor:check:drift -- <backend-checkout>` additionally compares each
-vendored file against the canonical input in that checkout. It names every file
-that drifted with the vendored and canonical SHA-256 and byte count, and prints
-the exact `--sync` command to refresh. It fails closed: a `--source-root` that
-is absent, valueless, not a directory, or missing a canonical input is an error,
-never a pass. Run it whenever the backend contract may have changed; a snapshot
-that passes `vendor:check` can still be superseded.
+`npm run vendor:check:drift -- <backend-checkout>` compares each vendored
+file against the canonical input in that checkout. It names every file that
+drifted with the vendored and canonical SHA-256 and byte count, and prints
+the exact `--sync` command to refresh. It fails closed: a `--source-root`
+that is absent, valueless, not a directory, or missing a canonical input is
+an error, never a pass.
 
 The ordinary `main` workflow tags `vYY.MM.N` and publishes deterministic
 `screenrig-cli.tgz` as a short-lived CI artifact. Committed `package.json` stays
-`0.1.0`; CI stamps the artifact. The plugin repository pins that artifact by CLI
-commit and SHA-256, not by CalVer. A separate protected workflow publishes npm
+`0.1.0`; CI stamps the artifact. The plugin repository records that artifact as
+provenance (CLI commit and SHA-256), not as a freeze instead of `main`. A
+separate protected workflow publishes npm
 only after a non-prerelease GitHub release is published on that existing CalVer
 tag. It reuses the tag and stamps the published package.
 It uses npm trusted publishing through GitHub OIDC, includes provenance, performs
@@ -1150,10 +1152,10 @@ offline archive plus its checksum to the stable GitHub release. See the
 
 For a coordinated identity release, freeze and review the backend contract
 first, vendor and gate that exact snapshot here, publish and review the resulting
-CLI CI artifact, then update the plugin lock and regenerate its bundle. Site and
-dashboard releases follow their own independent workflows only after those
-inputs are fixed. Source-ready CLI commands are not evidence that the older
-locked plugin bundle or any public origin exposes them.
+CLI CI artifact. Plugin CI packs current `screenrig/cli` `main` into the
+marketplace bundle. Site and dashboard releases follow their own independent
+workflows only after those inputs are fixed. Source-ready CLI commands are not
+evidence that a public origin exposes them.
 
 The plugin marketplace is a separate distribution. This repository does not
 deploy ScreenRig, publish Homebrew formulae, or publish to PyPI.

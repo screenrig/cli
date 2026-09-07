@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -41,11 +41,23 @@ async function canonicalSourceRoot(prefix: string): Promise<string> {
   return root;
 }
 
-test("plain --check verifies internal consistency and does not require a backend checkout", async () => {
+test("plain --check always tampers-checks the manifest and drifts against sibling ../backend when present", async () => {
   const result = await sync(["--check"]);
+  let sibling = false;
+  try {
+    sibling = (await stat(path.resolve(ROOT, "../backend"))).isDirectory();
+  } catch {
+    sibling = false;
+  }
+  if (!sibling) {
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /internal consistency only/);
+    assert.match(result.stdout, /pass --source-root to check for backend drift/);
+    return;
+  }
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /internal consistency only/);
-  assert.match(result.stdout, /pass --source-root to check for backend drift/);
+  assert.match(result.stdout, /verified against/);
+  assert.match(result.stdout, /backend/);
 });
 
 test("--check --source-root passes when the vendored snapshot matches the backend", async () => {

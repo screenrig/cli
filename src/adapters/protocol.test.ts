@@ -476,6 +476,7 @@ test("published problem codes include payment_required at 402", () => {
     "payment_required",
     "rate_limited",
     "dependency_unavailable",
+    "dependency_timeout",
     "schema_incompatible",
     "not_ready",
     "manifest_degraded",

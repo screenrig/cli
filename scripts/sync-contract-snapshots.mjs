@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { statSync } from 'node:fs';
 import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,9 +15,20 @@ if (sourceRootGiven && (sourceRootArg === undefined || sourceRootArg.startsWith(
   console.error('--source-root requires a path, for example --source-root ../backend');
   process.exit(1);
 }
+const siblingBackend = path.resolve(cliRoot, '../backend');
+
+function siblingBackendIfPresent() {
+  try {
+    return statSync(siblingBackend).isDirectory() ? siblingBackend : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const siblingRoot = siblingBackendIfPresent();
 const sourceRoot = sourceRootGiven
   ? path.resolve(sourceRootArg)
-  : path.resolve(cliRoot, '../..');
+  : (siblingRoot ?? path.resolve(cliRoot, '../..'));
 
 const snapshots = [
   {
@@ -75,12 +87,12 @@ async function sync() {
 }
 
 /**
- * Internal consistency only: the vendored bytes still match vendor/manifest.json.
+ * Tamper check: the vendored bytes still match vendor/manifest.json SHA-256.
  *
- * This proves nobody hand-edited vendor/, and nothing more. It cannot detect
- * that the backend contract moved on, because it never reads the backend. CI
- * has no backend checkout, so this stays the default gate. Use --source-root to
- * additionally check for drift.
+ * This proves nobody hand-edited vendor/. Cheap `vendor:check` also runs
+ * checkDrift when a sibling ../backend checkout exists. Public GitHub Actions
+ * does not clone backend, so CI stays this tamper check only. Use
+ * --source-root to drift against an explicit checkout.
  */
 async function check() {
   const expected = JSON.parse(await readFile(path.join(cliRoot, 'vendor/manifest.json'), 'utf8'));
@@ -159,13 +171,14 @@ async function checkDrift() {
 
 if (mode === 'sync') await sync();
 await check();
-if (mode === 'check' && sourceRootGiven) {
+const runDrift = mode === 'check' && (sourceRootGiven || Boolean(siblingRoot));
+if (runDrift) {
   await checkDrift();
   console.log(`CLI contract/SDK snapshot verified against ${sourceRoot}`);
 } else {
   console.log(
     mode === 'sync'
       ? 'CLI contract/SDK snapshot synchronized and verified'
-      : 'CLI contract/SDK snapshot verified (internal consistency only; pass --source-root to check for backend drift)',
+      : 'CLI contract/SDK snapshot verified (internal consistency only; pass --source-root to check for backend drift, or keep a sibling ../backend checkout)',
   );
 }

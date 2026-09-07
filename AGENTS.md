@@ -1,10 +1,11 @@
 # ScreenRig CLI agent guide
 
 This repository owns the public noninteractive ScreenRig CLI and deterministic
-static-application packer. The supported agent distribution is the pinned CLI
-artifact bundled by `screenrig/plugin`. Exact-version npm releases are the
-official developer-shell distribution. This repository does not own plugin
-installation, players, backend services, the site, or production deployment.
+static-application packer. The supported agent distribution is the CLI bundled
+by `screenrig/plugin` from current `screenrig/cli` `main`. Exact-version npm
+releases are the official developer-shell distribution. This repository does
+not own plugin installation, players, backend services, the site, or production
+deployment.
 
 ## Sources of truth
 
@@ -29,8 +30,9 @@ installation, players, backend services, the site, or production deployment.
   a laptop or add a long-lived npm token.
 - Distributed CLI versions are CalVer `YY.MM.SERIAL` (UTC). Tags are
   `vYY.MM.N`. Committed `package.json` stays `0.1.0`; CI stamps the artifact.
-  Local and pull-request trees use `YY.MM.0-dev`. Plugin lock identity stays
-  commit plus SHA-256. See `RELEASING.md`.
+  Local and pull-request trees use `YY.MM.0-dev`. The checksum of the CLI
+  tarball the plugin just packed is provenance of that build, not a freeze of
+  which SHA to fetch. See `RELEASING.md`.
 - **Deploys are independent** (operating rule). Do not pack siblings.
   Do not dispatch backend. Do not copy deploy tokens between repos.
   Coordinated multi-repo deploy is rare and only for a breaking contract
@@ -46,16 +48,16 @@ installation, players, backend services, the site, or production deployment.
   node scripts/sync-contract-snapshots.mjs --sync --source-root <backend-checkout>
   ```
 
-- **`npm run vendor:check` proves internal consistency only.** It compares
-  `vendor/` against `vendor/manifest.json` and never reads a backend checkout,
-  so a snapshot pinned to a superseded contract passes it forever. It stays the
-  CI gate because CI has no backend checkout. Do not add a backend dependency
-  to it.
-- **`npm run vendor:check:drift -- <backend-checkout>` is the drift gate.** It
-  compares each vendored file against the canonical input and reports every
-  divergence with both SHA-256 values and byte counts. It fails closed on an
-  absent, valueless, non-directory, or incomplete source root. Run it before
-  trusting a snapshot, and whenever the backend contract may have moved.
+- **`npm run vendor:check` is the cheap vendor gate.** It always compares
+  `vendor/` against `vendor/manifest.json` (SHA-256 tamper check). When a
+  sibling `../backend` checkout exists, it also runs the drift comparison
+  against that working tree. Public GitHub Actions does not clone backend, so
+  CI stays the tamper check only. Do not add a backend clone to CLI CI.
+- **`npm run vendor:check:drift -- <backend-checkout>` is the explicit drift
+  gate.** It compares each vendored file against the canonical input and
+  reports every divergence with both SHA-256 values and byte counts. It fails
+  closed on an absent, valueless, non-directory, or incomplete source root.
+  Cheap `vendor:check` already invokes this when `../backend` exists.
 - The drift gate reads the source root's **working tree**, matching `--sync`.
   That catches drift early, but it also means it can report divergence against
   uncommitted backend work in flight. Confirm the backend revision is reviewed
@@ -220,8 +222,9 @@ installation, players, backend services, the site, or production deployment.
 - Optional `comments` on `screen show` / `playlist show` (and lists) is passed
   through when the server sends it. Do not strip it. `ScreenPatch` and
   playlist writes cannot set it.
-- This surface is **source-ready**. It is not in the locked plugin bundle. Do
-  not claim marketplace or deployed.
+- This surface is implemented in current CLI source. The plugin bundles
+  current `screenrig/cli` `main`. Do not claim marketplace until that plugin
+  tree is published.
 
 ## Archive
 
@@ -291,8 +294,9 @@ installation, players, backend services, the site, or production deployment.
 - Writes carry `Idempotency-Key`. An exact retry returns the original link and
   expiry for twenty-four hours, so a retry is safe and does not mint a second
   live link.
-- This command is **source-ready**. It is not in the locked plugin bundle, and
-  the dashboard origin is not deployed. Do not claim a working dashboard.
+- This command is implemented in current CLI source. The plugin bundles
+  current `screenrig/cli` `main`. The dashboard origin is not deployed. Do
+  not claim a working dashboard.
 - `redactText` strips a `#link=` or `#provision=` fragment from any text that
   reaches a problem detail, an event, or a message. Keep new output on that path.
 
@@ -334,8 +338,9 @@ installation, players, backend services, the site, or production deployment.
 - `--screen-id` must start with `scr_`. `--media-id` must start with `med_`.
   `--day` is a UTC calendar day as `YYYY-MM-DD`. Identifiers filter the
   caller's own rows and are never a cross-account lookup.
-- This command is **repository-ready** on public `main`. It is not in the
-  locked plugin bundle. Do not claim marketplace or deployed.
+- This command is **repository-ready** on public `main`. The plugin bundles
+  current `screenrig/cli` `main`. Do not claim marketplace until that plugin
+  tree is published.
 
 ## Media envelopes
 
@@ -363,8 +368,9 @@ installation, players, backend services, the site, or production deployment.
   `PATCH /api/v1/media/{id}`. Exactly one of `--tag` or `--clear-tag`.
   `--clear-tag` sends `null`. There is no other media metadata patch. Do
   not add an update path for filename, primitive, or codecs.
-- This surface is **repository-ready** on public `main`. It is not in the
-  locked plugin bundle. Do not claim marketplace or deployed.
+- This surface is **repository-ready** on public `main`. The plugin bundles
+  current `screenrig/cli` `main`. Do not claim marketplace until that plugin
+  tree is published.
 
 ## Page scheduling
 
@@ -414,8 +420,9 @@ installation, players, backend services, the site, or production deployment.
   Optional `--name` (at most 120 characters, no line break) is sent as
   `ScreenRig-Application-Name`. Every upload still creates a new
   application and a new release; `--name` is not an in-place update. That
-  flag is **repository-ready** on public `main`. It is not in the locked
-  plugin bundle. Do not claim marketplace or deployed.
+  flag is **repository-ready** on public `main`. The plugin bundles current
+  `screenrig/cli` `main`. Do not claim marketplace until that plugin tree is
+  published.
 
 ## Product and security boundaries
 
@@ -508,7 +515,8 @@ installation, players, backend services, the site, or production deployment.
   changes the image and the price. Optional `tag` is the same 1–32 letter-or-digit tag as
   upload. The command blocks until `201` MediaGeneration `{ media, usage }`.
   `media.id` is `med_…`. There is no 202 poll and no client PUT. `402` is
-  `payment_required` even during launch fail-open. Envelope `usage` shows
+  `payment_required` even during launch fail-open. `504` is
+  `dependency_timeout` when the image vendor did not answer in time. Envelope `usage` shows
   credits and usd for the chosen tier (600 credits / $0.06, 1200 credits /
   $0.12, 5000 credits / $0.50). Never print the prompt, pixels, or image
   bytes. The call blocks for tens of seconds (about 15 s low, 35 s medium,
@@ -520,8 +528,10 @@ installation, players, backend services, the site, or production deployment.
   re-run after a timeout replays the original still instead of billing a
   second one; a timeout says so and names the `media list` command that
   checks. The success envelope carries `elapsed_ms`, and unless
-  `--no-progress` is set the command announces on stderr that it blocks. This surface is **source-ready**. It is not in the locked plugin
-  bundle. Do not claim marketplace or deployed.
+  `--no-progress` is set the command announces on stderr that it blocks. This
+  surface is implemented in current CLI source. The plugin bundles current
+  `screenrig/cli` `main`. Do not claim marketplace until that plugin tree is
+  published.
 - Playlist pages the CLI emits use `primitives[]`. Four wire primitives exist:
   `image`, `video`, `iframe`, and `application`, named by the `primitive`
   field. Image and video require a `selector` whose `by` is `id`, `ids`, `all`,
@@ -586,8 +596,8 @@ installation, players, backend services, the site, or production deployment.
   Preserve glyph fallback, upscale, painted-pixel contrast, and
   viewing-distance floor diagnostics. It is not `screenrig.canvas/v1` and not
   a player feature. This is **repository-ready** on public `main`. The plugin
-  lock still pins the previous CLI artifact. Do not claim marketplace or
-  deployed.
+  bundles current `screenrig/cli` `main`. Do not claim marketplace until that
+  plugin tree is published.
 
 ## Follow operation logs
 
@@ -634,9 +644,8 @@ npm run check:npm-install
 ```
 
 `npm run smoke:server` requires an explicitly owned local backend and is not a
-production or hardware gate. `npm run vendor:check:drift -- <backend-checkout>`
-requires a readable backend checkout and is therefore not part of the CI list
-above; run it explicitly when one is available.
+production or hardware gate. Cheap `npm run vendor:check` also drifts when
+`../backend` exists. Public GitHub Actions does not clone backend.
 
 ## Completion evidence
 
@@ -660,9 +669,10 @@ checkout path. Keep that executable stable while other agents are using it:
 `npm run build` cleans `dist/` first, so coordinate builds with live UAT commands.
 A global `screenrig` command is not required for this source workflow.
 
-Canonical plugin skill text can update independently of the installed pinned
-CLI. New guidance does not upgrade that executable; check its help/catalog
-before relying on new commands. Source builds and local test packages are
-unreleased. Do not overwrite the installed plugin cache or copy a mutable build
-into its bundle. A bundled CLI refresh requires a reviewed CLI artifact, an
-intentional component-lock update, normal plugin generation, and installation.
+Skill text and the bundled CLI travel together in `screenrig/plugin`. Refresh
+the installed plugin to get both. Do not PATH-swap a local checkout into an
+installed agent. Do not `npm i -g screenrig`. Source builds and local test
+packages are unreleased. Do not overwrite the installed plugin cache or copy a
+mutable build into its bundle. Plugin CI packs current `screenrig/cli` `main`.
+A checksum of the tarball just packed is provenance of that build, not a
+freeze of which SHA to fetch.

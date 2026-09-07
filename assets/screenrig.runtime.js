@@ -286,6 +286,7 @@
       this.allowOpaqueNativeParent = allowOpaqueNativeParent;
       this.unsubscribe = this.host.addMessageListener((event) => this.onMessage(event));
     }
+    nativeParentOrigin;
     readyState = "inert";
     context = null;
     capabilities = { ...EMPTY_CAPABILITIES };
@@ -661,6 +662,7 @@
       this.windowLike = windowLike;
       this.parent = windowLike.parent;
     }
+    windowLike;
     parent;
     addMessageListener(listener) {
       const wrapped = (event) => listener(event);

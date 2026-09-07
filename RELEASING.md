@@ -40,8 +40,9 @@ the packed artifact. A rebuild of the same SHA reuses the tag. Failed jobs do
 not tag. SERIAL is not `github.run_number` and not a git commit count.
 
 `npm-release.yml` reuses the tag on that commit and stamps the published
-package. Plugin lock identity stays the CLI commit and SHA-256; it is not this
-CalVer string.
+package. The checksum of the CLI tarball the plugin just packed is provenance
+of that build; it is not this CalVer string and not a freeze of which SHA to
+fetch.
 
 ## Release procedure
 

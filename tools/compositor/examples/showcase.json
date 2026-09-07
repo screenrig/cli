@@ -6,8 +6,12 @@
   "pages": [
     {
       "id": "fire-at-the-table",
-      "video": "./media/ember-hearth.mp4",
-      "motion": { "type": "drift", "zoom": "in", "direction": "none", "speed": "slow" },
+      "motion": {
+        "type": "drift",
+        "zoom": "in",
+        "direction": "none",
+        "speed": "slow"
+      },
       "background": "#0D0D0D",
       "brand": "#D4AF37",
       "text": "#F2EDE4",
@@ -17,12 +21,20 @@
           "title": "FIRE AT THE TABLE",
           "subtitle": "Four courses over live coals",
           "cards": [
-            { "title": "Ember bread, smoked butter" },
-            { "title": "Humber mussels, kelp butter" },
-            { "title": "Coal ribeye, hispi, bone sauce" },
-            { "title": "Burnt honey tart, bay cream" }
+            {
+              "title": "Ember bread, smoked butter"
+            },
+            {
+              "title": "Humber mussels, kelp butter"
+            },
+            {
+              "title": "Coal ribeye, hispi, bone sauce"
+            },
+            {
+              "title": "Burnt honey tart, bay cream"
+            }
           ],
-          "footer": "Hearth Company · book at the Kiln desk"
+          "footer": "Hearth Company \u00b7 book at the Kiln desk"
         }
       },
       "right": {
@@ -33,24 +45,27 @@
           "fit": "ink",
           "title": "Saturday 17 October",
           "text": [
-            "19:00–22:30",
+            "19:00\u201322:30",
             "The Kiln Room",
             "14 Humber Dock, Hull HU1 1TB",
             "01482 550 441",
-            "Tickets **£86**"
+            "Tickets **\u00a386**"
           ]
         }
-      }
+      },
+      "image": "media/fire-at-the-table-poster.png"
     },
     {
       "id": "lantern-row",
-      "video": "./media/lantern-row-market.mp4",
       "background": "#1C1410",
       "brand": "#C9A227",
       "text": "#F3E6D0",
       "right": {
         "valign": "top",
-        "title": ["LANTERN", "ROW"]
+        "title": [
+          "LANTERN",
+          "ROW"
+        ]
       },
       "left": {
         "valign": "bottom",
@@ -58,18 +73,18 @@
           "fit": "ink",
           "title": "Night market on the old wharf",
           "text": [
-            "Fridays in October · 16:00–21:00",
+            "Fridays in October \u00b7 16:00\u201321:00",
             "Old Wharf, Garrison Side, Hull HU1",
-            "Free to enter · food tokens at the kiosk"
+            "Free to enter \u00b7 food tokens at the kiosk"
           ],
           "footer": "Bring a coat. Last tokens 20:30."
         }
-      }
+      },
+      "image": "media/lantern-row-poster.png"
     },
     {
       "id": "ashline-circuit",
       "font": "Noto Sans",
-      "video": "./media/ashline-circuit.mp4",
       "background": "#0B1220",
       "brand": "#E8EEF6",
       "text": "#F4F7FB",
@@ -79,13 +94,14 @@
           "subtitle": "Closed-road city ride",
           "text": [
             "Sunday 4 October",
-            "Sign-on 07:00 · start 08:00",
+            "Sign-on 07:00 \u00b7 start 08:00",
             "North Quay, Hull HU1 2AB",
-            "40 km **£18** · 80 km **£28**"
+            "40 km **\u00a318** \u00b7 80 km **\u00a328**"
           ],
           "footer": "Collect numbers at the shed. Helmets required."
         }
-      }
+      },
+      "image": "media/ashline-circuit-poster.png"
     },
     {
       "id": "night-garden",
@@ -108,16 +124,16 @@
           "title": "Night Garden",
           "text": [
             "An evening among the glasshouse collections",
-            "Thursday 8 October · 18:30",
+            "Thursday 8 October \u00b7 18:30",
             "Vellum Conservatory, Pearson Park, Hull HU5",
-            "**£22** · 40 seats · doors 18:00"
+            "**\u00a322** \u00b7 40 seats \u00b7 doors 18:00"
           ]
         }
-      }
+      },
+      "image": "media/night-garden-poster.png"
     },
     {
       "id": "look-what-we-made",
-      "video": "./media/science-fair-workshop.mp4",
       "background": "#F4EFE6",
       "brand": "#5C2E6B",
       "text": "#2A1B33",
@@ -127,18 +143,23 @@
           "title": "LOOK WHAT WE MADE",
           "subtitle": "Willowmere Primary science fair",
           "text": [
-            "Wednesday 14 October · 15:30–18:00",
+            "Wednesday 14 October \u00b7 15:30\u201318:00",
             "Lime Street hall, Hull HU8",
-            "Free entry · prizes at 17:45",
+            "Free entry \u00b7 prizes at 17:45",
             "Families welcome. Leave bikes in the yard."
           ]
         }
-      }
+      },
+      "image": "media/look-what-we-made-poster.png"
     },
     {
       "id": "silverthread",
-      "video": "./media/silverthread-cinema.mp4",
-      "motion": { "type": "drift", "zoom": "out", "direction": "none", "speed": "slow" },
+      "motion": {
+        "type": "drift",
+        "zoom": "out",
+        "direction": "none",
+        "speed": "slow"
+      },
       "background": "#0D0D0D",
       "brand": "#D4AF37",
       "text": "#F2EDE4",
@@ -148,13 +169,14 @@
           "title": "Silverthread",
           "subtitle": "Five nights of new student cinema",
           "text": [
-            "21–25 October · doors 19:00",
+            "21\u201325 October \u00b7 doors 19:00",
             "Hartley Theatre, Cottingham Road, Hull HU6",
-            "Festival pass **£32** · single **£7**"
+            "Festival pass **\u00a332** \u00b7 single **\u00a37**"
           ],
           "footer": "Box office in the foyer from 17:30"
         }
-      }
+      },
+      "image": "media/silverthread-poster.png"
     },
     {
       "id": "afterimage",
@@ -177,9 +199,10 @@
         "card": {
           "fit": "ink",
           "title": "Split Stage at The Brick Kiln",
-          "text": "6–18 October · forty minutes · **£14** / **£9**"
+          "text": "6\u201318 October \u00b7 forty minutes \u00b7 **\u00a314** / **\u00a39**"
         }
-      }
+      },
+      "image": "media/afterimage-poster.png"
     },
     {
       "id": "tide-table",
@@ -191,9 +214,9 @@
           "title": "Tide Table",
           "subtitle": "A harbour lunch as the tide turns",
           "text": [
-            "Saturday 10 October · 12:00–16:00",
+            "Saturday 10 October \u00b7 12:00\u201316:00",
             "Harbour Shed, Berth 2, Hull HU1 1UH",
-            "Four courses **£38** · book by 3 October"
+            "Four courses **\u00a338** \u00b7 book by 3 October"
           ],
           "footer": "Walk-ins after 15:00 if seats remain"
         }
@@ -201,23 +224,31 @@
       "right": {
         "image": "./media/boat.png",
         "enter": "fade-left",
-        "motion": { "type": "drift", "zoom": "in", "direction": "left", "speed": "slow" }
+        "motion": {
+          "type": "drift",
+          "zoom": "in",
+          "direction": "left",
+          "speed": "slow"
+        }
       },
       "bottom": {
         "image": "./media/fish.png",
         "enter": "fade-up"
-      }
+      },
+      "image": "media/tide-table-poster.png"
     },
     {
       "id": "mothlight",
-      "video": "./media/mothlight-field.mp4",
       "background": "#1A1024",
       "brand": "#F4F0FF",
       "text": "#F8F4FF",
       "top": {
         "align": "center",
         "title": "MOTHLIGHT",
-        "outline": { "width": 2, "color": "#1A1024" },
+        "outline": {
+          "width": 2,
+          "color": "#1A1024"
+        },
         "subtitle": "Three days in Hollow Field"
       },
       "bottom": {
@@ -226,13 +257,14 @@
         "card": {
           "fit": "ink",
           "text": [
-            "Red Kite Choir · The Low Antennas · Marrow & Glass",
-            "Night Orchard · HVN Sunday · Coral Static",
-            "11–13 September · Hollow Field, east of Beverley",
-            "Weekend **£95** · day **£42** · camping extra"
+            "Red Kite Choir \u00b7 The Low Antennas \u00b7 Marrow & Glass",
+            "Night Orchard \u00b7 HVN Sunday \u00b7 Coral Static",
+            "11\u201313 September \u00b7 Hollow Field, east of Beverley",
+            "Weekend **\u00a395** \u00b7 day **\u00a342** \u00b7 camping extra"
           ]
         }
-      }
+      },
+      "image": "media/mothlight-poster.png"
     },
     {
       "id": "open-night",
@@ -245,7 +277,7 @@
           "title": "OPEN NIGHT",
           "text": [
             "Northspire Observatory opens the dome for one evening.",
-            "Friday 23 October · 19:30–22:30",
+            "Friday 23 October \u00b7 19:30\u201322:30",
             "Beacon Lane, Hull HU6",
             "Free, ticketed. Bring a coat."
           ],
@@ -256,16 +288,20 @@
         "z": 1,
         "image": "./media/planet.png",
         "enter": "fade-right",
-        "motion": { "type": "spin", "direction": "cw", "speed": "slow" }
+        "motion": {
+          "type": "spin",
+          "direction": "cw",
+          "speed": "slow"
+        }
       },
       "right": {
         "image": "./media/telescope.png",
         "enter": "zoom-in"
-      }
+      },
+      "image": "media/open-night-poster.png"
     },
     {
       "id": "harborfield",
-      "video": "./media/harborfield-sports.mp4",
       "background": "#0B1220",
       "brand": "#F4F7FB",
       "text": "#F4F7FB",
@@ -275,12 +311,13 @@
           "fit": "ink",
           "title": "HARBORFIELD SPORTS DAY",
           "text": [
-            "Saturday 19 September · 10:00–15:00",
+            "Saturday 19 September \u00b7 10:00\u201315:00",
             "the Green, Harborfield, Hull HU9",
-            "Free · medals at 15:00 · tea tent from 11:00"
+            "Free \u00b7 medals at 15:00 \u00b7 tea tent from 11:00"
           ]
         }
-      }
+      },
+      "image": "media/harborfield-poster.png"
     },
     {
       "id": "char-and-bone",
@@ -291,23 +328,42 @@
         "card": {
           "title": "Char & Bone",
           "cards": [
-            { "title": "Coal-seared ribeye", "price": "28" },
-            { "title": "Ember chicken, brown butter", "price": "19" },
-            { "title": "Fire-caught mackerel", "price": "17" },
-            { "title": "Charred hispi", "price": "8" },
-            { "title": "Beetroot, goat curd", "price": "9" },
-            { "title": "Burnt honey tart", "price": "8" }
+            {
+              "title": "Coal-seared ribeye",
+              "price": "28"
+            },
+            {
+              "title": "Ember chicken, brown butter",
+              "price": "19"
+            },
+            {
+              "title": "Fire-caught mackerel",
+              "price": "17"
+            },
+            {
+              "title": "Charred hispi",
+              "price": "8"
+            },
+            {
+              "title": "Beetroot, goat curd",
+              "price": "9"
+            },
+            {
+              "title": "Burnt honey tart",
+              "price": "8"
+            }
           ],
-          "footer": "8 Posterngate, Hull HU1 2JN · 17:00–22:30 · ask about allergens"
+          "footer": "8 Posterngate, Hull HU1 2JN \u00b7 17:00\u201322:30 \u00b7 ask about allergens"
         }
       },
       "right": {
         "image": "./media/small-grill-dish.png"
-      }
+      },
+      "image": "media/char-and-bone-poster.png"
     },
     {
       "id": "saltglass",
-      "image": "./media/coastal-lunch-room.png",
+      "image": "media/saltglass-poster.png",
       "background": "#F3E6D0",
       "brand": "#A3471A",
       "text": "#3B2A1A",
@@ -316,20 +372,38 @@
           "title": "Saltglass",
           "subtitle": "The Lookout, Minerva Terrace",
           "cards": [
-            { "title": "Dressed crab", "price": "14" },
-            { "title": "Haddock chowder", "price": "9" },
-            { "title": "Day-boat plaice", "price": "18" }
+            {
+              "title": "Dressed crab",
+              "price": "14"
+            },
+            {
+              "title": "Haddock chowder",
+              "price": "9"
+            },
+            {
+              "title": "Day-boat plaice",
+              "price": "18"
+            }
           ]
         }
       },
       "right": {
         "card": {
           "cards": [
-            { "title": "Tomato and rye", "price": "8" },
-            { "title": "Mint courgette", "price": "9" },
-            { "title": "Garden leaves", "price": "5" }
+            {
+              "title": "Tomato and rye",
+              "price": "8"
+            },
+            {
+              "title": "Mint courgette",
+              "price": "9"
+            },
+            {
+              "title": "Garden leaves",
+              "price": "5"
+            }
           ],
-          "footer": "Lunch by the water · Wed–Sun 12:00–15:00 · Hull HU1 1TJ"
+          "footer": "Lunch by the water \u00b7 Wed\u2013Sun 12:00\u201315:00 \u00b7 Hull HU1 1TJ"
         }
       }
     },
@@ -343,22 +417,41 @@
         "card": {
           "title": "Casa Velluto",
           "cards": [
-            { "title": "Burrata", "price": "11" },
-            { "title": "Crostini", "price": "8" },
-            { "title": "Tagliatelle", "price": "16" }
+            {
+              "title": "Burrata",
+              "price": "11"
+            },
+            {
+              "title": "Crostini",
+              "price": "8"
+            },
+            {
+              "title": "Tagliatelle",
+              "price": "16"
+            }
           ]
         }
       },
       "right": {
         "card": {
           "cards": [
-            { "title": "Risotto", "price": "17" },
-            { "title": "Veal cutlet", "price": "24" },
-            { "title": "Sea bream", "price": "22" }
+            {
+              "title": "Risotto",
+              "price": "17"
+            },
+            {
+              "title": "Veal cutlet",
+              "price": "24"
+            },
+            {
+              "title": "Sea bream",
+              "price": "22"
+            }
           ],
-          "footer": "22 Scale Lane, Hull HU1 1LF · kitchen 18:00 · closed Monday"
+          "footer": "22 Scale Lane, Hull HU1 1LF \u00b7 kitchen 18:00 \u00b7 closed Monday"
         }
-      }
+      },
+      "image": "media/casa-velluto-poster.png"
     },
     {
       "id": "stackhouse",
@@ -369,20 +462,42 @@
         "card": {
           "title": "Stackhouse",
           "cards": [
-            { "title": "1 House smash", "price": "9.50" },
-            { "title": "2 Melt", "price": "10.50" },
-            { "title": "3 Crisp chicken", "price": "10.00" },
-            { "title": "4 Garden stack", "price": "9.00" },
-            { "title": "Fries", "price": "3.00" },
-            { "title": "Slaw", "price": "2.50" },
-            { "title": "Shake", "price": "3.80" }
+            {
+              "title": "1 House smash",
+              "price": "9.50"
+            },
+            {
+              "title": "2 Melt",
+              "price": "10.50"
+            },
+            {
+              "title": "3 Crisp chicken",
+              "price": "10.00"
+            },
+            {
+              "title": "4 Garden stack",
+              "price": "9.00"
+            },
+            {
+              "title": "Fries",
+              "price": "3.00"
+            },
+            {
+              "title": "Slaw",
+              "price": "2.50"
+            },
+            {
+              "title": "Shake",
+              "price": "3.80"
+            }
           ],
-          "footer": "3 Paragon Street, Hull HU1 3NA · combos include fries and a drink"
+          "footer": "3 Paragon Street, Hull HU1 3NA \u00b7 combos include fries and a drink"
         }
       },
       "right": {
         "image": "./media/stackhouse-tray.png"
-      }
+      },
+      "image": "media/stackhouse-poster.png"
     },
     {
       "id": "oven-and-oak",
@@ -393,11 +508,26 @@
         "card": {
           "title": "Oven & Oak",
           "cards": [
-            { "title": "Plain", "price": "3.80 / 11.50" },
-            { "title": "Nduja", "price": "4.60 / 14.00" },
-            { "title": "Mushroom", "price": "4.40 / 13.50" },
-            { "title": "Red onion", "price": "4.20 / 13.00" },
-            { "title": "Anchovy", "price": "4.80 / 14.50" }
+            {
+              "title": "Plain",
+              "price": "3.80 / 11.50"
+            },
+            {
+              "title": "Nduja",
+              "price": "4.60 / 14.00"
+            },
+            {
+              "title": "Mushroom",
+              "price": "4.40 / 13.50"
+            },
+            {
+              "title": "Red onion",
+              "price": "4.20 / 13.00"
+            },
+            {
+              "title": "Anchovy",
+              "price": "4.80 / 14.50"
+            }
           ]
         }
       },
@@ -409,13 +539,23 @@
         "card": {
           "fit": "ink",
           "cards": [
-            { "title": "Green salad", "price": "3.50" },
-            { "title": "Olives", "price": "3.00" },
-            { "title": "Dough balls", "price": "4.00" }
+            {
+              "title": "Green salad",
+              "price": "3.50"
+            },
+            {
+              "title": "Olives",
+              "price": "3.00"
+            },
+            {
+              "title": "Dough balls",
+              "price": "4.00"
+            }
           ],
-          "footer": "11 Princes Avenue, Hull HU5 3QA · Tuesday meal **£14**"
+          "footer": "11 Princes Avenue, Hull HU5 3QA \u00b7 Tuesday meal **\u00a314**"
         }
-      }
+      },
+      "image": "media/oven-and-oak-poster.png"
     },
     {
       "id": "mill-and-steam",
@@ -426,30 +566,58 @@
         "card": {
           "title": "Mill & Steam",
           "cards": [
-            { "title": "Filter", "price": "2.40 / 3.20" },
-            { "title": "Americano", "price": "2.60 / 3.40" },
-            { "title": "Flat white", "price": "3.20 / 3.50" },
-            { "title": "Latte", "price": "3.20 / 4.10" }
+            {
+              "title": "Filter",
+              "price": "2.40 / 3.20"
+            },
+            {
+              "title": "Americano",
+              "price": "2.60 / 3.40"
+            },
+            {
+              "title": "Flat white",
+              "price": "3.20 / 3.50"
+            },
+            {
+              "title": "Latte",
+              "price": "3.20 / 4.10"
+            }
           ]
         }
       },
       "right": {
         "card": {
           "cards": [
-            { "title": "Croissant", "price": "2.80" },
-            { "title": "Almond roll", "price": "3.40" },
-            { "title": "Sticky bun", "price": "3.20" },
-            { "title": "Cheese twist", "price": "2.90" },
-            { "title": "Seed loaf", "price": "2.20" }
+            {
+              "title": "Croissant",
+              "price": "2.80"
+            },
+            {
+              "title": "Almond roll",
+              "price": "3.40"
+            },
+            {
+              "title": "Sticky bun",
+              "price": "3.20"
+            },
+            {
+              "title": "Cheese twist",
+              "price": "2.90"
+            },
+            {
+              "title": "Seed loaf",
+              "price": "2.20"
+            }
           ],
-          "footer": "5 Whitefriargate, Hull HU1 2ER · oat or extra shot +0.50"
+          "footer": "5 Whitefriargate, Hull HU1 2ER \u00b7 oat or extra shot +0.50"
         }
-      }
+      },
+      "image": "media/mill-and-steam-poster.png"
     },
     {
       "id": "today-on-campus",
       "font": "Liberation Sans",
-      "image": "./media/campus-noticeboard-bg.png",
+      "image": "media/today-on-campus-poster.png",
       "background": "#EEF1F4",
       "brand": "#1B3654",
       "text": "#1B3654",
@@ -457,26 +625,62 @@
         "card": {
           "title": "Monday 14 September",
           "table": {
-            "columns": ["Time", "Event", "Room"],
+            "columns": [
+              "Time",
+              "Event",
+              "Room"
+            ],
             "rows": [
-              ["08:30", "Hall breakfast", "Refectory"],
-              ["09:15", "Year 1 induction", "Hall A"],
-              ["10:00", "Library tour", "Library"],
-              ["11:30", "Campus tour", "Quad"],
-              ["13:00", "Lunch service", "Refectory"],
-              ["14:15", "Study skills clinic", "Room 204"],
-              ["16:00", "Sports hall open", "Sports Hall"],
-              ["18:30", "Hall dinner", "Refectory"]
+              [
+                "08:30",
+                "Hall breakfast",
+                "Refectory"
+              ],
+              [
+                "09:15",
+                "Year 1 induction",
+                "Hall A"
+              ],
+              [
+                "10:00",
+                "Library tour",
+                "Library"
+              ],
+              [
+                "11:30",
+                "Campus tour",
+                "Quad"
+              ],
+              [
+                "13:00",
+                "Lunch service",
+                "Refectory"
+              ],
+              [
+                "14:15",
+                "Study skills clinic",
+                "Room 204"
+              ],
+              [
+                "16:00",
+                "Sports hall open",
+                "Sports Hall"
+              ],
+              [
+                "18:30",
+                "Hall dinner",
+                "Refectory"
+              ]
             ]
           },
-          "footer": "Eastmere College · changes go on the afternoon slip at the porter’s desk"
+          "footer": "Eastmere College \u00b7 changes go on the afternoon slip at the porter\u2019s desk"
         }
       }
     },
     {
       "id": "maker-labs",
       "font": "Liberation Sans",
-      "image": "./media/maker-workshop-bg.png",
+      "image": "media/maker-labs-poster.png",
       "background": "#E8E4DC",
       "brand": "#1A1A1A",
       "text": "#1A1A1A",
@@ -484,22 +688,46 @@
         "card": {
           "title": "MAKER LABS THIS WEEK",
           "table": {
-            "columns": ["Day", "Session", "Room"],
+            "columns": [
+              "Day",
+              "Session",
+              "Room"
+            ],
             "rows": [
-              ["Mon", "16:00 Introduction to the laser bed", "NW-1"],
-              ["Tue", "17:00 Sewing machines, basic seams", "NW-3"],
-              ["Wed", "16:30 Electronics bench, continuity", "NW-2"],
-              ["Thu", "14:00 Print studio, one-colour poster", "NW-4"],
-              ["Fri", "16:00 Open bench, staffed", "NW block"]
+              [
+                "Mon",
+                "16:00 Introduction to the laser bed",
+                "NW-1"
+              ],
+              [
+                "Tue",
+                "17:00 Sewing machines, basic seams",
+                "NW-3"
+              ],
+              [
+                "Wed",
+                "16:30 Electronics bench, continuity",
+                "NW-2"
+              ],
+              [
+                "Thu",
+                "14:00 Print studio, one-colour poster",
+                "NW-4"
+              ],
+              [
+                "Fri",
+                "16:00 Open bench, staffed",
+                "NW block"
+              ]
             ]
           },
-          "footer": "NW block · 14–18 September · book a bench · sign the door by 17:00 the day before"
+          "footer": "NW block \u00b7 14\u201318 September \u00b7 book a bench \u00b7 sign the door by 17:00 the day before"
         }
       }
     },
     {
       "id": "marlow-lane",
-      "image": "./media/clinic-waiting.png",
+      "image": "media/marlow-lane-poster.png",
       "background": "#E8F0EE",
       "brand": "#2A6B62",
       "text": "#1C3330",
@@ -513,13 +741,13 @@
             "2 Give your name at the desk",
             "3 Take a seat in the garden room"
           ],
-          "footer": "Check in, then wait — we will come and find you"
+          "footer": "Check in, then wait \u2014 we will come and find you"
         }
       }
     },
     {
       "id": "clinic-hours",
-      "image": "./media/clinic-seasonal.png",
+      "image": "media/clinic-hours-poster.png",
       "background": "#E8F0EE",
       "brand": "#2A6B62",
       "text": "#1C3330",
@@ -528,7 +756,7 @@
           "title": "Clinic hours this fortnight",
           "text": [
             "Closes 12:00 Friday 18 September.",
-            "Closed 19–21 September.",
+            "Closed 19\u201321 September.",
             "Reopens 08:00 Tuesday 22 September."
           ],
           "footer": "Duty line **01482 661 090** while the building is closed"
@@ -537,7 +765,7 @@
     },
     {
       "id": "aurel-quietly",
-      "image": "./media/aurel-product.png",
+      "image": "media/aurel-quietly-poster.png",
       "background": "#0D0D0D",
       "brand": "#D4AF37",
       "text": "#F2EDE4",
@@ -566,7 +794,7 @@
           "subtitle": "Hold the colour. Keep the calm.",
           "text": [
             "*Fictional product for demonstration*",
-            "Solenne Gel · 50 ml",
+            "Solenne Gel \u00b7 50 ml",
             "Helixwell Counter, Whitefriargate"
           ]
         }
@@ -578,7 +806,8 @@
       "right-third": {
         "image": "./media/solenne-bottle.png",
         "enter": "fade-up"
-      }
+      },
+      "image": "media/solenne-poster.png"
     }
   ]
 }
