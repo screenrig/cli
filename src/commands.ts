@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   limitsFromCapabilities,
@@ -15,6 +15,7 @@ import {
   type CLIEnrollment,
   type CLIEnrollmentRequest,
   type EventPage,
+  type MediaRecord,
   type FeedbackContext,
   type FeedbackKind,
   type FeedbackList,
@@ -64,7 +65,7 @@ import {
   observeCreditsRemaining,
   parseCreditsInteger,
 } from "./credits.js";
-import { successEnvelope } from "./envelope.js";
+import { successEnvelope, type ProblemNext } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
 import { CliError, configError, makeProblem, notEnrolledError, timeoutError, usageError } from "./problems.js";
 import { packDirectory } from "./pack/index.js";
@@ -89,6 +90,7 @@ import { LOOK_AT_THE_CONTACT_SHEET, PREVIEW_VIEWPORT, previewPlaylist } from "./
 import { uploadMediaFile } from "./media-upload.js";
 import { runMediaUploadBatch, UPLOAD_BATCH_DEFAULT_CONCURRENCY, UPLOAD_BATCH_MAX_CONCURRENCY, UPLOAD_BATCH_MIN_CONCURRENCY } from "./media-upload-batch.js";
 import { clearProvisionRetryState, provisionRetryState } from "./provisioning-state.js";
+import { clearGenerateRetryState, generateRequestHash, generateRetryState } from "./media-generate-retry.js";
 import { validateProvisioningUrls } from "./provisioning-url.js";
 import { validateDashboardLink } from "./dashboard-link.js";
 import {
@@ -175,6 +177,7 @@ Commands:
   media upload-batch <manifest.json> --state FILE [--concurrency N]
                      [--no-transcode] [--tag TAG] [--no-progress]
   media show <id>
+  media download <id> [--output FILE]
   media list [--tag TAG] [--primitive image|video]
   media update <id> (--tag TAG | --clear-tag) --if-match REVISION
   media delete <id> --if-match REVISION
@@ -191,7 +194,7 @@ Commands:
   playlist create <file>
   playlist update <id> <file> --if-match REVISION
   playlist export <id> --output DIRECTORY
-  playlist import <directory> [--update ID --if-match REVISION]
+  playlist import <directory> [--name NAME] [--update ID --if-match REVISION]
   playlist show <id>
   playlist list
   playlist delete <id> --if-match REVISION
@@ -1415,7 +1418,7 @@ function isAuthenticatedCommand(group: string, action: string | undefined): bool
     account: new Set(["show"]),
     dashboard: new Set([undefined]),
     app: new Set(["upload", "list", "show"]),
-    media: new Set(["upload", "show", "list", "delete", "update"]),
+    media: new Set(["upload", "show", "download", "list", "delete", "update"]),
     playlist: new Set(["create", "update", "export", "import", "show", "get", "list", "delete"]),
     screen: new Set(["pair", "provision", "update", "list", "show", "assign", "set-timezone", "archive", "unarchive", "delete", "rotate-public-id", "toast", "screenshot"]),
     browser: new Set(["setup"]),
@@ -1886,6 +1889,11 @@ async function mediaCommand(
   if (action === "update") {
     return mediaUpdate(args, client);
   }
+  if (action === "download") {
+    return loggerOf(runtime).withLocal({ op: "media.download", message: "media download" }, () =>
+      mediaDownload(args, runtime, client),
+    );
+  }
   if (action === "delete") {
     const id = args.positionals[2];
     const revision = flagString(args.flags, "if-match");
@@ -1900,7 +1908,7 @@ async function mediaCommand(
   }
   if (action === "generate") {
     return loggerOf(runtime).withLocal({ op: "media.generate", message: "media generate" }, () =>
-      mediaGenerate(args, client),
+      mediaGenerate(args, runtime, client, resolved),
     );
   }
   if (action === "upload") {
@@ -1917,7 +1925,23 @@ async function mediaCommand(
 const GENERATE_ASPECT_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"] as const;
 const GENERATE_QUALITIES = ["low", "medium", "high"] as const;
 const GENERATE_PROMPT_MAX = 4000;
-const GENERATE_DEFAULT_TIMEOUT_MS = 60_000;
+
+/**
+ * `media generate` is a single blocking call with no poll, and the server's own
+ * vendor budget for the image is ninety seconds. The client budget therefore
+ * has to sit above ninety seconds plus the store-and-commit tail, so the
+ * server's timeout is what binds and the CLI never abandons a still the account
+ * has already been billed for. This is deliberately not the generic request
+ * timeout, which stays at thirty seconds for ordinary calls.
+ */
+const GENERATE_BLOCKING_TIMEOUT_MS = 150_000;
+
+/** Measured blocking durations per tier, for the up-front notice only. */
+const GENERATE_TYPICAL_SECONDS: Record<MediaGenerationQuality, number> = {
+  low: 15,
+  medium: 35,
+  high: 80,
+};
 
 function isGenerateAspectRatio(value: string): value is MediaGenerationAspectRatio {
   return (GENERATE_ASPECT_RATIOS as readonly string[]).includes(value);
@@ -1958,7 +1982,68 @@ function mediaGenerationFromBody(body: unknown): MediaGeneration {
   };
 }
 
-async function mediaGenerate(args: ParsedArgs, client: ApiClient): Promise<CommandResult> {
+/**
+ * A billed blocking call that did not return a result leaves the caller unable
+ * to say whether the still exists. Name both ways to find out: the identical
+ * re-run replays under the stored key, and the listing shows what the account
+ * actually holds.
+ */
+function ambiguousGenerateError(error: unknown, options: { elapsedMs: number; tag?: string }): unknown {
+  if (!(error instanceof CliError)) return error;
+  if (error.problem.code !== "timeout" && error.problem.code !== "transport_error") return error;
+  const seconds = Math.round(options.elapsedMs / 1000);
+  const listCommand = options.tag
+    ? `screenrig --json media list --tag ${options.tag}`
+    : "screenrig --json media list --primitive image";
+  return new CliError(
+    makeProblem(
+      error.problem.code,
+      error.problem.title,
+      error.problem.status,
+      `media generate did not return a result after ${seconds} s. The still may or may not have been created, and a created still is billed. ` +
+        "Re-run the identical media generate command: it retries with the same idempotency key, so a still that was created is returned instead of generating and billing a second one.",
+      {
+        request_id: error.problem.request_id,
+        next: {
+          command: listCommand,
+          reason: "Lists this account's stills, newest first, so you can see whether the generation completed before you re-run it.",
+        },
+      },
+    ),
+    error.exitCode,
+    error.warnings,
+  );
+}
+
+function writeGenerateNotice(
+  args: ParsedArgs,
+  runtime: CliRuntime,
+  quality: MediaGenerationQuality,
+): void {
+  if (flagBool(args.flags, "no-progress")) return;
+  const seconds = GENERATE_TYPICAL_SECONDS[quality];
+  if (flagBool(args.flags, "json")) {
+    runtime.stderr.write(
+      `${JSON.stringify({
+        event: "media_generate_started",
+        quality,
+        typical_seconds: seconds,
+        timeout_ms: GENERATE_BLOCKING_TIMEOUT_MS,
+      })}\n`,
+    );
+    return;
+  }
+  runtime.stderr.write(
+    `screenrig: media generate blocks until the still is ready; ${quality} quality usually takes about ${seconds} s.\n`,
+  );
+}
+
+async function mediaGenerate(
+  args: ParsedArgs,
+  runtime: CliRuntime,
+  client: ApiClient,
+  resolved: Awaited<ReturnType<typeof resolveConfig>>,
+): Promise<CommandResult> {
   requireFlagValue(args, "prompt", `"A dusk lobby photograph"`);
   requireFlagValue(args, "aspect-ratio", "16:9");
   requireFlagValue(args, "quality", "medium");
@@ -1981,27 +2066,53 @@ async function mediaGenerate(args: ParsedArgs, client: ApiClient): Promise<Comma
     quality,
     ...(tag ? { tag } : {}),
   };
-  const timeoutMs = flagNumber(args.flags, "timeout") ?? GENERATE_DEFAULT_TIMEOUT_MS;
-  const response = await client.call({
-    method: "POST",
-    path: "/api/v1/media/generations",
-    idempotent: true,
-    timeout_ms: timeoutMs,
-    body,
+  const timeoutMs = flagNumber(args.flags, "timeout") ?? GENERATE_BLOCKING_TIMEOUT_MS;
+  const retry = await generateRetryState({
+    resolved,
+    runtime,
+    requestHash: generateRequestHash(body),
+    ...(flagString(args.flags, "idempotency-key") ? { requestedKey: flagString(args.flags, "idempotency-key") } : {}),
   });
+  writeGenerateNotice(args, runtime, quality);
+  const startedAt = runtime.now().getTime();
+  let response;
+  try {
+    response = await client.call({
+      method: "POST",
+      path: "/api/v1/media/generations",
+      idempotent: true,
+      idempotencyKey: retry.state.idempotency_key,
+      timeout_ms: timeoutMs,
+      body,
+    });
+  } catch (error) {
+    const ambiguous = ambiguousGenerateError(error, {
+      elapsedMs: runtime.now().getTime() - startedAt,
+      ...(tag ? { tag } : {}),
+    });
+    if (ambiguous === error) {
+      // The server answered, so there is nothing for a replay to recover.
+      await clearGenerateRetryState(resolved, runtime, retry.state.idempotency_key);
+    }
+    throw ambiguous;
+  }
+  const elapsedMs = runtime.now().getTime() - startedAt;
   if (response.status !== 201) {
     throw usageError("media generate does not poll; the server must return 201 MediaGeneration.");
   }
   const generated = mediaGenerationFromBody(response.body);
   const mediaId = generated.media.id;
+  // The generation resolved, so the stored key has nothing left to replay.
+  await clearGenerateRetryState(resolved, runtime, retry.state.idempotency_key);
   return {
-    envelope: jsonBody(response, client.requestId, { id: mediaId, media_id: mediaId }),
+    envelope: jsonBody(response, client.requestId, { id: mediaId, media_id: mediaId, elapsed_ms: elapsedMs }),
     exitCode: ExitCode.Success,
     human: humanLines("Generated media", [
       ["media_id", mediaId],
       ["quality", generated.usage.quality ?? quality],
       ["credits", String(generated.usage.credits)],
       ["usd", generated.usage.usd],
+      ["elapsed_ms", String(elapsedMs)],
     ]),
   };
 }
@@ -2029,6 +2140,140 @@ async function mediaUpdate(args: ParsedArgs, client: ApiClient): Promise<Command
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
     human: clearTag ? `Cleared tag on media ${id}` : `Set tag ${tag} on media ${id}`,
+  };
+}
+
+const MEDIA_ID_PATTERN = /^med_[A-Za-z0-9_-]+$/;
+
+/** Canonical file extension for each verified media content type, matching the server's Content-Disposition. */
+const MEDIA_CONTENT_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "video/mp4": "mp4",
+  "video/webm": "webm",
+};
+
+function mediaRecordFromBody(body: unknown, id: string): MediaRecord {
+  const rec = (body ?? {}) as Partial<MediaRecord>;
+  if (
+    rec.id !== id ||
+    typeof rec.content_type !== "string" ||
+    typeof rec.sha256 !== "string" ||
+    !/^[a-f0-9]{64}$/.test(rec.sha256) ||
+    typeof rec.bytes !== "number" ||
+    !Number.isInteger(rec.bytes) ||
+    rec.bytes < 1
+  ) {
+    throw usageError(`Media ${id} metadata does not match the Media contract; cannot verify a download.`);
+  }
+  return rec as MediaRecord;
+}
+
+/**
+ * `media download <id> [--output FILE]` binds `GET /api/v1/media/{id}/content`.
+ *
+ * The metadata row is read first so the default name, the expected length,
+ * and the expected SHA-256 come from the server; the streamed bytes are
+ * verified against them before the file is moved into place. Bytes never
+ * reach stdout, the envelope, or the log.
+ */
+async function mediaDownload(args: ParsedArgs, runtime: CliRuntime, client: ApiClient): Promise<CommandResult> {
+  const id = args.positionals[2];
+  if (!id || !MEDIA_ID_PATTERN.test(id)) {
+    throw usageError("media download requires <id> starting with med_.");
+  }
+  if (args.positionals.length !== 3) {
+    throw usageError("media download takes exactly one media id.");
+  }
+  const metadataResponse = await client.call({ method: "GET", path: `/api/v1/media/${id}` });
+  const media = mediaRecordFromBody(metadataResponse.body, id);
+  const extension = MEDIA_CONTENT_EXTENSIONS[media.content_type.toLowerCase()];
+  if (!extension) {
+    throw usageError(`Media ${id} has content type ${media.content_type}, which this CLI cannot write.`);
+  }
+  const outputPath = await resolveDownloadOutput(runtime.cwd(), `./${id}.${extension}`, args.flags);
+
+  const response = await client.download({ method: "GET", path: `/api/v1/media/${id}/content` });
+  const tempPath = `${outputPath}.${process.pid}.part`;
+  let digest = "";
+  let written = 0;
+  try {
+    const contentType = (response.headers["content-type"] ?? "").split(";", 1)[0]?.trim().toLowerCase();
+    if (contentType !== media.content_type.toLowerCase()) {
+      throw usageError(`Media ${id} download Content-Type did not match its metadata.`);
+    }
+    const reportedLength = response.headers["content-length"];
+    if (reportedLength !== undefined && reportedLength !== String(media.bytes)) {
+      throw usageError(`Media ${id} download Content-Length did not match its metadata.`);
+    }
+    if (!response.body) {
+      throw usageError(`Media ${id} download returned no body.`);
+    }
+    const hash = createHash("sha256");
+    const handle = await open(tempPath, "w", 0o600);
+    try {
+      for await (const chunk of response.body) {
+        written += chunk.byteLength;
+        if (written > media.bytes) {
+          throw usageError(`Media ${id} download exceeded the declared length.`);
+        }
+        let offset = 0;
+        while (offset < chunk.byteLength) {
+          const result = await handle.write(chunk, offset, chunk.byteLength - offset);
+          offset += result.bytesWritten;
+        }
+        hash.update(chunk);
+      }
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    if (written !== media.bytes) {
+      throw usageError(`Media ${id} download ended before the declared length.`);
+    }
+    digest = hash.digest("hex");
+    if (digest !== media.sha256) {
+      throw usageError(`Media ${id} download SHA-256 did not match its metadata.`);
+    }
+    await rename(tempPath, outputPath);
+  } catch (error) {
+    await rm(tempPath, { force: true });
+    if (error instanceof CliError) {
+      throw error;
+    }
+    throw usageError("Cannot write the media download to the output path.");
+  } finally {
+    await response.body?.cancel?.();
+  }
+
+  const data = {
+    media_id: id,
+    id,
+    path: outputPath,
+    bytes: written,
+    sha256: digest,
+    content_type: media.content_type,
+    primitive: media.primitive,
+    filename: media.filename,
+    ...(typeof media.source_filename === "string" ? { source_filename: media.source_filename } : {}),
+    ...(typeof media.width === "number" ? { width: media.width } : {}),
+    ...(typeof media.height === "number" ? { height: media.height } : {}),
+  };
+  return {
+    envelope: successEnvelope(data, { request_id: client.requestId }),
+    exitCode: ExitCode.Success,
+    human: humanLines("Media downloaded", [
+      ["media_id", id],
+      ["path", outputPath],
+      ["bytes", String(written)],
+      ["sha256", digest],
+      ["content_type", media.content_type],
+      ["filename", media.filename],
+      ["source_filename", media.source_filename],
+      ["size", typeof media.width === "number" && typeof media.height === "number" ? `${media.width}x${media.height}` : undefined],
+    ]),
   };
 }
 
@@ -2158,6 +2403,7 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
       ["operation_id", uploaded.operation.id],
       ["state", uploaded.operation.state],
       ["filename", uploaded.upload.filename],
+      ["source_filename", uploaded.upload.source_filename],
       ["content_type", uploaded.upload.content_type],
       ["tag", uploaded.upload.tag],
       ["transcode", typeof uploaded.transcode.duration_ms === "number" ? `${uploaded.transcode.reason} in ${uploaded.transcode.duration_ms} ms` : "skipped"],
@@ -2526,16 +2772,19 @@ async function playlistCommand(
   if (action === "import") {
     requireFlagValue(args, "update", "pl_01");
     requireFlagValue(args, "if-match", "1");
+    requireFlagValue(args, "name", "Lobby loop (copy)");
     const directory = args.positionals[2];
     if (!directory || args.positionals.length !== 3) throw usageError("playlist import requires one <directory>.");
     const updateId = flagString(args.flags, "update");
     const ifMatch = flagString(args.flags, "if-match");
+    const name = flagString(args.flags, "name");
     const result = await importPlaylistBundle({
       directory: path.resolve(runtime.cwd(), directory),
       client,
       runtime,
       updateId,
       ifMatch,
+      name,
       timeoutMs: flagNumber(args.flags, "timeout"),
       pollMs: flagNumber(args.flags, "poll-ms"),
       beforePlaylistWrite: async (playlist, targetId) => {
@@ -2971,12 +3220,25 @@ function screenshotUnavailable(requestId: string): CliError {
   );
 }
 
+const READINESS_SENTENCE_MAX = 400;
+
+/** One line, redacted, bounded: the sentence is server text shown to the operator. */
+function redactedReadinessSentence(sentence: string): string {
+  const flat = redactText(sentence).replace(/[\r\n\t]+/g, " ").replace(/ {2,}/g, " ").trim();
+  return flat.length > READINESS_SENTENCE_MAX ? `${flat.slice(0, READINESS_SENTENCE_MAX)}...` : flat;
+}
+
 async function resolveScreenshotOutput(cwd: string, id: string, flags: ParsedArgs["flags"]): Promise<string> {
+  return resolveDownloadOutput(cwd, `./${id}.webp`, flags);
+}
+
+/** `--output` is a file path, never a directory; the default is relative to cwd. */
+async function resolveDownloadOutput(cwd: string, defaultRelative: string, flags: ParsedArgs["flags"]): Promise<string> {
   if (flags.output === true) {
     throw usageError("--output requires a file path.");
   }
   const specified = flagString(flags, "output");
-  const relative = specified ?? `./${id}.webp`;
+  const relative = specified ?? defaultRelative;
   if (relative.endsWith("/") || relative.endsWith("\\")) {
     throw usageError("--output must be a file path, not a directory.");
   }
@@ -3410,6 +3672,11 @@ function formatEventLines(events: AccountEvent[]): string {
 }
 
 async function eventsList(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>): Promise<CommandResult> {
+  // `--limit` is forwarded verbatim: the server owns the 1..200 bound and
+  // answers 400 invalid_request with errors[].field = "limit", which the
+  // envelope surfaces. A null next_cursor is the end of the history, not an error.
+  requireFlagValue(args, "limit", "50");
+  requireFlagValue(args, "after", "ev1_0");
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const response = await client.call({
@@ -3574,6 +3841,55 @@ interface DoctorCheck {
   name: string;
   status: DoctorStatus;
   detail: string;
+  /** The command that clears a `warn` or `fail` row, when one exists. */
+  next?: ProblemNext;
+}
+
+/**
+ * A fresh install has no credential and nothing is broken, so the `token` row
+ * warns and names the enrollment or connection command instead of failing.
+ * `fail` is reserved for damage the operator must repair: bad permissions,
+ * a missing toolchain piece a supported command needs, or an unreachable
+ * control plane.
+ */
+function credentialCheck(resolved: Awaited<ReturnType<typeof resolveConfig>>): DoctorCheck {
+  if (hasToken(resolved.token)) {
+    return { name: "token", status: "pass", detail: describeTokenPresence(resolved.token) };
+  }
+  const detail = describeTokenPresence(resolved.token);
+  if (resolved.agentConnection) {
+    return {
+      name: "token",
+      status: "warn",
+      detail: `${detail}; an agent connection is pending dashboard approval`,
+      next: {
+        command: "screenrig agent connect",
+        reason: "Resume the pending passkey-approved connection, then rerun doctor.",
+      },
+    };
+  }
+  if (resolved.lastAgent) {
+    return {
+      name: "token",
+      status: "warn",
+      detail: `${detail}; this installation was disconnected`,
+      next: {
+        command: "screenrig agent connect",
+        reason: "Connect a new independently revocable agent through dashboard passkey approval, then rerun doctor.",
+      },
+    };
+  }
+  return {
+    name: "token",
+    status: "warn",
+    detail: `${detail}; this installation is not enrolled`,
+    next: {
+      command: resolved.enrollment?.email ? "screenrig agent enroll" : "screenrig agent enroll --email ADDRESS",
+      reason: resolved.enrollment?.email
+        ? "Resume the exact pending enrollment, then rerun doctor."
+        : "Create the first agent with unverified contact metadata, then rerun doctor. Every authenticated command fails with not_enrolled until then.",
+    },
+  };
 }
 
 function probeFailureDetail(err: unknown, fallback: string): string {
@@ -3612,11 +3928,7 @@ async function doctor(
   } catch {
     checks.push({ name: "config_permissions", status: "pass", detail: "config file not present" });
   }
-  checks.push({
-    name: "token",
-    status: hasToken(resolved.token) ? "pass" : "fail",
-    detail: describeTokenPresence(resolved.token),
-  });
+  checks.push(credentialCheck(resolved));
   checks.push({
     name: "api_url",
     status: resolved.apiUrl.startsWith("https://") || resolved.apiUrl.startsWith("http://127.") || resolved.apiUrl.includes("localhost") ? "pass" : "fail",
@@ -3736,7 +4048,19 @@ async function doctor(
       const body = response.body;
       const degraded = route === "/.ready" && body !== null && typeof body === "object"
         && "degraded" in body && Array.isArray(body.degraded) ? body.degraded : [];
+      const degradedDetail = route === "/.ready" && body !== null && typeof body === "object"
+        && "degraded_detail" in body && body.degraded_detail !== null && typeof body.degraded_detail === "object"
+        && !Array.isArray(body.degraded_detail)
+        ? (body.degraded_detail as Record<string, unknown>)
+        : {};
       const guidance = [...new Set(degraded.map((dependency): string => {
+        // The server's degraded_detail sentence is written for a client to show
+        // verbatim (for example why app upload will answer 503). Prefer it, bounded
+        // and redacted, over the local fallback text.
+        const sentence = typeof dependency === "string" ? degradedDetail[dependency] : undefined;
+        if (typeof sentence === "string" && sentence.trim().length > 0) {
+          return `${dependency}: ${redactedReadinessSentence(sentence)}`;
+        }
         switch (dependency) {
           case "application_processing":
             return "application_processing: new applications cannot become ready; ask the service operator to restore application workers, then rerun doctor";
@@ -3775,10 +4099,13 @@ async function doctor(
   const failed = checks.some((check) => check.status === "fail");
   const warned = checks.some((check) => check.status === "warn");
   const status: DoctorStatus = failed ? "fail" : warned ? "warn" : "pass";
+  // `data.next` is the one command that clears the worst row that has one.
+  const next = checks.find((check) => check.status === "fail" && check.next)?.next
+    ?? checks.find((check) => check.status === "warn" && check.next)?.next;
   return {
-    envelope: successEnvelope({ status, checks, version: CLI_VERSION }),
+    envelope: successEnvelope({ status, checks, version: CLI_VERSION, ...(next ? { next } : {}) }),
     exitCode: failed ? ExitCode.Unexpected : ExitCode.Success,
-    human: checks.map((check) => `${check.status.toUpperCase()} ${check.name}: ${check.detail}`).join("\n"),
+    human: checks.map((check) => `${check.status.toUpperCase()} ${check.name}: ${check.detail}${check.next ? `\n  next: ${check.next.command}` : ""}`).join("\n"),
   };
 }
 

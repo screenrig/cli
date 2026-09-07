@@ -769,6 +769,74 @@ test("playlist-write 429 preserves Retry-After and reports an unknown write outc
   await rm(dir, { recursive: true, force: true });
 });
 
+function nameConflictResponse(): TransportResponse {
+  return {
+    status: 409,
+    headers: {},
+    body: {
+      type: "https://screenrig.ai/problems/resource-conflict",
+      title: "Resource state conflicts with the request",
+      status: 409,
+      detail: "playlist name is already in use",
+      code: "resource_conflict",
+    },
+  };
+}
+
+/**
+ * UAT round 1, F5: importing an account's own export unchanged is refused
+ * because playlist names are unique per account. The 409 gains a `next` that
+ * names `--name`, and `--name` itself replaces the bundle's playlist name.
+ */
+test("import of a bundle whose playlist name is taken points at --name, and --name overrides the bundle name", async () => {
+  const dir = await testTemp("bundle-name-conflict-");
+  const bytes = Uint8Array.from([7, 8, 9]);
+  await writeBundle(dir, [{ id: "med_SOURCE_A", filename: "hero.png", bytes, tag: "Lobby" }]);
+  const existing = [remoteMedia("med_SOURCE_A", bytes, { tag: "Lobby" })];
+  const conflicting = importTransport(existing, [], { playlistResponse: () => nameConflictResponse() });
+  await assert.rejects(
+    () => importPlaylistBundle({
+      directory: dir,
+      client: new ApiClient({ transport: conflicting, token: "token", idempotencyKey: "bundle-base-key" }),
+      runtime: runtimeForImport([]),
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof CliError);
+      assert.equal(error.problem.status, 409);
+      assert.equal(error.problem.code, "resource_conflict");
+      assert.match(error.problem.detail, /playlist name is already in use/);
+      assert.match(error.problem.detail, /unique per account/);
+      assert.equal(error.problem.next?.command, `screenrig --json playlist import ${dir} --name NAME`);
+      assert.match(error.problem.next?.reason ?? "", /--update ID --if-match REVISION/);
+      return true;
+    },
+  );
+  assert.equal(conflicting.calls.filter((call) => call.path === "/api/v1/playlists").length, 1);
+
+  const transport = importTransport(existing);
+  const result = await importPlaylistBundle({
+    directory: dir,
+    client: new ApiClient({ transport, token: "token", idempotencyKey: "bundle-base-key" }),
+    runtime: runtimeForImport([]),
+    name: "  Lobby loop (copy) ",
+  });
+  assert.equal(result.mode, "create");
+  const create = transport.calls.find((call) => call.method === "POST" && call.path === "/api/v1/playlists")!;
+  assert.equal((create.body as { name: string }).name, "Lobby loop (copy)");
+  assert.deepEqual(Object.keys(create.body as object).sort(), ["name", "pages"]);
+
+  await assert.rejects(
+    () => importPlaylistBundle({
+      directory: dir,
+      client: new ApiClient({ transport: importTransport(existing), token: "token", idempotencyKey: "bundle-base-key" }),
+      runtime: runtimeForImport([]),
+      name: "   ",
+    }),
+    /--name must be 1 to 120 characters/,
+  );
+  await rm(dir, { recursive: true, force: true });
+});
+
 test("a non-rate-limit declaration failure remains partial and is not retried", async () => {
   const dir = await testTemp("bundle-rate-nonretry-");
   await writeBundle(dir, bundleSources(2));
@@ -931,7 +999,7 @@ test("command parser and JSON help expose playlist export/import including updat
   assert.equal(parsed.flags.update, "pl_TARGET");
   assert.equal(parsed.flags["if-match"], "8");
   assert.match(USAGE, /playlist export <id> --output DIRECTORY/);
-  assert.match(USAGE, /playlist import <directory> \[--update ID --if-match REVISION\]/);
+  assert.match(USAGE, /playlist import <directory> \[--name NAME\] \[--update ID --if-match REVISION\]/);
 
   const stdout = new PassThrough();
   const stderr = new PassThrough();

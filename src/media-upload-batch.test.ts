@@ -384,12 +384,35 @@ test("a second run skips accepted hashes and reports resumed", async () => {
     );
     assert.equal(resumed.code, ExitCode.Success, resumed.stdout);
     const envelope = JSON.parse(resumed.stdout) as {
-      data: { accepted: number; resumed: number; failed: unknown[]; attempts: number };
+      data: {
+        accepted: number;
+        resumed: number;
+        failed: unknown[];
+        attempts: number;
+        items: Array<{ path: string; source_filename: string; sha256: string; outcome: string; media_id?: string }>;
+      };
     };
     assert.equal(envelope.data.resumed, 2);
     assert.equal(envelope.data.accepted, 3);
     assert.equal(envelope.data.failed.length, 0);
     assert.equal(second.declareCount(), 3);
+    // Counts alone force a second `media list --tag` call to learn what the
+    // batch created, and an untagged batch has no way back to its ids at all.
+    assert.equal(envelope.data.items.length, 5);
+    assert.deepEqual(
+      envelope.data.items.map((item) => item.source_filename),
+      ["still-0.png", "still-1.png", "still-2.png", "still-3.png", "still-4.png"],
+      "items follow manifest order, not completion order",
+    );
+    for (const item of envelope.data.items) {
+      assert.ok(item.media_id?.startsWith("med_"), JSON.stringify(item));
+      assert.match(item.sha256, /^[a-f0-9]{64}$/);
+    }
+    assert.deepEqual(
+      envelope.data.items.filter((item) => item.outcome === "resumed").map((item) => item.source_filename),
+      ["still-0.png", "still-1.png"],
+      "the two items already accepted in the interrupted run come back as resumed, with their ids",
+    );
   } finally {
     await rm(configDir, { recursive: true, force: true });
     await rm(cwdDir, { recursive: true, force: true });

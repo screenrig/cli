@@ -7,6 +7,7 @@ import { USAGE } from "./commands.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { run, type CliRuntime } from "./main.js";
+import { timeoutError } from "./problems.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 
@@ -16,9 +17,11 @@ const PROMPT = "A dusk lobby photograph, warm tungsten, no people";
 
 const GENERATED_MEDIA = {
   id: "med_01EXAMPLEGENERATED0000000",
-  filename: "generated.png",
+  filename: "generated-16x9-1a2b3c4d.webp",
   primitive: "image",
-  content_type: "image/png",
+  content_type: "image/webp",
+  width: 1920,
+  height: 1080,
   state: "ready",
 } as const;
 
@@ -149,7 +152,7 @@ test("media generate stores the still and returns med_… plus usage", async () 
       tag: "LobbyDusk",
     });
     assert.ok(transport.calls[0]?.headers?.["idempotency-key"]);
-    assert.equal(transport.calls[0]?.timeout_ms, 60_000);
+    assert.equal(transport.calls[0]?.timeout_ms, 150_000);
     assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 0);
     assert.equal(transport.calls.filter((call) => call.method === "PUT").length, 0);
     assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/v1/operations")).length, 0);
@@ -366,6 +369,205 @@ test("media generate does not poll a 202", async () => {
     assert.equal(envelope.error.code, "usage_error");
     assert.match(envelope.error.detail, /does not poll/);
     assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/v1/operations")).length, 0);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("the generate budget sits above the backend's 90 s vendor timeout while short calls keep 30 s", async () => {
+  const transport = generateTransport().on("GET", "/api/v1/media", () => ({
+    status: 200,
+    headers: { "content-type": "application/json" },
+    body: { items: [], next_cursor: null },
+  }));
+  const configDir = await testTemp("media-generate-budget-");
+  const fsLike = await enrolled(configDir);
+  try {
+    const generated = await withRuntime(
+      ["--json", "media", "generate", "--prompt", PROMPT, "--quality", "high"],
+      transport,
+      { configDir, fs: fsLike },
+    );
+    assert.equal(generated.code, ExitCode.Success, generated.stdout);
+    const generate = transport.calls.find((call) => call.path === "/api/v1/media/generations");
+    assert.ok(generate?.timeout_ms !== undefined);
+    assert.ok(
+      generate.timeout_ms > 90_000,
+      `the blocking generate budget must exceed the server's 90 s vendor timeout, got ${generate.timeout_ms}`,
+    );
+    assert.equal(generate.timeout_ms, 150_000);
+
+    const listed = await withRuntime(["--json", "media", "list"], transport, { configDir, fs: fsLike });
+    assert.equal(listed.code, ExitCode.Success, listed.stdout);
+    const list = transport.calls.find((call) => call.path === "/api/v1/media");
+    assert.equal(list?.timeout_ms, 30_000, "the generic request budget is unchanged by the generate budget");
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("media generate reports elapsed_ms and announces that it blocks", async () => {
+  const transport = generateTransport();
+  const configDir = await testTemp("media-generate-elapsed-");
+  const fsLike = await enrolled(configDir);
+  try {
+    const result = await withRuntime(
+      ["--json", "media", "generate", "--prompt", PROMPT, "--quality", "high"],
+      transport,
+      { configDir, fs: fsLike },
+    );
+    assert.equal(result.code, ExitCode.Success, result.stdout);
+    const envelope = JSON.parse(result.stdout) as { data: { elapsed_ms: number } };
+    assert.equal(typeof envelope.data.elapsed_ms, "number");
+    const notice = JSON.parse(result.stderr.trim()) as {
+      event: string;
+      quality: string;
+      typical_seconds: number;
+      timeout_ms: number;
+    };
+    assert.equal(notice.event, "media_generate_started");
+    assert.equal(notice.quality, "high");
+    assert.ok(notice.typical_seconds > 0);
+    assert.equal(notice.timeout_ms, 150_000);
+    assert.doesNotMatch(result.stderr, new RegExp(PROMPT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("a generate that times out says the still may exist and names the command that checks", async () => {
+  const transport = new FakeTransport().on("POST", "/api/v1/media/generations", () => {
+    throw timeoutError("API request timed out", "req_generatetimeout00000");
+  });
+  const configDir = await testTemp("media-generate-timeout-");
+  const fsLike = await enrolled(configDir);
+  try {
+    const result = await withRuntime(
+      ["--json", "media", "generate", "--prompt", PROMPT, "--quality", "high", "--tag", "MenuBoard"],
+      transport,
+      { configDir, fs: fsLike },
+    );
+    assert.equal(result.code, ExitCode.Timeout, result.stdout);
+    const envelope = JSON.parse(result.stdout) as {
+      error: { code: string; detail: string; next?: { command: string; reason: string } };
+    };
+    assert.equal(envelope.error.code, "timeout");
+    assert.match(envelope.error.detail, /may or may not have been created/);
+    assert.match(envelope.error.detail, /same idempotency key/);
+    assert.equal(envelope.error.next?.command, "screenrig --json media list --tag MenuBoard");
+    assert.doesNotMatch(result.stdout, new RegExp(PROMPT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("an identical retry after a timeout reuses the idempotency key, and a resolved generation releases it", async () => {
+  const configDir = await testTemp("media-generate-replay-");
+  const fsLike = await enrolled(configDir);
+  const failing = new FakeTransport().on("POST", "/api/v1/media/generations", () => {
+    throw timeoutError("API request timed out", "req_generatetimeout00000");
+  });
+  try {
+    const first = await withRuntime(
+      ["--json", "media", "generate", "--prompt", PROMPT, "--quality", "high"],
+      failing,
+      { configDir, fs: fsLike },
+    );
+    assert.equal(first.code, ExitCode.Timeout, first.stdout);
+    const firstKey = failing.calls[0]?.headers?.["idempotency-key"];
+    assert.ok(firstKey);
+
+    const secondFailing = new FakeTransport().on("POST", "/api/v1/media/generations", () => {
+      throw timeoutError("API request timed out", "req_generatetimeout00000");
+    });
+    const retried = await withRuntime(
+      ["--json", "media", "generate", "--prompt", PROMPT, "--quality", "high"],
+      secondFailing,
+      { configDir, fs: fsLike },
+    );
+    assert.equal(retried.code, ExitCode.Timeout, retried.stdout);
+    assert.equal(
+      secondFailing.calls[0]?.headers?.["idempotency-key"],
+      firstKey,
+      "the identical retry must replay under the original key so the server returns the still it may already have billed",
+    );
+
+    const different = new FakeTransport().on("POST", "/api/v1/media/generations", () => {
+      throw timeoutError("API request timed out", "req_generatetimeout00000");
+    });
+    await withRuntime(
+      ["--json", "media", "generate", "--prompt", `${PROMPT} at night`, "--quality", "high"],
+      different,
+      { configDir, fs: fsLike },
+    );
+    assert.notEqual(
+      different.calls[0]?.headers?.["idempotency-key"],
+      firstKey,
+      "a different prompt must not inherit a key whose replay would return the earlier still",
+    );
+
+    const succeeding = generateTransport();
+    const done = await withRuntime(
+      ["--json", "media", "generate", "--prompt", `${PROMPT} at night`, "--quality", "high"],
+      succeeding,
+      { configDir, fs: fsLike },
+    );
+    assert.equal(done.code, ExitCode.Success, done.stdout);
+    const resolvedKey = succeeding.calls[0]?.headers?.["idempotency-key"];
+
+    const after = generateTransport();
+    const again = await withRuntime(
+      ["--json", "media", "generate", "--prompt", `${PROMPT} at night`, "--quality", "high"],
+      after,
+      { configDir, fs: fsLike },
+    );
+    assert.equal(again.code, ExitCode.Success, again.stdout);
+    assert.notEqual(
+      after.calls[0]?.headers?.["idempotency-key"],
+      resolvedKey,
+      "once a generation returns there is nothing left to replay, so the next run bills a new still",
+    );
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("a server answer releases the stored key: a 402 does not make the next run replay", async () => {
+  const configDir = await testTemp("media-generate-402-key-");
+  const fsLike = await enrolled(configDir);
+  const refused = new FakeTransport().on("POST", "/api/v1/media/generations", () => ({
+    status: 402,
+    headers: { "content-type": "application/problem+json" },
+    body: {
+      type: "https://screenrig.ai/problems/payment-required",
+      title: "Prepaid credit is required",
+      status: 402,
+      detail: "Prepaid credit remaining is below the generation debit.",
+      code: "payment_required",
+    },
+  }));
+  try {
+    const first = await withRuntime(
+      ["--json", "media", "generate", "--prompt", PROMPT, "--quality", "high"],
+      refused,
+      { configDir, fs: fsLike },
+    );
+    assert.equal(first.code, ExitCode.Client, first.stdout);
+    const refusedKey = refused.calls[0]?.headers?.["idempotency-key"];
+    assert.ok(refusedKey);
+
+    const funded = generateTransport();
+    const second = await withRuntime(
+      ["--json", "media", "generate", "--prompt", PROMPT, "--quality", "high"],
+      funded,
+      { configDir, fs: fsLike },
+    );
+    assert.equal(second.code, ExitCode.Success, second.stdout);
+    assert.notEqual(
+      funded.calls[0]?.headers?.["idempotency-key"],
+      refusedKey,
+      "a request the server answered is not ambiguous, so its key is released rather than replayed",
+    );
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }

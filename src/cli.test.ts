@@ -1589,6 +1589,37 @@ test("events list sends after and limit when the user supplies them", async () =
   await rm(configDir, { recursive: true, force: true });
 });
 
+test("events list treats a null next_cursor as the end of history and surfaces the server's limit bound", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("ev-page-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  try {
+    const last = await withRuntime(["--json", "events", "list"], transport, { fs: fsLike });
+    assert.equal(last.code, ExitCode.Success, last.stdout);
+    const page = JSON.parse(last.stdout) as { ok: true; data: { items: unknown[]; next_cursor: string | null } };
+    assert.strictEqual(page.data.next_cursor, null, "null terminates paging and is not an error");
+
+    const capped = await withRuntime(["--json", "events", "list", "--limit", "500"], transport, { fs: fsLike });
+    assert.notEqual(capped.code, ExitCode.Success);
+    const problem = JSON.parse(capped.stdout) as { ok: false; error: { code: string; status: number; errors: Array<{ field?: string }> } };
+    assert.equal(problem.error.status, 400);
+    assert.equal(problem.error.code, "invalid_request");
+    assert.equal(problem.error.errors[0]?.field, "limit", "the server's field name must reach the envelope");
+    const call = transport.calls.filter((item) => item.path === "/api/v1/events").at(-1);
+    assert.equal(call?.query?.limit, "500", "the CLI must not cap --limit locally");
+
+    const missing = await withRuntime(["--json", "events", "list", "--limit"], transport, { fs: fsLike });
+    assert.equal(missing.code, ExitCode.Usage, missing.stdout);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
 test("formatEventLine prints logfmt, never canned messages", () => {
   assert.equal(
     formatEventLine({
@@ -2249,9 +2280,11 @@ test("events follow --timeout exits during backoff without hanging", async () =>
 });
 
 test("doctor reports checks over the published foundation routes", async () => {
+  resetFfmpegToolchainCache();
   const transport = memoryBackend();
-  const { code, stdout, configDir } = await withRuntime(["--json", "doctor"], transport);
-  assert.equal(code, ExitCode.Unexpected);
+  const { code, stdout, configDir } = await withRuntime(["--json", "doctor"], transport, { runProcess: fullToolchainProbe() });
+  // A fresh install has no credential; that is a warning, never a failure.
+  assert.equal(code, ExitCode.Success, stdout);
   const envelope = JSON.parse(stdout) as { ok: true; data: { checks: Array<{ name: string; status: string }> } };
   const names = envelope.data.checks.map((check) => check.name);
   assert.ok(names.includes("node"));
@@ -2288,6 +2321,15 @@ function fakeToolchainProbe(options: { encoders: string[]; filters: string[]; cw
     }
     return { code: 1, signal: null, stdout: "", stderrTail: "" };
   };
+}
+
+/** A host with every encoder and filter the CLI can use, so only the row under test moves. */
+function fullToolchainProbe(): NonNullable<CliRuntime["runProcess"]> {
+  return fakeToolchainProbe({
+    encoders: ["libx264", "libx265", "libwebp", "libwebp_anim"],
+    filters: ["scale", "zscale", "tonemap"],
+    cwebp: true,
+  }) as unknown as NonNullable<CliRuntime["runProcess"]>;
 }
 
 async function doctorWithToolchain(
@@ -2345,6 +2387,37 @@ test("doctor warns about degraded application workers without failing HTTP readi
     assert.match(byName.ready?.detail ?? "", /another optional dependency/);
     assert.doesNotMatch(byName.ready?.detail ?? "", /private-probe-value/);
     assert.equal(byName.health?.status, "pass");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("doctor prints the server's degraded_detail sentence verbatim for each degraded dependency", async () => {
+  const sentence = "Application upload is unavailable: POST /api/v1/applications answers 503 dependency_unavailable until the application workers run.";
+  const { code, status, byName, cleanup } = await doctorWithToolchain("doctor-degraded-detail-", {
+    encoders: ["libx264", "libx265", "libwebp"], filters: ["zscale", "tonemap"], cwebp: true,
+  }, {
+    status: 200,
+    body: {
+      status: "ready",
+      degraded: ["application_processing", "valkey", "private-probe-value"],
+      degraded_detail: {
+        application_processing: sentence,
+        // A stray credential or line break in server text is flattened and redacted, never echoed.
+        valkey: "Cache is unavailable.\nSessions fall back to the database. sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr",
+      },
+    },
+  });
+  try {
+    assert.equal(code, ExitCode.Success);
+    assert.equal(status, "warn");
+    assert.equal(byName.ready?.status, "warn");
+    assert.ok(byName.ready?.detail.includes(`application_processing: ${sentence}`), byName.ready?.detail);
+    assert.match(byName.ready?.detail ?? "", /valkey: Cache is unavailable\. Sessions fall back to the database\. sr_live_\*\*\*/);
+    assert.doesNotMatch(byName.ready?.detail ?? "", /secretsecret|\n/);
+    // No sentence for this one, so the local fallback still applies and the name is not echoed.
+    assert.match(byName.ready?.detail ?? "", /another optional dependency is unavailable/);
+    assert.doesNotMatch(byName.ready?.detail ?? "", /private-probe-value/);
   } finally {
     await cleanup();
   }
@@ -2495,18 +2568,56 @@ test("doctor reports a configured credential as presence only", async () => {
   }
 });
 
-test("doctor fails the token check without a credential", async () => {
+test("doctor warns, exits 0, and names agent enroll when a fresh install has no credential", async () => {
   resetFfmpegToolchainCache();
-  const { code, stdout, configDir } = await withRuntime(["--json", "doctor"], memoryBackend());
-  assert.equal(code, ExitCode.Unexpected);
+  const { code, stdout, configDir } = await withRuntime(["--json", "doctor"], memoryBackend(), { runProcess: fullToolchainProbe() });
+  assert.equal(code, ExitCode.Success, stdout);
   const envelope = JSON.parse(stdout) as {
-    data: { status: string; checks: Array<{ name: string; status: string; detail: string }> };
+    data: {
+      status: string;
+      next?: { command: string; reason: string };
+      checks: Array<{ name: string; status: string; detail: string; next?: { command: string; reason: string } }>;
+    };
   };
+  assert.equal(envelope.data.status, "warn");
   const token = envelope.data.checks.find((check) => check.name === "token");
   assert.ok(token, stdout);
-  assert.equal(token.status, "fail");
-  assert.equal(token.detail, "(none)");
+  assert.equal(token.status, "warn");
+  assert.match(token.detail, /^\(none\); this installation is not enrolled/);
+  assert.equal(token.next?.command, "screenrig agent enroll --email ADDRESS");
+  assert.equal(envelope.data.next?.command, "screenrig agent enroll --email ADDRESS");
+  assert.match(envelope.data.next?.reason ?? "", /not_enrolled/);
+  assert.equal(envelope.data.checks.some((check) => check.status === "fail" && check.name === "token"), false);
   assert.doesNotMatch(stdout, /sr_live_/);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("doctor points a pending agent connection at agent connect instead of enroll", async () => {
+  resetFfmpegToolchainCache();
+  const configDir = await testTemp("doctor-connecting-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    {
+      api_url: "https://api.screenrig.ai",
+      agent_connection: {
+        private_jwk: { kty: "OKP", crv: "X25519", x: "x", d: "d" },
+        connection_id: "acn_PENDING",
+        expires_at: "2099-01-01T00:00:00Z",
+      },
+    },
+    fsLike,
+  );
+  const { code, stdout } = await withRuntime(["--json", "doctor"], memoryBackend(), { fs: fsLike, runProcess: fullToolchainProbe() });
+  assert.equal(code, ExitCode.Success, stdout);
+  const envelope = JSON.parse(stdout) as {
+    data: { next?: { command: string }; checks: Array<{ name: string; status: string; next?: { command: string } }> };
+  };
+  const token = envelope.data.checks.find((check) => check.name === "token");
+  assert.equal(token?.status, "warn");
+  assert.equal(token?.next?.command, "screenrig agent connect");
+  assert.equal(envelope.data.next?.command, "screenrig agent connect");
+  assert.doesNotMatch(stdout, /acn_PENDING/);
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -2697,6 +2808,9 @@ test("media upload transcodes before declaring, and uploads only the transcoded 
     const declare = transport.calls.find((call) => call.path === "/api/v1/media/uploads");
     assert.deepEqual((declare?.body as { filename: string; content_type: string; bytes: number }).content_type, "image/webp");
     assert.equal((declare?.body as { filename: string }).filename, "poster.webp");
+    // The caller's name travels with the declaration so the server can derive a
+    // non-colliding stored filename (poster.png.webp) and keep the handle.
+    assert.equal((declare?.body as { source_filename?: string }).source_filename, "poster.png");
     assert.equal((declare?.body as { bytes: number }).bytes, encoded.length);
     assert.deepEqual(signedRequest?.body, encoded, "the source bytes must never reach the signed PUT");
 
@@ -2705,11 +2819,24 @@ test("media upload transcodes before declaring, and uploads only the transcoded 
         id?: string;
         media_id?: string;
         operation: { result?: { media_id?: string } };
-        upload: { content_type: string };
-        transcode: { applied: boolean; width: number; height: number; dimensions_measured: boolean };
+        upload: { filename: string; declared_filename: string; filename_source: string; content_type: string; source_filename?: string };
+        transcode: { applied: boolean; width: number; height: number; source_width?: number; source_height?: number; dimensions_measured: boolean };
       };
+      warnings: Array<{ code: string; message: string }>;
     };
     assert.equal(envelope.data.upload.content_type, "image/webp");
+    assert.equal(envelope.data.upload.source_filename, "poster.png");
+    // The envelope reports what the account now holds. Before this, `filename`
+    // was the local post-transcode guess, so poster.png, poster.jpg and
+    // poster.webp all reported poster.webp while the stored rows differed.
+    assert.equal(envelope.data.upload.filename, "poster.png.webp");
+    assert.equal(envelope.data.upload.declared_filename, "poster.webp");
+    assert.equal(envelope.data.upload.filename_source, "server");
+    assert.equal(envelope.data.transcode.source_width, 8000);
+    assert.equal(envelope.data.transcode.source_height, 4000);
+    const resized = envelope.warnings.find((warning) => warning.code === "image_resized");
+    assert.ok(resized, "an image scaled to the 3840 px bound must say so in the envelope");
+    assert.match(resized.message, /poster\.png was 8000x4000 and was scaled down to 3840x1920 to fit the 3840 px bound/);
     assert.equal(envelope.data.media_id, "med_AAAAAAAAAAAAAAAAAAAAAAAA");
     assert.equal(envelope.data.id, envelope.data.media_id);
     assert.equal(envelope.data.operation.result?.media_id, envelope.data.media_id);
@@ -2724,6 +2851,153 @@ test("media upload transcodes before declaring, and uploads only the transcoded 
 
     await assert.rejects(() => stat(temporaryOutput), "the temporary transcode directory must be removed");
     assert.deepEqual(await readFile(source), sourceBytes, "the source file must be left untouched");
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("media upload refuses a --content-type the bytes contradict before ffprobe, ffmpeg, or declare", async () => {
+  resetFfmpegToolchainCache();
+  const transport = memoryBackend();
+  const configDir = await testTemp("media-mismatch-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const source = path.join(configDir, "photo.png");
+  await writeFile(source, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82]));
+  let processRuns = 0;
+  const runProcess = async () => {
+    processRuns += 1;
+    return { code: 0, signal: null, stdout: "", stderrTail: "" };
+  };
+  let signedPuts = 0;
+  try {
+    for (const extra of [[], ["--no-transcode"]]) {
+      const result = await withRuntime(["--json", "media", "upload", source, "--content-type", "video/mp4", ...extra], transport, {
+        fs: fsLike,
+        runProcess: runProcess as unknown as NonNullable<CliRuntime["runProcess"]>,
+        signedRawPut: async () => {
+          signedPuts += 1;
+          return { status: 200 };
+        },
+      });
+      assert.equal(result.code, ExitCode.Usage, result.stdout);
+      const envelope = JSON.parse(result.stdout) as { ok: false; error: { code: string; detail: string } };
+      assert.equal(envelope.error.code, "usage_error");
+      assert.match(envelope.error.detail, /photo\.png was declared --content-type video\/mp4, but its bytes are a PNG image \(image\/png\)/);
+      assert.match(envelope.error.detail, /Nothing was transcoded or uploaded/);
+    }
+    assert.equal(processRuns, 0, "neither ffprobe nor ffmpeg may run on a contradicted declaration");
+    assert.equal(signedPuts, 0);
+    assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 0);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+function byteStream(bytes: Uint8Array, split = 3) {
+  return {
+    async *[Symbol.asyncIterator]() {
+      yield bytes.subarray(0, split);
+      yield bytes.subarray(split);
+    },
+  };
+}
+
+test("media download writes the verified original rendition to --output or ./<id>.<ext> and never prints bytes", async () => {
+  const bytes = lossyWebpFixture(1920, 1080);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const id = "med_GENERATEDAAAAAAAAAAAAAAA";
+  const metadata = {
+    id,
+    filename: "generated-16x9-1a2b3c4d.webp",
+    primitive: "image",
+    content_type: "image/webp",
+    operation_id: "op_GEN",
+    sha256,
+    bytes: bytes.length,
+    width: 1920,
+    height: 1080,
+    revision: 1,
+    state: "ready",
+    created_at: "2026-08-14T17:00:00.000Z",
+    updated_at: "2026-08-14T17:00:01.000Z",
+  };
+  const headers = {
+    "content-type": "image/webp",
+    "content-length": String(bytes.length),
+    "content-disposition": `attachment; filename="${id}.webp"`,
+    etag: `"${sha256}"`,
+    "cache-control": "private, no-store",
+  };
+  const transport = new FakeTransport()
+    .on("GET", `/api/v1/media/${id}`, () => ({ status: 200, headers: { etag: '"1"' }, body: metadata }))
+    .onDownload("GET", `/api/v1/media/${id}/content`, () => ({ status: 200, headers, body: byteStream(bytes) }));
+  const configDir = await testTemp("media-download-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const workDir = path.join(configDir, "work");
+  await mkdir(workDir, { recursive: true });
+  try {
+    const defaulted = await withRuntime(["--json", "media", "download", id], transport, { fs: fsLike, cwd: () => workDir });
+    assert.equal(defaulted.code, ExitCode.Success, defaulted.stdout);
+    const envelope = JSON.parse(defaulted.stdout) as {
+      ok: true;
+      data: { media_id: string; id: string; path: string; bytes: number; sha256: string; content_type: string; filename: string; width: number; height: number; source_filename?: string };
+    };
+    assert.equal(envelope.data.path, path.join(workDir, `${id}.webp`));
+    assert.equal(envelope.data.media_id, id);
+    assert.equal(envelope.data.id, id);
+    assert.equal(envelope.data.bytes, bytes.length);
+    assert.equal(envelope.data.sha256, sha256);
+    assert.equal(envelope.data.content_type, "image/webp");
+    assert.equal(envelope.data.filename, "generated-16x9-1a2b3c4d.webp");
+    assert.equal(envelope.data.source_filename, undefined, "a generated still declares no source_filename");
+    assert.deepEqual(await readFile(envelope.data.path), bytes);
+    assert.doesNotMatch(defaulted.stdout, /RIFF|WEBP|VP8X/, "no image bytes on stdout");
+    const downloadCall = transport.calls.find((call) => call.path === `/api/v1/media/${id}/content`);
+    assert.equal(downloadCall?.method, "GET");
+    assert.match(downloadCall?.headers?.authorization ?? "", /^Bearer /, "the content route needs the account bearer");
+
+    const explicit = path.join(workDir, "hero.webp");
+    const named = await withRuntime(["--json", "media", "download", id, "--output", explicit], transport, { fs: fsLike, cwd: () => workDir });
+    assert.equal(named.code, ExitCode.Success, named.stdout);
+    assert.deepEqual(await readFile(explicit), bytes);
+
+    const human = await withRuntime(["media", "download", id, "--output", path.join(workDir, "again.webp")], transport, { fs: fsLike, cwd: () => workDir });
+    assert.equal(human.code, ExitCode.Success, human.stdout);
+    assert.match(human.stdout, /Media downloaded/);
+    assert.match(human.stdout, /size: 1920x1080/);
+    assert.doesNotMatch(human.stdout, /RIFF|WEBP/);
+
+    const directory = await withRuntime(["--json", "media", "download", id, "--output", workDir], transport, { fs: fsLike, cwd: () => workDir });
+    assert.equal(directory.code, ExitCode.Usage, directory.stdout);
+
+    const badId = await withRuntime(["--json", "media", "download", "scr_notmedia"], transport, { fs: fsLike, cwd: () => workDir });
+    assert.equal(badId.code, ExitCode.Usage, badId.stdout);
+    assert.equal(transport.calls.filter((call) => call.path.includes("scr_notmedia")).length, 0);
+
+    // A body that does not hash to the metadata SHA-256 leaves no file behind.
+    const tampered = new FakeTransport()
+      .on("GET", `/api/v1/media/${id}`, () => ({ status: 200, headers: { etag: '"1"' }, body: metadata }))
+      .onDownload("GET", `/api/v1/media/${id}/content`, () => ({
+        status: 200,
+        headers,
+        body: byteStream(Buffer.concat([bytes.subarray(0, bytes.length - 1), Buffer.from([bytes[bytes.length - 1]! ^ 0xff])])),
+      }));
+    const corrupt = path.join(workDir, "corrupt.webp");
+    const failed = await withRuntime(["--json", "media", "download", id, "--output", corrupt], tampered, { fs: fsLike, cwd: () => workDir });
+    assert.notEqual(failed.code, ExitCode.Success);
+    assert.match(failed.stdout, /SHA-256 did not match/);
+    await assert.rejects(() => stat(corrupt));
+    await assert.rejects(() => stat(`${corrupt}.${process.pid}.part`));
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
@@ -4731,6 +5005,9 @@ test("playback list, media filters, media update, and app --name bind the consum
       { fs: fsLike },
     );
     assert.equal(playback.code, ExitCode.Success, playback.stdout);
+    const playbackEnvelope = JSON.parse(playback.stdout) as { data: { items: Array<{ primitive?: string; filename: string }> } };
+    assert.equal(playbackEnvelope.data.items[0]?.primitive, "video", "PlaybackAggregate.primitive passes through");
+    assert.match(playback.stdout, /"primitive"/);
     const playbackCall = transport.calls.find((call) => call.path === "/api/v1/playback");
     assert.deepEqual(playbackCall?.query, {
       screen_id: "scr_PAIRINGAAAAAAAAAAAAAAAA",
@@ -4766,8 +5043,16 @@ test("playback list, media filters, media update, and app --name bind the consum
     assert.equal(mediaUpload.code, ExitCode.Success, mediaUpload.stdout);
     const declare = transport.calls.find((call) => call.path === "/api/v1/media/uploads");
     assert.equal((declare?.body as { tag?: string }).tag, "lobby");
-    const mediaEnvelope = JSON.parse(mediaUpload.stdout) as { data: { upload: { tag?: string } } };
+    assert.equal((declare?.body as { source_filename?: string }).source_filename, "lobby-poster.png");
+    const mediaEnvelope = JSON.parse(mediaUpload.stdout) as { data: { upload: { tag?: string; source_filename?: string } } };
     assert.equal(mediaEnvelope.data.upload.tag, "lobby");
+    assert.equal(mediaEnvelope.data.upload.source_filename, "lobby-poster.png");
+
+    const shown = await withRuntime(["--json", "media", "show", "med_AAAAAAAAAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.equal(shown.code, ExitCode.Success, shown.stdout);
+    const shownEnvelope = JSON.parse(shown.stdout) as { data: { filename: string; source_filename?: string } };
+    assert.equal(shownEnvelope.data.source_filename, "lobby-poster.png");
+    assert.equal(shownEnvelope.data.filename, "lobby-poster.png", "same extension: the stored name is the source name");
 
     transport.calls.length = 0;
     const listed = await withRuntime(
@@ -4778,8 +5063,9 @@ test("playback list, media filters, media update, and app --name bind the consum
     assert.equal(listed.code, ExitCode.Success, listed.stdout);
     const listCall = transport.calls.find((call) => call.method === "GET" && call.path === "/api/v1/media");
     assert.deepEqual(listCall?.query, { tag: "lobby", primitive: "image" });
-    const listedEnvelope = JSON.parse(listed.stdout) as { data: { items: Array<{ tag?: string }> } };
+    const listedEnvelope = JSON.parse(listed.stdout) as { data: { items: Array<{ tag?: string; source_filename?: string }> } };
     assert.equal(listedEnvelope.data.items[0]?.tag, "lobby");
+    assert.equal(listedEnvelope.data.items[0]?.source_filename, "lobby-poster.png", "media list carries the handle");
 
     const updated = await withRuntime(
       ["--json", "media", "update", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--tag", "lobby2", "--if-match", "1"],

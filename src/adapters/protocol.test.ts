@@ -125,6 +125,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "primitive",
     "revision",
     "sha256",
+    "source_filename",
     "state",
     "tag",
     "updated_at",
@@ -135,6 +136,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "content_type",
     "filename",
     "sha256",
+    "source_filename",
     "tag",
   ]);
   assert.match(
@@ -434,9 +436,9 @@ test("screen online is required, last_online_at and last_ip are optional, and Sc
 
   const screenSchema = openapi.slice(openapi.indexOf("    Screen:\n"), openapi.indexOf("    ScreenList:"));
   assert.match(screenSchema, /state, online, created_at, updated_at/);
-  assert.match(screenSchema, /not a player heartbeat or presence\.write report/);
+  assert.match(screenSchema, /not a player\s+heartbeat or presence\.write report/);
   assert.match(screenSchema, /maxLength: 45/);
-  assert.match(screenSchema, /ScreenPatch, pairing bodies, session[\s\S]*runtime manifest cannot write it/);
+  assert.match(screenSchema, /ScreenPatch, pairing bodies, session[\s\S]*runtime manifest\s+body cannot write it/);
   assert.doesNotMatch(commands, /--online|--last-online-at|--last-ip/);
   assert.match(commands, /screen update requires <id>, --if-match, and --name, --playlist-id, or --timezone/);
 });
@@ -476,6 +478,7 @@ test("published problem codes include payment_required at 402", () => {
     "dependency_unavailable",
     "schema_incompatible",
     "not_ready",
+    "manifest_degraded",
     "screenshot_unavailable",
     "identity_invalid",
     "identity_conflict",
@@ -548,7 +551,8 @@ test("pinned backend snapshot includes swipe and primitive enter", () => {
   assert.match(openapi, /enum: \[path\]/);
   assert.match(openapi, /enum: \[drift\]/);
   assert.match(openapi, /there is no snake_case rename inside it/);
-  assert.doesNotMatch(openapi, /enter_type|object_enter_delay_ms|enter_delay_ms/);
+  // `unknown_enter_type` is a manifest diagnostic code, not a snake_case field.
+  assert.doesNotMatch(openapi, /\benter_type\b|object_enter_delay_ms|enter_delay_ms/);
 });
 
 test("playlist writes send a media selector and media_end, not a singular media_id or video_end", () => {

@@ -29,6 +29,8 @@ const COLLISION_OVERLAP = 0.2;
 const FULL_BLEED_COVERAGE = 0.95;
 const CONTRAST_MIN = 4.5;
 const BUSY_STDDEV = 40;
+/** Layer id of the page background image or video, the only full-page raster. */
+const BACKGROUND_LAYER = "background";
 const SAFE_MARGIN = 0.04;
 
 export interface LintFinding {
@@ -137,7 +139,7 @@ export function lintComposedPage(args: {
           message: `${args.page_id}: ${run.layer} contrast ${contrast.toFixed(2)}:1 is below 4.5:1.`,
         });
       }
-      if (overBusyImage(run.ink, args.quality, args.pixels)) {
+      if (overBusyImage(run.layer, run.ink, args.quality, args.pixels)) {
         findings.push({
           page_id: args.page_id,
           code: "text_over_busy_image",
@@ -202,12 +204,14 @@ export function lintPlaylistPages(
     if (index === 0) continue;
     const previous = records[index - 1];
     if (!previous) continue;
-    if (rectSet(previous) === rectSet(page) && rectSet(page) !== "") {
+    // Two consecutive full-bleed photos are a slideshow, not a repeat. The
+    // lint fires only when the pages show the same media in the same places.
+    if (contentSet(previous) === contentSet(page) && contentSet(page) !== "" && page.primitives.every((primitive) => primitive.content !== "")) {
       findings.push({
         page_id: page.id,
         code: "adjacent_repeat",
         id: page.primitives[0]?.id ?? page.id,
-        message: `${page.id}: identical primitive rect set to ${previous.id}.`,
+        message: `${page.id}: shows the same media at the same rects as ${previous.id}.`,
       });
     }
   }
@@ -293,9 +297,30 @@ interface PlaylistPage {
     id: string;
     kind: string;
     rect: Box;
+    /** What the primitive shows: media ids, a tag, or a URL. Empty when unknown. */
+    content: string;
     motion?: unknown;
     enter?: unknown;
   }>;
+}
+
+/**
+ * The content identity of a primitive, independent of where it sits. Image and
+ * video name media through a selector; iframe and application name a source.
+ */
+function primitiveContent(primitive: Record<string, unknown>): string {
+  const selector = primitive.selector;
+  if (selector && typeof selector === "object" && !Array.isArray(selector)) {
+    const record = selector as Record<string, unknown>;
+    if (typeof record.media_id === "string") return `id:${record.media_id}`;
+    if (Array.isArray(record.media_ids)) return `ids:${record.media_ids.filter((id) => typeof id === "string").sort().join(",")}`;
+    if (typeof record.tag === "string") return `tag:${record.tag}`;
+    if (record.by === "all") return "all";
+  }
+  if (typeof primitive.src === "string") return `src:${primitive.src}`;
+  if (typeof primitive.release_id === "string") return `release:${primitive.release_id}`;
+  if (typeof primitive.application_id === "string") return `application:${primitive.application_id}`;
+  return "";
 }
 
 function pageRecord(value: unknown): PlaylistPage | undefined {
@@ -328,6 +353,7 @@ function pageRecord(value: unknown): PlaylistPage | undefined {
         width: numberOf(rectRecord.width, 0),
         height: numberOf(rectRecord.height, 0),
       },
+      content: primitiveContent(primitive),
       motion: primitive.motion,
       enter: primitive.enter,
     }];
@@ -335,9 +361,9 @@ function pageRecord(value: unknown): PlaylistPage | undefined {
   return { id, raw, canvas, primitives };
 }
 
-function rectSet(page: PlaylistPage): string {
+function contentSet(page: PlaylistPage): string {
   return page.primitives
-    .map((primitive) => `${primitive.rect.x},${primitive.rect.y},${primitive.rect.width},${primitive.rect.height}`)
+    .map((primitive) => `${primitive.content}@${primitive.rect.x},${primitive.rect.y},${primitive.rect.width},${primitive.rect.height}`)
     .sort()
     .join("|");
 }
@@ -377,15 +403,18 @@ function withinSafeMargin(box: Box, frame: { width: number; height: number }): b
     || box.y + box.height > frame.height - inset;
 }
 
-function overBusyImage(ink: Box, quality: ComposeQuality, pixels: PixelBuffer): boolean {
-  for (const image of quality.images) {
-    const box = { x: 0, y: 0, width: image.box.width, height: image.box.height };
-    const overlap = overlapBox(ink, box);
-    if (!overlap) continue;
-    if (luminanceStddev(pixels, overlap) > BUSY_STDDEV) return true;
-  }
-  if (quality.images.length === 0) return false;
-  return luminanceStddev(pixels, ink) > BUSY_STDDEV && quality.images.length > 0;
+/**
+ * Text is only "over a busy image" when a raster is actually behind it: the page
+ * background image, or an image painted inside the same region as the text. The
+ * page `logo` is a corner mark on its own layer and card thumbnails sit beside
+ * their copy, so neither makes the type unreadable and neither is counted. A
+ * page whose only raster is a logo produced one false row per text node before
+ * this was scoped.
+ */
+function overBusyImage(layer: string, ink: Box, quality: ComposeQuality, pixels: PixelBuffer): boolean {
+  const behind = quality.images.some((image) => image.layer === BACKGROUND_LAYER || image.layer === layer);
+  if (!behind) return false;
+  return luminanceStddev(pixels, ink) > BUSY_STDDEV;
 }
 
 function measureXHeight(

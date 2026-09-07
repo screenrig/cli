@@ -140,8 +140,8 @@ test("compose render old Frame JSON is usage_error pointing at compose catalog",
 test("compose render --open calls the stubbed opener with combined.png", async () => {
   const cwdDir = await testTemp("compose-open-");
   await writeFile(path.join(cwdDir, "spec.json"), JSON.stringify({
-    width: 64,
-    height: 64,
+    width: 640,
+    height: 360,
     background: "#1C1410",
     text: "#F3E6D0",
     fullpage: { title: "Hi" },

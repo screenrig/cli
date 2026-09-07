@@ -8,6 +8,7 @@ import { isValidIdempotencyKey } from "./ids.js";
 import { lowInformationFilenameWarning } from "./media-filename.js";
 import type { ProgressReporter } from "./media/progress.js";
 import { transcodeForUpload, type TranscodeOptions, type TranscodeResult } from "./media/transcode.js";
+import { assertDeclaredTypeMatchesBytes } from "./media/sniff.js";
 import { readWebpContainer } from "./media/webp.js";
 import { CliError, networkError, usageError } from "./problems.js";
 import { fetchSignedRawPut, type CliRuntime, type SignedRawPut } from "./runtime.js";
@@ -231,7 +232,18 @@ export interface MediaFileUploadResult {
   mediaId?: string;
   operation: Operation;
   upload: {
+    /**
+     * The stored name. Read back from the ready media object, because the
+     * server derives it from `source_filename` (photo.png sent as WebP is
+     * stored as photo.png.webp) and only the server knows the result.
+     */
     filename: string;
+    /** The name the CLI put on the wire, before the server derived the stored one. */
+    declared_filename: string;
+    /** `server` when `filename` came from the ready object, `declared` when it could not be read back. */
+    filename_source: "server" | "declared";
+    /** The caller's original file name, declared so the ready object keeps the handle. */
+    source_filename?: string;
     content_type: string;
     bytes: number;
     sha256: string;
@@ -245,6 +257,9 @@ export interface MediaFileUploadResult {
     output_bytes?: number;
     width?: number;
     height?: number;
+    /** Probed source dimensions before any bound; present when the transcoder ran. */
+    source_width?: number;
+    source_height?: number;
     dimensions_measured?: boolean;
     duration_ms?: number;
     video?: TranscodeResult["video"];
@@ -262,6 +277,13 @@ export interface PreparedMediaFile {
  * declared. The caller must `cleanupPreparedMediaFile` after submit/failure.
  */
 export async function prepareMediaFileForUpload(input: MediaFileUploadInput): Promise<PreparedMediaFile> {
+  // The declared type is a claim; the bytes are the fact. Refuse a contradiction
+  // before ffmpeg or the server sees the file.
+  await assertDeclaredTypeMatchesBytes(input.sourcePath, input.explicitContentType);
+  const sourceFilename = path.basename(input.sourcePath);
+  if (!sourceFilename || Buffer.byteLength(sourceFilename, "utf8") > 255) {
+    throw usageError("Media filename must be 1 to 255 bytes.");
+  }
   let transcode: TranscodeResult | undefined;
   if (!input.noTranscode) {
     transcode = await transcodeForUpload({
@@ -276,6 +298,10 @@ export async function prepareMediaFileForUpload(input: MediaFileUploadInput): Pr
     const prepared = transcode
       ? await prepareMediaUpload(transcode.filePath, transcode.contentType, transcode.verifiedSha256)
       : await prepareMediaUpload(input.sourcePath, input.explicitContentType);
+    // Always declare the caller's file name. The server derives the stored
+    // filename from it (photo.png uploaded as WebP becomes photo.png.webp), so
+    // distinct sources no longer collide, and `media list` keeps the handle.
+    prepared.declaration.source_filename = sourceFilename;
     if (input.tag !== undefined) {
       prepared.declaration.tag = input.tag;
     }
@@ -306,6 +332,8 @@ function transcodeEnvelope(transcode: TranscodeResult | undefined): MediaFileUpl
     output_bytes: transcode.outputBytes,
     width: transcode.width,
     height: transcode.height,
+    source_width: transcode.sourceWidth,
+    source_height: transcode.sourceHeight,
     dimensions_measured: transcode.dimensionsMeasured,
     duration_ms: transcode.durationMs,
     ...(transcode.video ? { video: transcode.video } : {}),
@@ -313,8 +341,23 @@ function transcodeEnvelope(transcode: TranscodeResult | undefined): MediaFileUpl
 }
 
 function uploadWarnings(prepared: PreparedMediaUpload, transcode: TranscodeResult | undefined): MediaFileUploadResult["warnings"] {
-  const warnings = (transcode?.warnings ?? []).map((message) => ({ code: "transcode_warning", message }));
-  const filenameWarning = lowInformationFilenameWarning(prepared.declaration.filename);
+  const warnings: MediaFileUploadResult["warnings"] = (transcode?.warnings ?? []).map((message) => ({ code: "transcode_warning", message }));
+  if (transcode?.resized) {
+    const { sourceWidth, sourceHeight, width, height, maxEdge } = transcode.resized;
+    warnings.push({
+      code: "image_resized",
+      message:
+        `${prepared.declaration.source_filename ?? prepared.declaration.filename} was ${sourceWidth}x${sourceHeight} and was ` +
+        `scaled down to ${width}x${height} to fit the ${maxEdge} px bound on each edge. The stored still is smaller ` +
+        "than the source; pass --max-edge to tighten the bound further, or supply a smaller source to keep control of the result.",
+    });
+  }
+  // Quote the name the caller chose. After a transcode the declared name is a
+  // local derivative (photo.png sent as photo.webp) and quoting that reads as a
+  // name the caller never typed.
+  const filenameWarning = lowInformationFilenameWarning(
+    prepared.declaration.source_filename ?? prepared.declaration.filename,
+  );
   if (filenameWarning) warnings.push({ code: "generic_filename", message: filenameWarning });
   return warnings;
 }
@@ -360,14 +403,49 @@ export async function submitPreparedMedia(
   return { mediaId: readyMediaId(operation), operation };
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+/**
+ * The name the caller needs after an upload is the one the account now holds,
+ * not the local pre-transcode guess: photo.png, photo.jpg, and photo.webp all
+ * declare photo.webp but are stored as three distinct rows. Only the ready
+ * object carries the derived name, so read it back.
+ */
+async function storedMediaFilename(
+  client: ApiClient,
+  mediaId: string,
+): Promise<{ filename?: string; source_filename?: string }> {
+  try {
+    const response = await client.call({ method: "GET", path: `/api/v1/media/${mediaId}` });
+    const body = asRecord(response.body);
+    const filename = typeof body?.filename === "string" && body.filename.length > 0 ? body.filename : undefined;
+    const sourceFilename =
+      typeof body?.source_filename === "string" && body.source_filename.length > 0 ? body.source_filename : undefined;
+    return { ...(filename ? { filename } : {}), ...(sourceFilename ? { source_filename: sourceFilename } : {}) };
+  } catch {
+    // The bytes are already stored and billed. A failed read-back downgrades the
+    // reported name; it does not fail the upload.
+    return {};
+  }
+}
+
 export async function uploadMediaFile(input: MediaFileUploadInput): Promise<MediaFileUploadResult> {
   const preparedFile = await prepareMediaFileForUpload(input);
   try {
     const submitted = await submitPreparedMedia(input, preparedFile);
+    const stored = submitted.mediaId ? await storedMediaFilename(input.client, submitted.mediaId) : {};
     return {
       ...submitted,
       upload: {
-        filename: preparedFile.prepared.declaration.filename,
+        filename: stored.filename ?? preparedFile.prepared.declaration.filename,
+        declared_filename: preparedFile.prepared.declaration.filename,
+        filename_source: stored.filename ? "server" : "declared",
+        ...(stored.source_filename ?? preparedFile.prepared.declaration.source_filename
+          ? { source_filename: stored.source_filename ?? preparedFile.prepared.declaration.source_filename }
+          : {}),
         content_type: preparedFile.prepared.declaration.content_type,
         bytes: preparedFile.prepared.declaration.bytes,
         sha256: preparedFile.prepared.declaration.sha256,

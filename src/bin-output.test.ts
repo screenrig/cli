@@ -13,11 +13,11 @@ test("CLI drains a large JSON envelope through a backpressured child-process pip
     const file = path.join(directory, "batch.json"), output = path.join(directory, "rendered");
     await mkdir(output);
     await writeFile(file, JSON.stringify({
-      width: 320,
-      height: 180,
+      width: 1280,
+      height: 720,
       background: "#111111",
       text: "#eeeeee",
-      pages: Array.from({ length: 48 }, (_, index) => ({
+      pages: Array.from({ length: 64 }, (_, index) => ({
         id: `page-${index}`,
         left: {
           title: `Page ${index}`,
@@ -40,7 +40,7 @@ test("CLI drains a large JSON envelope through a backpressured child-process pip
     assert.ok(Buffer.byteLength(stdout) > 65536, "regression must exceed a typical pipe buffer");
     const envelope = JSON.parse(stdout);
     assert.equal(envelope.ok, true);
-    assert.equal(envelope.data.rendered, 48);
+    assert.equal(envelope.data.rendered, 64);
     assert.deepEqual(envelope.data.pages, JSON.parse(await readFile(path.join(output, "compose-batch.json"), "utf8")).pages);
     assert.ok(stdout.endsWith("\n"));
   } finally { await rm(directory, { recursive: true, force: true }); }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { memoryBackend } from "./transport/fake.js";
@@ -26,6 +26,23 @@ async function main(): Promise<void> {
       const stream = await backend.stream({ method: "GET", path: url.pathname, headers, query: Object.fromEntries(url.searchParams) });
       for await (const chunk of stream) res.write(chunk);
       res.end();
+      return;
+    }
+    if (/^\/api\/v1\/media\/[^/]+\/content$/.test(url.pathname) && req.method === "GET") {
+      // The memory backend never sees the signed PUT bytes; serve the captured
+      // upload back so `media download` can verify length and SHA-256.
+      if (!signedUploadBytes) {
+        res.writeHead(404, { "content-type": "application/problem+json" });
+        res.end(JSON.stringify({ code: "not_found", status: 404, detail: "No media bytes uploaded yet." }));
+        return;
+      }
+      res.writeHead(200, {
+        "content-type": "image/png",
+        "content-length": String(signedUploadBytes.byteLength),
+        "content-disposition": `attachment; filename="${url.pathname.split("/").at(-2)}.png"`,
+        "cache-control": "private, no-store",
+      });
+      res.end(signedUploadBytes);
       return;
     }
     if (url.pathname === "/signed-upload" && req.method === "PUT") {
@@ -245,7 +262,13 @@ async function main(): Promise<void> {
     assert.deepEqual(signedUploadBytes, mediaBytes);
     const mediaOperation = (mediaUpload.data as { operation?: { result?: { media_id?: string } } }).operation;
     const mediaId = mediaOperation?.result?.media_id ?? "med_AAAAAAAAAAAAAAAAAAAAAAAA";
-    await run("media", "show", mediaId);
+    const shown = await run("media", "show", mediaId);
+    assert.equal((shown.data as { source_filename?: string }).source_filename, "pixel.png");
+    const downloadPath = path.join(temp, "downloaded.png");
+    const downloaded = await run("media", "download", mediaId, "--output", downloadPath);
+    assert.equal((downloaded.data as { path?: string }).path, downloadPath);
+    assert.deepEqual(await readFile(downloadPath), mediaBytes);
+    assert.doesNotMatch(JSON.stringify(downloaded), /\u0089PNG|iVBOR/, "download envelope must not carry pixels");
     await run("media", "list", "--tag", "lobby", "--primitive", "image");
     await run("media", "update", mediaId, "--tag", "lobby2", "--if-match", "1");
     await run("playback", "list", "--screen-id", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--day", "2026-08-14");

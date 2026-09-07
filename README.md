@@ -192,10 +192,10 @@ generate first. Do not always compose first.
    is the default for most cases. `high` is $0.50 (5000 credits) for
    high-density text such as restaurant menus and complex posters. Quality
    changes the image and the price. Most static content should use generate
-   when it works. The POST stores the PNG in the account media store and
-   returns `med_…`; the CLI does not re-upload. Fetch content only to
-   inspect. Own-gen-then-upload remains valid when you already have a
-   preferred model.
+   when it works. The POST stores a lossy WebP in the account media store
+   and returns `med_…`; the CLI does not re-upload. `media download <id>`
+   fetches the still to disk when a composed page needs it. Own-gen-then-upload
+   remains valid when you already have a preferred model.
 
 ```sh
 screenrig --json media generate --prompt "A dusk lobby photograph, warm tungsten, no people" --aspect-ratio 16:9 --quality medium --tag LobbyDusk
@@ -211,6 +211,35 @@ blocks until a `201` MediaGeneration `{ media, usage }`. `media.id` is
 shows credits and usd for the chosen tier (600 credits / $0.06, 1200 credits
 / $0.12, 5000 credits / $0.50). The envelope never prints image bytes or the
 prompt.
+
+`media generate` is one blocking call and it is slow on purpose: the image is
+drawn while the request is open. Measured durations are about 15 s at `low`,
+about 35 s at `medium`, and about 80 s at `high`. The client budget for this
+call is 150 s, above the server's own budget, so the server is what binds; the
+generic request budget for every other command stays at 30 s. Give the command
+at least three minutes in any wrapper that imposes its own timeout. Unless
+`--no-progress` is set, the command writes an up-front notice to stderr before
+it blocks (`media_generate_started` with `quality`, `typical_seconds`, and
+`timeout_ms` under `--json`), and the success envelope carries `elapsed_ms`.
+
+A billed blocking call that does not return leaves the caller unable to say
+whether the still exists. The CLI stores the request's `Idempotency-Key` in the
+0600 user config before sending, so re-running the identical `media generate`
+command retries under the same key and the server replays the original
+`MediaGeneration` instead of generating and billing a second still. A different
+prompt, ratio, quality, or tag never inherits that key, and the key is released
+as soon as a generation returns. A timeout or dropped connection therefore
+reports that the still may or may not have been created and billed, and its
+`error.next.command` names the `media list` call that shows what the account
+actually holds.
+
+The stored rendition is lossy WebP (quality 90) at the exact aspect size with a
+1080 px short edge: `16:9` is 1920×1080, `9:16` 1080×1920, `1:1` 1080×1080,
+`4:3` 1440×1080, `3:4` 1080×1440, `3:2` 1620×1080, and `2:3` 1080×1620. The
+filename is distinctive per generation, `generated-16x9-1a2b3c4d.webp`, with
+the suffix taken from the media id. A generated still declares no
+`source_filename`. Read `data.media.width` / `height` from the envelope rather
+than assuming; fetch the bytes with `media download <id>`.
 
 ScreenRig content has three families: static images, including stills produced
 by local compose or `media generate`; motion video; and web content delivered as an `iframe` or
@@ -382,7 +411,9 @@ availability or deployment.
 `playback list` returns daily playback aggregates for this account, newest
 days first. Filter with `--screen-id`, `--media-id`, and `--day YYYY-MM-DD`.
 Those identifiers select the caller's own rows and are never a cross-account
-lookup.
+lookup. Each row carries the server-resolved `filename` and, for rows
+aggregated since players began reporting image starts, `primitive` (`image` or
+`video`). Rows last aggregated before that change have no `primitive`.
 
 Authenticated responses may carry remaining prepaid credits as a nonnegative
 whole integer. Remaining never displays negative; empty remaining is `0`.
@@ -547,11 +578,16 @@ The manifest records `selector_policy: "snapshot"` and
 rejected before any media download because v1 has no application-package
 export.
 
-Import creates a new playlist by default. Updating is explicit and requires the
-current destination revision:
+Import creates a new playlist by default. Playlist names are unique per
+account, so importing an account's own export unchanged is refused with 409
+`resource_conflict`; that problem's `next` names the two ways forward.
+`--name NAME` (1 to 120 characters) replaces the bundle's playlist name on the
+written playlist. Updating is explicit and requires the current destination
+revision:
 
 ```sh
 screenrig --json playlist import ./lobby-bundle
+screenrig --json playlist import ./lobby-bundle --name "Lobby loop (copy)"
 screenrig --json playlist import ./lobby-bundle --update pl_02 --if-match 8
 ```
 
@@ -701,6 +737,14 @@ screenrig --json events follow --after ev1_0
 screenrig --json playback list --screen-id scr_01 --day 2026-08-14
 ```
 
+Paging is contiguous. A page is `items` plus `next_cursor`: the cursor of the
+last returned event while newer events already exist, or `null` at the end of
+the history. Pass a string `next_cursor` back as `--after` and stop on `null`;
+`null` is not an error and the CLI never rewrites it. `--limit` defaults to 50
+on the server and accepts 1 through 200. The CLI forwards the value unchanged,
+so a value outside that range returns the server's 400 `invalid_request` with
+an `errors[]` member whose `field` is `limit`. There is no silent cap.
+
 A human line looks like
 `at=2026-08-14T17:00:00.000Z type=application.event severity=info code=cta.pressed primitive_id=weather`.
 It carries `at`, `type`, `severity`, optional resource fields, scalar
@@ -733,12 +777,29 @@ credential is secret, including the lookup id ahead of the final underscore, so
 no prefix, suffix, or redacted form of the stored value appears in `doctor`
 output in either mode. `account show` reports the same fact as `token_present`.
 
-`node`, `config_permissions`, `token`, `api_url`, `ffmpeg`, `ffprobe`,
+A fresh install has no credential and nothing is broken, so a missing
+credential is `warn`, not `fail`: the row's `detail` says whether the
+installation is not enrolled, disconnected, or waiting on a pending agent
+connection, and the row carries `next.command` (`screenrig agent enroll
+--email ADDRESS`, or `screenrig agent connect`). The same `next` is repeated
+at `data.next` so a first-run agent can read one field. Run `doctor` before
+`agent enroll`; a `warn` status with that `next` is the expected first-run
+result, and every authenticated command fails with `not_enrolled` until the
+enrollment runs.
+
+`node`, `config_permissions`, `api_url`, `ffmpeg`, `ffprobe`,
 `encoder_libx264`, `health`, `ready`, `version`, and `capabilities` fail when
-they are not satisfied. These rows warn instead:
+they are not satisfied. The `ready` row warns, rather than fails, when the
+service answers 200 with a non-empty `degraded` list. Its `detail` then names
+each degraded dependency and prints the server's `degraded_detail` sentence
+for it verbatim (flattened to one line and redacted), for example why
+`app upload` will answer 503 `dependency_unavailable` until the application
+workers run. A dependency the server lists without a sentence falls back to the
+CLI's own guidance. These rows warn instead:
 
 | Check | Why it is optional |
 | --- | --- |
+| `token` | No credential is stored yet. `next.command` names `agent enroll --email ADDRESS` or `agent connect`. |
 | `cwebp` | The standalone WebP encoder is only the fallback for an ffmpeg build without libwebp, so a host whose ffmpeg carries the `libwebp` encoder never runs it. |
 | `encoder_libwebp` | Where the binary above is installed, stills are encoded with it instead. Animation still needs `libwebp_anim`. |
 | `encoder_libx265` | Only `--codec hevc` uses it. |
@@ -773,6 +834,22 @@ fallback, and whether the build carries the `zscale` and `tonemap` filters that
 HDR tone mapping needs. `encoder_libwebp` is the ffmpeg encoder only, and its
 detail never claims the fallback covers it: a warning there means stills still
 transcode through `cwebp` while animation does not.
+
+Before anything runs, a declared `--content-type` is checked against the
+file's bytes. The CLI sniffs the container signature (PNG, JPEG, GIF, WebP,
+MP4/QuickTime, Matroska/WebM, and a few others) and, when the declared type
+contradicts it, fails locally with `usage_error` naming both types. Nothing is
+transcoded or uploaded: `photo.png --content-type video/mp4` no longer becomes
+a one-frame MP4. A file the sniffer does not recognize is left to the
+extension and ffprobe as before. No declaration means nothing to contradict.
+
+The declaration always carries `source_filename`, the caller's file name. The
+server stores it on the ready object and derives the stored `filename` from it
+when the extension changed: `photo.png` transcoded to WebP is stored as
+`photo.png.webp`, `photo.jpg` as `photo.jpg.webp`, and a source `photo.webp`
+stays `photo.webp`, so distinct sources no longer collide. `media list` and
+`media show` return both fields; `source_filename` is the human handle for
+filename-to-id lookups.
 
 The command also checks the filename. A low-information name such as
 `video.mp4` or `IMG_1234.jpg` adds an advisory `generic_filename` warning to
@@ -873,6 +950,7 @@ link, but that saving does not outrank playback on the browser path.
 
 | Flag | Effect |
 | --- | --- |
+| `--content-type TYPE` | The source's type when the extension does not say. Checked against the bytes first: a contradiction is a local `usage_error` before any transcode or upload. |
 | `--no-transcode` | Upload accepted delivery bytes unchanged. ffmpeg, ffprobe, and cwebp are not run; lossless WebP is still rejected. |
 | `--codec h264\|hevc` | Video codec. Default `h264`. `avc` and `h265` are accepted as aliases. |
 | `--preset signage-1080p30\|signage-4k30` | Optional orientation-aware video size and 30 fps caps. |
@@ -896,7 +974,37 @@ screenrig --json media upload-batch ./images.json --state ./upload-state.json --
 screenrig --json media list --tag lobby --primitive image
 screenrig --json media update med_01 --tag lobby --if-match 1
 screenrig --json media update med_01 --clear-tag --if-match 2
+screenrig --json media download med_01
+screenrig --json media download med_01 --output ./hero.webp
 ```
+
+`media download <id> [--output FILE]` fetches the original stored rendition
+through `GET /api/v1/media/{id}/content` on the account bearer and writes it
+to disk. It reads the `Media` row first, verifies the streamed bytes against
+the row's `bytes` and `sha256` and the response `Content-Type`, and only then
+moves the file into place; a mismatch leaves no file behind. `--output` is a
+file path, not a directory. The default is `./<id>.<ext>` in the current
+working directory, with the extension taken from the content type (`png`,
+`jpg`, `webp`, `gif`, `mp4`, `webm`), matching the server's
+`Content-Disposition`. An existing file is overwritten without a prompt. The
+success envelope is `media_id`, `id`, `path`, `bytes`, `sha256`,
+`content_type`, `primitive`, `filename`, optional `source_filename`, and
+`width` / `height` when the row carries them. Bytes never reach stdout, the
+envelope, or the operation log. This is what makes a generated still
+composable: download it, then point a `compose render` region `image` at the
+path.
+
+The `media upload` success envelope reports `upload.filename` as the name the
+server actually stored, read back from the ready `Media` row after commit. The
+server derives it from `source_filename` when a client-side transcode changed
+the extension, so `photo.png` is stored as `photo.png.webp` and `photo.jpg` as
+`photo.jpg.webp` while a source `photo.webp` stays `photo.webp`. The name the
+CLI put on the wire stays visible as `upload.declared_filename` (`photo.webp`
+for all three), the caller's original name stays as `upload.source_filename`,
+and `upload.filename_source` is `server` or, when the row could not be read
+back, `declared`. Under `--no-wait` there is no ready row yet, so the declared
+name is what is reported. The `generic_filename` warning quotes the caller's
+own name rather than a post-transcode derivative.
 
 `media upload-batch` uploads many local files through the same declare / transcode
 / PUT / wait path as `media upload`. The manifest is
@@ -921,8 +1029,11 @@ with jitter, and at most 8 attempts per item. 5xx responses use the same
 backoff. `--concurrency` defaults to 4 and accepts 1 through 8.
 
 The envelope reports `attempts`, `rate_limited`, `wait_ms` (backoff sleeps),
-`transfer_ms` (request time), `accepted`, `resumed`, and `failed` (the last
-problem per failed item). Progress goes to stderr; `--no-progress` silences
+`transfer_ms` (request time), `accepted`, `resumed`, `items`, and `failed` (the
+last problem per failed item). `items` is one row per file that reached the
+account, in manifest order, with `path`, `source_filename`, `sha256`,
+`outcome` (`accepted` or `resumed`), `media_id`, and `revision` when known, so
+a batch does not need a follow-up `media list --tag` to learn what it created. Progress goes to stderr; `--no-progress` silences
 it. `--tag` is the default tag when an item omits one.
 
 `media list` forwards `--tag` and `--primitive image|video` to
@@ -940,9 +1051,14 @@ Under `--json` the reporter writes `transcode_start`, `transcode_progress`, and
 an ETA, redrawn in place on a TTY and throttled when stderr is not a TTY.
 
 The envelope carries a `transcode` block with `applied`, `stage`, `reason`,
-`source_bytes`, `output_bytes`, `width`, `height`, `dimensions_measured`, and
-`duration_ms`. `width` and `height` are read back from the produced file with a
-follow-up probe. Video read-back must confirm the codec, profile/level, pixel
+`source_bytes`, `output_bytes`, `width`, `height`, `source_width`,
+`source_height`, `dimensions_measured`, and `duration_ms`. `width` and
+`height` are read back from the produced file with a follow-up probe;
+`source_width` and `source_height` are the probed source dimensions before any
+bound. When an image larger than the edge bound is scaled down, the envelope
+adds an `image_resized` warning naming the source and delivered sizes (for
+example `8000x4000` scaled to `3840x1920`), so nobody discovers the smaller
+still on the screen. Video read-back must confirm the codec, profile/level, pixel
 format, exact planned dimensions, rate, color tags, and expected audio layout
 before any upload starts. Known interlaced output is rejected; unavailable HEVC
 scan metadata is reported as `unknown`. A failed video probe or mismatch aborts
@@ -1091,8 +1207,14 @@ measurement and paint, preserving the requested weight and reporting its node
 and font. Unresolved glyphs are warned explicitly. This is not a
 language-shaping guarantee. Full-resolution visual review remains useful;
 contact sheets are reduced-resolution previews. Copy that still cannot fit at
-the minimum type scale paints at that scale and emits a nonblocking
-`text_overflow` warning.
+the minimum type scale is a `usage_error` that names the region (and `.card`
+for an ink plate) and the scale it was tried at; no PNG is written for that
+page, because a still with copy hanging past its plate or region edge is wrong
+to ship. Shorten the copy, drop a block, or use a taller region. An ink-fit
+card measures its type inside the plate's own 24 px padding, so the plate hugs
+every line. Regions that share one top and height (`left` and `right`, or the
+three thirds) form a row: with automatic vertical alignment they share one
+type scale and one starting line, so titles across a menu sit on one baseline.
 
 `playlist validate playlist.json` performs offline canonical schema and
 cross-field validation before upload or publication. Create/update run the same
@@ -1103,7 +1225,9 @@ come from the backend snapshots tracked by `vendor/manifest.json`.
 Validate, `compose render`, and `compose batch` also emit visual `lint`
 warnings (never errors) under `data.lint`, ordered by page:
 `low_contrast_rendered` (finished pixels below 4.5:1),
-`text_over_busy_image`, `too_small_for_distance`, `too_dense`, `collision`,
+`text_over_busy_image` (text over the page background image, or over an image
+painted in the same region; a page `logo` is a corner mark and never counts as
+a background), `too_small_for_distance`, `too_dense`, `collision`,
 `motion_overuse`, `adjacent_repeat`, and `safe_margin`.
 `--lint-only` is accepted on those commands and on `playlist preview`.
 

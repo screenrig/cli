@@ -130,6 +130,15 @@ export interface TranscodeResult {
   /** True when width/height were read back from the produced file. */
   dimensionsMeasured: boolean;
   video?: { codec: TranscodeCodec; profile: string; level: string; fps: number; audio: boolean; scan: string; preset?: SignagePreset };
+  /** Source dimensions as probed, before any bound was applied. */
+  sourceWidth: number;
+  sourceHeight: number;
+  /**
+   * Present when the encode scaled an image down to fit the edge bound. The
+   * caller turns it into an `image_resized` warning so the operator knows the
+   * delivered still is smaller than the file they supplied.
+   */
+  resized?: { sourceWidth: number; sourceHeight: number; width: number; height: number; maxEdge: number };
   warnings: string[];
   /** Directory the caller must remove once the upload completes. */
   cleanupDir?: string;
@@ -208,6 +217,8 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
         durationMs: 0,
         width: sourceWebp.width,
         height: sourceWebp.height,
+        sourceWidth: sourceWebp.width,
+        sourceHeight: sourceWebp.height,
         // Read from the RIFF header of the exact bytes being uploaded.
         dimensionsMeasured: true,
         warnings: [],
@@ -249,6 +260,8 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
       durationMs: 0,
       width: passedProbe.displayWidth,
       height: passedProbe.displayHeight,
+      sourceWidth: passedProbe.displayWidth,
+      sourceHeight: passedProbe.displayHeight,
       // A passthrough uploads the probed source verbatim, so this is measured.
       dimensionsMeasured: true,
       warnings: [],
@@ -319,6 +332,22 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
       measured = await measureOutput(runtime, toolchain, outputPath, kind);
     }
     const warnings = [...plan.warnings];
+    const finalWidth = measured?.width ?? plan.outputWidth;
+    const finalHeight = measured?.height ?? plan.outputHeight;
+    // An image larger than the bound is accepted and scaled, not rejected. Say
+    // so with both sizes, because nothing else in the envelope shows the source.
+    const resized =
+      kind === "image" &&
+      (probe.displayWidth > options.maxEdge || probe.displayHeight > options.maxEdge) &&
+      (finalWidth !== probe.displayWidth || finalHeight !== probe.displayHeight)
+        ? {
+            sourceWidth: probe.displayWidth,
+            sourceHeight: probe.displayHeight,
+            width: finalWidth,
+            height: finalHeight,
+            maxEdge: options.maxEdge,
+          }
+        : undefined;
     if (!measured) {
       warnings.push(
         "The CLI could not measure the transcoded file, so the reported width and height are the " +
@@ -348,10 +377,13 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
       sourceBytes,
       outputBytes,
       durationMs,
-      width: measured?.width ?? plan.outputWidth,
-      height: measured?.height ?? plan.outputHeight,
+      width: finalWidth,
+      height: finalHeight,
+      sourceWidth: probe.displayWidth,
+      sourceHeight: probe.displayHeight,
       dimensionsMeasured: measured !== undefined,
       ...(video ? { video } : {}),
+      ...(resized ? { resized } : {}),
       warnings,
       cleanupDir,
     };

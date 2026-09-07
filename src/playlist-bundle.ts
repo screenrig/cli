@@ -836,10 +836,16 @@ export async function importPlaylistBundle(options: {
   runtime: CliRuntime;
   updateId?: string;
   ifMatch?: string;
+  /** Replaces the bundle's playlist name on the written playlist. Names are unique per account. */
+  name?: string;
   timeoutMs?: number;
   pollMs?: number;
   beforePlaylistWrite?: (playlist: JsonRecord, updateId: string | undefined) => Promise<void>;
 }): Promise<PlaylistBundleImportResult> {
+  if (options.name !== undefined) {
+    const trimmed = options.name.trim();
+    if (trimmed.length === 0 || trimmed.length > 120) throw usageError("playlist import --name must be 1 to 120 characters.");
+  }
   if (options.updateId && !options.ifMatch) throw usageError("playlist import --update requires --if-match REVISION.");
   if (!options.updateId && options.ifMatch) throw usageError("playlist import --if-match requires --update PLAYLIST_ID.");
   if (options.updateId && !options.updateId.startsWith("pl_")) throw usageError("playlist import --update requires a playlist id starting with pl_.");
@@ -942,6 +948,7 @@ export async function importPlaylistBundle(options: {
     }
 
     const playlist = rewritePlaylistIds(bundle.playlist, mapping);
+    if (options.name !== undefined) playlist.name = options.name.trim();
     const playlistKey = deriveBundleIdempotencyKey(
       options.client.idempotencyKey,
       options.updateId ? "playlist-update" : "playlist-create",
@@ -966,8 +973,37 @@ export async function importPlaylistBundle(options: {
     };
   } catch (error) {
     rethrowRateLimitedImport(error, { uploaded, mutationStarted, playlistWriteStarted });
+    rethrowNameConflict(error, { directory: options.directory, updateId: options.updateId, playlistWriteStarted });
     partialImportError(error, uploaded, mutationStarted, playlistWriteStarted);
   } finally {
     await bundle.close();
   }
+}
+
+/**
+ * Playlist names are unique per account, so importing an account's own export
+ * unchanged is refused with 409 `resource_conflict`. The problem gains a
+ * `next` that names the two ways forward: import under another name, or
+ * replace the existing playlist. The mapping stays truthful: all media was
+ * reused or confirmed before the write, and the write itself did not happen.
+ */
+function rethrowNameConflict(error: unknown, state: {
+  directory: string;
+  updateId: string | undefined;
+  playlistWriteStarted: boolean;
+}): void {
+  if (!(error instanceof CliError) || error.problem.status !== 409 || error.problem.code !== "resource_conflict") return;
+  if (!state.playlistWriteStarted || state.updateId) return;
+  throw new CliError(
+    {
+      ...error.problem,
+      detail: `${error.problem.detail} Playlist names are unique per account, and this bundle's name is already taken.`,
+      next: {
+        command: `screenrig --json playlist import ${state.directory} --name NAME`,
+        reason: "Import as a new playlist under a different name, or replace the existing one with --update ID --if-match REVISION.",
+      },
+    },
+    error.exitCode,
+    error.warnings,
+  );
 }

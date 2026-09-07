@@ -81,7 +81,10 @@ installation, players, backend services, the site, or production deployment.
   server-advertised `feedback` feature. The two WebP rows fail together when
   the host has neither encoder, because then no image can be transcoded at all.
   `encoder_libx264`, `ffmpeg`, `ffprobe`, `node`, `config_permissions`,
-  `token`, `api_url`, and the four control-plane rows stay `fail`. Never widen
+  `api_url`, and the four control-plane rows stay `fail`. A missing
+  credential is `warn` with `next.command` (`agent enroll --email ADDRESS` or
+  `agent connect`), mirrored at `data.next`: a fresh install is not damaged,
+  and the skill tells agents to run `doctor` before enrolling. Never widen
   a `fail` to something the host cannot fix or a supported command never needs;
   never soften a piece a default path requires.
 - Delivery profiles are fixed. Video defaults to H.264 (`libx264`, High, output-dependent level
@@ -328,6 +331,20 @@ installation, players, backend services, the site, or production deployment.
 - This command is **repository-ready** on public `main`. It is not in the
   locked plugin bundle. Do not claim marketplace or deployed.
 
+## Media envelopes
+
+- `media upload` reports `upload.filename` as the name the server stored, read
+  back from the ready `Media` row after commit; the wire name stays as
+  `upload.declared_filename`, the caller's name as `upload.source_filename`,
+  and `upload.filename_source` says which of the two `filename` came from.
+  Never report a pre-transcode local guess as the stored name: `photo.png`,
+  `photo.jpg`, and `photo.webp` all declare `photo.webp` and are stored as
+  three distinct rows.
+- `media upload-batch` returns `items[]` in manifest order (`path`,
+  `source_filename`, `sha256`, `outcome`, `media_id`, `revision`) beside the
+  counts, so a caller never has to run `media list --tag` to learn what the
+  batch created.
+
 ## Media tags
 
 - `media upload --tag TAG` stores a 1–32 letter-or-digit tag on the ready
@@ -468,10 +485,11 @@ installation, players, backend services, the site, or production deployment.
      medium $0.12 (1200 credits) for most cases (recommend this); high $0.50
      (5000 credits) for high-density text such as restaurant menus and complex
      posters. Quality changes the image and the price. Most static content
-     should use generate when it works. The POST stores the PNG in the account
-     media store and returns `med_…`; the CLI does not re-upload. Fetch
-     content only to inspect. Own-gen-then-upload remains valid when they
-     already have a preferred model.
+     should use generate when it works. The POST stores a lossy WebP in the
+     account media store and returns `med_…`; the CLI does not re-upload.
+     `media download <id>` fetches it when a composed page needs the file.
+     Own-gen-then-upload remains valid when they already have a preferred
+     model.
 - `media generate --prompt TEXT [--aspect-ratio RATIO] [--quality QUALITY]
   [--tag TAG]` binds `POST /api/v1/media/generations`. `prompt` is required
   (1–4000). `aspect_ratio` defaults to `16:9` (`1:1|16:9|9:16|4:3|3:4|3:2|2:3`).
@@ -482,7 +500,16 @@ installation, players, backend services, the site, or production deployment.
   `payment_required` even during launch fail-open. Envelope `usage` shows
   credits and usd for the chosen tier (600 credits / $0.06, 1200 credits /
   $0.12, 5000 credits / $0.50). Never print the prompt, pixels, or image
-  bytes. This surface is **source-ready**. It is not in the locked plugin
+  bytes. The call blocks for tens of seconds (about 15 s low, 35 s medium,
+  80 s high), so its client budget is 150 s, above the server's own budget for
+  the image; the generic request budget stays 30 s and must not be raised with
+  it. Do not add a `--no-wait`: generate is a single blocking call. The
+  request's `Idempotency-Key` is stored in the 0600 user config before the
+  request goes out and cleared when a generation returns, so an identical
+  re-run after a timeout replays the original still instead of billing a
+  second one; a timeout says so and names the `media list` command that
+  checks. The success envelope carries `elapsed_ms`, and unless
+  `--no-progress` is set the command announces on stderr that it blocks. This surface is **source-ready**. It is not in the locked plugin
   bundle. Do not claim marketplace or deployed.
 - Playlist pages the CLI emits use `primitives[]`. Four wire primitives exist:
   `image`, `video`, `iframe`, and `application`, named by the `primitive`

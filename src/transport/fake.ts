@@ -356,6 +356,7 @@ export function memoryBackend(): FakeTransport {
       screen_id: "scr_PAIRINGAAAAAAAAAAAAAAAA",
       media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA",
       filename: "lobby-loop.mp4",
+      primitive: "video",
       day: "2026-08-14",
       play_count: 3,
       last_page_id: "clip",
@@ -414,13 +415,34 @@ export function memoryBackend(): FakeTransport {
     return { status: 200, headers: {}, body: operation };
   });
 
-  transport.on("GET", "/api/v1/events", (req) => {
+  transport.on("GET", "/api/v1/events", (req): TransportResponse => {
     const after = req.query?.after;
-    const items = after ? events.filter((event) => event.cursor > after) : events;
+    // Contract: limit defaults to 50 and accepts 1..200; anything else is 400
+    // invalid_request naming the field. No silent capping.
+    const rawLimit = req.query?.limit;
+    const limit = rawLimit === undefined ? 50 : Number(rawLimit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+      return {
+        status: 400,
+        headers: { "content-type": "application/problem+json", "x-request-id": req.headers?.["x-request-id"] ?? "req_events" },
+        body: {
+          type: "https://screenrig.ai/problems/invalid-request",
+          title: "Request is invalid",
+          status: 400,
+          detail: "limit must be an integer from 1 to 200.",
+          code: "invalid_request",
+          errors: [{ field: "limit", message: "must be an integer from 1 to 200" }],
+        },
+      };
+    }
+    const remaining = after ? events.filter((event) => event.cursor > after) : events;
+    const items = remaining.slice(0, limit);
+    // next_cursor is the last returned cursor while more exist, and null at the end.
+    const nextCursor = remaining.length > items.length ? items.at(-1)?.cursor ?? null : null;
     return {
       status: 200,
       headers: { "x-request-id": req.headers?.["x-request-id"] ?? "req_events" },
-      body: { items, next_cursor: items.at(-1)?.cursor ?? after ?? "" },
+      body: { items, next_cursor: nextCursor },
     };
   });
 
@@ -777,9 +799,19 @@ export function memoryBackend(): FakeTransport {
     const commit = req.body as MediaCommit;
     const id = "med_AAAAAAAAAAAAAAAAAAAAAAAA";
     const operationId = "op_MEDIAAAAAAAAAAAAAAAAAAAAA";
+    // Mirror the server's derivation: a declared source_filename whose
+    // extension differs from the stored one is kept whole and the stored
+    // extension is appended (photo.png -> photo.png.webp); same extension stays.
+    const storedExtension = stored.declaration.filename.includes(".") ? stored.declaration.filename.slice(stored.declaration.filename.lastIndexOf(".")) : "";
+    const sourceFilename = stored.declaration.source_filename;
+    const sourceExtension = sourceFilename?.includes(".") ? sourceFilename.slice(sourceFilename.lastIndexOf(".")) : "";
+    const filename = sourceFilename
+      ? sourceExtension.toLowerCase() === storedExtension.toLowerCase() ? sourceFilename : `${sourceFilename}${storedExtension}`
+      : stored.declaration.filename;
     const item = {
       id,
-      filename: stored.declaration.filename,
+      filename,
+      ...(sourceFilename ? { source_filename: sourceFilename } : {}),
       primitive: commit.content_type.startsWith("image/") ? "image" : "video",
       content_type: commit.content_type,
       operation_id: operationId,

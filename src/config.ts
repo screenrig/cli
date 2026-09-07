@@ -45,6 +45,16 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
         idempotency_key: string;
         code: string;
       };
+      /**
+       * Idempotency key of a `media generate` request that has not returned a
+       * result yet, with a hash of that request. Re-running the identical
+       * command reuses the key so the server replays the original still rather
+       * than billing a second one. Cleared when a generation returns.
+       */
+      media_generate?: {
+        idempotency_key: string;
+        request_hash: string;
+      };
       updated_at?: string;
     }
 

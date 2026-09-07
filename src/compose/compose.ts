@@ -110,7 +110,19 @@ export interface PaintedLayer {
   family: string;
   overflow: boolean;
   scale: number;
+  /** Distance from the padded region top to the first line of type. */
+  originOffset: number;
   ink: Box[];
+}
+
+/**
+ * Layout decisions a row of regions shares. `scale` pins the type ramp instead
+ * of letting the region choose its own, and `originOffset` pins where the
+ * first line starts so titles across a row sit on one baseline.
+ */
+interface SharedLayout {
+  scale?: number;
+  originOffset?: number;
 }
 
 export interface ComposePageResult {
@@ -730,6 +742,7 @@ async function paintLogoLayer(
     family: resolveFontFamily(layer.font ?? undefined),
     overflow: false,
     scale: 1,
+    originOffset: 0,
     ink: [],
   };
 }
@@ -740,6 +753,7 @@ async function paintLayer(
   quality: ComposeQuality,
   warnings: ComposeWarning[],
   logoBox: Box | null = null,
+  shared: SharedLayout = {},
 ): Promise<PaintedLayer> {
   if (layer.region === "logo") return paintLogoLayer(layer, baseDir, quality, warnings);
   const canvas = createCanvas(layer.w, layer.h);
@@ -765,6 +779,12 @@ async function paintLayer(
     w: Math.max(1, area.w - pad * 2),
     h: Math.max(1, area.h - pad * 2),
   };
+  // The box the type has to fit. An ink plate adds its own padding inside the
+  // region, so measure against the region less that padding; otherwise copy
+  // sized to the region overflows the plate that then hugs it.
+  const fitBox = inkFit
+    ? { w: Math.max(1, inner.w - CARD_INK_PAD * 2), h: Math.max(1, inner.h - CARD_INK_PAD * 2) }
+    : { w: inner.w, h: inner.h };
   const footer = layer.blocks.find((block) => block.role === "footer");
   const flow = layer.blocks.filter((block) => block.role !== "footer");
   const fluid = flow.filter((block) => block.role === "image" || block.role === "placeholder");
@@ -773,28 +793,28 @@ async function paintLayer(
   const footerText = footer && footer.role === "footer" ? footer.text : undefined;
   const title = layer.blocks.find((block) => block.role === "title");
   const subtitle = layer.blocks.find((block) => block.role === "subtitle");
-  let scale = 1;
+  let scale = shared.scale ?? 1;
   let ramp = sizesFor(ctx, {
     root: layer.root,
     family,
-    width: inner.w,
+    width: fitBox.w,
     viewing: layer.viewing,
     title: title && title.role === "title" ? title.text : "",
     subtitle: subtitle && subtitle.role === "subtitle" ? subtitle.text : "",
-    scale: 1,
+    scale,
   });
-  if (!hasFluid && fixed.length) {
-    const chosen = chooseScale(ctx, layer, inner, family, fixed, footerText);
+  if (shared.scale === undefined && !hasFluid && fixed.length) {
+    const chosen = chooseScale(ctx, layer, fitBox, family, fixed, footerText);
     ramp = chosen.ramp;
     scale = chosen.scale;
   }
   const footerLead = leadingOf(ramp.footer);
-  const footerH = footerText ? textHeight(ctx, footerText, inner.w, ramp.footer, family, footerLead) : 0;
+  const footerH = footerText ? textHeight(ctx, footerText, fitBox.w, ramp.footer, family, footerLead) : 0;
   const footerGap = footerText ? Math.round(ramp.footer * 0.8) : 0;
-  const available = Math.max(1, inner.h - footerH - footerGap);
+  const available = Math.max(1, fitBox.h - footerH - footerGap);
   const gapAfter = gapsFor(ramp);
   let itemGapBoost = 0;
-  let fixedH = packFixedHeight(ctx, fixed, inner.w, ramp, family, 0);
+  let fixedH = packFixedHeight(ctx, fixed, fitBox.w, ramp, family, 0);
   if (!hasFluid && fixed.length && !inkFit) {
     const extraGap = Math.max(0, available - fixedH);
     const list = fixed.find((block) => block.role === "cards" || block.role === "table");
@@ -802,7 +822,7 @@ async function paintLayer(
     if (extraGap > 0 && n > 1) {
       const cap = Math.round((list!.role === "cards" ? ramp.card : ramp.table) * 0.4);
       itemGapBoost = Math.min(cap, Math.floor(extraGap / (n - 1)));
-      fixedH = packFixedHeight(ctx, fixed, inner.w, ramp, family, itemGapBoost);
+      fixedH = packFixedHeight(ctx, fixed, fitBox.w, ramp, family, itemGapBoost);
     }
   }
   if (fixed.length && fluid.length) fixedH += gapAfter[fixed[fixed.length - 1]?.role ?? ""] ?? 0;
@@ -811,7 +831,7 @@ async function paintLayer(
   if (!fluid.length) packH = fixedH;
   if (inkFit) {
     const flowBlocks = footerText ? [...fixed, footer!] : fixed;
-    const inkW = packInkWidth(ctx, flowBlocks, inner.w, ramp, family);
+    const inkW = packInkWidth(ctx, flowBlocks, fitBox.w, ramp, family);
     const contentH = packH + (footerText ? footerH + footerGap : 0);
     const plateW = Math.min(inner.w, Math.max(1, inkW + CARD_INK_PAD * 2));
     const plateH = Math.min(inner.h, Math.max(1, Math.ceil(contentH) + CARD_INK_PAD * 2));
@@ -833,11 +853,13 @@ async function paintLayer(
     };
   }
   const slack = Math.max(0, (inkFit ? inner.h - (footerText ? footerH + footerGap : 0) : available) - packH);
-  const originY = (() => {
-    if (inkFit || layer.valign === "top") return inner.y;
-    if (layer.valign === "bottom") return inner.y + slack;
-    return inner.y + Math.round(slack / 2);
+  const originOffset = (() => {
+    if (inkFit || layer.valign === "top") return 0;
+    if (layer.valign === "bottom") return slack;
+    if (shared.originOffset !== undefined) return Math.min(slack, shared.originOffset);
+    return Math.round(slack / 2);
   })();
+  const originY = inner.y + originOffset;
   let y = originY;
   let overflow = false;
   const limit = inner.y + inner.h - footerH - footerGap;
@@ -1002,10 +1024,15 @@ async function paintLayer(
 
   for (const run of runs) quality.text.push(run);
   if (overflow) {
-    warnings.push({
-      code: "text_overflow",
-      message: `${layer.id}: copy overflows at ${scale.toFixed(2)}× type scale.`,
-    });
+    // Copy that does not fit paints past the plate or the region edge. That
+    // PNG is wrong to ship, so it is a usage error naming the spec path, not a
+    // warning beside a rendered file.
+    const where = inkFit ? `${layer.id}.card` : layer.id;
+    const floor = scale <= SCALE_MIN + 1e-6 ? " (the minimum)" : "";
+    throw usage(
+      `${where}: copy does not fit the ${layer.region} region at ${scale.toFixed(2)}× type scale${floor}. ` +
+      "Shorten the title or text, drop a block, split the copy across pages, or use a taller region.",
+    );
   }
   return {
     id: layer.id,
@@ -1013,8 +1040,70 @@ async function paintLayer(
     family,
     overflow,
     scale,
+    originOffset,
     ink: runs.map((run) => run.ink),
   };
+}
+
+/**
+ * Regions that sit side by side with the same top and height form a row: the
+ * thirds of a menu, or left and right. Each would otherwise choose its own
+ * type scale and centre its own copy, so titles land at different heights.
+ * A row shares the smallest scale and the smallest centring offset so every
+ * title starts on one line. Only automatic vertical alignment on a region-fit
+ * card takes part; explicit valign, ink plates, and fluid image or hole
+ * blocks keep their own layout.
+ */
+function layoutRows(layers: LayerSpec[]): LayerSpec[][] {
+  const groups = new Map<string, LayerSpec[]>();
+  for (const layer of layers) {
+    if (layer.region === "background" || layer.region === "logo") continue;
+    if (layer.cardFit === "ink" || layer.valign !== "auto") continue;
+    if (layer.blocks.some((block) => block.role === "image" || block.role === "placeholder")) continue;
+    if (!layer.blocks.some((block) => block.role !== "footer")) continue;
+    const key = `${layer.y}:${layer.h}`;
+    const group = groups.get(key) ?? [];
+    group.push(layer);
+    groups.set(key, group);
+  }
+  return [...groups.values()].filter((group) => {
+    if (group.length < 2) return false;
+    const sorted = [...group].sort((a, b) => a.x - b.x);
+    return sorted.every((layer, i) => i === 0 || layer.x >= sorted[i - 1]!.x + sorted[i - 1]!.w);
+  });
+}
+
+async function paintPageLayers(
+  layers: LayerSpec[],
+  baseDir: string,
+  quality: ComposeQuality,
+  warnings: ComposeWarning[],
+  logoBox: Box | null,
+): Promise<PaintedLayer[]> {
+  const shared = new Map<string, SharedLayout>();
+  for (const row of layoutRows(layers)) {
+    // Measurement passes record into scratch quality so the real report holds
+    // one entry per layer.
+    const scratch = () => ({ quality: emptyQuality({ width: 1, height: 1 }), warnings: [] as ComposeWarning[] });
+    let first: PaintedLayer[] = [];
+    for (const layer of row) {
+      const s = scratch();
+      first.push(await paintLayer(layer, baseDir, s.quality, s.warnings, logoBox));
+    }
+    const scale = Math.min(...first.map((item) => item.scale));
+    if (first.some((item) => item.scale !== scale)) {
+      first = [];
+      for (const layer of row) {
+        const s = scratch();
+        first.push(await paintLayer(layer, baseDir, s.quality, s.warnings, logoBox, { scale }));
+      }
+    }
+    const originOffset = Math.min(...first.map((item) => item.originOffset));
+    for (const layer of row) shared.set(layer.id, { scale, originOffset });
+  }
+  const painted: PaintedLayer[] = [];
+  for (const layer of layers) painted.push(await paintLayer(layer, baseDir, quality, warnings, logoBox, shared.get(layer.id) ?? {}));
+  return painted;
 }
 
 function recordImage(
@@ -1163,7 +1252,7 @@ export async function composeDocument(
       logoLayer.h = painted.height;
       logoBox = reservedLogoBox(painted, document.canvas, logoLayer.logoCorner ?? "bottom-right");
     }
-    for (const layer of page.layers) painted.push(await paintLayer(layer, options.baseDir, quality, warnings, logoBox));
+    painted.push(...await paintPageLayers(page.layers, options.baseDir, quality, warnings, logoBox));
     layerOverlaps(page.layers, quality);
     const manifest = manifestOf(document.canvas, page.layers, painted);
     const combined = await combinedPng({ layers: page.layers, painted }, document.canvas);

@@ -70,6 +70,20 @@ export interface UploadBatchFailedItem {
   };
 }
 
+/**
+ * One row per item that reached the account, in manifest order. Counts alone
+ * force a second `media list --tag` call to learn what a batch created, and a
+ * batch without a tag has no way back to its ids at all.
+ */
+export interface UploadBatchItem {
+  path: string;
+  source_filename: string;
+  sha256: string;
+  outcome: "accepted" | "resumed";
+  media_id?: string;
+  revision?: number;
+}
+
 export interface UploadBatchEnvelopeData {
   attempts: number;
   rate_limited: number;
@@ -77,6 +91,7 @@ export interface UploadBatchEnvelopeData {
   transfer_ms: number;
   accepted: number;
   resumed: number;
+  items: UploadBatchItem[];
   failed: UploadBatchFailedItem[];
 }
 
@@ -423,6 +438,9 @@ function humanReport(data: UploadBatchEnvelopeData): string {
     `wait_ms: ${data.wait_ms}`,
     `transfer_ms: ${data.transfer_ms}`,
   ];
+  for (const item of data.items) {
+    lines.push(`item: ${item.source_filename} ${item.media_id ?? "(no id)"} ${item.outcome}`);
+  }
   for (const item of data.failed) {
     lines.push(`failed_item: ${path.basename(item.path)} ${item.problem.code}/${item.problem.status}`);
   }
@@ -550,8 +568,12 @@ export async function runMediaUploadBatch(input: RunMediaUploadBatchInput): Prom
       transfer_ms: 0,
       accepted: 0,
       resumed: 0,
+      items: [],
       failed: [],
     };
+    // Manifest order, filled as outcomes land so concurrency does not shuffle it.
+    const itemsByPath = new Map<string, UploadBatchItem>();
+    const manifestOrder: string[] = [];
     const pending: PendingItem[] = [];
     const seen = new Set<string>();
     const total = manifestItems.length;
@@ -573,8 +595,17 @@ export async function runMediaUploadBatch(input: RunMediaUploadBatchInput): Prom
         continue;
       }
       const record = state.items[sha256];
+      manifestOrder.push(item.displayPath);
       if (record?.media_id || seen.has(sha256)) {
         data.resumed += 1;
+        itemsByPath.set(item.displayPath, {
+          path: item.displayPath,
+          source_filename: path.basename(item.path),
+          sha256,
+          outcome: "resumed",
+          ...(record?.media_id ? { media_id: record.media_id } : {}),
+          ...(record?.revision !== undefined ? { revision: record.revision } : {}),
+        });
         await logger.withLocal(
           {
             op: "media.upload.batch.item",
@@ -622,6 +653,14 @@ export async function runMediaUploadBatch(input: RunMediaUploadBatchInput): Prom
               await writeUploadBatchStateAtomic(input.statePath, state, input.runtime.fs, input.runtime.now().getTime());
             });
             data.accepted += 1;
+            itemsByPath.set(item.displayPath, {
+              path: item.displayPath,
+              source_filename: path.basename(item.sourcePath),
+              sha256: item.sha256,
+              outcome: "accepted",
+              media_id: outcome.mediaId,
+              ...(outcome.revision !== undefined ? { revision: outcome.revision } : {}),
+            });
             span.finish({ id: outcome.mediaId, params: { outcome: "accepted" } });
             for (const warning of outcome.warnings) {
               warnings.push({ code: warning.code, message: `${path.basename(item.sourcePath)}: ${warning.message}` });
@@ -639,6 +678,10 @@ export async function runMediaUploadBatch(input: RunMediaUploadBatchInput): Prom
       );
     });
 
+    for (const displayPath of manifestOrder) {
+      const row = itemsByPath.get(displayPath);
+      if (row) data.items.push(row);
+    }
     return {
       data,
       warnings,

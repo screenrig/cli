@@ -182,7 +182,11 @@ export interface AccountEvent {
 
 export interface EventPage {
   items: AccountEvent[];
-  next_cursor: string;
+  /**
+   * Cursor of the last returned event while newer events already exist; pass
+   * it back as `after`. `null` marks the end of the history and is not an error.
+   */
+  next_cursor: string | null;
 }
 
 export interface Capabilities {
@@ -431,10 +435,32 @@ export interface MediaCommit {
 export interface MediaUploadDeclaration {
   bytes: number;
   content_type: "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "video/mp4" | "video/webm";
+  /** Name of the bytes being uploaded, as they will be sent. */
   filename: string;
+  /**
+   * Caller's original file name before any client-side transcode. Bare file
+   * name only. The server stores it verbatim and derives the ready `filename`
+   * from it, so photo.png uploaded as WebP is stored as photo.png.webp.
+   */
+  source_filename?: string;
   sha256: string;
   /** Optional mutable query tag. Stored on the ready object, not redeclared at commit. */
   tag?: string;
+}
+
+/** The subset of a ready Media row that `media download` verifies against. */
+export interface MediaRecord {
+  id: string;
+  filename: string;
+  /** Present when the upload declared one; absent for generated stills. */
+  source_filename?: string;
+  primitive: "image" | "video";
+  content_type: string;
+  sha256: string;
+  bytes: number;
+  width?: number;
+  height?: number;
+  [key: string]: unknown;
 }
 
 /** PATCH /api/v1/media/{id}. tag is required; null clears it. */

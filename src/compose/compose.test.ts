@@ -361,8 +361,8 @@ test("compose batch chunk_timings has more than one chunk above 100 pages", { ti
   const count = COMPOSE_BATCH_CHUNK_SIZE + 1;
   const pages = Array.from({ length: count }, (_, i) => ({ id: `p${i + 1}`, left: { title: "Hi" } }));
   await writeFile(input, JSON.stringify({
-    width: 64,
-    height: 36,
+    width: 640,
+    height: 360,
     background: "#111111",
     text: "#eeeeee",
     pages,
@@ -586,9 +586,9 @@ test("markdown bold paints and strips markers from measured copy", async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-test("a packed region that cannot fit at scale 1 renders below 1 and warns text_overflow", async () => {
+test("a packed region that cannot fit at the minimum type scale is a usage_error naming the region, not a shipped PNG", async () => {
   const dir = await testTemp("compose-overflow-");
-  const result = await composeDocument({
+  await assertUsageRejects(() => composeDocument({
     width: 640,
     height: 200,
     background: "#1C1410",
@@ -597,13 +597,99 @@ test("a packed region that cannot fit at scale 1 renders below 1 and warns text_
       title: "A packed title that will not fit",
       text: Array.from({ length: 40 }, (_, i) => `Course ${i + 1} with a descriptive line of copy.`),
     },
+  }, { baseDir: dir }), new RegExp(`^left: copy does not fit the left region at ${SCALE_MIN.toFixed(2)}× type scale \\(the minimum\\)`));
+  await rm(dir, { recursive: true, force: true });
+});
+
+/**
+ * UAT round 1, E10: the skill's own lower third (`fit: "ink"` with a title and
+ * one line of text) sized its type to the region, then hugged only the title;
+ * the body line painted below the plate and the PNG still shipped. The plate
+ * must contain every measured line.
+ */
+test("an ink-fit card hugs every measured line and reports no overflow", async () => {
+  const dir = await testTemp("compose-ink-hug-");
+  const result = await composeDocument({
+    width: 1920,
+    height: 1080,
+    font: "Noto Sans",
+    background: "#00000000",
+    brand: "#FFD166",
+    text: "#FFFFFF",
+    bottom: { valign: "bottom", card: { fit: "ink", title: "Pizza night Friday", text: "From 5pm, until the dough runs out." } },
   }, { baseDir: dir });
-  const left = result.pages[0]!.painted.find((item) => item.id === "left");
-  assert.ok(left);
-  assert.ok(left.scale < 1, `expected scale < 1, got ${left.scale}`);
-  assert.ok(left.scale <= SCALE_MIN + 0.01, `expected min scale, got ${left.scale}`);
-  assert.equal(left.overflow, true);
-  assert.ok(result.pages[0]!.warnings.some((warning) => warning.code === "text_overflow"));
+  const page = result.pages[0]!;
+  const bottom = page.painted.find((item) => item.id === "bottom");
+  assert.ok(bottom);
+  assert.equal(bottom.overflow, false);
+  assert.equal(page.warnings.some((warning) => warning.code === "text_overflow"), false);
+  const layer = page.layers.find((item) => item.id === "bottom")!;
+  const runs = page.quality.text.filter((run) => run.layer === "bottom");
+  assert.equal(runs.length, 2);
+  // Every measured line ends inside the region; the plate is the region's
+  // fitted inner box, so the body line can no longer hang past it.
+  const bottomEdge = Math.max(...runs.map((run) => run.box.y + run.box.height));
+  assert.ok(bottomEdge <= layer.y + layer.h - layer.pad - 24, `type bottom ${bottomEdge} exceeds plate bottom`);
+  // The painted plate is opaque where the type sits and transparent above it.
+  const png = await loadImage(bottom.png!);
+  const canvas = createCanvas(png.width, png.height);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(png, 0, 0);
+  const lastRun = runs[runs.length - 1]!;
+  const probeY = Math.round(lastRun.box.y + lastRun.box.height - layer.y - 1);
+  const probeX = Math.round(lastRun.box.x - layer.x + 4);
+  const under = ctx.getImageData(probeX, probeY, 1, 1).data;
+  assert.ok(under[3]! > 0, "plate must be painted under the last line of type");
+  const above = ctx.getImageData(probeX, 2, 1, 1).data;
+  assert.equal(above[3], 0, "the plate hugs the type and leaves the region top transparent");
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("an ink-fit card whose copy cannot fit at the minimum scale is a usage_error naming the card path", async () => {
+  const dir = await testTemp("compose-ink-overflow-");
+  await assertUsageRejects(() => composeDocument({
+    width: 640,
+    height: 200,
+    background: "#1C1410",
+    text: "#F3E6D0",
+    bottom: { card: { fit: "ink", title: "Pizza night Friday", text: Array.from({ length: 12 }, () => "From 5pm, until the dough runs out.").join(" ") } },
+  }, { baseDir: dir }), /^bottom\.card: copy does not fit the bottom region at 0\.65× type scale \(the minimum\)/);
+  await rm(dir, { recursive: true, force: true });
+});
+
+/**
+ * UAT round 1, E7: three thirds of a menu each centred their own copy, so the
+ * column titles sat at three different heights. Regions in one row share a
+ * type scale and a starting line.
+ */
+test("regions in one row share a type scale and title baseline regardless of body length", async () => {
+  const dir = await testTemp("compose-row-baseline-");
+  const spec = {
+    width: 1920,
+    height: 1080,
+    font: "Noto Sans",
+    background: "#1B1B1F",
+    brand: "#E9C46A",
+    text: "#F1FAEE",
+    "left-third": { title: "Breads", cards: [{ title: "Country white", price: "6" }, { title: "Seeded rye", price: "7" }, { title: "Olive & rosemary", price: "8" }] },
+    "middle-third": { title: "Pastries", cards: [{ title: "Cardamom bun", price: "4" }, { title: "Cinnamon knot", price: "4" }, { title: "Almond croissant", price: "5" }] },
+    "right-third": { title: "Drinks", cards: [{ title: "Filter coffee", price: "3.5" }] },
+  };
+  const result = await composeDocument(spec, { baseDir: dir });
+  const page = result.pages[0]!;
+  const titles = page.quality.text.filter((run) => run.role === "title");
+  assert.equal(titles.length, 3);
+  assert.equal(new Set(titles.map((run) => run.box.y)).size, 1, JSON.stringify(titles.map((run) => [run.layer, run.box.y])));
+  assert.equal(new Set(titles.map((run) => run.font_size)).size, 1);
+  const scales = page.painted.filter((item) => item.id.endsWith("-third")).map((item) => item.scale);
+  assert.equal(new Set(scales).size, 1, JSON.stringify(scales));
+  // The quality report holds one title per region: measurement passes do not leak.
+  assert.equal(page.quality.fonts.filter((font) => font.layer === "right-third.title").length, 1);
+  // An explicit valign opts a region out of the shared row.
+  const explicit = await composeDocument({ ...spec, "right-third": { ...spec["right-third"], valign: "bottom" } }, { baseDir: dir });
+  const right = explicit.pages[0]!.quality.text.find((run) => run.role === "title" && run.layer === "right-third")!;
+  const left = explicit.pages[0]!.quality.text.find((run) => run.role === "title" && run.layer === "left-third")!;
+  assert.ok(right.box.y > left.box.y);
   await rm(dir, { recursive: true, force: true });
 });
 
