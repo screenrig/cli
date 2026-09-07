@@ -4378,7 +4378,7 @@ test("a scheduled playlist assigns once the screen carries a timezone", async ()
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("one screen update that sets both a playlist and a timezone needs no preflight", async () => {
+test("one screen update that sets both a playlist and a timezone skips the schedule screen lookup", async () => {
   const transport = memoryBackend();
   const { configDir, fsLike, file } = await scheduledPlaylistFixture(true, "tz-update-both-");
   await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
@@ -4398,8 +4398,10 @@ test("one screen update that sets both a playlist and a timezone needs no prefli
   assert.equal(result.code, ExitCode.Success, result.stdout);
   const patch = transport.calls.find((call) => call.method === "PATCH");
   assert.deepEqual(patch?.body, { playlist_id: "pl_AAAAAAAAAAAAAAAAAAAAAAAA", timezone: "America/Los_Angeles" });
-  // The patch supplies the zone itself, so the playlist is never fetched.
-  assert.equal(transport.calls.some((call) => call.path.startsWith("/api/v1/playlists/")), false);
+  // The patch supplies the zone itself, so schedule validation does not need
+  // the current screen. The playlist is read once for advisory aspect checks.
+  assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/v1/playlists/")).length, 1);
+  assert.equal(transport.calls.some((call) => call.method === "GET" && call.path.startsWith("/api/v1/screens/")), false);
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -4415,6 +4417,82 @@ const SAMPLE_OBSERVATION = {
     },
   ],
 };
+
+function aspectMismatchTransport(): FakeTransport {
+  const transport = new FakeTransport();
+  transport.on("GET", "/api/v1/playlists/pl_ASPECT", () => ({
+    status: 200,
+    headers: { "x-request-id": "req_playlist_aspect" },
+    body: {
+      id: "pl_ASPECT",
+      name: "Portrait",
+      revision: 1,
+      pages: [{
+        id: "page_portrait",
+        primitives: [{
+          primitive: "image",
+          resolved_media: [{
+            media_id: "med_PORTRAIT",
+            intrinsic_size: { width: 1080, height: 1920 },
+          }],
+        }],
+      }],
+    },
+  }));
+  transport.on("PATCH", "/api/v1/screens/scr_ASPECT", (request) => ({
+    status: 200,
+    headers: { "x-request-id": "req_screen_aspect" },
+    body: {
+      id: "scr_ASPECT",
+      ...(request.body as object),
+      observation: SAMPLE_OBSERVATION,
+    },
+  }));
+  return transport;
+}
+
+test("screen assign emits aspect_mismatch beside credits_low from resolved playlist media", async () => {
+  const transport = aspectMismatchTransport();
+  transport.extraResponseHeaders = { "screenrig-credits-remaining": "999" };
+  const result = await withAuthenticatedRuntime(
+    ["--json", "screen", "assign", "scr_ASPECT", "--playlist-id", "pl_ASPECT", "--if-match", "1"],
+    transport,
+  );
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  const envelope = JSON.parse(result.stdout) as {
+    request_id?: string;
+    warnings: Array<{ code: string; message: string }>;
+  };
+  assert.equal(envelope.request_id, "req_screen_aspect");
+  assert.deepEqual(envelope.warnings, [{
+    code: "aspect_mismatch",
+    message: "Page page_portrait uses portrait media med_PORTRAIT on screen scr_ASPECT, whose player reported a landscape 1920x1080 surface.",
+  }, {
+    code: "credits_low",
+    message: "Remaining prepaid credit is 999, below 1000 credits.",
+  }]);
+  assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), [
+    "GET /api/v1/playlists/pl_ASPECT",
+    "PATCH /api/v1/screens/scr_ASPECT",
+  ]);
+  await rm(result.configDir, { recursive: true, force: true });
+});
+
+test("screen update --playlist-id emits aspect_mismatch without media lookups", async () => {
+  const transport = aspectMismatchTransport();
+  const result = await withAuthenticatedRuntime(
+    ["--json", "screen", "update", "scr_ASPECT", "--playlist-id", "pl_ASPECT", "--if-match", "1"],
+    transport,
+  );
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  const envelope = JSON.parse(result.stdout) as { warnings: Array<{ code: string; message: string }> };
+  assert.deepEqual(envelope.warnings, [{
+    code: "aspect_mismatch",
+    message: "Page page_portrait uses portrait media med_PORTRAIT on screen scr_ASPECT, whose player reported a landscape 1920x1080 surface.",
+  }]);
+  assert.equal(transport.calls.some((call) => call.path.startsWith("/api/v1/media/")), false);
+  await rm(result.configDir, { recursive: true, force: true });
+});
 
 test("screen show prints optional player-reported observation", async () => {
   const transport = new FakeTransport();

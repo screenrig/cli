@@ -65,7 +65,7 @@ import {
   observeCreditsRemaining,
   parseCreditsInteger,
 } from "./credits.js";
-import { successEnvelope, type ProblemNext } from "./envelope.js";
+import { successEnvelope, type ProblemNext, type Warning } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
 import { CliError, configError, makeProblem, notEnrolledError, timeoutError, usageError } from "./problems.js";
 import { packDirectory } from "./pack/index.js";
@@ -93,6 +93,7 @@ import { clearProvisionRetryState, provisionRetryState } from "./provisioning-st
 import { clearGenerateRetryState, generateRequestHash, generateRetryState } from "./media-generate-retry.js";
 import { validateProvisioningUrls } from "./provisioning-url.js";
 import { validateDashboardLink } from "./dashboard-link.js";
+import { aspectMismatchWarnings } from "./aspect-mismatch.js";
 import {
   browserHandoffUrl,
   browserSetupRetryState,
@@ -447,13 +448,19 @@ function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?
   });
 }
 
-function jsonBody(response: { body: unknown; headers: Record<string, string> }, requestId: string, extra?: Record<string, unknown>) {
+function jsonBody(
+  response: { body: unknown; headers: Record<string, string> },
+  requestId: string,
+  extra?: Record<string, unknown>,
+  warnings: Warning[] = [],
+) {
   const body = (response.body ?? {}) as Record<string, unknown>;
   return successEnvelope(
     extra ? { ...body, ...extra } : body,
     {
       request_id: (body.request_id as string | undefined) ?? response.headers["x-request-id"] ?? requestId,
       operation_id: body.operation_id as string | undefined,
+      warnings,
     },
   );
 }
@@ -2888,14 +2895,14 @@ function scheduleZoneError(screenId: string): CliError {
  * write; naming the screen and the fixing command here is the difference
  * between a clear message and an opaque rejection.
  */
-async function assertScheduledPlaylistHasZone(client: ApiClient, screenId: string, playlistId: string): Promise<void> {
+async function assertScheduledPlaylistHasZone(client: ApiClient, screenId: string, playlistId: string): Promise<unknown> {
   const playlist = await client.call({ method: "GET", path: `/api/v1/playlists/${playlistId}` });
   if (!usesPageVisibility(playlist.body)) {
-    return;
+    return playlist.body;
   }
   const screen = await client.call({ method: "GET", path: `/api/v1/screens/${screenId}` });
   if ((screen.body as Screen | undefined)?.timezone) {
-    return;
+    return playlist.body;
   }
   throw scheduleZoneError(screenId);
 }
@@ -3046,8 +3053,17 @@ async function screenCommand(
     // A patch that sets both a playlist and a timezone satisfies the schedule
     // rule in one request, so only check when the patch leaves the screen
     // without one.
+    let playlist: unknown;
     if (playlistId && !timezone) {
-      await assertScheduledPlaylistHasZone(client, id, playlistId);
+      playlist = await assertScheduledPlaylistHasZone(client, id, playlistId);
+    } else if (playlistId) {
+      // This read exists only for advisory aspect warnings. A missing warning
+      // must not block a patch that supplies the required timezone itself.
+      try {
+        playlist = (await client.call({ method: "GET", path: `/api/v1/playlists/${playlistId}` })).body;
+      } catch {
+        playlist = undefined;
+      }
     }
     const body: ScreenPatch = {
       ...(name ? { name } : {}),
@@ -3055,14 +3071,19 @@ async function screenCommand(
       ...(timezone ? { timezone } : {}),
     };
     const response = await client.call({ method: "PATCH", path: `/api/v1/screens/${id}`, idempotent: true, headers: { "if-match": quotedRevision(ifMatch) }, body });
-    return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Updated screen ${id}` };
+    const warnings = playlistId ? aspectMismatchWarnings(id, response.body, playlist) : [];
+    return {
+      envelope: jsonBody(response, client.requestId, undefined, warnings),
+      exitCode: ExitCode.Success,
+      human: [`Updated screen ${id}`, ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
+    };
   }
   if (action === "assign") {
     const id = args.positionals[2];
     const playlistId = flagString(args.flags, "playlist-id");
     const ifMatch = flagString(args.flags, "if-match");
     if (!id || !playlistId || !ifMatch) throw usageError("screen assign requires <id> --playlist-id --if-match.");
-    await assertScheduledPlaylistHasZone(client, id, playlistId);
+    const playlist = await assertScheduledPlaylistHasZone(client, id, playlistId);
     const body: ScreenPatch = { playlist_id: playlistId };
     const response = await client.call({
       method: "PATCH",
@@ -3071,7 +3092,12 @@ async function screenCommand(
       headers: { "if-match": quotedRevision(ifMatch) },
       body,
     });
-    return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Assigned playlist ${playlistId} to ${id}` };
+    const warnings = aspectMismatchWarnings(id, response.body, playlist);
+    return {
+      envelope: jsonBody(response, client.requestId, undefined, warnings),
+      exitCode: ExitCode.Success,
+      human: [`Assigned playlist ${playlistId} to ${id}`, ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
+    };
   }
   if (action === "set-timezone") {
     const id = args.positionals[2];
