@@ -1,632 +1,89 @@
-# ScreenRig CLI agent guide
+# cli
 
 This repository owns the public noninteractive ScreenRig CLI and deterministic
 static-application packer. The supported agent distribution is the CLI bundled
 by `screenrig/plugin` from current `screenrig/cli` `main`. Exact-version npm
-releases are the official developer-shell distribution. This repository does
-not own plugin installation, players, backend services, the site, or production
-deployment.
+releases are the official developer-shell distribution.
+
+It does not own plugin installation, Players, backend services, the site, or
+production deployment.
+
+The workspace [`../AGENTS.md`](../AGENTS.md) is the shared working agreement.
+This file outranks it on anything local here.
 
 ## Sources of truth
 
 - `src/` and its tests define implemented commands and behavior. `src/media/`
   owns the ffmpeg toolchain probe, the transcode planner, and the progress
   reporter.
-- `package.json` defines the executable, Node engine, scripts, package
-  inventory, and public metadata.
+- `package.json` defines the executable, Node engine, scripts, and public
+  metadata. Committed version stays `0.1.0`; CI stamps CalVer on the artifact.
 - `vendor/manifest.json` records exact backend OpenAPI/protocol/SDK runtime
   inputs.
 - `scripts/package-release.sh` defines deterministic `screenrig-cli.tgz`.
-- `scripts/vendor-runtime-dependencies.mjs` vendors the complete exact
-  production closure from `package-lock.json`; `scripts/check-release-artifact.mjs`
-  rejects a release that cannot run offline.
 - `.github/workflows/ci.yml` defines public, test, package, and secret gates.
-  The `main` Action tags CalVer `vYY.MM.N` and publishes the stamped
-  `screenrig-cli.tgz` CI artifact only. Pull requests pack `YY.MM.0-dev`.
-- `.github/workflows/npm-release.yml` is the only npm publication path. It runs
-  from a protected, non-prerelease GitHub release, reuses the CalVer tag on that
-  commit, stamps the published package, uses npm trusted publishing and
-  provenance, and performs post-publish clean installs. Do not publish npm from
-  a laptop or add a long-lived npm token.
-- Distributed CLI versions are CalVer `YY.MM.SERIAL` (UTC). Tags are
-  `vYY.MM.N`. Committed `package.json` stays `0.1.0`; CI stamps the artifact.
-  Local and pull-request trees use `YY.MM.0-dev`. The checksum of the CLI
-  tarball the plugin just packed is provenance of that build, not a freeze of
-  which SHA to fetch. See `RELEASING.md`.
-- **Deploys are independent** (operating rule). Do not pack siblings.
-  Do not dispatch backend. Do not copy deploy tokens between repos.
-  Coordinated multi-repo deploy is rare and only for a breaking contract
-  change. The ordinary `main` CI packages the archive and does not publish npm.
+  `.github/workflows/npm-release.yml` is the only npm publication path.
+- See `RELEASING.md` for CalVer and npm publication.
 
 ## Edit and generation rules
 
-- Edit `src/`, never `dist/`; `npm run build` regenerates `dist/`.
-- Do not hand-edit `vendor/` or `assets/screenrig.runtime.js`. Refresh from
-  an explicit reviewed backend checkout:
+- Edit `src/`, never `dist/`. `npm run build` regenerates `dist/`.
+- Do not hand-edit `vendor/` or `assets/screenrig.runtime.js`. Refresh from a
+  reviewed backend checkout:
 
   ```sh
-  node scripts/sync-contract-snapshots.mjs --sync --source-root <backend-checkout>
+  node scripts/sync-contract-snapshots.mjs --sync --source-root ../backend
   ```
 
-- **`npm run vendor:check` is the cheap vendor gate.** It always compares
-  `vendor/` against `vendor/manifest.json` (SHA-256 tamper check). When a
-  sibling `../backend` checkout exists, it also runs the drift comparison
-  against that working tree. Public GitHub Actions does not clone backend, so
-  CI stays the tamper check only. Do not add a backend clone to CLI CI.
-- **`npm run vendor:check:drift -- <backend-checkout>` is the explicit drift
-  gate.** It compares each vendored file against the canonical input and
-  reports every divergence with both SHA-256 values and byte counts. It fails
-  closed on an absent, valueless, non-directory, or incomplete source root.
-  Cheap `vendor:check` already invokes this when `../backend` exists.
-- The drift gate reads the source root's **working tree**, matching `--sync`.
-  That catches drift early, but it also means it can report divergence against
-  uncommitted backend work in flight. Confirm the backend revision is reviewed
-  before syncing; never vendor an in-progress contract.
-- Inspect every vendored path/byte/hash change and keep adapters/tests aligned.
-- Preserve deterministic archive ordering, normalized metadata, SDK injection,
-  path/type/size limits, and source-directory immutability.
+- `npm run vendor:check` is the cheap vendor gate (tamper check, plus drift
+  against `../backend` when that sibling exists). Public GitHub Actions does
+  not clone backend.
 - The release artifact must include every non-development package recorded in
-  `package-lock.json`, including all optional native targets. Verify SHA-512
-  before extraction. Never add a mutable runtime install step to the plugin.
-- Preserve unrelated work. Do not commit, push, tag, publish, deploy, or change
-  external systems unless explicitly authorized.
+  `package-lock.json`, including optional native targets, and must run offline.
+- Preserve unrelated work. Do not commit, push, tag, or publish unless asked.
+  Do not publish npm from a laptop.
 
 ## Media transcoding
 
-- `media upload` transcodes by default, so **ffmpeg and ffprobe are a required
-  external dependency** of that command. The CLI never bundles or installs
-  them. Resolution order is `SCREENRIG_FFMPEG` / `SCREENRIG_FFPROBE`, then
-  `PATH`. Image encode prefers ffmpeg `libwebp` / `libwebp_anim`; if those are
-  missing it falls back to `cwebp` on `PATH` or `SCREENRIG_CWEBP`. `doctor`
-  reports both ffmpeg binaries, the `libx265`, `libx264`, and `libwebp`
-  encoders, the `cwebp` fallback, and the `zscale` / `tonemap` filters. Do not
-  claim ffmpeg has `libwebp` when it does not.
-- **`doctor` check status is `pass`, `warn`, or `fail`, and only a `fail` moves
-  the exit code.** `data.status` is the worst row. A clean host must exit 0, so
-  an optional piece the CLI has a documented path without is a warning: `cwebp`
-  beside an ffmpeg with `libwebp`, `encoder_libwebp` beside a usable `cwebp`,
-  `encoder_libx265` (only `--codec hevc`), `filter_hdr_tonemap`, and the
-  server-advertised `feedback` feature. The two WebP rows fail together when
-  the host has neither encoder, because then no image can be transcoded at all.
-  `encoder_libx264`, `ffmpeg`, `ffprobe`, `node`, `config_permissions`,
-  `api_url`, and the four control-plane rows stay `fail`. A missing
-  credential is `warn` with `next.command` (`agent enroll --email ADDRESS` or
-  `agent connect`), mirrored at `data.next`: a fresh install is not damaged,
-  and the skill tells agents to run `doctor` before enrolling. Never widen
-  a `fail` to something the host cannot fix or a supported command never needs;
-  never soften a piece a default path requires.
-- Delivery profiles are fixed. Video defaults to H.264 (`libx264`, High, output-dependent level
-  4.2/5.1/5.2, `-preset fast -crf 23 -maxrate 8M -bufsize 16M`, `-bf 2`, GOP two
-  seconds, `yuv420p`, Rec. 709 limited range, AAC 192 kbit/s 48 kHz stereo),
-  with H.265 (`libx265`, `hvc1`, Main, CRF 28) under `--codec hevc`. Players
-  play from a complete cached file, so the encode does not remux for
-  progressive download (`+faststart`). Images are lossy WebP quality 90,
-  `yuva420p` when the source has alpha, `libwebp_anim` for animation. When
-  ffmpeg has no libwebp encoder, stills use `cwebp` (`-q 90 -alpha_q 100`,
-  never lossless). Both bound **each** edge to 3840 px; video also
-  bounds total pixels to 3840×2160,
-  preserve aspect, and never upscale. HDR is tone mapped to Rec. 709, with a
-  warning-and-fallback path when the build has no libzimg. Do not retune these
-  quality/bitrate/GOP values here; they are a product decision, not a local one.
-  Optional `--preset signage-1080p30` and `signage-4k30` cap the long/short
-  edges to 1920/1080 or 3840/2160 and FPS to 30, preserving orientation.
-  Explicit max-edge/FPS flags can tighten these bounds. `--no-audio` removes
-  the video audio track. Neither option accepts images or `--no-transcode`.
-  Do not describe these presets as hardware certified. Select levels that fit
-  macroblock/pixel throughput and the existing VBV/DPB budgets; never label 4K
-  H.264 as level 4.2. x265 needs explicit `level-idc`; both encoders carry
-  explicit Rec.709 VUI parameters because wrapper color flags may be omitted.
-- **H.264 is the default deliberately.** ScreenRig stores one rendition per
-  media object and the layout contract carries no codec parameter, so there is
-  no per-client fallback. A browser that cannot decode the rendition stalls
-  rather than degrading. H.265 browser support is not universal: Safari plays
-  it, Chrome and Edge only with platform hardware HEVC decode, Firefox is
-  limited. Document `--codec hevc` as an opt-in for fleets known to be
-  native-only, meaning Qt/GStreamer and Android/MediaCodec. In a browser without
-  hardware HEVC decode it can render black. Never frame H.265 as the
-  browser-optimized choice, and do not flip the default back without an
-  `architecture` ruling.
-- Progress goes to **stderr only**, because stdout carries the single envelope.
-  `--json` switches the reporter to JSON lines on stderr. The envelope's
-  `transcode` block reports `applied`, `stage`, `reason`, `source_bytes`,
-  `output_bytes`, `width`, `height`, `dimensions_measured`, and `duration_ms`.
-- `width`/`height` are measured from the produced file, never predicted.
-  Video output must pass a read-back of codec, profile/level, pixel format,
-  exact planned size, FPS, Rec.709 tags, and expected audio before upload.
-  Reject known interlaced output; absent HEVC scan metadata remains unknown.
-  The `video` object reports codec/profile/level/FPS/audio/scan/preset. These
-  facts do not prove peak VBV bitrate or hardware performance. For images only,
-  keep the planned-size fallback with `dimensions_measured: false` and a warning.
-- H.264 MP4 may pass through automatically only after `video-inspection.ts`
-  validates every packet and all SPS/PPS/slice headers from a private snapshot.
-  Keep the supported lower source levels separate from encoder level floors.
-  Enforce policy size/FPS/audio, level/DPB/reference limits, stable colour/geometry,
-  constant cadence, IDR GOPs, B-frame runs, and video/AAC packet rate envelopes.
-  Missing evidence, trace errors, unsupported inputs, or a 15-second per-pass
-  timeout fall back to encoding. Never substitute average bitrate for this scan,
-  use full picture decoding as a mandatory check, or retain a media cache.
-  Bind accepted snapshot bytes to `prepareMediaUpload` with `verifiedSha256`;
-  the signed PUT must use that exact verified Buffer. The caller removes the
-  snapshot on success/failure. These checks are not formal HRD or hardware proof.
-- `--no-transcode` uploads accepted source bytes unchanged and never runs ffmpeg.
-  It does not bypass the lossy-WebP delivery policy: VP8L input is rejected.
-  Raw-byte tests unrelated to inspection must pass it; automatic passthrough
-  tests must prove the full inspection path and exact original-byte identity.
-- `npm run smoke:mock` must stay independent of a host ffmpeg. It uses
-  `--no-transcode` for `media upload` and ignores the toolchain checks in
-  `doctor`. The transcode paths are covered by `src/media/transcode.test.ts` and
-  `src/cli.test.ts` with a fake process runner.
-- This transcoding support is implemented in current source. No test here proves playback on a
-  real browser, on player hardware, or in production.
-
-## Feedback
-
-- `feedback bug`, `feedback feature`, and `feedback list` bind
-  `POST`/`GET /api/v1/feedback/bugs` and `/api/v1/feedback/features`. **The kind
-  comes from the route.** Never add a `kind` member to the request body.
-- Submissions are immutable. Do not add an update or delete command, and do not
-  document one. A correction is a new submission.
-- Writes carry `Idempotency-Key`. The server returns the original submission for
-  an exact retry within 24 hours; a different body under the same key returns
-  `idempotency_mismatch`.
-- `FeedbackContext` is a closed object of three optional scalars. Never invent a
-  member; the server rejects an unknown one. `context.command` is
-  pattern-constrained to up to four lowercase words and **must never be built
-  from raw argv**. It comes only from `--command`, is validated exactly as
-  supplied, and is never normalized first — lowercasing would let
-  `screen pair ABC234` through.
-- Do not add client-side scrubbing of title or body. The server rejects rather
-  than redacts credential-shaped text; render its problem and its `errors[]`
-  guidance so the operator can rewrite and resend.
-- A 429 must surface `Retry-After`. `ApiClient.call` folds it into
-  `retry_after_seconds` and next-action guidance for every route, not just
-  feedback.
-- Probe support through `capabilities.features.feedback` rather than assuming
-  the routes exist. `doctor` reports it.
-
-## Toast
-
-- `screen toast <id> --text TEXT [--level info] [--duration-ms MS]`
-  binds `POST /api/v1/screens/{id}/toast`. A toast is stage chrome, not a
-  placement: no canvas slot, no layer, no readiness or crossfade.
-- `--level` is `info`, `alert`, or `error`. It defaults to `info` when
-  omitted. The CLI accepts all three. Production glass shows error toasts
-  only; alert and info only off production. Status chips show in every
-  environment. Do not map player HTTP errors onto this command.
-- Latest-wins. Do not add a queue, a cancel command, or a colour field.
-  Player chrome chooses the fill; the API never carries one.
-- Text is 1 to 120 characters, line feed is the only accepted line break, and
-  at most three lines are accepted. `duration_ms` is omitted so the server can
-  default it to 10000; when supplied it must be an integer from 2000 to 60000.
-- Writes carry `Idempotency-Key`. An exact retry returns the original
-  `expires_at` for twenty-four hours. The accepted body is `{ expires_at }`
-  only; do not echo the submitted text in the human report or invent an id.
-- Do not add client-side scrubbing of toast text. The server rejects
-  recognizable ScreenRig credential material and other control characters;
-  render its problem so the operator can rewrite and resend.
-
-## Comments
-
-- `comment show|set|delete` bind dedicated `/api/v1/comment/...` routes on a
-  screen, a playlist, or one playlist page (`--page`). USAGE is word commands
-  (`comment show screen <id>`), not the HTTP path.
-- Comments are the agent's own JSON object. Compact UTF-8 of that object is at
-  most 1024 bytes. The value itself must be an object; arrays and scalars are
-  rejected. ScreenRig does not read or use them. They are not authorization
-  and are not on the runtime manifest. Last-write-wins; no `--if-match`; no
-  revision bump.
-- `comment set` takes exactly one of `--json-value` or `--file`. Both send the
-  object as `{ "comments": { ... } }`. Do not add `--value-base64`.
-- Unset GET is `{ "comments": null }`. DELETE is 204, unsets, and is
-  idempotent. Writes carry `Idempotency-Key`.
-- Optional `comments` on `screen show` / `playlist show` (and lists) is passed
-  through when the server sends it. Do not strip it. `ScreenPatch` and
-  playlist writes cannot set it.
-- This surface is implemented in current CLI source. The plugin bundles
-  current `screenrig/cli` `main`. Do not claim marketplace until that plugin
-  tree is published.
-
-## Archive
-
-- `screen archive <id> --if-match REVISION` binds
-  `POST /api/v1/screens/{id}/archive`. It hides the screen from the default
-  list and darkens the glass. It does not unbind the player.
-- `screen unarchive <id> --if-match REVISION` binds
-  `POST /api/v1/screens/{id}/unarchive`. It restores the screen to the default
-  list. Unarchive must pass screen admission.
-- `screen list` omits archived screens. `screen list --state archived` lists
-  archived screens only. `screen show <id>` still returns an archived row.
-- `screen delete` sends `DELETE /api/v1/screens/{id}` and surfaces
-  `screen_archive_required`. It does not tombstone. There is no account unbind.
-- `screen revoke-credential` is retired. The CLI does not call
-  `POST /api/v1/screens/{id}/credential/revoke`. It returns a usage error that
-  names `screen archive`.
-- The CLI is not a screen. Do not add a CLI keypair.
-
-## Screenshot
-
-- `screen screenshot <id> [--output FILE]` binds
-  `POST /api/v1/screens/{id}/screenshot`, polls
-  `GET /api/v1/screens/{id}/screenshot/status`, then downloads
-  `GET /api/v1/screens/{id}/screenshot?capture_id=...` as `image/webp`. It
-  blocks until the still WebP is on disk. There is no `--no-wait`.
-- `<id>` must match `^scr_[A-Za-z0-9_-]+$`. `--output` is a file path, not a
-  directory. The default is `./<id>.webp` in the current working directory.
-  The file is overwritten without a prompt.
-- `--timeout` (default 35000 ms) and `--poll-ms` (default 500 ms) are the
-  existing global wait flags. A matching `timed_out` status or a wait deadline
-  is `screenshot_unavailable`. A later `capture_id` is `resource_conflict`.
-- Writes carry `Idempotency-Key`. The download uses the binary transport path;
-  never put image bytes in `rawText`, JSON, the envelope, or human output.
-  The success envelope is `screen_id`, `capture_id`, `path`, `bytes`, `sha256`,
-  `width`, and `height` only.
-
-## Dashboard
-
-- `dashboard [--print-url]` binds `POST /api/v1/account/dashboard-links` on the
-  CLI account bearer. It mints one single-use link, then opens it with
-  `runtime.openUrl`, the same opener `browser setup --open` uses. Do not add a
-  second opener.
-- **The whole URL is a credential.** The 256-bit token rides the fragment, which
-  no server, access log, or `Referer` header sees. The URL reaches stdout as one
-  line only when the opener failed or the operator passed `--print-url`. Never
-  write it to a file, never keep it in the config, and never repeat it.
-- `DashboardLinkTTL` is ten minutes and the link is single use. That clock is
-  not the 30-minute public locator, not the 10-minute protected provisioning
-  window, and not the 72-hour native pairing clocks. Do not describe it as any
-  of them. The remedy for an expired link is another mint, not a refresh route.
-- `validateDashboardLink` binds the returned origin to the configured control
-  plane and accepts only `/#link=<43 base64url characters>`. A query, a path, or
-  authority credentials is a rejection, never something to strip and continue
-  with.
-- Production requires HTTPS. The only HTTP exception is the documented local
-  control plane `http://api.screenrig.localhost:8088`, which maps to the same-port
-  `http://dashboard.screenrig.localhost:8088` origin. No other HTTP host is
-  accepted.
-- **The CLI mints and never claims.** `POST /dashboard/v1/links/claim` is the
-  browser's request on the dashboard origin. `dashboard_link_invalid`,
-  `dashboard_link_expired`, `dashboard_link_consumed`, `passkey_invalid`, and
-  `passkeys_disabled` belong to that origin; the CLI cannot receive them and must
-  not pretend to map them. The mint call returns `invalid_request`,
-  `unauthorized`, `payment_required`, `rate_limited`, or `not_ready`.
-  Production does not send `payment_required` (HTTP 402) until LaunchCreditEnforcementAt
-  (2027-01-01 08:00 UTC / midnight PT).
-- Writes carry `Idempotency-Key`. An exact retry returns the original link and
-  expiry for twenty-four hours, so a retry is safe and does not mint a second
-  live link.
-- This command is implemented in current CLI source. The plugin bundles
-  current `screenrig/cli` `main`. The dashboard origin is not deployed. Do
-  not claim a working dashboard.
-- `redactText` strips a `#link=` or `#provision=` fragment from any text that
-  reaches a problem detail, an event, or a message. Keep new output on that path.
-
-## Events
-
-- `events list` binds `GET /api/v1/events` with `--after` / `--cursor` and
-  `--limit`. `events follow` binds `GET /api/v1/events/stream` with the same
-  cursor flags and the global `--timeout`. It reconnects on disconnect or a
-  transient connect failure, with exponential backoff, and sends the last
-  SSE `id` as `after`. `--timeout` covers the whole follow, including
-  backoff. 401, 403, 404, and other non-transient 4xx problems stop the
-  command. Do not print reconnect chatter on stdout.
-- Human mode is logfmt: one `key=value` line per printable event. `--json
-  events list` is one page envelope. `--json events follow` is a JSON stream
-  of envelopes. Do not document canned server sentences as the trail.
-- A human line carries `at`, `type`, `severity`, optional `resource_type` and
-  `resource_id`, scalar `details`, and a `message` that is not canned and is
-  not a duplicate of `type` or `details.code`. Nested objects, empty strings,
-  and sensitive keys or values are omitted. A screenshot `capture_id` is data.
-- An `application.event` or `runtime.reported` with no remaining scalar
-  payload is silent. A silent page or stream writes no human output. `--json
-  events list` still emits the empty page envelope. `--json events follow`
-  with no events emits one empty `{ items: [] }` envelope.
-- `--json` redacts tokens, pixels, authorization, object keys, and other
-  credential-shaped material. Canned-sentence silence is human-only. After
-  redaction, a server `message` field that is data remains.
-- Optional `Event.actor` is `{ user_id, display_name }` and names the dashboard
-  user that caused one mutation. It is descriptive attribution and never
-  authorization. Optional `Event.agent` is `{ agent_id, name, agent_type }` and
-  names the authenticated agent that directly caused one mutation. An event
-  never uses either field as authorization. `--json` passes both through. They
-  are nested objects, so human logfmt omits them under the existing rule.
-
-## Playback
-
-- `playback list [--screen-id ID] [--media-id ID] [--day YYYY-MM-DD]` binds
-  `GET /api/v1/playback`. Daily aggregates for this account: one row per
-  screen, media, and UTC day. Newest days first.
-- `--screen-id` must start with `scr_`. `--media-id` must start with `med_`.
-  `--day` is a UTC calendar day as `YYYY-MM-DD`. Identifiers filter the
-  caller's own rows and are never a cross-account lookup.
-- This command is **repository-ready** on public `main`. The plugin bundles
-  current `screenrig/cli` `main`. Do not claim marketplace until that plugin
-  tree is published.
-
-## Media envelopes
-
-- `media upload` reports `upload.filename` as the name the server stored, read
-  back from the ready `Media` row after commit; the wire name stays as
-  `upload.declared_filename`, the caller's name as `upload.source_filename`,
-  and `upload.filename_source` says which of the two `filename` came from.
-  Never report a pre-transcode local guess as the stored name: `photo.png`,
-  `photo.jpg`, and `photo.webp` all declare `photo.webp` and are stored as
-  three distinct rows.
-- `media upload-batch` returns `items[]` in manifest order (`path`,
-  `source_filename`, `sha256`, `outcome`, `media_id`, `revision`) beside the
-  counts, so a caller never has to run `media list --tag` to learn what the
-  batch created.
-
-## Media tags
-
-- `media upload --tag TAG` stores a 1–32 letter-or-digit tag on the ready
-  object at declare. It is not redeclared at commit. Pattern
-  `^[A-Za-z0-9]{1,32}$`; reject other values locally as `usage_error`.
-- `media list [--tag TAG] [--primitive image|video]` forwards `tag` and
-  `primitive` parameters to `GET /api/v1/media`. Untagged objects are omitted when `--tag`
-  is present.
-- `media update <id> (--tag TAG | --clear-tag) --if-match REVISION` binds
-  `PATCH /api/v1/media/{id}`. Exactly one of `--tag` or `--clear-tag`.
-  `--clear-tag` sends `null`. There is no other media metadata patch. Do
-  not add an update path for filename, primitive, or codecs.
-- This surface is **repository-ready** on public `main`. The plugin bundles
-  current `screenrig/cli` `main`. Do not claim marketplace until that plugin
-  tree is published.
-
-## Page scheduling
-
-- `visibility` on a playlist page is optional playback orchestration and a
-  sibling of `advance`. It is **not** part of `screenrig.canvas/v1`. The CLI
-  forwards it verbatim and never constructs one.
-- The CLI inspects exactly one thing about it: whether the `visibility` key is
-  present on a page. That mirrors the server's own test, so a page whose only
-  rule is `enabled: false` still counts as scheduled. Do not deepen this into
-  local schedule evaluation; the player evaluates, and the server validates.
-- **A screen running a scheduled playlist must have a timezone.** `screen
-  assign`, `screen update --playlist-id`, and `playlist update` refuse locally
-  before sending, naming the screen and the `screen set-timezone` command that
-  fixes it. The server enforces the same rule on assignment, playlist update,
-  and manifest resolution; the local check exists to replace an opaque 400 with
-  an actionable message, never to replace the server's authority.
-- `screen set-timezone` forwards the IANA identifier unchanged. The server owns
-  the zone database. Never add a CLI-side zone list or allowlist; it would go
-  stale and reject valid names.
-- **Every playlist must keep at least one page with no `visibility` field at
-  all.** That is a server rule and the CLI does not duplicate it. Do not add a
-  local copy that could drift; render the server's problem instead.
-
-## Page motion
-
-- Default templated pages stay `{ type: "crossfade", duration_ms: 200 }` with
-  no object `enter` and no object `motion`. Do not flip that default to swipe.
-- Full pages are opaque: the CLI forwards `transition.type` swipe variants
-  (`swipe-left`, `swipe-right`, `swipe-up`, `swipe-down`), optional
-  object `enter: { type, stagger? }` with that same object name, and optional
-  object `motion` (`spin`, `path`, `drift`). No snake_case inside `enter` or
-  `motion`. `duration_ms` is required, 0 through 60000. Swipe authoring
-  default when chosen is `duration_ms: 600`. Optional `enter.stagger` is an
-  integer 0 through 8. `spin` is `cw|ccw` and `slow|medium|fast` on image
-  and video only. `drift` is `zoom in|out`, `direction left|right|up|down|none`,
-  and the same speed tokens, on image and video only. `path` is 1 through 64
-  points, `rate` greater than 0 and at most 10000, and `loop|ping-pong|once`.
-- Teach swipe, `enter`, and persistent `motion` as spare emphasis, not as the
-  ordinary page. Object enter delay 500 ms and duration 400 ms are contract
-  constants, not author fields and not CLI flags. One moving element per page
-  is the norm.
-- `Application` carries no `state` and no `release_id`. It reports
-  `latest_ready_release`. `OperationAccepted.release_id` is required, so
-  `app upload` reports the release id without waiting on the operation result.
-  An application primitive pins that `release_id`; it has no selector.
-  Knowing the id is not readiness; the operation still decides that.
-  Optional `--name` (at most 120 characters, no line break) is sent as
-  `ScreenRig-Application-Name`. Every upload still creates a new
-  application and a new release; `--name` is not an in-place update. That
-  flag is **repository-ready** on public `main`. The plugin bundles current
-  `screenrig/cli` `main`. Do not claim marketplace until that plugin tree is
-  published.
+- `media upload` transcodes by default. ffmpeg and ffprobe are a required
+  external dependency of that command. The CLI never bundles them.
+- H.264 is the default deliberately. There is no per-client codec fallback.
+  `--codec hevc` is opt-in for native-only fleets.
+- `doctor` check status is `pass`, `warn`, or `fail`; only `fail` moves the
+  exit code. A missing credential is `warn` with `next.command`.
+- Progress goes to stderr only. Stdout carries the single envelope.
+- `--no-transcode` uploads accepted source bytes unchanged. It does not bypass
+  the lossy-WebP delivery policy.
+- Do not retune quality/bitrate/GOP values here; they are a product decision.
 
 ## Product and security boundaries
 
-- Package metadata requires Node.js 20.11+. The plugin's package-relative
-  launcher owns the exact runtime preflight. ffmpeg and ffprobe are a host
-  dependency the launcher does not provide.
-- `agent enroll --email ADDRESS` explicitly creates the account's first
-  independently revocable agent. It persists exact replay state before the
-  request and verifies the issued credential. Other authenticated commands do
-  not enroll as a side effect; without a credential they fail with the stable
-  local code `not_enrolled`, exit code 3, and a `next.command` naming
-  `agent enroll --email ADDRESS` or `agent connect`. Agents branch on
-  `error.code`, so keep that code stable. `agent status` never enrolls. The
-  email is unverified contact metadata, not authentication or recovery
-  authority. The email joins the enrollment request hash as its lowercase
-  uniqueness key, so a retry must send the exact persisted address; the pending
-  `enrollment` record carries it and is cleared once the credential verifies.
-  A `409 email_conflict` is terminal: report it, clear only the pending
-  enrollment, and point at `agent connect`. Never retry it automatically and
-  never advise substituting another address.
-  `--beta-key` and `SCREENRIG_BETA_KEY` are sent as `beta_key` on
-  `POST /api/v1/enrollments` when present, and omitted when unset.
-- `agent connect` adds this installation to an existing account after a fresh
-  dashboard passkey assertion. Cancelled or expired connections, and a
-  cryptographically rejected or revoked pending bearer, clear unusable local
-  connection state before directing the user to start again. Ambiguous transport
-  failures retain the exact state for retry. `connection_ready` means a persisted
-  account passkey exists; a dashboard user or session alone is insufficient.
-- `agent disconnect --yes` is server-first, revokes only the calling agent,
-  and retains local state after failed or ambiguous server results. The last
-  active agent requires the separate `--allow-lockout` choice. `auth status`
-  and `auth revoke --yes [--allow-lockout]` are deprecated compatibility aliases
-  with the same last-agent guard and cleanup semantics. None of these
-  routes unbinds a screen. `POST /api/v1/screens/{id}/credential/revoke` is
-  retired. Archive hides a screen. Do not teach `screen revoke-credential`
-  or `screen delete` as unbind. `screen delete` surfaces
-  `screen_archive_required`. The CLI is not a screen and holds no player
-  keypair.
-- `screen pair` currently accepts exactly six canonical undashed characters.
-  `browser setup --code` accepts the dashed or undashed public handoff form.
-- Configuration and transient retry state are atomic and user-private. Never
-  log/output raw credentials, signed upload details, cookies, completion nonces,
-  provisioning material, customer content, or secret-bearing headers/bodies.
-  ffmpeg diagnostics reach the user only through `summarizeFfmpegError`, which
-  redacts and bounds the stderr tail; keep it on that path.
-- **No part of a stored credential reaches stdout, including the lookup
-  segment.** `redactToken` is gone: a redacted credential is `sr_live_***`
-  with no lookup id, and `redactText` / `redactValue` emit exactly that. A
-  command that wants to report a credential reports presence through
-  `hasToken` or `describeTokenPresence` (`present` / `(none)`), which is what
-  the `doctor` `token` row and `account show`'s `token_present` do. Never
-  reintroduce a truncated `sr_live_` value in a check detail, a human line, an
-  envelope, a log, or a problem detail. `tokenLookupId` stays for internal
-  correlation that never reaches output.
-- Transcoded bytes live in a `mkdtemp` directory the caller removes. Every
-  failure path after that directory exists must remove it.
-- **Playlist authoring order.** Choose by what the page is. Do not generate
-  an atmosphere plate and compose type onto it. Do not compose a presentable
-  poster as named regions + cards.
-  1. You already have the image or video: `media upload` (declare → PUT exact
-     bytes → commit) and place `med_…` on the playlist. No compose. No
-     generate.
-  2. Anything presentable (posters, announcements, restaurant menus, event
-     art, product stills, public-facing rich static pages): `media generate`
-     as the **whole page**. Put every fact and all copy in the prompt so the
-     image model typesets it. ScreenRig generate is the default.
-     Own-gen-then-upload remains valid only if
-     they already have a preferred model. Do not compose this page. Do not
-     generate atmosphere-only stills for later overlay. There is a charge by
-     quality: low $0.06 (600 credits) for unimportant generated stills only;
-     medium $0.12 (1200 credits) for most cases (recommend this); high $0.50
-     (5000 credits) for high-density text such as restaurant menus and complex
-     posters. Quality changes the image and the price. Most static content
-     should use generate when it works. The POST stores a lossy WebP in the
-     account media store and returns `med_…`; the CLI does not re-upload.
-     `media download <id>` fetches it when a composed page needs the file.
-  3. Slide-deck-like experiences (title/body/table slides, internal decks,
-     measured type that must stay editable as compose JSON): local unbilled
-     `compose render` from `compose catalog` examples. Named regions. Compose
-     writes stills and holes for iframe/webapp/region video. Upload those
-     stills if they need to play on a screen.
-  4. Live objects (a playing video, iframe, or webapp as the page or as
-     playlist primitives): write playlist primitives. Upload the video if you
-     have it. Do not local-render stills merely to attach `enter` / `motion`.
-     Animation is not a reason to compose.
-- `media generate --prompt TEXT [--aspect-ratio RATIO] [--quality QUALITY]
-  [--tag TAG]` binds `POST /api/v1/media/generations`. `prompt` is required
-  (1–4000). `aspect_ratio` defaults to `16:9` (`1:1|16:9|9:16|4:3|3:4|3:2|2:3`).
-  `quality` defaults to `medium` (`low|medium|high`). Quality
-  changes the image and the price. Optional `tag` is the same 1–32 letter-or-digit tag as
-  upload. The command blocks until `201` MediaGeneration `{ media, usage }`.
-  `media.id` is `med_…`. There is no 202 poll and no client PUT. `402` is
-  `payment_required` even during launch fail-open. `504` is
-  `dependency_timeout` when the image vendor did not answer in time. Envelope `usage` shows
-  credits and usd for the chosen tier (600 credits / $0.06, 1200 credits /
-  $0.12, 5000 credits / $0.50). Never print the prompt, pixels, or image
-  bytes. The call blocks for tens of seconds (about 15 s low, 35 s medium,
-  80 s high), so its client budget is 150 s, above the server's own budget for
-  the image; the generic request budget stays 30 s and must not be raised with
-  it. Do not add a `--no-wait`: generate is a single blocking call. The
-  request's `Idempotency-Key` is stored in the 0600 user config before the
-  request goes out and cleared when a generation returns, so an identical
-  re-run after a timeout replays the original still instead of billing a
-  second one; a timeout says so and names the `media list` command that
-  checks. The success envelope carries `elapsed_ms`, and unless
-  `--no-progress` is set the command announces on stderr that it blocks. This
-  surface is implemented in current CLI source. The plugin bundles current
-  `screenrig/cli` `main`. Do not claim marketplace until that plugin tree is
-  published.
-- Playlist pages the CLI emits use `primitives[]`. Four wire primitives exist:
-  `image`, `video`, `iframe`, and `application`, named by the `primitive`
-  field. Image and video require a `selector` whose `by` is `id`, `ids`, `all`,
-  or `tag`; iframe and application do not take selectors. Do not emit native
-  `text`, `box`, or `line`. Presentable copy lives in the generated still.
-  Decks are composed from `compose catalog` examples. Deck copy and chrome
-  are composed locally with `compose catalog` / `compose render`, uploaded as
-  `image`, then used as one image primitive. `playlist templates` is a local
-  catalog that refuses native text; it is not the authoring path.
-  Templated pages that would emit vector chrome fail with `usage_error`
-  pointing at those compose commands. Do not silently rasterize and upload.
-- `canvas.background` is a solid uppercase `#RRGGBBAA` or a top-to-bottom
-  linear gradient (`type: "linear"`, 2 through 8 strictly increasing stops,
-  first at=0, last at=1). There is no angle. Templated pages accept that
-  union on `canvas.background` only. Default slide templates stay solid
-  `SLIDE_BACKGROUND`. Do not invent a local background variant.
-- `Media.codecs` is server-derived from the stored bytes and never
-  client-declared. The CLI must not send, infer, or validate it. `--codec hevc`
-  simply causes the server to derive `hvc1.*` instead.
-- The default plan has no product storage cap (`account_content_bytes` and
-  `content_limit_bytes` are 0). A custom storage ceiling, when present, is
-  checked first and rejected with `quota_exceeded`. Remaining prepaid credit is
-  a nonnegative whole integer; empty remaining displays `0`, never negative.
-  `account show` prints integer `credit_remaining` and does not debit.
-  Remaining below 1000 credits adds `credits_low` to envelope `warnings[]`.
-  Until LaunchCreditEnforcementAt (2027-01-01 08:00 UTC / midnight PT),
-  production fails open: billed `/api/v1` work is not rejected for empty
-  remaining and does not return HTTP 402. Empty remaining does not stop or
-  shut off screens in this window. After that instant, remaining below 1
-  whole credit rejects billed `/api/v1` work with `payment_required`. Keep
-  mapping 402 to `payment_required` in the client; do not weaken handling of
-  a real 402. `media generate` is the exception: remaining below the chosen
-  quality debit (low 600 credits / $0.06, medium 1200 credits / $0.12, high
-  5000 credits / $0.50) returns `payment_required` even during this window.
-  Keep the 1 GiB local check as a plan-independent transport bound.
-  Keep `quota_exceeded` and `payment_required` guidance pointing at `account show`.
-  Screen toast and screenshot are exempt from the 1-credit API meter. Do not
-  add pay, Stripe, or x402 commands.
-- Screenshotting is in v1. `screen screenshot <id>` blocks on a still WebP and
-  writes a file. Do not print pixels.
-- `compose catalog` and `compose render` are local and unauthenticated. The
-  render envelope is paths and layout metadata only. Never put PNG bytes in
-  stdout, the envelope, or human text. `--open` opens a local path through
-  `CliRuntime.openPath`; it is not the agent vision loop.
-- Compose authoring is named regions, not Frame/Row/Column/Box trees. Page
-  rails are `width`, `height`, `font`, `background`, `brand`, `text`, optional
-  `image`/`video`/`motion`/`viewing`/`pages`/`logo`. Regions are `fullpage`,
-  `left`, `right`, thirds, halves, `top`, and `bottom`. Do not author
-  `fontSize`, `x`, or `y`. Type size is procedural. `eyebrow` is the kicker
-  above the headline and defaults to `brand`. Region `title` defaults to page
-  `text`. Body `text` uses muted. `subtitle` and `footer` use `text`. Card-item
-  titles, prices, and table headers stay `brand`. Optional region or `card`
-  `color` overrides every role in that box. `card` is a plate (`fit` `region`
-  or `ink`, default `region`, fill background+B3). `logo` sits 32 px inset,
-  contained to 200×100. Copy accepts `**bold**` `*italic*` `__underline__`.
-  iframe/webapp are manifest holes, not painted PNGs. Text over a page `image`
-  or `video` with no `fill` gets a 1 px unblurred drop shadow (`#000000E6` on
-  light type, `#FFFFFFE6` on dark type). Set region `shadow` to `"none"` or
-  `{ x, y, color, blur? }` to override (`blur` 0–32, omit is 0). Region
-  `outline` is `{ width: 0.5-12, color }` and is off unless set. `--combined`
-  is inspection-only; default output is layered PNGs plus `manifest.json`.
-  Preserve glyph fallback, upscale, painted-pixel contrast, and
-  viewing-distance floor diagnostics. It is not `screenrig.canvas/v1` and not
-  a player feature. This is **repository-ready** on public `main`. The plugin
-  bundles current `screenrig/cli` `main`. Do not claim marketplace until that
-  plugin tree is published.
+- Package metadata requires Node.js 20.11+.
+- `agent enroll --email ADDRESS` is the explicit first-agent step. Other
+  authenticated commands do not enroll as a side effect; they fail with
+  `not_enrolled` (exit 3). Keep that code stable.
+- No part of a stored credential reaches stdout. Report presence through
+  `hasToken` / `describeTokenPresence` (`present` / `(none)`).
+- Playlist authoring: choose by what the page is. Existing file →
+  `media upload`. Presentable page → `media generate` as the whole page.
+  Slide-deck-like → local `compose render`. Live objects → playlist primitives.
+  Do not emit native `text`, `box`, or `line`.
+- `media generate` is billed by quality (low $0.06 / 600 credits, medium $0.12
+  / 1200, high $0.50 / 5000). It 402s when remaining is below that debit even
+  during launch fail-open. Never print the prompt or pixels.
+- Compose is local and unauthenticated. Never put PNG bytes in stdout.
+- Until 2027-01-01 08:00 UTC, production fails open on empty remaining for
+  billed `/api/v1` work except `media generate`. Do not add pay, Stripe, or
+  x402 commands.
+- `cli/` is public. Never write MCP. Never print credentials, cookies, signed
+  URLs, object keys, or pixels.
+- Root `README.md` must keep the exact `[security policy](SECURITY.md)` link.
 
 ## Follow operation logs
 
-The CLI is a **client**. Optional `log_socket` lives in the same 0600 user
-config as the token (`src/config.ts`). `README.md` documents the field.
-There is no `--log-socket` flag and no `SCREENRIG_LOG_SOCKET` override
-(`src/commands.ts` USAGE).
-
-If `log_socket` is absent or empty, commands work unchanged. If it is set,
-connect or write failure never fails the command: lines are dropped, counted,
-and one envelope warning `{ code: "log_sink_degraded", dropped: N }` is
-emitted at the end (`src/log/attach.ts`, `src/log/socket.ts`).
-
-Each line is one v1 NDJSON object (`src/log/types.ts`): `v`, `ts`,
-`event_id`, `correlation_id`, `run_id`, `command`, `kind` (`http` or
-`local`), `phase`, `op`, `tag`, optional `id` / `params`. Pair HTTP
-request/response and local start/finish on `correlation_id`. Prefer `tag`
-(snake_case, for example `get_screens`). Optional `id` is the associated
-resource (`scr_…`, `pl_…`), never `event_id` or `correlation_id`. Optional
-`params` is small scalars.
-
-This socket is not `events follow`. `events follow` is account SSE
-(`GET /api/v1/events/stream`).
-
-To follow: start a listener on the configured path, then run the CLI
-command. The README example path is `/tmp/screenrig.sock`. Do not paste
-full NDJSON into reports. Prefer `tag`, `correlation_id`, `id`, `status` /
-`phase`. Never log or print credentials, cookies, `Authorization` headers,
-nonces, signed URLs, object keys, or pixels.
+Optional `log_socket` lives in the same 0600 user config as the token. There is
+no `--log-socket` flag and no `SCREENRIG_LOG_SOCKET` override. Connect failure
+never fails the command. This socket is not `events follow`.
 
 ## Verification
 
@@ -643,36 +100,20 @@ npm run pack:release
 npm run check:npm-install
 ```
 
-`npm run smoke:server` requires an explicitly owned local backend and is not a
-production or hardware gate. Cheap `npm run vendor:check` also drifts when
-`../backend` exists. Public GitHub Actions does not clone backend.
+`npm run smoke:server` requires an explicitly owned local backend.
 
-## Completion evidence
-
-Report exact source/docs/vendor files changed, vendored provenance and hashes,
-all command results, package inventory, stale-language scan, repository status,
-and skipped live-server/plugin/player/native/deployment checks.
-
-## Executing changed source during local development
-
-For work explicitly testing this checkout, build it and invoke its executable
-from this repository directory:
+To execute this checkout:
 
 ```sh
 npm run build
 node ./dist/bin.js --json version
-node ./dist/bin.js --help
 ```
 
-From another directory, use `node <cli-checkout>/dist/bin.js` with the actual
-checkout path. Keep that executable stable while other agents are using it:
-`npm run build` cleans `dist/` first, so coordinate builds with live UAT commands.
-A global `screenrig` command is not required for this source workflow.
+Do not PATH-swap a local checkout into an installed agent. Do not
+`npm i -g screenrig` as the agent path.
 
-Skill text and the bundled CLI travel together in `screenrig/plugin`. Refresh
-the installed plugin to get both. Do not PATH-swap a local checkout into an
-installed agent. Do not `npm i -g screenrig`. Source builds and local test
-packages are unreleased. Do not overwrite the installed plugin cache or copy a
-mutable build into its bundle. Plugin CI packs current `screenrig/cli` `main`.
-A checksum of the tarball just packed is provenance of that build, not a
-freeze of which SHA to fetch.
+## Completion evidence
+
+Report source/docs/vendor files changed, vendored hashes, command results,
+package inventory, stale-language scan, repository status, skipped
+live-server/plugin/player gates, and claim state.
