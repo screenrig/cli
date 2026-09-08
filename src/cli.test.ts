@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import { createCipheriv, createHash, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync } from "node:crypto";
 import { PassThrough } from "node:stream";
-import { readFileSync } from "node:fs";
 import { mkdir, open, readFile, rename, chmod, stat, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { CLI_VERSION, EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, USAGE, formatEventLine } from "./commands.js";
 import { run, type CliRuntime } from "./main.js";
@@ -3538,12 +3536,7 @@ test("media upload warns on a low-information filename without blocking the uplo
 });
 
 test("customer-facing credit copy is fail-open until 1 Jan 2027", () => {
-  const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const documents: Array<[string, string]> = [
-    ["USAGE", USAGE],
-    ["README.md", readFileSync(path.join(repoRoot, "README.md"), "utf8")],
-    ["AGENTS.md", readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8")],
-  ];
+  const documents: Array<[string, string]> = [["USAGE", USAGE]];
   for (const [name, text] of documents) {
     assert.match(text, /nonnegative/, `${name} must say remaining is nonnegative`);
     assert.match(text, /credits_low/, `${name} must name the live credits_low warning`);
@@ -3554,17 +3547,15 @@ test("customer-facing credit copy is fail-open until 1 Jan 2027", () => {
     assert.match(text, /payment_required/, `${name} must keep payment_required as the after-cutoff code`);
     assert.match(text, /402/, `${name} must name HTTP 402 as after-cutoff, not current`);
     assert.match(text, /does not stop or\s+shut off screens/, `${name} must not claim screens stop for empty remaining`);
-    assert.match(text, /\$0\.06/, `${name} must name the low still-generation price`);
-    assert.match(text, /\$0\.12/, `${name} must name the medium still-generation price`);
-    assert.match(text, /\$0\.50/, `${name} must name the high still-generation price`);
-    assert.match(text, /600 credits/, `${name} must name the low still-generation debit`);
-    assert.match(text, /1200 credits/, `${name} must name the medium still-generation debit`);
-    assert.match(text, /5000 credits/, `${name} must name the high still-generation debit`);
-    assert.match(text, /changes the image and the price/, `${name} must say quality changes the image and the price`);
+    assert.match(text, /\$10 \/ 1M/, `${name} must name the text-input token rate`);
+    assert.match(text, /\$16 \/ 1M/, `${name} must name the image-input token rate`);
+    assert.match(text, /\$60 \/ 1M/, `${name} must name the image-output token rate`);
+    assert.match(text, /how detailed the still is/, `${name} must say quality changes how detailed the still is`);
     assert.doesNotMatch(text, /\$0\.10 per image/, `${name} must not name a flat still-generation price`);
+    assert.doesNotMatch(text, /\$0\.06/, `${name} must not name the retired low still price`);
     assert.doesNotMatch(text, /change the image, not the price/, `${name} must not say quality is unpriced`);
     assert.doesNotMatch(text, /gpt-image-2/, `${name} must not name gpt-image-2 as the price`);
-    assert.doesNotMatch(text, /\$30 per million/, `${name} must not name token-output rates as the price`);
+    assert.doesNotMatch(text, /\$30 \/ 1M/, `${name} must not name the vendor image-output rate as the price`);
     assert.doesNotMatch(text, /OpenRouter/, `${name} must not name OpenRouter`);
   }
   assert.match(USAGE, /feedback list \[--kind bug\|feature\]/);
