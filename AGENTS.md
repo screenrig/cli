@@ -79,6 +79,14 @@ This file outranks it on anything local here.
   URLs, object keys, or pixels.
 - Root `README.md` must keep the exact `[security policy](SECURITY.md)` link.
 
+## Local workspace logs
+
+When this CLI is started through `rig start` in the developer workspace,
+stdout and stderr including request, response, and error lines are
+appended to `../logs/YY-MM-DD/cli.log` (example
+`../logs/26-09-08/cli.log`). Rig deletes date folders older than 7 days.
+The `logs/` directory is not a git repository.
+
 ## Follow operation logs
 
 Optional `log_socket` lives in the same 0600 user config as the token. There is
