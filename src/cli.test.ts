@@ -178,6 +178,37 @@ test("pairing requires explicit enrollment and then preserves the original pairi
   await rm(configDir, { recursive: true, force: true });
 });
 
+test("agent enroll without a beta key maps a gated invalid_request onto --beta-key next", async () => {
+  const transport = new FakeTransport().on("POST", "/api/v1/enrollments", () => ({
+    status: 400,
+    headers: { "content-type": "application/problem+json", "cache-control": "no-store" },
+    body: {
+      type: "https://screenrig.ai/problems/invalid-request",
+      title: "Request is invalid",
+      status: 400,
+      detail: "Enrollment request is invalid.",
+      code: "invalid_request",
+      errors: [],
+    },
+  }));
+  const { code, stdout, configDir } = await withRuntime(
+    ["--json", "agent", "enroll", "--email", "owner@example.com"],
+    transport,
+  );
+  assert.equal(code, ExitCode.Client, stdout);
+  const envelope = JSON.parse(stdout) as {
+    ok: boolean;
+    error: { code: string; detail: string; next?: { command: string } };
+  };
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.error.code, "invalid_request");
+  assert.equal(envelope.error.detail, "Enrollment requires the control-plane beta key.");
+  assert.match(envelope.error.next?.command ?? "", /--beta-key/);
+  assert.match(envelope.error.next?.command ?? "", /agent enroll/);
+  assert.ok(!stdout.includes("owner@example.com"));
+  await rm(configDir, { recursive: true, force: true });
+});
+
 test("explicit enrollment includes beta_key when --beta-key is set", async () => {
   const transport = memoryBackend();
   const { code, stdout, configDir } = await withRuntime(
