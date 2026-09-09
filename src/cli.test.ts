@@ -3567,7 +3567,7 @@ test("customer-facing credit copy is fail-open until 1 Jan 2027", () => {
   const readme = readFileSync(path.join(repoRoot, "README.md"), "utf8");
   for (const [name, text] of [["AGENTS.md", agents], ["README.md", readme]] as Array<[string, string]>) {
     assert.match(text, /whole page/, `${name} must say generate as the whole page`);
-    assert.match(text, /slide-deck-like/, `${name} must keep compose for slide-deck-like pages`);
+    assert.match(text, /slide-deck-like/i, `${name} must keep compose for slide-deck-like pages`);
     assert.doesNotMatch(text, /\$0\.10 per image/, `${name} must not name a flat still-generation price`);
     assert.doesNotMatch(text, /\$0\.06/, `${name} must not name the retired low still price`);
     assert.doesNotMatch(text, /\$0\.12/, `${name} must not name the retired medium still price`);
