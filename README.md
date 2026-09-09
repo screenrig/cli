@@ -44,11 +44,8 @@ Choose by what the page is:
 
 User-private config lives outside the replaceable plugin directory
 (`$XDG_CONFIG_HOME/screenrig/config.json`, or
-`%APPDATA%\screenrig\config.json` on Windows). When `config.local-dev.json`
-exists in that directory, the CLI uses
-`http://api.screenrig.localhost:8088` by default. Otherwise the production
-default is `https://api.screenrig.ai`. `SCREENRIG_API_URL` and `--api-url`
-remain explicit overrides.
+`%APPDATA%\screenrig\config.json` on Windows). The default service is `https://api.screenrig.ai`.
+`SCREENRIG_API_URL` and `--api-url` are explicit overrides.
 
 Optional `log_socket` in that same config enables a side-channel NDJSON
 operation log. There is no `--log-socket` flag. Connect failure never fails the
@@ -66,5 +63,7 @@ npm run smoke:mock
 
 Execute this checkout with `node ./dist/bin.js` after `npm run build`.
 
-See [`RELEASING.md`](RELEASING.md) for CalVer stamping and npm publication.
+Development profiles are described in [CONTRIBUTING.md](https://github.com/screenrig/cli/blob/main/CONTRIBUTING.md).
+
+See [`RELEASING.md`](https://github.com/screenrig/cli/blob/main/RELEASING.md) for CalVer stamping and npm publication.
 Report suspected vulnerabilities through the [security policy](SECURITY.md).

@@ -8,8 +8,9 @@ releases are the official developer-shell distribution.
 It does not own plugin installation, Players, backend services, the site, or
 production deployment.
 
-The workspace [`../AGENTS.md`](../AGENTS.md) is the shared working agreement.
-This file outranks it on anything local here.
+This is a public maintainer guide. In the internal multi-repository workspace,
+the optional parent AGENTS.md adds shared operational rules; this repository
+does not require that file for standalone contribution.
 
 ## Sources of truth
 
@@ -68,26 +69,16 @@ This file outranks it on anything local here.
   `media upload`. Presentable page → `media generate` as the whole page.
   Slide-deck-like → local `compose render`. Live objects → playlist primitives.
   Do not emit native `text`, `box`, or `line`.
-- `media generate` is billed per token ($10 / 1M text input, $16 / 1M image
-  input, $60 / 1M image output). Quality (`low`, `medium`, `high`; default
-  `medium`) changes how detailed the still is and therefore how many tokens it
-  uses. Remaining that cannot cover the debit returns payment_required / 402,
-  including during launch fail-open. Never print the prompt or pixels.
+- `media generate` reports billed usage. Server admission determines whether
+  work proceeds; do not infer refusal from the displayed balance. Keep prompt
+  and pixels out of logs.
 - Compose is local and unauthenticated. Never put PNG bytes in stdout.
-- Until 2027-01-01 08:00 UTC, production fails open on empty remaining for
-  billed `/api/v1` work except `media generate`. Do not add pay, Stripe, or
+- During the documented launch window, a displayed zero balance does not
+  determine admission. Respect server payment_required responses. Do not add pay, Stripe, or
   x402 commands.
 - `cli/` is public. Never write MCP. Never print credentials, cookies, signed
   URLs, object keys, or pixels.
 - Root `README.md` must keep the exact `[security policy](SECURITY.md)` link.
-
-## Local workspace logs
-
-When this CLI is started through `rig start` in the developer workspace,
-stdout and stderr including request, response, and error lines are
-appended to `../logs/YY-MM-DD/cli.log` (example
-`../logs/26-09-08/cli.log`). Rig deletes date folders older than 7 days.
-The `logs/` directory is not a git repository.
 
 ## Follow operation logs
 
