@@ -194,7 +194,7 @@ paths:
       description: Returns the agent installation linked to the calling account bearer plus connection_ready. connection_ready is true when this same account has either a persisted WebAuthn credential or an account password owned by a dashboard user and can therefore authorize another agent. Identity status is diagnostic and does not debit the API meter.
       security: [{ accountBearer: [] }]
       responses:
-        "200": { description: Current agent and production connection readiness., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSelfStatus" } } } }
+        "200": { description: "Current agent and account connection readiness.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSelfStatus" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/agents/self/disconnect:
     post:
@@ -1568,24 +1568,7 @@ paths:
       operationId: claimDashboardLink
       x-rate-limit-policies: [{ name: dashboard-claim-ip, quota: 30, windowSeconds: 600 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
-      description: >-
-        Claims one dashboard link. The token is presented in the request body
-        only, because it rides the browser URL fragment and a fragment never
-        reaches the server. No cookie is required and no ScreenRig-*
-        Authorization header is ever accepted on this path family. next is the
-        only discriminator a client may branch on. ready means a valid dashboard
-        session for the same account already exists and this is a no-op sign-in.
-        register_passkey means production mode with no session; the response
-        sets the short-lived setup cookie and the client continues with a
-        WebAuthn registration ceremony. create_session means the server is in
-        dashboard development-authentication mode; the response sets the setup
-        cookie and the client continues with POST /dashboard/v1/sessions. An
-        unknown token, a malformed token, and a claim presented from a session
-        bound to a different account all return dashboard_link_invalid, so the
-        route is not an account or token existence oracle. An elapsed link is
-        dashboard_link_expired and an already-claimed link is
-        dashboard_link_consumed. The response never echoes the token and never
-        carries provisioning material.
+      description: "Claims one dashboard link using the token from its URL fragment. Present the token in the request body; no cookie is required and native Authorization headers are not accepted. Branch on next: ready uses an existing same-account session, register_passkey starts passkey registration, and create_session is reserved for local development. Invalid, unknown and other-account tokens return dashboard_link_invalid. Expired links return dashboard_link_expired; previously claimed links return dashboard_link_consumed. The response does not echo the token or return provisioning material."
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardLinkClaimRequest" } } } }
       responses:
         "200":
@@ -1703,21 +1686,7 @@ paths:
       operationId: createDashboardSession
       x-rate-limit-policies: [{ name: dashboard-password-email, quota: 10, windowSeconds: 600 }, { name: dashboard-password-ip, quota: 30, windowSeconds: 600 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
-      description: >-
-        With email and password, verifies the password credential on the
-        existing account identified by its normalized enrolled email. It never
-        creates an account, dashboard user, tenant, or agent and provides no
-        signup or recovery behavior. Unknown emails, accounts without a
-        password, and mismatches all return the same unauthorized response.
-        Admission is limited independently by normalized email and client IP.
-        Success mints exactly the same __Host-screenrig-dashboard cookie and
-        server-side account session as a verified passkey assertion.
-
-        The display_name body is a separate localhost-only
-        development-authentication shape requiring the setup cookie. It mints a
-        no-proof development user and session only when DashboardDevAuth is on;
-        production explicitly refuses that shape. DashboardDevAuth is never
-        consulted or accepted as password proof.
+      description: "With email and password, verifies the password credential on the existing account identified by its normalized enrolled email. It creates no account, dashboard user or agent. Unknown emails, accounts without a password, and mismatches return the same unauthorized response. Admission is limited independently by email and client IP. Success sets the account session cookie used by passkey sign-in. The display_name request variant is reserved for local development and is rejected by the hosted service."
       requestBody:
         required: true
         content:
@@ -1757,13 +1726,7 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
     get:
       operationId: getDashboardSession
-      description: >-
-        Returns the current dashboard session. Authority is the session cookie
-        and the server-side session row it names; the user identifier in the
-        body is descriptive and is never authorization. A returning visit calls
-        this first, and treats 401 as the signal to offer password login or a
-        usernameless assertion ceremony. dev_auth reports the server mode so the client
-        needs no build-time flag, environment check, or hostname test.
+      description: "Returns the current dashboard session. The session cookie and server-side session establish authority; user_id is descriptive. A 401 response means sign-in is required. The dev_auth field is reserved for local development and is false on the hosted service."
       security: [{ dashboardSession: [] }]
       responses:
         "200": { description: Current dashboard session., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardSession" } } } }
@@ -3533,19 +3496,7 @@ components:
       type: string
       maxLength: 128
       pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$"
-      description: >-
-        Server-derived RFC 6381 codec list for this exact rendition, never
-        client-declared. It is a sibling of contentType, not a parameter inside
-        it; a player composes a capability query as contentType, a semicolon, and
-        codecs="VALUE". Every stored ready video carries a derived codec, because
-        video whose codec cannot be established is rejected at upload rather than
-        stored without it. This property is optional for one reason only: runtime
-        content schemas are additionalProperties:false, so emission stays off
-        until the current PWA and native trees accept the field. It
-        becomes required once that rollout completes. A player must not read an
-        absent value as an unsupported codec. This release emits exactly one
-        video-track entry; the comma-separated grammar is published now so a later
-        audio entry is additive.
+      description: "Server-derived RFC 6381 codec list for this exact rendition, never client-declared. It is a sibling of contentType; a Player can form a capability query as contentType followed by codecs=\"VALUE\". A video whose codec cannot be derived is rejected at upload. The property is optional. An absent value does not mean that the codec is unsupported. A present value currently contains one video-track entry; the grammar permits comma-separated entries."
     RuntimeReport:
       oneOf:
         - { $ref: "#/components/schemas/ManifestActivatedReport" }
@@ -3619,15 +3570,10 @@ components:
       type: object
       additionalProperties: false
       required: [next, dev_auth]
-      description: >-
-        Result of one link claim. next is the only discriminator a client may
-        branch on, and dev_auth is the only server-mode signal it receives, so
-        no dashboard client needs a build-time flag, an environment check, or a
-        hostname test. The response carries no token, no cookie value, and no
-        provisioning material.
+      description: "Result of one link claim. Branch on next to choose the next step. The response contains no token, cookie value or provisioning material."
       properties:
-        next: { type: string, enum: [ready, register_passkey, create_session], description: "ready is a no-op sign-in on an existing same-account session. register_passkey is production mode with no session. create_session is dashboard development-authentication mode." }
-        dev_auth: { type: boolean, description: "True when the server runs dashboard development authentication and the four WebAuthn ceremony routes therefore return passkeys_disabled. False in production, where the display_name development shape of POST /dashboard/v1/sessions returns forbidden; its email/password shape remains real password verification." }
+        next: { type: string, enum: [ready, register_passkey, create_session], description: "ready means a valid same-account session already exists. register_passkey starts passkey registration. create_session is reserved for local development." }
+        dev_auth: { type: boolean, description: "Reserved for local development; false on the hosted service. When true, WebAuthn ceremony routes return passkeys_disabled." }
     DashboardPasskeyRegistrationStart:
       type: object
       additionalProperties: false
@@ -3675,7 +3621,7 @@ components:
       type: object
       additionalProperties: false
       required: [display_name]
-      description: Development-authentication-only session mint body. It carries no credential and no proof of possession, which is why the route is forbidden outside development authentication.
+      description: "Local-development-only request body. The hosted service rejects this credential-free session request."
       properties:
         display_name: { $ref: "#/components/schemas/DashboardDisplayName" }
     DashboardPasswordLogin:
@@ -3704,7 +3650,7 @@ components:
         user_id: { type: string }
         account_id: { type: string }
         display_name: { $ref: "#/components/schemas/DashboardDisplayName" }
-        dev_auth: { type: boolean, description: True when the server runs dashboard development authentication. }
+        dev_auth: { type: boolean, description: "Reserved for local development; false on the hosted service." }
         expires_at: { type: string, format: date-time, description: Instant the twenty-four-hour session row stops being accepted. Logout deletes the row before this time. }
     DashboardUser:
       type: object
@@ -3720,7 +3666,7 @@ components:
     DashboardAgentAuthorization:
       type: object
       additionalProperties: false
-      description: A passkey session returns ceremony_id and request_options. A password session returns password_session=true and confirmation_required=true. Development-authentication mode returns dev_auth=true and confirmation_required=true as a distinct localhost-only exception.
+      description: "A passkey session returns ceremony_id and request_options. A password session returns password_session=true and confirmation_required=true. dev_auth=true is reserved for local development."
       properties:
         ceremony_id: { type: string }
         request_options: { type: object, additionalProperties: true }

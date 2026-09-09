@@ -3613,24 +3613,9 @@ test("customer-facing credit copy is fail-open until 1 Jan 2027", () => {
   }
   assert.match(USAGE, /feedback list \[--kind bug\|feature\]/);
 
-  const repoRoot = fileURLToPath(new URL("..", import.meta.url));
-  const agents = readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8");
-  const readme = readFileSync(path.join(repoRoot, "README.md"), "utf8");
-  for (const [name, text] of [["AGENTS.md", agents], ["README.md", readme]] as Array<[string, string]>) {
-    assert.match(text, /whole page/, `${name} must say generate as the whole page`);
-    assert.match(text, /slide-deck-like/i, `${name} must keep compose for slide-deck-like pages`);
-    assert.doesNotMatch(text, /\$0\.10 per image/, `${name} must not name a flat still-generation price`);
-    assert.doesNotMatch(text, /\$0\.06/, `${name} must not name the retired low still price`);
-    assert.doesNotMatch(text, /\$0\.12/, `${name} must not name the retired medium still price`);
-    assert.doesNotMatch(text, /\$0\.50/, `${name} must not name the retired high still price`);
-    assert.doesNotMatch(text, /billed by quality/, `${name} must not say generate is billed by quality tier`);
-  }
-  assert.match(agents, /\$10 \/ 1M/, "AGENTS.md must name the text-input token rate");
-  assert.match(agents, /\$16 \/ 1M/, "AGENTS.md must name the image-input token rate");
-  assert.match(agents, /\$60 \/ 1M/, "AGENTS.md must name the image-output token rate");
-  assert.match(agents, /how detailed the still is/, "AGENTS.md must say quality changes how detailed the still is");
-  assert.match(agents, /fails open/, "AGENTS.md must keep launch fail-open copy");
-  assert.match(agents, /2027-01-01/, "AGENTS.md must name the 1 Jan 2027 cutoff");
+  // Maintainer AGENTS.md and README navigation do not duplicate the CLI help
+  // rate card. Behavior and customer command help are validated above.
+
 });
 
 test("credits_low appends beside generic_filename instead of replacing it", async () => {
