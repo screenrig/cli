@@ -68,9 +68,11 @@ This file outranks it on anything local here.
   `media upload`. Presentable page → `media generate` as the whole page.
   Slide-deck-like → local `compose render`. Live objects → playlist primitives.
   Do not emit native `text`, `box`, or `line`.
-- `media generate` is billed by quality (low $0.06 / 600 credits, medium $0.12
-  / 1200, high $0.50 / 5000). It 402s when remaining is below that debit even
-  during launch fail-open. Never print the prompt or pixels.
+- `media generate` is billed per token ($10 / 1M text input, $16 / 1M image
+  input, $60 / 1M image output). Quality (`low`, `medium`, `high`; default
+  `medium`) changes how detailed the still is and therefore how many tokens it
+  uses. Remaining that cannot cover the debit returns payment_required / 402,
+  including during launch fail-open. Never print the prompt or pixels.
 - Compose is local and unauthenticated. Never put PNG bytes in stdout.
 - Until 2027-01-01 08:00 UTC, production fails open on empty remaining for
   billed `/api/v1` work except `media generate`. Do not add pay, Stripe, or

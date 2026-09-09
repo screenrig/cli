@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { createCipheriv, createHash, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync } from "node:crypto";
 import { PassThrough } from "node:stream";
+import { readFileSync } from "node:fs";
 import { mkdir, open, readFile, rename, chmod, stat, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { CLI_VERSION, EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, USAGE, formatEventLine } from "./commands.js";
 import { run, type CliRuntime } from "./main.js";
@@ -3559,6 +3561,25 @@ test("customer-facing credit copy is fail-open until 1 Jan 2027", () => {
     assert.doesNotMatch(text, /OpenRouter/, `${name} must not name OpenRouter`);
   }
   assert.match(USAGE, /feedback list \[--kind bug\|feature\]/);
+
+  const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+  const agents = readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8");
+  const readme = readFileSync(path.join(repoRoot, "README.md"), "utf8");
+  for (const [name, text] of [["AGENTS.md", agents], ["README.md", readme]] as Array<[string, string]>) {
+    assert.match(text, /whole page/, `${name} must say generate as the whole page`);
+    assert.match(text, /slide-deck-like/, `${name} must keep compose for slide-deck-like pages`);
+    assert.doesNotMatch(text, /\$0\.10 per image/, `${name} must not name a flat still-generation price`);
+    assert.doesNotMatch(text, /\$0\.06/, `${name} must not name the retired low still price`);
+    assert.doesNotMatch(text, /\$0\.12/, `${name} must not name the retired medium still price`);
+    assert.doesNotMatch(text, /\$0\.50/, `${name} must not name the retired high still price`);
+    assert.doesNotMatch(text, /billed by quality/, `${name} must not say generate is billed by quality tier`);
+  }
+  assert.match(agents, /\$10 \/ 1M/, "AGENTS.md must name the text-input token rate");
+  assert.match(agents, /\$16 \/ 1M/, "AGENTS.md must name the image-input token rate");
+  assert.match(agents, /\$60 \/ 1M/, "AGENTS.md must name the image-output token rate");
+  assert.match(agents, /how detailed the still is/, "AGENTS.md must say quality changes how detailed the still is");
+  assert.match(agents, /fails open/, "AGENTS.md must keep launch fail-open copy");
+  assert.match(agents, /2027-01-01/, "AGENTS.md must name the 1 Jan 2027 cutoff");
 });
 
 test("credits_low appends beside generic_filename instead of replacing it", async () => {
