@@ -503,13 +503,21 @@ function agentConnectionEnvelope(recipient: { kty: "OKP"; crv: "X25519"; x: stri
   };
 }
 
-test("agent connect opens the safe approval URL, consumes status-only SSE, and activates a distinct credential", async () => {
+test("agent connect rejects waits beyond one day before network access", async () => {
+  const result = await withRuntime(["--json", "agent", "connect", "--timeout", "86400001"], new FakeTransport());
+  assert.notEqual(result.code, 0);
+  assert.match(JSON.parse(result.stdout).error.detail, /1 to 86400000/);
+  await rm(result.configDir, { recursive: true, force: true });
+});
+
+test("agent connect resumes after its cached approval expiry when approved while offline", async () => {
   const transport = new FakeTransport();
   let sealed: ReturnType<typeof agentConnectionEnvelope> | undefined;
   const connectionToken = `sac_${"C".repeat(43)}`;
   transport.on("POST", "/api/v1/agent-connections", (req) => {
     const input = req.body as { recipient_public_key: { kty: "OKP"; crv: "X25519"; x: string } };
     sealed = agentConnectionEnvelope(input.recipient_public_key);
+    sealed.collection.issuance_expires_at = "2026-08-16T16:00:00.000Z";
     return {
       status: 201,
       headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
@@ -517,7 +525,7 @@ test("agent connect opens the safe approval URL, consumes status-only SSE, and a
         connection_id: sealed.connectionId,
         connection_token: connectionToken,
         approval_url: `https://dashboard.screenrig.ai/agents/connect/${sealed.connectionId}`,
-        expires_at: "2026-08-14T17:10:00.000Z",
+        expires_at: "2026-08-15T17:00:00.000Z",
       },
     };
   });
@@ -526,7 +534,7 @@ test("agent connect opens the safe approval URL, consumes status-only SSE, and a
     name: "Office Codex",
     agent_type: "cli",
     status: "approved",
-    expires_at: "2026-08-14T17:10:00.000Z",
+    expires_at: "2026-08-15T17:00:00.000Z",
     created_at: "2026-08-14T17:00:00.000Z",
   })}\n\n`);
   transport.on("POST", /\/api\/v1\/agent-connections\/acn_.*\/credential/, (req) => {
@@ -542,10 +550,18 @@ test("agent connect opens the safe approval URL, consumes status-only SSE, and a
     headers: { "cache-control": "private, no-store" },
     body: { agent: { ...sealed!.pendingAgent, state: "active", connected_at: "2026-08-14T17:00:01.000Z" }, connection_ready: true },
   }));
+  transport.queueStream(Object.assign(new Error("Interrupted"), { name: "AbortError" }));
+  const interrupted = await withRuntime(["--json", "agent", "connect"], transport, { openUrl: async () => true });
+  assert.equal(JSON.parse(interrupted.stdout).error.code, "timeout");
+  const resumedFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => interrupted.configDir, env: { XDG_CONFIG_HOME: interrupted.configDir } };
   const opened: string[] = [];
-  const result = await withRuntime(["--json", "agent", "connect", "--name", "Office Codex"], transport, {
+  const resumed = await withRuntime(["--json", "agent", "connect", "--name", "Office Codex", "--timeout", "86400000"], transport, {
+    fs: resumedFs,
+    now: () => new Date("2026-08-16T05:00:00.000Z"),
     openUrl: async (url) => { opened.push(url); return true; },
   });
+  const result = { ...resumed, configDir: interrupted.configDir };
+  assert.equal(transport.calls.filter(call => call.method === "POST" && call.path === "/api/v1/agent-connections").length, 1);
   assert.equal(result.code, 0, result.stdout);
   assert.deepEqual(opened, ["https://dashboard.screenrig.ai/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA"]);
   assert.equal(JSON.parse(result.stdout).data.status, "active");
@@ -1282,7 +1298,7 @@ test("dashboard prints the link exactly once when no browser could be opened", a
   assert.equal(result.code, 0, result.stderr);
   assert.equal(result.stdout.match(/#link=/g)?.length, 1);
   assert.match(result.stdout, /no browser could be opened/);
-  assert.match(result.stdout, /single use, ten minutes from mint/);
+  assert.match(result.stdout, /single use, 24 hours from mint/);
   assert.match(result.stdout, /reissue: run screenrig dashboard again for a fresh link/);
   assert.match(result.stdout, new RegExp(`url: ${DASHBOARD_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   await rm(result.configDir, { recursive: true, force: true });

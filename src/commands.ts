@@ -161,6 +161,8 @@ Commands:
   account show
   agent enroll --email ADDRESS [--name NAME] [--open-dashboard]
   agent connect [--name NAME] [--print-url] [--timeout MS]
+    Approval expires after 24 hours; --timeout defaults to 86400000 ms.
+    Retry agent connect to resume after an interrupted wait.
   agent status
   agent disconnect --yes [--allow-lockout]
   dashboard [--print-url]
@@ -885,11 +887,8 @@ async function startOrResumeAgentConnection(
           reason: "Use another private config path to connect a separate installation.",
         });
       }
-      if (current?.agent_connection?.expires_at
-        && Date.parse(current.agent_connection.expires_at) <= runtime.now().getTime()) {
-        const { agent_connection: _expired, token: _pending, agent_id: _agent, ...rest } = current;
-        current = rest;
-      }
+      // Approval can extend expiry while this installation is offline. Keep the
+      // recipient key until the server confirms this connection is terminal.
       let pending = current?.agent_connection;
       if (pending?.name && requestedName && pending.name !== requestedName) {
         throw usageError("The pending agent connection has a different --name. Resume it without changing the name.");
@@ -1137,15 +1136,15 @@ async function agentConnect(
 ): Promise<CommandResult> {
   if (args.positionals.length !== 2) throw usageError("agent connect does not accept positional arguments.");
   requireFlagValue(args, "name", "Office MacBook Codex");
-  requireFlagValue(args, "timeout", "600000");
+  requireFlagValue(args, "timeout", "86400000");
   const name = flagString(args.flags, "name");
   if (name && name.length > 80) throw usageError("agent connect --name is at most 80 characters.");
   const requestedTimeout = flagNumber(args.flags, "timeout");
   if (flagString(args.flags, "timeout") !== undefined && requestedTimeout === undefined) {
-    throw usageError("agent connect --timeout must be an integer from 1 to 600000 milliseconds.");
+    throw usageError("agent connect --timeout must be an integer from 1 to 86400000 milliseconds.");
   }
-  if (requestedTimeout !== undefined && (!Number.isInteger(requestedTimeout) || requestedTimeout <= 0 || requestedTimeout > 600_000)) {
-    throw usageError("agent connect --timeout must be an integer from 1 to 600000 milliseconds.");
+  if (requestedTimeout !== undefined && (!Number.isInteger(requestedTimeout) || requestedTimeout <= 0 || requestedTimeout > 86_400_000)) {
+    throw usageError("agent connect --timeout must be an integer from 1 to 86400000 milliseconds.");
   }
   let current = await currentAgentConnectionConfig(resolved, runtime);
   let connection: AgentConnectionConfig;
@@ -1185,19 +1184,18 @@ async function agentConnect(
         printed = true;
       }
     }
-    const expiresIn = Date.parse(connection.expires_at ?? "") - runtime.now().getTime();
-    const timeoutMs = Math.max(1, Math.min(requestedTimeout ?? 600_000, Number.isFinite(expiresIn) ? expiresIn : 600_000));
+    const timeoutMs = requestedTimeout ?? 86_400_000;
     let status: AgentConnection;
     try {
       status = await waitForAgentConnectionApproval(args, runtime, resolved, connection, timeoutMs);
     } catch (err) {
-      if (err instanceof CliError && err.problem.code === "agent_connection_cancelled") {
+      if (err instanceof CliError && ["agent_connection_cancelled", "agent_connection_expired", "agent_connection_invalid"].includes(err.problem.code)) {
         return clearDefinitivePendingAgentFailure(
           runtime,
           resolved,
           connection,
           err,
-          "The pending agent connection was cancelled while waiting for dashboard approval.",
+          "The server reports that this pending agent connection is no longer available.",
         );
       }
       throw err;
@@ -1513,7 +1511,7 @@ async function dashboardCommand(
   const link = validateDashboardLink(response.body as DashboardLink, resolved.apiUrl);
   const opened = printMode ? false : await (runtime.openUrl?.(link.url) ?? Promise.resolve(false));
   // Falling back is the only reason to print an unasked-for URL: the link
-  // expires in ten minutes, and a link nobody can reach is worse than one line
+  // expires in 24 hours, and a link nobody can reach is worse than one line
   // of sensitive output the operator already chose to produce.
   const printed = printMode || !opened;
   const data = {
@@ -1533,7 +1531,7 @@ async function dashboardCommand(
     human: humanLines(title, [
       ...(printed ? [["url", link.url] as [string, string]] : []),
       ["expires_at", link.expiresAt],
-      ["validity", "single use, ten minutes from mint"],
+      ["validity", "single use, 24 hours from mint"],
       ["reissue", "run screenrig dashboard again for a fresh link"],
       ...(printMode ? [] : [["opened", opened ? "true" : "false"] as [string, string]]),
     ]),

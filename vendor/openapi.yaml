@@ -147,7 +147,7 @@ paths:
   /api/v1/agent-connections:
     post:
       operationId: startAgentConnection
-      description: Starts a ten-minute request to connect another agent to an existing account. The caller supplies an X25519 public JWK and receives a temporary connection credential separately from the browser approval URL. No account bearer, cookie, Origin header, query credential, or Idempotency-Key is accepted. The connection id is descriptive and never authority.
+      description: Starts a request to connect another agent to an existing account. The human has 24 hours to approve it. The caller supplies an X25519 public JWK and receives a temporary connection credential separately from the browser approval URL. No account bearer, cookie, Origin header, query credential, or Idempotency-Key is accepted. The connection id is descriptive and never authority.
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AgentConnectionRequest" } } } }
       responses:
         "201": { description: "Temporary connection authority and safe dashboard approval URL. The temporary credential is never placed in the URL.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/AgentConnectionStart" } } } }
@@ -168,7 +168,7 @@ paths:
   /api/v1/agent-connections/{id}/credential:
     post:
       operationId: collectAgentCredential
-      description: Collects the exact replay-safe credential envelope after approval. The temporary connection bearer authenticates the request, while X25519, HKDF-SHA-256, and AES-256-GCM bind the envelope to the recipient key supplied at connection creation. No plaintext account bearer is returned by this route. The envelope is available only for a fresh ten-minute delivery window and is deleted on activation, cancellation, or expiry.
+      description: Collects the exact replay-safe credential envelope after approval. The temporary connection bearer authenticates the request, while X25519, HKDF-SHA-256, and AES-256-GCM bind the envelope to the recipient key supplied at connection creation. No plaintext account bearer is returned by this route. Approval starts a fresh 24-hour delivery window so the recipient can resume after being offline. The envelope is deleted on activation, cancellation, or expiry.
       security: [{ agentConnectionAuthorization: [] }]
       parameters: [{ $ref: "#/components/parameters/ResourceID" }]
       responses:
@@ -236,10 +236,8 @@ paths:
       description: >-
         Mints one single-use dashboard link for the calling account. The link
         carries a 256-bit token in its URL fragment, and its lifetime is the
-        separate DashboardLinkTTL constant of ten minutes. That clock is not the
-        thirty-minute public handoff locator, not the ten-minute protected
-        provisioning delivery window, and not the seventy-two-hour native
-        pairing clocks; do not describe it as any of them. There is no
+        separate DashboardLinkTTL constant of 24 hours. Claiming the link starts
+        a fresh 24-hour dashboard setup window. There is no
         mint-time user hint in v1: the link names an account, and the claiming
         visitor establishes or selects the dashboard user. A fragment is never
         sent to the server, never lands in an access log, and never appears in a
@@ -1074,7 +1072,7 @@ paths:
       operationId: startBrowserLink
       x-rate-limit-policies: [{ name: browser-link-session-ip, quota: 20, windowSeconds: 60 }, { name: browser-link-session-outstanding, quota: 5, windowSeconds: 600 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
-      description: Strict same-origin no-JavaScript-compatible POST that creates or reuses a thirty-minute unclaimed browser-link session. Claiming within that window creates a fresh, independent ten-minute protected provisioning-delivery window; cookie Player pairing remains ten minutes. Native pairing is a separate seventy-two-hour unclaimed locator; claimed native delivery remains durable until signed completion or explicit on-player reset. It sets exactly the apex host-only Secure HttpOnly SameSite=Strict Path=/ __Host-screenrig-browser-link cookie with no Domain. JSON clients receive 201; Accept text/html receives a bodyless 303 to /setup. No insecure localhost fallback exists; development requires the configured HTTPS loopback origin.
+      description: Strict same-origin no-JavaScript-compatible POST that creates or reuses a 24-hour unclaimed browser-link session. Claiming within that window creates a fresh, independent ten-minute protected provisioning-delivery window; cookie Player pairing lasts 24 hours. Native pairing is a separate seventy-two-hour unclaimed locator; claimed native delivery remains durable until signed completion or explicit on-player reset. It sets exactly the apex host-only Secure HttpOnly SameSite=Strict Path=/ __Host-screenrig-browser-link cookie with no Domain. JSON clients receive 201; Accept text/html receives a bodyless 303 to /setup. No insecure localhost fallback exists; development requires the configured HTTPS loopback origin.
       responses:
         "201": { description: Safe browser-link code/status metadata., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, Set-Cookie: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserLinkSession" } } } }
         "303": { description: No-JavaScript form continuation to the read-only setup page., headers: { Location: { schema: { type: string, enum: [/setup] } }, Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, Set-Cookie: { schema: { type: string } } } }
@@ -2482,8 +2480,8 @@ components:
     runtimeCookie: { type: apiKey, in: cookie, name: __Host-screenrig-runtime }
     pairedRuntimeCookie: { type: apiKey, in: cookie, name: __Host-screenrig-runtime, description: Signed runtime session with paired-device mutation profile. }
     pairedDeviceCookie: { type: apiKey, in: cookie, name: __Host-screenrig-device }
-    pairingCookie: { type: apiKey, in: cookie, name: __Host-screenrig-pairing, description: "Signed ten-minute pairing session; never grants account, content, or runtime authority." }
-    browserLinkCookie: { type: apiKey, in: cookie, name: __Host-screenrig-browser-link, description: "Apex host-only Secure HttpOnly SameSite=Strict Path=/ browser-link owner cookie; it authenticates a thirty-minute unclaimed locator and, when claimed near the boundary, its fresh ten-minute protected delivery window. It has no Domain and is never accepted as a Player cookie." }
+    pairingCookie: { type: apiKey, in: cookie, name: __Host-screenrig-pairing, description: "Signed 24-hour pairing session; never grants account, content, or runtime authority." }
+    browserLinkCookie: { type: apiKey, in: cookie, name: __Host-screenrig-browser-link, description: "Apex host-only Secure HttpOnly SameSite=Strict Path=/ browser-link owner cookie; it authenticates a 24-hour unclaimed locator and, when claimed near the boundary, its fresh ten-minute protected delivery window. It has no Domain and is never accepted as a Player cookie." }
     primitiveCapability:
       type: apiKey
       in: header
@@ -3610,7 +3608,7 @@ components:
             not print it, and do not store it. The server never sees the
             fragment, so the claiming client strips it before its first network
             call.
-        expires_at: { type: string, format: date-time, description: "Instant the unclaimed link stops being claimable, ten minutes after mint. This is DashboardLinkTTL, a separate clock from the handoff locator and from native pairing." }
+        expires_at: { type: string, format: date-time, description: "Instant the unclaimed link stops being claimable, 24 hours after mint. This is DashboardLinkTTL, a separate clock from the handoff locator and from native pairing." }
     DashboardLinkClaimRequest:
       type: object
       additionalProperties: false
