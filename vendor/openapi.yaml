@@ -14,9 +14,11 @@ info:
     millicredits (1000 mcr = 1 credit); published remaining is floored.
 
     Authenticated user or agent /api/v1 requests cost 1 credit, debited
-    immediately against this server request id. Remaining below 1 whole credit
-    is payment_required. GET /api/v1/account and POST
-    /api/v1/account/credential/revoke do not debit, so a zero-remaining account
+    immediately against this server request id, after the first 10,000 API or
+    billed listen-stream taxes in the UTC month. Remaining below the intro
+    floor of negative 1,000,000 credits (zero from 2027-01-01) is
+    payment_required. GET /api/v1/account and POST
+    /api/v1/agents/self/disconnect do not debit, so a zero-remaining account
     can recover. Screen messages are exempt from this meter:
     POST /api/v1/screens/{id}/toast, POST /api/v1/screens/{id}/screenshot,
     GET /api/v1/screens/{id}/screenshot, and GET
@@ -119,22 +121,19 @@ paths:
       operationId: enrollCLI
       x-rate-limit-policies: [{ name: cli-enrollment-client, quota: 3, windowSeconds: 3600 }, { name: cli-enrollment-ip, quota: 5, windowSeconds: 3600 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
-      description: >-
-        Internal bundled-CLI enrollment. It is an explicit step the agent runs, not an
-        automatic side effect of the first account-scoped command. The body must carry a
-        contact email; a missing or malformed address is rejected with invalid_request and
-        the rejection never echoes it. The address is unique across accounts, so a second
-        enrollment with the same normalized address is rejected with email_conflict, which
-        the same cli-enrollment-client and cli-enrollment-ip policies bound. The address is
-        stored unverified and grants no authority by itself. After an authenticated dashboard
-        user sets a password on this same account, the normalized address identifies the
-        account for password login; there is no email-based signup, recovery, or account
-        attachment. Persist client_id, the
-        email, and Idempotency-Key before sending; an exact retry redelivers the same
-        permanent credential from its encrypted issuance for ten minutes without creating
-        another account and without tripping the email conflict. After that delivery window
-        the durable idempotency result returns credential_issuance_expired; no follow-up
-        mutation is required or supported.
+      description: |-
+        Create an account and its first agent through the bundled-CLI enrollment step.
+        Enrollment is explicit: an account-scoped command never creates an account automatically.
+
+        Supply a contact email. Missing or malformed addresses return invalid_request;
+        an address already used by an account returns email_conflict. The address is
+        unverified and cannot recover an account or attach an agent. Once a signed-in
+        dashboard user sets a password, this email also identifies that account at login.
+
+        Persist client_id, email, and Idempotency-Key before sending. An exact retry
+        returns the same permanent bearer credential for ten minutes. Save and verify
+        the token before reporting success. After ten minutes, retries return
+        credential_issuance_expired; the saved token remains valid. There is no follow-up mutation.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CLIEnrollmentRequest" } } } }
       responses:
@@ -228,18 +227,7 @@ paths:
             ScreenRig-Credits-Included: { $ref: "#/components/headers/ScreenRigCreditsIncluded" }
           content: { application/json: { schema: { $ref: "#/components/schemas/Account" } } }
         default: { $ref: "#/components/responses/Problem" }
-  /api/v1/account/credential/revoke:
-    post:
-      operationId: revokeCurrentAccountCredential
-      description: Legacy compatibility alias for POST /api/v1/agents/self/disconnect. It disconnects the agent linked to exactly the calling account bearer and issues no replacement. The account, screens, and content remain. Disconnecting the last active agent returns agent_lockout_risk unless allow_last_agent is explicit. Repeating this request with the same cryptographically valid already-revoked bearer returns 204 only on this endpoint, allowing safe repair of an ambiguous response; every other account route rejects that bearer. This operation is intrinsically idempotent and does not use an Idempotency-Key. It does not debit the 1-credit API meter.
-      security: [{ accountBearer: [] }]
-      requestBody: { required: false, content: { application/json: { schema: { $ref: "#/components/schemas/AgentDisconnectRequest" } } } }
-      responses:
-        "204": { description: "The bearer-linked agent is disconnected and no replacement token was issued.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } } }
-        "401": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
-        "500": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+  # Credential revocation uses /api/v1/agents/self/disconnect.
   /api/v1/account/dashboard-links:
     post:
       operationId: createAccountDashboardLink
@@ -847,11 +835,14 @@ paths:
         centre-cropped and resampled to that size. The filename is distinctive per
         generation, generated-16x9-1a2b3c4d.webp, with the suffix taken from the
         media id. Fetch the bytes with GET /api/v1/media/{id}/content.
-        Own-gen-then-upload remains valid. Remaining whole credits below the quality
-        debit return payment_required even during the launch fail-open window, except
-        SCREENRIG__ENVIRONMENT=development. Empty selected-vendor configuration
-        returns not_ready. Account bearer only.
-      x-rate-limit-policies: [{ name: media-upload-admission, quota: 120, windowSeconds: 60 }]
+        Own-gen-then-upload remains valid. Remaining that cannot cover twice the
+        vendor cost of the still, rounded up to whole credits, after the intro
+        floor (negative 1,000,000 credits until 2027-01-01, then zero) returns
+        payment_required, except SCREENRIG__ENVIRONMENT=development. Admission
+        before the vendor call requires remaining above that floor by at least 1
+        credit. Empty selected-vendor configuration returns not_ready. Account bearer only.
+        One in-flight generation per account; further parallelism is rate_limited.
+      x-rate-limit-policies: [{ name: media-generate-admission, quota: 6, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ accountBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
@@ -1310,7 +1301,7 @@ paths:
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeReport" } } } }
       responses:
-        "202": { description: Accepted. manifest.activated is committed before this response and is idempotent for the current active revision. playback.media_started upserts the daily aggregate for an image or video start before this response; playback.video_started is the video-only legacy form of the same report and remains accepted. playback.page_failed replaces the screen's latest page-failure slot and appends an account-only durable event in the same transaction without changing screen or manifest revision. application.event appends a durable account event before this response., headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
+        "202": { description: Accepted. manifest.activated is committed before this response and is idempotent for the current active revision. playback.media_started upserts the daily aggregate for an image or video start before this response; playback.video_started reports a video start using the same aggregation. playback.page_failed replaces the screen's latest page-failure slot and appends an account-only durable event in the same transaction without changing screen or manifest revision. application.event appends a durable account event before this response., headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/screenshot:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -2479,7 +2470,7 @@ components:
       description: Temporary `ScreenRig-Agent-Connect <credential>` authority returned only by connection creation. It is never accepted as an account bearer, dashboard cookie, URL parameter, or runtime credential.
     pendingAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Pending agent bearer accepted only for its own activation, plus the same active bearer for exact acknowledgement replay." }
     revocableAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active agent bearer, or the same cryptographically verified revoked bearer for an idempotent self-disconnect replay." }
-    accountBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: Active account bearer. The credential-revocation operation alone may reverify the same already-revoked bearer to return its idempotent 204 result. }
+    accountBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: Active account bearer. Use revocableAgentBearer for self-disconnect retries after revocation. }
     nativePairingAuthorization:
       type: http
       scheme: ScreenRig-Pairing
@@ -2582,7 +2573,7 @@ components:
         account_content_bytes: { type: integer, enum: [0], description: "Storage limit of the default plan. Zero means no product storage cap. A custom storage ceiling, when present, still counts committed media, expanded application release trees, and application key/value entries together, including bytes reserved by an upload in flight. The per-request ceilings above are plan-independent transport bounds." }
         features: { type: object, additionalProperties: { type: boolean } }
     CLIEnrollmentRequest: { type: object, additionalProperties: false, required: [client_id, email], properties: { client_id: { type: string, pattern: "^cli_[A-Za-z0-9_-]{43}$", description: "Stable anonymous installation identity generated from 32 CSPRNG bytes and persisted before the first request. It is rate-limit material, not an account credential." }, email: { type: string, format: email, minLength: 3, maxLength: 254, description: "Required account contact address: one plain ASCII addr-spec with an unquoted local part and dotted DNS domain, with no display name, angle bracket, comma, quote, whitespace, or control character. The server trims surrounding whitespace, lowercases the address into a private uniqueness key, and preserves the trimmed capitalization for display. It is unique across accounts: a second enrollment with the same normalized address is rejected with email_conflict. A malformed or missing address is rejected with invalid_request, and the rejection never echoes the address. It is stored unverified, email_verified stays false, and ScreenRig sends no mail. It grants no authority by itself. After an authenticated dashboard user sets a password, the normalized address identifies this same account for password login; it provides no signup, recovery, or attach-by-address behavior." }, beta_key: { type: string, description: "Required when the server has a configured enrollment beta key. Omit when the server does not gate enrollment." }, name: { type: string, minLength: 1, maxLength: 80, default: "ScreenRig CLI" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
-    Account: { type: object, additionalProperties: false, required: [id, revision, status, email, email_verified, used_bytes, reserved_bytes, screen_count, content_limit_bytes, screen_limit, credit_remaining, created_at, updated_at], properties: { id: { type: string }, revision: { type: integer }, status: { type: string, enum: [active, cancelled, deleted] }, email: { type: string, minLength: 3, maxLength: 254, description: "Required contact address supplied at enrollment, preserving its capitalization after surrounding whitespace is trimmed. Read-only: no route updates it, and it is published only on an authenticated read of the caller's own account." }, email_verified: { type: boolean, enum: [false], description: "Always false. The address is stored unverified, ScreenRig sends no mail, and no flow sets this true. It is published so a later recovery feature cannot mistake an unverified string for authority. It is not an authorization factor." }, used_bytes: { type: integer, description: "Durable bytes the account owns across media, expanded application release trees, and application key/value entries." }, reserved_bytes: { type: integer, description: "Bytes held by uploads in flight. They count against a custom storage ceiling until the upload commits or its reservation is released." }, screen_count: { type: integer }, content_limit_bytes: { type: integer, description: "Storage ceiling the account's plan allows. Zero means no product storage cap." }, screen_limit: { type: integer, description: "Screen limit the account's plan allows. Zero means no screen cap." }, credit_remaining: { type: integer, minimum: 0, description: "Remaining prepaid credits as a whole integer. Never negative. Enrollment grants the Standard included remainder of 10000 credits." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    Account: { type: object, additionalProperties: false, required: [id, revision, status, email, email_verified, used_bytes, reserved_bytes, screen_count, content_limit_bytes, screen_limit, credit_remaining, created_at, updated_at], properties: { id: { type: string }, revision: { type: integer }, status: { type: string, enum: [active, cancelled, deleted] }, email: { type: string, minLength: 3, maxLength: 254, description: "Required contact address supplied at enrollment, preserving its capitalization after surrounding whitespace is trimmed. Read-only: no route updates it, and it is published only on an authenticated read of the caller's own account." }, email_verified: { type: boolean, enum: [false], description: "Always false. The address is stored unverified, ScreenRig sends no mail, and no flow sets this true. It is published so a later recovery feature cannot mistake an unverified string for authority. It is not an authorization factor." }, used_bytes: { type: integer, description: "Durable bytes the account owns across media, expanded application release trees, and application key/value entries." }, reserved_bytes: { type: integer, description: "Bytes held by uploads in flight. They count against a custom storage ceiling until the upload commits or its reservation is released." }, screen_count: { type: integer }, content_limit_bytes: { type: integer, description: "Storage ceiling the account's plan allows. Zero means no product storage cap." }, screen_limit: { type: integer, description: "Screen limit the account's plan allows. Zero means no screen cap." }, credit_remaining: { type: integer, minimum: 0, description: "Remaining prepaid credits as a whole integer. Never negative. Standard includes no monthly credit grant. Every account waives the first 10 GB of bandwidth, 1 GB-month of storage, and 10,000 API or billed listen-stream taxes each UTC month." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     RuntimeChrome: { type: object, additionalProperties: false, required: [schema_version, banner], properties: { schema_version: { type: integer, enum: [1] }, banner: { type: "null" } } }
     CLIEnrollment: { type: object, additionalProperties: false, required: [account, agent, connection_ready, token, issuance_id, issuance_expires_at], properties: { account: { $ref: "#/components/schemas/Account" }, agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, enum: [false], description: "A newly enrolled account has neither a registered dashboard passkey nor password, so approval of another agent is not ready. Re-read GET /api/v1/agents/self after configuring either retained dashboard credential." }, token: { type: string, minLength: 32, description: Permanent bearer credential for exactly this first agent. It has no scheduled expiry and is redelivered only through this short-lived encrypted issuance envelope. }, issuance_id: { type: string, description: Opaque identifier for the encrypted exact-retry delivery envelope. }, issuance_expires_at: { type: string, format: date-time, description: Exact-retry redelivery deadline for this credential issuance; ten minutes after first enrollment. Later exact retries return credential_issuance_expired while the permanent token remains valid. } } }
     AgentInput: { type: object, additionalProperties: false, properties: { name: { type: string, minLength: 1, maxLength: 80, default: "ScreenRig CLI" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
@@ -3143,9 +3134,10 @@ components:
         logged, or published on account SSE. aspect_ratio defaults to 16:9. quality
         is low, medium, or high and defaults to medium. tag is stored on the ready
         media object like an upload tag. Optional references are inline base64 or
-        an account media_id; HTTP URLs are rejected. Remaining whole credits below
-        the quality debit return payment_required even during launch fail-open, except
-        development.
+        an account media_id; HTTP URLs are rejected. Remaining that cannot cover
+        twice the vendor cost of the still, rounded up to whole credits, after the
+        intro floor (negative 1,000,000 credits until 2027-01-01, then zero)
+        returns payment_required, except development.
       properties:
         prompt: { type: string, minLength: 1, maxLength: 4000 }
         aspect_ratio: { type: string, enum: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"], default: "16:9" }
@@ -3175,9 +3167,10 @@ components:
       additionalProperties: false
       required: [quality, credits, usd]
       description: >-
-        Customer-facing debit for one stored still. quality is the requested quality.
-        credits are whole ScreenRig credits. usd is the dollar equivalent of those
-        credits. Never a vendor name, vendor cost, or token count.
+        Customer-facing debit for one stored still. quality is the requested quality
+        and changes the image, not a fixed price. credits are twice the vendor cost
+        of that still, rounded up to whole ScreenRig credits. usd is the dollar
+        equivalent of those credits. Never a vendor name, vendor cost, or token count.
       properties:
         quality: { type: string, enum: [low, medium, high] }
         credits: { type: integer, minimum: 1 }
@@ -3259,8 +3252,8 @@ components:
     NativeIdentityChallengeRequest:
       type: object
       additionalProperties: false
-      required: [kid]
-      description: Explicit requests require op and request_hash together. An unknown key also requires public_key and op=pairing.start; challenge issuance does not enroll it. The kid-only compatibility request is restricted to already-bound or retired keys and permits only session.mint or identity.reset proofs.
+      required: [kid, op, request_hash]
+      description: Supply the operation and its request_hash for every challenge. An unknown key also requires public_key and op=pairing.start. Creating a challenge does not enroll the key.
       properties:
         kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$", description: RFC 7638 SHA-256 JWK thumbprint. }
         public_key: { $ref: "#/components/schemas/PlayerPublicKey" }
@@ -3269,8 +3262,8 @@ components:
     NativeIdentityChallenge:
       type: object
       additionalProperties: false
-      required: [nonce, expires_at, aud, op]
-      description: Explicit challenges echo op and request_hash; compare both against locally computed values before signing. Independent nonces expire in 120 seconds and can be consumed once. Legacy kid-only responses omit request_hash.
+      required: [nonce, expires_at, aud, op, request_hash]
+      description: Compare the returned op and request_hash with your locally computed values before signing. Each nonce expires in 120 seconds and can be consumed once.
       properties:
         nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
         expires_at: { type: string, format: date-time }
@@ -3290,8 +3283,7 @@ components:
         screenrig.native.identity.request.v1 and op. Append Idempotency-Key for
         pairing.start and session.mint; append the exact srp_ pairing credential
         then completion_nonce for pairing.complete; append nothing for identity.reset.
-        Only already-bound or retired keys may use context-free legacy session/reset
-        proofs, at most 300 seconds, against a legacy-issued challenge. A cached
+        Every proof must include request_hash. A cached
         operation result still requires a fresh issued proof or the exact accepted
         proof while its short-lived receipt remains valid. Duplicate or unknown
         JWS/JWK members, noncanonical base64url, and non-prime-order keys are rejected.
@@ -3568,7 +3560,7 @@ components:
     ManifestActivatedContext: { type: object, additionalProperties: false, required: [manifest_revision], properties: { manifest_revision: { type: string, pattern: "^man_" } } }
     PlaybackMediaStartedReport: { type: object, additionalProperties: false, required: [severity, code, context], description: "One visible start of an image or video primitive on a page. Players send this once per page appearance of the media, for images exactly as for videos; loops inside one appearance are not restarts. The media must be on the session screen's grant at the reported manifest revision, and context.primitive must match the ready media's primitive or the report is rejected. Upserts the daily PlaybackAggregate for the screen, media, and UTC day.", properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [playback.media_started] }, context: { $ref: "#/components/schemas/PlaybackMediaStartedContext" } } }
     PlaybackMediaStartedContext: { type: object, additionalProperties: false, required: [media_id, manifest_revision, page_id, primitive], properties: { media_id: { type: string, pattern: "^med_" }, manifest_revision: { type: string, pattern: "^man_" }, page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [image, video], description: The primitive kind of the media that started. Must match the ready media. } } }
-    PlaybackVideoStartedReport: { type: object, additionalProperties: false, required: [severity, code, context], description: "Legacy video-only start report, equivalent to playback.media_started with primitive video. Still accepted so players shipped before media-neutral starts keep aggregating; new players send playback.media_started for both images and videos.", properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [playback.video_started] }, context: { $ref: "#/components/schemas/PlaybackVideoStartedContext" } } }
+    PlaybackVideoStartedReport: { type: object, additionalProperties: false, required: [severity, code, context], description: "Report one visible video start. This uses the same daily aggregation as playback.media_started with primitive video. Send one report per start; sending both event types counts the start twice. Use playback.media_started when reporting both images and videos.", properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [playback.video_started] }, context: { $ref: "#/components/schemas/PlaybackVideoStartedContext" } } }
     PlaybackVideoStartedContext: { type: object, additionalProperties: false, required: [media_id, manifest_revision, page_id], properties: { media_id: { type: string, pattern: "^med_" }, manifest_revision: { type: string, pattern: "^man_" }, page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" } } }
     PlaybackPageFailedReport:
       type: object

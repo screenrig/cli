@@ -113,7 +113,7 @@ async function main(): Promise<void> {
     const publicUrl = String(pairing.data?.public_url ?? "");
     assert.match(publicUrl, /^http:\/\/play\.screenrig\.localhost:8088\/s\/[A-Za-z0-9_-]+$/);
     assert.equal(new URL(publicUrl).origin, new URL(playUrl).origin);
-    await run(["auth", "status"]);
+    await run(["agent", "status"]);
     await run(["doctor"]);
 
     const configPath = path.join(temp, "config", "screenrig", "config.json");

@@ -163,8 +163,6 @@ Commands:
   agent connect [--name NAME] [--print-url] [--timeout MS]
   agent status
   agent disconnect --yes [--allow-lockout]
-  auth status                         (deprecated alias for agent status)
-  auth revoke --yes [--allow-lockout] (deprecated alias for agent disconnect)
   dashboard [--print-url]
   app pack <directory> [--output FILE]
   app upload <directory> [--name NAME] [--no-wait] [--poll-ms MS]
@@ -594,9 +592,6 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
   if (group === "agent" && action === "status") {
     return agentStatus(args, runtime, resolved);
   }
-  if (group === "auth" && (action === "status" || action === undefined)) {
-    return agentStatus(args, runtime, resolved, true);
-  }
   if (group === "agent" && action === "connect") {
     return loggerOf(runtime).withLocal({ op: "agent.connect", message: "agent connect" }, () =>
       agentConnect(args, runtime, resolved),
@@ -608,10 +603,7 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
     );
   }
   if (group === "agent" && action === "disconnect") {
-    return agentDisconnect(args, runtime, resolved, false);
-  }
-  if (group === "auth" && action === "revoke") {
-    return agentDisconnect(args, runtime, resolved, true);
+    return agentDisconnect(args, runtime, resolved);
   }
   if (isAuthenticatedCommand(group, action) && !resolved.token) {
     if (resolved.agentConnection) {
@@ -695,23 +687,16 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
   if (group === "feedback") {
     return feedbackCommand(args, runtime, resolved, action);
   }
-  if (group === "agent" || group === "auth") {
+  if (group === "agent") {
     throw usageError("Unknown agent command. Use agent enroll, connect, status, or disconnect.", {
       command: "screenrig --help",
-      reason: "List implemented agent identity commands and deprecated auth aliases.",
+      reason: "List implemented agent identity commands.",
     });
   }
   throw usageError(`Unknown command: ${args.positionals.join(" ")}`, {
     command: "screenrig --help",
     reason: "List implemented commands.",
   });
-}
-
-function deprecatedWarning(command: "status" | "disconnect") {
-  return {
-    code: "deprecated_command",
-    message: `The auth command is deprecated. Use screenrig agent ${command}.`,
-  };
 }
 
 function safeAgentSummary(agent: Agent) {
@@ -734,12 +719,10 @@ async function agentStatus(
   args: ParsedArgs,
   runtime: CliRuntime,
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
-  deprecated = false,
 ): Promise<CommandResult> {
   if (args.positionals.length > 2) {
-    throw usageError(`${deprecated ? "auth" : "agent"} status does not accept positional arguments.`);
+    throw usageError("agent status does not accept positional arguments.");
   }
-  const warnings = deprecated ? [deprecatedWarning("status")] : [];
   if (resolved.agentConnection) {
     const connection = resolved.agentConnection;
     const data = {
@@ -749,14 +732,13 @@ async function agentStatus(
       ...(connection.expires_at ? { expires_at: connection.expires_at } : {}),
     };
     return {
-      envelope: successEnvelope(data, { warnings }),
+      envelope: successEnvelope(data),
       exitCode: ExitCode.Success,
       human: humanLines("Agent connection", [
         ["status", "connecting"],
         ["phase", data.phase],
         ["connection_id", connection.connection_id],
         ["expires_at", connection.expires_at],
-        ...(deprecated ? [["deprecated", "use screenrig agent status"] as [string, string]] : []),
       ]),
     };
   }
@@ -764,13 +746,12 @@ async function agentStatus(
     const local = resolved.lastAgent;
     const status = local ? "disconnected" : "not_enrolled";
     return {
-      envelope: successEnvelope({ status, ...(local ? { agent: local } : {}) }, { warnings }),
+      envelope: successEnvelope({ status, ...(local ? { agent: local } : {}) }),
       exitCode: ExitCode.Success,
       human: humanLines("Agent", [
         ["status", status],
         ["id", local?.id],
         ["name", local?.name],
-        ...(deprecated ? [["deprecated", "use screenrig agent status"] as [string, string]] : []),
       ]),
     };
   }
@@ -783,7 +764,7 @@ async function agentStatus(
     const agent = self.agent;
     const status = agent.state === "active" ? "active" : agent.state === "revoked" ? "disconnected" : "connecting";
     return {
-      envelope: successEnvelope({ status, connection_ready: self.connection_ready, agent: safeAgentSummary(agent) }, { request_id: client.requestId, warnings }),
+      envelope: successEnvelope({ status, connection_ready: self.connection_ready, agent: safeAgentSummary(agent) }, { request_id: client.requestId }),
       exitCode: ExitCode.Success,
       human: humanLines("Agent", [
         ["status", status],
@@ -794,19 +775,17 @@ async function agentStatus(
         ["version", agent.version],
         ["connection_ready", self.connection_ready ? "true" : "false"],
         ["last_used_at", agent.last_used_at],
-        ...(deprecated ? [["deprecated", "use screenrig agent status"] as [string, string]] : []),
       ]),
     };
   } catch (err) {
     if (!(err instanceof CliError) || err.problem.code !== "unauthorized") throw err;
     return {
-      envelope: successEnvelope({ status: "disconnected", credential_accepted: false, local_cleanup_required: true }, { warnings }),
+      envelope: successEnvelope({ status: "disconnected", credential_accepted: false, local_cleanup_required: true }),
       exitCode: ExitCode.Success,
       human: humanLines("Agent", [
         ["status", "disconnected"],
         ["credential_accepted", "false"],
         ["next", "run screenrig agent disconnect --yes to complete local cleanup before reconnecting"],
-        ...(deprecated ? [["deprecated", "use screenrig agent status"] as [string, string]] : []),
       ]),
     };
   }
@@ -1319,13 +1298,11 @@ async function agentDisconnect(
   args: ParsedArgs,
   runtime: CliRuntime,
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
-  deprecated: boolean,
 ): Promise<CommandResult> {
-  const invokedName = deprecated ? "auth revoke" : "agent disconnect";
-  const warnings = deprecated ? [deprecatedWarning("disconnect")] : [];
+  const invokedName = "agent disconnect";
   if (args.positionals.length !== 2) throw usageError(`${invokedName} does not accept positional arguments.`);
   if (!flagBool(args.flags, "yes")) {
-    throw usageError(`${invokedName} requires --yes. It revokes only this agent and preserves the account, screens, content, and other agents.${deprecated ? " This command is deprecated; use screenrig agent disconnect." : ""}`, {
+    throw usageError(`${invokedName} requires --yes. It revokes only this agent and preserves the account, screens, content, and other agents.`, {
       command: "screenrig agent disconnect --yes",
       reason: "Run only after explicitly accepting revocation of this installation.",
     });
@@ -1347,7 +1324,7 @@ async function agentDisconnect(
   try {
     response = await client.call({
       method: "POST",
-      path: deprecated ? "/api/v1/account/credential/revoke" : "/api/v1/agents/self/disconnect",
+      path: "/api/v1/agents/self/disconnect",
       ...(request.allow_last_agent ? { body: request } : {}),
     });
   } catch (err) {
@@ -1408,13 +1385,12 @@ async function agentDisconnect(
       account_preserved: true,
       screens_preserved: true,
       other_agents_preserved: true,
-    }, { request_id: client.requestId, warnings }),
+    }, { request_id: client.requestId }),
     exitCode: ExitCode.Success,
     human: humanLines("Agent disconnected", [
       ["local_credential", "removed"],
       ["account_screens_and_other_agents", "preserved"],
       ["reconnect", "run screenrig agent connect and approve with an existing dashboard passkey"],
-      ...(deprecated ? [["deprecated", "use screenrig agent disconnect --yes"] as [string, string]] : []),
     ]),
   };
 }
@@ -1636,11 +1612,9 @@ async function enrollForCommand(
               if (!item || typeof item !== "object") return false;
               return (item as { field?: string }).field === "beta_key";
             });
-            const legacyGate = err.problem.detail === "Enrollment request is invalid.";
-            if (namesBeta || legacyGate) {
+            if (namesBeta) {
               throw new CliError({
                 ...err.problem,
-                detail: namesBeta ? err.problem.detail : "Enrollment requires the control-plane beta key.",
                 next: err.problem.next ?? {
                   command: "screenrig --json --beta-key KEY agent enroll --email ADDRESS",
                   reason: "The control plane gates enrollment. Retry the same email with the enrollment beta key.",

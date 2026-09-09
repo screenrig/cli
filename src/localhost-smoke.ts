@@ -138,7 +138,7 @@ async function main(): Promise<void> {
     const pairingData = pairing.data as { public_url?: string; screen?: { id?: string } };
     assert.equal(pairingData.screen?.id, "scr_PAIRINGAAAAAAAAAAAAAAAA");
     assert.equal(pairingData.public_url, "https://play.screenrig.ai/s/scr_public_pairing");
-    await run("auth", "status");
+    await run("agent", "status");
     await runDoctor();
     await run("app", "pack", app);
     // This is the documented "web app on a screen" path: upload the directory,

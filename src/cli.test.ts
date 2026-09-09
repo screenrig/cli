@@ -188,6 +188,37 @@ test("agent enroll without a beta key maps a gated invalid_request onto --beta-k
       status: 400,
       detail: "Enrollment request is invalid.",
       code: "invalid_request",
+      errors: [{ field: "beta_key", code: "required", message: "An enrollment beta key is required." }],
+    },
+  }));
+  const { code, stdout, configDir } = await withRuntime(
+    ["--json", "agent", "enroll", "--email", "owner@example.com"],
+    transport,
+  );
+  assert.equal(code, ExitCode.Client, stdout);
+  const envelope = JSON.parse(stdout) as {
+    ok: boolean;
+    error: { code: string; detail: string; next?: { command: string } };
+  };
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.error.code, "invalid_request");
+  assert.equal(envelope.error.detail, "Enrollment request is invalid.");
+  assert.match(envelope.error.next?.command ?? "", /--beta-key/);
+  assert.match(envelope.error.next?.command ?? "", /agent enroll/);
+  assert.ok(!stdout.includes("owner@example.com"));
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("agent enroll preserves generic invalid_request without suggesting a beta key", async () => {
+  const transport = new FakeTransport().on("POST", "/api/v1/enrollments", () => ({
+    status: 400,
+    headers: { "content-type": "application/problem+json", "cache-control": "no-store" },
+    body: {
+      type: "https://screenrig.ai/problems/invalid-request",
+      title: "Request is invalid",
+      status: 400,
+      detail: "Enrollment request is invalid.",
+      code: "invalid_request",
       errors: [],
     },
   }));
@@ -202,9 +233,8 @@ test("agent enroll without a beta key maps a gated invalid_request onto --beta-k
   };
   assert.equal(envelope.ok, false);
   assert.equal(envelope.error.code, "invalid_request");
-  assert.equal(envelope.error.detail, "Enrollment requires the control-plane beta key.");
-  assert.match(envelope.error.next?.command ?? "", /--beta-key/);
-  assert.match(envelope.error.next?.command ?? "", /agent enroll/);
+  assert.equal(envelope.error.detail, "Enrollment request is invalid.");
+  assert.doesNotMatch(envelope.error.next?.command ?? "", /--beta-key/);
   assert.ok(!stdout.includes("owner@example.com"));
   await rm(configDir, { recursive: true, force: true });
 });
@@ -385,19 +415,24 @@ test("every authenticated command reports not_enrolled instead of enrolling", as
   }
 });
 
-test("agent status and deprecated auth status never enroll a missing installation", async () => {
+test("agent status never enrolls a missing installation", async () => {
   const transport = new FakeTransport();
   const status = await withRuntime(["--json", "agent", "status"], transport);
   assert.equal(status.code, 0, status.stdout);
   assert.equal(JSON.parse(status.stdout).data.status, "not_enrolled");
   assert.equal(transport.calls.length, 0);
-  const legacy = await withRuntime(["--json", "auth", "status"], transport);
-  assert.equal(legacy.code, 0, legacy.stdout);
-  assert.equal(JSON.parse(legacy.stdout).data.status, "not_enrolled");
-  assert.deepEqual(JSON.parse(legacy.stdout).warnings.map((item: { code: string }) => item.code), ["deprecated_command"]);
-  assert.equal(transport.calls.length, 0);
   await rm(status.configDir, { recursive: true, force: true });
-  await rm(legacy.configDir, { recursive: true, force: true });
+});
+
+test("unsupported auth aliases do not make requests or enroll", async () => {
+  const transport = new FakeTransport();
+  for (const command of [[], ["status"], ["revoke", "--yes"]]) {
+    const result = await withRuntime(["--json", "auth", ...command], transport);
+    assert.equal(result.code, ExitCode.Usage, result.stdout);
+    assert.equal(JSON.parse(result.stdout).error.code, "usage_error");
+    assert.equal(transport.calls.length, 0);
+    await rm(result.configDir, { recursive: true, force: true });
+  }
 });
 
 test("agent status reports whether a persisted passkey can authorize another agent", async () => {
@@ -849,7 +884,7 @@ test("existing credential skips enrollment and directly runs the original comman
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("auth revoke requires explicit confirmation and never auto-enrolls", async () => {
+test("agent disconnect requires explicit confirmation and never auto-enrolls", async () => {
   const transport = new FakeTransport();
   const configDir = await testTemp("revoke-confirm-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
@@ -857,28 +892,28 @@ test("auth revoke requires explicit confirmation and never auto-enrolls", async 
   const original = { api_url: "https://api.screenrig.ai", token: "sr_live_current_private_secret", account_id: "acc_current" };
   await writeConfigAtomic(configPath, original, fsLike);
 
-  let result = await withRuntime(["--json", "auth", "revoke"], transport, { fs: fsLike });
+  let result = await withRuntime(["--json", "agent", "disconnect"], transport, { fs: fsLike });
   assert.equal(result.code, ExitCode.Usage);
   assert.match((JSON.parse(result.stdout) as { error: { detail: string } }).error.detail, /requires --yes/);
   assert.deepEqual(await readConfigFile(configPath, fsLike), original);
   assert.equal(transport.calls.length, 0);
 
   await rm(configPath, { force: true });
-  result = await withRuntime(["--json", "auth", "revoke", "--yes"], transport, { fs: fsLike });
+  result = await withRuntime(["--json", "agent", "disconnect", "--yes"], transport, { fs: fsLike });
   assert.equal(result.code, ExitCode.Usage);
   assert.match((JSON.parse(result.stdout) as { error: { detail: string } }).error.detail, /No stored ScreenRig agent credential/);
   assert.equal(transport.calls.length, 0);
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("auth revoke confirms server success before atomically removing all local credential state", async () => {
+test("agent disconnect confirms server success before atomically removing all local credential state", async () => {
   const transport = new FakeTransport();
   transport.on("GET", "/api/v1/agents/self", () => ({
     status: 200,
     headers: { "cache-control": "private, no-store" },
     body: { agent: TEST_AGENT, connection_ready: true },
   }));
-  transport.on("POST", "/api/v1/account/credential/revoke", () => ({
+  transport.on("POST", "/api/v1/agents/self/disconnect", () => ({
     status: 204,
     headers: { "cache-control": "private, no-store", "x-request-id": "req_revokeAAAAAAAAAAAAAAAA" },
     body: undefined,
@@ -896,7 +931,7 @@ test("auth revoke confirms server success before atomically removing all local c
     browser_setup: { idempotency_key: "browser-setup-key", code: "ABC234" },
   }, fsLike);
 
-  const result = await withRuntime(["--json", "auth", "revoke", "--yes"], transport, { fs: fsLike });
+  const result = await withRuntime(["--json", "agent", "disconnect", "--yes"], transport, { fs: fsLike });
   assert.equal(result.code, 0, result.stdout);
   const envelope = JSON.parse(result.stdout) as { ok: true; data: Record<string, unknown>; warnings: Array<{ code: string }> };
   assert.deepEqual(envelope.data, {
@@ -906,9 +941,9 @@ test("auth revoke confirms server success before atomically removing all local c
     screens_preserved: true,
     other_agents_preserved: true,
   });
-  assert.deepEqual(envelope.warnings.map((warning) => warning.code), ["deprecated_command"]);
+  assert.deepEqual(envelope.warnings, []);
   assert.doesNotMatch(result.stdout, /current_private_secret|acc_current|enrollment-retry-key|browser-setup-key/);
-  assert.deepEqual(transport.calls.map((call) => call.path), ["/api/v1/agents/self", "/api/v1/account/credential/revoke"]);
+  assert.deepEqual(transport.calls.map((call) => call.path), ["/api/v1/agents/self", "/api/v1/agents/self/disconnect"]);
   assert.equal(transport.calls[1]?.headers?.authorization, `Bearer ${token}`);
   assert.equal(transport.calls[1]?.headers?.["idempotency-key"], undefined);
   const cleaned = await readConfigFile(configPath, fsLike);
@@ -919,14 +954,14 @@ test("auth revoke confirms server success before atomically removing all local c
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("auth revoke retains local state on a server failure and gives a safe retry", async () => {
+test("agent disconnect retains local state on a server failure and gives a safe retry", async () => {
   const transport = new FakeTransport();
   transport.on("GET", "/api/v1/agents/self", () => ({
     status: 200,
     headers: { "cache-control": "private, no-store" },
     body: { agent: TEST_AGENT, connection_ready: true },
   }));
-  transport.on("POST", "/api/v1/account/credential/revoke", () => ({
+  transport.on("POST", "/api/v1/agents/self/disconnect", () => ({
     status: 503,
     headers: { "content-type": "application/problem+json" },
     body: {
@@ -948,7 +983,7 @@ test("auth revoke retains local state on a server failure and gives a safe retry
   };
   await writeConfigAtomic(configPath, original, fsLike);
 
-  const result = await withRuntime(["--json", "auth", "revoke", "--yes"], transport, { fs: fsLike });
+  const result = await withRuntime(["--json", "agent", "disconnect", "--yes"], transport, { fs: fsLike });
   assert.equal(result.code, ExitCode.Server);
   const envelope = JSON.parse(result.stdout) as { error: { code: string; next: { command: string; reason: string } } };
   assert.equal(envelope.error.code, "dependency_unavailable");
@@ -959,14 +994,14 @@ test("auth revoke retains local state on a server failure and gives a safe retry
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("auth revoke retries the exact revoked bearer after cleanup failure and completes local cleanup", async () => {
+test("agent disconnect retries the exact revoked bearer after cleanup failure and completes local cleanup", async () => {
   const transport = new FakeTransport();
   transport.on("GET", "/api/v1/agents/self", () => ({
     status: 200,
     headers: { "cache-control": "private, no-store" },
     body: { agent: TEST_AGENT, connection_ready: true },
   }));
-  transport.on("POST", "/api/v1/account/credential/revoke", () => ({
+  transport.on("POST", "/api/v1/agents/self/disconnect", () => ({
     status: 204,
     headers: { "cache-control": "private, no-store" },
     body: undefined,
@@ -990,7 +1025,7 @@ test("auth revoke retries the exact revoked bearer after cleanup failure and com
     },
   };
 
-  const result = await withRuntime(["--json", "auth", "revoke", "--yes"], transport, { fs: interruptedFs });
+  const result = await withRuntime(["--json", "agent", "disconnect", "--yes"], transport, { fs: interruptedFs });
   assert.equal(result.code, ExitCode.Config);
   const envelope = JSON.parse(result.stdout) as { error: { detail: string; next: { command: string } } };
   assert.match(envelope.error.detail, /server disconnected.*atomic local cleanup failed/i);
@@ -998,7 +1033,7 @@ test("auth revoke retries the exact revoked bearer after cleanup failure and com
   assert.doesNotMatch(result.stdout, /current_private_secret/);
   assert.deepEqual(await readConfigFile(configPath, realFs), original);
 
-  const retry = await withRuntime(["--json", "auth", "revoke", "--yes"], transport, { fs: realFs });
+  const retry = await withRuntime(["--json", "agent", "disconnect", "--yes"], transport, { fs: realFs });
   assert.equal(retry.code, 0, retry.stdout);
   assert.equal(transport.calls.length, 4);
   assert.equal(transport.calls[3]?.headers?.authorization, `Bearer ${original.token}`);
@@ -1008,14 +1043,14 @@ test("auth revoke retries the exact revoked bearer after cleanup failure and com
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("auth revoke shares the last-agent guard and explicit allow-lockout override", async () => {
+test("agent disconnect shares the last-agent guard and explicit allow-lockout override", async () => {
   const transport = new FakeTransport();
   transport.on("GET", "/api/v1/agents/self", () => ({
     status: 200,
     headers: { "cache-control": "private, no-store" },
     body: { agent: TEST_AGENT, connection_ready: true },
   }));
-  transport.on("POST", "/api/v1/account/credential/revoke", (req) => {
+  transport.on("POST", "/api/v1/agents/self/disconnect", (req) => {
     if (req.body) {
       return { status: 204, headers: { "cache-control": "private, no-store" } as Record<string, string>, body: undefined };
     }
@@ -1030,12 +1065,12 @@ test("auth revoke shares the last-agent guard and explicit allow-lockout overrid
   const configPath = path.join(configDir, "screenrig", "config.json");
   const token = `sr_live_auth_lockout_${"L".repeat(43)}`;
   await writeConfigAtomic(configPath, { api_url: "https://api.screenrig.ai", token, agent_id: TEST_AGENT.id }, fsLike);
-  const guarded = await withRuntime(["--json", "auth", "revoke", "--yes"], transport, { fs: fsLike });
+  const guarded = await withRuntime(["--json", "agent", "disconnect", "--yes"], transport, { fs: fsLike });
   assert.equal(guarded.code, ExitCode.Conflict);
   assert.equal((JSON.parse(guarded.stdout) as { error: { next: { command: string } } }).error.next.command,
     "screenrig agent disconnect --yes --allow-lockout");
   assert.equal((await readConfigFile(configPath, fsLike))?.token, token);
-  const override = await withRuntime(["--json", "auth", "revoke", "--yes", "--allow-lockout"], transport, { fs: fsLike });
+  const override = await withRuntime(["--json", "agent", "disconnect", "--yes", "--allow-lockout"], transport, { fs: fsLike });
   assert.equal(override.code, 0, override.stdout);
   assert.deepEqual(transport.calls[3]?.body, { allow_last_agent: true });
   assert.equal((await readConfigFile(configPath, fsLike))?.token, undefined);
