@@ -79,10 +79,17 @@ command.
 
 ## Develop
 
-Commander 14 owns argument parsing, command selection, and help rendering while
-supporting Node 20.11. The command tree feeds both human and JSON help. The adapter
-keeps parser diagnostics inside the CLI error envelope and only forwards explicit
-options to handlers, including the existing `no-*` boolean flags.
+Commander 14 supports Node 20.11 and owns parsing, command selection, and help.
+Add commands in `src/cli-commands/`: each group registers native Commander commands
+with their arguments, options, descriptions, validation hooks, and bound handlers.
+There is no separate command schema or path-based dispatcher. Shared option
+parsers live beside these modules; human and JSON help read the registered tree.
+
+`src/program.ts` awaits Commander actions with `parseAsync`. The output boundary
+keeps one CLI envelope per invocation, and shared handler setup handles config,
+authentication, and logging. Only explicitly supplied options reach handlers,
+including the existing `no-*` switches. `parseArgv` is an inspection helper for
+tests; execution runs through Commander actions.
 
 ```sh
 npm ci

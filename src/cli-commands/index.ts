@@ -1,0 +1,41 @@
+import { registerGlobalOptions } from "./globals.js";
+import type { CommandActionBinder } from "./types.js";
+import type { Command } from "commander";
+import { registerAccountCommands } from "./account.js";
+import { registerAgentCommands } from "./agent.js";
+import { registerDashboardCommands } from "./dashboard.js";
+import { registerAppCommands } from "./app.js";
+import { registerMediaCommands } from "./media.js";
+import { registerComposeCommands } from "./compose.js";
+import { registerPlaylistCommands } from "./playlist.js";
+import { registerScreenCommands } from "./screen.js";
+import { registerBrowserCommands } from "./browser.js";
+import { registerKvCommands } from "./kv.js";
+import { registerCommentCommands } from "./comment.js";
+import { registerOperationsCommands } from "./operations.js";
+import { registerEventsCommands } from "./events.js";
+import { registerPlaybackCommands } from "./playback.js";
+import { registerFeedbackCommands } from "./feedback.js";
+import { registerDoctorCommands } from "./doctor.js";
+import { registerVersionCommands } from "./version.js";
+
+export function registerCommands(root: Command, bind: CommandActionBinder): void {
+  registerGlobalOptions(root);
+  registerAccountCommands(root, bind);
+  registerAgentCommands(root, bind);
+  registerDashboardCommands(root, bind);
+  registerAppCommands(root, bind);
+  registerMediaCommands(root, bind);
+  registerComposeCommands(root, bind);
+  registerPlaylistCommands(root, bind);
+  registerScreenCommands(root, bind);
+  registerBrowserCommands(root, bind);
+  registerKvCommands(root, bind);
+  registerCommentCommands(root, bind);
+  registerOperationsCommands(root, bind);
+  registerEventsCommands(root, bind);
+  registerPlaybackCommands(root, bind);
+  registerFeedbackCommands(root, bind);
+  registerDoctorCommands(root, bind);
+  registerVersionCommands(root, bind);
+}

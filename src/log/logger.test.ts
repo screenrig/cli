@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ApiClient } from "../client.js";
 import { parseArgv } from "../argv.js";
-import { USAGE } from "../commands.js";
+import { commandHelp } from "../help.js";
 import { preserveLogSocket, readConfigFile, resolveConfig, writeConfigAtomic, type ConfigFs } from "../config.js";
 import { ensureCredential } from "../enrollment.js";
 import { run, type CliRuntime } from "../main.js";
@@ -121,8 +121,8 @@ async function listenUnix(socketPath: string): Promise<{ events: LogEvent[]; wai
 }
 
 test("USAGE and argv do not define a log-socket flag", () => {
-  assert.doesNotMatch(USAGE, /\[--log-socket/);
-  assert.doesNotMatch(USAGE, /log_socket/);
+  assert.doesNotMatch(commandHelp().usage, /\[--log-socket/);
+  assert.doesNotMatch(commandHelp().usage, /log_socket/);
   assert.throws(() => parseArgv(["--log-socket", "/tmp/screenrig.sock", "version"]),
     (error: unknown) => error instanceof CliError && error.problem.code === "usage_error");
 });
