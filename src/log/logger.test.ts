@@ -123,9 +123,8 @@ async function listenUnix(socketPath: string): Promise<{ events: LogEvent[]; wai
 test("USAGE and argv do not define a log-socket flag", () => {
   assert.doesNotMatch(USAGE, /\[--log-socket/);
   assert.match(USAGE, /log_socket/);
-  const parsed = parseArgv(["--log-socket", "/tmp/screenrig.sock", "version"]);
-  assert.equal(parsed.flags["log-socket"], true);
-  assert.equal(parsed.positionals[0], "/tmp/screenrig.sock");
+  assert.throws(() => parseArgv(["--log-socket", "/tmp/screenrig.sock", "version"]),
+    (error: unknown) => error instanceof CliError && error.problem.code === "usage_error");
 });
 
 test("HTTP request and response share correlation_id with distinct event_id", async () => {
