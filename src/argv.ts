@@ -1,143 +1,47 @@
+import { BOOLEAN_FLAGS, COMMAND_SPECS, GLOBAL_FLAGS } from "./command-spec.js";
+import { usageError } from "./problems.js";
+
 export interface ParsedArgs {
   command: string[];
   flags: Record<string, string | boolean>;
   positionals: string[];
 }
 
-function takeValue(
-  argv: string[],
-  index: number,
-  current: string,
-): { value: string; nextIndex: number } {
-  const eq = current.indexOf("=");
-  if (eq >= 0) {
-    return { value: current.slice(eq + 1), nextIndex: index };
-  }
-  const next = argv[index + 1];
-  if (next === undefined || next.startsWith("-")) {
-    return { value: "", nextIndex: index };
-  }
-  return { value: next, nextIndex: index + 1 };
-}
-
-const VALUE_FLAGS = new Set([
-  "api-url",
-  "beta-key",
-  "email",
-  "token",
-  "config",
-  "idempotency-key",
-  "request-id",
-  "timeout",
-  "output",
-  "only",
-  "target-width",
-  "target-height",
-  "ink-padding",
-  "cursor",
-  "after",
-  "limit",
-  "if-match",
-  "revision",
-  "id",
-  "key",
-  "value",
-  "json-value",
-  "file",
-  "value-base64",
-  "application-id",
-  "playlist-id",
-  "timezone",
-  "screen-id",
-  "media-id",
-  "name",
-  "type",
-  "severity",
-  "operation-id",
-  "poll-ms",
-  "label",
-  "content-type",
-  "code",
-  "codec",
-  "preset",
-  "max-fps",
-  "max-edge",
-  "webp-quality",
-  "body",
-  "body-file",
-  "command",
-  "kind",
-  "primitive",
-  "level",
-  "text",
-  "duration-ms",
-  "tag",
-  "day",
-  "state",
-  "page",
-  "update",
-  "concurrency",
-  "frame-ms",
-  "prompt",
-  "aspect-ratio",
-  "quality",
-]);
-
 export function parseArgv(argv: string[]): ParsedArgs {
-  const flags: Record<string, string | boolean> = {};
+  const flags: Record<string, string | boolean> = Object.create(null) as Record<string, string | boolean>;
   const positionals: string[] = [];
+  const known = new Set<string>([...GLOBAL_FLAGS, ...COMMAND_SPECS.flatMap((spec) => spec.flags)]);
   for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg === undefined) {
-      continue;
-    }
+    const arg = argv[i]!;
     if (arg === "--") {
       positionals.push(...argv.slice(i + 1));
       break;
     }
-    if (arg === "--json") {
-      flags.json = true;
+    if (!arg.startsWith("-") || arg === "-") {
+      positionals.push(arg);
       continue;
     }
-    if (arg === "--no-wait") {
-      flags["no-wait"] = true;
-      continue;
-    }
-    if (arg === "--repair-config") {
-      flags["repair-config"] = true;
-      continue;
-    }
-    if (arg === "--help" || arg === "-h") {
-      flags.help = true;
-      continue;
-    }
-    if (arg === "--version" || arg === "-V") {
-      flags.version = true;
-      continue;
-    }
-    if (arg.startsWith("--")) {
-      const raw = arg.slice(2);
-      const name = raw.split("=")[0] ?? raw;
-      if (VALUE_FLAGS.has(name) || raw.includes("=")) {
-        const taken = takeValue(argv, i, raw);
-        if (taken.value === "") {
-          flags[name] = true;
-        } else {
-          flags[name] = taken.value;
-          i = taken.nextIndex;
-        }
-        continue;
-      }
+    const normalized = arg === "-h" ? "--help" : arg === "-V" ? "--version" : arg;
+    if (!normalized.startsWith("--")) throw usageError("Unsupported short option. Use --help to discover supported options.");
+    const eq = normalized.indexOf("=");
+    const name = normalized.slice(2, eq < 0 ? undefined : eq);
+    // Do not echo unknown names or values: either can contain credentials.
+    if (!known.has(name)) throw usageError("Unsupported option. Use --help to discover supported options.");
+    if (Object.hasOwn(flags, name)) throw usageError(`--${name} may be supplied only once.`);
+    if (BOOLEAN_FLAGS.has(name)) {
+      if (eq >= 0) throw usageError(`--${name} takes no value.`);
       flags[name] = true;
       continue;
     }
-    positionals.push(arg);
+    const value = eq >= 0 ? normalized.slice(eq + 1) : argv[i + 1];
+    if (value === undefined || (eq < 0 && value.startsWith("-") && !/^-\d/.test(value))) {
+      throw usageError(`--${name} requires a value.`);
+    }
+    if (value.length === 0 && name !== "value-base64") throw usageError(`--${name} requires a value.`);
+    flags[name] = value;
+    if (eq < 0) i += 1;
   }
-  return {
-    command: positionals.slice(0, 2),
-    flags,
-    positionals,
-  };
+  return { command: positionals.slice(0, 2), flags, positionals };
 }
 
 export function flagString(flags: Record<string, string | boolean>, name: string): string | undefined {

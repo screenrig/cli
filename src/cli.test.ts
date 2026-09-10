@@ -4660,11 +4660,10 @@ test("screen update cannot send observation", async () => {
     transport,
     { fs: fsLike },
   );
-  assert.equal(result.code, ExitCode.Success, result.stdout);
+  assert.equal(result.code, ExitCode.Usage, result.stdout);
   const patch = transport.calls.find((call) => call.method === "PATCH");
-  assert.equal(patch?.path, "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA");
-  assert.deepEqual(patch?.body, { name: "Lobby" });
-  assert.equal(JSON.stringify(patch?.body).includes("observation"), false);
+  assert.equal(patch, undefined);
+  assert.equal(transport.calls.length, 0, "unsupported flags must fail before any request");
   assert.equal(transport.calls.some((call) => call.path === "/runtime/v1/observation"), false);
   await rm(configDir, { recursive: true, force: true });
 });
@@ -4805,14 +4804,10 @@ test("screen update cannot send online, last_online_at, or last_ip", async () =>
     transport,
     { fs: fsLike },
   );
-  assert.equal(result.code, ExitCode.Success, result.stdout);
+  assert.equal(result.code, ExitCode.Usage, result.stdout);
   const patch = transport.calls.find((call) => call.method === "PATCH");
-  assert.equal(patch?.path, "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA");
-  assert.deepEqual(patch?.body, { name: "Lobby" });
-  const patchJson = JSON.stringify(patch?.body);
-  assert.equal(patchJson.includes("online"), false);
-  assert.equal(patchJson.includes("last_online_at"), false);
-  assert.equal(patchJson.includes("last_ip"), false);
+  assert.equal(patch, undefined);
+  assert.equal(transport.calls.length, 0, "unsupported flags must fail before any request");
   await rm(configDir, { recursive: true, force: true });
 });
 

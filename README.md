@@ -46,6 +46,22 @@ Choose by what the page is:
 - Slide-deck-like experiences: local unbilled `compose render`.
 - Live video, iframe, or webapp: write playlist primitives.
 
+## Application command results
+
+`app upload` and `app update` return the same JSON data paths with or without
+`--no-wait`: `data.application` contains the accepted application `id`,
+`release_id`, and `operation_id`; `data.pack` contains `sha256` and `file_count`.
+The accepted response does not include an application revision. Read `app show`
+for the current revision before an update.
+
+`data.operation` contains the observed completed operation when waiting. With
+`--no-wait` it is `null`: upload acceptance does not establish operation state
+or release readiness. Use `operations get <operation_id>` or
+`operations wait <operation_id>` to observe processing. The envelope's
+`operation_id` identifies that same operation in either mode. Existing flat
+accepted fields (`data.id`, `data.release_id`, `data.operation_id`) and
+`data.sha256` remain available as compatibility aliases in both modes.
+
 ## Configuration
 
 User-private config lives outside the replaceable plugin directory
