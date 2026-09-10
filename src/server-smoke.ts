@@ -156,10 +156,10 @@ async function main(): Promise<void> {
     assert.ok(playlistId && Number.isInteger(playlistRevision));
     await run(["playlist", "show", playlistId]);
     await run(["playlist", "list"]);
-    const updatedPlaylist = await run(["playlist", "update", playlistId, playlistFile, "--if-match", String(playlistRevision)]);
+    const updatedPlaylist = await run(["playlist", "update", playlistId, playlistFile, "--expect-rev", String(playlistRevision)]);
     playlistRevision = Number(updatedPlaylist.data?.revision);
 
-    const assignedScreen = await run(["screen", "assign", screenId, "--playlist-id", playlistId, "--if-match", String(screenRevision)]);
+    const assignedScreen = await run(["screen", "assign", screenId, "--playlist-id", playlistId, "--expect-rev", String(screenRevision)]);
     screenRevision = Number(assignedScreen.data?.revision);
 
     const pairingEventsResponse = await fetch(new URL("/runtime/v1/pairing-events", playUrl), {
@@ -209,9 +209,9 @@ async function main(): Promise<void> {
     const kv = await run(["kv", "set", "smoke", "--application-id", applicationId, "--json-value", "{\"status\":\"ok\"}"]);
     kvRevision = Number(kv.data?.revision);
     assert.ok(Number.isInteger(kvRevision));
-    const kvUpdated = await run(["kv", "set", "smoke", "--application-id", applicationId, "--json-value", "{\"status\":\"updated\"}", "--if-match", String(kvRevision)]);
+    const kvUpdated = await run(["kv", "set", "smoke", "--application-id", applicationId, "--json-value", "{\"status\":\"updated\"}", "--expect-rev", String(kvRevision)]);
     kvRevision = Number(kvUpdated.data?.revision);
-    const staleUpdate = await run(["kv", "set", "smoke", "--application-id", applicationId, "--json-value", "{\"status\":\"stale\"}", "--if-match", "1"], true);
+    const staleUpdate = await run(["kv", "set", "smoke", "--application-id", applicationId, "--json-value", "{\"status\":\"stale\"}", "--expect-rev", "1"], true);
     assert.equal(staleUpdate.ok, false);
     assert.equal(staleUpdate.error?.code, "revision_conflict");
     await run(["kv", "get", "smoke", "--application-id", applicationId]);
@@ -222,9 +222,9 @@ async function main(): Promise<void> {
     await run(["kv", "list", "--application-id", applicationId]);
     const events = await run(["events", "list"]);
     const cursor = String(events.data?.next_cursor ?? "");
-    await run(["kv", "delete", "smoke", "--application-id", applicationId, "--if-match", String(kvRevision)]);
+    await run(["kv", "delete", "smoke", "--application-id", applicationId, "--expect-rev", String(kvRevision)]);
     kvRevision = undefined;
-    await run(["kv", "delete", "smoke-binary", "--application-id", applicationId, "--if-match", String(kvBinaryRevision)]);
+    await run(["kv", "delete", "smoke-binary", "--application-id", applicationId, "--expect-rev", String(kvBinaryRevision)]);
     kvBinaryRevision = undefined;
     const followed = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
       const child = spawn(process.execPath, [path.join(packageRoot, "dist", "bin.js"), "--json", "events", "follow", "--after", cursor, "--timeout", "1500"], { cwd: packageRoot, env });
@@ -242,7 +242,7 @@ async function main(): Promise<void> {
       const screenBeforeRotation = await run(["screen", "show", screenId]);
       screenRevision = Number(screenBeforeRotation.data?.revision);
       assert.ok(Number.isInteger(screenRevision));
-      const candidate = await run(["screen", "rotate-public-id", screenId, "--if-match", String(screenRevision)], true);
+      const candidate = await run(["screen", "rotate-public-id", screenId, "--expect-rev", String(screenRevision)], true);
       if (candidate.ok) {
         rotated = candidate;
         break;
@@ -253,7 +253,7 @@ async function main(): Promise<void> {
     assert.ok(rotated, "screen rotation did not converge after manifest materialization revisions settled");
     screenRevision = Number(rotated.data?.revision);
     const revisionBeforeArchive = screenRevision;
-    const archived = await run(["screen", "archive", screenId, "--if-match", String(screenRevision)]);
+    const archived = await run(["screen", "archive", screenId, "--expect-rev", String(screenRevision)]);
     screenRevision = Number(archived.data?.revision);
     assert.equal(archived.data?.state, "archived", "screen archive must set state archived");
     assert.equal(screenRevision, revisionBeforeArchive + 1, "screen archive must advance the resource revision");
@@ -275,19 +275,19 @@ async function main(): Promise<void> {
     }) + "\n");
   } finally {
     if (applicationId && kvRevision) {
-      await run(["kv", "delete", "smoke", "--application-id", applicationId, "--if-match", String(kvRevision)], true).catch(() => undefined);
+      await run(["kv", "delete", "smoke", "--application-id", applicationId, "--expect-rev", String(kvRevision)], true).catch(() => undefined);
     }
     if (applicationId && kvBinaryRevision) {
-      await run(["kv", "delete", "smoke-binary", "--application-id", applicationId, "--if-match", String(kvBinaryRevision)], true).catch(() => undefined);
+      await run(["kv", "delete", "smoke-binary", "--application-id", applicationId, "--expect-rev", String(kvBinaryRevision)], true).catch(() => undefined);
     }
     if (mediaId && Number.isInteger(mediaRevision)) {
-      await run(["media", "delete", mediaId, "--if-match", String(mediaRevision)], true).catch(() => undefined);
+      await run(["media", "delete", mediaId, "--expect-rev", String(mediaRevision)], true).catch(() => undefined);
     }
     if (screenId && Number.isInteger(screenRevision)) {
-      await run(["screen", "delete", screenId, "--if-match", String(screenRevision)], true).catch(() => undefined);
+      await run(["screen", "delete", screenId, "--expect-rev", String(screenRevision)], true).catch(() => undefined);
     }
     if (playlistId && Number.isInteger(playlistRevision)) {
-      await run(["playlist", "delete", playlistId, "--if-match", String(playlistRevision)], true).catch(() => undefined);
+      await run(["playlist", "delete", playlistId, "--expect-rev", String(playlistRevision)], true).catch(() => undefined);
     }
     await rm(temp, { recursive: true, force: true });
   }

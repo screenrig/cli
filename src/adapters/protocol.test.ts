@@ -412,7 +412,7 @@ test("screen observation is optional, read-only, and absent from ScreenPatch", (
   // The CLI reads observation from GET /api/v1/screens/{id}. Players PUT the
   // runtime route; this command surface must not.
   assert.doesNotMatch(commands, /\/runtime\/v1\/observation/);
-  assert.match(commands, /screen update requires <id>, --if-match, and --name, --playlist-id, or --timezone/);
+  assert.match(commands, /screen update requires <id>, --expect-rev, and --name, --playlist-id, or --timezone/);
 });
 
 test("screen online is required, last_online_at and last_ip are optional, and ScreenPatch cannot write them", () => {
@@ -448,7 +448,7 @@ test("screen online is required, last_online_at and last_ip are optional, and Sc
   assert.match(screenSchema, /maxLength: 45/);
   assert.match(screenSchema, /ScreenPatch, pairing bodies, session[\s\S]*runtime manifest\s+body cannot write it/);
   assert.doesNotMatch(commands, /--online|--last-online-at|--last-ip/);
-  assert.match(commands, /screen update requires <id>, --if-match, and --name, --playlist-id, or --timezone/);
+  assert.match(commands, /screen update requires <id>, --expect-rev, and --name, --playlist-id, or --timezone/);
 });
 
 test("published problem codes include payment_required and dependency_timeout", () => {
@@ -872,7 +872,7 @@ test("opaque agent comments are optional on GET resources, dedicated comment rou
         assert.equal(options.has(name), action === "set");
         if (action === "set") assert.equal(options.get(name)?.type, "value");
       }
-      assert.equal(options.has("--if-match"), false);
+      assert.equal(options.has("--expect-rev"), false);
       assert.equal(options.has("--value-base64"), false);
     }
   }

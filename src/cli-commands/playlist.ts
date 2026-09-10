@@ -1,13 +1,24 @@
 import { usageError } from "../problems.js";
 import { nonnegativeInteger, positiveInteger, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handlePlaylistValidate, handlePlaylistPreview, handlePlaylistTemplates, handlePlaylistCreate, handlePlaylistUpdate, handlePlaylistExport, handlePlaylistImport, handlePlaylistShow, handlePlaylistList, handlePlaylistDelete } from "../commands.js";
+import { handlePlaylistInit, handlePlaylistValidate, handlePlaylistPreview, handlePlaylistTemplates, handlePlaylistCreate, handlePlaylistUpdate, handlePlaylistExport, handlePlaylistImport, handlePlaylistShow, handlePlaylistList, handlePlaylistDelete } from "../commands.js";
 import type { Command } from "commander";
 import { addCommandNotes } from "./notes.js";
 import { LOOK_AT_THE_CONTACT_SHEET } from "../playlist-preview.js";
 
 export function registerPlaylistCommands(root: Command, bind: CommandActionBinder): void {
   const playlist = root.command("playlist").description("Author, validate, preview, and manage playlists");
+
+  playlist.command("init").description("Prepare an editable full-screen playlist from ready media")
+    .argument("<media-ids...>", "Media identifiers in playback order")
+    .requiredOption("--name <NAME>", "Playlist name")
+    .requiredOption("--output <FILE>", "Create an editable playlist file")
+    .option("--screen <ID>", "Use this screen's reported playback dimensions")
+    .option("--target-width <PX>", "Override canvas width", positiveInteger("target-width"))
+    .option("--target-height <PX>", "Override canvas height", positiveInteger("target-height"))
+    .option("--duration-ms <MS>", "Image page duration (default: 8000)", positiveInteger("duration-ms"))
+    .option("--fit <FIT>", "Content fit: contain (default), cover, or fill")
+    .action(bind(handlePlaylistInit));
 
   playlist.command("validate").description("Validate a playlist file")
     .argument("<file>", "Local input file")
@@ -32,7 +43,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
   playlist.command("update").description("Update a playlist")
     .argument("<id>", "Playlist identifier")
     .argument("<file>", "Local input file")
-    .requiredOption("--if-match <REVISION>", "Require the current resource revision (required)", revision)
+    .requiredOption("--expect-rev <REVISION>", "Require the current resource revision (required)", revision)
     .action(bind(handlePlaylistUpdate));
 
   playlist.command("export").description("Export a playlist bundle")
@@ -44,16 +55,18 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .argument("<directory>", "Local directory")
     .option("--name <NAME>", "Set the imported playlist name")
     .option("--update <ID>", "Update this playlist when importing")
-    .option("--if-match <REVISION>", "Require the current resource revision", revision)
+    .option("--expect-rev <REVISION>", "Require the current resource revision", revision)
     .option("--poll-ms <MS>", "Set the operation polling interval", positiveInteger("poll-ms"))
     .hook("preAction", (command) => {
       const update = command.getOptionValueSource("update") === "cli";
-      const ifMatch = command.getOptionValueSource("ifMatch") === "cli";
-      if (update !== ifMatch) throw usageError("playlist import --update and --if-match must be supplied together.");
+      const ifMatch = command.getOptionValueSource("expectRev") === "cli";
+      if (update !== ifMatch) throw usageError("playlist import --update and --expect-rev must be supplied together.");
     })
     .action(bind(handlePlaylistImport));
 
-  playlist.command("show").description("Inspect a playlist")
+  playlist.command("show").description("Inspect a playlist or write an editable document")
+    .option("--output <FILE>", "Create an editable playlist file; report its revision on stdout")
+    .option("--editable", "Return an editable document and revision in the JSON envelope")
     .alias("get")
     .argument("<id>", "Playlist identifier")
     .action(bind(handlePlaylistShow));
@@ -63,6 +76,6 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
 
   playlist.command("delete").description("Delete a playlist")
     .argument("<id>", "Playlist identifier")
-    .requiredOption("--if-match <REVISION>", "Require the current resource revision (required)", revision)
+    .requiredOption("--expect-rev <REVISION>", "Require the current resource revision (required)", revision)
     .action(bind(handlePlaylistDelete));
 }

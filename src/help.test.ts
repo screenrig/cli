@@ -56,6 +56,7 @@ test("root help is compact and every command is discoverable through immediate c
     "compose catalog",
     "compose batch",
     "compose render",
+    "playlist init",
     "playlist validate",
     "playlist preview",
     "playlist templates",
@@ -66,6 +67,7 @@ test("root help is compact and every command is discoverable through immediate c
     "playlist show",
     "playlist list",
     "playlist delete",
+    "screen publish",
     "screen pair",
     "screen provision",
     "browser setup",
@@ -142,7 +144,7 @@ test("help paths, --help, and bare groups work before configuration or authentic
   }
   const action = invoke(["screen", "assign", "--help"]).data;
   assert.match(action.usage, /Usage: screenrig screen assign \[options\] <id>/);
-  for (const name of ["--playlist-id", "--if-match"]) {
+  for (const name of ["--playlist-id", "--expect-rev"]) {
     const option = action.options.find((item) => item.name === name);
     assert.equal(option?.type, "value");
     assert.ok(option?.description);
