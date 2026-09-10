@@ -13,6 +13,7 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .option("--aspect-ratio <RATIO>", "Choose the generated image aspect ratio")
     .option("--quality <low|medium|high>", "Choose generation quality")
     .option("--tag <TAG>", "Set the media tag")
+    .option("--no-progress", "Suppress stderr progress")
     .action(bind(handleMediaGenerate)), CREDIT_HELP);
 
   media.command("upload").description("Upload an image or video")
