@@ -58,7 +58,11 @@ test("unknown help paths fail rather than silently showing root help", () => {
   assert.throws(() => invoke(["help", "screen", "assgin"]), (error: unknown) => {
     const failure = error as { status: number; stdout: string };
     assert.equal(failure.status, 2);
-    assert.match(failure.stdout, /Unknown help topic/);
+    const envelope = JSON.parse(failure.stdout);
+    assert.equal(envelope.ok, false);
+    assert.equal(envelope.error.code, "usage_error");
+    assert.equal(envelope.error.status, 400);
+    assert.equal(Object.hasOwn(envelope, "data"), false);
     return true;
   });
 });
