@@ -1,0 +1,86 @@
+/** Supported invocation shapes shared by argument validation and help discovery. */
+export interface CommandSpec {
+  readonly path: readonly string[];
+  readonly minArgs: number;
+  readonly maxArgs: number;
+  readonly aliases?: readonly (readonly string[])[];
+  readonly flags: readonly string[];
+}
+
+export const GLOBAL_FLAGS = ["json", "help", "version", "api-url", "config", "request-id", "idempotency-key", "timeout", "beta-key", "token"] as const;
+
+export const BOOLEAN_FLAGS = new Set([
+  "json", "help", "version", "open-dashboard", "print-url", "yes", "allow-lockout",
+  "no-wait", "no-transcode", "no-progress", "no-audio", "clear-tag", "safe-area",
+  "lint-only", "combined", "open", "contact-sheet", "no-context", "repair-config",
+]);
+
+export const COMMAND_SPECS: readonly CommandSpec[] = [
+  { path: ["account", "show"], minArgs: 0, maxArgs: 0, flags: [] },
+  { path: ["agent", "enroll"], minArgs: 0, maxArgs: 0, flags: ["email", "name", "open-dashboard"] },
+  { path: ["agent", "connect"], minArgs: 0, maxArgs: 0, flags: ["name", "print-url"] },
+  { path: ["agent", "status"], minArgs: 0, maxArgs: 0, flags: [] },
+  { path: ["agent", "disconnect"], minArgs: 0, maxArgs: 0, flags: ["yes", "allow-lockout"] },
+  { path: ["dashboard"], minArgs: 0, maxArgs: 0, flags: ["print-url"] },
+  { path: ["app", "pack"], minArgs: 1, maxArgs: 1, flags: ["output"] },
+  { path: ["app", "upload"], minArgs: 1, maxArgs: 1, flags: ["name", "no-wait", "poll-ms"] },
+  { path: ["app", "update"], minArgs: 2, maxArgs: 2, flags: ["if-match", "no-wait", "poll-ms"] },
+  { path: ["app", "list"], minArgs: 0, maxArgs: 0, flags: [] },
+  { path: ["app", "show"], minArgs: 1, maxArgs: 1, flags: [] },
+  { path: ["media", "generate"], minArgs: 0, maxArgs: 0, flags: ["prompt", "aspect-ratio", "quality", "tag"] },
+  { path: ["media", "upload"], minArgs: 1, maxArgs: 1, flags: ["content-type", "tag", "no-wait", "poll-ms", "no-transcode", "codec", "max-fps", "max-edge", "webp-quality", "no-progress", "preset", "no-audio"] },
+  { path: ["media", "upload-batch"], minArgs: 1, maxArgs: 1, flags: ["state", "concurrency", "no-transcode", "tag", "no-progress", "poll-ms", "codec", "max-fps", "max-edge", "webp-quality", "preset", "no-audio"] },
+  { path: ["media", "show"], minArgs: 1, maxArgs: 1, flags: [] },
+  { path: ["media", "download"], minArgs: 1, maxArgs: 1, flags: ["output"] },
+  { path: ["media", "list"], minArgs: 0, maxArgs: 0, flags: ["tag", "primitive"] },
+  { path: ["media", "update"], minArgs: 1, maxArgs: 1, flags: ["tag", "clear-tag", "if-match"] },
+  { path: ["media", "delete"], minArgs: 1, maxArgs: 1, flags: ["if-match"] },
+  { path: ["compose", "catalog"], minArgs: 0, maxArgs: 0, flags: [] },
+  { path: ["compose", "batch"], minArgs: 1, maxArgs: 1, flags: ["output", "only", "target-width", "target-height", "safe-area", "lint-only"] },
+  { path: ["compose", "render"], minArgs: 1, maxArgs: 1, flags: ["output", "combined", "target-width", "target-height", "safe-area", "open", "lint-only"] },
+  { path: ["playlist", "validate"], minArgs: 1, maxArgs: 1, flags: ["lint-only"] },
+  { path: ["playlist", "preview"], minArgs: 1, maxArgs: 1, flags: ["output", "frame-ms", "contact-sheet", "lint-only"] },
+  { path: ["playlist", "templates"], minArgs: 0, maxArgs: 0, flags: [] },
+  { path: ["playlist", "create"], minArgs: 1, maxArgs: 1, flags: [] },
+  { path: ["playlist", "update"], minArgs: 2, maxArgs: 2, flags: ["if-match"] },
+  { path: ["playlist", "export"], minArgs: 1, maxArgs: 1, flags: ["output"] },
+  { path: ["playlist", "import"], minArgs: 1, maxArgs: 1, flags: ["name", "update", "if-match", "poll-ms"] },
+  { path: ["playlist", "show"], aliases: [["playlist", "get"]], minArgs: 1, maxArgs: 1, flags: [] },
+  { path: ["playlist", "list"], minArgs: 0, maxArgs: 0, flags: [] },
+  { path: ["playlist", "delete"], minArgs: 1, maxArgs: 1, flags: ["if-match"] },
+  { path: ["screen", "pair"], minArgs: 1, maxArgs: 1, flags: ["label"] },
+  { path: ["screen", "provision"], minArgs: 0, maxArgs: 0, flags: ["open", "print-url", "label"] },
+  { path: ["browser", "setup"], minArgs: 0, maxArgs: 0, flags: ["code", "open"] },
+  { path: ["screen", "update"], minArgs: 1, maxArgs: 1, flags: ["name", "playlist-id", "timezone", "if-match"] },
+  { path: ["screen", "list"], minArgs: 0, maxArgs: 0, flags: ["state"] },
+  { path: ["screen", "show"], minArgs: 1, maxArgs: 1, flags: [] },
+  { path: ["screen", "assign"], minArgs: 1, maxArgs: 1, flags: ["playlist-id", "if-match"] },
+  { path: ["screen", "set-timezone"], minArgs: 1, maxArgs: 1, flags: ["timezone", "if-match"] },
+  { path: ["screen", "archive"], minArgs: 1, maxArgs: 1, flags: ["if-match"] },
+  { path: ["screen", "unarchive"], minArgs: 1, maxArgs: 1, flags: ["if-match"] },
+  { path: ["screen", "delete"], minArgs: 1, maxArgs: 1, flags: ["if-match"] },
+  { path: ["screen", "rotate-public-id"], minArgs: 1, maxArgs: 1, flags: ["if-match"] },
+  { path: ["screen", "toast"], minArgs: 1, maxArgs: 1, flags: ["text", "level", "duration-ms"] },
+  { path: ["screen", "screenshot"], minArgs: 1, maxArgs: 1, flags: ["output", "poll-ms"] },
+  { path: ["kv", "get"], minArgs: 1, maxArgs: 1, flags: ["application-id"] },
+  { path: ["kv", "set"], minArgs: 1, maxArgs: 1, flags: ["application-id", "json-value", "file", "value-base64", "content-type", "if-match"] },
+  { path: ["kv", "delete"], minArgs: 1, maxArgs: 1, flags: ["application-id", "if-match"] },
+  { path: ["kv", "list"], minArgs: 0, maxArgs: 0, flags: ["application-id"] },
+  { path: ["comment", "show", "screen"], minArgs: 1, maxArgs: 1, flags: [] },
+  { path: ["comment", "show", "playlist"], minArgs: 1, maxArgs: 1, flags: ["page"] },
+  { path: ["comment", "set", "screen"], minArgs: 1, maxArgs: 1, flags: ["json-value", "file"] },
+  { path: ["comment", "set", "playlist"], minArgs: 1, maxArgs: 1, flags: ["page", "json-value", "file"] },
+  { path: ["comment", "delete", "screen"], minArgs: 1, maxArgs: 1, flags: [] },
+  { path: ["comment", "delete", "playlist"], minArgs: 1, maxArgs: 1, flags: ["page"] },
+  { path: ["operations", "get"], minArgs: 1, maxArgs: 1, flags: [] },
+  { path: ["operations", "wait"], minArgs: 1, maxArgs: 1, flags: ["poll-ms"] },
+  { path: ["operations", "cancel"], minArgs: 1, maxArgs: 1, flags: [] },
+  { path: ["events", "list"], minArgs: 0, maxArgs: 0, flags: ["after", "cursor", "limit"] },
+  { path: ["events", "follow"], minArgs: 0, maxArgs: 0, flags: ["after", "cursor"] },
+  { path: ["playback", "list"], minArgs: 0, maxArgs: 0, flags: ["screen-id", "media-id", "day"] },
+  { path: ["feedback", "bug"], minArgs: 1, maxArgs: 1, flags: ["body", "body-file", "command", "no-context"] },
+  { path: ["feedback", "feature"], minArgs: 1, maxArgs: 1, flags: ["body", "body-file", "command", "no-context"] },
+  { path: ["feedback", "list"], minArgs: 0, maxArgs: 0, flags: ["kind"] },
+  { path: ["doctor"], minArgs: 0, maxArgs: 0, flags: ["repair-config"] },
+  { path: ["version"], minArgs: 0, maxArgs: 0, flags: [] },
+];

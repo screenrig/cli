@@ -138,6 +138,7 @@ import {
   type AgentConnectionConfig,
 } from "./agent-identity.js";
 import { CLI_VERSION } from "./version.js";
+import { validateInvocation } from "./validate-invocation.js";
 
 export { CLI_VERSION };
 
@@ -474,6 +475,7 @@ function humanLines(title: string, fields: Array<[string, string | undefined]>):
 }
 
 export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<CommandResult> {
+  validateInvocation(args);
   const group = args.positionals[0];
   const action = args.positionals[1];
   if (!group || flagBool(args.flags, "help") || group === "help") {
