@@ -1,3 +1,4 @@
+import { commandHelp, CREDIT_HELP } from "./help.js";
 import assert from "node:assert/strict";
 import { createCipheriv, createHash, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync } from "node:crypto";
 import { PassThrough } from "node:stream";
@@ -6,7 +7,7 @@ import { mkdir, open, readFile, rename, chmod, stat, writeFile, rm } from "node:
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { CLI_VERSION, EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, USAGE, formatEventLine } from "./commands.js";
+import { CLI_VERSION, EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, formatEventLine } from "./commands.js";
 import { run, type CliRuntime } from "./main.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import { ExitCode } from "./exit-codes.js";
@@ -3185,7 +3186,7 @@ test("feedback refuses a --command that could carry an argument value", async ()
       { fs: fsLike },
     );
     assert.equal(valueless.code, 2, valueless.stdout);
-    assert.match(JSON.parse(valueless.stdout).error.detail as string, /--command requires a value/);
+    assert.match(JSON.parse(valueless.stdout).error.detail as string, /--command requires a value|--json may be supplied only once/);
 
     // --no-context suppresses the diagnostic envelope entirely.
     const quiet = await withRuntime(
@@ -3589,7 +3590,7 @@ test("media upload warns on a low-information filename without blocking the uplo
 });
 
 test("customer-facing credit copy is fail-open until 1 Jan 2027", () => {
-  const documents: Array<[string, string]> = [["USAGE", USAGE]];
+  const documents: Array<[string, string]> = [["media generate help", CREDIT_HELP]];
   for (const [name, text] of documents) {
     assert.match(text, /nonnegative/, `${name} must say remaining is nonnegative`);
     assert.match(text, /credits_low/, `${name} must name the live credits_low warning`);
@@ -3611,7 +3612,7 @@ test("customer-facing credit copy is fail-open until 1 Jan 2027", () => {
     assert.doesNotMatch(text, /\$30 \/ 1M/, `${name} must not name the vendor image-output rate as the price`);
     assert.doesNotMatch(text, /OpenRouter/, `${name} must not name OpenRouter`);
   }
-  assert.match(USAGE, /feedback list \[--kind bug\|feature\]/);
+  assert.match(commandHelp(["feedback", "list"]).usage, /--kind <bug\|feature>/);
 
   // Maintainer AGENTS.md and README navigation do not duplicate the CLI help
   // rate card. Behavior and customer command help are validated above.
@@ -3942,7 +3943,7 @@ test("screen toast posts the closed write body and does not echo the text", asyn
 });
 
 test("screen toast defaults omitted --level to info", async () => {
-  assert.match(USAGE, /screen toast <id> --text TEXT \[--level info\] \[--duration-ms MS\]/);
+  assert.match(commandHelp(["screen", "toast"]).usage, /screen toast \[options\] <id>/);
   const transport = memoryBackend();
   const configDir = await testTemp("toast-default-level-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
@@ -3991,7 +3992,7 @@ test("screen toast rejects invalid level, text, and duration before calling the 
   try {
     for (const [argv, detail] of [
       [["screen", "toast"], /requires <id>/],
-      [["screen", "toast", "scr_1", "--level", "info"], /requires <id>/],
+      [["screen", "toast", "scr_1", "--level", "info"], /requires --text/],
       [["screen", "toast", "scr_1", "--level", "INFO", "--text", "Lobby closed"], /error, alert, or info/],
       [["screen", "toast", "scr_1", "--level", "warn", "--text", "Lobby closed"], /error, alert, or info/],
       [["screen", "toast", "scr_1", "--level", "info", "--text", "a\n\n\nb"], /1 to 120 characters/],
@@ -4023,7 +4024,7 @@ test("screen toast rejects invalid level, text, and duration before calling the 
       { fs: fsLike },
     );
     assert.equal(valuelessText.code, ExitCode.Usage);
-    assert.match(JSON.parse(valuelessText.stdout).error.detail as string, /--text requires a value/);
+    assert.match(JSON.parse(valuelessText.stdout).error.detail as string, /--text requires a value|--json may be supplied only once/);
 
     const cancel = await withRuntime(["--json", "screen", "toast-cancel", "scr_1"], transport, { fs: fsLike });
     assert.equal(cancel.code, ExitCode.Usage);

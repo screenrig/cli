@@ -4,7 +4,7 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { loadImage } from "@napi-rs/canvas";
-import { USAGE } from "./commands.js";
+import { commandHelp } from "./help.js";
 import { ExitCode } from "./exit-codes.js";
 import { run, type CliRuntime } from "./main.js";
 import type { ConfigFs } from "./config.js";
@@ -91,9 +91,12 @@ function iframePage(id: string, extra: Record<string, unknown> = {}): Record<str
 }
 
 test("USAGE and README sentence is printed verbatim", () => {
-  assert.match(USAGE, /playlist preview <file\|id> --output DIR \[--frame-ms MS\] \[--contact-sheet\] \[--lint-only\]/);
-  assert.ok(USAGE.includes(LOOK_AT_THE_CONTACT_SHEET));
-  assert.match(USAGE, /\[--lint-only\]/);
+  const help = commandHelp(["playlist", "preview"]);
+  assert.match(help.synopsis[0]!, /playlist preview \[options\] <file\|id>/);
+  assert.ok(help.usage.includes(LOOK_AT_THE_CONTACT_SHEET));
+  for (const [name, type] of [["--output", "value"], ["--frame-ms", "value"], ["--contact-sheet", "boolean"], ["--lint-only", "boolean"]]) {
+    assert.equal(help.options.find((option) => option.name === name)?.type, type);
+  }
 });
 
 test("playlist preview writes N*3 stable files and a 6-column contact sheet", async () => {

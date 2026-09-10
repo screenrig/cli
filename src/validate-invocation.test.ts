@@ -4,7 +4,6 @@ import { parseArgv } from "./argv.js";
 import { dispatch } from "./commands.js";
 import { CliError } from "./problems.js";
 import type { CliRuntime } from "./runtime.js";
-import { validateInvocation } from "./validate-invocation.js";
 
 const invalid = [
   ["screen", "update", "scr_TEST", "--name", "Lobby", "--if-match", "1", "--dry-run"],
@@ -48,12 +47,12 @@ test("supported values, aliases, empty byte payload, and help paths remain valid
     ["kv", "set", "key", "--application-id", "app_TEST", "--value-base64=", "--content-type", "text/plain"],
     ["--help"], ["--version"], ["screen"], ["comment", "show"],
     ["screen", "assign", "--help"], ["help", "comment", "show", "screen"], ["help", "help"],
-  ]) assert.doesNotThrow(() => validateInvocation(parseArgv(argv)), JSON.stringify(argv));
+  ]) assert.doesNotThrow(() => parseArgv(argv), JSON.stringify(argv));
   assert.equal(parseArgv(["app", "pack", "--", "--directory"]).positionals[2], "--directory");
 });
 
 test("unknown option names and invalid values never appear in usage errors", () => {
   for (const argv of [["screen", "list", "--private-secret=value"], ["screen", "list", "--timeout=private-secret"]]) {
-    assert.throws(() => validateInvocation(parseArgv(argv)), (error: unknown) => error instanceof CliError && !JSON.stringify(error.problem).includes("private-secret"));
+    assert.throws(() => parseArgv(argv), (error: unknown) => error instanceof CliError && !JSON.stringify(error.problem).includes("private-secret"));
   }
 });

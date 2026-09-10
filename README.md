@@ -33,6 +33,16 @@ Commands return JSON envelopes an agent can branch on. Customer surface is
 content (`app`, `media`, `compose`), playlists, and screens. Full reference:
 [https://screenrig.ai/docs/cli.md](https://screenrig.ai/docs/cli.md).
 
+Discover commands progressively with `screenrig --help`, `screenrig screen --help`,
+and `screenrig screen assign --help`. Deeper groups work the same way:
+`screenrig comment show --help`. `screenrig help screen assign` is equivalent.
+Add `--json` for structured child command paths, invocation syntax, and option types;
+help runs without configuration or authentication. Command-specific options follow
+that command, for example `screenrig screen update ID --name Lobby --if-match 1`.
+Global options such as `--json` may appear before or after the command. Use
+`--name=VALUE` for a value starting with a dash, and `--` before option-like file
+names. Duplicate options are rejected.
+
 Choose by what the page is:
 
 - Already have the file: `media upload`, then a playlist and `screen assign`.
@@ -68,6 +78,11 @@ operation log. There is no `--log-socket` flag. Connect failure never fails the
 command.
 
 ## Develop
+
+Commander 14 owns argument parsing, command selection, and help rendering while
+supporting Node 20.11. The command tree feeds both human and JSON help. The adapter
+keeps parser diagnostics inside the CLI error envelope and only forwards explicit
+options to handlers, including the existing `no-*` boolean flags.
 
 ```sh
 npm ci
