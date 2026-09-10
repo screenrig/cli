@@ -3,7 +3,8 @@ import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { COMMAND_SPECS } from "./command-spec.js";
-import { commandHelp } from "./help.js";
+import { createCommandTree, findCommand } from "./command-tree.js";
+import { commandHelp, leafCommandPaths } from "./help.js";
 import { CLI_VERSION } from "./version.js";
 
 const bin = fileURLToPath(new URL("./bin.js", import.meta.url));
@@ -15,14 +16,16 @@ function invoke(args: string[]): { data: ReturnType<typeof commandHelp> & { vers
 
 test("root help is compact and every command is discoverable through immediate children", () => {
   const root = commandHelp();
-  assert.ok(root.usage.split("\n").length < 35);
-  assert.doesNotMatch(root.usage, /localhost|log_socket|media upload|screen assign|--token/);
+  const commanderHelp = root.usage.split(/\n\nAll commands:\n/)[0]!;
+  assert.ok(commanderHelp.split("\n").length < 35);
+  assert.doesNotMatch(root.usage, /localhost|log_socket|--token/);
   const discovered: string[] = [];
   function visit(path: string[]): void {
     const help = commandHelp(path);
     if (help.kind === "command") {
       if (path.join(" ") !== "help") discovered.push(path.join(" "));
       assert.ok(help.synopsis.every((line) => line.startsWith(`screenrig ${path.join(" ")}`)));
+      assert.equal(help.usage.includes("\nAll commands:\n"), false);
       return;
     }
     for (const child of help.commands) {
@@ -32,6 +35,37 @@ test("root help is compact and every command is discoverable through immediate c
   }
   visit([]);
   assert.deepEqual(discovered.sort(), COMMAND_SPECS.map((spec) => spec.path.join(" ")).sort());
+  const inventory = leafCommandPaths(createCommandTree().root);
+  assert.ok(inventory.includes("help"));
+  for (const path of inventory) {
+    assert.ok(root.usage.includes(path), path);
+  }
+  assert.ok(root.commands.every((child) => child.path.length === 1));
+  assert.equal(root.commands.some((child) => child.name === "generate"), false);
+});
+
+test("group help stays focused and still names descendant leaf paths", () => {
+  const media = commandHelp(["media"]);
+  assert.match(media.usage, /Usage: screenrig media \[options\] \[command\]/);
+  assert.ok(media.commands.every((child) => child.path[0] === "media" && child.path.length === 2));
+  assert.deepEqual(media.commands.map((child) => child.name), [
+    "generate", "upload", "upload-batch", "show", "download", "list", "update", "delete",
+  ]);
+  for (const path of leafCommandPaths(findCommand(createCommandTree().root, ["media"])!)) {
+    assert.ok(media.usage.includes(path), path);
+  }
+  assert.doesNotMatch(media.usage, /screen assign|account show|agent enroll|playlist create/);
+});
+
+test("human root --help includes every taught leaf command path", () => {
+  const text = execFileSync(process.execPath, [bin, "--help"], {
+    encoding: "utf8", env: { ...process.env, SCREENRIG_CONFIG: "/nonexistent/screenrig-help-config" },
+  });
+  for (const spec of COMMAND_SPECS) {
+    const path = spec.path.join(" ");
+    assert.ok(text.includes(path), path);
+    for (const alias of spec.aliases ?? []) assert.ok(text.includes(alias.join(" ")), alias.join(" "));
+  }
 });
 
 test("help paths, --help, and bare groups work before configuration or authentication", () => {
