@@ -7,7 +7,6 @@ import { test } from "node:test";
 import type { MediaUploadDeclaration, Operation } from "./adapters/protocol.js";
 import { ApiClient } from "./client.js";
 import { commandHelp } from "./help.js";
-const USAGE = commandHelp(["media", "upload-batch"]).usage;
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { createMemoryLogger } from "./log/logger.js";
@@ -224,8 +223,13 @@ async function writeManifest(dir: string, files: string[]): Promise<string> {
 }
 
 test("USAGE lists media upload-batch", () => {
-  assert.match(USAGE, /media upload-batch <manifest\.json> --state FILE \[--concurrency N\]/);
-  assert.match(USAGE, /\[--no-transcode\] \[--tag TAG\] \[--no-progress\]/);
+  const help = commandHelp(["media", "upload-batch"]);
+  assert.match(help.synopsis[0]!, /media upload-batch \[options\] <manifest\.json>/);
+  for (const [name, type] of [["--state", "value"], ["--concurrency", "value"], ["--no-transcode", "boolean"], ["--tag", "value"], ["--no-progress", "boolean"]]) {
+    const option = help.options.find((item) => item.name === name);
+    assert.equal(option?.type, type);
+    assert.ok(option?.description);
+  }
 });
 
 test("backoff honours Retry-After and otherwise uses capped equal jitter", () => {

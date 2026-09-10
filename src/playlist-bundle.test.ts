@@ -20,7 +20,6 @@ import { test } from "node:test";
 import { parseArgv } from "./argv.js";
 import { ApiClient } from "./client.js";
 import { commandHelp } from "./help.js";
-const USAGE = ["export", "import"].map((action) => commandHelp(["playlist", action]).usage).join("\n");
 import { run, type CliRuntime } from "./main.js";
 import {
   PLAYLIST_BUNDLE_MANIFEST,
@@ -999,8 +998,14 @@ test("command parser and JSON help expose playlist export/import including updat
   const parsed = parseArgv(["playlist", "import", "./bundle", "--update", "pl_TARGET", "--if-match", "8"]);
   assert.equal(parsed.flags.update, "pl_TARGET");
   assert.equal(parsed.flags["if-match"], "8");
-  assert.match(USAGE, /playlist export <id> --output DIRECTORY/);
-  assert.match(USAGE, /playlist import <directory> \[--name NAME\] \[--update ID --if-match REVISION\]/);
+  const exportHelp = commandHelp(["playlist", "export"]);
+  assert.match(exportHelp.synopsis[0]!, /playlist export \[options\] <id>/);
+  assert.equal(exportHelp.options.find((option) => option.name === "--output")?.type, "value");
+  const importHelp = commandHelp(["playlist", "import"]);
+  assert.match(importHelp.synopsis[0]!, /playlist import \[options\] <directory>/);
+  for (const name of ["--name", "--update", "--if-match"]) {
+    assert.equal(importHelp.options.find((option) => option.name === name)?.type, "value");
+  }
 
   const stdout = new PassThrough();
   const stderr = new PassThrough();

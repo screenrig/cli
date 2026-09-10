@@ -860,14 +860,21 @@ test("opaque agent comments are optional on GET resources, dedicated comment rou
   assert.match(screenComments, /parameters: \[\{ \$ref: "#\/components\/parameters\/IdempotencyKey" \}\]/);
   assert.doesNotMatch(screenComments, /IfMatch/);
 
-  const commentHelp = ["show", "set", "delete"].flatMap((action) =>
-    ["screen", "playlist"].map((target) => commandHelp(["comment", action, target]).usage)).join("\n");
-  assert.match(commentHelp, /comment show screen <id>/);
-  assert.match(commentHelp, /comment show playlist <id> \[--page PAGE_ID\]/);
-  assert.match(commentHelp, /comment set screen <id> \(--json-value JSON \| --file FILE\)/);
-  assert.match(commentHelp, /comment set playlist <id> \[--page PAGE_ID\] \(--json-value JSON \| --file FILE\)/);
-  assert.match(commentHelp, /comment delete screen <id>/);
-  assert.match(commentHelp, /comment delete playlist <id> \[--page PAGE_ID\]/);
+  for (const action of ["show", "set", "delete"]) {
+    for (const target of ["screen", "playlist"]) {
+      const help = commandHelp(["comment", action, target]);
+      assert.match(help.synopsis[0]!, new RegExp(`comment ${action} ${target} \\[options\\] <id>`));
+      const options = new Map(help.options.map((option) => [option.name, option]));
+      assert.equal(options.has("--page"), target === "playlist");
+      if (target === "playlist") assert.equal(options.get("--page")?.type, "value");
+      for (const name of ["--json-value", "--file"]) {
+        assert.equal(options.has(name), action === "set");
+        if (action === "set") assert.equal(options.get(name)?.type, "value");
+      }
+      assert.equal(options.has("--if-match"), false);
+      assert.equal(options.has("--value-base64"), false);
+    }
+  }
   assert.doesNotMatch(commands, /comment\/screen\/:id/);
   assert.doesNotMatch(commands, /--value-base64.*comment/);
 });

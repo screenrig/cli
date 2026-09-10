@@ -42,7 +42,12 @@ test("help paths, --help, and bare groups work before configuration or authentic
     if (flagged.data.kind === "group") assert.deepEqual(flagged, invoke(path));
   }
   const action = invoke(["screen", "assign", "--help"]).data;
-  assert.match(action.usage, /--playlist-id ID --if-match REVISION/);
+  assert.match(action.usage, /Usage: screenrig screen assign \[options\] <id>/);
+  for (const name of ["--playlist-id", "--if-match"]) {
+    const option = action.options.find((item) => item.name === name);
+    assert.equal(option?.type, "value");
+    assert.ok(option?.description);
+  }
   assert.ok(action.options.some((option) => option.name === "--playlist-id" && option.type === "value"));
   assert.deepEqual(invoke(["comment", "show", "--help"]).data.commands.map((item) => item.name), ["screen", "playlist"]);
 });
@@ -75,4 +80,14 @@ test("compatibility aliases resolve canonical help", () => {
 test("help appended to an invocation resolves the command without echoing argument values", () => {
   assert.deepEqual(invoke(["screen", "assign", "scr_TEST", "--help"]), invoke(["screen", "assign", "--help"]));
   assert.deepEqual(invoke(["playlist", "get", "pl_TEST", "--help"]), invoke(["playlist", "show", "--help"]));
+});
+
+test("negative switches are documented as booleans without value placeholders", () => {
+  const help = invoke(["media", "upload", "--help"]).data;
+  for (const name of ["--no-wait", "--no-transcode", "--no-progress", "--no-audio"]) {
+    const option = help.options.find((item) => item.name === name);
+    assert.equal(option?.type, "boolean", name);
+    assert.ok(option?.description, name);
+    assert.match(help.usage, new RegExp(`${name}\\s+[^<\\s]`));
+  }
 });

@@ -137,9 +137,7 @@ import {
   validateAgentConnectionStart,
   type AgentConnectionConfig,
 } from "./agent-identity.js";
-import { commandHelp, isHelpGroup } from "./help.js";
 import { CLI_VERSION } from "./version.js";
-import { validateInvocation } from "./validate-invocation.js";
 
 export { CLI_VERSION };
 
@@ -362,7 +360,6 @@ function humanLines(title: string, fields: Array<[string, string | undefined]>):
 }
 
 export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<CommandResult> {
-  validateInvocation(args);
   const group = args.positionals[0];
   const action = args.positionals[1];
   if ((flagBool(args.flags, "version") || group === "version") && !flagBool(args.flags, "help") && group !== "help") {
@@ -372,14 +369,16 @@ export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<C
       human: `screenrig ${CLI_VERSION}`,
     };
   }
-  if (!group || flagBool(args.flags, "help") || group === "help" || isHelpGroup(args.positionals)) {
-    const help = commandHelp(group === "help" ? args.positionals.slice(1) : args.positionals, group !== "help");
+  if (args.help) {
+    const help = args.help;
     return {
       envelope: successEnvelope(help),
       exitCode: ExitCode.Success,
       human: help.usage,
     };
   }
+
+  if (!group) throw usageError("A command is required.");
 
   const repair = flagBool(args.flags, "repair-config");
   let resolved = await resolveConfig({ flags: args.flags, fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }, repair });

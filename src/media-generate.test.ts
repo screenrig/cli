@@ -4,7 +4,6 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { commandHelp } from "./help.js";
-const USAGE = commandHelp(["media", "generate"]).usage;
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { run, type CliRuntime } from "./main.js";
@@ -106,12 +105,16 @@ function generateTransport(): FakeTransport {
 }
 
 test("USAGE lists media generate", () => {
-  assert.match(
-    USAGE,
-    /media generate --prompt TEXT \[--aspect-ratio RATIO\] \[--quality low\|medium\|high\] \[--tag TAG\]/,
-  );
-  assert.doesNotMatch(USAGE, /media generate.*--no-wait/);
-  assert.doesNotMatch(USAGE, /--quality auto/);
+  const help = commandHelp(["media", "generate"]);
+  assert.match(help.synopsis[0]!, /media generate \[options\]/);
+  for (const name of ["--prompt", "--aspect-ratio", "--quality", "--tag"]) {
+    const option = help.options.find((item) => item.name === name);
+    assert.equal(option?.type, "value");
+    assert.ok(option?.description);
+  }
+  assert.match(help.usage, /--quality <low\|medium\|high>/);
+  assert.equal(help.options.some((option) => option.name === "--no-wait"), false);
+  assert.doesNotMatch(help.usage, /--quality.*auto/);
 });
 
 test("media generate stores the still and returns med_… plus usage", async () => {
