@@ -1,3 +1,4 @@
+import { WriteRecovery } from "./write-recovery.js";
 import { createHash } from "node:crypto";
 import { open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -318,6 +319,8 @@ function transportFor(runtime: CliRuntime, apiUrl: string, token?: string): Tran
   return loggingTransport(base, loggerOf(runtime));
 }
 
+const writeRecoveries = new WeakMap<CliRuntime, WriteRecovery>();
+
 function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?: string): ApiClient {
   return new ApiClient({
     transport: transportFor(runtime, apiUrl, token),
@@ -325,6 +328,7 @@ function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?
     requestId: flagString(args.flags, "request-id"),
     idempotencyKey: flagString(args.flags, "idempotency-key"),
     timeoutMs: flagNumber(args.flags, "timeout"),
+    writeRecovery: token ? writeRecoveries.get(runtime) : undefined,
     creditsOwner: runtime,
     logger: loggerOf(runtime),
   });
@@ -391,7 +395,33 @@ function commandHandler(
           : "Create the first agent with unverified contact metadata, then retry the original command.",
       });
     }
-    return handler(args, runtime, resolved);
+    // Specialized enrollment, generation, upload/bundle, and handoff flows own
+    // their recovery. Ordinary mutations share the durable request ledger.
+    const [group, action] = args.command;
+    const ordinary = authenticated && resolved.token && (
+      ["kv", "comment", "feedback", "operations"].includes(group ?? "") ||
+      (group === "app" && ["upload", "update"].includes(action ?? "")) ||
+      (group === "playlist" && ["create", "update", "delete"].includes(action ?? "")) ||
+      (group === "media" && ["update", "delete"].includes(action ?? "")) ||
+      (group === "screen" && action !== "provision")
+    );
+    const recovery = ordinary ? new WriteRecovery(resolved, runtime) : undefined;
+    if (recovery) writeRecoveries.set(runtime, recovery);
+    try {
+      const result = await handler(args, runtime, resolved);
+      await recovery?.finish();
+      return result;
+    } catch (error) {
+      if (recovery?.hasPending && error instanceof CliError) {
+        throw new CliError(error.problem, error.exitCode, [...error.warnings, {
+          code: "write_recovery_saved",
+          message: "The write key is saved locally. After an ambiguous failure, rerun the same command with unchanged input to reuse it. Reconcile explicit refusals or revision conflicts before changing the request.",
+        }]);
+      }
+      throw error;
+    } finally {
+      writeRecoveries.delete(runtime);
+    }
   };
 }
 
@@ -798,6 +828,7 @@ async function waitForAgentConnectionApproval(
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
   connection: AgentConnectionConfig,
   timeoutMs: number,
+  returnPending = false,
 ): Promise<AgentConnection> {
   if (!connection.connection_id || !connection.connection_token) throw configError("Pending agent connection authority is incomplete.");
   const transport = transportFor(runtime, resolved.apiUrl);
@@ -834,7 +865,7 @@ async function waitForAgentConnectionApproval(
           throw configError("Agent connection SSE emitted invalid JSON.");
         }
         latest = validateAgentConnectionEvent(decoded, connection.connection_id);
-        if (latest.status !== "pending") return latest;
+        if (returnPending || latest.status !== "pending") return latest;
       }
     }
   } catch (err) {
@@ -1014,26 +1045,30 @@ async function agentConnect(
   let pendingToken = current?.token;
   let pendingAgentId = connection.pending_agent_id;
 
+  const noWait = flagBool(args.flags, "no-wait");
   let opened = false;
   let printed = false;
   if (!(pendingToken && pendingAgentId)) {
     if (!connection.approval_url || !connection.connection_id || !connection.connection_token) {
       throw configError("Pending agent connection is incomplete.");
     }
-    if (flagBool(args.flags, "print-url")) {
-      emitAgentApprovalUrl(args, runtime, connection.approval_url);
-      printed = true;
-    } else {
-      opened = await (runtime.openUrl?.(connection.approval_url) ?? Promise.resolve(false));
-      if (!opened) {
-        emitAgentApprovalUrl(args, runtime, connection.approval_url);
+    const handoff = async () => {
+      if (flagBool(args.flags, "print-url")) {
+        if (!noWait) emitAgentApprovalUrl(args, runtime, connection.approval_url!);
         printed = true;
+      } else {
+        opened = await (runtime.openUrl?.(connection.approval_url!) ?? Promise.resolve(false));
+        if (!opened) {
+          if (!noWait) emitAgentApprovalUrl(args, runtime, connection.approval_url!);
+          printed = true;
+        }
       }
-    }
-    const timeoutMs = requestedTimeout ?? 86_400_000;
+    };
+    if (!noWait) await handoff();
+    const timeoutMs = requestedTimeout ?? (noWait ? 30_000 : 86_400_000);
     let status: AgentConnection;
     try {
-      status = await waitForAgentConnectionApproval(args, runtime, resolved, connection, timeoutMs);
+      status = await waitForAgentConnectionApproval(args, runtime, resolved, connection, timeoutMs, noWait);
     } catch (err) {
       if (err instanceof CliError && ["agent_connection_cancelled", "agent_connection_expired", "agent_connection_invalid"].includes(err.problem.code)) {
         return clearDefinitivePendingAgentFailure(
@@ -1045,6 +1080,22 @@ async function agentConnect(
         );
       }
       throw err;
+    }
+    if (status.status === "pending") {
+      await handoff();
+      const next = {
+        command: "screenrig agent connect --no-wait",
+        argv: ["agent", "connect", "--no-wait", "--config", resolved.configPath, "--api-url", resolved.apiUrl],
+        reason: "Complete dashboard approval, then resume. Use argv to preserve this configuration and API origin.",
+      };
+      return {
+        envelope: successEnvelope({ status: "pending", connection_id: connection.connection_id,
+          expires_at: status.expires_at, opened, approval_url_printed: printed,
+          ...(printed ? { approval_url: connection.approval_url } : {}), next }),
+        exitCode: ExitCode.Success,
+        human: humanLines("Agent approval pending", [["status", "pending"], ["connection_id", connection.connection_id],
+          ["approval_url", printed ? connection.approval_url : undefined], ["next", next.command]]),
+      };
     }
     if (status.status === "denied" || status.status === "expired" || status.status === "cancelled") {
       await clearAgentConnection(runtime, resolved, connection.connection_id, true);
