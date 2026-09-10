@@ -33,12 +33,38 @@ Commands return JSON envelopes an agent can branch on. Customer surface is
 content (`app`, `media`, `compose`), playlists, and screens. Full reference:
 [https://screenrig.ai/docs/cli.md](https://screenrig.ai/docs/cli.md).
 
+Discover commands progressively with `screenrig --help`, `screenrig screen --help`,
+and `screenrig screen assign --help`. Deeper groups work the same way:
+`screenrig comment show --help`. `screenrig help screen assign` is equivalent.
+Add `--json` for structured child command paths, invocation syntax, and option types;
+help runs without configuration or authentication. Command-specific options follow
+that command, for example `screenrig screen update ID --name Lobby --if-match 1`.
+Global options such as `--json` may appear before or after the command. Use
+`--name=VALUE` for a value starting with a dash, and `--` before option-like file
+names. Duplicate options are rejected.
+
 Choose by what the page is:
 
 - Already have the file: `media upload`, then a playlist and `screen assign`.
 - Anything presentable: `media generate` as the whole page.
 - Slide-deck-like experiences: local unbilled `compose render`.
 - Live video, iframe, or webapp: write playlist primitives.
+
+## Application command results
+
+`app upload` and `app update` return the same JSON data paths with or without
+`--no-wait`: `data.application` contains the accepted application `id`,
+`release_id`, and `operation_id`; `data.pack` contains `sha256` and `file_count`.
+The accepted response does not include an application revision. Read `app show`
+for the current revision before an update.
+
+`data.operation` contains the observed completed operation when waiting. With
+`--no-wait` it is `null`: upload acceptance does not establish operation state
+or release readiness. Use `operations get <operation_id>` or
+`operations wait <operation_id>` to observe processing. The envelope's
+`operation_id` identifies that same operation in either mode. Existing flat
+accepted fields (`data.id`, `data.release_id`, `data.operation_id`) and
+`data.sha256` remain available as compatibility aliases in both modes.
 
 ## Configuration
 
@@ -52,6 +78,18 @@ operation log. There is no `--log-socket` flag. Connect failure never fails the
 command.
 
 ## Develop
+
+Commander 14 supports Node 20.11 and owns parsing, command selection, and help.
+Add commands in `src/cli-commands/`: each group registers native Commander commands
+with their arguments, options, descriptions, validation hooks, and bound handlers.
+There is no separate command schema or path-based dispatcher. Shared option
+parsers live beside these modules; human and JSON help read the registered tree.
+
+`src/program.ts` awaits Commander actions with `parseAsync`. The output boundary
+keeps one CLI envelope per invocation, and shared handler setup handles config,
+authentication, and logging. Only explicitly supplied options reach handlers,
+including the existing `no-*` switches. `parseArgv` is an inspection helper for
+tests; execution runs through Commander actions.
 
 ```sh
 npm ci

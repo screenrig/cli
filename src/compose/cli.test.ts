@@ -3,7 +3,7 @@ import { mkdir, open, readFile, rename, chmod, stat, writeFile, rm } from "node:
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import { USAGE } from "../commands.js";
+import { commandHelp } from "../help.js";
 import { ExitCode } from "../exit-codes.js";
 import { run, type CliRuntime } from "../main.js";
 import { testTemp } from "../test-temp.js";
@@ -197,12 +197,23 @@ test("compose render --output foo.png is usage_error naming a directory", async 
 });
 
 test("USAGE documents compose batch page limit and layered render", () => {
-  assert.match(USAGE, /compose batch <file> --output DIRECTORY \[--only ID\]/);
-  assert.match(USAGE, /1 to 2000 pages/);
-  assert.doesNotMatch(USAGE, /1 to 100 pages/);
-  assert.match(USAGE, /compose render <file> \[--output DIRECTORY\] \[--combined\]/);
-  assert.doesNotMatch(USAGE, /\[--ink-tight\]/);
-  assert.match(USAGE, /playlist preview <file\|id> --output DIR \[--frame-ms MS\] \[--contact-sheet\] \[--lint-only\]/);
+  const batch = commandHelp(["compose", "batch"]);
+  assert.match(batch.synopsis[0]!, /compose batch \[options\] <file>/);
+  for (const name of ["--output", "--only"]) {
+    assert.equal(batch.options.find((option) => option.name === name)?.type, "value");
+  }
+  assert.match(batch.usage, /1 to 2000 pages/);
+  assert.doesNotMatch(batch.usage, /1 to 100 pages/);
+  const render = commandHelp(["compose", "render"]);
+  assert.match(render.synopsis[0]!, /compose render \[options\] <file>/);
+  assert.equal(render.options.find((option) => option.name === "--output")?.type, "value");
+  assert.equal(render.options.find((option) => option.name === "--combined")?.type, "boolean");
+  assert.equal(render.options.some((option) => option.name === "--ink-tight"), false);
+  const preview = commandHelp(["playlist", "preview"]);
+  assert.match(preview.synopsis[0]!, /playlist preview \[options\] <file\|id>/);
+  for (const [name, type] of [["--output", "value"], ["--frame-ms", "value"], ["--contact-sheet", "boolean"], ["--lint-only", "boolean"]]) {
+    assert.equal(preview.options.find((option) => option.name === name)?.type, type);
+  }
 });
 
 test("batch render returns ordered results, preview and supports one-page correction", async () => {

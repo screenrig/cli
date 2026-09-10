@@ -1,5 +1,4 @@
-import { parseArgv } from "./argv.js";
-import { dispatch } from "./commands.js";
+import { executeCommand } from "./program.js";
 import { applyCreditsLowToSuccess, observedCreditsRemaining } from "./credits.js";
 import { errorEnvelope, type Warning } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
@@ -31,11 +30,10 @@ function applyLogSinkToSuccess<T extends { envelope: { warnings: Warning[] }; hu
 export async function run(runtime: CliRuntime = processRuntime()): Promise<number> {
   const json = runtime.argv.includes("--json");
   try {
-    const args = parseArgv(runtime.argv);
-    const dispatched = applyCreditsLowToSuccess(await dispatch(args, runtime), observedCreditsRemaining(runtime));
+    const dispatched = applyCreditsLowToSuccess(await executeCommand(runtime.argv, runtime), observedCreditsRemaining(runtime));
     runtime.logger?.endRun();
     const result = applyLogSinkToSuccess(dispatched, runtime.logger?.droppedLines() ?? 0);
-    if (json || args.flags.json === true) {
+    if (json) {
       if (result.human) {
         runtime.stdout.write(`${JSON.stringify(result.envelope)}\n`);
       }
