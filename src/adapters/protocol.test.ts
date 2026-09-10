@@ -1,3 +1,4 @@
+import { commandHelp } from "../help.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -859,12 +860,14 @@ test("opaque agent comments are optional on GET resources, dedicated comment rou
   assert.match(screenComments, /parameters: \[\{ \$ref: "#\/components\/parameters\/IdempotencyKey" \}\]/);
   assert.doesNotMatch(screenComments, /IfMatch/);
 
-  assert.match(commands, /comment show screen <id>/);
-  assert.match(commands, /comment show playlist <id> \[--page PAGE_ID\]/);
-  assert.match(commands, /comment set screen <id> \(--json-value JSON \| --file FILE\)/);
-  assert.match(commands, /comment set playlist <id> \[--page PAGE_ID\] \(--json-value JSON \| --file FILE\)/);
-  assert.match(commands, /comment delete screen <id>/);
-  assert.match(commands, /comment delete playlist <id> \[--page PAGE_ID\]/);
+  const commentHelp = ["show", "set", "delete"].flatMap((action) =>
+    ["screen", "playlist"].map((target) => commandHelp(["comment", action, target]).usage)).join("\n");
+  assert.match(commentHelp, /comment show screen <id>/);
+  assert.match(commentHelp, /comment show playlist <id> \[--page PAGE_ID\]/);
+  assert.match(commentHelp, /comment set screen <id> \(--json-value JSON \| --file FILE\)/);
+  assert.match(commentHelp, /comment set playlist <id> \[--page PAGE_ID\] \(--json-value JSON \| --file FILE\)/);
+  assert.match(commentHelp, /comment delete screen <id>/);
+  assert.match(commentHelp, /comment delete playlist <id> \[--page PAGE_ID\]/);
   assert.doesNotMatch(commands, /comment\/screen\/:id/);
   assert.doesNotMatch(commands, /--value-base64.*comment/);
 });

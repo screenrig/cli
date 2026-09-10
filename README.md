@@ -33,6 +33,12 @@ Commands return JSON envelopes an agent can branch on. Customer surface is
 content (`app`, `media`, `compose`), playlists, and screens. Full reference:
 [https://screenrig.ai/docs/cli.md](https://screenrig.ai/docs/cli.md).
 
+Discover commands progressively with `screenrig --help`, `screenrig screen --help`,
+and `screenrig screen assign --help`. Deeper groups work the same way:
+`screenrig comment show --help`. `screenrig help screen assign` is equivalent.
+Add `--json` for structured child command paths, invocation syntax, and option types;
+help runs without configuration or authentication.
+
 Choose by what the page is:
 
 - Already have the file: `media upload`, then a playlist and `screen assign`.

@@ -3,7 +3,8 @@ import { mkdir, open, readFile, rename, chmod, stat, writeFile, rm } from "node:
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import { USAGE } from "../commands.js";
+import { commandHelp } from "../help.js";
+const USAGE = [["compose", "batch"], ["compose", "render"], ["playlist", "preview"]].map((path) => commandHelp(path).usage).join("\n");
 import { ExitCode } from "../exit-codes.js";
 import { run, type CliRuntime } from "../main.js";
 import { testTemp } from "../test-temp.js";

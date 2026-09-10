@@ -1,3 +1,4 @@
+import { commandHelp, CREDIT_HELP } from "./help.js";
 import assert from "node:assert/strict";
 import { createCipheriv, createHash, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync } from "node:crypto";
 import { PassThrough } from "node:stream";
@@ -6,7 +7,7 @@ import { mkdir, open, readFile, rename, chmod, stat, writeFile, rm } from "node:
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { CLI_VERSION, EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, USAGE, formatEventLine } from "./commands.js";
+import { CLI_VERSION, EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, formatEventLine } from "./commands.js";
 import { run, type CliRuntime } from "./main.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import { ExitCode } from "./exit-codes.js";
@@ -3589,7 +3590,7 @@ test("media upload warns on a low-information filename without blocking the uplo
 });
 
 test("customer-facing credit copy is fail-open until 1 Jan 2027", () => {
-  const documents: Array<[string, string]> = [["USAGE", USAGE]];
+  const documents: Array<[string, string]> = [["media generate help", CREDIT_HELP]];
   for (const [name, text] of documents) {
     assert.match(text, /nonnegative/, `${name} must say remaining is nonnegative`);
     assert.match(text, /credits_low/, `${name} must name the live credits_low warning`);
@@ -3611,7 +3612,7 @@ test("customer-facing credit copy is fail-open until 1 Jan 2027", () => {
     assert.doesNotMatch(text, /\$30 \/ 1M/, `${name} must not name the vendor image-output rate as the price`);
     assert.doesNotMatch(text, /OpenRouter/, `${name} must not name OpenRouter`);
   }
-  assert.match(USAGE, /feedback list \[--kind bug\|feature\]/);
+  assert.match(commandHelp(["feedback", "list"]).usage, /feedback list \[--kind bug\|feature\]/);
 
   // Maintainer AGENTS.md and README navigation do not duplicate the CLI help
   // rate card. Behavior and customer command help are validated above.
@@ -3942,7 +3943,7 @@ test("screen toast posts the closed write body and does not echo the text", asyn
 });
 
 test("screen toast defaults omitted --level to info", async () => {
-  assert.match(USAGE, /screen toast <id> --text TEXT \[--level info\] \[--duration-ms MS\]/);
+  assert.match(commandHelp(["screen", "toast"]).usage, /screen toast <id> --text TEXT \[--level info\] \[--duration-ms MS\]/);
   const transport = memoryBackend();
   const configDir = await testTemp("toast-default-level-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };

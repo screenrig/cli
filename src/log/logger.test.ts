@@ -122,7 +122,7 @@ async function listenUnix(socketPath: string): Promise<{ events: LogEvent[]; wai
 
 test("USAGE and argv do not define a log-socket flag", () => {
   assert.doesNotMatch(USAGE, /\[--log-socket/);
-  assert.match(USAGE, /log_socket/);
+  assert.doesNotMatch(USAGE, /log_socket/);
   const parsed = parseArgv(["--log-socket", "/tmp/screenrig.sock", "version"]);
   assert.equal(parsed.flags["log-socket"], true);
   assert.equal(parsed.positionals[0], "/tmp/screenrig.sock");

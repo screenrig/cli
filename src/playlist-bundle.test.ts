@@ -19,7 +19,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { parseArgv } from "./argv.js";
 import { ApiClient } from "./client.js";
-import { USAGE } from "./commands.js";
+import { commandHelp } from "./help.js";
+const USAGE = ["export", "import"].map((action) => commandHelp(["playlist", action]).usage).join("\n");
 import { run, type CliRuntime } from "./main.js";
 import {
   PLAYLIST_BUNDLE_MANIFEST,
@@ -1006,7 +1007,7 @@ test("command parser and JSON help expose playlist export/import including updat
   const output = collect(stdout);
   const errors = collect(stderr);
   const runtime: CliRuntime = {
-    argv: ["--json", "--help"], env: {}, stdout, stderr, now: () => new Date(), sleep: async () => undefined,
+    argv: ["--json", "playlist", "export", "--help"], env: {}, stdout, stderr, now: () => new Date(), sleep: async () => undefined,
     homedir: () => "/tmp", cwd: () => "/tmp", transport: new FakeTransport(),
     fs: { mkdir, open, rename, rm, chmod, stat, homedir: () => "/tmp", env: {} },
   };
