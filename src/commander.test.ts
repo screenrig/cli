@@ -40,14 +40,14 @@ test("missing option values cannot swallow switches or use text after the termin
 
 test("command-specific flags are scoped to their command", () => {
   assert.throws(() => parseArgv(["screen", "list", "--name", "Lobby"]), usage);
-  assert.throws(() => parseArgv(["--name", "Lobby", "screen", "update", "scr_TEST", "--if-match", "1"]), usage);
-  assert.equal(parseArgv(["screen", "update", "scr_TEST", "--name", "Lobby", "--if-match", "1"]).flags.name, "Lobby");
+  assert.throws(() => parseArgv(["--name", "Lobby", "screen", "update", "scr_TEST", "--expect-rev", "1"]), usage);
+  assert.equal(parseArgv(["screen", "update", "scr_TEST", "--name", "Lobby", "--expect-rev", "1"]).flags.name, "Lobby");
 });
 
 test("required options are discoverable and enforced before dispatch", () => {
   assert.throws(() => parseArgv(["screen", "assign", "scr_TEST"]), usage);
   const help = commandHelp(["screen", "assign"]);
-  for (const name of ["--playlist-id", "--if-match"]) assert.equal(help.options.find((option) => option.name === name)?.required, true);
+  for (const name of ["--playlist-id", "--expect-rev"]) assert.equal(help.options.find((option) => option.name === name)?.required, true);
   assert.doesNotThrow(() => parseArgv(["screen", "assign", "--help"]));
 });
 

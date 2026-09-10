@@ -8,6 +8,8 @@ import type { OperationLogger } from "./log/types.js";
 import { openExternalUrl, openLocalPath, type OpenPath, type OpenUrl } from "./open-url.js";
 
 export interface CliRuntime {
+  stdin?: AsyncIterable<Uint8Array | string>;
+  isStdinTty?: () => boolean;
   argv: string[];
   env: NodeJS.Dict<string>;
   stdout: Writable;
@@ -224,6 +226,8 @@ export function fetchSignedRawPut(fetchImpl: typeof fetch = fetch): SignedRawPut
 export function processRuntime(): CliRuntime {
   return {
     argv: process.argv.slice(2),
+    stdin: process.stdin,
+    isStdinTty: () => process.stdin.isTTY === true,
     env: process.env,
     stdout: process.stdout,
     stderr: process.stderr,

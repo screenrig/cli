@@ -807,7 +807,7 @@ test("import of a bundle whose playlist name is taken points at --name, and --na
       assert.match(error.problem.detail, /playlist name is already in use/);
       assert.match(error.problem.detail, /unique per account/);
       assert.equal(error.problem.next?.command, `screenrig playlist import ${dir} --name NAME`);
-      assert.match(error.problem.next?.reason ?? "", /--update ID --if-match REVISION/);
+      assert.match(error.problem.next?.reason ?? "", /--update ID --expect-rev REVISION/);
       return true;
     },
   );
@@ -899,9 +899,9 @@ test("import validates create/update flags and all local bytes before any networ
   await writeBundle(dir, [{ id: "med_SOURCE", filename: "hero.png", bytes: Uint8Array.from([1, 2]) }]);
   const transport = importTransport([]);
   const common = { directory: dir, client: new ApiClient({ transport, token: "token" }), runtime: runtimeForImport([]) };
-  await assert.rejects(() => importPlaylistBundle({ ...common, updateId: "pl_TARGET" }), /requires --if-match/);
+  await assert.rejects(() => importPlaylistBundle({ ...common, updateId: "pl_TARGET" }), /requires --expect-rev/);
   await assert.rejects(() => importPlaylistBundle({ ...common, ifMatch: "1" }), /requires --update/);
-  await assert.rejects(() => importPlaylistBundle({ ...common, updateId: "pl_TARGET", ifMatch: "not-a-revision" }), /--if-match/);
+  await assert.rejects(() => importPlaylistBundle({ ...common, updateId: "pl_TARGET", ifMatch: "not-a-revision" }), /--expect-rev/);
   assert.equal(transport.calls.length, 0);
   await writeFile(path.join(dir, (JSON.parse(await readFile(path.join(dir, PLAYLIST_BUNDLE_MANIFEST), "utf8")) as PlaylistBundleManifest).media[0]!.path), Uint8Array.from([9, 9]));
   await assert.rejects(() => importPlaylistBundle(common), /SHA-256 mismatch/);
@@ -995,7 +995,7 @@ function collect(stream: PassThrough): Promise<string> {
 }
 
 test("command parser and JSON help expose playlist export/import including update", async () => {
-  const parsed = parseArgv(["playlist", "import", "./bundle", "--update", "pl_TARGET", "--if-match", "8"]);
+  const parsed = parseArgv(["playlist", "import", "./bundle", "--update", "pl_TARGET", "--expect-rev", "8"]);
   assert.equal(parsed.flags.update, "pl_TARGET");
   assert.equal(parsed.flags["if-match"], "8");
   const exportHelp = commandHelp(["playlist", "export"]);
@@ -1003,7 +1003,7 @@ test("command parser and JSON help expose playlist export/import including updat
   assert.equal(exportHelp.options.find((option) => option.name === "--output")?.type, "value");
   const importHelp = commandHelp(["playlist", "import"]);
   assert.match(importHelp.synopsis[0]!, /playlist import \[options\] <directory>/);
-  for (const name of ["--name", "--update", "--if-match"]) {
+  for (const name of ["--name", "--update", "--expect-rev"]) {
     assert.equal(importHelp.options.find((option) => option.name === name)?.type, "value");
   }
 

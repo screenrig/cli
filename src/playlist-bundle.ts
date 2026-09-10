@@ -846,8 +846,8 @@ export async function importPlaylistBundle(options: {
     const trimmed = options.name.trim();
     if (trimmed.length === 0 || trimmed.length > 120) throw usageError("playlist import --name must be 1 to 120 characters.");
   }
-  if (options.updateId && !options.ifMatch) throw usageError("playlist import --update requires --if-match REVISION.");
-  if (!options.updateId && options.ifMatch) throw usageError("playlist import --if-match requires --update PLAYLIST_ID.");
+  if (options.updateId && !options.ifMatch) throw usageError("playlist import --update requires --expect-rev REVISION.");
+  if (!options.updateId && options.ifMatch) throw usageError("playlist import --expect-rev requires --update PLAYLIST_ID.");
   if (options.updateId && !options.updateId.startsWith("pl_")) throw usageError("playlist import --update requires a playlist id starting with pl_.");
   const ifMatch = options.ifMatch ? quotedRevision(options.ifMatch) : undefined;
 
@@ -1000,7 +1000,7 @@ function rethrowNameConflict(error: unknown, state: {
       detail: `${error.problem.detail} Playlist names are unique per account, and this bundle's name is already taken.`,
       next: {
         command: `screenrig playlist import ${state.directory} --name NAME`,
-        reason: "Import as a new playlist under a different name, or replace the existing one with --update ID --if-match REVISION.",
+        reason: "Import as a new playlist under a different name, or replace the existing one with --update ID --expect-rev REVISION.",
       },
     },
     error.exitCode,

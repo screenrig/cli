@@ -1,3 +1,4 @@
+import { usageError } from "../problems.js";
 import { positiveInteger, positiveNumber, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import { handleMediaGenerate, handleMediaUpload, handleMediaUploadBatch, handleMediaShow, handleMediaDownload, handleMediaList, handleMediaUpdate, handleMediaDelete } from "../commands.js";
@@ -9,11 +10,15 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
   const media = root.command("media").description("Generate, upload, and manage images and videos");
 
   addCommandNotes(media.command("generate").description("Generate an image from a prompt")
-    .requiredOption("--prompt <TEXT>", "Describe the complete image to generate (required)")
+    .addOption(new Option("--prompt <TEXT>", "Describe the complete image to generate").conflicts("promptFile"))
+    .addOption(new Option("--prompt-file <FILE>", "Read the complete prompt from a file or stdin (-)").conflicts("prompt"))
     .option("--aspect-ratio <RATIO>", "Choose the generated image aspect ratio")
     .option("--quality <low|medium|high>", "Choose generation quality")
     .option("--tag <TAG>", "Set the media tag")
     .option("--no-progress", "Suppress stderr progress")
+    .hook("preAction", (command) => {
+      if (command.getOptionValue("prompt") === undefined && command.getOptionValue("promptFile") === undefined) throw usageError("Provide --prompt TEXT or --prompt-file FILE.");
+    })
     .action(bind(handleMediaGenerate)), CREDIT_HELP);
 
   media.command("upload").description("Upload an image or video")
@@ -66,11 +71,11 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .argument("<id>", "Media identifier")
     .addOption(new Option("--tag <TAG>", "Set the media tag").conflicts(["clearTag"]))
     .addOption(new Option("--clear-tag", "Remove the media tag").conflicts(["tag"]))
-    .requiredOption("--if-match <REVISION>", "Require the current resource revision (required)", revision)
+    .requiredOption("--expect-rev <REVISION>", "Require the current resource revision (required)", revision)
     .action(bind(handleMediaUpdate));
 
   media.command("delete").description("Delete media")
     .argument("<id>", "Media identifier")
-    .requiredOption("--if-match <REVISION>", "Require the current resource revision (required)", revision)
+    .requiredOption("--expect-rev <REVISION>", "Require the current resource revision (required)", revision)
     .action(bind(handleMediaDelete));
 }
