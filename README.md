@@ -77,6 +77,48 @@ accepted fields (`data.id`, `data.release_id`, `data.operation_id`) and
 
 ## Configuration
 
+### Nonblocking agent connection
+
+`screenrig agent connect --no-wait --print-url` starts or resumes a connection,
+reads one server status snapshot, and returns a JSON envelope. While approval is
+pending, `data.status` is `pending`, `data.approval_url` contains the dashboard
+handoff, and `data.next.command` identifies the resume command. `data.next.argv`
+supplies its arguments, preserving the selected config and API origin. Open the handoff
+for the intended user, then run `screenrig agent connect --no-wait` again. An
+approved connection completes credential collection and activation and returns
+`data.status: active`. No credential is included in either result.
+
+Without `--print-url`, the CLI tries to open the browser and includes the handoff
+URL in the pending result only if opening fails. `--no-wait` defaults to a
+30-second status-read budget; it does not wait for a person to approve. Normal
+`agent connect` retains its existing approval wait of up to 24 hours. `--timeout`
+overrides either mode's wait budget. Terminal denial, cancellation, and expiry
+remain errors.
+
+### Recovering writes
+
+Ordinary application uploads/updates, playlist creates/updates/deletes, screen
+mutations other than provisioning, media tag updates/deletes, K/V and comment
+writes, feedback submissions, and operation cancellation persist an idempotency
+key before sending the request. After an ambiguous network failure or server
+error, rerun the same command with unchanged input. The CLI reuses the saved key;
+it does not automatically send another request within the failed invocation.
+`write_recovery_saved` indicates that recovery state was retained.
+
+The private config stores only request fingerprints, keys, and timestamps, never
+request payloads. Fingerprints include the origin, credential, target, request
+body, and revision. Changed requests receive different keys. A completed command
+clears its pending state; application acceptance followed by a failed processing
+wait retains it so retrying does not create another application. Definite
+refusals still require reconciliation; revision checks remain in force.
+
+Automatic replay stops after 23 hours, before the server's 24-hour replay window
+ends. Inspect the resource before explicitly supplying a new `--idempotency-key`
+for a reconciled write. Explicit keys remain supported. Pending entries are not
+silently evicted; resolve outstanding writes if the 256-entry limit is reached.
+Enrollment, generation, media uploads/batches, bundle imports, and browser
+handoffs retain their existing specialized recovery behavior.
+
 User-private config lives outside the replaceable plugin directory
 (`$XDG_CONFIG_HOME/screenrig/config.json`, or
 `%APPDATA%\screenrig\config.json` on Windows). The default service is `https://api.screenrig.ai`.
