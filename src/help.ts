@@ -1,6 +1,6 @@
 import type { Command, Option } from "commander";
 import { commandPath, createCommandTree, findCommand } from "./command-tree.js";
-import { NOTES } from "./help-text.js";
+import { commandNotes } from "./cli-commands/notes.js";
 import { usageError } from "./problems.js";
 export { CREDIT_HELP } from "./help-text.js";
 
@@ -20,8 +20,7 @@ export interface HelpDocument {
 export function describeHelp(command: Command): HelpDocument {
   const helper = command.createHelp();
   const path = commandPath(command);
-  const note = NOTES[path.join(" ")];
-  const notes = note ? [note] : [];
+  const notes = commandNotes(command);
   const describeOption = (option: Option) => ({
     name: option.long!, type: (option.negate || option.isBoolean()) ? "boolean" as const : "value" as const, description: option.description, required: option.mandatory,
   });
@@ -46,5 +45,3 @@ export function commandHelp(path: readonly string[] = []): HelpDocument {
   if (!command) throw usageError("Unknown help topic.");
   return describeHelp(command);
 }
-
-export const ROOT_HELP = commandHelp().usage;

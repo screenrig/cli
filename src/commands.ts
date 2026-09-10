@@ -45,7 +45,7 @@ import {
   type ScreenToastWrite,
 } from "./adapters/protocol.js";
 import { SDK_PROTOCOL_VERSION } from "./adapters/sdk-injection.js";
-import { flagBool, flagNumber, flagString, type ParsedArgs } from "./argv.js";
+import { flagBool, flagNumber, flagString, type ParsedArgs } from "./command-input.js";
 import { ApiClient, requireToken } from "./client.js";
 import {
   preserveLogSocket,
@@ -141,8 +141,6 @@ import { CLI_VERSION } from "./version.js";
 
 export { CLI_VERSION };
 
-export { ROOT_HELP as USAGE } from "./help.js";
-
 export interface CommandResult {
   envelope: ReturnType<typeof successEnvelope<unknown>>;
   exitCode: ExitCode;
@@ -194,9 +192,7 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
       reason: "Inspect the fail-closed compose catalog, then compose render a spec.",
     });
   }
-  if (args.positionals.length > 3) {
-    throw usageError("compose render accepts one spec file.");
-  }
+
   if (file.includes("\0")) {
     throw usageError("compose render spec path must not contain a NUL byte.");
   }
@@ -359,236 +355,197 @@ function humanLines(title: string, fields: Array<[string, string | undefined]>):
   return lines.join("\n");
 }
 
-export async function dispatch(args: ParsedArgs, runtime: CliRuntime): Promise<CommandResult> {
-  const group = args.positionals[0];
-  const action = args.positionals[1];
-  if ((flagBool(args.flags, "version") || group === "version") && !flagBool(args.flags, "help") && group !== "help") {
-    return {
-      envelope: successEnvelope({ version: CLI_VERSION, protocol_adapter: TEMPORARY_PROTOCOL_VERSION }),
-      exitCode: ExitCode.Success,
-      human: `screenrig ${CLI_VERSION}`,
-    };
-  }
-  if (args.help) {
-    const help = args.help;
-    return {
-      envelope: successEnvelope(help),
-      exitCode: ExitCode.Success,
-      human: help.usage,
-    };
-  }
+export type CommandHandler = (args: ParsedArgs, runtime: CliRuntime) => Promise<CommandResult>;
+type ResolvedCommandConfig = Awaited<ReturnType<typeof resolveConfig>>;
 
-  if (!group) throw usageError("A command is required.");
-
-  const repair = flagBool(args.flags, "repair-config");
-  let resolved = await resolveConfig({ flags: args.flags, fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }, repair });
-  await attachOperationLogger(runtime, args, resolved);
-
-  if (group === "compose" && action === "catalog") {
-    if (args.positionals.length > 2) {
-      throw usageError("compose catalog does not accept positional arguments.");
-    }
-    return loggerOf(runtime).withLocal({ op: "compose.catalog", message: "compose catalog" }, async () => {
-      const catalog = composeCatalog();
-      return {
-        envelope: successEnvelope(catalog),
-        exitCode: ExitCode.Success,
-        human: formatComposeCatalog(catalog),
-      };
-    });
-  }
-  if (group === "playlist" && action === "validate") {
-    const file = args.positionals[2];
-    if (!file || args.positionals.length !== 3) throw usageError("playlist validate requires one JSON file.");
-    let parsed: Record<string, unknown>;
-    try { parsed = JSON.parse(await readFile(path.resolve(runtime.cwd(), file), "utf8")); }
-    catch { throw usageError("Cannot read playlist JSON."); }
-    const body = parsed && typeof parsed === "object" && Array.isArray(parsed.pages) ? { ...parsed, pages: expandPlaylistPages(parsed.pages) } : parsed;
-    assertPlaylistValid(body);
-    const lint = playlistLint(body);
-    return {
-      envelope: successEnvelope({ valid: true, scope: "local_schema_and_semantics", server_checks: PLAYLIST_SERVER_CHECKS, lint }),
-      exitCode: ExitCode.Success,
-      human: [
-        "Playlist passed local canonical validation. Reference authorization and runtime readiness require server checks.",
-        ...lint.map((item) => `lint: ${item.page_id} ${item.code} ${item.id}`),
-        LOOK_AT_THE_CONTACT_SHEET,
-      ].join("\n"),
-    };
-  }
-  if (group === "playlist" && action === "preview") {
-    return playlistPreviewCommand(args, runtime, resolved);
-  }
-  if (group === "compose" && action === "batch") {
-    const file = args.positionals[2];
-    requireFlagValue(args, "output", "./rendered");
-    const output = flagString(args.flags, "output");
-    if (!file || !output || args.positionals.length !== 3) throw usageError("compose batch requires one JSON file and --output DIRECTORY.");
-    try {
-      rejectImageLikeOutput(path.resolve(runtime.cwd(), output), "compose batch");
-    } catch (error) { rethrowCompose(error); }
-    requireFlagValue(args, "target-width", "3840"); requireFlagValue(args, "target-height", "2160"); requireFlagValue(args, "only", "page-id");
-    const tw = flagString(args.flags, "target-width"), th = flagString(args.flags, "target-height");
-    if ((tw === undefined) !== (th === undefined)) throw usageError("Provide both target dimensions.");
-    const target = tw !== undefined && th !== undefined ? { width: Number(tw), height: Number(th) } : undefined;
-    let result;
-    try {
-      result = await composeBatch(path.resolve(runtime.cwd(), file), path.resolve(runtime.cwd(), output), {
-        target,
-        safeArea: flagBool(args.flags, "safe-area"),
-        only: flagString(args.flags, "only"),
-        lintOnly: flagBool(args.flags, "lint-only"),
+/** Prepare configuration, logging and credential guidance once for a bound leaf. */
+function commandHandler(
+  handler: (args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig) => Promise<CommandResult>,
+  authenticated = true,
+): CommandHandler {
+  return async (args, runtime) => {
+    const repair = flagBool(args.flags, "repair-config");
+    const resolved = await resolveConfig({ flags: args.flags, fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }, repair });
+    await attachOperationLogger(runtime, args, resolved);
+    if (authenticated && !resolved.token) {
+      if (resolved.agentConnection) {
+        throw notEnrolledError("This installation has a pending agent connection and no active credential.", {
+          command: "screenrig agent connect",
+          reason: "Resume the passkey-approved connection before running account commands.",
+        });
+      }
+      if (resolved.lastAgent) {
+        throw notEnrolledError("This installation is disconnected and cannot run account commands.", {
+          command: "screenrig agent connect",
+          reason: "Connect a new independently revocable agent through dashboard passkey approval.",
+        });
+      }
+      throw notEnrolledError("This installation is not enrolled. Enrollment is an explicit step and is never a side effect of another command.", {
+        command: resolved.enrollment?.email
+          ? "screenrig agent enroll"
+          : "screenrig agent enroll --email ADDRESS",
+        reason: resolved.enrollment?.email
+          ? "Resume the exact pending enrollment before running pairing or another account command."
+          : "Create the first agent with unverified contact metadata, then retry the original command.",
       });
     }
-    catch (error) { rethrowCompose(error); }
-    const warnings = result.pages.flatMap((page) => (page.warnings ?? []).map((warning) => ({ ...warning, message: `${page.id}: ${warning.message}` })));
-    if (result.failed) throw new CliError(makeProblem("usage_error", "Some pages could not render", 400, `${result.failed} page(s) failed. Successful outputs are retained. See ${result.manifest} and ${result.preview}.`, { errors: result.pages.filter((page) => page.status === "failed").map((page) => ({ page_id: page.id, ...page.error })) }), ExitCode.Usage, warnings);
-    return {
-      envelope: successEnvelope(result, { warnings }),
-      exitCode: ExitCode.Success,
-      human: [
-        `Rendered ${result.rendered} page(s). Preview: ${result.preview}. Details: ${result.manifest}.`,
-        ...result.lint.map((item) => `lint: ${item.page_id} ${item.code} ${item.id}`),
-        LOOK_AT_THE_CONTACT_SHEET,
-      ].join("\n"),
-    };
-  }
-  if (group === "compose" && action === "render") {
-    return composeRender(args, runtime);
-  }
-  if (group === "playlist" && action === "templates") {
-    if (args.positionals.length > 2) {
-      throw usageError("playlist templates does not accept positional arguments.");
-    }
-    const catalog = playlistTemplateCatalog();
+    return handler(args, runtime, resolved);
+  };
+}
+
+export const handleVersion: CommandHandler = async () => {
+  return {
+    envelope: successEnvelope({ version: CLI_VERSION, protocol_adapter: TEMPORARY_PROTOCOL_VERSION }),
+    exitCode: ExitCode.Success,
+    human: `screenrig ${CLI_VERSION}`,
+  };
+
+};
+
+export const handleComposeCatalog = commandHandler(async (args, runtime, resolved) => {
+
+  return loggerOf(runtime).withLocal({ op: "compose.catalog", message: "compose catalog" }, async () => {
+    const catalog = composeCatalog();
     return {
       envelope: successEnvelope(catalog),
       exitCode: ExitCode.Success,
-      human: formatTemplateCatalog(catalog),
+      human: formatComposeCatalog(catalog),
     };
-  }
-  if (group === "compose") {
-    throw usageError("Unknown compose command. Use compose catalog or compose render.", {
-      command: "screenrig --json compose catalog",
-      reason: "List the fail-closed compose catalog.",
-    });
-  }
-
-  if (group === "doctor") {
-    return doctor(args, runtime, resolved);
-  }
-  if (group === "app" && action === "pack") {
-    return appPack(args, runtime);
-  }
-  if (group === "agent" && action === "status") {
-    return agentStatus(args, runtime, resolved);
-  }
-  if (group === "agent" && action === "connect") {
-    return loggerOf(runtime).withLocal({ op: "agent.connect", message: "agent connect" }, () =>
-      agentConnect(args, runtime, resolved),
-    );
-  }
-  if (group === "agent" && action === "enroll") {
-    return loggerOf(runtime).withLocal({ op: "agent.enroll", message: "agent enroll" }, () =>
-      agentEnroll(args, runtime, resolved),
-    );
-  }
-  if (group === "agent" && action === "disconnect") {
-    return agentDisconnect(args, runtime, resolved);
-  }
-  if (isAuthenticatedCommand(group, action) && !resolved.token) {
-    if (resolved.agentConnection) {
-      throw notEnrolledError("This installation has a pending agent connection and no active credential.", {
-        command: "screenrig agent connect",
-        reason: "Resume the passkey-approved connection before running account commands.",
-      });
-    }
-    if (resolved.lastAgent) {
-      throw notEnrolledError("This installation is disconnected and cannot run account commands.", {
-        command: "screenrig agent connect",
-        reason: "Connect a new independently revocable agent through dashboard passkey approval.",
-      });
-    }
-    throw notEnrolledError("This installation is not enrolled. Enrollment is an explicit step and is never a side effect of another command.", {
-      command: resolved.enrollment?.email
-        ? "screenrig agent enroll"
-        : "screenrig agent enroll --email ADDRESS",
-      reason: resolved.enrollment?.email
-        ? "Resume the exact pending enrollment before running pairing or another account command."
-        : "Create the first agent with unverified contact metadata, then retry the original command.",
-    });
-  }
-  if (group === "account" && action === "show") {
-    return accountShow(args, runtime, resolved);
-  }
-  if (group === "dashboard") {
-    return dashboardCommand(args, runtime, resolved);
-  }
-  if (group === "app" && (action === "upload" || action === "update")) {
-    return loggerOf(runtime).withLocal({ op: `app.${action}`, message: `app ${action}` }, () =>
-      appUpload(args, runtime, resolved),
-    );
-  }
-  if (group === "app" && action === "list") {
-    return simpleGet(args, runtime, resolved, "/api/v1/applications", "Applications");
-  }
-  if (group === "app" && action === "show") {
-    const id = args.positionals[2];
-    if (!id) throw usageError("app show requires an application id.");
-    return simpleGet(args, runtime, resolved, `/api/v1/applications/${id}`, "Application");
-  }
-  if (group === "media") {
-    return mediaCommand(args, runtime, resolved, action);
-  }
-  if (group === "playlist") {
-    return playlistCommand(args, runtime, resolved, action);
-  }
-  if (group === "screen") {
-    return screenCommand(args, runtime, resolved, action);
-  }
-  if (group === "browser" && action === "setup") {
-    return browserSetupCommand(args, runtime, resolved);
-  }
-  if (group === "kv") {
-    return kvCommand(args, runtime, resolved, action);
-  }
-  if (group === "comment") {
-    return commentCommand(args, runtime, resolved, action);
-  }
-  if (group === "operations" && action === "get") {
-    return operationsGet(args, runtime, resolved);
-  }
-  if (group === "operations" && action === "wait") {
-    return operationsWait(args, runtime, resolved);
-  }
-  if (group === "operations" && action === "cancel") {
-    return operationsCancel(args, runtime, resolved);
-  }
-  if (group === "events" && action === "list") {
-    return eventsList(args, runtime, resolved);
-  }
-  if (group === "events" && action === "follow") {
-    return loggerOf(runtime).withLocal({ op: "events.follow", message: "events follow" }, () =>
-      eventsFollow(args, runtime, resolved),
-    );
-  }
-  if (group === "playback" && action === "list") {
-    return playbackList(args, runtime, resolved);
-  }
-  if (group === "feedback") {
-    return feedbackCommand(args, runtime, resolved, action);
-  }
-  if (group === "agent") {
-    throw usageError("Unknown agent command. Use agent enroll, connect, status, or disconnect.", {
-      command: "screenrig --help",
-      reason: "List implemented agent identity commands.",
-    });
-  }
-  throw usageError(`Unknown command: ${args.positionals.join(" ")}`, {
-    command: "screenrig --help",
-    reason: "List implemented commands.",
   });
-}
+}, false);
+
+export const handlePlaylistValidate = commandHandler(async (args, runtime, resolved) => {
+  const file = args.positionals[2];
+  if (!file) throw usageError("playlist validate requires one JSON file.");
+  let parsed: Record<string, unknown>;
+  try { parsed = JSON.parse(await readFile(path.resolve(runtime.cwd(), file), "utf8")); }
+  catch { throw usageError("Cannot read playlist JSON."); }
+  const body = parsed && typeof parsed === "object" && Array.isArray(parsed.pages) ? { ...parsed, pages: expandPlaylistPages(parsed.pages) } : parsed;
+  assertPlaylistValid(body);
+  const lint = playlistLint(body);
+  return {
+    envelope: successEnvelope({ valid: true, scope: "local_schema_and_semantics", server_checks: PLAYLIST_SERVER_CHECKS, lint }),
+    exitCode: ExitCode.Success,
+    human: [
+      "Playlist passed local canonical validation. Reference authorization and runtime readiness require server checks.",
+      ...lint.map((item) => `lint: ${item.page_id} ${item.code} ${item.id}`),
+      LOOK_AT_THE_CONTACT_SHEET,
+    ].join("\n"),
+  };
+}, false);
+
+export const handlePlaylistPreview = commandHandler(playlistPreviewCommand, false);
+
+export const handleComposeBatch = commandHandler(async (args, runtime, resolved) => {
+  const file = args.positionals[2];
+  requireFlagValue(args, "output", "./rendered");
+  const output = flagString(args.flags, "output");
+  if (!file || !output) throw usageError("compose batch requires one JSON file and --output DIRECTORY.");
+  try {
+    rejectImageLikeOutput(path.resolve(runtime.cwd(), output), "compose batch");
+  } catch (error) { rethrowCompose(error); }
+  requireFlagValue(args, "target-width", "3840"); requireFlagValue(args, "target-height", "2160"); requireFlagValue(args, "only", "page-id");
+  const tw = flagString(args.flags, "target-width"), th = flagString(args.flags, "target-height");
+  if ((tw === undefined) !== (th === undefined)) throw usageError("Provide both target dimensions.");
+  const target = tw !== undefined && th !== undefined ? { width: Number(tw), height: Number(th) } : undefined;
+  let result;
+  try {
+    result = await composeBatch(path.resolve(runtime.cwd(), file), path.resolve(runtime.cwd(), output), {
+      target,
+      safeArea: flagBool(args.flags, "safe-area"),
+      only: flagString(args.flags, "only"),
+      lintOnly: flagBool(args.flags, "lint-only"),
+    });
+  }
+  catch (error) { rethrowCompose(error); }
+  const warnings = result.pages.flatMap((page) => (page.warnings ?? []).map((warning) => ({ ...warning, message: `${page.id}: ${warning.message}` })));
+  if (result.failed) throw new CliError(makeProblem("usage_error", "Some pages could not render", 400, `${result.failed} page(s) failed. Successful outputs are retained. See ${result.manifest} and ${result.preview}.`, { errors: result.pages.filter((page) => page.status === "failed").map((page) => ({ page_id: page.id, ...page.error })) }), ExitCode.Usage, warnings);
+  return {
+    envelope: successEnvelope(result, { warnings }),
+    exitCode: ExitCode.Success,
+    human: [
+      `Rendered ${result.rendered} page(s). Preview: ${result.preview}. Details: ${result.manifest}.`,
+      ...result.lint.map((item) => `lint: ${item.page_id} ${item.code} ${item.id}`),
+      LOOK_AT_THE_CONTACT_SHEET,
+    ].join("\n"),
+  };
+}, false);
+
+export const handleComposeRender = commandHandler(composeRender, false);
+
+export const handlePlaylistTemplates = commandHandler(async (args, runtime, resolved) => {
+
+  const catalog = playlistTemplateCatalog();
+  return {
+    envelope: successEnvelope(catalog),
+    exitCode: ExitCode.Success,
+    human: formatTemplateCatalog(catalog),
+  };
+}, false);
+
+export const handleDoctor = commandHandler(doctor, false);
+
+export const handleAppPack = commandHandler(appPack, false);
+
+export const handleAgentStatus = commandHandler(agentStatus, false);
+
+export const handleAgentConnect = commandHandler(async (args, runtime, resolved) => {
+  return loggerOf(runtime).withLocal({ op: "agent.connect", message: "agent connect" }, () =>
+    agentConnect(args, runtime, resolved),
+  );
+}, false);
+
+export const handleAgentEnroll = commandHandler(async (args, runtime, resolved) => {
+  return loggerOf(runtime).withLocal({ op: "agent.enroll", message: "agent enroll" }, () =>
+    agentEnroll(args, runtime, resolved),
+  );
+}, false);
+
+export const handleAgentDisconnect = commandHandler(agentDisconnect, false);
+
+export const handleAccountShow = commandHandler(accountShow);
+
+export const handleDashboard = commandHandler(dashboardCommand);
+
+export const handleAppUpload = commandHandler(async (args, runtime, resolved) => {
+  return loggerOf(runtime).withLocal({ op: "app.upload", message: "app upload" }, () =>
+    appUpload(args, runtime, resolved, false),
+  );
+}, true);
+
+export const handleAppUpdate = commandHandler(async (args, runtime, resolved) => {
+  return loggerOf(runtime).withLocal({ op: "app.update", message: "app update" }, () =>
+    appUpload(args, runtime, resolved, true),
+  );
+}, true);
+
+export const handleAppList = commandHandler(async (args, runtime, resolved) => {
+  return simpleGet(args, runtime, resolved, "/api/v1/applications", "Applications");
+}, true);
+
+export const handleAppShow = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[2];
+  if (!id) throw usageError("app show requires an application id.");
+  return simpleGet(args, runtime, resolved, `/api/v1/applications/${id}`, "Application");
+}, true);
+
+export const handleBrowserSetup = commandHandler(browserSetupCommand);
+
+export const handleOperationsGet = commandHandler(operationsGet);
+
+export const handleOperationsWait = commandHandler(operationsWait);
+
+export const handleOperationsCancel = commandHandler(operationsCancel);
+
+export const handleEventsList = commandHandler(eventsList);
+
+export const handleEventsFollow = commandHandler(async (args, runtime, resolved) => {
+  return loggerOf(runtime).withLocal({ op: "events.follow", message: "events follow" }, () =>
+    eventsFollow(args, runtime, resolved),
+  );
+}, true);
+
+export const handlePlaybackList = commandHandler(playbackList);
 
 function safeAgentSummary(agent: Agent) {
   return {
@@ -611,9 +568,7 @@ async function agentStatus(
   runtime: CliRuntime,
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<CommandResult> {
-  if (args.positionals.length > 2) {
-    throw usageError("agent status does not accept positional arguments.");
-  }
+
   if (resolved.agentConnection) {
     const connection = resolved.agentConnection;
     const data = {
@@ -700,7 +655,7 @@ async function agentEnroll(
   runtime: CliRuntime,
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<CommandResult> {
-  if (args.positionals.length !== 2) throw usageError("agent enroll does not accept positional arguments.");
+
   requireFlagValue(args, "name", "Office MacBook Codex");
   const name = flagString(args.flags, "name");
   if (name && name.length > 80) throw usageError("agent enroll --name is at most 80 characters.");
@@ -1023,7 +978,7 @@ async function agentConnect(
   runtime: CliRuntime,
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<CommandResult> {
-  if (args.positionals.length !== 2) throw usageError("agent connect does not accept positional arguments.");
+
   requireFlagValue(args, "name", "Office MacBook Codex");
   requireFlagValue(args, "timeout", "86400000");
   const name = flagString(args.flags, "name");
@@ -1187,7 +1142,7 @@ async function agentDisconnect(
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<CommandResult> {
   const invokedName = "agent disconnect";
-  if (args.positionals.length !== 2) throw usageError(`${invokedName} does not accept positional arguments.`);
+
   if (!flagBool(args.flags, "yes")) {
     throw usageError(`${invokedName} requires --yes. It revokes only this agent and preserves the account, screens, content, and other agents.`, {
       command: "screenrig agent disconnect --yes",
@@ -1282,25 +1237,6 @@ async function agentDisconnect(
   };
 }
 
-function isAuthenticatedCommand(group: string, action: string | undefined): boolean {
-  const actions: Record<string, ReadonlySet<string | undefined>> = {
-    account: new Set(["show"]),
-    dashboard: new Set([undefined]),
-    app: new Set(["upload", "list", "show"]),
-    media: new Set(["upload", "show", "download", "list", "delete", "update"]),
-    playlist: new Set(["create", "update", "export", "import", "show", "get", "list", "delete"]),
-    screen: new Set(["pair", "provision", "update", "list", "show", "assign", "set-timezone", "archive", "unarchive", "delete", "rotate-public-id", "toast", "screenshot"]),
-    browser: new Set(["setup"]),
-    kv: new Set(["get", "set", "delete", "list"]),
-    comment: new Set(["show", "set", "delete"]),
-    operations: new Set(["get", "wait", "cancel"]),
-    events: new Set(["list", "follow"]),
-    playback: new Set(["list"]),
-    feedback: new Set(["bug", "feature", "list"]),
-  };
-  return actions[group]?.has(action) ?? false;
-}
-
 async function browserSetupCommand(
   args: ParsedArgs,
   runtime: CliRuntime,
@@ -1382,12 +1318,7 @@ async function dashboardCommand(
   runtime: CliRuntime,
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<CommandResult> {
-  if (args.positionals.length > 1) {
-    throw usageError("dashboard does not accept positional arguments.", {
-      command: "screenrig dashboard",
-      reason: "Mint one single-use dashboard link for the enrolled account and open it.",
-    });
-  }
+
   const printMode = flagBool(args.flags, "print-url");
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
@@ -1612,13 +1543,12 @@ async function appPack(args: ParsedArgs, runtime: CliRuntime): Promise<CommandRe
   };
 }
 
-async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>): Promise<CommandResult> {
-  const update = args.positionals[1] === "update";
+async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>, update: boolean): Promise<CommandResult> {
   const id = update ? args.positionals[2] : undefined;
   const dir = args.positionals[update ? 3 : 2];
   requireFlagValue(args, "if-match", "1");
   const revision = flagString(args.flags, "if-match");
-  if (!dir || args.positionals.length !== (update ? 4 : 3) || (update && (!id || !revision))) {
+  if (!dir || (update && (!id || !revision))) {
     throw usageError(update ? "app update requires <id> <directory> --if-match REVISION." : "app upload requires one directory.");
   }
   if (update && args.flags.name !== undefined) throw usageError("app update preserves the application name; omit --name.");
@@ -1720,7 +1650,6 @@ function mediaTagFromArgs(args: ParsedArgs): string | undefined {
   return tag;
 }
 
-
 function mediaPrimitiveFromArgs(args: ParsedArgs): "image" | "video" | undefined {
   requireFlagValue(args, "primitive", "image");
   const primitive = flagString(args.flags, "primitive");
@@ -1745,63 +1674,80 @@ function screenListStateFromArgs(args: ParsedArgs): "archived" | undefined {
   return state;
 }
 
-async function mediaCommand(
-  args: ParsedArgs,
-  runtime: CliRuntime,
-  resolved: Awaited<ReturnType<typeof resolveConfig>>,
-  action: string | undefined,
-): Promise<CommandResult> {
-  if (action === "list") {
-    if (Object.hasOwn(args.flags, "kind")) {
-      throw usageError("media list uses --primitive image|video, not --kind.");
-    }
-    return simpleGet(args, runtime, resolved, "/api/v1/media", "Media", {
-      tag: mediaTagFromArgs(args),
-      primitive: mediaPrimitiveFromArgs(args),
-    });
+export const handleMediaList = commandHandler(async (args, runtime, resolved) => {
+
+  if (Object.hasOwn(args.flags, "kind")) {
+    throw usageError("media list uses --primitive image|video, not --kind.");
   }
+  return simpleGet(args, runtime, resolved, "/api/v1/media", "Media", {
+    tag: mediaTagFromArgs(args),
+    primitive: mediaPrimitiveFromArgs(args),
+  });
+}, true);
+
+export const handleMediaShow = commandHandler(async (args, runtime, resolved) => {
+
+  const id = args.positionals[2];
+  if (!id) throw usageError("media show requires an id.");
+  return simpleGet(args, runtime, resolved, `/api/v1/media/${id}`, "Media");
+}, true);
+
+export const handleMediaUpdate = commandHandler(async (args, runtime, resolved) => {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
-  if (action === "show") {
-    const id = args.positionals[2];
-    if (!id) throw usageError("media show requires an id.");
-    return simpleGet(args, runtime, resolved, `/api/v1/media/${id}`, "Media");
-  }
-  if (action === "update") {
-    return mediaUpdate(args, client);
-  }
-  if (action === "download") {
-    return loggerOf(runtime).withLocal({ op: "media.download", message: "media download" }, () =>
-      mediaDownload(args, runtime, client),
-    );
-  }
-  if (action === "delete") {
-    const id = args.positionals[2];
-    const revision = flagString(args.flags, "if-match");
-    if (!id || !revision) throw usageError("media delete requires <id> and --if-match.");
-    const response = await client.call({
-      method: "DELETE",
-      path: `/api/v1/media/${id}`,
-      idempotent: true,
-      headers: { "if-match": quotedRevision(revision) },
-    });
-    return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted media ${id}` };
-  }
-  if (action === "generate") {
-    return loggerOf(runtime).withLocal({ op: "media.generate", message: "media generate" }, () =>
-      mediaGenerate(args, runtime, client, resolved),
-    );
-  }
-  if (action === "upload") {
-    return loggerOf(runtime).withLocal({ op: "media.upload", message: "media upload" }, () =>
-      mediaUpload(args, runtime, client),
-    );
-  }
-  if (action === "upload-batch") {
-    return mediaUploadBatch(args, runtime, client, resolved);
-  }
-  throw usageError("Unknown media command.");
-}
+
+  return mediaUpdate(args, client);
+}, true);
+
+export const handleMediaDownload = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  return loggerOf(runtime).withLocal({ op: "media.download", message: "media download" }, () =>
+    mediaDownload(args, runtime, client),
+  );
+}, true);
+
+export const handleMediaDelete = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  const id = args.positionals[2];
+  const revision = flagString(args.flags, "if-match");
+  if (!id || !revision) throw usageError("media delete requires <id> and --if-match.");
+  const response = await client.call({
+    method: "DELETE",
+    path: `/api/v1/media/${id}`,
+    idempotent: true,
+    headers: { "if-match": quotedRevision(revision) },
+  });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted media ${id}` };
+}, true);
+
+export const handleMediaGenerate = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  return loggerOf(runtime).withLocal({ op: "media.generate", message: "media generate" }, () =>
+    mediaGenerate(args, runtime, client, resolved),
+  );
+}, true);
+
+export const handleMediaUpload = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  return loggerOf(runtime).withLocal({ op: "media.upload", message: "media upload" }, () =>
+    mediaUpload(args, runtime, client),
+  );
+}, true);
+
+export const handleMediaUploadBatch = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  return mediaUploadBatch(args, runtime, client, resolved);
+}, true);
 
 const GENERATE_ASPECT_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"] as const;
 const GENERATE_QUALITIES = ["low", "medium", "high"] as const;
@@ -2065,9 +2011,7 @@ async function mediaDownload(args: ParsedArgs, runtime: CliRuntime, client: ApiC
   if (!id || !MEDIA_ID_PATTERN.test(id)) {
     throw usageError("media download requires <id> starting with med_.");
   }
-  if (args.positionals.length !== 3) {
-    throw usageError("media download takes exactly one media id.");
-  }
+
   const metadataResponse = await client.call({ method: "GET", path: `/api/v1/media/${id}` });
   const media = mediaRecordFromBody(metadataResponse.body, id);
   const extension = MEDIA_CONTENT_EXTENSIONS[media.content_type.toLowerCase()];
@@ -2301,7 +2245,7 @@ async function mediaUploadBatch(
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<CommandResult> {
   const manifest = args.positionals[2];
-  if (!manifest || args.positionals.length !== 3) {
+  if (!manifest) {
     throw usageError("media upload-batch requires one manifest JSON file.");
   }
   requireFlagValue(args, "state", "./upload-state.json");
@@ -2463,25 +2407,21 @@ async function readFeedbackBody(args: ParsedArgs, runtime: CliRuntime): Promise<
   }
 }
 
-async function feedbackCommand(
-  args: ParsedArgs,
-  runtime: CliRuntime,
-  resolved: Awaited<ReturnType<typeof resolveConfig>>,
-  action: string | undefined,
-): Promise<CommandResult> {
+export const handleFeedbackList = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  return feedbackList(args, client);
+});
+
+export const handleFeedbackBug = commandHandler((args, runtime, resolved) => submitFeedback(args, runtime, resolved, "bug"));
+export const handleFeedbackFeature = commandHandler((args, runtime, resolved) => submitFeedback(args, runtime, resolved, "feature"));
+
+async function submitFeedback(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig, kind: FeedbackKind): Promise<CommandResult> {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
 
-  if (action === "list") {
-    return feedbackList(args, client);
-  }
-  if (action !== "bug" && action !== "feature") {
-    throw usageError("Unknown feedback command; use feedback bug, feedback feature, or feedback list.");
-  }
-
   const title = args.positionals[2]?.trim();
   if (!title) {
-    throw usageError(`feedback ${action} requires a title.`);
+    throw usageError(`feedback ${kind} requires a title.`);
   }
   if (title.length > FEEDBACK_TITLE_MAX) {
     throw usageError(`A feedback title is at most ${FEEDBACK_TITLE_MAX} characters.`);
@@ -2502,7 +2442,7 @@ async function feedbackCommand(
   // retry safe rather than duplicating a report.
   const response = await client.call({
     method: "POST",
-    path: FEEDBACK_PATHS[action],
+    path: FEEDBACK_PATHS[kind],
     idempotent: true,
     body: payload,
   });
@@ -2510,7 +2450,7 @@ async function feedbackCommand(
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
-    human: humanLines(action === "bug" ? "Bug report submitted" : "Feature request submitted", [
+    human: humanLines(kind === "bug" ? "Bug report submitted" : "Feature request submitted", [
       ["id", submission?.id],
       ["kind", submission?.kind],
       ["title", submission?.title],
@@ -2561,7 +2501,7 @@ async function playlistPreviewCommand(
   requireFlagValue(args, "output", "./preview");
   requireFlagValue(args, "frame-ms", "1000");
   const output = flagString(args.flags, "output");
-  if (!target || !output || args.positionals.length !== 3) {
+  if (!target || !output) {
     throw usageError("playlist preview requires <file|id> and --output DIR.");
   }
   if (target.includes("\0") || output.includes("\0")) {
@@ -2617,123 +2557,143 @@ async function playlistPreviewCommand(
   };
 }
 
-async function playlistCommand(
-  args: ParsedArgs,
-  runtime: CliRuntime,
-  resolved: Awaited<ReturnType<typeof resolveConfig>>,
-  action: string | undefined,
-): Promise<CommandResult> {
+export const handlePlaylistList = commandHandler(async (args, runtime, resolved) => {
+
+  return simpleGet(args, runtime, resolved, "/api/v1/playlists", "Playlists");
+}, true);
+
+export const handlePlaylistShow = commandHandler(async (args, runtime, resolved) => {
+
+  const id = args.positionals[2];
+  if (!id) throw usageError("playlist get requires an id.");
+  return simpleGet(args, runtime, resolved, `/api/v1/playlists/${id}`, "Playlist");
+}, true);
+
+export const handlePlaylistExport = commandHandler(async (args, runtime, resolved) => {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
-  if (action === "list") return simpleGet(args, runtime, resolved, "/api/v1/playlists", "Playlists");
-  if (action === "get" || action === "show") {
-    const id = args.positionals[2];
-    if (!id) throw usageError("playlist get requires an id.");
-    return simpleGet(args, runtime, resolved, `/api/v1/playlists/${id}`, "Playlist");
+
+  requireFlagValue(args, "output", "./playlist-bundle");
+  const id = args.positionals[2];
+  const output = flagString(args.flags, "output");
+  if (!id || !output) {
+    throw usageError("playlist export requires <id> --output <directory>.");
   }
-  if (action === "export") {
-    requireFlagValue(args, "output", "./playlist-bundle");
-    const id = args.positionals[2];
-    const output = flagString(args.flags, "output");
-    if (!id || !output || args.positionals.length !== 3) {
-      throw usageError("playlist export requires <id> --output <directory>.");
-    }
-    const result = await exportPlaylistBundle({ playlistId: id, outputDirectory: path.resolve(runtime.cwd(), output), client });
-    return {
-      envelope: successEnvelope(result, { request_id: client.requestId }),
-      exitCode: ExitCode.Success,
-      human: humanLines("Playlist exported", [
-        ["playlist_id", result.playlist_id],
-        ["directory", result.directory],
-        ["media_count", String(result.media_count)],
-        ["media_bytes", String(result.media_bytes)],
-      ]),
-    };
+  const result = await exportPlaylistBundle({ playlistId: id, outputDirectory: path.resolve(runtime.cwd(), output), client });
+  return {
+    envelope: successEnvelope(result, { request_id: client.requestId }),
+    exitCode: ExitCode.Success,
+    human: humanLines("Playlist exported", [
+      ["playlist_id", result.playlist_id],
+      ["directory", result.directory],
+      ["media_count", String(result.media_count)],
+      ["media_bytes", String(result.media_bytes)],
+    ]),
+  };
+}, true);
+
+export const handlePlaylistImport = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  requireFlagValue(args, "update", "pl_01");
+  requireFlagValue(args, "if-match", "1");
+  requireFlagValue(args, "name", "Lobby loop (copy)");
+  const directory = args.positionals[2];
+  if (!directory) throw usageError("playlist import requires one <directory>.");
+  const updateId = flagString(args.flags, "update");
+  const ifMatch = flagString(args.flags, "if-match");
+  const name = flagString(args.flags, "name");
+  const result = await importPlaylistBundle({
+    directory: path.resolve(runtime.cwd(), directory),
+    client,
+    runtime,
+    updateId,
+    ifMatch,
+    name,
+    timeoutMs: flagNumber(args.flags, "timeout"),
+    pollMs: flagNumber(args.flags, "poll-ms"),
+    beforePlaylistWrite: async (playlist, targetId) => {
+      if (targetId) await assertAssignedScreensHaveZone(client, targetId, playlist.pages);
+    },
+  });
+  return {
+    envelope: successEnvelope(result, { request_id: client.requestId }),
+    exitCode: ExitCode.Success,
+    human: humanLines(`Playlist ${result.mode === "create" ? "imported" : "updated from bundle"}`, [
+      ["source_playlist_id", result.source_playlist_id],
+      ["directory", result.directory],
+      ["media_reused", String(result.media.reused)],
+      ["media_uploaded", String(result.media.uploaded)],
+    ]),
+  };
+}, true);
+
+async function playlistCreateUpdateAction(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig, action: "create" | "update"): Promise<CommandResult> {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  const id = action === "update" ? args.positionals[2] : undefined;
+  const file = action === "update" ? args.positionals[3] : args.positionals[2];
+  const ifMatch = flagString(args.flags, "if-match");
+  if (!file || (action === "update" && (!id || !ifMatch))) {
+    throw usageError(`playlist ${action} requires ${action === "update" ? "<id> <file> --if-match" : "<file>"}.`);
   }
-  if (action === "import") {
-    requireFlagValue(args, "update", "pl_01");
-    requireFlagValue(args, "if-match", "1");
-    requireFlagValue(args, "name", "Lobby loop (copy)");
-    const directory = args.positionals[2];
-    if (!directory || args.positionals.length !== 3) throw usageError("playlist import requires one <directory>.");
-    const updateId = flagString(args.flags, "update");
-    const ifMatch = flagString(args.flags, "if-match");
-    const name = flagString(args.flags, "name");
-    const result = await importPlaylistBundle({
-      directory: path.resolve(runtime.cwd(), directory),
-      client,
-      runtime,
-      updateId,
-      ifMatch,
-      name,
-      timeoutMs: flagNumber(args.flags, "timeout"),
-      pollMs: flagNumber(args.flags, "poll-ms"),
-      beforePlaylistWrite: async (playlist, targetId) => {
-        if (targetId) await assertAssignedScreensHaveZone(client, targetId, playlist.pages);
-      },
-    });
-    return {
-      envelope: successEnvelope(result, { request_id: client.requestId }),
-      exitCode: ExitCode.Success,
-      human: humanLines(`Playlist ${result.mode === "create" ? "imported" : "updated from bundle"}`, [
-        ["source_playlist_id", result.source_playlist_id],
-        ["directory", result.directory],
-        ["media_reused", String(result.media.reused)],
-        ["media_uploaded", String(result.media.uploaded)],
-      ]),
-    };
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(await readFile(path.resolve(runtime.cwd(), file), "utf8")) as Record<string, unknown>;
+  } catch (err) {
+    throw usageError(`Cannot read playlist JSON: ${err instanceof Error ? err.message : "invalid JSON"}`);
   }
-  if (action === "create" || action === "update") {
-    const id = action === "update" ? args.positionals[2] : undefined;
-    const file = action === "update" ? args.positionals[3] : args.positionals[2];
-    const ifMatch = flagString(args.flags, "if-match");
-    if (!file || (action === "update" && (!id || !ifMatch))) {
-      throw usageError(`playlist ${action} requires ${action === "update" ? "<id> <file> --if-match" : "<file>"}.`);
-    }
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(await readFile(path.resolve(runtime.cwd(), file), "utf8")) as Record<string, unknown>;
-    } catch (err) {
-      throw usageError(`Cannot read playlist JSON: ${err instanceof Error ? err.message : "invalid JSON"}`);
-    }
-    if (typeof parsed.name !== "string" || !Array.isArray(parsed.pages)) {
-      throw usageError("Playlist JSON must contain string name and array pages.");
-    }
-    const extra = Object.keys(parsed).filter((key) => key !== "name" && key !== "pages");
-    if (extra.length > 0) {
-      throw usageError(`Playlist JSON contains unsupported fields: ${extra.join(", ")}.`);
-    }
-    const pages = expandPlaylistPages(parsed.pages);
-    const body = { name: parsed.name, pages };
-    assertPlaylistValid(body);
-    // A create has no assigned screen yet, so there is nothing to check. An
-    // update can add a schedule to a playlist screens are already running.
-    if (action === "update" && id) {
-      await assertAssignedScreensHaveZone(client, id, pages);
-    }
-    const response = await client.call({
-      method: action === "create" ? "POST" : "PUT",
-      path: action === "create" ? "/api/v1/playlists" : `/api/v1/playlists/${id}`,
-      idempotent: true,
-      headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
-      body,
-    });
-    return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Playlist ${action}d.` };
+  if (typeof parsed.name !== "string" || !Array.isArray(parsed.pages)) {
+    throw usageError("Playlist JSON must contain string name and array pages.");
   }
-  if (action === "delete") {
-    const id = args.positionals[2];
-    const ifMatch = flagString(args.flags, "if-match");
-    if (!id || !ifMatch) throw usageError("playlist delete requires <id> and --if-match.");
-    const response = await client.call({
-      method: "DELETE",
-      path: `/api/v1/playlists/${id}`,
-      idempotent: true,
-      headers: { "if-match": quotedRevision(ifMatch) },
-    });
-    return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted playlist ${id}` };
+  const extra = Object.keys(parsed).filter((key) => key !== "name" && key !== "pages");
+  if (extra.length > 0) {
+    throw usageError(`Playlist JSON contains unsupported fields: ${extra.join(", ")}.`);
   }
-  throw usageError("Unknown playlist command.");
+  const pages = expandPlaylistPages(parsed.pages);
+  const body = { name: parsed.name, pages };
+  assertPlaylistValid(body);
+  // A create has no assigned screen yet, so there is nothing to check. An
+  // update can add a schedule to a playlist screens are already running.
+  if (action === "update" && id) {
+    await assertAssignedScreensHaveZone(client, id, pages);
+  }
+  const response = await client.call({
+    method: action === "create" ? "POST" : "PUT",
+    path: action === "create" ? "/api/v1/playlists" : `/api/v1/playlists/${id}`,
+    idempotent: true,
+    headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
+    body,
+  });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Playlist ${action}d.` };
+
 }
+
+export const handlePlaylistCreate = commandHandler(async (args, runtime, resolved) => {
+  return playlistCreateUpdateAction(args, runtime, resolved, "create");
+}, true);
+
+export const handlePlaylistUpdate = commandHandler(async (args, runtime, resolved) => {
+  return playlistCreateUpdateAction(args, runtime, resolved, "update");
+}, true);
+
+export const handlePlaylistDelete = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  const id = args.positionals[2];
+  const ifMatch = flagString(args.flags, "if-match");
+  if (!id || !ifMatch) throw usageError("playlist delete requires <id> and --if-match.");
+  const response = await client.call({
+    method: "DELETE",
+    path: `/api/v1/playlists/${id}`,
+    idempotent: true,
+    headers: { "if-match": quotedRevision(ifMatch) },
+  });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted playlist ${id}` };
+}, true);
 
 /**
  * A page schedule is civil, so it means nothing without a zone to read it in.
@@ -2800,250 +2760,286 @@ async function assertAssignedScreensHaveZone(client: ApiClient, playlistId: stri
   }
 }
 
-async function screenCommand(
-  args: ParsedArgs,
-  runtime: CliRuntime,
-  resolved: Awaited<ReturnType<typeof resolveConfig>>,
-  action: string | undefined,
-): Promise<CommandResult> {
-  if (action === "revoke-credential") {
-    throw usageError("screen revoke-credential is retired. Archive the screen instead.", {
-      command: "screenrig --json screen archive <id> --if-match REVISION",
-      reason: "Archive hides the screen. It does not unbind the player. There is no account unbind.",
-    });
-  }
+export const handleScreenList = commandHandler(async (args, runtime, resolved) => {
+
+  return simpleGet(args, runtime, resolved, "/api/v1/screens", "Screens", {
+    state: screenListStateFromArgs(args),
+  });
+}, true);
+
+export const handleScreenProvision = commandHandler(async (args, runtime, resolved) => {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
-  if (action === "list") {
-    return simpleGet(args, runtime, resolved, "/api/v1/screens", "Screens", {
-      state: screenListStateFromArgs(args),
-    });
+
+  const openMode = flagBool(args.flags, "open");
+  const printMode = flagBool(args.flags, "print-url");
+  if (openMode === printMode) {
+    throw usageError("screen provision requires exactly one of --open or --print-url.");
   }
-  if (action === "provision") {
-    const openMode = flagBool(args.flags, "open");
-    const printMode = flagBool(args.flags, "print-url");
-    if (openMode === printMode) {
-      throw usageError("screen provision requires exactly one of --open or --print-url.");
-    }
-    const label = flagString(args.flags, "label");
-    const enrollmentRuntime = {
-      fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir },
-      now: runtime.now,
-      sleep: runtime.sleep,
-    };
-    const retry = await provisionRetryState({
-      resolved,
-      runtime: enrollmentRuntime,
-      ...(label ? { label } : {}),
-      ...(flagString(args.flags, "idempotency-key") ? { requestedKey: flagString(args.flags, "idempotency-key") } : {}),
-    });
-    const request: ProvisionScreen = { ...(label ? { label } : {}) };
-    let response;
-    try {
-      response = await client.call({
-        method: "POST",
-        path: "/api/v1/screens/provision",
-        idempotent: true,
-        idempotencyKey: retry.idempotency_key,
-        body: request,
-      });
-    } catch (error) {
-      if (error instanceof CliError && error.problem.code === "provisioning_expired") {
-        await clearProvisionRetryState(resolved, enrollmentRuntime, retry.idempotency_key);
-      }
-      throw error;
-    }
-    requirePrivateNoStore(response.headers, "Browser provisioning response");
-    const provisioned = response.body as ScreenProvisioning;
-    if (!provisioned.screen?.id || !provisioned.screen.public_id || !provisioned.expires_at || Number.isNaN(Date.parse(provisioned.expires_at))) {
-      throw usageError("Browser provisioning response does not match the generated ScreenProvisioning contract.");
-    }
-    const urls = validateProvisioningUrls(provisioned);
-    const opened = openMode ? await (runtime.openUrl?.(urls.provisioningUrl) ?? Promise.resolve(false)) : false;
-    if (printMode || opened) await clearProvisionRetryState(resolved, enrollmentRuntime, retry.idempotency_key);
-    const data = {
-      screen_id: provisioned.screen.id,
-      public_url: urls.publicUrl,
-      expires_at: provisioned.expires_at,
-      ...(openMode ? { opened } : { provisioning_url: urls.provisioningUrl }),
-    };
-    return {
-      envelope: successEnvelope(data, { request_id: client.requestId }),
-      exitCode: ExitCode.Success,
-      human: humanLines(openMode ? "Browser provisioning" : "Sensitive one-time browser provisioning URL", [
-        ["screen_id", provisioned.screen.id],
-        ["public_url", urls.publicUrl],
-        ["expires_at", provisioned.expires_at],
-        ...(openMode ? [["opened", opened ? "true" : "false"] as [string, string]] : [["provisioning_url", urls.provisioningUrl] as [string, string]]),
-      ]),
-    };
-  }
-  if (action === "pair") {
-    const rawCode = args.positionals[2];
-    if (!rawCode) throw usageError("screen pair requires CODE.");
-    const code = rawCode.toUpperCase();
-    if (!/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/.test(code)) {
-      throw usageError("screen pair CODE must be six characters from 23456789ABCDEFGHJKMNPQRSTUVWXYZ.");
-    }
-    const label = flagString(args.flags, "label");
-    const request: PairScreen = { code, ...(label ? { label } : {}) };
-    const response = await client.call({
+  const label = flagString(args.flags, "label");
+  const enrollmentRuntime = {
+    fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir },
+    now: runtime.now,
+    sleep: runtime.sleep,
+  };
+  const retry = await provisionRetryState({
+    resolved,
+    runtime: enrollmentRuntime,
+    ...(label ? { label } : {}),
+    ...(flagString(args.flags, "idempotency-key") ? { requestedKey: flagString(args.flags, "idempotency-key") } : {}),
+  });
+  const request: ProvisionScreen = { ...(label ? { label } : {}) };
+  let response;
+  try {
+    response = await client.call({
       method: "POST",
-      path: "/api/v1/screens/pair",
+      path: "/api/v1/screens/provision",
       idempotent: true,
+      idempotencyKey: retry.idempotency_key,
       body: request,
     });
-    requirePrivateNoStore(response.headers, "Screen pairing response");
-    const claim = response.body as PairingClaim;
-    if (!claim.screen?.id || !claim.screen.label || !claim.public_url) {
-      throw usageError("Screen pairing response does not match the generated PairingClaim contract.");
+  } catch (error) {
+    if (error instanceof CliError && error.problem.code === "provisioning_expired") {
+      await clearProvisionRetryState(resolved, enrollmentRuntime, retry.idempotency_key);
     }
-    return {
-      envelope: jsonBody(response, client.requestId),
-      exitCode: ExitCode.Success,
-      human: humanLines("Screen paired", [
-        ["code", code],
-        ["screen_id", claim.screen.id],
-        ["label", claim.screen.label],
-        ["state", claim.screen.state],
-      ]),
-    };
+    throw error;
   }
-  if (action === "show") {
-    const id = args.positionals[2];
-    if (!id) throw usageError("screen show requires an id.");
-    return simpleGet(args, runtime, resolved, `/api/v1/screens/${id}`, "Screen");
+  requirePrivateNoStore(response.headers, "Browser provisioning response");
+  const provisioned = response.body as ScreenProvisioning;
+  if (!provisioned.screen?.id || !provisioned.screen.public_id || !provisioned.expires_at || Number.isNaN(Date.parse(provisioned.expires_at))) {
+    throw usageError("Browser provisioning response does not match the generated ScreenProvisioning contract.");
   }
-  if (action === "update") {
-    const id = args.positionals[2];
-    const ifMatch = flagString(args.flags, "if-match");
-    const name = flagString(args.flags, "name");
-    const playlistId = flagString(args.flags, "playlist-id");
-    const timezone = flagString(args.flags, "timezone");
-    if (!id || !ifMatch || (!name && !playlistId && !timezone)) {
-      throw usageError("screen update requires <id>, --if-match, and --name, --playlist-id, or --timezone.");
+  const urls = validateProvisioningUrls(provisioned);
+  const opened = openMode ? await (runtime.openUrl?.(urls.provisioningUrl) ?? Promise.resolve(false)) : false;
+  if (printMode || opened) await clearProvisionRetryState(resolved, enrollmentRuntime, retry.idempotency_key);
+  const data = {
+    screen_id: provisioned.screen.id,
+    public_url: urls.publicUrl,
+    expires_at: provisioned.expires_at,
+    ...(openMode ? { opened } : { provisioning_url: urls.provisioningUrl }),
+  };
+  return {
+    envelope: successEnvelope(data, { request_id: client.requestId }),
+    exitCode: ExitCode.Success,
+    human: humanLines(openMode ? "Browser provisioning" : "Sensitive one-time browser provisioning URL", [
+      ["screen_id", provisioned.screen.id],
+      ["public_url", urls.publicUrl],
+      ["expires_at", provisioned.expires_at],
+      ...(openMode ? [["opened", opened ? "true" : "false"] as [string, string]] : [["provisioning_url", urls.provisioningUrl] as [string, string]]),
+    ]),
+  };
+}, true);
+
+export const handleScreenPair = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  const rawCode = args.positionals[2];
+  if (!rawCode) throw usageError("screen pair requires CODE.");
+  const code = rawCode.toUpperCase();
+  if (!/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/.test(code)) {
+    throw usageError("screen pair CODE must be six characters from 23456789ABCDEFGHJKMNPQRSTUVWXYZ.");
+  }
+  const label = flagString(args.flags, "label");
+  const request: PairScreen = { code, ...(label ? { label } : {}) };
+  const response = await client.call({
+    method: "POST",
+    path: "/api/v1/screens/pair",
+    idempotent: true,
+    body: request,
+  });
+  requirePrivateNoStore(response.headers, "Screen pairing response");
+  const claim = response.body as PairingClaim;
+  if (!claim.screen?.id || !claim.screen.label || !claim.public_url) {
+    throw usageError("Screen pairing response does not match the generated PairingClaim contract.");
+  }
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: humanLines("Screen paired", [
+      ["code", code],
+      ["screen_id", claim.screen.id],
+      ["label", claim.screen.label],
+      ["state", claim.screen.state],
+    ]),
+  };
+}, true);
+
+export const handleScreenShow = commandHandler(async (args, runtime, resolved) => {
+
+  const id = args.positionals[2];
+  if (!id) throw usageError("screen show requires an id.");
+  return simpleGet(args, runtime, resolved, `/api/v1/screens/${id}`, "Screen");
+}, true);
+
+export const handleScreenUpdate = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  const id = args.positionals[2];
+  const ifMatch = flagString(args.flags, "if-match");
+  const name = flagString(args.flags, "name");
+  const playlistId = flagString(args.flags, "playlist-id");
+  const timezone = flagString(args.flags, "timezone");
+  if (!id || !ifMatch || (!name && !playlistId && !timezone)) {
+    throw usageError("screen update requires <id>, --if-match, and --name, --playlist-id, or --timezone.");
+  }
+  // A patch that sets both a playlist and a timezone satisfies the schedule
+  // rule in one request, so only check when the patch leaves the screen
+  // without one.
+  let playlist: unknown;
+  if (playlistId && !timezone) {
+    playlist = await assertScheduledPlaylistHasZone(client, id, playlistId);
+  } else if (playlistId) {
+    // This read exists only for advisory aspect warnings. A missing warning
+    // must not block a patch that supplies the required timezone itself.
+    try {
+      playlist = (await client.call({ method: "GET", path: `/api/v1/playlists/${playlistId}` })).body;
+    } catch {
+      playlist = undefined;
     }
-    // A patch that sets both a playlist and a timezone satisfies the schedule
-    // rule in one request, so only check when the patch leaves the screen
-    // without one.
-    let playlist: unknown;
-    if (playlistId && !timezone) {
-      playlist = await assertScheduledPlaylistHasZone(client, id, playlistId);
-    } else if (playlistId) {
-      // This read exists only for advisory aspect warnings. A missing warning
-      // must not block a patch that supplies the required timezone itself.
-      try {
-        playlist = (await client.call({ method: "GET", path: `/api/v1/playlists/${playlistId}` })).body;
-      } catch {
-        playlist = undefined;
-      }
-    }
-    const body: ScreenPatch = {
-      ...(name ? { name } : {}),
-      ...(playlistId ? { playlist_id: playlistId } : {}),
-      ...(timezone ? { timezone } : {}),
-    };
-    const response = await client.call({ method: "PATCH", path: `/api/v1/screens/${id}`, idempotent: true, headers: { "if-match": quotedRevision(ifMatch) }, body });
-    const warnings = playlistId ? aspectMismatchWarnings(id, response.body, playlist) : [];
-    return {
-      envelope: jsonBody(response, client.requestId, undefined, warnings),
-      exitCode: ExitCode.Success,
-      human: [`Updated screen ${id}`, ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
-    };
   }
-  if (action === "assign") {
-    const id = args.positionals[2];
-    const playlistId = flagString(args.flags, "playlist-id");
-    const ifMatch = flagString(args.flags, "if-match");
-    if (!id || !playlistId || !ifMatch) throw usageError("screen assign requires <id> --playlist-id --if-match.");
-    const playlist = await assertScheduledPlaylistHasZone(client, id, playlistId);
-    const body: ScreenPatch = { playlist_id: playlistId };
-    const response = await client.call({
-      method: "PATCH",
-      path: `/api/v1/screens/${id}`,
-      idempotent: true,
-      headers: { "if-match": quotedRevision(ifMatch) },
-      body,
-    });
-    const warnings = aspectMismatchWarnings(id, response.body, playlist);
-    return {
-      envelope: jsonBody(response, client.requestId, undefined, warnings),
-      exitCode: ExitCode.Success,
-      human: [`Assigned playlist ${playlistId} to ${id}`, ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
-    };
-  }
-  if (action === "set-timezone") {
-    const id = args.positionals[2];
-    const timezone = flagString(args.flags, "timezone");
-    const ifMatch = flagString(args.flags, "if-match");
-    if (!id || !timezone || !ifMatch) throw usageError("screen set-timezone requires <id> --timezone --if-match.");
-    // The zone database belongs to the server, which validates the identifier
-    // against it. Sending the value unchanged keeps one authority for what a
-    // real zone is, so the CLI never carries a list that can go stale.
-    const body: ScreenPatch = { timezone };
-    const response = await client.call({
-      method: "PATCH",
-      path: `/api/v1/screens/${id}`,
-      idempotent: true,
-      headers: { "if-match": quotedRevision(ifMatch) },
-      body,
-    });
-    return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Set timezone ${timezone} on ${id}` };
-  }
-  if (action === "archive" || action === "unarchive") {
-    const id = args.positionals[2];
-    const revision = flagString(args.flags, "if-match");
-    if (!id || !revision) throw usageError(`screen ${action} requires <id> and --if-match.`);
-    const response = await client.call({
-      method: "POST",
-      path: `/api/v1/screens/${id}/${action}`,
-      idempotent: true,
-      headers: { "if-match": quotedRevision(revision) },
-    });
-    return {
-      envelope: jsonBody(response, client.requestId),
-      exitCode: ExitCode.Success,
-      human: action === "archive" ? `Archived screen ${id}` : `Unarchived screen ${id}`,
-    };
-  }
-  if (action === "delete") {
-    const id = args.positionals[2];
-    const ifMatch = flagString(args.flags, "if-match");
-    if (!id || !ifMatch) throw usageError("screen delete requires <id> and --if-match.");
-    const response = await client.call({
-      method: "DELETE",
-      path: `/api/v1/screens/${id}`,
-      idempotent: true,
-      headers: { "if-match": quotedRevision(ifMatch) },
-    });
-    return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted screen ${id}` };
-  }
-  if (action === "rotate-public-id") {
-    const id = args.positionals[2];
-    const revision = flagString(args.flags, "if-match");
-    if (!id || !revision) throw usageError("screen rotate-public-id requires <id> and --if-match.");
-    const response = await client.call({
-      method: "POST",
-      path: `/api/v1/screens/${id}/public-id/rotate`,
-      idempotent: true,
-      headers: { "if-match": quotedRevision(revision) },
-    });
-    return {
-      envelope: jsonBody(response, client.requestId),
-      exitCode: ExitCode.Success,
-      human: `Rotated public id for ${id}`,
-    };
-  }
-  if (action === "toast") {
-    return screenToast(args, client);
-  }
-  if (action === "screenshot") {
-    return loggerOf(runtime).withLocal({ op: "screenshot.capture", message: "screen screenshot" }, () =>
-      screenScreenshot(args, runtime, client),
-    );
-  }
-  throw usageError("Unknown screen command.");
+  const body: ScreenPatch = {
+    ...(name ? { name } : {}),
+    ...(playlistId ? { playlist_id: playlistId } : {}),
+    ...(timezone ? { timezone } : {}),
+  };
+  const response = await client.call({ method: "PATCH", path: `/api/v1/screens/${id}`, idempotent: true, headers: { "if-match": quotedRevision(ifMatch) }, body });
+  const warnings = playlistId ? aspectMismatchWarnings(id, response.body, playlist) : [];
+  return {
+    envelope: jsonBody(response, client.requestId, undefined, warnings),
+    exitCode: ExitCode.Success,
+    human: [`Updated screen ${id}`, ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
+  };
+}, true);
+
+export const handleScreenAssign = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  const id = args.positionals[2];
+  const playlistId = flagString(args.flags, "playlist-id");
+  const ifMatch = flagString(args.flags, "if-match");
+  if (!id || !playlistId || !ifMatch) throw usageError("screen assign requires <id> --playlist-id --if-match.");
+  const playlist = await assertScheduledPlaylistHasZone(client, id, playlistId);
+  const body: ScreenPatch = { playlist_id: playlistId };
+  const response = await client.call({
+    method: "PATCH",
+    path: `/api/v1/screens/${id}`,
+    idempotent: true,
+    headers: { "if-match": quotedRevision(ifMatch) },
+    body,
+  });
+  const warnings = aspectMismatchWarnings(id, response.body, playlist);
+  return {
+    envelope: jsonBody(response, client.requestId, undefined, warnings),
+    exitCode: ExitCode.Success,
+    human: [`Assigned playlist ${playlistId} to ${id}`, ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
+  };
+}, true);
+
+export const handleScreenSetTimezone = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  const id = args.positionals[2];
+  const timezone = flagString(args.flags, "timezone");
+  const ifMatch = flagString(args.flags, "if-match");
+  if (!id || !timezone || !ifMatch) throw usageError("screen set-timezone requires <id> --timezone --if-match.");
+  // The zone database belongs to the server, which validates the identifier
+  // against it. Sending the value unchanged keeps one authority for what a
+  // real zone is, so the CLI never carries a list that can go stale.
+  const body: ScreenPatch = { timezone };
+  const response = await client.call({
+    method: "PATCH",
+    path: `/api/v1/screens/${id}`,
+    idempotent: true,
+    headers: { "if-match": quotedRevision(ifMatch) },
+    body,
+  });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Set timezone ${timezone} on ${id}` };
+}, true);
+
+async function screenArchiveUnarchiveAction(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig, action: "archive" | "unarchive"): Promise<CommandResult> {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  const id = args.positionals[2];
+  const revision = flagString(args.flags, "if-match");
+  if (!id || !revision) throw usageError(`screen ${action} requires <id> and --if-match.`);
+  const response = await client.call({
+    method: "POST",
+    path: `/api/v1/screens/${id}/${action}`,
+    idempotent: true,
+    headers: { "if-match": quotedRevision(revision) },
+  });
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: action === "archive" ? `Archived screen ${id}` : `Unarchived screen ${id}`,
+  };
+
 }
+
+export const handleScreenArchive = commandHandler(async (args, runtime, resolved) => {
+  return screenArchiveUnarchiveAction(args, runtime, resolved, "archive");
+}, true);
+
+export const handleScreenUnarchive = commandHandler(async (args, runtime, resolved) => {
+  return screenArchiveUnarchiveAction(args, runtime, resolved, "unarchive");
+}, true);
+
+export const handleScreenDelete = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  const id = args.positionals[2];
+  const ifMatch = flagString(args.flags, "if-match");
+  if (!id || !ifMatch) throw usageError("screen delete requires <id> and --if-match.");
+  const response = await client.call({
+    method: "DELETE",
+    path: `/api/v1/screens/${id}`,
+    idempotent: true,
+    headers: { "if-match": quotedRevision(ifMatch) },
+  });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted screen ${id}` };
+}, true);
+
+export const handleScreenRotatePublicId = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  const id = args.positionals[2];
+  const revision = flagString(args.flags, "if-match");
+  if (!id || !revision) throw usageError("screen rotate-public-id requires <id> and --if-match.");
+  const response = await client.call({
+    method: "POST",
+    path: `/api/v1/screens/${id}/public-id/rotate`,
+    idempotent: true,
+    headers: { "if-match": quotedRevision(revision) },
+  });
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: `Rotated public id for ${id}`,
+  };
+}, true);
+
+export const handleScreenToast = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  return screenToast(args, client);
+}, true);
+
+export const handleScreenScreenshot = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  return loggerOf(runtime).withLocal({ op: "screenshot.capture", message: "screen screenshot" }, () =>
+    screenScreenshot(args, runtime, client),
+  );
+}, true);
 
 async function screenToast(args: ParsedArgs, client: ApiClient): Promise<CommandResult> {
   const id = args.positionals[2];
@@ -3302,62 +3298,72 @@ async function screenScreenshot(args: ParsedArgs, runtime: CliRuntime, client: A
   };
 }
 
-async function kvCommand(
-  args: ParsedArgs,
-  runtime: CliRuntime,
-  resolved: Awaited<ReturnType<typeof resolveConfig>>,
-  action: string | undefined,
-): Promise<CommandResult> {
+export const handleKvList = commandHandler(async (args, runtime, resolved) => {
+  const applicationId = flagString(args.flags, "application-id");
+  if (!applicationId) throw usageError("kv commands require --application-id.");
+  const key = args.positionals[2];
+
+  return simpleGet(args, runtime, resolved, `/api/v1/applications/${applicationId}/kv`, "K/V");
+}, true);
+
+export const handleKvGet = commandHandler(async (args, runtime, resolved) => {
+  const applicationId = flagString(args.flags, "application-id");
+  if (!applicationId) throw usageError("kv commands require --application-id.");
+  const key = args.positionals[2];
+
+  if (!key) throw usageError("kv get requires a key.");
+  return simpleGet(args, runtime, resolved, `/api/v1/applications/${applicationId}/kv/${encodeURIComponent(key)}`, "K/V");
+}, true);
+
+export const handleKvSet = commandHandler(async (args, runtime, resolved) => {
   const applicationId = flagString(args.flags, "application-id");
   if (!applicationId) throw usageError("kv commands require --application-id.");
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const key = args.positionals[2];
-  if (action === "list") {
-    return simpleGet(args, runtime, resolved, `/api/v1/applications/${applicationId}/kv`, "K/V");
-  }
-  if (action === "get") {
-    if (!key) throw usageError("kv get requires a key.");
-    return simpleGet(args, runtime, resolved, `/api/v1/applications/${applicationId}/kv/${encodeURIComponent(key)}`, "K/V");
-  }
-  if (action === "set") {
-    if (!key) throw usageError("kv set requires a key.");
-    const body = await kvWriteFromArgs(args, runtime.cwd());
-    const revision = flagString(args.flags, "if-match");
-    const response = await client.call({
-      method: "PUT",
-      path: `/api/v1/applications/${applicationId}/kv/${encodeURIComponent(key)}`,
-      idempotent: true,
-      headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
-      body,
-    });
-    const entry = response.body as KVEntry;
-    return {
-      envelope: jsonBody(response, client.requestId),
-      exitCode: ExitCode.Success,
-      human: humanLines("K/V value set", [
-        ["key", entry.key],
-        ["content_type", entry.content_type],
-        ["bytes", String(entry.bytes)],
-        ["sha256", entry.sha256],
-        ["revision", String(entry.revision)],
-      ]),
-    };
-  }
-  if (action === "delete") {
-    if (!key) throw usageError("kv delete requires a key.");
-    const ifMatch = flagString(args.flags, "if-match");
-    if (!ifMatch) throw usageError("kv delete requires --if-match.");
-    const response = await client.call({
-      method: "DELETE",
-      path: `/api/v1/applications/${applicationId}/kv/${encodeURIComponent(key)}`,
-      idempotent: true,
-      headers: { "if-match": quotedRevision(ifMatch) },
-    });
-    return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted ${key}` };
-  }
-  throw usageError("Unknown kv command.");
-}
+
+  if (!key) throw usageError("kv set requires a key.");
+  const body = await kvWriteFromArgs(args, runtime.cwd());
+  const revision = flagString(args.flags, "if-match");
+  const response = await client.call({
+    method: "PUT",
+    path: `/api/v1/applications/${applicationId}/kv/${encodeURIComponent(key)}`,
+    idempotent: true,
+    headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
+    body,
+  });
+  const entry = response.body as KVEntry;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: humanLines("K/V value set", [
+      ["key", entry.key],
+      ["content_type", entry.content_type],
+      ["bytes", String(entry.bytes)],
+      ["sha256", entry.sha256],
+      ["revision", String(entry.revision)],
+    ]),
+  };
+}, true);
+
+export const handleKvDelete = commandHandler(async (args, runtime, resolved) => {
+  const applicationId = flagString(args.flags, "application-id");
+  if (!applicationId) throw usageError("kv commands require --application-id.");
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+  const key = args.positionals[2];
+
+  if (!key) throw usageError("kv delete requires a key.");
+  const ifMatch = flagString(args.flags, "if-match");
+  if (!ifMatch) throw usageError("kv delete requires --if-match.");
+  const response = await client.call({
+    method: "DELETE",
+    path: `/api/v1/applications/${applicationId}/kv/${encodeURIComponent(key)}`,
+    idempotent: true,
+    headers: { "if-match": quotedRevision(ifMatch) },
+  });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted ${key}` };
+}, true);
 
 function commentPath(target: "screen" | "playlist", id: string, pageId: string | undefined): string {
   if (target === "screen") {
@@ -3369,26 +3375,12 @@ function commentPath(target: "screen" | "playlist", id: string, pageId: string |
   return `/api/v1/comment/playlist/${encodeURIComponent(id)}`;
 }
 
-async function commentCommand(
-  args: ParsedArgs,
-  runtime: CliRuntime,
-  resolved: Awaited<ReturnType<typeof resolveConfig>>,
-  action: string | undefined,
-): Promise<CommandResult> {
-  if (action !== "show" && action !== "set" && action !== "delete") {
-    throw usageError("Unknown comment command.");
-  }
-  const target = args.positionals[2];
+function commentTarget(args: ParsedArgs, target: "screen" | "playlist") {
   const id = args.positionals[3];
-  if (target !== "screen" && target !== "playlist") {
-    throw usageError("comment commands require screen <id> or playlist <id>.");
-  }
   if (!id || (target === "screen" && !isScreenId(id))) {
-    throw usageError(`comment ${action} ${target} requires <id>.`);
+    throw usageError(`comment ${target} requires <id>.`);
   }
-  if (args.positionals.length > 4) {
-    throw usageError(`comment ${action} ${target} does not accept extra arguments.`);
-  }
+
   if (Object.hasOwn(args.flags, "if-match")) {
     throw usageError("comment commands do not take --if-match; last write wins and does not bump revision.");
   }
@@ -3401,28 +3393,48 @@ async function commentCommand(
     throw usageError("--page must be a playlist page id: a letter, then up to 63 letters, digits, underscores, or hyphens.");
   }
   const pathName = commentPath(target, id, pageId);
-  if (action === "show") {
-    return simpleGet(args, runtime, resolved, pathName, "Comments");
-  }
-  const token = requireToken(resolved.token);
-  const client = clientFor(runtime, args, resolved.apiUrl, token);
-  if (action === "set") {
-    const body = await commentsWriteFromArgs(args, runtime.cwd());
-    const response = await client.call({
-      method: "PUT",
-      path: pathName,
-      idempotent: true,
-      body,
-    });
-    return {
-      envelope: jsonBody(response, client.requestId),
-      exitCode: ExitCode.Success,
-      human: humanLines("Comments set", [
-        [target, id],
-        ["page", pageId],
-      ]),
-    };
-  }
+
+  return { id, pageId, pathName };
+}
+
+async function showComment(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig, target: "screen" | "playlist"): Promise<CommandResult> {
+  const { pathName } = commentTarget(args, target);
+  return simpleGet(args, runtime, resolved, pathName, "Comments");
+
+}
+
+export const handleCommentShowScreen = commandHandler((args, runtime, resolved) => showComment(args, runtime, resolved, "screen"));
+export const handleCommentShowPlaylist = commandHandler((args, runtime, resolved) => showComment(args, runtime, resolved, "playlist"));
+
+async function setComment(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig, target: "screen" | "playlist"): Promise<CommandResult> {
+  const { id, pageId, pathName } = commentTarget(args, target);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+
+  const body = await commentsWriteFromArgs(args, runtime.cwd());
+  const response = await client.call({
+    method: "PUT",
+    path: pathName,
+    idempotent: true,
+    body,
+  });
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: humanLines("Comments set", [
+      [target, id],
+      ["page", pageId],
+    ]),
+  };
+
+}
+
+export const handleCommentSetScreen = commandHandler((args, runtime, resolved) => setComment(args, runtime, resolved, "screen"));
+export const handleCommentSetPlaylist = commandHandler((args, runtime, resolved) => setComment(args, runtime, resolved, "playlist"));
+
+async function deleteComment(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig, target: "screen" | "playlist"): Promise<CommandResult> {
+  const { id, pageId, pathName } = commentTarget(args, target);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+
   const response = await client.call({
     method: "DELETE",
     path: pathName,
@@ -3435,7 +3447,11 @@ async function commentCommand(
       ? `Deleted comments on playlist ${id} page ${pageId}`
       : `Deleted comments on ${target} ${id}`,
   };
+
 }
+
+export const handleCommentDeleteScreen = commandHandler((args, runtime, resolved) => deleteComment(args, runtime, resolved, "screen"));
+export const handleCommentDeletePlaylist = commandHandler((args, runtime, resolved) => deleteComment(args, runtime, resolved, "playlist"));
 
 async function operationsGet(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>): Promise<CommandResult> {
   const id = args.positionals[2];

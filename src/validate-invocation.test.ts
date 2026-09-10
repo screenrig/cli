@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseArgv } from "./argv.js";
-import { dispatch } from "./commands.js";
+import { executeCommand } from "./program.js";
 import { CliError } from "./problems.js";
 import type { CliRuntime } from "./runtime.js";
 
@@ -33,7 +33,7 @@ const invalid = [
 for (const [index, argv] of invalid.entries()) {
   test(`invalid invocation ${index + 1} is rejected before accessing runtime`, async () => {
     const runtime = new Proxy({} as CliRuntime, { get() { assert.fail("invalid invocation accessed runtime"); } });
-    await assert.rejects(async () => dispatch(parseArgv(argv), runtime), (error: unknown) => error instanceof CliError && error.problem.code === "usage_error");
+    await assert.rejects(async () => executeCommand(argv, runtime), (error: unknown) => error instanceof CliError && error.problem.code === "usage_error");
   });
 }
 

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { COMMAND_SPECS } from "./command-spec.js";
 import { commandHelp } from "./help.js";
 import { CLI_VERSION } from "./version.js";
 
@@ -31,7 +30,75 @@ test("root help is compact and every command is discoverable through immediate c
     }
   }
   visit([]);
-  assert.deepEqual(discovered.sort(), COMMAND_SPECS.map((spec) => spec.path.join(" ")).sort());
+  assert.deepEqual(discovered.sort(), [
+    "account show",
+    "agent enroll",
+    "agent connect",
+    "agent status",
+    "agent disconnect",
+    "dashboard",
+    "app pack",
+    "app upload",
+    "app update",
+    "app list",
+    "app show",
+    "media generate",
+    "media upload",
+    "media upload-batch",
+    "media show",
+    "media download",
+    "media list",
+    "media update",
+    "media delete",
+    "compose catalog",
+    "compose batch",
+    "compose render",
+    "playlist validate",
+    "playlist preview",
+    "playlist templates",
+    "playlist create",
+    "playlist update",
+    "playlist export",
+    "playlist import",
+    "playlist show",
+    "playlist list",
+    "playlist delete",
+    "screen pair",
+    "screen provision",
+    "browser setup",
+    "screen update",
+    "screen list",
+    "screen show",
+    "screen assign",
+    "screen set-timezone",
+    "screen archive",
+    "screen unarchive",
+    "screen delete",
+    "screen rotate-public-id",
+    "screen toast",
+    "screen screenshot",
+    "kv get",
+    "kv set",
+    "kv delete",
+    "kv list",
+    "comment show screen",
+    "comment show playlist",
+    "comment set screen",
+    "comment set playlist",
+    "comment delete screen",
+    "comment delete playlist",
+    "operations get",
+    "operations wait",
+    "operations cancel",
+    "events list",
+    "events follow",
+    "playback list",
+    "feedback bug",
+    "feedback feature",
+    "feedback list",
+    "doctor",
+    "version",
+  ].sort());
 });
 
 test("help paths, --help, and bare groups work before configuration or authentication", () => {
