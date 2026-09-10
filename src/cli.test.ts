@@ -579,6 +579,86 @@ test("agent connect resumes after its cached approval expiry when approved while
   await rm(result.configDir, { recursive: true, force: true });
 });
 
+test("agent connect --no-wait returns a pending handoff and resumes the same approved connection", async () => {
+  const transport = new FakeTransport();
+  let sealed: ReturnType<typeof agentConnectionEnvelope> | undefined;
+  const connectionToken = `sac_${"C".repeat(43)}`;
+  transport.on("POST", "/api/v1/agent-connections", (req) => {
+    const input = req.body as { recipient_public_key: { kty: "OKP"; crv: "X25519"; x: string } };
+    sealed = agentConnectionEnvelope(input.recipient_public_key);
+    sealed.collection.issuance_expires_at = "2026-08-16T16:00:00.000Z";
+    return {
+      status: 201,
+      headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
+      body: {
+        connection_id: sealed.connectionId,
+        connection_token: connectionToken,
+        approval_url: `https://dashboard.screenrig.ai/agents/connect/${sealed.connectionId}`,
+        expires_at: "2026-08-15T17:00:00.000Z",
+      },
+    };
+  });
+  transport.pushStream(`event: agent.connection\ndata: ${JSON.stringify({
+    connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA",
+    name: "Office Codex",
+    agent_type: "cli",
+    status: "approved",
+    expires_at: "2026-08-15T17:00:00.000Z",
+    created_at: "2026-08-14T17:00:00.000Z",
+  })}\n\n`);
+  transport.on("POST", /\/api\/v1\/agent-connections\/acn_.*\/credential/, (req) => {
+    assert.equal(req.headers?.authorization, `ScreenRig-Agent-Connect ${connectionToken}`);
+    return { status: 200, headers: { "cache-control": "private, no-store" }, body: sealed!.collection };
+  });
+  transport.on("POST", "/api/v1/agents/self/activate", (req) => {
+    assert.equal(req.headers?.authorization, `Bearer ${sealed!.pendingToken}`);
+    return { status: 200, headers: { "cache-control": "private, no-store" }, body: { ...sealed!.pendingAgent, state: "active", connected_at: "2026-08-14T17:00:01.000Z" } };
+  });
+  transport.on("GET", "/api/v1/agents/self", () => ({
+    status: 200,
+    headers: { "cache-control": "private, no-store" },
+    body: { agent: { ...sealed!.pendingAgent, state: "active", connected_at: "2026-08-14T17:00:01.000Z" }, connection_ready: true },
+  }));
+  transport.queueStream({ chunks: [`event: agent.connection\ndata: ${JSON.stringify({
+    connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Office Codex", agent_type: "cli",
+    status: "pending", expires_at: "2026-08-15T17:00:00.000Z", created_at: "2026-08-14T17:00:00.000Z",
+  })}\n\n`] });
+  const interrupted = await withRuntime(["agent", "connect", "--no-wait", "--print-url"], transport, { openUrl: async () => { throw new Error("print-url must not open browser"); } });
+  assert.equal(interrupted.code, 0, interrupted.stdout);
+  const pending = JSON.parse(interrupted.stdout).data;
+  assert.equal(pending.status, "pending");
+  assert.equal(pending.approval_url, "https://dashboard.screenrig.ai/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA");
+  assert.equal(pending.next.command, "screenrig agent connect --no-wait");
+  assert.deepEqual(pending.next.argv, ["agent", "connect", "--no-wait", "--config",
+    path.join(interrupted.configDir, "screenrig", "config.json"), "--api-url", "https://api.screenrig.ai"]);
+  assert.equal(interrupted.stderr, "");
+  assert.equal(transport.calls.filter(call => call.method === "POST").length, 1);
+  assert.doesNotMatch(interrupted.stdout, /sr_live_|sac_|ciphertext|nonce|private_jwk/);
+  const resumedFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => interrupted.configDir, env: { XDG_CONFIG_HOME: interrupted.configDir } };
+  const opened: string[] = [];
+  const resumed = await withRuntime(["agent", "connect", "--no-wait", "--name", "Office Codex"], transport, {
+    fs: resumedFs,
+    now: () => new Date("2026-08-16T05:00:00.000Z"),
+    openUrl: async (url) => { opened.push(url); return true; },
+  });
+  const result = { ...resumed, configDir: interrupted.configDir };
+  assert.equal(transport.calls.filter(call => call.method === "POST" && call.path === "/api/v1/agent-connections").length, 1);
+  assert.equal(result.code, 0, result.stdout);
+  assert.deepEqual(opened, [], "approved snapshots must not reopen the approval page");
+  assert.equal(JSON.parse(result.stdout).data.status, "active");
+  assert.equal(result.stderr, "");
+  assert.doesNotMatch(result.stdout, /sr_live_|sac_|ciphertext|nonce|private|authorization/i);
+  const configPath = path.join(result.configDir, "screenrig", "config.json");
+  const config = await readConfigFile(configPath, {
+    mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir, env: { XDG_CONFIG_HOME: result.configDir },
+  });
+  assert.equal(config?.token, sealed?.pendingToken);
+  assert.equal(config?.agent_id, sealed?.agentId);
+  assert.equal(config?.agent_connection, undefined);
+  assert.equal((await stat(configPath)).mode & 0o777, 0o600);
+  await rm(result.configDir, { recursive: true, force: true });
+});
+
 test("agent disconnect revokes only this installation and preserves safe disconnected status", async () => {
   const transport = new FakeTransport();
   const active = { ...TEST_AGENT, name: "Office Codex" };
@@ -663,7 +743,7 @@ test("agent connect resumes activation after the pending bearer was durably stor
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("agent connect clears private and pending bearer state when the dashboard cancels", async () => {
+for (const waitFlags of [[], ["--no-wait"]]) test(`agent connect ${waitFlags.join(" ")} clears private state when the dashboard cancels`, async () => {
   const transport = new FakeTransport();
   const connectionId = "acn_CANCELAAAAAAAAAAAAAAAA";
   transport.on("POST", "/api/v1/agent-connections", () => ({
@@ -684,7 +764,7 @@ test("agent connect clears private and pending bearer state when the dashboard c
     expires_at: "2026-08-14T17:10:00.000Z",
     created_at: "2026-08-14T17:00:00.000Z",
   })}\n\n`);
-  const result = await withRuntime(["--json", "agent", "connect"], transport, { openUrl: async () => true });
+  const result = await withRuntime(["--json", "agent", "connect", ...waitFlags], transport, { openUrl: async () => true });
   assert.equal(result.code, ExitCode.Client);
   const envelope = JSON.parse(result.stdout) as { error: { code: string; next: { command: string } } };
   assert.equal(envelope.error.code, "agent_connection_cancelled");

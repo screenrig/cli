@@ -15,7 +15,8 @@ export function registerAgentCommands(root: Command, bind: CommandActionBinder):
   addCommandNotes(agent.command("connect").description("Connect this installation with approval")
     .option("--name <NAME>", "Set this agent installation name")
     .option("--print-url", "Return the browser handoff URL")
-    .action(bind(handleAgentConnect)), "Approval expires after 24 hours; --timeout defaults to 86400000 ms. Retry agent connect to resume after an interrupted wait.");
+    .option("--no-wait", "Return pending status instead of waiting for dashboard approval")
+    .action(bind(handleAgentConnect)), "Approval expires after 24 hours. Default mode waits up to 86400000 ms. --no-wait reads one status snapshot (30000 ms default), returning pending with a resume command or completing an approved connection. --print-url places the handoff URL in the pending result. Retry agent connect to resume after an interrupted wait.");
 
   agent.command("status").description("Inspect this agent's connection")
     .action(bind(handleAgentStatus));
