@@ -3,6 +3,7 @@ export interface CommandSpec {
   readonly path: readonly string[];
   readonly minArgs: number;
   readonly maxArgs: number;
+  readonly aliases?: readonly (readonly string[])[];
   readonly flags: readonly string[];
 }
 
@@ -23,7 +24,7 @@ export const COMMAND_SPECS: readonly CommandSpec[] = [
   { path: ["dashboard"], minArgs: 0, maxArgs: 0, flags: ["print-url"] },
   { path: ["app", "pack"], minArgs: 1, maxArgs: 1, flags: ["output"] },
   { path: ["app", "upload"], minArgs: 1, maxArgs: 1, flags: ["name", "no-wait", "poll-ms"] },
-  { path: ["app", "update"], minArgs: 2, maxArgs: 2, flags: ["if-match", "name", "no-wait", "poll-ms"] },
+  { path: ["app", "update"], minArgs: 2, maxArgs: 2, flags: ["if-match", "no-wait", "poll-ms"] },
   { path: ["app", "list"], minArgs: 0, maxArgs: 0, flags: [] },
   { path: ["app", "show"], minArgs: 1, maxArgs: 1, flags: [] },
   { path: ["media", "generate"], minArgs: 0, maxArgs: 0, flags: ["prompt", "aspect-ratio", "quality", "tag"] },
@@ -44,7 +45,7 @@ export const COMMAND_SPECS: readonly CommandSpec[] = [
   { path: ["playlist", "update"], minArgs: 2, maxArgs: 2, flags: ["if-match"] },
   { path: ["playlist", "export"], minArgs: 1, maxArgs: 1, flags: ["output"] },
   { path: ["playlist", "import"], minArgs: 1, maxArgs: 1, flags: ["name", "update", "if-match", "poll-ms"] },
-  { path: ["playlist", "show"], minArgs: 1, maxArgs: 1, flags: [] },
+  { path: ["playlist", "show"], aliases: [["playlist", "get"]], minArgs: 1, maxArgs: 1, flags: [] },
   { path: ["playlist", "list"], minArgs: 0, maxArgs: 0, flags: [] },
   { path: ["playlist", "delete"], minArgs: 1, maxArgs: 1, flags: ["if-match"] },
   { path: ["screen", "pair"], minArgs: 1, maxArgs: 1, flags: ["label"] },
