@@ -571,8 +571,8 @@ export interface TemplateCatalog {
 export function playlistTemplateCatalog(): TemplateCatalog {
   return {
     compose: {
-      catalog_command: "screenrig --json compose catalog",
-      render_command: "screenrig --json compose render <file>",
+      catalog_command: "screenrig compose catalog",
+      render_command: "screenrig compose render <file>",
       wire_primitives: [...WIRE_PRIMITIVES],
     },
     canvas: {
@@ -644,7 +644,7 @@ function vectorChromeError(label: string): never {
   throw usageError(
     `${label} would emit native text, box, or line primitives. Compose a still with compose render, upload it as image, and use that image primitive on the page.`,
     {
-      command: "screenrig --json compose catalog",
+      command: "screenrig compose catalog",
       reason: "List the local compose catalog, then run compose render and media upload.",
     },
   );
@@ -664,7 +664,7 @@ function assertWirePrimitives(page: unknown, index: number): void {
       throw usageError(
         `${label} primitives[${primitiveIndex}].primitive must be ${WIRE_PRIMITIVES.join("|")}. Compose copy and chrome locally.`,
         {
-          command: "screenrig --json compose catalog",
+          command: "screenrig compose catalog",
           reason: "List the local compose catalog, then run compose render and media upload.",
         },
       );
@@ -763,7 +763,7 @@ function resolveTemplate(value: unknown): SlideTemplateDef {
   if (typeof value !== "string" || !TEMPLATE_BY_ID.has(value)) {
     const named = typeof value === "string" && value.length > 0 ? ` ${value}` : "";
     throw usageError(`Unknown template${named}. Run playlist templates for the closed catalog.`, {
-      command: "screenrig --json playlist templates",
+      command: "screenrig playlist templates",
       reason: "List the closed slide templates and their slots.",
     });
   }

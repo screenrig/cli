@@ -3,7 +3,8 @@ import { nonnegativeInteger } from "./options.js";
 
 export function registerGlobalOptions(root: Command): void {
   root
-    .option("--json", "Return a JSON envelope")
+    .addOption(new Option("--json", "Return JSON (default; also enables structured help)").conflicts("human"))
+    .addOption(new Option("--human", "Return human-readable output").conflicts("json"))
     .option("--api-url <URL>", "Override the API origin")
     .option("--config <PATH>", "Use this credential/configuration file")
     .option("--request-id <ID>", "Use a request correlation ID")

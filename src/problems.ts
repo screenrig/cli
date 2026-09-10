@@ -212,7 +212,7 @@ export function withQuotaGuidance(problem: NormalizedProblem): NormalizedProblem
   return {
     ...problem,
     next: {
-      command: "screenrig --json account show",
+      command: "screenrig account show",
       reason: "Read used_bytes and content_limit_bytes, then free space or upload a smaller file.",
     },
   };
@@ -230,7 +230,7 @@ export function withPaymentGuidance(problem: NormalizedProblem): NormalizedProbl
   return {
     ...problem,
     next: {
-      command: "screenrig --json account show",
+      command: "screenrig account show",
       reason: "Read credit_remaining. Remaining prepaid credit of zero rejects costly operations.",
     },
   };

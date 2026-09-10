@@ -458,7 +458,7 @@ test("a generate that times out says the still may exist and names the command t
     assert.equal(envelope.error.code, "timeout");
     assert.match(envelope.error.detail, /may or may not have been created/);
     assert.match(envelope.error.detail, /same idempotency key/);
-    assert.equal(envelope.error.next?.command, "screenrig --json media list --tag MenuBoard");
+    assert.equal(envelope.error.next?.command, "screenrig media list --tag MenuBoard");
     assert.doesNotMatch(result.stdout, new RegExp(PROMPT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   } finally {
     await rm(configDir, { recursive: true, force: true });

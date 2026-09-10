@@ -130,7 +130,7 @@ test("compose render old Frame JSON is usage_error pointing at compose catalog",
   assert.equal(frame.code, ExitCode.Usage, frame.stdout);
   const body = JSON.parse(frame.stdout);
   assert.match(body.error.detail, /old Frame\/recipe language|compose catalog/);
-  assert.equal(body.error.next?.command, "screenrig --json compose catalog");
+  assert.equal(body.error.next?.command, "screenrig compose catalog");
   const font = await withRuntime(["--json", "compose", "render", "font.json"], { cwdDir });
   assert.equal(font.code, ExitCode.Usage, font.stdout);
   assert.match(JSON.parse(font.stdout).error.detail, /fontSize/);

@@ -14,7 +14,7 @@ import { CliError, networkError, usageError } from "./problems.js";
 import { fetchSignedRawPut, type CliRuntime, type SignedRawPut } from "./runtime.js";
 
 const MEDIA_PUT_NOT_READY =
-  "Private media upload did not complete because the service is not ready. Run screenrig --json doctor and check the ready result before retrying.";
+  "Private media upload did not complete because the service is not ready. Run screenrig doctor and check the ready result before retrying.";
 
 export const SUPPORTED_MEDIA_CONTENT_TYPES = [
   "image/png",

@@ -144,7 +144,7 @@ test("templates with copy fail expansion and point at compose render", () => {
       assert.equal(err.problem.code, "usage_error");
       assert.match(err.problem.detail, /compose render/);
       assert.match(err.problem.detail, /text, box, or line/);
-      assert.equal(err.problem.next?.command, "screenrig --json compose catalog");
+      assert.equal(err.problem.next?.command, "screenrig compose catalog");
       return true;
     },
   );
@@ -302,7 +302,7 @@ test("unknown and retired template ids name playlist templates", () => {
         assert.ok(err instanceof CliError);
         assert.equal(err.problem.code, "usage_error");
         assert.match(err.problem.detail, new RegExp(`Unknown template ${id}`));
-        assert.equal(err.problem.next?.command, "screenrig --json playlist templates");
+        assert.equal(err.problem.next?.command, "screenrig playlist templates");
         return true;
       },
     );

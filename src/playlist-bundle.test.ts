@@ -806,7 +806,7 @@ test("import of a bundle whose playlist name is taken points at --name, and --na
       assert.equal(error.problem.code, "resource_conflict");
       assert.match(error.problem.detail, /playlist name is already in use/);
       assert.match(error.problem.detail, /unique per account/);
-      assert.equal(error.problem.next?.command, `screenrig --json playlist import ${dir} --name NAME`);
+      assert.equal(error.problem.next?.command, `screenrig playlist import ${dir} --name NAME`);
       assert.match(error.problem.next?.reason ?? "", /--update ID --if-match REVISION/);
       return true;
     },

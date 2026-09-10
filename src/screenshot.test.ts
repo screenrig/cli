@@ -346,7 +346,7 @@ test("screen screenshot success envelope has metadata only and never prints pixe
     assert.equal(json.stderr.includes(IMAGE_MARK), false);
 
     const human = await withRuntime(
-      ["screen", "screenshot", SCREEN_ID, "--poll-ms", "1"],
+      ["--human", "screen", "screenshot", SCREEN_ID, "--poll-ms", "1"],
       screenshotTransport({ statuses: [readyStatus()] }),
       { fs: fsLike, configDir, cwdDir },
     );

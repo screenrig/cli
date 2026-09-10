@@ -7,7 +7,7 @@ export function commandError(error: CommanderError, command: Command): never {
   const path = commandPath(command).join(" ");
   // Preserve actionable migration hints using only known command/flag names.
   const has = (flag: string) => command.args.some((arg) => arg === `--${flag}` || arg.startsWith(`--${flag}=`));
-  if (path === "screen" && command.args[0] === "revoke-credential") throw usageError("screen revoke-credential is retired. Archive the screen instead.", { command: "screenrig --json screen archive <id> --if-match REVISION", reason: "Archive hides the screen; it does not unbind the player." });
+  if (path === "screen" && command.args[0] === "revoke-credential") throw usageError("screen revoke-credential is retired. Archive the screen instead.", { command: "screenrig screen archive <id> --if-match REVISION", reason: "Archive hides the screen; it does not unbind the player." });
   if (path.startsWith("comment ")) {
     if (command.commands.length) throw usageError("comment commands require screen <id> or playlist <id>.");
     if (has("if-match")) throw usageError("comment commands do not take --if-match; last write wins and does not bump revision.");

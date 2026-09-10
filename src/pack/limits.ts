@@ -8,7 +8,7 @@ export function packError(code: string, detail: string): CliError {
   return new CliError(
     makeProblem(code, "Application archive rejected", 400, detail, {
       next: {
-        command: "screenrig app pack <directory> --json",
+        command: "screenrig app pack <directory>",
         reason: "Fix the named path or ignore rule, then rebuild the archive locally.",
       },
     }),
