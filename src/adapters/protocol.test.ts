@@ -736,7 +736,7 @@ test("screenshot contract is latest-wins POST, status GET, and binary WebP GET",
   assert.match(route, /image\/webp/);
   assert.match(route, /screenshot_unavailable/);
   assert.match(route, /resource_conflict/);
-  assert.match(source, /ScreenshotCaptureID: \{ type: string, pattern: "\^shot_\[A-Za-z0-9_-\]\{16,64\}\$"/);
+  assert.ok(source.includes('ScreenshotCaptureID: { type: string, pattern: "^(?:(?:stage|qa|development)_)?shot_[A-Za-z0-9_-]{16,64}$"'));
   assert.match(source, /x-problem-codes: \[[^\]]*screenshot_unavailable[^\]]*\]/);
   const generated = readFileSync(GENERATED_CONTRACT, "utf8");
   assert.deepEqual(quotedProperties(interfaceBody(generated, "ScreenScreenshotAccepted")), [
@@ -749,6 +749,7 @@ test("screenshot contract is latest-wins POST, status GET, and binary WebP GET",
     "captured_at",
     "expires_at",
     "height",
+    "reason",
     "sha256",
     "state",
     "width",

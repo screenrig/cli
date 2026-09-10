@@ -263,6 +263,32 @@ test("screen screenshot surfaces screenshot_unavailable when status is timed_out
   }
 });
 
+test("screen screenshot surfaces screenshot_unavailable when the Player cannot capture a surface", async () => {
+  const configDir = await testTemp("screenshot-timeout-");
+  const cwdDir = await testTemp("screenshot-timeout-cwd-");
+  const fsLike = await enrolledFs(configDir);
+  const transport = screenshotTransport({
+    statuses: [{ state: "unavailable", capture_id: CAPTURE_ID }],
+  });
+  try {
+    const result = await withRuntime(
+      ["--json", "screen", "screenshot", SCREEN_ID, "--poll-ms", "1"],
+      transport,
+      { fs: fsLike, configDir, cwdDir },
+    );
+    assert.equal(result.code, ExitCode.Conflict, result.stdout);
+    const envelope = JSON.parse(result.stdout) as { error: { code: string; type: string; status: number } };
+    assert.equal(envelope.error.code, "screenshot_unavailable");
+    assert.equal(envelope.error.type, "https://screenrig.ai/problems/screenshot-unavailable");
+    assert.equal(envelope.error.status, 409);
+    assert.equal(transport.calls.some((call) => call.method === "GET" && call.path.endsWith("/screenshot") && call.binary), false);
+    assert.equal(result.stdout.includes(IMAGE_MARK), false);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+    await rm(cwdDir, { recursive: true, force: true });
+  }
+});
+
 test("screen screenshot surfaces resource_conflict when capture_id is replaced", async () => {
   const configDir = await testTemp("screenshot-replaced-");
   const cwdDir = await testTemp("screenshot-replaced-cwd-");

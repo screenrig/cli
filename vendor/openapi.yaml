@@ -657,7 +657,7 @@ paths:
         Requests one still screenshot of the named active screen. Latest-wins:
         a new request replaces any in-flight capture_id and does not 409. The
         current ready slot is kept until a later upload succeeds. capture_id is
-        shot_ plus 16 to 64 base64url characters. expires_at is thirty seconds
+        an optional environment prefix, then shot_ and a random suffix. expires_at is thirty seconds
         after accept. The durable event type is screen.screenshot_requested on
         the existing runtime SSE stream; runtime scan never delivers it after
         expires_at. Event details name capture_id, expires_at, max_width_divisor
@@ -1319,8 +1319,8 @@ paths:
         capture_id, bytes, width, height, and sha256; they never include pixels
         or an object key.
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
-      parameters: [{ $ref: "#/components/parameters/ScreenshotCaptureIDHeader" }]
-      requestBody: { required: true, content: { image/webp: { schema: { type: string, format: binary } } } }
+      parameters: [{ $ref: "#/components/parameters/ScreenshotCaptureIDHeader" }, { name: ScreenRig-Capture-Failure, in: header, required: false, schema: { type: string, enum: [unsupported_surface, capture_failed] }, description: "Report unavailable capture with an empty body. Only the current pending capture may fail. No pixels or partial image are stored; screen.screenshot_failed carries this reason and status becomes unavailable." }]
+      requestBody: { required: false, description: "Raw still WebP for success; empty when ScreenRig-Capture-Failure is supplied.", content: { image/webp: { schema: { type: string, format: binary } } } }
       responses:
         "204": { description: Still WebP stored as the current slot., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
         "400": { $ref: "#/components/responses/Problem" }
@@ -2410,7 +2410,7 @@ components:
     OptionalIfMatch: { name: If-Match, in: header, required: false, schema: { type: string }, description: Omit only when creating a new key; updates require the current quoted revision. }
     AfterCursor: { name: after, in: query, required: false, schema: { type: string } }
     EventListLimit: { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 }, description: "Page size. A value outside 1-200 is refused with invalid_request and an errors[] member whose field is limit." }
-    PlaybackScreenID: { name: screen_id, in: query, required: false, schema: { type: string, pattern: "^scr_" } }
+    PlaybackScreenID: { name: screen_id, in: query, required: false, schema: { type: string, pattern: "^(?:(?:stage|qa|development)_)?scr_" } }
     PlaybackMediaID: { name: media_id, in: query, required: false, schema: { type: string, pattern: "^med_" } }
     MediaTagQuery: { name: tag, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, description: Exact media tag. Untagged objects are omitted when this filter is present. }
     MediaPrimitiveQuery: { name: primitive, in: query, required: false, schema: { type: string, enum: [image, video] } }
@@ -2944,7 +2944,7 @@ components:
         text: { type: string, maxLength: 120 }
         duration_ms: { type: integer, minimum: 2000, maximum: 60000 }
         expires_at: { type: string, format: date-time }
-    ScreenshotCaptureID: { type: string, pattern: "^shot_[A-Za-z0-9_-]{16,64}$", description: "shot_ plus 16 to 64 unpadded base64url characters. Never cap_." }
+    ScreenshotCaptureID: { type: string, pattern: "^(?:(?:stage|qa|development)_)?shot_[A-Za-z0-9_-]{16,64}$", description: "Optional stage_, qa_, or development_ prefix, then shot_ and a random suffix. New suffixes use 16 alphanumeric characters excluding oOlL; retained legacy suffixes are accepted." }
     ScreenScreenshotAccepted:
       type: object
       additionalProperties: false
@@ -2958,7 +2958,8 @@ components:
       required: [state]
       properties:
         capture_id: { $ref: "#/components/schemas/ScreenshotCaptureID" }
-        state: { type: string, enum: [idle, pending, ready, timed_out] }
+        state: { type: string, enum: [idle, pending, ready, timed_out, unavailable] }
+        reason: { type: string, enum: [unsupported_surface, capture_failed], description: Present when state is unavailable. }
         expires_at: { type: string, format: date-time }
         width: { type: integer, minimum: 1 }
         height: { type: integer, minimum: 1 }
@@ -2996,7 +2997,7 @@ components:
       description: details object on a durable screen.screenshot_failed event.
       properties:
         capture_id: { $ref: "#/components/schemas/ScreenshotCaptureID" }
-        reason: { type: string, enum: [expired] }
+        reason: { type: string, enum: [expired, unsupported_surface, capture_failed] }
     Event: { type: object, additionalProperties: true, required: [cursor, sequence, type, severity, message, at], properties: { cursor: { type: string }, sequence: { type: integer }, type: { type: string }, tag: { type: string, description: "Operation-log alias of type with each dot replaced by an underscore." }, id: { type: string, description: "Operation-log alias of resource.id. Absent when resource has no string id." }, params: { type: object, additionalProperties: { oneOf: [{ type: string, minLength: 1 }, { type: number }, { type: boolean }] }, description: "Operation-log alias containing only non-secret, non-empty scalar details. Nested values and secret-looking keys or values are omitted." }, severity: { type: string }, request_id: { type: string }, operation_id: { type: string }, message: { type: string }, actor: { $ref: "#/components/schemas/EventActor" }, agent: { $ref: "#/components/schemas/EventAgent" }, command: { $ref: "#/components/schemas/EventCommand" }, resource: { type: object, additionalProperties: true }, details: { type: object, additionalProperties: true }, at: { type: string } } }
     EventCommand:
       type: object
@@ -3170,7 +3171,7 @@ components:
         One immutable account-scoped submission. It has no revision because it never
         changes after it is written.
       properties:
-        id: { type: string, pattern: "^fb_[A-Za-z0-9_-]{24}$" }
+        id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?fb_[A-Za-z0-9_-]{16,24}$" }
         kind: { type: string, enum: [bug, feature] }
         title: { type: string, maxLength: 120 }
         body: { type: string, maxLength: 4000 }

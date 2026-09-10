@@ -386,7 +386,7 @@ export interface ScreenScreenshotAccepted {
   expires_at: string;
 }
 
-export type ScreenScreenshotState = "idle" | "pending" | "ready" | "timed_out";
+export type ScreenScreenshotState = "idle" | "pending" | "ready" | "timed_out" | "unavailable";
 
 /** GET /api/v1/screens/{id}/screenshot/status. Image bytes are never present. */
 export interface ScreenScreenshotStatus {

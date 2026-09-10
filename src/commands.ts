@@ -3334,7 +3334,7 @@ async function screenScreenshot(args: ParsedArgs, runtime: CliRuntime, client: A
           span.finish({ capture_id: captureId, state: status.state });
           return;
         }
-        if (status.state === "timed_out" && currentId === captureId) {
+        if ((status.state === "timed_out" || status.state === "unavailable") && currentId === captureId) {
           throw screenshotUnavailable(client.requestId);
         }
         if (Date.now() >= deadline) {
