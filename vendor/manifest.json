@@ -29,8 +29,8 @@
     {
       "path": "assets/screenrig.runtime.js",
       "source": "packages/sdk/dist/screenrig.runtime.js",
-      "bytes": 90622,
-      "sha256": "fb5dcdccf5b13e46f212297e6a66026e3be42862dfe3194b1144cc363b273219"
+      "bytes": 92594,
+      "sha256": "529919b546052878e61eff4cf181eec7cc86fb710e42b1e0818c9121695973da"
     }
   ]
 }

@@ -1529,6 +1529,38 @@
     const style = getComputedStyle(node);
     return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) !== 0;
   }
+  async function captureFonts(document2, families) {
+    const rules = [];
+    const visit = (list) => {
+      for (const rule of list) {
+        if (rule instanceof CSSFontFaceRule && families.has(rule.style.getPropertyValue("font-family").replaceAll(/["']/g, "").toLowerCase())) rules.push(rule);
+        else if (rule instanceof CSSImportRule && rule.styleSheet) visit(rule.styleSheet.cssRules);
+        else if ("cssRules" in rule) visit(rule.cssRules);
+      }
+    };
+    for (const sheet of document2.styleSheets) visit(sheet.cssRules);
+    let total = 0;
+    const output = [];
+    for (const rule of rules) {
+      let css = rule.cssText;
+      const urls = [...css.matchAll(/url\(["']?([^"')]+)["']?\)/g)];
+      for (const match of urls) {
+        const url = new URL(match[1], rule.parentStyleSheet?.href ?? document2.baseURI);
+        if (url.origin !== document2.location.origin) throw new CaptureUnavailable();
+        const response = await fetch(url, { credentials: "same-origin", cache: "force-cache", signal: AbortSignal.timeout(2e3) });
+        if (!response.ok) throw new CaptureUnavailable("capture_failed");
+        const buffer = await response.arrayBuffer();
+        total += buffer.byteLength;
+        if (total > MAX_PIXELS) throw new CaptureUnavailable("capture_failed");
+        const bytes = new Uint8Array(buffer);
+        let binary = "";
+        for (let offset = 0; offset < bytes.length; offset += 16384) binary += String.fromCharCode(...bytes.subarray(offset, offset + 16384));
+        css = css.replace(match[0], `url("data:font/ttf;base64,${btoa(binary)}")`);
+      }
+      output.push(css);
+    }
+    return output.join("\n") || "/* system fonts */";
+  }
   var previous = Promise.resolve();
   function captureDOM(root, signal) {
     const result = previous.catch(() => void 0).then(() => capture(root, signal));
@@ -1545,10 +1577,12 @@
     const videoClones = /* @__PURE__ */ new Map();
     const placeholders = [];
     const videos = /* @__PURE__ */ new WeakSet();
+    const families = /* @__PURE__ */ new Set();
     let failed = false;
     const visit = async (node) => {
       if (!visible(node)) return;
       const style = getComputedStyle(node);
+      for (const family of style.fontFamily.split(",")) families.add(family.trim().replaceAll(/["']/g, "").toLowerCase());
       if (style.mixBlendMode !== "normal" || style.backdropFilter && style.backdropFilter !== "none") throw new CaptureUnavailable();
       if (node instanceof HTMLVideoElement) {
         if (node.readyState < 2 || node.videoWidth < 1 || node.videoHeight < 1) throw new CaptureUnavailable("capture_failed");
@@ -1594,12 +1628,14 @@
     let context;
     try {
       await visit(root);
+      const fontCSS = await captureFonts(root.ownerDocument, families);
       context = await createContext(root, {
         width,
         height,
         scale: 1,
         timeout: 2e3,
         debug: false,
+        font: { cssText: fontCSS },
         features: { restoreScrollPosition: true },
         filter: (node) => !videos.has(node) && (!(node instanceof Element) || node.hasAttribute(marker) || visible(node)),
         onCloneNode: (clone) => {
