@@ -1759,39 +1759,36 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
     body: packed.archive,
   });
   const body = response.body as OperationAccepted;
-  if (!flagBool(args.flags, "no-wait") && body.operation_id) {
-    const operation = await client.waitForOperation(body.operation_id, {
+  const operation = !flagBool(args.flags, "no-wait") && body.operation_id
+    ? await client.waitForOperation(body.operation_id, {
       timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000,
       pollMs: flagNumber(args.flags, "poll-ms") ?? 1000,
       sleep: runtime.sleep,
-    });
-    return {
-      envelope: successEnvelope(
-        { application: body, operation, pack: { sha256: packed.sha256, file_count: packed.file_count } },
-        { request_id: client.requestId, operation_id: operation.id },
-      ),
-      exitCode: ExitCode.Success,
-      human: humanLines(update ? "Application release uploaded" : "Application uploaded", [
-        ["application_id", body.id],
-        // The release id is the only handle an application primitive accepts, so
-        // report it here rather than making the caller read the operation
-        // result to find it.
-        ["release_id", body.release_id],
-        ["operation_id", operation.id],
-        ["state", operation.state],
-        ["sha256", packed.sha256],
-      ]),
-    };
-  }
+    })
+    : null;
   return {
-    envelope: jsonBody(response, client.requestId, { sha256: packed.sha256 }),
+    envelope: jsonBody(response, client.requestId, {
+      // Keep the historical flat accepted fields and sha256 as aliases while
+      // exposing the same canonical paths regardless of waiting mode.
+      application: body,
+      operation,
+      pack: { sha256: packed.sha256, file_count: packed.file_count },
+      sha256: packed.sha256,
+    }),
     exitCode: ExitCode.Success,
-    human: humanLines(update ? "Application release accepted" : "Application upload accepted", [
-      ["application_id", body.id],
-      ["release_id", body.release_id],
-      ["operation_id", body.operation_id],
-      ["sha256", packed.sha256],
-    ]),
+    human: humanLines(
+      operation
+        ? (update ? "Application release uploaded" : "Application uploaded")
+        : (update ? "Application release accepted" : "Application upload accepted"),
+      [
+        ["application_id", body.id],
+        // Application primitives use the release id, not the application id.
+        ["release_id", body.release_id],
+        ["operation_id", body.operation_id],
+        ["state", operation?.state],
+        ["sha256", packed.sha256],
+      ],
+    ),
   };
 }
 
