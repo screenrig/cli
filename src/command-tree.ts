@@ -48,6 +48,9 @@ export function createCommandTree(
 ): CommandTree {
   const end = argv.indexOf("--");
   const tokens = end < 0 ? argv : argv.slice(0, end);
+  if (tokens.includes("--json") && tokens.includes("--human")) {
+    throw usageError("--json and --human are mutually exclusive.");
+  }
   for (const spellings of [["--help", "-h"], ["--version", "-V"]]) {
     if (tokens.filter((arg) => spellings.includes(arg)).length > 1) throw usageError(`${spellings[0]} may be supplied only once.`);
   }

@@ -107,7 +107,7 @@ To execute this checkout:
 
 ```sh
 npm run build
-node ./dist/bin.js --json version
+node ./dist/bin.js version
 ```
 
 Do not PATH-swap a local checkout into an installed agent. Do not

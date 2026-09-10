@@ -160,7 +160,7 @@ test("playlist preview command writes files, lint, and the contact-sheet sentenc
     }
   }
   const human = await withRuntime(
-    ["playlist", "preview", file, "--output", path.join(cwdDir, "human")],
+    ["--human", "playlist", "preview", file, "--output", path.join(cwdDir, "human")],
     { cwdDir },
   );
   assert.equal(human.code, ExitCode.Success, human.stdout);

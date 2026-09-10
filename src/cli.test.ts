@@ -1096,7 +1096,7 @@ test("agent disconnect shares the last-agent guard and explicit allow-lockout ov
 
 test("screen pair normalizes safe lowercase input and reports canonical uppercase", async () => {
   const transport = memoryBackend();
-  const result = await withAuthenticatedRuntime(["screen", "pair", "abc234", "--label", "Lobby"], transport);
+  const result = await withAuthenticatedRuntime(["--human", "screen", "pair", "abc234", "--label", "Lobby"], transport);
   assert.equal(result.code, 0, result.stdout);
   assert.match(result.stdout, /Screen paired/);
   assert.match(result.stdout, /code: ABC234/);
@@ -1292,7 +1292,7 @@ test("dashboard mints one single-use link, opens it, and keeps the URL out of ev
 
 test("dashboard prints the link exactly once when no browser could be opened", async () => {
   const result = await withAuthenticatedRuntime(
-    ["dashboard"],
+    ["--human", "dashboard"],
     memoryBackend(),
     { openUrl: async () => false },
   );
@@ -1957,7 +1957,7 @@ test("events list prints data or silence", async () => {
     { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
-  const printed = await withRuntime(["events", "list"], transport, { fs: fsLike });
+  const printed = await withRuntime(["--human", "events", "list"], transport, { fs: fsLike });
   assert.equal(printed.code, 0, printed.stdout);
   assert.equal(
     printed.stdout,
@@ -1972,7 +1972,7 @@ test("events list prints data or silence", async () => {
     headers: { "x-request-id": "req_events_empty" },
     body: { items: [], next_cursor: "" },
   }));
-  const silent = await withRuntime(["events", "list"], emptyTransport, { fs: fsLike });
+  const silent = await withRuntime(["--human", "events", "list"], emptyTransport, { fs: fsLike });
   assert.equal(silent.code, 0, silent.stdout);
   assert.equal(silent.stdout, "");
   await rm(configDir, { recursive: true, force: true });
@@ -2008,7 +2008,7 @@ test("events follow parses SSE frames from the transport stream", async () => {
   assert.equal(transport.calls.at(-1)?.query?.after, "ev1_0");
   assert.equal(transport.calls.at(-1)?.query?.cursor, undefined);
 
-  const human = await withRuntime(["events", "follow", "--timeout", "50"], transport, { fs: fsLike });
+  const human = await withRuntime(["--human", "events", "follow", "--timeout", "50"], transport, { fs: fsLike });
   assert.equal(human.code, 0, human.stdout);
   assert.equal(
     human.stdout,
@@ -2048,7 +2048,7 @@ test("events follow writes a human line before the stream closes", async () => {
     return origWrite(chunk as string | Buffer, encoding as BufferEncoding, cb);
   }) as typeof stdout.write;
   const code = await run({
-    argv: ["events", "follow", "--timeout", "50"],
+    argv: ["--human", "events", "follow", "--timeout", "50"],
     env: fsLike.env,
     stdout,
     stderr: new PassThrough(),
@@ -2074,7 +2074,7 @@ test("events follow is silent when no events arrive", async () => {
     { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
-  const human = await withRuntime(["events", "follow", "--timeout", "50"], transport, { fs: fsLike });
+  const human = await withRuntime(["--human", "events", "follow", "--timeout", "50"], transport, { fs: fsLike });
   assert.equal(human.code, 0, human.stdout);
   assert.equal(human.stdout, "");
   const json = await withRuntime(["--json", "events", "follow", "--timeout", "50"], transport, { fs: fsLike });
@@ -2171,7 +2171,7 @@ test("events follow prints scalar details and skips empty frames", async () => {
     { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
-  const { code, stdout } = await withRuntime(["events", "follow", "--timeout", "50"], transport, { fs: fsLike });
+  const { code, stdout } = await withRuntime(["--human", "events", "follow", "--timeout", "50"], transport, { fs: fsLike });
   assert.equal(code, 0, stdout);
   assert.equal(
     stdout,
@@ -2641,7 +2641,7 @@ test("doctor reports a configured credential as presence only", async () => {
       assert.doesNotMatch(json.stdout, pattern);
     }
 
-    const human = await withRuntime(["doctor"], memoryBackend(), { fs: fsLike, runProcess: probe });
+    const human = await withRuntime(["--human", "doctor"], memoryBackend(), { fs: fsLike, runProcess: probe });
     assert.match(human.stdout, /^PASS token: present$/m);
     for (const pattern of [/sr_live_/, /tokidAAAA/, /secretsecret/]) {
       assert.doesNotMatch(human.stdout, pattern);
@@ -3054,7 +3054,7 @@ test("media download writes the verified original rendition to --output or ./<id
     assert.equal(named.code, ExitCode.Success, named.stdout);
     assert.deepEqual(await readFile(explicit), bytes);
 
-    const human = await withRuntime(["media", "download", id, "--output", path.join(workDir, "again.webp")], transport, { fs: fsLike, cwd: () => workDir });
+    const human = await withRuntime(["--human", "media", "download", id, "--output", path.join(workDir, "again.webp")], transport, { fs: fsLike, cwd: () => workDir });
     assert.equal(human.code, ExitCode.Success, human.stdout);
     assert.match(human.stdout, /Media downloaded/);
     assert.match(human.stdout, /size: 1920x1080/);
@@ -3239,7 +3239,7 @@ test("a rate-limited submission surfaces Retry-After instead of a bare 429", asy
     assert.match(envelope.error.detail, /Retry-After is 180 seconds/);
     assert.match(String(envelope.error.next?.reason), /Wait 3 minutes/);
 
-    const human = await withRuntime(["feedback", "bug", "Title", "--body", "Body"], transport, { fs: fsLike });
+    const human = await withRuntime(["--human", "feedback", "bug", "Title", "--body", "Body"], transport, { fs: fsLike });
     assert.match(human.stderr, /retry_after_seconds: 180/);
   } finally {
     await rm(configDir, { recursive: true, force: true });
@@ -3315,7 +3315,7 @@ test("account show reports integer credit_remaining and warns when remaining is 
   assert.match(warning.message, /below 1000 credits/);
   assert.doesNotMatch(json.stdout, /kCr|stripe|x402|mcr|millicredit|\$/i);
 
-  const human = await withTokenConfig(transport, ["account", "show"]);
+  const human = await withTokenConfig(transport, ["--human", "account", "show"]);
   assert.equal(human.code, 0, human.stdout);
   assert.match(human.stdout, /credit_remaining: 0/);
   assert.match(human.stdout, /^token: present$/m);
@@ -3344,7 +3344,7 @@ test("remaining header 999 adds credits_low on JSON and human output", async () 
   assert.match(warning.message, /\b999\b/);
   assert.doesNotMatch(json.stdout, /kCr|stripe|x402|mcr|millicredit|\$/i);
 
-  const human = await withTokenConfig(transport, ["account", "show"]);
+  const human = await withTokenConfig(transport, ["--human", "account", "show"]);
   assert.equal(human.code, 0, human.stdout);
   assert.match(human.stdout, /warning: Remaining prepaid credit is 999, below 1000 credits\./);
 });
@@ -3515,7 +3515,7 @@ test("a 402 with remaining header 0 includes payment_required and credits_low", 
     assert.match(warning.message, /\b0\b/);
     assert.doesNotMatch(result.stdout, /stripe|x402|pay |kCr|mcr|millicredit|\$/i);
 
-    const human = await withRuntime(["media", "upload", file, "--no-transcode"], transport, { fs: fsLike });
+    const human = await withRuntime(["--human", "media", "upload", file, "--no-transcode"], transport, { fs: fsLike });
     assert.equal(human.code, 8, human.stderr);
     assert.match(human.stderr, /payment_required/);
     assert.match(human.stderr, /warning: Remaining prepaid credit is 0, below 1000 credits\./);
@@ -3916,7 +3916,7 @@ test("screen toast posts the closed write body and does not echo the text", asyn
     );
 
     const human = await withRuntime(
-      ["screen", "toast", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--level", "error", "--text", "Offline"],
+      ["--human", "screen", "toast", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--level", "error", "--text", "Offline"],
       transport,
       { fs: fsLike },
     );
@@ -4612,7 +4612,7 @@ test("screen show prints optional player-reported observation", async () => {
   assert.deepEqual(envelope.data.observation, SAMPLE_OBSERVATION);
 
   const humanResult = await withRuntime(
-    ["screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"],
+    ["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"],
     transport,
     { fs: fsLike },
   );
@@ -4716,7 +4716,7 @@ test("screen show includes online and optional last_online_at and last_ip", asyn
   assert.equal(envelope.data.last_ip, DOCUMENTATION_IPV4);
 
   const humanResult = await withRuntime(
-    ["screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"],
+    ["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"],
     transport,
     { fs: fsLike },
   );
@@ -5067,7 +5067,7 @@ test("playlist create refuses a templated page that would emit text", async () =
   const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string; next?: { command: string } } };
   assert.equal(envelope.error.code, "usage_error");
   assert.match(envelope.error.detail, /compose render/);
-  assert.equal(envelope.error.next?.command, "screenrig --json compose catalog");
+  assert.equal(envelope.error.next?.command, "screenrig compose catalog");
   assert.equal(transport.calls.some((call) => call.method === "POST" && call.path === "/api/v1/playlists"), false);
   await rm(configDir, { recursive: true, force: true });
 });

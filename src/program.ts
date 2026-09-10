@@ -19,7 +19,7 @@ export async function executeCommand(argv: string[], runtime: CliRuntime): Promi
   }
   if (tree.helpRequested()) {
     const help = describeHelp(tree.selected());
-    return { envelope: successEnvelope(help), exitCode: ExitCode.Success, human: help.usage };
+    return { envelope: successEnvelope(help), exitCode: ExitCode.Success, human: help.usage, output: "help" };
   }
   if (tree.versionRequested()) return handleVersion({ command: ["version"], positionals: ["version"], flags: {} }, runtime);
   if (!result) throw new Error("Command completed without a result.");

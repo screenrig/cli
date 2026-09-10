@@ -45,7 +45,7 @@ test("payment_required guidance names credit_remaining and not millicredits", ()
     code: "payment_required",
     errors: [],
   });
-  assert.equal(problem.next?.command, "screenrig --json account show");
+  assert.equal(problem.next?.command, "screenrig account show");
   assert.match(problem.next?.reason ?? "", /credit_remaining/);
   assert.doesNotMatch(problem.next?.reason ?? "", /mcr|millicredit|kCr|stripe|x402|\$/i);
 });

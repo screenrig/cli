@@ -145,6 +145,8 @@ export interface CommandResult {
   envelope: ReturnType<typeof successEnvelope<unknown>>;
   exitCode: ExitCode;
   human: string;
+  /** Help defaults to text; streams have already emitted their output. */
+  output?: "help" | "stream";
 }
 
 function nonemptyEnv(value: string | undefined): string | undefined {
@@ -177,7 +179,7 @@ function rethrowCompose(err: unknown): never {
   }
   if (err instanceof Error && (err as { code?: string }).code === "usage_error") {
     throw usageError(err.message, {
-      command: "screenrig --json compose catalog",
+      command: "screenrig compose catalog",
       reason: "Inspect the fail-closed compose catalog, then compose render a spec.",
     });
   }
@@ -188,7 +190,7 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
   const file = args.positionals[2];
   if (!file) {
     throw usageError("compose render requires a spec file.", {
-      command: "screenrig --json compose catalog",
+      command: "screenrig compose catalog",
       reason: "Inspect the fail-closed compose catalog, then compose render a spec.",
     });
   }
@@ -698,7 +700,7 @@ async function agentEnroll(
 }
 
 function emitAgentApprovalUrl(args: ParsedArgs, runtime: CliRuntime, approvalUrl: string): void {
-  if (flagBool(args.flags, "json")) {
+  if (!flagBool(args.flags, "human")) {
     runtime.stderr.write(`${JSON.stringify({ type: "agent_connection_approval", approval_url: approvalUrl })}\n`);
     return;
   }
@@ -1434,7 +1436,7 @@ async function enrollForCommand(
               throw new CliError({
                 ...err.problem,
                 next: err.problem.next ?? {
-                  command: "screenrig --json --beta-key KEY agent enroll --email ADDRESS",
+                  command: "screenrig --beta-key KEY agent enroll --email ADDRESS",
                   reason: "The control plane gates enrollment. Retry the same email with the enrollment beta key.",
                 },
               }, err.exitCode, err.warnings);
@@ -1820,8 +1822,8 @@ function ambiguousGenerateError(error: unknown, options: { elapsedMs: number; ta
   if (error.problem.code !== "timeout" && error.problem.code !== "transport_error") return error;
   const seconds = Math.round(options.elapsedMs / 1000);
   const listCommand = options.tag
-    ? `screenrig --json media list --tag ${options.tag}`
-    : "screenrig --json media list --primitive image";
+    ? `screenrig media list --tag ${options.tag}`
+    : "screenrig media list --primitive image";
   return new CliError(
     makeProblem(
       error.problem.code,
@@ -1849,7 +1851,7 @@ function writeGenerateNotice(
 ): void {
   if (flagBool(args.flags, "no-progress")) return;
   const seconds = GENERATE_TYPICAL_SECONDS[quality];
-  if (flagBool(args.flags, "json")) {
+  if (!flagBool(args.flags, "human")) {
     runtime.stderr.write(
       `${JSON.stringify({
         event: "media_generate_started",
@@ -2178,7 +2180,7 @@ function progressReporterFor(args: ParsedArgs, runtime: CliRuntime): ProgressRep
   if (flagBool(args.flags, "no-progress")) {
     return silentProgressReporter();
   }
-  const json = flagBool(args.flags, "json");
+  const json = !flagBool(args.flags, "human");
   return createProgressReporter({
     stderr: runtime.stderr,
     json,
@@ -2277,7 +2279,7 @@ async function mediaUploadBatch(
     transcodeOptions,
     noTranscode: flagBool(args.flags, "no-transcode"),
     reporter: progressReporterFor(args, runtime),
-    json: flagBool(args.flags, "json"),
+    json: !flagBool(args.flags, "human"),
     noProgress: flagBool(args.flags, "no-progress"),
     timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000,
     pollMs: flagNumber(args.flags, "poll-ms") ?? 1000,
@@ -2716,7 +2718,7 @@ function scheduleZoneError(screenId: string): CliError {
   return usageError(
     `Screen ${screenId} has no timezone, and the playlist schedules pages with visibility. Page visibility rules are civil times, so the screen needs an IANA zone before it can run them.`,
     {
-      command: `screenrig --json screen set-timezone ${screenId} --timezone America/Los_Angeles --if-match REVISION`,
+      command: `screenrig screen set-timezone ${screenId} --timezone America/Los_Angeles --if-match REVISION`,
       reason: "Set the screen timezone first, then assign the playlist. Read the current revision from screen show.",
     },
   );
@@ -3610,8 +3612,7 @@ async function eventsList(args: ParsedArgs, runtime: CliRuntime, resolved: Await
   return {
     envelope: jsonBody({ ...response, body: safePage }, client.requestId),
     exitCode: ExitCode.Success,
-    // main.ts writes JSON only when human is truthy; a space is a silent JSON gate.
-    human: human || (args.flags.json === true ? " " : ""),
+    human,
   };
 }
 
@@ -3664,7 +3665,7 @@ async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awa
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const transport = transportFor(runtime, resolved.apiUrl, token);
-  const json = args.flags.json === true;
+  const json = !flagBool(args.flags, "human");
   let printed = 0;
   let after = flagString(args.flags, "after") ?? flagString(args.flags, "cursor");
   let delayMs = EVENT_STREAM_BACKOFF_MS;
@@ -3743,6 +3744,7 @@ async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awa
     envelope: successEnvelope({ items: [] }, { request_id: client.requestId }),
     exitCode: ExitCode.Success,
     human: "",
+    output: "stream",
   };
 }
 
