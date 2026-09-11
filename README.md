@@ -45,7 +45,10 @@ The customer surface is content (`app`, `media`, `compose`), playlists, and scre
 Discover commands progressively with `screenrig --help`, `screenrig screen --help`,
 and `screenrig screen assign --help`. Deeper groups work the same way:
 `screenrig comment show --help`. `screenrig help screen assign` is equivalent.
-Add `--json` for structured child command paths, invocation syntax, and option types;
+Use `screenrig help --all` for the complete command inventory, or
+`screenrig help --all screen` for one group's descendants. Normal help lists
+immediate children. Add `--json` for structured command paths, positional arguments,
+option choices and defaults, relationships, and examples;
 help runs without configuration or authentication. Command-specific options follow
 that command, for example `screenrig screen update ID --name Lobby --if-match 1`.
 Global options such as `--json` may appear before or after the command. Use
