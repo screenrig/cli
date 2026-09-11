@@ -62,6 +62,7 @@ test("root help is compact and every command is discoverable through immediate c
     "playlist init",
     "playlist validate",
     "playlist preview",
+    "playlist replace-release",
     "playlist templates",
     "playlist create",
     "playlist update",

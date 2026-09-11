@@ -1,6 +1,6 @@
 import { nonnegativeInteger, positiveInteger, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handlePlaylistInit, handlePlaylistValidate, handlePlaylistPreview, handlePlaylistTemplates, handlePlaylistCreate, handlePlaylistUpdate, handlePlaylistExport, handlePlaylistImport, handlePlaylistShow, handlePlaylistList, handlePlaylistDelete } from "../commands.js";
+import { handlePlaylistReplaceRelease, handlePlaylistInit, handlePlaylistValidate, handlePlaylistPreview, handlePlaylistTemplates, handlePlaylistCreate, handlePlaylistUpdate, handlePlaylistExport, handlePlaylistImport, handlePlaylistShow, handlePlaylistList, handlePlaylistDelete } from "../commands.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes.js";
 import { LOOK_AT_THE_CONTACT_SHEET } from "../playlist-preview.js";
@@ -51,6 +51,19 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .argument("<file>", "Local input file")
     .requiredOption("--expect-rev <REVISION>", "Require the current resource revision (required)", revision)
     .action(bind(handlePlaylistUpdate));
+
+  const replaceRelease = playlist.command("replace-release").description("Preview or apply one application release replacement and its shared-screen impact")
+    .argument("<id>", "Playlist identifier")
+    .requiredOption("--page <ID>", "Exact page identifier")
+    .requiredOption("--primitive <ID>", "Exact application primitive identifier within the page")
+    .requiredOption("--release-id <ID>", "New immutable release identifier")
+    .option("--apply", "Apply the reviewed replacement")
+    .option("--expect-rev <REVISION>", "Playlist revision from the preview", revision)
+    .option("--expect-impact <TOKEN>", "Impact token from the preview")
+    .action(bind(handlePlaylistReplaceRelease));
+  addCommandNotes(replaceRelease, "Defaults to a read-only preview including active and archived assigned screens. Apply requires the preview revision and impact token. Changed impact requires a fresh review. Screen assignments are a snapshot; only playlist revision is checked atomically. Server validates release availability and ownership on apply.");
+  addCommandExamples(replaceRelease, 'screenrig playlist replace-release pl_PLAYLIST --page board-page --primitive board --release-id rel_NEW',
+    'screenrig playlist replace-release pl_PLAYLIST --page board-page --primitive board --release-id rel_NEW --apply --expect-rev 4 --expect-impact TOKEN');
 
   playlist.command("export").description("Export a playlist bundle")
     .argument("<id>", "Playlist identifier")

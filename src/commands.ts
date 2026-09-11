@@ -1,3 +1,4 @@
+import { replacePlaylistRelease } from "./playlist-release.js";
 import { publishScreen } from "./screen-publish.js";
 import { readAuthoringJson, readAuthoringText, writeAuthoringJson } from "./authoring-input.js";
 import { editablePlaylist, preparePlaylist, targetDimensions } from "./playlist-authoring.js";
@@ -2742,6 +2743,17 @@ export const handlePlaylistCreate = commandHandler(async (args, runtime, resolve
 
 export const handlePlaylistUpdate = commandHandler(async (args, runtime, resolved) => {
   return playlistCreateUpdateAction(args, runtime, resolved, "update");
+}, true);
+
+export const handlePlaylistReplaceRelease = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const result = await replacePlaylistRelease({ client, apiUrl: resolved.apiUrl,
+    playlistId: args.positionals[2]!, pageId: flagString(args.flags, "page")!,
+    primitiveId: flagString(args.flags, "primitive")!, releaseId: flagString(args.flags, "release-id")!,
+    apply: flagBool(args.flags, "apply"), revision: flagString(args.flags, "if-match"),
+    impact: flagString(args.flags, "expect-impact"),
+  });
+  return { envelope: successEnvelope(result, { request_id: client.requestId }), exitCode: ExitCode.Success, human: JSON.stringify(result, null, 2) };
 }, true);
 
 export const handlePlaylistDelete = commandHandler(async (args, runtime, resolved) => {

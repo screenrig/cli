@@ -249,6 +249,30 @@ remain separate. Plain `playlist show` is an inspection response; `--editable`
 without `--output` returns `data.document`, `data.playlist_id`, and `data.revision`.
 Updating a playlist affects every screen assigned to it.
 
+After `app update` succeeds, take `data.application.release_id` and preview a
+replacement of one explicitly identified application primitive:
+
+```sh
+screenrig playlist replace-release pl_EXISTING --page board-page --primitive board --release-id rel_NEW
+```
+
+Review `data.previous_release_id`, `data.release_id`, and `data.affected_screens`
+(including archived assignments). Then use the returned `data.revision` and
+`data.impact` to apply that exact replacement:
+
+```sh
+screenrig playlist replace-release pl_EXISTING --page board-page --primitive board --release-id rel_NEW --apply --expect-rev 4 --expect-impact TOKEN_FROM_PREVIEW
+```
+
+The CLI preserves the other primitives and playlist settings. Every screen
+assigned to this shared playlist receives the new pin; archived screens retain
+it for later use. A changed replacement, playlist revision, or observed screen
+impact requires a fresh preview and review. Screen assignments can change after
+the snapshot; the server atomically checks only the playlist revision. Release
+availability and ownership are validated by the server on apply. After writing,
+verify screen manifest revisions and playback. Existing pins stay unchanged
+until the replacement is applied.
+
 Playlist validate, create, update, preview, and screen publish accept `-` as their
 input file to read stdin. JSON envelopes are never written into authored files.
 `--expect-rev` is the preferred revision spelling; `--if-match` remains a compatible
