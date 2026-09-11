@@ -6,7 +6,7 @@ import { CliError } from "./problems.js";
 import type { CliRuntime } from "./runtime.js";
 
 const invalid = [
-  ["screen", "update", "scr_TEST", "--name", "Lobby", "--if-match", "1", "--dry-run"],
+  ["screen", "update", "scr_TEST", "--name", "Lobby", "--expect-rev", "1", "--dry-run"],
   ["screen", "list", "--name", "Lobby"],
   ["screen", "show", "scr_TEST", "extra"],
   ["screen", "list", "--timeout", "oops"],
@@ -20,9 +20,9 @@ const invalid = [
   ["screen", "list", "--state", "archived", "--state", "archived"],
   ["screen", "list", "-x"],
   ["screen", "show", "scr_TEST", "--name=secret"],
-  ["screen", "archive", "scr_TEST", "--if-match", "oops"],
+  ["screen", "archive", "scr_TEST", "--expect-rev", "oops"],
   ["media", "upload", "poster.png", "--no-transcode", "--codec", "h264"],
-  ["media", "update", "med_TEST", "--tag", "x", "--clear-tag", "--if-match", "1"],
+  ["media", "update", "med_TEST", "--tag", "x", "--clear-tag", "--expect-rev", "1"],
   ["feedback", "bug", "Title", "--body", "x", "--body-file", "x.md"],
   ["kv", "set", "key", "--application-id", "app_TEST", "--json-value", "{}", "--file", "x"],
   ["compose", "render", "page.json", "--target-width", "1920"],
@@ -39,7 +39,7 @@ for (const [index, argv] of invalid.entries()) {
 
 test("supported values, aliases, empty byte payload, and help paths remain valid", () => {
   for (const argv of [
-    ["screen", "update", "scr_TEST", "--name=Lobby=North", "--if-match", '"1"'],
+    ["screen", "update", "scr_TEST", "--name=Lobby=North", "--expect-rev", '"1"'],
     ["screen", "screenshot", "scr_TEST", "--timeout", "0"],
     ["events", "follow", "--timeout", "0"],
     ["playlist", "get", "pl_TEST"],

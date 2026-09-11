@@ -82,7 +82,7 @@ for (const outcome of ["success", "rejection"] as const) {
 
 test("unauthenticated native mutation actions reject before local preparation or transport", async () => {
   for (const argv of [
-    ["app", "update", "app_TEST", "missing-app", "--if-match", "1"],
+    ["app", "update", "app_TEST", "missing-app", "--expect-rev", "1"],
     ["media", "generate", "--prompt", "A sample information board"],
     ["media", "upload-batch", "missing-manifest.json", "--state", "resume.json"],
   ]) {

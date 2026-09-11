@@ -579,6 +579,86 @@ test("agent connect resumes after its cached approval expiry when approved while
   await rm(result.configDir, { recursive: true, force: true });
 });
 
+test("agent connect --no-wait returns a pending handoff and resumes the same approved connection", async () => {
+  const transport = new FakeTransport();
+  let sealed: ReturnType<typeof agentConnectionEnvelope> | undefined;
+  const connectionToken = `sac_${"C".repeat(43)}`;
+  transport.on("POST", "/api/v1/agent-connections", (req) => {
+    const input = req.body as { recipient_public_key: { kty: "OKP"; crv: "X25519"; x: string } };
+    sealed = agentConnectionEnvelope(input.recipient_public_key);
+    sealed.collection.issuance_expires_at = "2026-08-16T16:00:00.000Z";
+    return {
+      status: 201,
+      headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
+      body: {
+        connection_id: sealed.connectionId,
+        connection_token: connectionToken,
+        approval_url: `https://dashboard.screenrig.ai/agents/connect/${sealed.connectionId}`,
+        expires_at: "2026-08-15T17:00:00.000Z",
+      },
+    };
+  });
+  transport.pushStream(`event: agent.connection\ndata: ${JSON.stringify({
+    connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA",
+    name: "Office Codex",
+    agent_type: "cli",
+    status: "approved",
+    expires_at: "2026-08-15T17:00:00.000Z",
+    created_at: "2026-08-14T17:00:00.000Z",
+  })}\n\n`);
+  transport.on("POST", /\/api\/v1\/agent-connections\/acn_.*\/credential/, (req) => {
+    assert.equal(req.headers?.authorization, `ScreenRig-Agent-Connect ${connectionToken}`);
+    return { status: 200, headers: { "cache-control": "private, no-store" }, body: sealed!.collection };
+  });
+  transport.on("POST", "/api/v1/agents/self/activate", (req) => {
+    assert.equal(req.headers?.authorization, `Bearer ${sealed!.pendingToken}`);
+    return { status: 200, headers: { "cache-control": "private, no-store" }, body: { ...sealed!.pendingAgent, state: "active", connected_at: "2026-08-14T17:00:01.000Z" } };
+  });
+  transport.on("GET", "/api/v1/agents/self", () => ({
+    status: 200,
+    headers: { "cache-control": "private, no-store" },
+    body: { agent: { ...sealed!.pendingAgent, state: "active", connected_at: "2026-08-14T17:00:01.000Z" }, connection_ready: true },
+  }));
+  transport.queueStream({ chunks: [`event: agent.connection\ndata: ${JSON.stringify({
+    connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Office Codex", agent_type: "cli",
+    status: "pending", expires_at: "2026-08-15T17:00:00.000Z", created_at: "2026-08-14T17:00:00.000Z",
+  })}\n\n`] });
+  const interrupted = await withRuntime(["agent", "connect", "--no-wait", "--print-url"], transport, { openUrl: async () => { throw new Error("print-url must not open browser"); } });
+  assert.equal(interrupted.code, 0, interrupted.stdout);
+  const pending = JSON.parse(interrupted.stdout).data;
+  assert.equal(pending.status, "pending");
+  assert.equal(pending.approval_url, "https://dashboard.screenrig.ai/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA");
+  assert.equal(pending.next.command, "screenrig agent connect --no-wait");
+  assert.deepEqual(pending.next.argv, ["agent", "connect", "--no-wait", "--config",
+    path.join(interrupted.configDir, "screenrig", "config.json"), "--api-url", "https://api.screenrig.ai"]);
+  assert.equal(interrupted.stderr, "");
+  assert.equal(transport.calls.filter(call => call.method === "POST").length, 1);
+  assert.doesNotMatch(interrupted.stdout, /sr_live_|sac_|ciphertext|nonce|private_jwk/);
+  const resumedFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => interrupted.configDir, env: { XDG_CONFIG_HOME: interrupted.configDir } };
+  const opened: string[] = [];
+  const resumed = await withRuntime(["agent", "connect", "--no-wait", "--name", "Office Codex"], transport, {
+    fs: resumedFs,
+    now: () => new Date("2026-08-16T05:00:00.000Z"),
+    openUrl: async (url) => { opened.push(url); return true; },
+  });
+  const result = { ...resumed, configDir: interrupted.configDir };
+  assert.equal(transport.calls.filter(call => call.method === "POST" && call.path === "/api/v1/agent-connections").length, 1);
+  assert.equal(result.code, 0, result.stdout);
+  assert.deepEqual(opened, [], "approved snapshots must not reopen the approval page");
+  assert.equal(JSON.parse(result.stdout).data.status, "active");
+  assert.equal(result.stderr, "");
+  assert.doesNotMatch(result.stdout, /sr_live_|sac_|ciphertext|nonce|private|authorization/i);
+  const configPath = path.join(result.configDir, "screenrig", "config.json");
+  const config = await readConfigFile(configPath, {
+    mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir, env: { XDG_CONFIG_HOME: result.configDir },
+  });
+  assert.equal(config?.token, sealed?.pendingToken);
+  assert.equal(config?.agent_id, sealed?.agentId);
+  assert.equal(config?.agent_connection, undefined);
+  assert.equal((await stat(configPath)).mode & 0o777, 0o600);
+  await rm(result.configDir, { recursive: true, force: true });
+});
+
 test("agent disconnect revokes only this installation and preserves safe disconnected status", async () => {
   const transport = new FakeTransport();
   const active = { ...TEST_AGENT, name: "Office Codex" };
@@ -663,7 +743,7 @@ test("agent connect resumes activation after the pending bearer was durably stor
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("agent connect clears private and pending bearer state when the dashboard cancels", async () => {
+for (const waitFlags of [[], ["--no-wait"]]) test(`agent connect ${waitFlags.join(" ")} clears private state when the dashboard cancels`, async () => {
   const transport = new FakeTransport();
   const connectionId = "acn_CANCELAAAAAAAAAAAAAAAA";
   transport.on("POST", "/api/v1/agent-connections", () => ({
@@ -684,7 +764,7 @@ test("agent connect clears private and pending bearer state when the dashboard c
     expires_at: "2026-08-14T17:10:00.000Z",
     created_at: "2026-08-14T17:00:00.000Z",
   })}\n\n`);
-  const result = await withRuntime(["--json", "agent", "connect"], transport, { openUrl: async () => true });
+  const result = await withRuntime(["--json", "agent", "connect", ...waitFlags], transport, { openUrl: async () => true });
   assert.equal(result.code, ExitCode.Client);
   const envelope = JSON.parse(result.stdout) as { error: { code: string; next: { command: string } } };
   assert.equal(envelope.error.code, "agent_connection_cancelled");
@@ -3848,7 +3928,7 @@ test("comment set rejects non-objects, oversize payloads, and last-write-wins fl
       [["comment", "set", "screen", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--json-value", "[]"], /JSON object/],
       [["comment", "set", "screen", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--json-value", '{"note":"x"}', "--file", "x.json"], /exactly one of --json-value or --file/],
       [["comment", "set", "screen", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--value-base64", "e30="], /--json-value or --file/],
-      [["comment", "set", "screen", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--json-value", '{"note":"x"}', "--if-match", "1"], /do not take --if-match/],
+      [["comment", "set", "screen", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--json-value", '{"note":"x"}', "--expect-rev", "1"], /do not take --expect-rev/],
       [["comment", "set", "screen", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--page", "poster", "--json-value", '{"note":"x"}'], /do not take --page/],
       [["comment", "show", "playlist", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--page", "1poster"], /playlist page id/],
       [["comment", "set", "screen", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--json-value", `{"x":"${"a".repeat(1017)}"}`], /1024 bytes/],
@@ -4076,7 +4156,7 @@ test("media, operation, screen credential, and K/V revision commands bind the fr
 
     result = await withRuntime(["--json", "media", "show", "med_AAAAAAAAAAAAAAAAAAAAAAAA"], transport, runtimeExtra);
     assert.equal(result.code, 0, result.stdout);
-    result = await withRuntime(["--json", "media", "delete", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "1"], transport, runtimeExtra);
+    result = await withRuntime(["--json", "media", "delete", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--expect-rev", "1"], transport, runtimeExtra);
     assert.equal(result.code, 0, result.stdout);
     assert.equal(transport.calls.at(-1)?.headers?.["if-match"], '"1"');
 
@@ -4086,10 +4166,10 @@ test("media, operation, screen credential, and K/V revision commands bind the fr
 
     result = await withRuntime(["--json", "screen", "pair", "ABC234"], transport, runtimeExtra);
     const paired = (JSON.parse(result.stdout) as { data: { screen: { id: string; revision: number } } }).data.screen;
-    result = await withRuntime(["--json", "screen", "rotate-public-id", paired.id, "--if-match", String(paired.revision)], transport, runtimeExtra);
+    result = await withRuntime(["--json", "screen", "rotate-public-id", paired.id, "--expect-rev", String(paired.revision)], transport, runtimeExtra);
     assert.equal(result.code, 0, result.stdout);
     const rotated = (JSON.parse(result.stdout) as { data: { revision: number } }).data;
-    result = await withRuntime(["--json", "screen", "archive", paired.id, "--if-match", String(rotated.revision)], transport, runtimeExtra);
+    result = await withRuntime(["--json", "screen", "archive", paired.id, "--expect-rev", String(rotated.revision)], transport, runtimeExtra);
     assert.equal(result.code, 0, result.stdout);
     assert.equal(transport.calls.at(-1)?.path, `/api/v1/screens/${paired.id}/archive`);
 
@@ -4104,10 +4184,10 @@ test("media, operation, screen credential, and K/V revision commands bind the fr
 
     result = await withRuntime(["--json", "kv", "set", "settings", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":1}'], transport, runtimeExtra);
     assert.equal(result.code, 0, result.stdout);
-    result = await withRuntime(["--json", "kv", "set", "settings", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":2}', "--if-match", "1"], transport, runtimeExtra);
+    result = await withRuntime(["--json", "kv", "set", "settings", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":2}', "--expect-rev", "1"], transport, runtimeExtra);
     assert.equal(result.code, 0, result.stdout);
     assert.equal(transport.calls.at(-1)?.headers?.["if-match"], '"1"');
-    result = await withRuntime(["--json", "kv", "set", "settings", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":3}', "--if-match", "1"], transport, runtimeExtra);
+    result = await withRuntime(["--json", "kv", "set", "settings", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":3}', "--expect-rev", "1"], transport, runtimeExtra);
     assert.equal(result.code, ExitCode.Precondition);
     assert.equal((JSON.parse(result.stdout) as { error: { current_revision: number } }).error.current_revision, 2);
   } finally {
@@ -4139,7 +4219,7 @@ test("screen archive, unarchive, archived list, and retired unbind drive the rea
     );
 
     const archived = await withRuntime(
-      ["--json", "screen", "archive", screen.id, "--if-match", String(screen.revision)],
+      ["--json", "screen", "archive", screen.id, "--expect-rev", String(screen.revision)],
       transport,
       { fs: fsLike },
     );
@@ -4170,7 +4250,7 @@ test("screen archive, unarchive, archived list, and retired unbind drive the rea
     assert.equal((JSON.parse(shown.stdout) as { data: { state: string } }).data.state, "archived");
 
     const unarchived = await withRuntime(
-      ["--json", "screen", "unarchive", screen.id, "--if-match", String(archivedScreen.revision)],
+      ["--json", "screen", "unarchive", screen.id, "--expect-rev", String(archivedScreen.revision)],
       transport,
       { fs: fsLike },
     );
@@ -4191,7 +4271,7 @@ test("screen archive, unarchive, archived list, and retired unbind drive the rea
 
     const callsBeforeDelete = transport.calls.length;
     const deleted = await withRuntime(
-      ["--json", "screen", "delete", screen.id, "--if-match", String(restored.revision)],
+      ["--json", "screen", "delete", screen.id, "--expect-rev", String(restored.revision)],
       transport,
       { fs: fsLike },
     );
@@ -4210,7 +4290,7 @@ test("screen archive, unarchive, archived list, and retired unbind drive the rea
 
     const callsBeforeRevoke = transport.calls.length;
     const revoked = await withRuntime(
-      ["--json", "screen", "revoke-credential", screen.id, "--if-match", String(restored.revision)],
+      ["--json", "screen", "revoke-credential", screen.id, "--expect-rev", String(restored.revision)],
       transport,
       { fs: fsLike },
     );
@@ -4308,7 +4388,7 @@ test("screen set-timezone patches only the timezone and carries the revision", a
   const transport = memoryBackend();
   const { configDir, fsLike } = await scheduledPlaylistFixture(false, "tz-set-");
   const result = await withRuntime(
-    ["--json", "screen", "set-timezone", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--timezone", "America/Los_Angeles", "--if-match", "1"],
+    ["--json", "screen", "set-timezone", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--timezone", "America/Los_Angeles", "--expect-rev", "1"],
     transport,
     { fs: fsLike },
   );
@@ -4328,7 +4408,7 @@ test("screen set-timezone forwards the identifier unchanged and never carries a 
   // would go stale, so an unknown name must still reach the server to be
   // rejected there.
   await withRuntime(
-    ["--json", "screen", "set-timezone", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--timezone", "Mars/Olympus_Mons", "--if-match", "1"],
+    ["--json", "screen", "set-timezone", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--timezone", "Mars/Olympus_Mons", "--expect-rev", "1"],
     transport,
     { fs: fsLike },
   );
@@ -4341,15 +4421,15 @@ test("screen set-timezone rejects a missing id, zone, or revision", async () => 
   const transport = memoryBackend();
   const { configDir, fsLike } = await scheduledPlaylistFixture(false, "tz-usage-");
   for (const argv of [
-    ["screen", "set-timezone", "--timezone", "America/Los_Angeles", "--if-match", "1"],
-    ["screen", "set-timezone", "scr_1", "--if-match", "1"],
+    ["screen", "set-timezone", "--timezone", "America/Los_Angeles", "--expect-rev", "1"],
+    ["screen", "set-timezone", "scr_1", "--expect-rev", "1"],
     ["screen", "set-timezone", "scr_1", "--timezone", "America/Los_Angeles"],
   ]) {
     const result = await withRuntime(["--json", ...argv], transport, { fs: fsLike });
     assert.equal(result.code, ExitCode.Usage, `${argv.join(" ")}: ${result.stdout}`);
     const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string } };
     assert.equal(envelope.error.code, "usage_error");
-    assert.match(envelope.error.detail, /requires <id> --timezone --if-match/);
+    assert.match(envelope.error.detail, /requires <id> --timezone --expect-rev/);
   }
   // A rejected invocation never reaches the server.
   assert.equal(transport.calls.some((call) => call.method === "PATCH"), false);
@@ -4364,7 +4444,7 @@ test("assigning a scheduled playlist to a screen with no timezone is refused bef
   transport.calls.length = 0;
 
   const result = await withRuntime(
-    ["--json", "screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "1"],
+    ["--json", "screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--expect-rev", "1"],
     transport,
     { fs: fsLike },
   );
@@ -4415,7 +4495,7 @@ test("a page disabled outright still counts as scheduled", async () => {
   await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
 
   const result = await withRuntime(
-    ["--json", "screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "1"],
+    ["--json", "screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--expect-rev", "1"],
     transport,
     { fs: fsLike },
   );
@@ -4430,7 +4510,7 @@ test("an unscheduled playlist assigns to a screen with no timezone", async () =>
   await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
 
   const result = await withRuntime(
-    ["--json", "screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "1"],
+    ["--json", "screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--expect-rev", "1"],
     transport,
     { fs: fsLike },
   );
@@ -4444,13 +4524,13 @@ test("a scheduled playlist assigns once the screen carries a timezone", async ()
   await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
   await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
   await withRuntime(
-    ["--json", "screen", "set-timezone", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--timezone", "America/Los_Angeles", "--if-match", "1"],
+    ["--json", "screen", "set-timezone", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--timezone", "America/Los_Angeles", "--expect-rev", "1"],
     transport,
     { fs: fsLike },
   );
 
   const result = await withRuntime(
-    ["--json", "screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "2"],
+    ["--json", "screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--expect-rev", "2"],
     transport,
     { fs: fsLike },
   );
@@ -4470,7 +4550,7 @@ test("one screen update that sets both a playlist and a timezone skips the sched
       "--json", "screen", "update", "scr_PAIRINGAAAAAAAAAAAAAAAA",
       "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA",
       "--timezone", "America/Los_Angeles",
-      "--if-match", "1",
+      "--expect-rev", "1",
     ],
     transport,
     { fs: fsLike },
@@ -4535,7 +4615,7 @@ test("screen assign emits aspect_mismatch beside credits_low from resolved playl
   const transport = aspectMismatchTransport();
   transport.extraResponseHeaders = { "screenrig-credits-remaining": "999" };
   const result = await withAuthenticatedRuntime(
-    ["--json", "screen", "assign", "scr_ASPECT", "--playlist-id", "pl_ASPECT", "--if-match", "1"],
+    ["--json", "screen", "assign", "scr_ASPECT", "--playlist-id", "pl_ASPECT", "--expect-rev", "1"],
     transport,
   );
   assert.equal(result.code, ExitCode.Success, result.stdout);
@@ -4561,7 +4641,7 @@ test("screen assign emits aspect_mismatch beside credits_low from resolved playl
 test("screen update --playlist-id emits aspect_mismatch without media lookups", async () => {
   const transport = aspectMismatchTransport();
   const result = await withAuthenticatedRuntime(
-    ["--json", "screen", "update", "scr_ASPECT", "--playlist-id", "pl_ASPECT", "--if-match", "1"],
+    ["--json", "screen", "update", "scr_ASPECT", "--playlist-id", "pl_ASPECT", "--expect-rev", "1"],
     transport,
   );
   assert.equal(result.code, ExitCode.Success, result.stdout);
@@ -4654,7 +4734,7 @@ test("screen update cannot send observation", async () => {
     [
       "--json", "screen", "update", "scr_PAIRINGAAAAAAAAAAAAAAAA",
       "--name", "Lobby",
-      "--if-match", "1",
+      "--expect-rev", "1",
       "--observation", JSON.stringify(SAMPLE_OBSERVATION),
     ],
     transport,
@@ -4796,7 +4876,7 @@ test("screen update cannot send online, last_online_at, or last_ip", async () =>
     [
       "--json", "screen", "update", "scr_PAIRINGAAAAAAAAAAAAAAAA",
       "--name", "Lobby",
-      "--if-match", "1",
+      "--expect-rev", "1",
       "--online", "true",
       "--last-online-at", "2026-08-19T12:00:00Z",
       "--last-ip", DOCUMENTATION_IPV4,
@@ -4817,7 +4897,7 @@ test("adding a schedule to a playlist an unzoned screen already runs is refused"
   await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
   await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
   await withRuntime(
-    ["--json", "screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "1"],
+    ["--json", "screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--expect-rev", "1"],
     transport,
     { fs: fsLike },
   );
@@ -4825,7 +4905,7 @@ test("adding a schedule to a playlist an unzoned screen already runs is refused"
   const scheduled = await scheduledPlaylistFixture(true, "tz-playlist-update-src-");
   transport.calls.length = 0;
   const result = await withRuntime(
-    ["--json", "playlist", "update", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", scheduled.file, "--if-match", "1"],
+    ["--json", "playlist", "update", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", scheduled.file, "--expect-rev", "1"],
     transport,
     { fs: fsLike },
   );
@@ -4876,12 +4956,12 @@ test("app update publishes to the existing application with revision and release
   const appDir = path.join(configDir, "app");
   await mkdir(appDir);
   await writeFile(path.join(appDir, "index.html"), "<!doctype html><html><head></head><body>updated</body></html>");
-  const result = await withRuntime(["--json", "app", "update", "app_EXISTING", appDir, "--if-match", "7", "--no-wait"], transport, { fs: fsLike });
+  const result = await withRuntime(["--json", "app", "update", "app_EXISTING", appDir, "--expect-rev", "7", "--no-wait"], transport, { fs: fsLike });
   assert.equal(result.code, ExitCode.Success, result.stdout);
   assert.equal(JSON.parse(result.stdout).data.id, "app_EXISTING");
   assert.equal(JSON.parse(result.stdout).data.release_id, "rel_NEW");
   const count = transport.calls.length;
-  for (const flags of [[], ["--if-match", "0"], ["--if-match", "7", "--name", "changed"]]) {
+  for (const flags of [[], ["--expect-rev", "0"], ["--expect-rev", "7", "--name", "changed"]]) {
     const invalid = await withRuntime(["--json", "app", "update", "app_EXISTING", appDir, ...flags], transport, { fs: fsLike });
     assert.equal(invalid.code, ExitCode.Usage, invalid.stdout);
     assert.equal(transport.calls.length, count, "invalid update does not upload or request capabilities");
@@ -5222,7 +5302,7 @@ test("playback list, media filters, media update, and app --name bind the consum
     assert.equal(listedEnvelope.data.items[0]?.source_filename, "lobby-poster.png", "media list carries the handle");
 
     const updated = await withRuntime(
-      ["--json", "media", "update", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--tag", "lobby2", "--if-match", "1"],
+      ["--json", "media", "update", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--tag", "lobby2", "--expect-rev", "1"],
       transport,
       { fs: fsLike },
     );
@@ -5232,7 +5312,7 @@ test("playback list, media filters, media update, and app --name bind the consum
     assert.equal(patch?.headers?.["if-match"], '"1"');
 
     const cleared = await withRuntime(
-      ["--json", "media", "update", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--clear-tag", "--if-match", "2"],
+      ["--json", "media", "update", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--clear-tag", "--expect-rev", "2"],
       transport,
       { fs: fsLike },
     );
@@ -5241,7 +5321,7 @@ test("playback list, media filters, media update, and app --name bind the consum
     assert.deepEqual(clearPatch?.body, { tag: null });
 
     const both = await withRuntime(
-      ["--json", "media", "update", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--tag", "lobby", "--clear-tag", "--if-match", "3"],
+      ["--json", "media", "update", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--tag", "lobby", "--clear-tag", "--expect-rev", "3"],
       transport,
       { fs: fsLike },
     );

@@ -208,7 +208,7 @@ async function main(): Promise<void> {
     await run("playlist", "create", playlist);
     await run("playlist", "list");
     await run("playlist", "show", "pl_AAAAAAAAAAAAAAAAAAAAAAAA");
-    await run("playlist", "update", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", playlist, "--if-match", "1");
+    await run("playlist", "update", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", playlist, "--expect-rev", "1");
     const commentsSet = await run(
       "comment",
       "set",
@@ -239,11 +239,11 @@ async function main(): Promise<void> {
     // The playlist schedules a page, and a schedule is a civil rule, so the
     // screen needs a zone before it can carry the playlist. Setting it first is
     // what lets the assignment below through.
-    const zoned = await run("screen", "set-timezone", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--timezone", "America/Los_Angeles", "--if-match", "1");
+    const zoned = await run("screen", "set-timezone", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--timezone", "America/Los_Angeles", "--expect-rev", "1");
     assert.equal((zoned.data as { timezone?: string }).timezone, "America/Los_Angeles");
-    await run("screen", "update", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "1");
+    await run("screen", "update", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--expect-rev", "1");
     // `screen assign` is the last step of the documented application flow.
-    const assigned = await run("screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "2");
+    const assigned = await run("screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--expect-rev", "2");
     assert.equal((assigned.data as { playlist_id?: string }).playlist_id, "pl_AAAAAAAAAAAAAAAAAAAAAAAA");
     const toast = await run(
       "screen",
@@ -270,12 +270,12 @@ async function main(): Promise<void> {
     assert.deepEqual(await readFile(downloadPath), mediaBytes);
     assert.doesNotMatch(JSON.stringify(downloaded), /\u0089PNG|iVBOR/, "download envelope must not carry pixels");
     await run("media", "list", "--tag", "lobby", "--primitive", "image");
-    await run("media", "update", mediaId, "--tag", "lobby2", "--if-match", "1");
+    await run("media", "update", mediaId, "--tag", "lobby2", "--expect-rev", "1");
     await run("playback", "list", "--screen-id", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--day", "2026-08-14");
     await run("kv", "set", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", "{\"message\":\"hello\"}");
     await run("kv", "get", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA");
     await run("kv", "list", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA");
-    await run("kv", "set", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", "{\"message\":\"updated\"}", "--if-match", "1");
+    await run("kv", "set", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", "{\"message\":\"updated\"}", "--expect-rev", "1");
     const bug = await run("feedback", "bug", "Smoke bug", "--body", "Recorded by the localhost smoke.", "--command", "media upload");
     assert.equal((bug.data as { kind?: string }).kind, "bug");
     await run("feedback", "feature", "Smoke feature", "--body", "Recorded by the localhost smoke.");
@@ -288,20 +288,20 @@ async function main(): Promise<void> {
     await run("events", "follow", "--after", "ev1_0", "--timeout", "200");
     await run("operations", "wait", "op_AAAAAAAAAAAAAAAAAAAAAAAA", "--poll-ms", "1");
     await run("operations", "cancel", "op_MEDIAAAAAAAAAAAAAAAAAAAAA");
-    await run("kv", "delete", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "2");
-    await run("media", "delete", mediaId, "--if-match", "2");
-    await run("screen", "rotate-public-id", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--if-match", "2");
-    const archived = await run("screen", "archive", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--if-match", "3");
+    await run("kv", "delete", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--expect-rev", "2");
+    await run("media", "delete", mediaId, "--expect-rev", "2");
+    await run("screen", "rotate-public-id", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", "2");
+    const archived = await run("screen", "archive", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", "3");
     assert.equal((archived.data as { state?: string }).state, "archived");
     const listed = await run("screen", "list");
     assert.equal(((listed.data as { items?: unknown[] }).items ?? []).length, 0);
     const archivedList = await run("screen", "list", "--state", "archived");
     assert.equal(((archivedList.data as { items?: Array<{ id?: string }> }).items ?? [])[0]?.id, "scr_PAIRINGAAAAAAAAAAAAAAAA");
-    await run("screen", "unarchive", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--if-match", "4");
-    const deleted = await invoke(["screen", "delete", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--if-match", "5"]);
+    await run("screen", "unarchive", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", "4");
+    const deleted = await invoke(["screen", "delete", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", "5"]);
     assert.equal(deleted.code, 5, `screen delete must surface screen_archive_required: ${deleted.stderr || deleted.stdout}`);
     assert.equal((JSON.parse(deleted.stdout) as { error?: { code?: string } }).error?.code, "screen_archive_required");
-    await run("playlist", "delete", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--if-match", "2");
+    await run("playlist", "delete", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--expect-rev", "2");
     process.stdout.write(`localhost v1 smoke passed: ${apiUrl} (mock-backed control-plane routes)\n`);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));

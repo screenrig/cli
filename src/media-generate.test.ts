@@ -439,6 +439,39 @@ test("media generate reports elapsed_ms and announces that it blocks", async () 
   }
 });
 
+test("media generate --no-progress suppresses the notice while returning the generated media", async () => {
+  const transport = generateTransport();
+  const configDir = await testTemp("media-generate-no-progress-");
+  const fsLike = await enrolled(configDir);
+  try {
+    const result = await withRuntime(
+      ["media", "generate", "--prompt", PROMPT, "--no-progress"],
+      transport,
+      { configDir, fs: fsLike },
+    );
+    assert.equal(result.code, ExitCode.Success, result.stdout);
+    assert.equal(result.stderr, "");
+    const envelope = JSON.parse(result.stdout) as {
+      ok: boolean;
+      data: { media: { id: string }; usage: { credits: number; usd: string } };
+    };
+    assert.equal(envelope.ok, true);
+    assert.equal(envelope.data.media.id, GENERATED_MEDIA.id);
+    assert.equal(envelope.data.usage.credits, GENERATE_DEBITS.medium.credits);
+    assert.equal(envelope.data.usage.usd, GENERATE_DEBITS.medium.usd);
+    assert.equal(transport.calls.length, 1);
+    assert.equal(transport.calls[0]?.method, "POST");
+    assert.equal(transport.calls[0]?.path, "/api/v1/media/generations");
+    assert.deepEqual(transport.calls[0]?.body, {
+      prompt: PROMPT,
+      aspect_ratio: "16:9",
+      quality: "medium",
+    });
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
 test("a generate that times out says the still may exist and names the command that checks", async () => {
   const transport = new FakeTransport().on("POST", "/api/v1/media/generations", () => {
     throw timeoutError("API request timed out", "req_generatetimeout00000");

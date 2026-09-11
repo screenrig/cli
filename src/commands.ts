@@ -1,3 +1,7 @@
+import { publishScreen } from "./screen-publish.js";
+import { readAuthoringJson, readAuthoringText, writeAuthoringJson } from "./authoring-input.js";
+import { editablePlaylist, initializePlaylist, targetDimensions } from "./playlist-authoring.js";
+import { WriteRecovery } from "./write-recovery.js";
 import { createHash } from "node:crypto";
 import { open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -318,6 +322,8 @@ function transportFor(runtime: CliRuntime, apiUrl: string, token?: string): Tran
   return loggingTransport(base, loggerOf(runtime));
 }
 
+const writeRecoveries = new WeakMap<CliRuntime, WriteRecovery>();
+
 function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?: string): ApiClient {
   return new ApiClient({
     transport: transportFor(runtime, apiUrl, token),
@@ -325,6 +331,7 @@ function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?
     requestId: flagString(args.flags, "request-id"),
     idempotencyKey: flagString(args.flags, "idempotency-key"),
     timeoutMs: flagNumber(args.flags, "timeout"),
+    writeRecovery: token ? writeRecoveries.get(runtime) : undefined,
     creditsOwner: runtime,
     logger: loggerOf(runtime),
   });
@@ -391,7 +398,33 @@ function commandHandler(
           : "Create the first agent with unverified contact metadata, then retry the original command.",
       });
     }
-    return handler(args, runtime, resolved);
+    // Specialized enrollment, generation, upload/bundle, and handoff flows own
+    // their recovery. Ordinary mutations share the durable request ledger.
+    const [group, action] = args.command;
+    const ordinary = authenticated && resolved.token && (
+      ["kv", "comment", "feedback", "operations"].includes(group ?? "") ||
+      (group === "app" && ["upload", "update"].includes(action ?? "")) ||
+      (group === "playlist" && ["create", "update", "delete"].includes(action ?? "")) ||
+      (group === "media" && ["update", "delete"].includes(action ?? "")) ||
+      (group === "screen" && !["provision", "publish"].includes(action ?? ""))
+    );
+    const recovery = ordinary ? new WriteRecovery(resolved, runtime, args.command.slice(0, 2).join(" ")) : undefined;
+    if (recovery) writeRecoveries.set(runtime, recovery);
+    try {
+      const result = await handler(args, runtime, resolved);
+      await recovery?.finish();
+      return result;
+    } catch (error) {
+      if (recovery?.hasPending && error instanceof CliError) {
+        throw new CliError(error.problem, error.exitCode, [...error.warnings, {
+          code: "write_recovery_saved",
+          message: "The write key is saved locally. After an ambiguous failure, rerun the same command with unchanged input to reuse it. Reconcile explicit refusals or revision conflicts before changing the request.",
+        }]);
+      }
+      throw error;
+    } finally {
+      writeRecoveries.delete(runtime);
+    }
   };
 }
 
@@ -420,7 +453,7 @@ export const handlePlaylistValidate = commandHandler(async (args, runtime, resol
   const file = args.positionals[2];
   if (!file) throw usageError("playlist validate requires one JSON file.");
   let parsed: Record<string, unknown>;
-  try { parsed = JSON.parse(await readFile(path.resolve(runtime.cwd(), file), "utf8")); }
+  try { parsed = await readAuthoringJson(file, runtime); }
   catch { throw usageError("Cannot read playlist JSON."); }
   const body = parsed && typeof parsed === "object" && Array.isArray(parsed.pages) ? { ...parsed, pages: expandPlaylistPages(parsed.pages) } : parsed;
   assertPlaylistValid(body);
@@ -798,6 +831,7 @@ async function waitForAgentConnectionApproval(
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
   connection: AgentConnectionConfig,
   timeoutMs: number,
+  returnPending = false,
 ): Promise<AgentConnection> {
   if (!connection.connection_id || !connection.connection_token) throw configError("Pending agent connection authority is incomplete.");
   const transport = transportFor(runtime, resolved.apiUrl);
@@ -834,7 +868,7 @@ async function waitForAgentConnectionApproval(
           throw configError("Agent connection SSE emitted invalid JSON.");
         }
         latest = validateAgentConnectionEvent(decoded, connection.connection_id);
-        if (latest.status !== "pending") return latest;
+        if (returnPending || latest.status !== "pending") return latest;
       }
     }
   } catch (err) {
@@ -1014,26 +1048,30 @@ async function agentConnect(
   let pendingToken = current?.token;
   let pendingAgentId = connection.pending_agent_id;
 
+  const noWait = flagBool(args.flags, "no-wait");
   let opened = false;
   let printed = false;
   if (!(pendingToken && pendingAgentId)) {
     if (!connection.approval_url || !connection.connection_id || !connection.connection_token) {
       throw configError("Pending agent connection is incomplete.");
     }
-    if (flagBool(args.flags, "print-url")) {
-      emitAgentApprovalUrl(args, runtime, connection.approval_url);
-      printed = true;
-    } else {
-      opened = await (runtime.openUrl?.(connection.approval_url) ?? Promise.resolve(false));
-      if (!opened) {
-        emitAgentApprovalUrl(args, runtime, connection.approval_url);
+    const handoff = async () => {
+      if (flagBool(args.flags, "print-url")) {
+        if (!noWait) emitAgentApprovalUrl(args, runtime, connection.approval_url!);
         printed = true;
+      } else {
+        opened = await (runtime.openUrl?.(connection.approval_url!) ?? Promise.resolve(false));
+        if (!opened) {
+          if (!noWait) emitAgentApprovalUrl(args, runtime, connection.approval_url!);
+          printed = true;
+        }
       }
-    }
-    const timeoutMs = requestedTimeout ?? 86_400_000;
+    };
+    if (!noWait) await handoff();
+    const timeoutMs = requestedTimeout ?? (noWait ? 30_000 : 86_400_000);
     let status: AgentConnection;
     try {
-      status = await waitForAgentConnectionApproval(args, runtime, resolved, connection, timeoutMs);
+      status = await waitForAgentConnectionApproval(args, runtime, resolved, connection, timeoutMs, noWait);
     } catch (err) {
       if (err instanceof CliError && ["agent_connection_cancelled", "agent_connection_expired", "agent_connection_invalid"].includes(err.problem.code)) {
         return clearDefinitivePendingAgentFailure(
@@ -1045,6 +1083,22 @@ async function agentConnect(
         );
       }
       throw err;
+    }
+    if (status.status === "pending") {
+      await handoff();
+      const next = {
+        command: "screenrig agent connect --no-wait",
+        argv: ["agent", "connect", "--no-wait", "--config", resolved.configPath, "--api-url", resolved.apiUrl],
+        reason: "Complete dashboard approval, then resume. Use argv to preserve this configuration and API origin.",
+      };
+      return {
+        envelope: successEnvelope({ status: "pending", connection_id: connection.connection_id,
+          expires_at: status.expires_at, opened, approval_url_printed: printed,
+          ...(printed ? { approval_url: connection.approval_url } : {}), next }),
+        exitCode: ExitCode.Success,
+        human: humanLines("Agent approval pending", [["status", "pending"], ["connection_id", connection.connection_id],
+          ["approval_url", printed ? connection.approval_url : undefined], ["next", next.command]]),
+      };
     }
     if (status.status === "denied" || status.status === "expired" || status.status === "cancelled") {
       await clearAgentConnection(runtime, resolved, connection.connection_id, true);
@@ -1551,7 +1605,7 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
   requireFlagValue(args, "if-match", "1");
   const revision = flagString(args.flags, "if-match");
   if (!dir || (update && (!id || !revision))) {
-    throw usageError(update ? "app update requires <id> <directory> --if-match REVISION." : "app upload requires one directory.");
+    throw usageError(update ? "app update requires <id> <directory> --expect-rev REVISION." : "app upload requires one directory.");
   }
   if (update && args.flags.name !== undefined) throw usageError("app update preserves the application name; omit --name.");
   const ifMatch = update ? quotedRevision(revision!) : undefined;
@@ -1716,7 +1770,7 @@ export const handleMediaDelete = commandHandler(async (args, runtime, resolved) 
 
   const id = args.positionals[2];
   const revision = flagString(args.flags, "if-match");
-  if (!id || !revision) throw usageError("media delete requires <id> and --if-match.");
+  if (!id || !revision) throw usageError("media delete requires <id> and --expect-rev.");
   const response = await client.call({
     method: "DELETE",
     path: `/api/v1/media/${id}`,
@@ -1876,9 +1930,10 @@ async function mediaGenerate(
   requireFlagValue(args, "prompt", `"Finished event poster with title, facts, and type in the image"`);
   requireFlagValue(args, "aspect-ratio", "16:9");
   requireFlagValue(args, "quality", "medium");
-  const prompt = flagString(args.flags, "prompt");
+  const promptFile = flagString(args.flags, "prompt-file");
+  const prompt = promptFile ? await readAuthoringText(promptFile, runtime, GENERATE_PROMPT_MAX * 4) : flagString(args.flags, "prompt");
   if (prompt === undefined || prompt.length < 1 || prompt.length > GENERATE_PROMPT_MAX) {
-    throw usageError("media generate requires --prompt TEXT of 1 to 4000 characters.");
+    throw usageError("media generate requires --prompt TEXT or --prompt-file FILE containing 1 to 4000 characters.");
   }
   const aspectRatio = flagString(args.flags, "aspect-ratio") ?? "16:9";
   if (!isGenerateAspectRatio(aspectRatio)) {
@@ -1952,7 +2007,7 @@ async function mediaUpdate(args: ParsedArgs, client: ApiClient): Promise<Command
   const clearTag = flagBool(args.flags, "clear-tag");
   const tag = mediaTagFromArgs(args);
   if (!id || !revision) {
-    throw usageError("media update requires <id>, --if-match, and --tag TAG or --clear-tag.");
+    throw usageError("media update requires <id>, --expect-rev, and --tag TAG or --clear-tag.");
   }
   if (clearTag === Boolean(tag)) {
     throw usageError("media update requires exactly one of --tag TAG or --clear-tag.");
@@ -2521,7 +2576,7 @@ async function playlistPreviewCommand(
   let client: ApiClient | undefined;
   let fromFile = false;
   try {
-    playlist = JSON.parse(await readFile(filePath, "utf8"));
+    playlist = await readAuthoringJson(target, runtime);
     fromFile = true;
   } catch {
     fromFile = false;
@@ -2568,7 +2623,15 @@ export const handlePlaylistShow = commandHandler(async (args, runtime, resolved)
 
   const id = args.positionals[2];
   if (!id) throw usageError("playlist get requires an id.");
-  return simpleGet(args, runtime, resolved, `/api/v1/playlists/${id}`, "Playlist");
+  const output = flagString(args.flags, "output");
+  if (!output && !flagBool(args.flags, "editable")) return simpleGet(args, runtime, resolved, `/api/v1/playlists/${id}`, "Playlist");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: `/api/v1/playlists/${id}` });
+  const resource = response.body as { id: string; revision: number };
+  if (resource.id !== id || !Number.isSafeInteger(resource.revision) || resource.revision < 1) throw usageError("Playlist response has invalid identity or revision.");
+  const document = editablePlaylist(response.body);
+  const file = output ? await writeAuthoringJson(output, document, runtime) : undefined;
+  return { envelope: successEnvelope({ playlist_id: id, revision: resource.revision, ...(file ? { output: file } : { document }) }, { request_id: client.requestId }), exitCode: ExitCode.Success, human: file ? `Editable playlist written to ${file}` : JSON.stringify(document, null, 2) };
 }, true);
 
 export const handlePlaylistExport = commandHandler(async (args, runtime, resolved) => {
@@ -2639,15 +2702,15 @@ async function playlistCreateUpdateAction(args: ParsedArgs, runtime: CliRuntime,
   const file = action === "update" ? args.positionals[3] : args.positionals[2];
   const ifMatch = flagString(args.flags, "if-match");
   if (!file || (action === "update" && (!id || !ifMatch))) {
-    throw usageError(`playlist ${action} requires ${action === "update" ? "<id> <file> --if-match" : "<file>"}.`);
+    throw usageError(`playlist ${action} requires ${action === "update" ? "<id> <file> --expect-rev" : "<file>"}.`);
   }
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(await readFile(path.resolve(runtime.cwd(), file), "utf8")) as Record<string, unknown>;
+    parsed = await readAuthoringJson(file, runtime) as Record<string, unknown>;
   } catch (err) {
     throw usageError(`Cannot read playlist JSON: ${err instanceof Error ? err.message : "invalid JSON"}`);
   }
-  if (typeof parsed.name !== "string" || !Array.isArray(parsed.pages)) {
+  if (!parsed || typeof parsed !== "object" || typeof parsed.name !== "string" || !Array.isArray(parsed.pages)) {
     throw usageError("Playlist JSON must contain string name and array pages.");
   }
   const extra = Object.keys(parsed).filter((key) => key !== "name" && key !== "pages");
@@ -2687,7 +2750,7 @@ export const handlePlaylistDelete = commandHandler(async (args, runtime, resolve
 
   const id = args.positionals[2];
   const ifMatch = flagString(args.flags, "if-match");
-  if (!id || !ifMatch) throw usageError("playlist delete requires <id> and --if-match.");
+  if (!id || !ifMatch) throw usageError("playlist delete requires <id> and --expect-rev.");
   const response = await client.call({
     method: "DELETE",
     path: `/api/v1/playlists/${id}`,
@@ -2718,7 +2781,7 @@ function scheduleZoneError(screenId: string): CliError {
   return usageError(
     `Screen ${screenId} has no timezone, and the playlist schedules pages with visibility. Page visibility rules are civil times, so the screen needs an IANA zone before it can run them.`,
     {
-      command: `screenrig screen set-timezone ${screenId} --timezone America/Los_Angeles --if-match REVISION`,
+      command: `screenrig screen set-timezone ${screenId} --timezone America/Los_Angeles --expect-rev REVISION`,
       reason: "Set the screen timezone first, then assign the playlist. Read the current revision from screen show.",
     },
   );
@@ -2884,7 +2947,7 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
   const playlistId = flagString(args.flags, "playlist-id");
   const timezone = flagString(args.flags, "timezone");
   if (!id || !ifMatch || (!name && !playlistId && !timezone)) {
-    throw usageError("screen update requires <id>, --if-match, and --name, --playlist-id, or --timezone.");
+    throw usageError("screen update requires <id>, --expect-rev, and --name, --playlist-id, or --timezone.");
   }
   // A patch that sets both a playlist and a timezone satisfies the schedule
   // rule in one request, so only check when the patch leaves the screen
@@ -2922,7 +2985,7 @@ export const handleScreenAssign = commandHandler(async (args, runtime, resolved)
   const id = args.positionals[2];
   const playlistId = flagString(args.flags, "playlist-id");
   const ifMatch = flagString(args.flags, "if-match");
-  if (!id || !playlistId || !ifMatch) throw usageError("screen assign requires <id> --playlist-id --if-match.");
+  if (!id || !playlistId || !ifMatch) throw usageError("screen assign requires <id> --playlist-id --expect-rev.");
   const playlist = await assertScheduledPlaylistHasZone(client, id, playlistId);
   const body: ScreenPatch = { playlist_id: playlistId };
   const response = await client.call({
@@ -2947,7 +3010,7 @@ export const handleScreenSetTimezone = commandHandler(async (args, runtime, reso
   const id = args.positionals[2];
   const timezone = flagString(args.flags, "timezone");
   const ifMatch = flagString(args.flags, "if-match");
-  if (!id || !timezone || !ifMatch) throw usageError("screen set-timezone requires <id> --timezone --if-match.");
+  if (!id || !timezone || !ifMatch) throw usageError("screen set-timezone requires <id> --timezone --expect-rev.");
   // The zone database belongs to the server, which validates the identifier
   // against it. Sending the value unchanged keeps one authority for what a
   // real zone is, so the CLI never carries a list that can go stale.
@@ -2968,7 +3031,7 @@ async function screenArchiveUnarchiveAction(args: ParsedArgs, runtime: CliRuntim
 
   const id = args.positionals[2];
   const revision = flagString(args.flags, "if-match");
-  if (!id || !revision) throw usageError(`screen ${action} requires <id> and --if-match.`);
+  if (!id || !revision) throw usageError(`screen ${action} requires <id> and --expect-rev.`);
   const response = await client.call({
     method: "POST",
     path: `/api/v1/screens/${id}/${action}`,
@@ -2997,7 +3060,7 @@ export const handleScreenDelete = commandHandler(async (args, runtime, resolved)
 
   const id = args.positionals[2];
   const ifMatch = flagString(args.flags, "if-match");
-  if (!id || !ifMatch) throw usageError("screen delete requires <id> and --if-match.");
+  if (!id || !ifMatch) throw usageError("screen delete requires <id> and --expect-rev.");
   const response = await client.call({
     method: "DELETE",
     path: `/api/v1/screens/${id}`,
@@ -3013,7 +3076,7 @@ export const handleScreenRotatePublicId = commandHandler(async (args, runtime, r
 
   const id = args.positionals[2];
   const revision = flagString(args.flags, "if-match");
-  if (!id || !revision) throw usageError("screen rotate-public-id requires <id> and --if-match.");
+  if (!id || !revision) throw usageError("screen rotate-public-id requires <id> and --expect-rev.");
   const response = await client.call({
     method: "POST",
     path: `/api/v1/screens/${id}/public-id/rotate`,
@@ -3357,7 +3420,7 @@ export const handleKvDelete = commandHandler(async (args, runtime, resolved) => 
 
   if (!key) throw usageError("kv delete requires a key.");
   const ifMatch = flagString(args.flags, "if-match");
-  if (!ifMatch) throw usageError("kv delete requires --if-match.");
+  if (!ifMatch) throw usageError("kv delete requires --expect-rev.");
   const response = await client.call({
     method: "DELETE",
     path: `/api/v1/applications/${applicationId}/kv/${encodeURIComponent(key)}`,
@@ -3384,7 +3447,7 @@ function commentTarget(args: ParsedArgs, target: "screen" | "playlist") {
   }
 
   if (Object.hasOwn(args.flags, "if-match")) {
-    throw usageError("comment commands do not take --if-match; last write wins and does not bump revision.");
+    throw usageError("comment commands do not take --expect-rev; last write wins and does not bump revision.");
   }
   requireFlagValue(args, "page", "poster");
   const pageId = flagString(args.flags, "page");
@@ -4028,3 +4091,31 @@ async function doctor(
 }
 
 export type { Operation };
+
+export const handlePlaylistInit = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const screenId = flagString(args.flags, "screen");
+  const width = flagNumber(args.flags, "target-width"), height = flagNumber(args.flags, "target-height");
+  const screen = screenId ? (await client.call({ method: "GET", path: `/api/v1/screens/${encodeURIComponent(screenId)}` })).body : undefined;
+  const dimensions = targetDimensions(screen, width, height);
+  const media = [];
+  for (const id of args.positionals.slice(2)) {
+    if (!/^med_[A-Za-z0-9_-]+$/.test(id)) throw usageError("playlist init requires media identifiers.");
+    const response = await client.call({ method: "GET", path: `/api/v1/media/${id}` });
+    const record = response.body as Record<string, any>;
+    if (record.id !== id) throw usageError("Media response identity did not match.");
+    media.push(record);
+  }
+  const document = initializePlaylist({ name: flagString(args.flags, "name")!, media, ...dimensions, durationMs: flagNumber(args.flags, "duration-ms") ?? 8000, fit: flagString(args.flags, "fit") ?? "contain" });
+  const output = await writeAuthoringJson(flagString(args.flags, "output")!, document, runtime);
+  return { envelope: successEnvelope({ output, ...dimensions, page_count: media.length }, { request_id: client.requestId }), exitCode: ExitCode.Success, human: `Playlist prepared at ${output}` };
+});
+
+export const handleScreenPublish = commandHandler(async (args, runtime, resolved) => {
+  const parsed = await readAuthoringJson(args.positionals[3]!, runtime);
+  const document = parsed && typeof parsed === "object" && Array.isArray(parsed.pages) ? { ...parsed, pages: expandPlaylistPages(parsed.pages) } : parsed;
+  assertPlaylistValid(document);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const result = await publishScreen({ client, runtime, configPath: resolved.configPath, apiUrl: resolved.apiUrl, screenId: args.positionals[2]!, revision: flagString(args.flags, "if-match")!, document, requestedKey: flagString(args.flags, "idempotency-key") });
+  return { envelope: successEnvelope(result, { request_id: client.requestId }), exitCode: ExitCode.Success, human: `Assigned ${result.playlist_id} to ${result.screen_id}; assignment read back. Playback still needs verification.` };
+});
