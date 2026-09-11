@@ -1,3 +1,4 @@
+import { handlerOptionName } from "./cli-commands/aliases.js";
 import type { Command } from "commander";
 
 /** Canonical command names, excluding the executable and any supplied values. */
@@ -24,7 +25,7 @@ export function invocationFlags(command: Command): Record<string, string | boole
       const value = current.getOptionValue(option.attributeName());
       if (option.negate && value !== false) continue;
       if (!option.negate && option.isBoolean() && value === false) continue;
-      flags[option.long === "--expect-rev" ? "if-match" : option.long!.slice(2)] = option.negate ? true : current.getOptionValue(option.attributeName());
+      flags[handlerOptionName(option)] = option.negate ? true : current.getOptionValue(option.attributeName());
     }
   }
   return flags;

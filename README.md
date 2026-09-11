@@ -21,7 +21,7 @@ screenrig version
 ```
 
 Node.js 20.11 or newer is required. `media upload` additionally requires ffmpeg
-and ffprobe; the other commands do not. Run `screenrig doctor` to inspect
+and ffprobe, as do batch uploads and playlist preparation from local media files. Run `screenrig doctor` to inspect
 the optional media toolchain before an upload.
 
 This global package is the official developer-shell distribution. It is not the
@@ -50,7 +50,7 @@ Use `screenrig help --all` for the complete command inventory, or
 immediate children. Add `--json` for structured command paths, positional arguments,
 option choices and defaults, relationships, and examples;
 help runs without configuration or authentication. Command-specific options follow
-that command, for example `screenrig screen update ID --name Lobby --if-match 1`.
+that command, for example `screenrig screen update ID --name Lobby --expect-rev 1`.
 Global options such as `--json` may appear before or after the command. Use
 `--name=VALUE` for a value starting with a dash, and `--` before option-like file
 names. Duplicate options are rejected.
@@ -62,6 +62,35 @@ Choose by what the page is:
 - Slide-deck-like experiences: local unbilled `compose render`.
 - Live video, iframe, or webapp: write playlist primitives.
 
+## Command vocabulary
+
+Use these canonical spellings in new invocations and examples:
+
+| Concept | Spelling | Compatibility |
+| --- | --- | --- |
+| Inspect one resource | `show` (including `operations show`) | `operations get` and `playlist get` remain aliases |
+| Read/write a K/V value | `kv get` / `kv set` | Values retain their byte-oriented semantics |
+| Display name | `--name` | Screen pair/provision retain `--label` |
+| Select a screen | `--screen-id` | Playlist init retains `--screen` |
+| Select an application namespace | `--app-id` | K/V retains `--application-id` |
+| Select a playlist or release | `--playlist-id` / `--release-id` | IDs stay explicit |
+| Guard a revision | `--expect-rev` | `--if-match` remains an alias |
+| Read a collection | `list` | `events` and `operations` retain established plural group names |
+
+The application command group is `app`; use “application” in explanatory prose.
+Keep the established `comment ACTION screen|playlist ID` grammar. `--page` and
+`--primitive` identify objects within a playlist, rather than account resources.
+Use `--after` for an event cursor (`--cursor` remains an alias). `--output` selects
+an output path; each command states whether it expects a file or directory.
+Durations use milliseconds as stated by `--duration-ms`, `--poll-ms`, and `--timeout`.
+
+Legacy option spellings share the same value and validation as their canonical
+option; supplying both is an error. JSON help exposes compatibility spellings in
+`options[].aliases`. Response fields and backend contracts are unchanged.
+Option `relationships` describe `exactlyOne`, `atLeastOne`, and `together` groups;
+`requires` means the first option requires every remaining option. These same
+rules validate invocations before configuration or network access.
+
 ## Application command results
 
 `app upload` and `app update` return the same JSON data paths with or without
@@ -72,7 +101,7 @@ for the current revision before an update.
 
 `data.operation` contains the observed completed operation when waiting. With
 `--no-wait` it is `null`: upload acceptance does not establish operation state
-or release readiness. Use `operations get <operation_id>` or
+or release readiness. Use `operations show <operation_id>` or
 `operations wait <operation_id>` to observe processing. The envelope's
 `operation_id` identifies that same operation in either mode. Existing flat
 accepted fields (`data.id`, `data.release_id`, `data.operation_id`) and
@@ -184,7 +213,7 @@ Report suspected vulnerabilities through the [security policy](SECURITY.md).
 For ready images and videos, prepare a full-screen playlist in playback order:
 
 ```sh
-screenrig playlist init med_POSTER med_VIDEO --name "Lobby loop" --screen scr_LOBBY --output lobby.json
+screenrig playlist init med_POSTER med_VIDEO --name "Lobby loop" --screen-id scr_LOBBY --output lobby.json
 screenrig playlist preview lobby.json --output preview --contact-sheet
 screenrig screen publish scr_LOBBY lobby.json --expect-rev 7
 ```
@@ -194,7 +223,7 @@ local image/video files, ready `med_` IDs, pinned `rel_` application releases, a
 HTTPS iframe URLs, including mixed inputs:
 
 ```sh
-screenrig playlist init ./poster.png med_VIDEO rel_APP https://example.com --name Lobby --screen scr_LOBBY --output lobby.json
+screenrig playlist init ./poster.png med_VIDEO rel_APP https://example.com --name Lobby --screen-id scr_LOBBY --output lobby.json
 ```
 
 Files use the normal media upload/transcode path and wait for readiness; ffmpeg
@@ -217,13 +246,13 @@ videos are muted, do not loop, and advance on completion. Other pages advance af
 are pinned to the supplied release and use timed advancement, without controller
 privileges. Edit the document for application-controlled advancement.
 
-With `--screen`, the result includes `screen_id`, `screen_revision`, and a
+With `--screen-id`, the result includes `screen_id`, `screen_revision`, and a
 `publish.argv` array containing the output path and observed revision. It also
 returns `preview.argv`. These arrays preserve the selected config/API and paths
 with spaces; execute preview, inspect it, then use the publish arguments. A later
 screen change still produces a revision conflict. Target metadata stays outside
 the playlist file. Override canvas dimensions with both `--target-width` and
-`--target-height`; these also work without `--screen` (no publish arguments).
+`--target-height`; these also work without `--screen-id` (no publish arguments).
 Unknown or multiple reported surfaces require explicit dimensions. Output files
 must not already exist.
 

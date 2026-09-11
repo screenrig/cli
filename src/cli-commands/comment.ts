@@ -1,3 +1,4 @@
+import { requireOptionGroup } from "./notes.js";
 import type { CommandActionBinder } from "./types.js";
 import { handleCommentShowScreen, handleCommentShowPlaylist, handleCommentSetScreen, handleCommentSetPlaylist, handleCommentDeleteScreen, handleCommentDeletePlaylist } from "../commands.js";
 import { type Command, Option } from "commander";
@@ -41,4 +42,6 @@ export function registerCommentCommands(root: Command, bind: CommandActionBinder
     .argument("<id>", "Screen or playlist identifier")
     .option("--page <PAGE_ID>", "Select playlist page comments")
     .action(bind(handleCommentDeletePlaylist));
+  for (const command of commentSet.commands) requireOptionGroup(command, "exactlyOne", ["--json-value", "--file"]);
+  for (const action of comment.commands) for (const command of action.commands) command.registeredArguments[0]!.description = command.name() === "screen" ? "Screen identifier" : "Playlist identifier";
 }

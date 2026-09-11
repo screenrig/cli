@@ -3381,7 +3381,7 @@ async function screenScreenshot(args: ParsedArgs, runtime: CliRuntime, client: A
 
 export const handleKvList = commandHandler(async (args, runtime, resolved) => {
   const applicationId = flagString(args.flags, "application-id");
-  if (!applicationId) throw usageError("kv commands require --application-id.");
+  if (!applicationId) throw usageError("kv commands require --app-id.");
   const key = args.positionals[2];
 
   return simpleGet(args, runtime, resolved, `/api/v1/applications/${applicationId}/kv`, "K/V");
@@ -3389,7 +3389,7 @@ export const handleKvList = commandHandler(async (args, runtime, resolved) => {
 
 export const handleKvGet = commandHandler(async (args, runtime, resolved) => {
   const applicationId = flagString(args.flags, "application-id");
-  if (!applicationId) throw usageError("kv commands require --application-id.");
+  if (!applicationId) throw usageError("kv commands require --app-id.");
   const key = args.positionals[2];
 
   if (!key) throw usageError("kv get requires a key.");
@@ -3398,7 +3398,7 @@ export const handleKvGet = commandHandler(async (args, runtime, resolved) => {
 
 export const handleKvSet = commandHandler(async (args, runtime, resolved) => {
   const applicationId = flagString(args.flags, "application-id");
-  if (!applicationId) throw usageError("kv commands require --application-id.");
+  if (!applicationId) throw usageError("kv commands require --app-id.");
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const key = args.positionals[2];
@@ -3429,7 +3429,7 @@ export const handleKvSet = commandHandler(async (args, runtime, resolved) => {
 
 export const handleKvDelete = commandHandler(async (args, runtime, resolved) => {
   const applicationId = flagString(args.flags, "application-id");
-  if (!applicationId) throw usageError("kv commands require --application-id.");
+  if (!applicationId) throw usageError("kv commands require --app-id.");
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const key = args.positionals[2];
@@ -3536,7 +3536,7 @@ export const handleCommentDeletePlaylist = commandHandler((args, runtime, resolv
 
 async function operationsGet(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>): Promise<CommandResult> {
   const id = args.positionals[2];
-  if (!id) throw usageError("operations get requires an id.");
+  if (!id) throw usageError("operations show requires an id.");
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const operation = await client.getOperation(id);

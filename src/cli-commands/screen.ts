@@ -1,12 +1,14 @@
+import { addValueAlias } from "./aliases.js";
+import { requireOptionGroup } from "./notes.js";
 import { positiveInteger, revision, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenAssign, handleScreenSetTimezone, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenToast, handleScreenScreenshot } from "../commands.js";
-import type { Command } from "commander";
+import { type Command, Option } from "commander";
 
 export function registerScreenCommands(root: Command, bind: CommandActionBinder): void {
   const screen = root.command("screen").description("Pair, configure, and inspect screens");
 
-  screen.command("publish").description("Create a prepared playlist and assign it, with resumable recovery")
+  screen.command("publish").description("Create a new playlist from a prepared file and assign it to a screen")
     .argument("<id>", "Screen identifier")
     .argument("<file>", "Prepared playlist file, or - for stdin")
     .requiredOption("--expect-rev <REVISION>", "Expected screen revision", revision)
@@ -14,13 +16,11 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
 
   screen.command("pair").description("Claim a Player pairing code")
     .argument("<code>", "Player pairing code")
-    .option("--label <LABEL>", "Set the screen label")
     .action(bind(handleScreenPair));
 
   screen.command("provision").description("Create a screen and browser handoff")
     .option("--open", "Open the browser Player handoff")
     .option("--print-url", "Return the browser handoff URL")
-    .option("--label <LABEL>", "Set the screen label")
     .action(bind(handleScreenProvision));
 
   screen.command("update").description("Update a screen")
@@ -32,7 +32,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .action(bind(handleScreenUpdate));
 
   screen.command("list").description("List screens")
-    .option("--state <archived>", "List archived screens")
+    .addOption(new Option("--state <STATE>", "List archived screens; omitted lists active screens").choices(["archived"]))
     .action(bind(handleScreenList));
 
   screen.command("show").description("Inspect a screen")
@@ -74,7 +74,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   screen.command("toast").description("Show a temporary screen message")
     .argument("<id>", "Screen identifier")
     .requiredOption("--text <TEXT>", "Set the screen message (required)")
-    .option("--level <LEVEL>", "Set toast level (default: info)")
+    .addOption(new Option("--level <LEVEL>", "Set toast level").choices(["error", "alert", "info"]).default("info"))
     .option("--duration-ms <MS>", "Show the message for 2000–60000 milliseconds", toastDuration)
     .action(bind(handleScreenToast));
 
@@ -83,4 +83,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--output <PATH>", "Write the screenshot to this file")
     .option("--poll-ms <MS>", "Set the operation polling interval", positiveInteger("poll-ms"))
     .action(bind(handleScreenScreenshot));
+  for (const name of ["pair", "provision"]) addValueAlias(screen.commands.find(command => command.name() === name)!, "--name", "--label", "Set the screen name");
+  requireOptionGroup(screen.commands.find(command => command.name() === "provision")!, "exactlyOne", ["--open", "--print-url"]);
+  requireOptionGroup(screen.commands.find(command => command.name() === "update")!, "atLeastOne", ["--name", "--playlist-id", "--timezone"]);
 }

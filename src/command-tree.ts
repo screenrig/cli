@@ -1,3 +1,4 @@
+import { handlerOptionName } from "./cli-commands/aliases.js";
 import { Command, Option } from "commander";
 import type { ParsedArgs } from "./command-input.js";
 import type { CommandHandler } from "./commands.js";
@@ -37,8 +38,8 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
     });
   }
   command.on(`option:${option.name()}`, () => {
-    if (seen.has(name)) throw usageError(`--${name} may be supplied only once.`);
-    seen.add(name);
+    if (seen.has(handlerOptionName(option))) throw usageError(`--${name} may be supplied only once.`);
+    seen.add(handlerOptionName(option));
   });
 }
 

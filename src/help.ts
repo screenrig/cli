@@ -1,3 +1,4 @@
+import { optionAliases } from "./cli-commands/aliases.js";
 import type { Command, Option } from "commander";
 import { commandPath, createCommandTree, findCommand } from "./command-tree.js";
 import { commandNotes, commandExamples, commandRelationships, type OptionRelationship } from "./cli-commands/notes.js";
@@ -5,6 +6,7 @@ import { usageError } from "./problems.js";
 export { CREDIT_HELP } from "./help-text.js";
 
 export interface HelpOption {
+  aliases: string[];
   name: string;
   type: "boolean" | "value";
   description: string;
@@ -64,6 +66,7 @@ export function describeHelp(command: Command, all = false): HelpDocument {
   const examples = commandExamples(command);
   const visibleOptions = [...helper.visibleOptions(command), ...helper.visibleGlobalOptions(command)];
   const describeOption = (option: Option): HelpOption => ({
+    aliases: option.long === "--expect-rev" ? ["--if-match"] : optionAliases(option),
     name: option.long!, type: (option.negate || option.isBoolean()) ? "boolean" : "value", description: option.description, required: option.mandatory,
     valueRequired: option.required, variadic: option.variadic,
     ...(option.argChoices ? { choices: option.argChoices } : {}),

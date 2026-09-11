@@ -96,7 +96,7 @@ test("root help is compact and every command is discoverable through immediate c
     "comment set playlist",
     "comment delete screen",
     "comment delete playlist",
-    "operations get",
+    "operations show",
     "operations wait",
     "operations cancel",
     "events list",
@@ -236,4 +236,67 @@ test("declared relationships and choices reject invalid commands before authenti
       return true;
     });
   }
+});
+
+test("canonical vocabulary keeps legacy invocations equivalent without rewriting values", async () => {
+  const { parseArgv } = await import("./argv.js");
+  for (const [prefix, canonical, legacy, value, suffix] of [
+    [["playlist", "init", "med_TEST"], "--screen-id", "--screen", "scr_TEST", ["--name", "Lobby", "--output", "out.json"]],
+    [["screen", "pair", "234567"], "--name", "--label", "--screen", []],
+    [["screen", "provision"], "--name", "--label", "Lobby", ["--print-url"]],
+    [["kv", "get", "greeting"], "--app-id", "--application-id", "app_TEST", []],
+  ] as const) {
+    assert.deepEqual(parseArgv([...prefix, `${canonical}=${value}`, ...suffix]), parseArgv([...prefix, `${legacy}=${value}`, ...suffix]));
+    assert.throws(() => parseArgv([...prefix, `${canonical}=${value}`, `${legacy}=${value}`, ...suffix]), /only once/);
+  }
+  assert.deepEqual(parseArgv(["operations", "get", "op_TEST"]), parseArgv(["operations", "show", "op_TEST"]));
+  assert.deepEqual(commandHelp(["operations", "get"]), commandHelp(["operations", "show"]));
+  const selector = commandHelp(["kv", "get"]).options.find(option => option.name === "--app-id");
+  assert.equal(selector?.required, true);
+  assert.deepEqual(selector?.aliases, ["--application-id"]);
+  assert.equal(commandHelp(["kv", "get"]).options.some(option => option.name === "--application-id"), false);
+});
+
+test("value dependencies and mutation requirements fail before runtime access", async () => {
+  const { executeCommand } = await import("./program.js");
+  const runtime = new Proxy({}, { get() { throw new Error("Runtime must not be accessed"); } });
+  for (const args of [
+    ["kv", "set", "key", "--app-id", "app_TEST"],
+    ["kv", "set", "key", "--application-id", "app_TEST", "--file", "input.txt"],
+    ["kv", "set", "key", "--app-id", "app_TEST", "--value-base64="],
+    ["comment", "set", "screen", "scr_TEST"],
+    ["comment", "set", "playlist", "pl_TEST"],
+    ["screen", "provision"],
+    ["screen", "provision", "--open", "--print-url"],
+    ["screen", "update", "scr_TEST", "--expect-rev", "1"],
+    ["media", "update", "med_TEST", "--expect-rev", "1"],
+    ["feedback", "bug", "Title"],
+    ["playlist", "replace-release", "pl_TEST", "--page", "page_1", "--primitive", "app", "--release-id", "rel_TEST", "--apply"],
+  ]) {
+    await assert.rejects(executeCommand(args, runtime as Parameters<typeof executeCommand>[1]), (error: any) => error.problem?.code === "usage_error", JSON.stringify(args));
+  }
+  assert.deepEqual(commandHelp(["screen", "list"]).options.find(option => option.name === "--state")?.choices, ["archived"]);
+  assert.equal(commandHelp(["screen", "toast"]).options.find(option => option.name === "--level")?.default, "info");
+  const set = commandHelp(["kv", "set"]);
+  assert.deepEqual(set.relationships, [
+    { kind: "exactlyOne", options: ["--json-value", "--file", "--value-base64"] },
+    { kind: "requires", options: ["--file", "--content-type"] },
+    { kind: "requires", options: ["--value-base64", "--content-type"] },
+  ]);
+});
+
+test("every operational command has examples that parse and stdin help matches implemented inputs", async () => {
+  const { parseArgv } = await import("./argv.js");
+  // Tokenize only our authored examples, preserving quoted JSON and paths.
+  const words = (text: string) => [...text.matchAll(/"([^"]*)"|'([^']*)'|([^\s]+)/g)].map(match => match[1] ?? match[2] ?? match[3]!);
+  for (const path of leafCommandPaths(createCommandTree().root)) {
+    if (path === "help") continue;
+    const help = commandHelp(path.split(" "));
+    assert.ok(help.examples.length > 0, path);
+    for (const example of help.examples) assert.doesNotThrow(() => parseArgv(words(example).slice(1)), example);
+  }
+  for (const action of ["validate", "preview", "create", "update"]) {
+    assert.ok(commandHelp(["playlist", action]).arguments.some(argument => argument.description.includes("stdin")), action);
+  }
+  assert.match(commandHelp(["screen", "publish"]).usage, /does not update an existing playlist/);
 });
