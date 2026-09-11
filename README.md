@@ -62,6 +62,36 @@ Choose by what the page is:
 - Slide-deck-like experiences: local unbilled `compose render`.
 - Live video, iframe, or webapp: write playlist primitives.
 
+## Screen host and recovery
+
+Native players report the shell and hardware they run on. `screen show` prints
+that as a `Host` block (platform, host version, model, manufacturer, firmware,
+serial, DUID, MAC, capabilities, and when it was last updated); absent fields
+are omitted, and `screen list` adds a `PLATFORM` column when any screen reports
+one. In JSON mode the fields pass through as `host` and `host_updated_at`. The
+host is a hint that names a device. It is never a credential and never
+authorizes anything; only the player's key does.
+
+When a display loses its stored identity (for example after a factory reset)
+and starts pairing again while reporting identifiers that match exactly one of
+your screens, the server records an offer on that screen. `screen show` and
+`screen list` show it as `recovery_pending` with its deadline. Nothing changes
+until you confirm:
+
+```bash
+screenrig screen show scr_LOBBY
+screenrig screen recover scr_LOBBY
+```
+
+`screen recover` reconnects the display to the existing screen: the label,
+playlist, timezone, schedules, and history stay; the display's new key replaces
+the previous one, which retires after a fifteen-minute grace window. Recovery
+never happens without this confirmation and never crosses accounts. If you do
+not confirm, the pairing code still works as a new screen. The command exits
+nonzero with `recovery_not_offered` when nothing is pending,
+`recovery_expired` when the display's pairing session lapsed, and
+`recovery_ambiguous` when the identifiers are attached to more than one screen.
+
 ## Application command results
 
 `app upload` and `app update` return the same JSON data paths with or without

@@ -38,6 +38,7 @@ import {
   type BrowserLinkClaim,
   type BrowserLinkClaimRequest,
   type DashboardLink,
+  type HostContext,
   type ProvisionScreen,
   type Screen,
   type ScreenPatch,
@@ -2826,11 +2827,58 @@ async function assertAssignedScreensHaveZone(client: ApiClient, playlistId: stri
 }
 
 export const handleScreenList = commandHandler(async (args, runtime, resolved) => {
-
-  return simpleGet(args, runtime, resolved, "/api/v1/screens", "Screens", {
-    state: screenListStateFromArgs(args),
-  });
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+  const response = await client.call({ method: "GET", path: "/api/v1/screens", query: { state: screenListStateFromArgs(args) } });
+  const items = (response.body as { items?: Screen[] } | undefined)?.items;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: ["Screens", ...screenTableLines(Array.isArray(items) ? items : []), JSON.stringify(response.body, null, 2)].join("\n"),
+  };
 }, true);
+
+/**
+ * One row per screen. The platform column appears only when at least one
+ * screen reports a host, so a fleet without native players keeps the table it
+ * had. The JSON body follows unchanged in both output modes.
+ */
+function screenTableLines(items: Screen[]): string[] {
+  if (!items.length) return [];
+  const withPlatform = items.some((screen) => typeof screen?.host?.platform === "string");
+  const rows = items.map((screen) => [
+    screen?.id ?? "", screen?.label ?? "", screen?.state ?? "",
+    ...(withPlatform ? [screen?.host?.platform ?? ""] : []),
+    ...(screen?.recovery_pending?.expires_at ? [`recovery pending until ${screen.recovery_pending.expires_at}`] : []),
+  ]);
+  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : [])];
+  const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => (row[index] ?? "").length)));
+  const render = (row: string[]) => row.map((cell, index) => index < widths.length ? cell.padEnd(widths[index]!) : cell).join("  ").trimEnd();
+  return [render(header), ...rows.map(render)];
+}
+
+/** The `Host` block `screen show` prints. Absent fields are omitted; identifiers belong to the owning account. */
+function hostLines(host: HostContext | undefined, updatedAt: string | undefined): string[] {
+  if (!host || typeof host !== "object") return [];
+  const device = host.device ?? {};
+  return humanLines("Host", [
+    ["platform", host.platform],
+    ["host_version", host.host_version],
+    ["model", device.model],
+    ["manufacturer", device.manufacturer],
+    ["firmware", device.firmware],
+    ["serial", device.serial],
+    ["duid", device.duid],
+    ["mac", device.mac],
+    ["capabilities", Array.isArray(host.capabilities) && host.capabilities.length ? host.capabilities.join(", ") : undefined],
+    ["updated_at", updatedAt],
+  ]).split("\n");
+}
+
+function recoveryPendingLine(screen: Screen | undefined): string[] {
+  const expiresAt = screen?.recovery_pending?.expires_at;
+  return expiresAt ? [`Recovery pending until ${expiresAt}`, "Confirm with screen recover <id>; nothing is rebound until then."] : [];
+}
 
 export const handleScreenProvision = commandHandler(async (args, runtime, resolved) => {
   const token = requireToken(resolved.token);
@@ -2931,10 +2979,23 @@ export const handleScreenPair = commandHandler(async (args, runtime, resolved) =
 }, true);
 
 export const handleScreenShow = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
 
   const id = args.positionals[2];
   if (!id) throw usageError("screen show requires an id.");
-  return simpleGet(args, runtime, resolved, `/api/v1/screens/${id}`, "Screen");
+  const response = await client.call({ method: "GET", path: `/api/v1/screens/${id}` });
+  const screen = response.body as Screen | undefined;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [
+      "Screen",
+      JSON.stringify(response.body, null, 2),
+      ...hostLines(screen?.host, screen?.host_updated_at),
+      ...recoveryPendingLine(screen),
+    ].join("\n"),
+  };
 }, true);
 
 export const handleScreenUpdate = commandHandler(async (args, runtime, resolved) => {
@@ -3087,6 +3148,62 @@ export const handleScreenRotatePublicId = commandHandler(async (args, runtime, r
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
     human: `Rotated public id for ${id}`,
+  };
+}, true);
+
+const RECOVERY_PROBLEM_MESSAGES: Record<string, { detail: string; next: ProblemNext }> = {
+  recovery_not_offered: {
+    detail: "No recovery is pending for this screen. A display has to start pairing and report this screen's identifiers before recovery can be confirmed.",
+    next: { command: "screenrig screen show <id>", reason: "Check recovery_pending. If the display is showing a pairing code, pair it as a new screen instead." },
+  },
+  recovery_expired: {
+    detail: "The recovery offer for this screen has expired because the display's pairing session lapsed. Nothing was rebound.",
+    next: { command: "screenrig screen show <id>", reason: "Restart pairing on the display; a new offer appears as recovery_pending." },
+  },
+  recovery_ambiguous: {
+    detail: "The display's identifiers are attached to more than one screen, so recovery cannot be offered. Nothing was rebound.",
+    next: { command: "screenrig screen pair <code>", reason: "Pair the display as a new screen, or archive the duplicate screens first." },
+  },
+};
+
+export const handleScreenRecover = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  const id = args.positionals[2];
+  if (!id) throw usageError("screen recover requires <id>.");
+  const revision = flagString(args.flags, "if-match");
+  let response;
+  try {
+    // A fresh Idempotency-Key per invocation: the client mints one when the
+    // operator did not pass --idempotency-key, and write recovery keeps it.
+    response = await client.call({
+      method: "POST",
+      path: `/api/v1/screens/${id}/recovery/confirm`,
+      idempotent: true,
+      ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+    });
+  } catch (error) {
+    const mapped = error instanceof CliError ? RECOVERY_PROBLEM_MESSAGES[error.problem.code] : undefined;
+    if (!(error instanceof CliError) || !mapped) throw error;
+    const next = { ...mapped.next, command: mapped.next.command.replace("<id>", id) };
+    throw new CliError({ ...error.problem, detail: mapped.detail, next: error.problem.next ?? next }, error.exitCode, error.warnings);
+  }
+  const screen = response.body as Screen | undefined;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [
+      humanLines(`Recovered screen ${id}`, [
+        ["screen_id", screen?.id],
+        ["label", screen?.label],
+        ["state", screen?.state],
+        ["revision", screen?.revision === undefined ? undefined : String(screen.revision)],
+        ["public_id", screen?.public_id],
+        ["platform", screen?.host?.platform],
+      ]),
+      "The display now runs this screen with its new key; the previous key retires after a fifteen-minute grace window.",
+    ].join("\n"),
   };
 }, true);
 

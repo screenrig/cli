@@ -591,6 +591,37 @@ paths:
       responses:
         "200": { description: "Public URL credential rotated; player public-key enrollment preserved. Every runtime session is invalidated by the new content_access_generation and the live desired and active grants are reissued at that generation for their unchanged manifest revision, so a paired player that re-mints its session keeps authorizing the content it is already showing.", content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
         default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/{id}/recovery/confirm:
+    post:
+      operationId: confirmScreenRecovery
+      description: >-
+        Confirms a pending screen recovery. A native pairing start that presented
+        a host duid or serial matching exactly one screen in exactly one account,
+        under a different bound public key, records an offer on that screen
+        (Screen.recovery_pending, account event screen.recovery_offered). The
+        host object is a hint, never a credential: nothing is rebound until the
+        owning account calls this route. Confirmation completes the pending
+        native pairing onto the EXISTING screen: the pairing device receives
+        pairing.claimed as usual and proves possession with pairing.complete,
+        the new key becomes the screen identity, and the previous key retires
+        with a fifteen-minute grace window in which its runtime sessions keep
+        working and it may still mint, after which it is refused. Playlists,
+        label, timezone, schedules, and history are preserved. Same account
+        only; another account's screen is not_found. If-Match is optional.
+        Emits screen.recovered. recovery_not_offered when nothing is pending,
+        recovery_expired when the pairing session lapsed, recovery_ambiguous
+        when the identifier is attached in more than one place. Problem
+        responses never echo device identifiers.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/OptionalIfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: "Screen recovered onto the pairing device's key; the response carries the current ETag.", content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "410": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/archive:
     post:
       operationId: archiveScreen
@@ -1232,7 +1263,7 @@ paths:
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Verifies an EdDSA compact JWS (op=session.mint) against the enrolled public key and returns a signed 24-hour ScreenRig-Session. Cookies are neither accepted nor set. Exact Idempotency-Key replay precedes new abuse admission. An archived screen still mints a session so the player can show the archived glass. Session mint requires the exact durable account and screen binding established by signed completion; pending claim offers have no session authority. Exact replay rechecks that binding and rejects retired identities.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityProof" } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentitySessionRequest" } } } }
       responses:
         "201": { description: Paired native runtime session; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativeRuntimeSession" } } } }
         "400": { $ref: "#/components/responses/Problem" }
@@ -2101,6 +2132,33 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/screens/{id}/recovery/confirm:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: confirmDashboardScreenRecovery
+      description: >-
+        Cookie-side twin of POST /api/v1/screens/{id}/recovery/confirm for the
+        dashboard, which cannot call /api/v1. Confirms the pending recovery
+        recorded when a native pairing start presented this screen's host duid
+        or serial under a different bound key. The host object is a hint, never
+        a credential; nothing is rebound until this confirmation. Completes the
+        pending native pairing onto the EXISTING screen, retires the previous
+        key with a fifteen-minute grace window, preserves playlists, label,
+        schedules, and history, and emits screen.recovered with the acting
+        dashboard user as actor. Same account only. If-Match is optional.
+        recovery_not_offered, recovery_expired, and recovery_ambiguous are the
+        stable problems; none echoes a device identifier.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/OptionalIfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Screen recovered onto the pairing device's key., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "410": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/screens/{id}/unarchive:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
     post:
@@ -2882,8 +2940,59 @@ components:
             IPv6 textual form. Absent until the first paired runtime SSE connect.
             Operational metadata; IDs and IPs are never authorization. Account
             cannot write it.
+        host:
+          $ref: "#/components/schemas/HostContext"
+        host_updated_at:
+          type: string
+          format: date-time
+          description: >-
+            Instant the stored host hint was last replaced by a native pairing
+            start, completion, or session mint. Absent until a player sends one.
+            Account cannot write it.
+        recovery_pending:
+          $ref: "#/components/schemas/ScreenRecoveryPending"
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    HostContext:
+      type: object
+      additionalProperties: false
+      required: [platform]
+      description: >-
+        The shell and hardware a player runs on, as the player reported it. A
+        HINT that names a device; never a credential, never authorization. Only
+        the Ed25519 key authorizes. Stored per screen, replaced by every session
+        mint that carries one, deleted with the screen, never written to
+        operation logs, never echoed in problem responses, and never returned
+        to any account other than the owner's. Read-only on the account API;
+        ScreenPatch cannot write it.
+      properties:
+        platform: { type: string, enum: [tizen, android, windows, qt, apple, chromeos, browser] }
+        host_version: { type: string, minLength: 1, maxLength: 40, description: "Shell or container product version, CalVer or vendor form." }
+        device: { $ref: "#/components/schemas/HostDevice" }
+        capabilities: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[a-z0-9_]{1,40}$" } }
+    HostDevice:
+      type: object
+      additionalProperties: false
+      description: Optional hardware identifiers. duid and serial are the only two the recovery hint consults; a failed read on the player omits the field.
+      properties:
+        duid: { type: string, minLength: 6, maxLength: 128, pattern: "^[A-Za-z0-9:_-]+$" }
+        serial: { type: string, minLength: 4, maxLength: 128, pattern: "^[A-Za-z0-9:_-]+$" }
+        mac: { type: string, minLength: 6, maxLength: 64, pattern: "^[A-Za-z0-9:_-]+$", description: Colon or dash separated hex accepted as-is. }
+        model: { type: string, minLength: 1, maxLength: 80 }
+        firmware: { type: string, minLength: 1, maxLength: 80 }
+        manufacturer: { type: string, minLength: 1, maxLength: 80 }
+    ScreenRecoveryPending:
+      type: object
+      additionalProperties: false
+      required: [expires_at]
+      description: >-
+        Present while a native pairing session that presented this screen's
+        hardware identity is waiting for the owning account to confirm with
+        POST /api/v1/screens/{id}/recovery/confirm. Carries only the deadline,
+        which is the pairing session's own expiry. Absent once confirmed,
+        lapsed, or claimed as a new screen. Read-only.
+      properties:
+        expires_at: { type: string, format: date-time }
     ScreenList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Screen" } } } }
     PageFailure:
       type: object
@@ -3186,7 +3295,21 @@ components:
         created_at: { type: string, format: date-time }
     FeedbackList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/FeedbackSubmission" } } } }
     PairingSession: { type: object, additionalProperties: false, required: [code, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, expires_at: { type: string, format: date-time } } }
-    NativePairingSession: { type: object, additionalProperties: false, required: [code, pairing_credential, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, pairing_credential: { type: string, pattern: "^srp_[A-Za-z0-9_-]{43}$" }, expires_at: { type: string, format: date-time, description: Unclaimed native pairing deadline; seventy-two hours after issuance. After claim this deadline does not expire native delivery or device identity. } } }
+    NativePairingSession: { type: object, additionalProperties: false, required: [code, pairing_credential, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, pairing_credential: { type: string, pattern: "^srp_[A-Za-z0-9_-]{43}$" }, expires_at: { type: string, format: date-time, description: Unclaimed native pairing deadline; seventy-two hours after issuance. After claim this deadline does not expire native delivery or device identity. }, recovery: { $ref: "#/components/schemas/NativePairingRecovery" } } }
+    NativePairingRecovery:
+      type: object
+      additionalProperties: false
+      required: [offered]
+      description: >-
+        Present only when the host duid or serial in the start request matched
+        exactly one existing screen bound to a different key. It carries no
+        screen, label, or account: the offer is surfaced account-side as
+        Screen.recovery_pending and the screen.recovery_offered event, and only
+        the owning account can confirm it. The pairing code still issues and
+        displays exactly as without a match. The player uses this solely to log
+        pairing.recovery_offered.
+      properties:
+        offered: { type: boolean, enum: [true] }
     PairingClaimedEvent: { type: object, additionalProperties: false, required: [type, completion_nonce], properties: { type: { type: string, enum: [pairing.claimed] }, completion_nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
     PairingClaim: { type: object, additionalProperties: false, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri } } }
     PairingComplete: { type: object, additionalProperties: false, required: [completion_nonce], properties: { completion_nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
@@ -3204,11 +3327,12 @@ components:
       type: object
       additionalProperties: false
       required: [kid, public_key, signature]
-      description: Proof of private-key possession is required before enrollment or locator creation. Sign a fresh pairing.start challenge bound to the exact Idempotency-Key; unsigned starts are rejected.
+      description: Proof of private-key possession is required before enrollment or locator creation. Sign a fresh pairing.start challenge bound to the exact Idempotency-Key; unsigned starts are rejected. The optional host object is a hint about the device, not a credential; it is stored on the screen at claim and may open a recovery offer account-side. Unknown host keys or out-of-range values are invalid_request.
       properties:
         kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
         public_key: { $ref: "#/components/schemas/PlayerPublicKey" }
         signature: { type: string, minLength: 80, maxLength: 4096 }
+        host: { $ref: "#/components/schemas/HostContext" }
     NativePairingComplete:
       type: object
       additionalProperties: false
@@ -3218,6 +3342,7 @@ components:
         completion_nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
         public_key: { $ref: "#/components/schemas/PlayerPublicKey" }
         signature: { type: string, minLength: 80, maxLength: 4096, description: Compact EdDSA JWS with op=pairing.complete and request_hash binding the exact pairing credential and completion nonce. }
+        host: { $ref: "#/components/schemas/HostContext" }
     NativeIdentityChallengeRequest:
       type: object
       additionalProperties: false
@@ -3260,6 +3385,20 @@ components:
         kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
         public_key: { $ref: "#/components/schemas/PlayerPublicKey" }
         signature: { type: string, minLength: 80, maxLength: 4096, description: Compact EdDSA JWS. }
+    NativeIdentitySessionRequest:
+      type: object
+      additionalProperties: false
+      required: [kid, public_key, signature]
+      description: >-
+        NativeIdentityProof with op=session.mint plus the optional host hint. A
+        present host REPLACES the host stored on the screen, because firmware
+        and shell versions drift over a screen's life. The hint never affects
+        authorization; only the signed proof does.
+      properties:
+        kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
+        public_key: { $ref: "#/components/schemas/PlayerPublicKey" }
+        signature: { type: string, minLength: 80, maxLength: 4096, description: Compact EdDSA JWS with op=session.mint. }
+        host: { $ref: "#/components/schemas/HostContext" }
     NativePairingCompletion: { type: object, additionalProperties: false, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri } } }
     BrowserProvisioningExchange: { type: object, additionalProperties: false, required: [provisioning_token, exchange_id], properties: { provisioning_token: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }, exchange_id: { type: string, pattern: "^xchg_[A-Za-z0-9_-]{43}$" } } }
     BrowserProvisioningCompletion: { type: object, additionalProperties: false, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri } } }
@@ -3784,4 +3923,4 @@ components:
         errors: { type: array, items: { $ref: "#/components/schemas/ProblemField" } }
         next: { $ref: "#/components/schemas/NextAction" }
 x-problem-registry: ./problems.yaml
-x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_account_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, dashboard_link_invalid, dashboard_link_expired, dashboard_link_consumed, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk]
+x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_account_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, dashboard_link_invalid, dashboard_link_expired, dashboard_link_consumed, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk, recovery_ambiguous, recovery_expired, recovery_not_offered]

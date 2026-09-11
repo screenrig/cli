@@ -4891,6 +4891,218 @@ test("screen update cannot send online, last_online_at, or last_ip", async () =>
   await rm(configDir, { recursive: true, force: true });
 });
 
+const SAMPLE_HOST = {
+  platform: "tizen" as const,
+  host_version: "26.09.1",
+  device: {
+    duid: "DUID-TEST-000001",
+    serial: "SERIAL0001",
+    mac: "00:11:22:33:44:55",
+    model: "QB65",
+    firmware: "T-KTM2ELAKUC-1200.1",
+    manufacturer: "Samsung",
+  },
+  capabilities: ["autostart", "network_standby_off"],
+};
+
+function hostScreen(extra: Record<string, unknown> = {}) {
+  return {
+    content_access_generation: 1,
+    created_at: "2026-08-14T17:00:00.000Z",
+    id: "scr_PAIRINGAAAAAAAAAAAAAAAA",
+    label: "Lobby",
+    manifest_revision: 1,
+    online: true,
+    public_id: "scr_public_pairing",
+    revision: 3,
+    state: "active" as const,
+    updated_at: "2026-08-14T17:00:00.000Z",
+    ...extra,
+  };
+}
+
+async function hostConfigFs(prefix: string) {
+  const configDir = await testTemp(prefix);
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_existing_secret" },
+    fsLike,
+  );
+  return { configDir, fsLike };
+}
+
+test("screen show prints the Host block and recovery deadline when the screen reports them", async () => {
+  const transport = new FakeTransport();
+  const screen = hostScreen({ host: SAMPLE_HOST, host_updated_at: "2026-09-10T08:00:00Z", recovery_pending: { expires_at: "2026-09-13T08:00:00Z" } });
+  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: screen }));
+  const { configDir, fsLike } = await hostConfigFs("screen-show-host-");
+
+  const jsonResult = await withRuntime(["--json", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+  assert.equal(jsonResult.code, ExitCode.Success, jsonResult.stdout);
+  const envelope = JSON.parse(jsonResult.stdout) as { ok: boolean; data: Record<string, unknown> };
+  assert.equal(envelope.ok, true);
+  assert.deepEqual(envelope.data.host, SAMPLE_HOST);
+  assert.equal(envelope.data.host_updated_at, "2026-09-10T08:00:00Z");
+  assert.deepEqual(envelope.data.recovery_pending, { expires_at: "2026-09-13T08:00:00Z" });
+
+  const humanResult = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+  assert.equal(humanResult.code, ExitCode.Success, humanResult.stdout);
+  assert.match(humanResult.stdout, /^Screen\n/);
+  const hostBlock = humanResult.stdout.slice(humanResult.stdout.indexOf("\nHost\n") + 1);
+  assert.match(hostBlock, /^Host\nplatform: tizen\nhost_version: 26\.09\.1\nmodel: QB65\nmanufacturer: Samsung\nfirmware: T-KTM2ELAKUC-1200\.1\nserial: SERIAL0001\nduid: DUID-TEST-000001\nmac: 00:11:22:33:44:55\ncapabilities: autostart, network_standby_off\nupdated_at: 2026-09-10T08:00:00Z\n/);
+  assert.match(hostBlock, /\nRecovery pending until 2026-09-13T08:00:00Z\n/);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen show omits absent host fields and the whole block without a host", async () => {
+  const transport = new FakeTransport();
+  const sparse = hostScreen({ host: { platform: "android", device: { model: "Pixel Tablet" } } });
+  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: sparse }));
+  const { configDir, fsLike } = await hostConfigFs("screen-show-sparse-host-");
+  const sparseResult = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+  assert.equal(sparseResult.code, ExitCode.Success, sparseResult.stdout);
+  assert.match(sparseResult.stdout, /\nHost\nplatform: android\nmodel: Pixel Tablet\n?$/);
+  assert.doesNotMatch(sparseResult.stdout, /serial:|duid:|mac:|updated_at:|Recovery pending/);
+  await rm(configDir, { recursive: true, force: true });
+
+  const memory = memoryBackend();
+  const paired = await withAuthenticatedRuntime(["--json", "screen", "pair", "ABC234"], memory);
+  assert.equal(paired.code, ExitCode.Success);
+  const pairedFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => paired.configDir, env: { XDG_CONFIG_HOME: paired.configDir } };
+  const human = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], memory, { fs: pairedFs });
+  assert.equal(human.code, ExitCode.Success, human.stdout);
+  assert.match(human.stdout, /^Screen\n\{/);
+  assert.doesNotMatch(human.stdout, /\nHost\n|Recovery pending/);
+  const json = await withRuntime(["--json", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], memory, { fs: pairedFs });
+  const envelope = JSON.parse(json.stdout) as { data: Record<string, unknown> };
+  assert.equal(envelope.data.host, undefined);
+  assert.equal(envelope.data.recovery_pending, undefined);
+  await rm(paired.configDir, { recursive: true, force: true });
+});
+
+test("screen list appends the platform column only when a screen reports a host", async () => {
+  const transport = new FakeTransport();
+  const items = [
+    hostScreen({ host: SAMPLE_HOST, recovery_pending: { expires_at: "2026-09-13T08:00:00Z" } }),
+    hostScreen({ id: "scr_BROWSERAAAAAAAAAAAAAAAA", label: "Cafe", public_id: "scr_public_cafe" }),
+  ];
+  let body: unknown = { items };
+  transport.on("GET", "/api/v1/screens", () => ({ status: 200, headers: {}, body }));
+  const { configDir, fsLike } = await hostConfigFs("screen-list-platform-");
+
+  const human = await withRuntime(["--human", "screen", "list"], transport, { fs: fsLike });
+  assert.equal(human.code, ExitCode.Success, human.stdout);
+  const lines = human.stdout.split("\n");
+  assert.equal(lines[0], "Screens");
+  assert.match(lines[1]!, /^ID\s+LABEL\s+STATE\s+PLATFORM$/);
+  assert.match(lines[2]!, /^scr_PAIRINGAAAAAAAAAAAAAAAA\s+Lobby\s+active\s+tizen\s+recovery pending until 2026-09-13T08:00:00Z$/);
+  assert.match(lines[3]!, /^scr_BROWSERAAAAAAAAAAAAAAAA\s+Cafe\s+active$/);
+  assert.equal(lines[4], "{");
+
+  const json = await withRuntime(["--json", "screen", "list"], transport, { fs: fsLike });
+  const envelope = JSON.parse(json.stdout) as { data: { items: Array<Record<string, unknown>> } };
+  assert.deepEqual(envelope.data.items[0]!.host, SAMPLE_HOST);
+  assert.equal(envelope.data.items[1]!.host, undefined);
+
+  body = { items: [items[1]] };
+  const plain = await withRuntime(["--human", "screen", "list"], transport, { fs: fsLike });
+  assert.match(plain.stdout.split("\n")[1]!, /^ID\s+LABEL\s+STATE$/);
+  assert.doesNotMatch(plain.stdout, /PLATFORM/);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen recover confirms a pending offer with a fresh idempotency key and prints the screen summary", async () => {
+  const transport = new FakeTransport();
+  const recovered = hostScreen({ host: SAMPLE_HOST, revision: 4 });
+  transport.on("POST", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/recovery/confirm", (req) => ({
+    status: 200, headers: { etag: '"4"', "x-request-id": req.headers?.["x-request-id"] ?? "req_recover" }, body: recovered,
+  }));
+  const { configDir, fsLike } = await hostConfigFs("screen-recover-");
+
+  const first = await withRuntime(["--json", "screen", "recover", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+  assert.equal(first.code, ExitCode.Success, first.stdout);
+  const envelope = JSON.parse(first.stdout) as { ok: boolean; data: Record<string, unknown> };
+  assert.equal(envelope.ok, true);
+  assert.equal(envelope.data.revision, 4);
+  assert.deepEqual(envelope.data.host, SAMPLE_HOST);
+  const call = transport.calls.at(-1)!;
+  assert.equal(call.method, "POST");
+  assert.equal(call.body, undefined);
+  const firstKey = call.headers?.["idempotency-key"];
+  assert.ok(firstKey, "confirm carries an Idempotency-Key");
+  assert.equal(call.headers?.["if-match"], undefined);
+
+  const second = await withRuntime(["--human", "screen", "recover", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", "3"], transport, { fs: fsLike });
+  assert.equal(second.code, ExitCode.Success, second.stdout);
+  const secondCall = transport.calls.at(-1)!;
+  assert.notEqual(secondCall.headers?.["idempotency-key"], firstKey, "each invocation mints its own key");
+  assert.equal(secondCall.headers?.["if-match"], '"3"');
+  assert.match(second.stdout, /^Recovered screen scr_PAIRINGAAAAAAAAAAAAAAAA\nscreen_id: scr_PAIRINGAAAAAAAAAAAAAAAA\nlabel: Lobby\nstate: active\nrevision: 4\npublic_id: scr_public_pairing\nplatform: tizen\n/);
+  assert.match(second.stdout, /fifteen-minute grace window/);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen recover through the memory backend clears recovery_pending", async () => {
+  const transport = memoryBackend();
+  const { code, configDir } = await withAuthenticatedRuntime(["--json", "screen", "pair", "ABC234"], transport);
+  assert.equal(code, ExitCode.Success);
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const notOffered = await withRuntime(["--json", "screen", "recover", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+  assert.equal(notOffered.code, ExitCode.NotFound);
+  assert.equal((JSON.parse(notOffered.stdout) as { error: { code: string } }).error.code, "recovery_not_offered");
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen recover maps each recovery problem to a one-line message and a nonzero exit", async () => {
+  const cases: Array<{ code: string; status: number; exit: number; detail: RegExp; next: RegExp }> = [
+    { code: "recovery_not_offered", status: 404, exit: ExitCode.NotFound, detail: /^No recovery is pending for this screen\./, next: /screen show scr_PAIRINGAAAAAAAAAAAAAAAA/ },
+    { code: "recovery_expired", status: 410, exit: ExitCode.Client, detail: /^The recovery offer for this screen has expired/, next: /screen show scr_PAIRINGAAAAAAAAAAAAAAAA/ },
+    { code: "recovery_ambiguous", status: 409, exit: ExitCode.Conflict, detail: /^The display's identifiers are attached to more than one screen/, next: /screen pair <code>/ },
+  ];
+  for (const testCase of cases) {
+    const transport = new FakeTransport();
+    transport.on("POST", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/recovery/confirm", () => ({
+      status: testCase.status,
+      headers: { "content-type": "application/problem+json", "x-request-id": "req_recover_problem" },
+      body: {
+        type: `https://screenrig.ai/problems/${testCase.code.replaceAll("_", "-")}`,
+        title: "Recovery refused",
+        status: testCase.status,
+        code: testCase.code,
+        detail: "server wording",
+      },
+    }));
+    const { configDir, fsLike } = await hostConfigFs(`screen-recover-${testCase.code}-`);
+    const json = await withRuntime(["--json", "screen", "recover", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.equal(json.code, testCase.exit, json.stdout);
+    const envelope = JSON.parse(json.stdout) as { ok: boolean; error: { code: string; status: number; detail: string; next?: { command: string } } };
+    assert.equal(envelope.ok, false);
+    assert.equal(envelope.error.code, testCase.code);
+    assert.equal(envelope.error.status, testCase.status);
+    assert.match(envelope.error.detail, testCase.detail);
+    assert.equal(envelope.error.detail.includes("\n"), false, "one line");
+    assert.match(envelope.error.next?.command ?? "", testCase.next);
+    assert.doesNotMatch(json.stdout, /SERIAL0001|DUID-TEST/);
+
+    const human = await withRuntime(["--human", "screen", "recover", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.equal(human.code, testCase.exit);
+    assert.equal(human.stdout, "");
+    assert.match(human.stderr, testCase.detail.source.startsWith("^") ? new RegExp(`\\n${testCase.detail.source.slice(1)}`) : testCase.detail);
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("screen recover rejects a missing id before any request", async () => {
+  const transport = new FakeTransport();
+  const { configDir, fsLike } = await hostConfigFs("screen-recover-usage-");
+  const result = await withRuntime(["--json", "screen", "recover"], transport, { fs: fsLike });
+  assert.equal(result.code, ExitCode.Usage);
+  assert.equal((JSON.parse(result.stdout) as { error: { code: string } }).error.code, "usage_error");
+  assert.equal(transport.calls.length, 0);
+  await rm(configDir, { recursive: true, force: true });
+});
+
 test("adding a schedule to a playlist an unzoned screen already runs is refused", async () => {
   const transport = memoryBackend();
   const { configDir, fsLike, file } = await scheduledPlaylistFixture(false, "tz-playlist-update-");

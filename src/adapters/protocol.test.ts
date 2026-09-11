@@ -234,6 +234,8 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "comments",
     "content_access_generation",
     "created_at",
+    "host",
+    "host_updated_at",
     "id",
     "label",
     "last_ip",
@@ -244,6 +246,7 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "online",
     "playlist_id",
     "public_id",
+    "recovery_pending",
     "revision",
     "state",
     "timezone",
@@ -256,6 +259,13 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
     "page_id",
   ]);
   assert.match(screen, /"comments"\?: Record<string, unknown>/);
+  assert.match(screen, /"host"\?: HostContext/);
+  assert.match(screen, /"recovery_pending"\?: ScreenRecoveryPending/);
+  assert.deepEqual(quotedProperties(interfaceBody(source, "HostContext")), ["capabilities", "device", "host_version", "platform"]);
+  assert.deepEqual(quotedProperties(interfaceBody(source, "HostDevice")), ["duid", "firmware", "mac", "manufacturer", "model", "serial"]);
+  assert.deepEqual(quotedProperties(interfaceBody(source, "ScreenRecoveryPending")), ["expires_at"]);
+  assert.match(openapi, /\/api\/v1\/screens\/\{id\}\/recovery\/confirm:/);
+  assert.match(openapi, /operationId: confirmScreenRecovery/);
   assert.match(screen, /"state": "pairing_pending" \| "active" \| "archived"/);
   assert.match(openapi, /\/api\/v1\/screens\/\{id\}\/archive:/);
   assert.match(openapi, /\/api\/v1\/screens\/\{id\}\/unarchive:/);
@@ -508,6 +518,9 @@ test("published problem codes include payment_required and dependency_timeout", 
     "agent_connection_cancelled",
     "agent_limit_exceeded",
     "agent_lockout_risk",
+    "recovery_ambiguous",
+    "recovery_expired",
+    "recovery_not_offered",
   ]);
   assert.match(source, /payment_required/);
   assert.doesNotMatch(source, /stripe|x402/i);
