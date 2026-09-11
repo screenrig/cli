@@ -16,7 +16,7 @@ function invoke(args: string[]): { data: ReturnType<typeof commandHelp> & { vers
 test("root help is compact and every command is discoverable through immediate children", () => {
   const root = commandHelp();
   const commanderHelp = root.usage.split(/\n\nAll commands:\n/)[0]!;
-  assert.ok(commanderHelp.split("\n").length < 36);
+  assert.ok(commanderHelp.split("\n").length <= 40);
   assert.doesNotMatch(root.usage, /localhost|log_socket|--token/);
   const discovered: string[] = [];
   function visit(path: string[]): void {
@@ -34,6 +34,9 @@ test("root help is compact and every command is discoverable through immediate c
   }
   visit([]);
   assert.deepEqual(discovered.sort(), [
+    "recovery list",
+    "recovery show",
+    "recovery reconcile",
     "account show",
     "agent enroll",
     "agent connect",
@@ -104,17 +107,19 @@ test("root help is compact and every command is discoverable through immediate c
     "doctor",
     "version",
   ].sort());
+  assert.equal(root.allCommands, undefined);
+  assert.doesNotMatch(root.usage, /All commands:/);
   const inventory = leafCommandPaths(createCommandTree().root);
   assert.ok(inventory.includes("help"));
   for (const path of inventory) {
-    assert.ok(root.usage.includes(path), path);
+    assert.ok(commandHelp([], true).usage.includes(path), path);
   }
   assert.ok(root.commands.every((child) => child.path.length === 1));
   assert.equal(root.commands.some((child) => child.name === "generate"), false);
 });
 
 test("group help stays focused and still names descendant leaf paths", () => {
-  const media = commandHelp(["media"]);
+  const media = commandHelp(["media"], true);
   assert.match(media.usage, /Usage: screenrig media \[options\] \[command\]/);
   assert.ok(media.commands.every((child) => child.path[0] === "media" && child.path.length === 2));
   assert.deepEqual(media.commands.map((child) => child.name), [
@@ -126,8 +131,8 @@ test("group help stays focused and still names descendant leaf paths", () => {
   assert.doesNotMatch(media.usage, /screen assign|account show|agent enroll|playlist create/);
 });
 
-test("human root --help includes every taught leaf command path", () => {
-  const text = execFileSync(process.execPath, [bin, "--help"], {
+test("explicit human inventory includes every leaf while default root stays compact", () => {
+  const text = execFileSync(process.execPath, [bin, "help", "--all"], {
     encoding: "utf8", env: { ...process.env, SCREENRIG_CONFIG: "/nonexistent/screenrig-help-config" },
   });
   for (const path of leafCommandPaths(createCommandTree().root)) {
@@ -190,5 +195,44 @@ test("negative switches are documented as booleans without value placeholders", 
     assert.equal(option?.type, "boolean", name);
     assert.ok(option?.description, name);
     assert.match(help.usage, new RegExp(`${name}\\s+[^<\\s]`));
+  }
+});
+
+test("structured discovery exposes positional cardinality, choices, defaults and examples", () => {
+  const init = invoke(["playlist", "init", "--help"]).data;
+  assert.deepEqual(init.arguments, [{ name: "media-ids", description: "Media identifiers in playback order", required: true, variadic: true }]);
+  assert.deepEqual(init.options.find((option) => option.name === "--fit")?.choices, ["contain", "cover", "fill"]);
+  assert.equal(init.options.find((option) => option.name === "--duration-ms")?.default, 8000);
+  assert.ok(init.examples.length > 0);
+  assert.deepEqual(init.relationships, [{ kind: "together", options: ["--target-width", "--target-height"] }]);
+  const generate = invoke(["media", "generate", "--help"]).data;
+  assert.equal(generate.options.find((option) => option.name === "--quality")?.default, "medium");
+  assert.equal(generate.options.find((option) => option.name === "--aspect-ratio")?.default, "16:9");
+  assert.deepEqual(generate.options.find((option) => option.name === "--prompt")?.conflicts, ["--prompt-file"]);
+  assert.deepEqual(generate.relationships, [{ kind: "exactlyOne", options: ["--prompt", "--prompt-file"] }]);
+  assert.equal(generate.usage.split("Provide exactly one").length, 2, "notes should appear only once");
+});
+
+test("explicit JSON inventory can be scoped to a group", () => {
+  assert.deepEqual(invoke(["help", "--all"]).data.allCommands, leafCommandPaths(createCommandTree().root));
+  const media = invoke(["help", "media", "--all"]).data;
+  assert.ok(media.allCommands?.every((path) => path.startsWith("media ")));
+  assert.ok(media.allCommands?.includes("media generate"));
+});
+
+test("declared relationships and choices reject invalid commands before authentication", () => {
+  for (const args of [
+    ["media", "generate"],
+    ["media", "generate", "--prompt", "test", "--quality", "ultra"],
+    ["playlist", "init", "med_TEST", "--name", "Test", "--output", "out.json", "--target-width", "1920"],
+    ["compose", "render", "input.json", "--target-height", "1080"],
+    ["playlist", "import", "bundle", "--update", "pl_TEST"],
+  ]) {
+    assert.throws(() => invoke(args), (error: unknown) => {
+      const failure = error as { status: number; stdout: string };
+      assert.equal(failure.status, 2);
+      assert.equal(JSON.parse(failure.stdout).error.code, "usage_error");
+      return true;
+    });
   }
 });

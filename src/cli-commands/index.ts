@@ -18,6 +18,7 @@ import { registerPlaybackCommands } from "./playback.js";
 import { registerFeedbackCommands } from "./feedback.js";
 import { registerDoctorCommands } from "./doctor.js";
 import { registerVersionCommands } from "./version.js";
+import { registerRecoveryCommands } from "./recovery.js";
 
 export function registerCommands(root: Command, bind: CommandActionBinder): void {
   registerGlobalOptions(root);
@@ -38,4 +39,5 @@ export function registerCommands(root: Command, bind: CommandActionBinder): void
   registerFeedbackCommands(root, bind);
   registerDoctorCommands(root, bind);
   registerVersionCommands(root, bind);
+  registerRecoveryCommands(root, bind);
 }

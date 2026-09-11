@@ -45,7 +45,10 @@ The customer surface is content (`app`, `media`, `compose`), playlists, and scre
 Discover commands progressively with `screenrig --help`, `screenrig screen --help`,
 and `screenrig screen assign --help`. Deeper groups work the same way:
 `screenrig comment show --help`. `screenrig help screen assign` is equivalent.
-Add `--json` for structured child command paths, invocation syntax, and option types;
+Use `screenrig help --all` for the complete command inventory, or
+`screenrig help --all screen` for one group's descendants. Normal help lists
+immediate children. Add `--json` for structured command paths, positional arguments,
+option choices and defaults, relationships, and examples;
 help runs without configuration or authentication. Command-specific options follow
 that command, for example `screenrig screen update ID --name Lobby --if-match 1`.
 Global options such as `--json` may appear before or after the command. Use
@@ -105,8 +108,8 @@ error, rerun the same command with unchanged input. The CLI reuses the saved key
 it does not automatically send another request within the failed invocation.
 `write_recovery_saved` indicates that recovery state was retained.
 
-The private config stores only request fingerprints, keys, and timestamps, never
-request payloads. Fingerprints include the origin, credential, target, request
+The private config stores request fingerprints, keys, timestamps, and the command
+group/action, never request payloads. Fingerprints include the origin, credential, target, request
 body, and revision. Changed requests receive different keys. A completed command
 clears its pending state; application acceptance followed by a failed processing
 wait retains it so retrying does not create another application. Definite
@@ -116,6 +119,16 @@ Automatic replay stops after 23 hours, before the server's 24-hour replay window
 ends. Inspect the resource before explicitly supplying a new `--idempotency-key`
 for a reconciled write. Explicit keys remain supported. Pending entries are not
 silently evicted; resolve outstanding writes if the 256-entry limit is reached.
+Use `screenrig recovery list` and `screenrig recovery show ID` to inspect local
+pending writes. Results contain opaque recovery IDs, creation and replay-expiry
+times, replay status, and command names where available. Older entries have no
+command metadata. Request contents and retry keys are never returned.
+
+After checking the remote outcome, run `screenrig recovery reconcile ID` to remove
+that entry's local retry protection. This does not retry, cancel, or undo the remote
+write; a subsequent invocation can make a new write. IDs identify a particular saved
+entry, so an old ID cannot remove a replacement entry. These commands work locally
+with the selected `--config`, including when credentials are no longer usable.
 Enrollment, generation, media uploads/batches, bundle imports, and browser
 handoffs retain their existing specialized recovery behavior.
 
@@ -189,7 +202,11 @@ repeat the identical command and input with the same config to resume. If playli
 creation succeeded before assignment failed, the error identifies the created
 playlist. Do not delete it or start another create to recover. A revision conflict
 requires inspecting the screen and reconciling the intended assignment; an already
-created playlist can be assigned explicitly with `screen assign`. Publishing never
+created playlist can be assigned explicitly with `screen assign`. Assignment-conflict
+guidance includes an inspection command and a separate assignment template with
+`<REVIEWED_REVISION>`. Replace that placeholder only after inspecting the screen and
+deciding the assignment is still intended. Structured argument arrays preserve the
+selected configuration and API origin without requiring shell parsing. Publishing never
 silently refreshes the expected revision. Unfinished recovery stops after the
 24-hour server idempotency window; inspect and reconcile before making more writes.
 

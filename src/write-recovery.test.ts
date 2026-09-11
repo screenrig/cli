@@ -129,3 +129,66 @@ test("application acceptance followed by lost operation status replays the same 
   assert.ok(upload(first)?.headers?.["idempotency-key"]);
   assert.equal(upload(first)?.headers?.["idempotency-key"], upload(second)?.headers?.["idempotency-key"]);
 });
+
+test("recovery list/show expose safe metadata and reconcile only the selected entry without transport", async (t) => {
+  const f = await fixture(t);
+  await f.invoke(failed());
+  await f.invoke(failed(), command.map(x => x === "Private lobby name" ? "Other private name" : x));
+  const original = await f.read();
+  const transport = new FakeTransport();
+  const listed = await f.invoke(transport, ["recovery", "list"]);
+  assert.equal(listed.code, 0);
+  assert.equal(listed.result.data.entries.length, 2);
+  const entry = listed.result.data.entries[0];
+  assert.equal(entry.command, "screen update");
+  assert.equal(entry.replay_status, "within_window");
+  const serialized = JSON.stringify(listed.result);
+  for (const secret of ["Private lobby name", "test-only-credential", "scr_TEST", ...Object.values(original.pending_writes).map((entry: any) => entry.idempotency_key)]) {
+    assert.ok(!serialized.includes(secret));
+  }
+  const shown = await f.invoke(transport, ["recovery", "show", entry.id]);
+  assert.deepEqual(shown.result.data.entry, entry);
+  const removed = await f.invoke(transport, ["recovery", "reconcile", entry.id]);
+  assert.equal(removed.code, 0);
+  assert.equal(removed.result.data.reconciled, true);
+  assert.equal(removed.result.data.remote_changed, false);
+  const remaining = await f.read();
+  assert.equal(remaining.token, original.token);
+  assert.equal(Object.keys(remaining.pending_writes).length, 1);
+  assert.equal((await f.invoke(transport, ["recovery", "reconcile", entry.id])).code, 2);
+  assert.equal(transport.calls.length, 0);
+});
+
+test("recovery legacy and expired entries are inspectable and stale IDs cannot clear replacement keys", async (t) => {
+  const f = await fixture(t);
+  await f.invoke(failed());
+  const saved = await f.read();
+  const fingerprint = Object.keys(saved.pending_writes)[0]!;
+  delete saved.pending_writes[fingerprint].command;
+  await writeFile(f.config, JSON.stringify(saved), { mode: 0o600 });
+  const transport = new FakeTransport();
+  const listed = await f.invoke(transport, ["recovery", "list"], "2026-09-11T12:00:00Z");
+  const entry = listed.result.data.entries[0];
+  assert.equal(entry.command, null);
+  assert.equal(entry.replay_status, "expired");
+  saved.pending_writes[fingerprint].idempotency_key = "replacement-write-key";
+  await writeFile(f.config, JSON.stringify(saved), { mode: 0o600 });
+  assert.equal((await f.invoke(transport, ["recovery", "reconcile", entry.id])).code, 2);
+  assert.equal((await f.read()).pending_writes[fingerprint].idempotency_key, "replacement-write-key");
+  const current = await f.invoke(transport, ["recovery", "list"]);
+  assert.notEqual(current.result.data.entries[0].id, entry.id);
+  assert.equal((await f.invoke(transport, ["recovery", "reconcile", current.result.data.entries[0].id])).code, 0);
+  assert.equal((await f.read()).pending_writes, undefined);
+  assert.equal(transport.calls.length, 0);
+});
+
+test("recovery rejects malformed state and identifiers without clearing anything", async (t) => {
+  const f = await fixture(t);
+  const transport = new FakeTransport();
+  assert.equal((await f.invoke(transport, ["recovery", "list"])).result.data.entries.length, 0);
+  assert.equal((await f.invoke(transport, ["recovery", "reconcile", "all"])).code, 2);
+  await writeFile(f.config, JSON.stringify({ ...(await f.read()), pending_writes: { broken: {} } }), { mode: 0o600 });
+  assert.equal((await f.invoke(transport, ["recovery", "list"])).code, 12);
+  assert.deepEqual((await f.read()).pending_writes, { broken: {} });
+  assert.equal(transport.calls.length, 0);
+});

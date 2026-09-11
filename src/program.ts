@@ -20,7 +20,7 @@ export async function executeCommand(argv: string[], runtime: CliRuntime): Promi
     if (!(error instanceof CommanderError) || !(tree.helpRequested() || tree.versionRequested())) throw error;
   }
   if (tree.helpRequested()) {
-    const help = describeHelp(tree.selected());
+    const help = describeHelp(tree.selected(), tree.inventoryRequested());
     return { envelope: successEnvelope(help), exitCode: ExitCode.Success, human: help.usage, output: "help" };
   }
   if (tree.versionRequested()) return handleVersion({ command: ["version"], positionals: ["version"], flags: {} }, runtime);

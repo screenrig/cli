@@ -408,7 +408,7 @@ function commandHandler(
       (group === "media" && ["update", "delete"].includes(action ?? "")) ||
       (group === "screen" && !["provision", "publish"].includes(action ?? ""))
     );
-    const recovery = ordinary ? new WriteRecovery(resolved, runtime) : undefined;
+    const recovery = ordinary ? new WriteRecovery(resolved, runtime, args.command.slice(0, 2).join(" ")) : undefined;
     if (recovery) writeRecoveries.set(runtime, recovery);
     try {
       const result = await handler(args, runtime, resolved);
