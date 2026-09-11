@@ -48,6 +48,19 @@ test("editable projection preserves dynamic selectors, schedules, motion and app
  assert.throws(() => editablePlaylist(resolved));
 });
 
+test("editable stream preserves sources and fallback without resolved media", () => {
+ const authored = document();
+ authored.pages = [authored.pages[0]];
+ authored.pages[0].primitives = [{ id: "live", primitive: "stream",
+   sources: [{ protocol: "udp-mpegts", group: "239.10.0.1", port: 5000 }, { protocol: "hls", url: "https://example.com/live.m3u8" }],
+   fallback_media_id: "med_IMAGE", muted: true,
+   rect: { x: 0, y: 0, width: 1080, height: 1920 }, layer: 0, content_fit: "contain" }];
+ const resolved = structuredClone(authored);
+ resolved.pages[0].primitives[0].resolved_media = [{ media_id: "med_IMAGE" }];
+ assert.deepEqual(editablePlaylist(resolved), authored);
+ assert.equal(resolved.pages[0].primitives[0].resolved_media.length, 1);
+});
+
 test("revision aliases normalize, but duplicate spellings fail", () => {
  for(const flag of ["--expect-rev", "--if-match"]) assert.equal(parseArgv(["playlist","update","pl_TEST","x.json",flag,"3"]).flags["if-match"], "3");
  assert.equal(parseArgv(["playlist","update","pl_TEST","x.json","--if-match=3"]).flags["if-match"], "3");

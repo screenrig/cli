@@ -17,7 +17,7 @@ export function editablePlaylist(value: unknown): RecordValue {
     if (!Array.isArray(page.primitives)) throw usageError("Playlist primitives are missing.");
     for (const primitive of page.primitives) {
       object(primitive);
-      if (primitive.primitive === "image" || primitive.primitive === "video") {
+      if (["image", "video", "stream"].includes(primitive.primitive)) {
         delete primitive.resolved_media;
         // Omit the server-inserted false default without changing selector behavior.
         if (primitive.selector?.by === "id" && primitive.selector.one_at_a_time === false) delete primitive.selector.one_at_a_time;
