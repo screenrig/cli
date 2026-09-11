@@ -202,8 +202,13 @@ and ffprobe are required unless `--no-transcode` is used. Preparation uploads
 files but does not create a remote playlist or assign a screen. Existing media
 must be ready. Release availability and iframe embedding support still need
 preview/server and Player verification. Preparation does not fetch iframe URLs.
-If preparation fails after an upload, that media remains in the account; inspect
-`media list` and reuse its ID instead of uploading it again.
+Each file occurrence has a distinct upload key derived from the invocation's
+idempotency key and its input position. For retryable preparation, supply
+`--idempotency-key` from the first attempt and reuse it with identical inputs in
+the same order, within the server's replay window. Declarations and commits then
+reuse their respective per-file keys. Without an explicit key, a new invocation
+gets new upload keys. If preparation fails after an upload, that media remains in
+the account; inspect `media list` and reuse its ID instead of uploading it again.
 
 The canonical document contains one full-screen page per input, a black background,
 and a 200 ms crossfade. Images use `--fit contain|cover|fill` (default `contain`);

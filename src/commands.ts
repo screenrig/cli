@@ -4155,7 +4155,12 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
   catch { throw usageError("Cannot create output; choose a new file in an existing directory."); }
   try {
     for (const [index, sourcePath] of files) {
-      const uploaded = await loggerOf(runtime).withLocal({ op: "media.upload", message: "media upload" }, () => uploadMediaFile({ runtime, client, sourcePath,
+      // Scope each occurrence to the invocation key, including repeated files.
+      // An identical retry with --idempotency-key reproduces both declare and commit keys.
+      const idempotencyKey = createHash("sha256")
+        .update(JSON.stringify(["screenrig.playlist.init.upload", client.idempotencyKey, index]))
+        .digest("base64url");
+      const uploaded = await loggerOf(runtime).withLocal({ op: "media.upload", message: "media upload" }, () => uploadMediaFile({ runtime, client, sourcePath, idempotencyKey,
         transcodeOptions: transcodeOptionsFromArgs(args), noTranscode: flagBool(args.flags, "no-transcode"),
         reporter: progressReporterFor(args, runtime), noWait: false,
         timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000, pollMs: flagNumber(args.flags, "poll-ms") ?? 1000 }));

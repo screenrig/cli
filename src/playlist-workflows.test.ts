@@ -241,3 +241,76 @@ test("file preparation uses upload readiness and protects existing output before
  assert.equal((await invoke()).code,2);
  await assert.rejects(readFile(dir+'/prepared.json'));
 });
+
+for (const sameFile of [false, true]) for (const explicitKey of [false, true]) {
+ test(`file preparation isolates ${sameFile ? 'identical' : 'different'} declarations with ${explicitKey ? 'retry-stable explicit' : 'generated'} keys`, async t => {
+  const dir = await mkdtemp('/tmp/prepare-idempotency-');
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const config = dir + '/config.json';
+  await writeFile(config, JSON.stringify({ api_url: 'https://api.screenrig.ai', token: 'test-token' }), { mode: 0o600 });
+  await writeFile(dir + '/first.mp4', Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
+  await writeFile(dir + '/second.mp4', Buffer.from([0, 0, 0, 24, 102, 116, 121, 112, 1]));
+  const declarations = new Map<string, { body: string; response: ReturnType<typeof response> }>();
+  const commits = new Map<string, { path: string; body: string; response: ReturnType<typeof response> }>();
+  let interrupted = false;
+  const conflict = () => ({ status: 409, headers: {}, body: { code: 'idempotency_conflict', title: 'Conflict', status: 409 } });
+  const transport = new FakeTransport()
+   .on('POST', '/api/v1/media/uploads', req => {
+    const key = req.headers?.['idempotency-key']; assert.ok(key);
+    const body = JSON.stringify(req.body);
+    const cached = declarations.get(key);
+    if (cached) return cached.body === body ? cached.response : conflict();
+    const id = String(declarations.size + 1);
+    const accepted = { status: 201, headers: { 'cache-control': 'private, no-store' }, body: {
+     id: `upload_${id}`, operation: { id: `op_${id}` }, method: 'PUT', headers: {},
+     upload_url: `https://storage.example.invalid/upload/${id}`, expires_at: '2099-01-01T00:00:00Z',
+    } };
+    declarations.set(key, { body, response: accepted });
+    // Simulate acceptance followed by a lost response on the second file.
+    if (explicitKey && id === '2' && !interrupted) { interrupted = true; throw networkError('Lost declaration response'); }
+    return accepted;
+   })
+   .on('POST', /^\/api\/v1\/media\/uploads\/upload_\d+\/commit$/, req => {
+    const key = req.headers?.['idempotency-key']; assert.ok(key);
+    const body = JSON.stringify(req.body), cached = commits.get(key);
+    if (cached) return cached.path === req.path && cached.body === body ? cached.response : conflict();
+    const id = req.path.split('/').at(-2)!.slice('upload_'.length);
+    const accepted = response({ id: `op_${id}`, state: 'succeeded', result: { media_id: `med_${id}` } });
+    commits.set(key, { path: req.path, body, response: accepted });
+    return accepted;
+   })
+   .on('GET', /^\/api\/v1\/operations\/op_\d+$/, req => {
+    const id = req.path.split('/').at(-1)!.slice('op_'.length);
+    return response({ id: `op_${id}`, state: 'succeeded', result: { media_id: `med_${id}` } });
+   })
+   .on('GET', /^\/api\/v1\/media\/med_\d+$/, req => response({ id: req.path.split('/').at(-1), state: 'ready', primitive: 'video' }));
+  async function invoke() {
+   let out = '';
+   const code = await run({ ...processRuntime(), argv: ['--config', config,
+    ...(explicitKey ? ['--idempotency-key', 'prepare-retry-test'] : []),
+    'playlist', 'init', './first.mp4', sameFile ? './first.mp4' : './second.mp4',
+    '--name', 'Lobby', '--output', 'prepared.json', '--target-width', '1920', '--target-height', '1080', '--no-transcode', '--no-progress'],
+    env: {}, cwd: () => dir, transport, sleep: async () => {}, signedRawPut: async () => ({ status: 200 }),
+    stdout: new Writable({ write(c, e, done) { out += c; done(); } }), stderr: new Writable({ write(c, e, done) { done(); } }),
+   });
+   return { code, body: JSON.parse(out) };
+  }
+  if (explicitKey) {
+   const failed = await invoke(); assert.notEqual(failed.code, 0);
+   assert.equal(interrupted, true, JSON.stringify(failed.body));
+   await assert.rejects(readFile(dir + '/prepared.json'));
+  }
+  const result = await invoke(); assert.equal(result.code, 0, JSON.stringify(result.body));
+  assert.equal(declarations.size, 2); assert.equal(commits.size, 2);
+  assert.equal(new Set([...declarations.keys(), ...commits.keys()]).size, 4);
+  const doc = JSON.parse(await readFile(dir + '/prepared.json', 'utf8'));
+  assert.deepEqual(doc.pages.map((p: any) => p.primitives[0].selector.media_id), ['med_1', 'med_2']);
+  const keys = transport.calls.filter(c => c.path === '/api/v1/media/uploads').map(c => c.headers!['idempotency-key']);
+  assert.equal(keys.length, explicitKey ? 4 : 2);
+  if (explicitKey) {
+   assert.deepEqual(keys.slice(0, 2), keys.slice(2));
+   const commitKeys = transport.calls.filter(c => c.path.endsWith('/commit')).map(c => c.headers!['idempotency-key']);
+   assert.equal(commitKeys[0], commitKeys[1]);
+  }
+ });
+}
