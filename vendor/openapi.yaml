@@ -1272,6 +1272,11 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     get:
       operationId: getRuntimeManifest
+      parameters:
+        - name: stream_transports
+          in: query
+          description: "Comma-separated supported stream transports (hls,udp-mpegts). Omission projects streams to fallback images. Rendering negotiation only, never authorization. Advertise udp-mpegts only when locally enabled."
+          schema: { type: string, maxLength: 64 }
       description: Resolved player manifest. Projection is fail-safe; invalid pages and primitives are omitted and listed in diagnostics. Compatibility rule 4 — 200 with pages [] and non-empty diagnostics is a degraded projection (player keeps last-known-good); 200 with pages [] and no diagnostics is an authored empty assignment. Until every player ships rule 4, the degraded case returns 503 manifest_degraded so deployed players hold last-known-good on 5xx. An archived screen returns problem screen_archived and must not refresh last-known-good.
       security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
       responses:
@@ -2750,6 +2755,7 @@ components:
         - { $ref: "#/components/schemas/PlaylistImagePrimitiveWrite" }
         - { $ref: "#/components/schemas/PlaylistVideoPrimitiveWrite" }
         - { $ref: "#/components/schemas/PlaylistIframePrimitiveWrite" }
+        - { $ref: "#/components/schemas/PlaylistStreamPrimitiveWrite" }
       discriminator: { propertyName: primitive }
     PlaylistPrimitive:
       oneOf:
@@ -2757,6 +2763,7 @@ components:
         - { $ref: "#/components/schemas/PlaylistImagePrimitive" }
         - { $ref: "#/components/schemas/PlaylistVideoPrimitive" }
         - { $ref: "#/components/schemas/PlaylistIframePrimitive" }
+        - { $ref: "#/components/schemas/PlaylistStreamPrimitive" }
       discriminator: { propertyName: primitive }
     PlaylistApplicationPrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, release_id, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [application] }, application_id: { type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id. }, release_id: { type: string }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, default: false }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
     PlaylistImagePrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, selector, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [image] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, alt: { type: string, maxLength: 300 }, dwell_ms: { type: integer, minimum: 1000, maximum: 86400000, description: Required on media_end image primitives. Forbidden on duration and application pages. }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
@@ -3354,6 +3361,7 @@ components:
         - { $ref: "#/components/schemas/RuntimeImagePrimitive" }
         - { $ref: "#/components/schemas/RuntimeVideoPrimitive" }
         - { $ref: "#/components/schemas/RuntimeIframePrimitive" }
+        - { $ref: "#/components/schemas/RuntimeStreamPrimitive" }
       discriminator: { propertyName: primitive }
     RuntimeApplicationPrimitive:
       type: object
@@ -3408,6 +3416,12 @@ components:
         contentFit: { type: string, enum: [contain, cover, fill] }
         enter: { $ref: "#/components/schemas/PrimitiveEnter" }
         motion: { $ref: "#/components/schemas/PrimitiveMotion" }
+    StreamSource: {"oneOf": [{"$ref": "#/components/schemas/HLSStreamSource"}, {"$ref": "#/components/schemas/UDPStreamSource"}], "discriminator": {"propertyName": "protocol"}}
+    HLSStreamSource: {"type": "object", "additionalProperties": false, "required": ["protocol", "url"], "properties": {"protocol": {"type": "string", "enum": ["hls"]}, "url": {"type": "string", "format": "uri", "maxLength": 2048, "pattern": "^https://"}}}
+    UDPStreamSource: {"type": "object", "additionalProperties": false, "required": ["protocol", "group", "port"], "properties": {"protocol": {"type": "string", "enum": ["udp-mpegts"]}, "group": {"type": "string", "description": "IPv4 ASM group within 239.0.0.0/8. Raw MPEG-TS over UDP, not RTP."}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}}}
+    PlaylistStreamPrimitiveWrite: {"type": "object", "additionalProperties": false, "required": ["id", "primitive", "sources", "fallback_media_id", "rect", "layer", "content_fit"], "properties": {"id": {"type": "string"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSource"}}, "muted": {"type": "boolean", "default": true}, "rect": {"$ref": "#/components/schemas/PlaylistRect"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "content_fit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "fallback_media_id": {"type": "string", "pattern": "^med_"}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistStreamPrimitive: {"type": "object", "additionalProperties": false, "required": ["id", "primitive", "sources", "fallback_media_id", "rect", "layer", "content_fit", "muted", "controller", "resolved_media"], "properties": {"id": {"type": "string"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSource"}}, "muted": {"type": "boolean", "default": true}, "rect": {"$ref": "#/components/schemas/PlaylistRect"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "content_fit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "fallback_media_id": {"type": "string", "pattern": "^med_"}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}, "controller": {"type": "boolean", "enum": [false]}, "resolved_media": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"$ref": "#/components/schemas/PlaylistResolvedMedia"}}}}
+    RuntimeStreamPrimitive: {"type": "object", "additionalProperties": false, "required": ["id", "primitive", "sources", "muted", "fallback", "grantId", "rect", "layer", "contentFit"], "properties": {"id": {"type": "string"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSource"}}, "muted": {"type": "boolean"}, "fallback": {"$ref": "#/components/schemas/RuntimeImageResolvedMedia"}, "grantId": {"type": "string"}, "rect": {"$ref": "#/components/schemas/RuntimeRect"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "contentFit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}}}
     RuntimeIframePrimitive:
       type: object
       required: [id, primitive, src, title, rect, layer, contentFit]

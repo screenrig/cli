@@ -598,21 +598,21 @@ test("playlist writes send a media selector and media_end, not a singular media_
   assert.doesNotMatch(openapi, /enum: \[video_end\]/);
 });
 
-test("pinned backend snapshot uses the four canonical primitive unions", () => {
+test("pinned backend snapshot uses the canonical primitive unions including streams", () => {
   const generated = readFileSync(GENERATED_CONTRACT, "utf8");
   const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
 
   assert.match(
     generated,
-    /export type PlaylistPrimitiveWrite = PlaylistApplicationPrimitiveWrite \| PlaylistImagePrimitiveWrite \| PlaylistVideoPrimitiveWrite \| PlaylistIframePrimitiveWrite;/,
+    /export type PlaylistPrimitiveWrite = PlaylistApplicationPrimitiveWrite \| PlaylistImagePrimitiveWrite \| PlaylistVideoPrimitiveWrite \| PlaylistIframePrimitiveWrite \| PlaylistStreamPrimitiveWrite;/,
   );
   assert.match(
     generated,
-    /export type PlaylistPrimitive = PlaylistApplicationPrimitive \| PlaylistImagePrimitive \| PlaylistVideoPrimitive \| PlaylistIframePrimitive;/,
+    /export type PlaylistPrimitive = PlaylistApplicationPrimitive \| PlaylistImagePrimitive \| PlaylistVideoPrimitive \| PlaylistIframePrimitive \| PlaylistStreamPrimitive;/,
   );
   assert.match(
     generated,
-    /export type RuntimePrimitive = RuntimeApplicationPrimitive \| RuntimeImagePrimitive \| RuntimeVideoPrimitive \| RuntimeIframePrimitive;/,
+    /export type RuntimePrimitive = RuntimeApplicationPrimitive \| RuntimeImagePrimitive \| RuntimeVideoPrimitive \| RuntimeIframePrimitive \| RuntimeStreamPrimitive;/,
   );
   for (const name of [
     "PlaylistTextPrimitiveWrite",

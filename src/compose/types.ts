@@ -50,7 +50,7 @@ export const LOGO_INSET = 32;
 export const LOGO_MAX = { width: 200, height: 100 } as const;
 export const CARD_INK_PAD = 24;
 
-export const WIRE_PRIMITIVES = ["image", "video", "iframe", "application"] as const;
+export const WIRE_PRIMITIVES = ["image", "video", "iframe", "application", "stream"] as const;
 export type WirePrimitive = (typeof WIRE_PRIMITIVES)[number];
 
 /** Playlist PrimitiveEnter, field-for-field. */

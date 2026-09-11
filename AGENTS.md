@@ -92,9 +92,7 @@ never fails the command. This socket is not `events follow`.
 npm ci
 npm run check:public
 npm run vendor:check
-npm run typecheck
-npm run lint
-npm test
+npm run check
 npm run smoke:mock
 npm run pack:dry
 npm run pack:release

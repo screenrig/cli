@@ -4911,7 +4911,7 @@ test("playlist templates --json lists the fifteen closed ids without enrolling",
     "slide-photo",
     "slide-full-bleed",
   ]);
-  assert.deepEqual(envelope.data.compose.wire_primitives, ["image", "video", "iframe", "application"]);
+  assert.deepEqual(envelope.data.compose.wire_primitives, ["image", "video", "iframe", "application", "stream"]);
   const catalog = envelope.data as {
     templates: Array<{ id: string }>;
     compose: { wire_primitives: string[] };

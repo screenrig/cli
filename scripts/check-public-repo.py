@@ -98,7 +98,7 @@ def check_public_tree(errors: list[str]) -> None:
         for fact in (
             "fetch-depth: 0",
             "python3 scripts/check-public-repo.py",
-            "npm run lint",
+            "npm run check",
             "npm audit --audit-level=high --package-lock-only",
             "name: screenrig-cli",
             "name: npm install (${{ matrix.os }}, Node 20.11.1)",
