@@ -207,9 +207,10 @@ async function preparePages(
         height: numberOf(rectValue.height, 0),
       };
       const kind = typeof primitive.primitive === "string" ? primitive.primitive : "image";
-      const selector = recordOf(primitive.selector);
-      const media = kind === "image" || kind === "video"
-        ? await loadMedia(selector, kind, options)
+      const selector = kind === "stream"
+        ? { by: "id", media_id: primitive.fallback_media_id } : recordOf(primitive.selector);
+      const media = kind === "image" || kind === "video" || kind === "stream"
+        ? await loadMedia(selector, kind === "stream" ? "image" : kind, options)
         : undefined;
       primitives.push({
         id: typeof primitive.id === "string" ? primitive.id : `p${sourceIndex}`,

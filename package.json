@@ -55,6 +55,7 @@
   "engines": {
     "node": ">=20.11"
   },
+  "packageManager": "npm@10.9.4",
   "scripts": {
     "clean": "node scripts/clean-dist.mjs",
     "build": "npm run clean && tsc -p tsconfig.json",
@@ -66,8 +67,8 @@
     "smoke:mock": "npm run build && node dist/localhost-smoke.js",
     "smoke:server": "npm run build && node dist/server-smoke.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "tsc -p tsconfig.json --noEmit",
     "test": "npm run vendor:check && npm run build && node --test $(find dist -name '*.test.js')",
+    "check": "npm run typecheck && npm test",
     "test:extractor": "npm run build && node --test dist/extractor.integration.test.js",
     "pack:dry": "npm pack --dry-run",
     "pack:release": "bash scripts/package-release.sh screenrig-cli.tgz",

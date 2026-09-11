@@ -281,9 +281,48 @@ export interface PageFailure {
   page_id: string;
 }
 
+/**
+ * Optional hardware identifiers a player reported. duid and serial are the
+ * only two the recovery hint consults. A failed read on the player omits the
+ * field. Never authorization.
+ */
+export interface HostDevice {
+  duid?: string;
+  serial?: string;
+  mac?: string;
+  model?: string;
+  firmware?: string;
+  manufacturer?: string;
+}
+
+/**
+ * The shell and hardware a player runs on, as the player reported it. A hint
+ * that names a device; never a credential. Read-only on the account API and
+ * returned only to the owning account.
+ */
+export interface HostContext {
+  platform: "tizen" | "android" | "windows" | "qt" | "apple" | "chromeos" | "browser";
+  host_version?: string;
+  device?: HostDevice;
+  capabilities?: string[];
+}
+
+/**
+ * Present while a native pairing session that presented this screen's
+ * hardware identity waits for the owning account to confirm with
+ * `screen recover`. Carries only the pairing session's deadline.
+ */
+export interface ScreenRecoveryPending {
+  expires_at: string;
+}
+
 export interface Screen {
   content_access_generation: number;
   created_at: string;
+  /** Player-reported host hint. Absent until a native player sends one. */
+  host?: HostContext;
+  /** Instant the stored host hint was last replaced. Account cannot write it. */
+  host_updated_at?: string;
   id: string;
   label: string;
   /**
@@ -312,6 +351,8 @@ export interface Screen {
    */
   comments?: Record<string, unknown>;
   public_id: string;
+  /** Read-only recovery offer awaiting confirmation. Absent once confirmed, lapsed, or claimed as a new screen. */
+  recovery_pending?: ScreenRecoveryPending;
   revision: number;
   state: "pairing_pending" | "active" | "archived";
   /**
@@ -326,7 +367,8 @@ export interface Screen {
  * The screen patch body. Every member is optional and the server requires at
  * least one, which is why each command builds only the members it was asked
  * for rather than sending undefined placeholders. Observation, online,
- * last_online_at, last_ip, and comments are not patchable fields.
+ * last_online_at, last_ip, comments, host, host_updated_at, and
+ * recovery_pending are not patchable fields.
  */
 export interface ScreenPatch {
   name?: string;

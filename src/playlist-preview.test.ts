@@ -3,7 +3,7 @@ import { mkdir, open, readFile, rename, chmod, stat, writeFile, rm } from "node:
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import { loadImage } from "@napi-rs/canvas";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { commandHelp } from "./help.js";
 import { ExitCode } from "./exit-codes.js";
 import { run, type CliRuntime } from "./main.js";
@@ -166,4 +166,24 @@ test("playlist preview command writes files, lint, and the contact-sheet sentenc
   assert.equal(human.code, ExitCode.Success, human.stdout);
   assert.ok(human.stdout.includes(LOOK_AT_THE_CONTACT_SHEET));
   await rm(cwdDir, { recursive: true, force: true });
+});
+
+
+test("stream preview paints the cached fallback exactly like an ordinary image", async () => {
+  const directory = await testTemp("stream-preview-");
+  const canvas = createCanvas(32, 24);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#cc3300";
+  context.fillRect(0, 0, 32, 24);
+  await writeFile(path.join(directory, "med_fallback.png"), canvas.toBuffer("image/png"));
+  const geometry = { id: "live", rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "contain" };
+  const stream = { ...geometry, primitive: "stream", fallback_media_id: "med_fallback", sources: [{ protocol: "hls", url: "https://example.com/live.m3u8" }] };
+  const image = { ...geometry, primitive: "image", selector: { by: "id", media_id: "med_fallback" } };
+  const outputs: Buffer[] = [];
+  for (const primitive of [stream, image]) {
+    const playlist = { name: "Preview", pages: [{ ...iframePage("page"), primitives: [primitive] }] };
+    const result = await previewPlaylist({ playlist, searchDirs: [directory], outputDirectory: path.join(directory, primitive.primitive) });
+    outputs.push(await readFile(result.pages[0]!.files.rest));
+  }
+  assert.deepEqual(outputs[0], outputs[1]);
 });

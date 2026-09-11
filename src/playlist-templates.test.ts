@@ -77,7 +77,7 @@ test("the catalog lists the fifteen slide ids and points copy at compose", () =>
   assert.equal(catalog.canvas.background, SLIDE_BACKGROUND);
   assert.equal(catalog.canvas.width, 1920);
   assert.equal(catalog.canvas.height, 1080);
-  assert.deepEqual(catalog.compose.wire_primitives, ["image", "video", "iframe", "application"]);
+  assert.deepEqual(catalog.compose.wire_primitives, ["image", "video", "iframe", "application", "stream"]);
   assert.deepEqual(catalog.transition, { type: "crossfade", duration_ms: 200 });
   assert.deepEqual(catalog.transition, SLIDE_DEFAULT_TRANSITION);
   assert.deepEqual(catalog.transition_types, [

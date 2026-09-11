@@ -689,6 +689,24 @@ export function memoryBackend(): FakeTransport {
     screens.set(id, item);
     return { status: 200, headers: {}, body: item };
   });
+  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/recovery\/confirm$/, (req): TransportResponse => {
+    const id = req.path.split("/")[4] ?? "";
+    const current = screens.get(id);
+    if (!current) {
+      return { status: 404, headers: { "content-type": "application/problem+json" }, body: { type: "https://screenrig.ai/problems/not-found", title: "Not found", status: 404, code: "not_found", detail: "Screen not found." } };
+    }
+    if (!current.recovery_pending) {
+      return { status: 404, headers: { "content-type": "application/problem+json" }, body: { type: "https://screenrig.ai/problems/recovery-not-offered", title: "No screen recovery is pending", status: 404, code: "recovery_not_offered", detail: "Nothing is pending." } };
+    }
+    const { recovery_pending: _pending, ...rest } = current;
+    const item: Screen = {
+      ...rest,
+      revision: current.revision + 1,
+      updated_at: "2026-08-14T17:00:05.000Z",
+    };
+    screens.set(id, item);
+    return { status: 200, headers: { etag: `"${item.revision}"` }, body: item };
+  });
   transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/toast$/, (req) => {
     const body = (req.body ?? {}) as { duration_ms?: number };
     const durationMs = body.duration_ms ?? 10_000;

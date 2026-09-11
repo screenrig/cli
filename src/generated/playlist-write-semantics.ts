@@ -50,12 +50,29 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
     const mode = object(page.advance).mode;
     const primitives = array(page.primitives).map(object);
     const ids = new Set<unknown>();
-    let controllers = 0, web = 0;
+    let controllers = 0, web = 0, streams = 0;
     for (const [primitiveIndex, primitive] of primitives.entries()) {
       const itemPath = `${path}/primitives/${primitiveIndex}`;
       if (ids.has(primitive.id)) fail(`${itemPath}/id`, "must be unique within the page");
       ids.add(primitive.id);
       if (primitive.primitive === "application" || primitive.primitive === "iframe") web++;
+      if (primitive.primitive === "stream") {
+        streams++;
+        if (mode !== "duration") fail(`${itemPath}`, "streams require duration advance");
+        const protocols = new Set<unknown>();
+        for (const [sourceIndex, rawSource] of array(primitive.sources).entries()) {
+          const source = object(rawSource), sourcePath = `${itemPath}/sources/${sourceIndex}`;
+          if (protocols.has(source.protocol)) fail(sourcePath, "source protocols must be unique");
+          protocols.add(source.protocol);
+          if (source.protocol === "udp-mpegts" && (typeof source.group !== "string" || !/^239\.(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2})$/.test(source.group) || source.group.split(".").some(part => Number(part) > 255))) fail(`${sourcePath}/group`, "must be an IPv4 multicast address in 239.0.0.0/8");
+          if (source.protocol === "hls") {
+            try {
+              const url = new URL(String(source.url));
+              if (url.protocol !== "https:" || url.username || url.password) fail(`${sourcePath}/url`, "must be HTTPS without credentials");
+            } catch { fail(`${sourcePath}/url`, "must be a valid HTTPS URL"); }
+          }
+        }
+      }
       if (primitive.controller === true) {
         controllers++;
         if (primitive.primitive !== "application" || mode !== "application") fail(`${itemPath}/controller`, "is valid only on an application in application advance mode");
@@ -63,8 +80,8 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
       if (primitive.primitive === "application" && typeof primitive.release_id === "string" && !primitive.release_id) fail(`${itemPath}/release_id`, "is required");
       if (Object.hasOwn(primitive, "motion")) {
         const motionType = object(primitive.motion).type;
-        if ((motionType === "spin" || motionType === "drift") && (primitive.primitive === "application" || primitive.primitive === "iframe")) {
-          fail(`${itemPath}/motion`, `${String(motionType)} is not allowed for application and iframe primitives`);
+        if ((motionType === "spin" || motionType === "drift") && (primitive.primitive === "application" || primitive.primitive === "iframe" || primitive.primitive === "stream")) {
+          fail(`${itemPath}/motion`, `${String(motionType)} is not allowed for application, iframe, and stream primitives`);
         }
       }
       if (primitive.primitive === "image" || primitive.primitive === "video") {
@@ -80,6 +97,7 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
       }
     }
     if (mode === "application" && controllers !== 1) fail(`${path}/primitives`, "application advance requires exactly one controller application");
+    if (streams > 1) fail(`${path}/primitives`, "must contain at most one stream primitive");
     if (web > 2) fail(`${path}/primitives`, "must contain at most two application or iframe primitives");
     if (mode === "media_end" && (primitives.length !== 1 || !["image", "video"].includes(String(primitives[0]?.primitive)))) fail(`${path}/advance`, "media_end requires exactly one image or video primitive");
   }

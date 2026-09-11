@@ -1,8 +1,8 @@
 import { addValueAlias } from "./aliases.js";
-import { requireOptionGroup } from "./notes.js";
+import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes.js";
 import { positiveInteger, revision, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenAssign, handleScreenSetTimezone, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenToast, handleScreenScreenshot } from "../commands.js";
+import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenAssign, handleScreenSetTimezone, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenToast, handleScreenScreenshot } from "../commands.js";
 import { type Command, Option } from "commander";
 
 export function registerScreenCommands(root: Command, bind: CommandActionBinder): void {
@@ -70,6 +70,13 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("<id>", "Screen identifier")
     .requiredOption("--expect-rev <REVISION>", "Require the current resource revision (required)", revision)
     .action(bind(handleScreenRotatePublicId));
+
+  const recover = screen.command("recover").description("Reconnect a display that reports this screen's identifiers")
+    .argument("<id>", "Screen identifier")
+    .option("--expect-rev <REVISION>", "Require the current resource revision", revision)
+    .action(bind(handleScreenRecover));
+  addCommandNotes(recover, "Recovery reconnects a display that lost its stored identity and now reports this screen's hardware identifiers while pairing. Nothing is rebound until this command confirms it: the screen keeps its label, playlist, timezone, schedules, and history; the display's new key replaces the previous one, which retires after a fifteen-minute grace window. screen show reports the offer as recovery_pending with its deadline. Recovery never crosses accounts.");
+  addCommandExamples(recover, "screenrig screen show scr_LOBBY", "screenrig screen recover scr_LOBBY");
 
   screen.command("toast").description("Show a temporary screen message")
     .argument("<id>", "Screen identifier")
