@@ -105,8 +105,8 @@ error, rerun the same command with unchanged input. The CLI reuses the saved key
 it does not automatically send another request within the failed invocation.
 `write_recovery_saved` indicates that recovery state was retained.
 
-The private config stores only request fingerprints, keys, and timestamps, never
-request payloads. Fingerprints include the origin, credential, target, request
+The private config stores request fingerprints, keys, timestamps, and the command
+group/action, never request payloads. Fingerprints include the origin, credential, target, request
 body, and revision. Changed requests receive different keys. A completed command
 clears its pending state; application acceptance followed by a failed processing
 wait retains it so retrying does not create another application. Definite
@@ -116,6 +116,16 @@ Automatic replay stops after 23 hours, before the server's 24-hour replay window
 ends. Inspect the resource before explicitly supplying a new `--idempotency-key`
 for a reconciled write. Explicit keys remain supported. Pending entries are not
 silently evicted; resolve outstanding writes if the 256-entry limit is reached.
+Use `screenrig recovery list` and `screenrig recovery show ID` to inspect local
+pending writes. Results contain opaque recovery IDs, creation and replay-expiry
+times, replay status, and command names where available. Older entries have no
+command metadata. Request contents and retry keys are never returned.
+
+After checking the remote outcome, run `screenrig recovery reconcile ID` to remove
+that entry's local retry protection. This does not retry, cancel, or undo the remote
+write; a subsequent invocation can make a new write. IDs identify a particular saved
+entry, so an old ID cannot remove a replacement entry. These commands work locally
+with the selected `--config`, including when credentials are no longer usable.
 Enrollment, generation, media uploads/batches, bundle imports, and browser
 handoffs retain their existing specialized recovery behavior.
 
