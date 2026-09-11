@@ -833,7 +833,7 @@ async function waitForAgentConnectionApproval(
   connection: AgentConnectionConfig,
   timeoutMs: number,
   returnPending = false,
-): Promise<AgentConnection> {
+): Promise<AgentConnection | undefined> {
   if (!connection.connection_id || !connection.connection_token) throw configError("Pending agent connection authority is incomplete.");
   const transport = transportFor(runtime, resolved.apiUrl);
   const controller = new AbortController();
@@ -874,6 +874,7 @@ async function waitForAgentConnectionApproval(
     }
   } catch (err) {
     if ((err as Error).name === "AbortError") {
+      if (controller.signal.aborted || returnPending) return latest;
       throw timeoutError("Timed out waiting for dashboard approval. Retry agent connect to resume the same request.");
     }
     throw err;
@@ -881,6 +882,7 @@ async function waitForAgentConnectionApproval(
     clearTimeout(timer);
   }
   if (latest?.status === "pending" || !latest) {
+    if (returnPending || latest || controller.signal.aborted) return latest;
     throw timeoutError("Agent connection stream ended before approval. Retry agent connect to resume the same request.");
   }
   return latest;
@@ -1049,7 +1051,7 @@ async function agentConnect(
   let pendingToken = current?.token;
   let pendingAgentId = connection.pending_agent_id;
 
-  const noWait = flagBool(args.flags, "no-wait");
+  const noWait = !flagBool(args.flags, "wait");
   let opened = false;
   let printed = false;
   if (!(pendingToken && pendingAgentId)) {
@@ -1069,8 +1071,8 @@ async function agentConnect(
       }
     };
     if (!noWait) await handoff();
-    const timeoutMs = requestedTimeout ?? (noWait ? 30_000 : 86_400_000);
-    let status: AgentConnection;
+    const timeoutMs = noWait ? Math.min(requestedTimeout ?? 1000, 1000) : requestedTimeout ?? 30_000;
+    let status: AgentConnection | undefined;
     try {
       status = await waitForAgentConnectionApproval(args, runtime, resolved, connection, timeoutMs, noWait);
     } catch (err) {
@@ -1085,19 +1087,19 @@ async function agentConnect(
       }
       throw err;
     }
-    if (status.status === "pending") {
-      await handoff();
+    if (!status || status.status === "pending") {
+      if (!opened && !printed) await handoff();
       const next = {
         command: "screenrig agent connect --no-wait",
         argv: ["agent", "connect", "--no-wait", "--config", resolved.configPath, "--api-url", resolved.apiUrl],
         reason: "Complete dashboard approval, then resume. Use argv to preserve this configuration and API origin.",
       };
       return {
-        envelope: successEnvelope({ status: "pending", connection_id: connection.connection_id,
-          expires_at: status.expires_at, opened, approval_url_printed: printed,
+        envelope: successEnvelope({ status: "pending", request_submitted: true, connection_complete: false, status_checked: status !== undefined, connection_id: connection.connection_id,
+          expires_at: status?.expires_at ?? connection.expires_at, opened, approval_url_printed: printed,
           ...(printed ? { approval_url: connection.approval_url } : {}), next }),
         exitCode: ExitCode.Success,
-        human: humanLines("Agent approval pending", [["status", "pending"], ["connection_id", connection.connection_id],
+        human: humanLines("Agent approval pending", [["status", "pending"], ["connection_complete", "false"], ["connection_id", connection.connection_id],
           ["approval_url", printed ? connection.approval_url : undefined], ["next", next.command]]),
       };
     }
@@ -1177,6 +1179,8 @@ async function agentConnect(
   return {
     envelope: successEnvelope({
       status: "active",
+      request_submitted: true,
+      connection_complete: true,
       agent: safeAgentSummary(agent),
       connection_id: connection.connection_id,
       opened,

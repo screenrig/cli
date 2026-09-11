@@ -82,21 +82,30 @@ accepted fields (`data.id`, `data.release_id`, `data.operation_id`) and
 
 ### Nonblocking agent connection
 
-`screenrig agent connect --no-wait --print-url` starts or resumes a connection,
+`screenrig agent connect --print-url` starts or resumes a connection,
 reads one server status snapshot, and returns a JSON envelope. While approval is
-pending, `data.status` is `pending`, `data.approval_url` contains the dashboard
+pending, `data.status` is `pending`, `data.request_submitted` is `true`,
+`data.connection_complete` is `false`, `data.approval_url` contains the dashboard
 handoff, and `data.next.command` identifies the resume command. `data.next.argv`
 supplies its arguments, preserving the selected config and API origin. Open the handoff
-for the intended user, then run `screenrig agent connect --no-wait` again. An
+for the intended user, then run `screenrig agent connect` again. An
 approved connection completes credential collection and activation and returns
-`data.status: active`. No credential is included in either result.
+`data.status: active` and `data.connection_complete: true`. No credential is included in either result.
 
 Without `--print-url`, the CLI tries to open the browser and includes the handoff
-URL in the pending result only if opening fails. `--no-wait` defaults to a
-30-second status-read budget; it does not wait for a person to approve. Normal
-`agent connect` retains its existing approval wait of up to 24 hours. `--timeout`
-overrides either mode's wait budget. Terminal denial, cancellation, and expiry
-remain errors.
+URL in the pending result only if opening fails. The default (also `--no-wait`)
+reads a status snapshot for at most one second. If none arrives, the request
+remains resumable and `data.status_checked` is `false`; this does not assert
+that the server still awaits approval. A received pending snapshot sets it to
+`true`. Success with pending status means submission succeeded, not connection
+completion.
+
+Use `agent connect --wait` to wait for approval for up to 30 seconds, or
+`agent connect --wait --timeout 10000` for an explicit budget in milliseconds
+(1–86400000). Reaching the wait budget returns a resumable pending result.
+Without `--wait`, `--timeout` can shorten but never extend the one-second
+snapshot budget. Approval requests expire after 24 hours. Terminal denial,
+cancellation, and expiry remain errors.
 
 ### Recovering writes
 

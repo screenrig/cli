@@ -21,6 +21,9 @@ export function invocationFlags(command: Command): Record<string, string | boole
   for (let current: Command | null = command; current; current = current.parent) {
     for (const option of current.options) {
       if (current.getOptionValueSource(option.attributeName()) !== "cli") continue;
+      const value = current.getOptionValue(option.attributeName());
+      if (option.negate && value !== false) continue;
+      if (!option.negate && option.isBoolean() && value === false) continue;
       flags[option.long === "--expect-rev" ? "if-match" : option.long!.slice(2)] = option.negate ? true : current.getOptionValue(option.attributeName());
     }
   }
