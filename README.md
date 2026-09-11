@@ -92,6 +92,17 @@ nonzero with `recovery_not_offered` when nothing is pending,
 `recovery_expired` when the display's pairing session lapsed, and
 `recovery_ambiguous` when the identifiers are attached to more than one screen.
 
+When the server reports it, the offer also describes the display asking to
+reconnect: platform, model, firmware, and manufacturer, with no identifiers.
+`screen show` prints them on the recovery line, for example
+`Recovery pending until 2026-09-13T08:00:00Z: Samsung tizen QM43B, firmware
+T-KTM2DEUC-1234`; absent fields are omitted, and in JSON mode they pass through
+as `recovery_pending.host`. Compare the reported model and firmware with the
+display you expect before confirming. A display's identifiers can be read by
+any application running on it, so an offer alone does not prove which display
+is asking. The service also refuses offers while the screen's current player
+is still online and limits how many offers each screen receives.
+
 ## Application command results
 
 `app upload` and `app update` return the same JSON data paths with or without

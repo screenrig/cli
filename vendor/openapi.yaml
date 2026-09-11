@@ -600,7 +600,14 @@ paths:
         under a different bound public key, records an offer on that screen
         (Screen.recovery_pending, account event screen.recovery_offered). The
         host object is a hint, never a credential: nothing is rebound until the
-        owning account calls this route. Confirmation completes the pending
+        owning account calls this route. A DUID is readable by any application
+        on the panel, so an offer is a phishing surface. It is mitigated by
+        liveness (no offer while the bound key showed life in the last ten
+        minutes), a limit of three offers per screen per rolling hour, and this
+        same-account confirmation; recovery_pending.host and the event carry
+        the offering device's platform, model, firmware, and manufacturer so
+        the operator can compare them with the display in front of them before
+        confirming. Confirmation completes the pending
         native pairing onto the EXISTING screen: the pairing device receives
         pairing.claimed as usual and proves possession with pairing.complete,
         the new key becomes the screen identity, and the previous key retires
@@ -2988,11 +2995,32 @@ components:
       description: >-
         Present while a native pairing session that presented this screen's
         hardware identity is waiting for the owning account to confirm with
-        POST /api/v1/screens/{id}/recovery/confirm. Carries only the deadline,
-        which is the pairing session's own expiry. Absent once confirmed,
-        lapsed, or claimed as a new screen. Read-only.
+        POST /api/v1/screens/{id}/recovery/confirm. Carries the deadline, which
+        is the pairing session's own expiry, and the offering device's
+        descriptive host fields (never duid, serial, or mac). A DUID is readable
+        by any application on the panel, so an offer is a phishing surface:
+        compare host.model and host.firmware with the display in front of you
+        before confirming. The server refuses an offer while the screen's bound
+        key has shown life within the last ten minutes (session mint, runtime
+        stream, manifest fetch, or presence heartbeat), and accepts at most
+        three offers per screen per rolling hour; a new offer replaces the
+        pending one. Absent once confirmed, lapsed, or claimed as a new screen.
+        Read-only.
       properties:
         expires_at: { type: string, format: date-time }
+        host: { $ref: "#/components/schemas/ScreenRecoveryHost" }
+    ScreenRecoveryHost:
+      type: object
+      additionalProperties: false
+      description: >-
+        What the device asking to recover this screen says it is, copied from
+        the pairing start's host object. Descriptive fields only; it never
+        carries duid, serial, or mac. Absent fields were not reported.
+      properties:
+        platform: { type: string, enum: [tizen, android, windows, qt, apple, chromeos, browser] }
+        model: { type: string, minLength: 1, maxLength: 80 }
+        firmware: { type: string, minLength: 1, maxLength: 80 }
+        manufacturer: { type: string, minLength: 1, maxLength: 80 }
     ScreenList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Screen" } } } }
     PageFailure:
       type: object
@@ -3305,9 +3333,12 @@ components:
         exactly one existing screen bound to a different key. It carries no
         screen, label, or account: the offer is surfaced account-side as
         Screen.recovery_pending and the screen.recovery_offered event, and only
-        the owning account can confirm it. The pairing code still issues and
-        displays exactly as without a match. The player uses this solely to log
-        pairing.recovery_offered.
+        the owning account can confirm it. It is absent, exactly as without a
+        match, when the identifier is ambiguous, when the matched screen's key
+        showed life within the last ten minutes, or when that screen already
+        took three offers in the rolling hour. The pairing code still issues
+        and displays exactly as without a match. The player uses this solely to
+        log pairing.recovery_offered.
       properties:
         offered: { type: boolean, enum: [true] }
     PairingClaimedEvent: { type: object, additionalProperties: false, required: [type, completion_nonce], properties: { type: { type: string, enum: [pairing.claimed] }, completion_nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }

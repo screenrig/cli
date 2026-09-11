@@ -308,12 +308,27 @@ export interface HostContext {
 }
 
 /**
+ * What the display asking to reconnect reported about itself: platform,
+ * model, firmware, and manufacturer only. No identifiers. Mirrors the vendored
+ * `ScreenRecoveryHost`; the CLI prints whichever fields are present so an
+ * operator can compare them with the display they expect.
+ */
+export interface ScreenRecoveryPendingHost {
+  platform?: HostContext["platform"];
+  model?: string;
+  firmware?: string;
+  manufacturer?: string;
+}
+
+/**
  * Present while a native pairing session that presented this screen's
  * hardware identity waits for the owning account to confirm with
- * `screen recover`. Carries only the pairing session's deadline.
+ * `screen recover`. Carries the pairing session's deadline and, when the
+ * server reports it, a description of the display asking to reconnect.
  */
 export interface ScreenRecoveryPending {
   expires_at: string;
+  host?: ScreenRecoveryPendingHost;
 }
 
 export interface Screen {

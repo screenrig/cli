@@ -2875,9 +2875,26 @@ function hostLines(host: HostContext | undefined, updatedAt: string | undefined)
   ]).split("\n");
 }
 
+/**
+ * The recovery offer `screen show` prints. When the server describes the
+ * display asking to reconnect, its manufacturer, platform, model, and firmware
+ * follow the deadline so the operator can compare them with the display they
+ * expect before confirming. Absent fields are omitted.
+ */
 function recoveryPendingLine(screen: Screen | undefined): string[] {
-  const expiresAt = screen?.recovery_pending?.expires_at;
-  return expiresAt ? [`Recovery pending until ${expiresAt}`, "Confirm with screen recover <id>; nothing is rebound until then."] : [];
+  const pending = screen?.recovery_pending;
+  const expiresAt = pending?.expires_at;
+  if (!expiresAt) return [];
+  const host = pending?.host && typeof pending.host === "object" ? pending.host : undefined;
+  const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
+  const name = [text(host?.manufacturer), text(host?.platform), text(host?.model)].filter((part): part is string => part !== undefined).join(" ");
+  const firmware = text(host?.firmware);
+  const described = [name || undefined, firmware ? `firmware ${firmware}` : undefined].filter((part): part is string => part !== undefined).join(", ");
+  return [
+    `Recovery pending until ${expiresAt}${described ? `: ${described}` : ""}`,
+    "Confirm with screen recover <id>; nothing is rebound until then.",
+    ...(described ? ["Compare the reported model and firmware with the display you expect before confirming."] : []),
+  ];
 }
 
 export const handleScreenProvision = commandHandler(async (args, runtime, resolved) => {

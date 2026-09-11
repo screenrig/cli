@@ -263,7 +263,11 @@ test("adapter shapes mirror generated OpenAPI contract fields and Capabilities l
   assert.match(screen, /"recovery_pending"\?: ScreenRecoveryPending/);
   assert.deepEqual(quotedProperties(interfaceBody(source, "HostContext")), ["capabilities", "device", "host_version", "platform"]);
   assert.deepEqual(quotedProperties(interfaceBody(source, "HostDevice")), ["duid", "firmware", "mac", "manufacturer", "model", "serial"]);
-  assert.deepEqual(quotedProperties(interfaceBody(source, "ScreenRecoveryPending")), ["expires_at"]);
+  // The vendored contract carries only the deadline until the backend adds the
+  // optional recovery host; the local adapter test below keeps that member
+  // optional so the CLI tolerates both shapes.
+  assert.deepEqual(quotedProperties(interfaceBody(source, "ScreenRecoveryPending")), ["expires_at", "host"]);
+  assert.deepEqual(quotedProperties(interfaceBody(source, "ScreenRecoveryHost")), ["firmware", "manufacturer", "model", "platform"]);
   assert.match(openapi, /\/api\/v1\/screens\/\{id\}\/recovery\/confirm:/);
   assert.match(openapi, /operationId: confirmScreenRecovery/);
   assert.match(screen, /"state": "pairing_pending" \| "active" \| "archived"/);
@@ -459,6 +463,22 @@ test("screen online is required, last_online_at and last_ip are optional, and Sc
   assert.match(screenSchema, /ScreenPatch, pairing bodies, session[\s\S]*runtime manifest\s+body cannot write it/);
   assert.doesNotMatch(commands, /--online|--last-online-at|--last-ip/);
   assert.match(commands, /screen update requires <id>, --expect-rev, and --name, --playlist-id, or --timezone/);
+});
+
+test("recovery_pending.host is a local optional description without identifiers", () => {
+  const adapter = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../src/adapters/protocol.ts"),
+    "utf8",
+  );
+  const pending = interfaceBody(adapter, "ScreenRecoveryPending");
+  assert.match(pending, /expires_at: string/);
+  assert.match(pending, /host\?: ScreenRecoveryPendingHost/);
+  const host = interfaceBody(adapter, "ScreenRecoveryPendingHost");
+  assert.match(host, /platform\?: HostContext\["platform"\]/);
+  assert.match(host, /model\?: string/);
+  assert.match(host, /firmware\?: string/);
+  assert.match(host, /manufacturer\?: string/);
+  assert.doesNotMatch(host, /duid|serial|mac|host_version|capabilities/);
 });
 
 test("published problem codes include payment_required and dependency_timeout", () => {

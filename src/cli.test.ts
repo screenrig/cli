@@ -4981,6 +4981,54 @@ test("screen show omits absent host fields and the whole block without a host", 
   await rm(paired.configDir, { recursive: true, force: true });
 });
 
+test("screen show describes the display asking to reconnect on the recovery line", async () => {
+  const transport = new FakeTransport();
+  const pending = {
+    expires_at: "2026-09-13T08:00:00Z",
+    host: { platform: "tizen" as const, model: "QM43B", firmware: "T-KTM2DEUC-1234", manufacturer: "Samsung" },
+  };
+  const screen = hostScreen({ host: SAMPLE_HOST, host_updated_at: "2026-09-10T08:00:00Z", recovery_pending: pending });
+  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: screen }));
+  const { configDir, fsLike } = await hostConfigFs("screen-show-recovery-host-");
+
+  const jsonResult = await withRuntime(["--json", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+  assert.equal(jsonResult.code, ExitCode.Success, jsonResult.stdout);
+  const envelope = JSON.parse(jsonResult.stdout) as { ok: boolean; data: Record<string, unknown> };
+  assert.equal(envelope.ok, true);
+  assert.deepEqual(envelope.data.recovery_pending, pending, "JSON mode passes recovery_pending.host through unchanged");
+
+  const humanResult = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+  assert.equal(humanResult.code, ExitCode.Success, humanResult.stdout);
+  assert.match(
+    humanResult.stdout,
+    /\nRecovery pending until 2026-09-13T08:00:00Z: Samsung tizen QM43B, firmware T-KTM2DEUC-1234\nConfirm with screen recover <id>; nothing is rebound until then\.\nCompare the reported model and firmware with the display you expect before confirming\.\n?$/,
+  );
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen show omits absent recovery host fields and the description without a host", async () => {
+  const transport = new FakeTransport();
+  let body: Record<string, unknown> = hostScreen({ recovery_pending: { expires_at: "2026-09-13T08:00:00Z", host: { model: "QM43B" } } });
+  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body }));
+  const { configDir, fsLike } = await hostConfigFs("screen-show-recovery-sparse-");
+  const sparseResult = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+  assert.equal(sparseResult.code, ExitCode.Success, sparseResult.stdout);
+  assert.match(sparseResult.stdout, /\nRecovery pending until 2026-09-13T08:00:00Z: QM43B\nConfirm with screen recover <id>/);
+  assert.doesNotMatch(sparseResult.stdout, /QM43B, firmware|Samsung|tizen|\nHost\n/);
+
+  body = hostScreen({ recovery_pending: { expires_at: "2026-09-13T08:00:00Z", host: { firmware: "T-KTM2DEUC-1234" } } });
+  const firmwareResult = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+  assert.equal(firmwareResult.code, ExitCode.Success, firmwareResult.stdout);
+  assert.match(firmwareResult.stdout, /\nRecovery pending until 2026-09-13T08:00:00Z: firmware T-KTM2DEUC-1234\n/);
+
+  body = hostScreen({ recovery_pending: { expires_at: "2026-09-13T08:00:00Z", host: {} } });
+  const emptyResult = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+  assert.equal(emptyResult.code, ExitCode.Success, emptyResult.stdout);
+  assert.match(emptyResult.stdout, /\nRecovery pending until 2026-09-13T08:00:00Z\nConfirm with screen recover <id>; nothing is rebound until then\.\n?$/);
+  assert.doesNotMatch(emptyResult.stdout, /Compare the reported/);
+  await rm(configDir, { recursive: true, force: true });
+});
+
 test("screen list appends the platform column only when a screen reports a host", async () => {
   const transport = new FakeTransport();
   const items = [
