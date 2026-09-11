@@ -180,12 +180,36 @@ screenrig playlist preview lobby.json --output preview --contact-sheet
 screenrig screen publish scr_LOBBY lobby.json --expect-rev 7
 ```
 
-Inspect the preview before publishing. `playlist init` reads media metadata and
-screen observations but makes no remote writes. It creates one page per media ID,
-with `contain` fit, a black background, and a 200 ms crossfade. Images last 8000 ms;
-videos are muted, do not loop, and advance on completion. Use `--duration-ms` for
-image duration and `--fit contain|cover|fill` for content fit. Override the canvas
-with both `--target-width` and `--target-height`; these also work without `--screen`.
+Inspect the document and preview before publishing. `playlist init` accepts ordered
+local image/video files, ready `med_` IDs, pinned `rel_` application releases, and
+HTTPS iframe URLs, including mixed inputs:
+
+```sh
+screenrig playlist init ./poster.png med_VIDEO rel_APP https://example.com --name Lobby --screen scr_LOBBY --output lobby.json
+```
+
+Files use the normal media upload/transcode path and wait for readiness; ffmpeg
+and ffprobe are required unless `--no-transcode` is used. Preparation uploads
+files but does not create a remote playlist or assign a screen. Existing media
+must be ready. Release availability and iframe embedding support still need
+preview/server and Player verification. Preparation does not fetch iframe URLs.
+If preparation fails after an upload, that media remains in the account; inspect
+`media list` and reuse its ID instead of uploading it again.
+
+The canonical document contains one full-screen page per input, a black background,
+and a 200 ms crossfade. Images use `--fit contain|cover|fill` (default `contain`);
+videos are muted, do not loop, and advance on completion. Other pages advance after
+`--duration-ms` (default 8000). Applications and iframes use `fill`; applications
+are pinned to the supplied release and use timed advancement, without controller
+privileges. Edit the document for application-controlled advancement.
+
+With `--screen`, the result includes `screen_id`, `screen_revision`, and a
+`publish.argv` array containing the output path and observed revision. It also
+returns `preview.argv`. These arrays preserve the selected config/API and paths
+with spaces; execute preview, inspect it, then use the publish arguments. A later
+screen change still produces a revision conflict. Target metadata stays outside
+the playlist file. Override canvas dimensions with both `--target-width` and
+`--target-height`; these also work without `--screen` (no publish arguments).
 Unknown or multiple reported surfaces require explicit dimensions. Output files
 must not already exist.
 

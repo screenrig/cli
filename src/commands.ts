@@ -1,6 +1,6 @@
 import { publishScreen } from "./screen-publish.js";
 import { readAuthoringJson, readAuthoringText, writeAuthoringJson } from "./authoring-input.js";
-import { editablePlaylist, initializePlaylist, targetDimensions } from "./playlist-authoring.js";
+import { editablePlaylist, preparePlaylist, targetDimensions } from "./playlist-authoring.js";
 import { WriteRecovery } from "./write-recovery.js";
 import { createHash } from "node:crypto";
 import { open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -4092,23 +4092,74 @@ async function doctor(
 
 export type { Operation };
 
+function sanitizedPreparationApiUrl(value: string): string {
+  const url = new URL(value); url.username = ""; url.password = ""; url.search = ""; url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
 export const handlePlaylistInit = commandHandler(async (args, runtime, resolved) => {
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const screenId = flagString(args.flags, "screen");
   const width = flagNumber(args.flags, "target-width"), height = flagNumber(args.flags, "target-height");
   const screen = screenId ? (await client.call({ method: "GET", path: `/api/v1/screens/${encodeURIComponent(screenId)}` })).body : undefined;
   const dimensions = targetDimensions(screen, width, height);
-  const media = [];
-  for (const id of args.positionals.slice(2)) {
-    if (!/^med_[A-Za-z0-9_-]+$/.test(id)) throw usageError("playlist init requires media identifiers.");
-    const response = await client.call({ method: "GET", path: `/api/v1/media/${id}` });
-    const record = response.body as Record<string, any>;
-    if (record.id !== id) throw usageError("Media response identity did not match.");
-    media.push(record);
+  const target = screen as { id: string; revision: number } | undefined;
+  if (screenId && (!target || target.id !== screenId || !Number.isSafeInteger(target.revision) || target.revision < 1)) {
+    throw usageError("Screen response has invalid identity or revision.");
   }
-  const document = initializePlaylist({ name: flagString(args.flags, "name")!, media, ...dimensions, durationMs: flagNumber(args.flags, "duration-ms") ?? 8000, fit: flagString(args.flags, "fit") ?? "contain" });
-  const output = await writeAuthoringJson(flagString(args.flags, "output")!, document, runtime);
-  return { envelope: successEnvelope({ output, ...dimensions, page_count: media.length }, { request_id: client.requestId }), exitCode: ExitCode.Success, human: `Playlist prepared at ${output}` };
+  const content: Record<string, any>[] = [];
+  const files = new Map<number, string>();
+  const warnings: Warning[] = [];
+  for (const input of args.positionals.slice(2)) {
+    if (/^med_[A-Za-z0-9_-]+$/.test(input)) {
+      const record = (await client.call({ method: "GET", path: `/api/v1/media/${input}` })).body as Record<string, any>;
+      if (record?.id !== input) throw usageError("Media response identity did not match.");
+      content.push(record);
+    } else if (/^rel_[A-Za-z0-9_-]+$/.test(input)) {
+      content.push({ primitive: "application", release_id: input });
+    } else if (/^[a-z][a-z0-9+.-]*:/i.test(input)) {
+      let url: URL;
+      try { url = new URL(input); } catch { throw usageError("Provide a valid HTTPS iframe URL."); }
+      if (url.protocol !== "https:" || url.username || url.password) throw usageError("Iframe URLs must use HTTPS without credentials.");
+      content.push({ primitive: "iframe", src: url.href, title: url.hostname.slice(0, 200) });
+    } else {
+      const sourcePath = path.resolve(runtime.cwd(), input);
+      try { if (!(await stat(sourcePath)).isFile()) throw new Error(); }
+      catch { throw usageError("Each input must be a readable image/video file, media ID, release ID, or HTTPS URL."); }
+      files.set(content.length, sourcePath);
+      content.push({ primitive: "image", state: "ready", id: "med_PENDING" });
+    }
+  }
+  const options = { name: flagString(args.flags, "name")!, content, ...dimensions, durationMs: flagNumber(args.flags, "duration-ms") ?? 8000, fit: flagString(args.flags, "fit") ?? "contain" };
+  // Validate the entire authoring shape and reserve the output before uploading.
+  preparePlaylist(options);
+  const output = path.resolve(runtime.cwd(), flagString(args.flags, "output")!);
+  let handle;
+  try { handle = await open(output, "wx", 0o600); }
+  catch { throw usageError("Cannot create output; choose a new file in an existing directory."); }
+  try {
+    for (const [index, sourcePath] of files) {
+      const uploaded = await loggerOf(runtime).withLocal({ op: "media.upload", message: "media upload" }, () => uploadMediaFile({ runtime, client, sourcePath,
+        transcodeOptions: transcodeOptionsFromArgs(args), noTranscode: flagBool(args.flags, "no-transcode"),
+        reporter: progressReporterFor(args, runtime), noWait: false,
+        timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000, pollMs: flagNumber(args.flags, "poll-ms") ?? 1000 }));
+      warnings.push(...uploaded.warnings);
+      if (!uploaded.mediaId) throw usageError("Upload completed without a media identifier.");
+      const record = (await client.call({ method: "GET", path: `/api/v1/media/${encodeURIComponent(uploaded.mediaId)}` })).body as Record<string, any>;
+      if (record?.id !== uploaded.mediaId) throw usageError("Media response identity did not match.");
+      content[index] = record;
+    }
+    await handle.writeFile(JSON.stringify(preparePlaylist(options), null, 2) + "\n");
+  } catch (error) {
+    await handle.close(); await rm(output, { force: true }); throw error;
+  }
+  await handle.close();
+  const context = ["--config", resolved.configPath, "--api-url", sanitizedPreparationApiUrl(resolved.apiUrl)];
+  return { envelope: successEnvelope({ output, ...dimensions, page_count: content.length,
+    ...(target ? { screen_id: target.id, screen_revision: target.revision } : {}),
+    preview: { argv: ["playlist", "preview", output, "--output", `${output}.preview`, "--contact-sheet", ...context] },
+    ...(target ? { publish: { argv: ["screen", "publish", target.id, output, "--expect-rev", String(target.revision), ...context], reason: "Inspect the prepared document and preview before publishing." } } : {}),
+  }, { request_id: client.requestId, warnings }), exitCode: ExitCode.Success, human: `Playlist prepared at ${output}` };
 });
 
 export const handleScreenPublish = commandHandler(async (args, runtime, resolved) => {

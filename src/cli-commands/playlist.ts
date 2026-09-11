@@ -8,18 +8,21 @@ import { LOOK_AT_THE_CONTACT_SHEET } from "../playlist-preview.js";
 export function registerPlaylistCommands(root: Command, bind: CommandActionBinder): void {
   const playlist = root.command("playlist").description("Author, validate, preview, and manage playlists");
 
-  const init = playlist.command("init").description("Prepare an editable full-screen playlist from ready media")
-    .argument("<media-ids...>", "Media identifiers in playback order")
+  const init = playlist.command("init").description("Prepare an editable playlist from files, ready media, application releases, or HTTPS URLs")
+    .argument("<inputs...>", "Local image/video files, med_ IDs, rel_ IDs, or HTTPS URLs in playback order")
     .requiredOption("--name <NAME>", "Playlist name")
     .requiredOption("--output <FILE>", "Create an editable playlist file")
     .option("--screen <ID>", "Use this screen's reported playback dimensions")
     .option("--target-width <PX>", "Override canvas width", positiveInteger("target-width"))
     .option("--target-height <PX>", "Override canvas height", positiveInteger("target-height"))
-    .addOption(new Option("--duration-ms <MS>", "Image page duration").argParser(positiveInteger("duration-ms")).default(8000))
+    .addOption(new Option("--duration-ms <MS>", "Non-video page duration").argParser(positiveInteger("duration-ms")).default(8000))
     .addOption(new Option("--fit <FIT>", "Content fit").choices(["contain", "cover", "fill"]).default("contain"))
+    .option("--no-transcode", "Upload accepted file bytes unchanged")
+    .option("--no-progress", "Suppress upload progress on stderr")
+    .option("--poll-ms <MS>", "Upload polling interval", positiveInteger("poll-ms"))
     .action(bind(handlePlaylistInit));
   requireOptionGroup(init, "together", ["--target-width", "--target-height"]);
-  addCommandNotes(init, "Provide --screen for reported dimensions, or both target dimensions to set the canvas explicitly.");
+  addCommandNotes(init, "Provide --screen for target identity, revision, and reported dimensions, or both target dimensions. Files upload and wait for readiness. Release IDs are pinned; preview/server validation checks availability. Inspect the document and preview before publishing.");
   addCommandExamples(init, 'screenrig playlist init med_IMAGE --name Lobby --screen scr_SCREEN --output lobby.json',
     'screenrig playlist init med_IMAGE med_VIDEO --name Lobby --target-width 1920 --target-height 1080 --output lobby.json');
 
