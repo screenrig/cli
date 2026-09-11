@@ -1,3 +1,4 @@
+import { registerGuidance } from "./guidance.js";
 import { registerGlobalOptions } from "./globals.js";
 import type { CommandActionBinder } from "./types.js";
 import type { Command } from "commander";
@@ -40,4 +41,5 @@ export function registerCommands(root: Command, bind: CommandActionBinder): void
   registerDoctorCommands(root, bind);
   registerVersionCommands(root, bind);
   registerRecoveryCommands(root, bind);
+  registerGuidance(root);
 }

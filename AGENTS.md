@@ -44,6 +44,18 @@ does not require that file for standalone contribution.
 - Preserve unrelated work. Do not commit, push, tag, or publish unless asked.
   Do not publish npm from a laptop.
 
+## CLI vocabulary and help
+
+Follow the canonical vocabulary in README.md: `show` inspects resources, `list`
+reads collections, K/V uses `get`/`set`, display names use `--name`, and resource
+selectors use `--screen-id`, `--app-id`, `--playlist-id`, or `--release-id`.
+Keep existing aliases compatible; never rename backend fields to match CLI flags.
+Native command definitions own arguments, choices, and validation. Declare option
+relationships with `requireOptionGroup` so human help, JSON discovery, and preflight
+validation agree. Document stdin only where implemented. Supply a working example
+and explain write scope, waiting, and recovery where relevant. Help-only workflow
+notes and examples live in `src/cli-commands/guidance.ts`.
+
 ## Media transcoding
 
 - `media upload` transcodes by default. ffmpeg and ffprobe are a required
