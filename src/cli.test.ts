@@ -511,6 +511,38 @@ test("agent connect rejects waits beyond one day before network access", async (
   await rm(result.configDir, { recursive: true, force: true });
 });
 
+for (const waitFlags of [[], ["--no-wait", "--timeout", "30000"], ["--wait", "--timeout", "10"]]) {
+  test(`agent connect ${waitFlags.join(" ")} returns resumable pending when the snapshot stalls`, async () => {
+    const transport = new FakeTransport();
+    transport.on("POST", "/api/v1/agent-connections", () => ({
+      status: 201,
+      headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
+      body: {
+        connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA",
+        connection_token: `sac_${"C".repeat(43)}`,
+        approval_url: "https://dashboard.screenrig.ai/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA",
+        expires_at: "2026-08-15T17:00:00.000Z",
+      },
+    }));
+    transport.streamHandler = async (req) => {
+      const started = Date.now();
+      await new Promise<void>((resolve) => req.signal!.addEventListener("abort", () => resolve(), { once: true }));
+      assert.ok(Date.now() - started < 2500, "snapshot must not inherit a 30-second wait");
+      throw Object.assign(new Error("Aborted"), { name: "AbortError" });
+    };
+    const result = await withRuntime(["agent", "connect", "--print-url", ...waitFlags], transport);
+    assert.equal(result.code, 0, result.stdout);
+    const data = JSON.parse(result.stdout).data;
+    assert.equal(data.status, "pending");
+    assert.equal(data.request_submitted, true);
+    assert.equal(data.connection_complete, false);
+    assert.equal(data.status_checked, false);
+    assert.ok(data.next.argv.includes("--config"));
+    assert.equal(transport.calls.filter(call => call.method === "POST").length, 1);
+    await rm(result.configDir, { recursive: true, force: true });
+  });
+}
+
 test("agent connect resumes after its cached approval expiry when approved while offline", async () => {
   const transport = new FakeTransport();
   let sealed: ReturnType<typeof agentConnectionEnvelope> | undefined;
@@ -552,11 +584,11 @@ test("agent connect resumes after its cached approval expiry when approved while
     body: { agent: { ...sealed!.pendingAgent, state: "active", connected_at: "2026-08-14T17:00:01.000Z" }, connection_ready: true },
   }));
   transport.queueStream(Object.assign(new Error("Interrupted"), { name: "AbortError" }));
-  const interrupted = await withRuntime(["--json", "agent", "connect"], transport, { openUrl: async () => true });
+  const interrupted = await withRuntime(["--json", "agent", "connect", "--wait"], transport, { openUrl: async () => true });
   assert.equal(JSON.parse(interrupted.stdout).error.code, "timeout");
   const resumedFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => interrupted.configDir, env: { XDG_CONFIG_HOME: interrupted.configDir } };
   const opened: string[] = [];
-  const resumed = await withRuntime(["--json", "agent", "connect", "--name", "Office Codex", "--timeout", "86400000"], transport, {
+  const resumed = await withRuntime(["--json", "agent", "connect", "--name", "Office Codex", "--wait", "--timeout", "86400000"], transport, {
     fs: resumedFs,
     now: () => new Date("2026-08-16T05:00:00.000Z"),
     openUrl: async (url) => { opened.push(url); return true; },
@@ -566,6 +598,7 @@ test("agent connect resumes after its cached approval expiry when approved while
   assert.equal(result.code, 0, result.stdout);
   assert.deepEqual(opened, ["https://dashboard.screenrig.ai/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA"]);
   assert.equal(JSON.parse(result.stdout).data.status, "active");
+  assert.equal(JSON.parse(result.stdout).data.connection_complete, true);
   assert.equal(result.stderr, "");
   assert.doesNotMatch(result.stdout, /sr_live_|sac_|ciphertext|nonce|private|authorization/i);
   const configPath = path.join(result.configDir, "screenrig", "config.json");
@@ -579,7 +612,7 @@ test("agent connect resumes after its cached approval expiry when approved while
   await rm(result.configDir, { recursive: true, force: true });
 });
 
-test("agent connect --no-wait returns a pending handoff and resumes the same approved connection", async () => {
+test("agent connect defaults to a snapshot, returns a pending handoff and resumes the same approved connection", async () => {
   const transport = new FakeTransport();
   let sealed: ReturnType<typeof agentConnectionEnvelope> | undefined;
   const connectionToken = `sac_${"C".repeat(43)}`;
@@ -623,10 +656,13 @@ test("agent connect --no-wait returns a pending handoff and resumes the same app
     connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Office Codex", agent_type: "cli",
     status: "pending", expires_at: "2026-08-15T17:00:00.000Z", created_at: "2026-08-14T17:00:00.000Z",
   })}\n\n`] });
-  const interrupted = await withRuntime(["agent", "connect", "--no-wait", "--print-url"], transport, { openUrl: async () => { throw new Error("print-url must not open browser"); } });
+  const interrupted = await withRuntime(["agent", "connect", "--print-url"], transport, { openUrl: async () => { throw new Error("print-url must not open browser"); } });
   assert.equal(interrupted.code, 0, interrupted.stdout);
   const pending = JSON.parse(interrupted.stdout).data;
   assert.equal(pending.status, "pending");
+  assert.equal(pending.request_submitted, true);
+  assert.equal(pending.connection_complete, false);
+  assert.equal(pending.status_checked, true);
   assert.equal(pending.approval_url, "https://dashboard.screenrig.ai/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA");
   assert.equal(pending.next.command, "screenrig agent connect --no-wait");
   assert.deepEqual(pending.next.argv, ["agent", "connect", "--no-wait", "--config",
@@ -646,6 +682,7 @@ test("agent connect --no-wait returns a pending handoff and resumes the same app
   assert.equal(result.code, 0, result.stdout);
   assert.deepEqual(opened, [], "approved snapshots must not reopen the approval page");
   assert.equal(JSON.parse(result.stdout).data.status, "active");
+  assert.equal(JSON.parse(result.stdout).data.connection_complete, true);
   assert.equal(result.stderr, "");
   assert.doesNotMatch(result.stdout, /sr_live_|sac_|ciphertext|nonce|private|authorization/i);
   const configPath = path.join(result.configDir, "screenrig", "config.json");

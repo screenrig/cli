@@ -66,3 +66,11 @@ test("Commander errors use one secret-safe envelope and never raw output", () =>
     });
   }
 });
+
+test("agent connect waits only when explicitly requested", () => {
+  assert.equal(parseArgv(["agent", "connect"]).flags.wait, undefined);
+  assert.equal(parseArgv(["agent", "connect", "--wait"]).flags.wait, true);
+  assert.equal(parseArgv(["agent", "connect", "--wait"]).flags["no-wait"], undefined);
+  assert.equal(parseArgv(["agent", "connect", "--no-wait"]).flags.wait, undefined);
+  assert.equal(parseArgv(["agent", "connect", "--no-wait"]).flags["no-wait"], true);
+});

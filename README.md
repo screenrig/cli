@@ -21,7 +21,7 @@ screenrig version
 ```
 
 Node.js 20.11 or newer is required. `media upload` additionally requires ffmpeg
-and ffprobe; the other commands do not. Run `screenrig doctor` to inspect
+and ffprobe, as do batch uploads and playlist preparation from local media files. Run `screenrig doctor` to inspect
 the optional media toolchain before an upload.
 
 This global package is the official developer-shell distribution. It is not the
@@ -50,7 +50,7 @@ Use `screenrig help --all` for the complete command inventory, or
 immediate children. Add `--json` for structured command paths, positional arguments,
 option choices and defaults, relationships, and examples;
 help runs without configuration or authentication. Command-specific options follow
-that command, for example `screenrig screen update ID --name Lobby --if-match 1`.
+that command, for example `screenrig screen update ID --name Lobby --expect-rev 1`.
 Global options such as `--json` may appear before or after the command. Use
 `--name=VALUE` for a value starting with a dash, and `--` before option-like file
 names. Duplicate options are rejected.
@@ -61,6 +61,35 @@ Choose by what the page is:
 - Anything presentable: `media generate` as the whole page.
 - Slide-deck-like experiences: local unbilled `compose render`.
 - Live video, iframe, or webapp: write playlist primitives.
+
+## Command vocabulary
+
+Use these canonical spellings in new invocations and examples:
+
+| Concept | Spelling | Compatibility |
+| --- | --- | --- |
+| Inspect one resource | `show` (including `operations show`) | `operations get` and `playlist get` remain aliases |
+| Read/write a K/V value | `kv get` / `kv set` | Values retain their byte-oriented semantics |
+| Display name | `--name` | Screen pair/provision retain `--label` |
+| Select a screen | `--screen-id` | Playlist init retains `--screen` |
+| Select an application namespace | `--app-id` | K/V retains `--application-id` |
+| Select a playlist or release | `--playlist-id` / `--release-id` | IDs stay explicit |
+| Guard a revision | `--expect-rev` | `--if-match` remains an alias |
+| Read a collection | `list` | `events` and `operations` retain established plural group names |
+
+The application command group is `app`; use “application” in explanatory prose.
+Keep the established `comment ACTION screen|playlist ID` grammar. `--page` and
+`--primitive` identify objects within a playlist, rather than account resources.
+Use `--after` for an event cursor (`--cursor` remains an alias). `--output` selects
+an output path; each command states whether it expects a file or directory.
+Durations use milliseconds as stated by `--duration-ms`, `--poll-ms`, and `--timeout`.
+
+Legacy option spellings share the same value and validation as their canonical
+option; supplying both is an error. JSON help exposes compatibility spellings in
+`options[].aliases`. Response fields and backend contracts are unchanged.
+Option `relationships` describe `exactlyOne`, `atLeastOne`, and `together` groups;
+`requires` means the first option requires every remaining option. These same
+rules validate invocations before configuration or network access.
 
 ## Screen host and recovery
 
@@ -102,7 +131,7 @@ for the current revision before an update.
 
 `data.operation` contains the observed completed operation when waiting. With
 `--no-wait` it is `null`: upload acceptance does not establish operation state
-or release readiness. Use `operations get <operation_id>` or
+or release readiness. Use `operations show <operation_id>` or
 `operations wait <operation_id>` to observe processing. The envelope's
 `operation_id` identifies that same operation in either mode. Existing flat
 accepted fields (`data.id`, `data.release_id`, `data.operation_id`) and
@@ -112,21 +141,30 @@ accepted fields (`data.id`, `data.release_id`, `data.operation_id`) and
 
 ### Nonblocking agent connection
 
-`screenrig agent connect --no-wait --print-url` starts or resumes a connection,
+`screenrig agent connect --print-url` starts or resumes a connection,
 reads one server status snapshot, and returns a JSON envelope. While approval is
-pending, `data.status` is `pending`, `data.approval_url` contains the dashboard
+pending, `data.status` is `pending`, `data.request_submitted` is `true`,
+`data.connection_complete` is `false`, `data.approval_url` contains the dashboard
 handoff, and `data.next.command` identifies the resume command. `data.next.argv`
 supplies its arguments, preserving the selected config and API origin. Open the handoff
-for the intended user, then run `screenrig agent connect --no-wait` again. An
+for the intended user, then run `screenrig agent connect` again. An
 approved connection completes credential collection and activation and returns
-`data.status: active`. No credential is included in either result.
+`data.status: active` and `data.connection_complete: true`. No credential is included in either result.
 
 Without `--print-url`, the CLI tries to open the browser and includes the handoff
-URL in the pending result only if opening fails. `--no-wait` defaults to a
-30-second status-read budget; it does not wait for a person to approve. Normal
-`agent connect` retains its existing approval wait of up to 24 hours. `--timeout`
-overrides either mode's wait budget. Terminal denial, cancellation, and expiry
-remain errors.
+URL in the pending result only if opening fails. The default (also `--no-wait`)
+reads a status snapshot for at most one second. If none arrives, the request
+remains resumable and `data.status_checked` is `false`; this does not assert
+that the server still awaits approval. A received pending snapshot sets it to
+`true`. Success with pending status means submission succeeded, not connection
+completion.
+
+Use `agent connect --wait` to wait for approval for up to 30 seconds, or
+`agent connect --wait --timeout 10000` for an explicit budget in milliseconds
+(1–86400000). Reaching the wait budget returns a resumable pending result.
+Without `--wait`, `--timeout` can shorten but never extend the one-second
+snapshot budget. Approval requests expire after 24 hours. Terminal denial,
+cancellation, and expiry remain errors.
 
 ### Recovering writes
 
@@ -205,17 +243,46 @@ Report suspected vulnerabilities through the [security policy](SECURITY.md).
 For ready images and videos, prepare a full-screen playlist in playback order:
 
 ```sh
-screenrig playlist init med_POSTER med_VIDEO --name "Lobby loop" --screen scr_LOBBY --output lobby.json
+screenrig playlist init med_POSTER med_VIDEO --name "Lobby loop" --screen-id scr_LOBBY --output lobby.json
 screenrig playlist preview lobby.json --output preview --contact-sheet
 screenrig screen publish scr_LOBBY lobby.json --expect-rev 7
 ```
 
-Inspect the preview before publishing. `playlist init` reads media metadata and
-screen observations but makes no remote writes. It creates one page per media ID,
-with `contain` fit, a black background, and a 200 ms crossfade. Images last 8000 ms;
-videos are muted, do not loop, and advance on completion. Use `--duration-ms` for
-image duration and `--fit contain|cover|fill` for content fit. Override the canvas
-with both `--target-width` and `--target-height`; these also work without `--screen`.
+Inspect the document and preview before publishing. `playlist init` accepts ordered
+local image/video files, ready `med_` IDs, pinned `rel_` application releases, and
+HTTPS iframe URLs, including mixed inputs:
+
+```sh
+screenrig playlist init ./poster.png med_VIDEO rel_APP https://example.com --name Lobby --screen-id scr_LOBBY --output lobby.json
+```
+
+Files use the normal media upload/transcode path and wait for readiness; ffmpeg
+and ffprobe are required unless `--no-transcode` is used. Preparation uploads
+files but does not create a remote playlist or assign a screen. Existing media
+must be ready. Release availability and iframe embedding support still need
+preview/server and Player verification. Preparation does not fetch iframe URLs.
+Each file occurrence has a distinct upload key derived from the invocation's
+idempotency key and its input position. For retryable preparation, supply
+`--idempotency-key` from the first attempt and reuse it with identical inputs in
+the same order, within the server's replay window. Declarations and commits then
+reuse their respective per-file keys. Without an explicit key, a new invocation
+gets new upload keys. If preparation fails after an upload, that media remains in
+the account; inspect `media list` and reuse its ID instead of uploading it again.
+
+The canonical document contains one full-screen page per input, a black background,
+and a 200 ms crossfade. Images use `--fit contain|cover|fill` (default `contain`);
+videos are muted, do not loop, and advance on completion. Other pages advance after
+`--duration-ms` (default 8000). Applications and iframes use `fill`; applications
+are pinned to the supplied release and use timed advancement, without controller
+privileges. Edit the document for application-controlled advancement.
+
+With `--screen-id`, the result includes `screen_id`, `screen_revision`, and a
+`publish.argv` array containing the output path and observed revision. It also
+returns `preview.argv`. These arrays preserve the selected config/API and paths
+with spaces; execute preview, inspect it, then use the publish arguments. A later
+screen change still produces a revision conflict. Target metadata stays outside
+the playlist file. Override canvas dimensions with both `--target-width` and
+`--target-height`; these also work without `--screen-id` (no publish arguments).
 Unknown or multiple reported surfaces require explicit dimensions. Output files
 must not already exist.
 
@@ -254,6 +321,30 @@ application releases, removing server-derived media and timing fields. Comments
 remain separate. Plain `playlist show` is an inspection response; `--editable`
 without `--output` returns `data.document`, `data.playlist_id`, and `data.revision`.
 Updating a playlist affects every screen assigned to it.
+
+After `app update` succeeds, take `data.application.release_id` and preview a
+replacement of one explicitly identified application primitive:
+
+```sh
+screenrig playlist replace-release pl_EXISTING --page board-page --primitive board --release-id rel_NEW
+```
+
+Review `data.previous_release_id`, `data.release_id`, and `data.affected_screens`
+(including archived assignments). Then use the returned `data.revision` and
+`data.impact` to apply that exact replacement:
+
+```sh
+screenrig playlist replace-release pl_EXISTING --page board-page --primitive board --release-id rel_NEW --apply --expect-rev 4 --expect-impact TOKEN_FROM_PREVIEW
+```
+
+The CLI preserves the other primitives and playlist settings. Every screen
+assigned to this shared playlist receives the new pin; archived screens retain
+it for later use. A changed replacement, playlist revision, or observed screen
+impact requires a fresh preview and review. Screen assignments can change after
+the snapshot; the server atomically checks only the playlist revision. Release
+availability and ownership are validated by the server on apply. After writing,
+verify screen manifest revisions and playback. Existing pins stay unchanged
+until the replacement is applied.
 
 Playlist validate, create, update, preview, and screen publish accept `-` as their
 input file to read stdin. JSON envelopes are never written into authored files.

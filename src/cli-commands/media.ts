@@ -79,4 +79,5 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .argument("<id>", "Media identifier")
     .requiredOption("--expect-rev <REVISION>", "Require the current resource revision (required)", revision)
     .action(bind(handleMediaDelete));
+  requireOptionGroup(media.commands.find(command => command.name() === "update")!, "exactlyOne", ["--tag", "--clear-tag"]);
 }
