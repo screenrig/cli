@@ -45,7 +45,10 @@ The customer surface is content (`app`, `media`, `compose`), playlists, and scre
 Discover commands progressively with `screenrig --help`, `screenrig screen --help`,
 and `screenrig screen assign --help`. Deeper groups work the same way:
 `screenrig comment show --help`. `screenrig help screen assign` is equivalent.
-Add `--json` for structured child command paths, invocation syntax, and option types;
+Use `screenrig help --all` for the complete command inventory, or
+`screenrig help --all screen` for one group's descendants. Normal help lists
+immediate children. Add `--json` for structured command paths, positional arguments,
+option choices and defaults, relationships, and examples;
 help runs without configuration or authentication. Command-specific options follow
 that command, for example `screenrig screen update ID --name Lobby --if-match 1`.
 Global options such as `--json` may appear before or after the command. Use
@@ -199,7 +202,11 @@ repeat the identical command and input with the same config to resume. If playli
 creation succeeded before assignment failed, the error identifies the created
 playlist. Do not delete it or start another create to recover. A revision conflict
 requires inspecting the screen and reconciling the intended assignment; an already
-created playlist can be assigned explicitly with `screen assign`. Publishing never
+created playlist can be assigned explicitly with `screen assign`. Assignment-conflict
+guidance includes an inspection command and a separate assignment template with
+`<REVIEWED_REVISION>`. Replace that placeholder only after inspecting the screen and
+deciding the assignment is still intended. Structured argument arrays preserve the
+selected configuration and API origin without requiring shell parsing. Publishing never
 silently refreshes the expected revision. Unfinished recovery stops after the
 24-hour server idempotency window; inspect and reconcile before making more writes.
 

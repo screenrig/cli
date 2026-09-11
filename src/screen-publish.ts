@@ -100,7 +100,27 @@ export async function publishScreen(options: {
   } catch (error) {
     if (error instanceof CliError) {
       error.problem.errors.push({ stage: state?.assigned ? "verify" : state?.playlist ? "assign" : "create", playlist_id: state?.playlist?.id, journal: journalPath });
-      if (!error.problem.next) error.problem.next = { command: `screenrig screen show ${screenId}`, reason: "Inspect the target. After a transport failure, repeat the identical publish command to resume; revision conflicts require reconciliation. The journal records any playlist already created." };
+      // Preserve the selected destination without copying credentials or URL parameters.
+      const api = new URL(options.apiUrl);
+      api.username = ""; api.password = ""; api.search = ""; api.hash = "";
+      const context = ["--config", options.configPath, "--api-url", api.toString().replace(/\/+$/, "")];
+      if (!error.problem.next) error.problem.next = {
+        command: `screenrig screen show ${screenId}`,
+        argv: ["screen", "show", screenId, ...context],
+        reason: "Inspect the target using argv to preserve the selected configuration and API. After a transport failure, repeat the identical publish command to resume; revision conflicts require reconciliation. The journal records any playlist already created.",
+      };
+      if (error.problem.code === "revision_conflict" && state?.playlist && !state.assigned) {
+        error.problem.next = {
+          command: `screenrig screen show ${screenId}`,
+          argv: ["screen", "show", screenId, ...context],
+          reason: "Inspect the current screen and reconcile concurrent changes before assigning the playlist already created. Do not rerun publish with a new revision: that starts a new publish and can create another playlist.",
+          after_inspection: {
+            command: `screenrig screen assign ${screenId} --playlist-id ${state.playlist.id} --expect-rev <REVIEWED_REVISION>`,
+            argv: ["screen", "assign", screenId, "--playlist-id", state.playlist.id, "--expect-rev", "<REVIEWED_REVISION>", ...context],
+            reason: "Only if this assignment is still intended, replace <REVIEWED_REVISION> with the revision from the inspected screen. Use argv to preserve the configuration and API. The conflict response revision is not approval to overwrite concurrent changes.",
+          },
+        };
+      }
     }
     throw error;
   } finally { await rm(lockPath, { recursive: true, force: true }); }

@@ -1,24 +1,27 @@
-import { usageError } from "../problems.js";
 import { nonnegativeInteger, positiveInteger, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import { handlePlaylistInit, handlePlaylistValidate, handlePlaylistPreview, handlePlaylistTemplates, handlePlaylistCreate, handlePlaylistUpdate, handlePlaylistExport, handlePlaylistImport, handlePlaylistShow, handlePlaylistList, handlePlaylistDelete } from "../commands.js";
-import type { Command } from "commander";
-import { addCommandNotes } from "./notes.js";
+import { type Command, Option } from "commander";
+import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes.js";
 import { LOOK_AT_THE_CONTACT_SHEET } from "../playlist-preview.js";
 
 export function registerPlaylistCommands(root: Command, bind: CommandActionBinder): void {
   const playlist = root.command("playlist").description("Author, validate, preview, and manage playlists");
 
-  playlist.command("init").description("Prepare an editable full-screen playlist from ready media")
+  const init = playlist.command("init").description("Prepare an editable full-screen playlist from ready media")
     .argument("<media-ids...>", "Media identifiers in playback order")
     .requiredOption("--name <NAME>", "Playlist name")
     .requiredOption("--output <FILE>", "Create an editable playlist file")
     .option("--screen <ID>", "Use this screen's reported playback dimensions")
     .option("--target-width <PX>", "Override canvas width", positiveInteger("target-width"))
     .option("--target-height <PX>", "Override canvas height", positiveInteger("target-height"))
-    .option("--duration-ms <MS>", "Image page duration (default: 8000)", positiveInteger("duration-ms"))
-    .option("--fit <FIT>", "Content fit: contain (default), cover, or fill")
+    .addOption(new Option("--duration-ms <MS>", "Image page duration").argParser(positiveInteger("duration-ms")).default(8000))
+    .addOption(new Option("--fit <FIT>", "Content fit").choices(["contain", "cover", "fill"]).default("contain"))
     .action(bind(handlePlaylistInit));
+  requireOptionGroup(init, "together", ["--target-width", "--target-height"]);
+  addCommandNotes(init, "Provide --screen for reported dimensions, or both target dimensions to set the canvas explicitly.");
+  addCommandExamples(init, 'screenrig playlist init med_IMAGE --name Lobby --screen scr_SCREEN --output lobby.json',
+    'screenrig playlist init med_IMAGE med_VIDEO --name Lobby --target-width 1920 --target-height 1080 --output lobby.json');
 
   playlist.command("validate").description("Validate a playlist file")
     .argument("<file>", "Local input file")
@@ -51,25 +54,23 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .requiredOption("--output <PATH>", "Write the exported bundle to this directory (required)")
     .action(bind(handlePlaylistExport));
 
-  playlist.command("import").description("Import a playlist bundle")
+  const importCommand = playlist.command("import").description("Import a playlist bundle")
     .argument("<directory>", "Local directory")
     .option("--name <NAME>", "Set the imported playlist name")
     .option("--update <ID>", "Update this playlist when importing")
     .option("--expect-rev <REVISION>", "Require the current resource revision", revision)
     .option("--poll-ms <MS>", "Set the operation polling interval", positiveInteger("poll-ms"))
-    .hook("preAction", (command) => {
-      const update = command.getOptionValueSource("update") === "cli";
-      const ifMatch = command.getOptionValueSource("expectRev") === "cli";
-      if (update !== ifMatch) throw usageError("playlist import --update and --expect-rev must be supplied together.");
-    })
     .action(bind(handlePlaylistImport));
+  requireOptionGroup(importCommand, "together", ["--update", "--expect-rev"]);
 
-  playlist.command("show").description("Inspect a playlist or write an editable document")
+  const show = playlist.command("show").description("Inspect a playlist or write an editable document")
     .option("--output <FILE>", "Create an editable playlist file; report its revision on stdout")
     .option("--editable", "Return an editable document and revision in the JSON envelope")
     .alias("get")
     .argument("<id>", "Playlist identifier")
     .action(bind(handlePlaylistShow));
+  addCommandExamples(show, 'screenrig playlist show pl_PLAYLIST --output playlist.json',
+    'screenrig playlist show pl_PLAYLIST --editable');
 
   playlist.command("list").description("List playlists")
     .action(bind(handlePlaylistList));

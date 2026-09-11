@@ -14,6 +14,7 @@ export interface CommandTree {
   selected: () => Command;
   helpRequested: () => boolean;
   versionRequested: () => boolean;
+  inventoryRequested: () => boolean;
 }
 
 export function commandInput(command: Command): ParsedArgs {
@@ -60,6 +61,7 @@ export function createCommandTree(
   let selected = root;
   let helpRequested = false;
   let versionRequested = false;
+  let inventoryRequested = false;
   const seen = new Set<string>();
 
   registerCommands(root, (handler) => (...values: unknown[]) => {
@@ -67,8 +69,10 @@ export function createCommandTree(
     return execute?.(handler, commandInput(selected));
   });
   root.command("help [command...]")
-    .description("Discover commands and their options")
-    .action((path: string[]) => {
+    .description("Discover commands; --all lists every command")
+    .option("--all", "Include all descendant command paths")
+    .action((path: string[], options: { all?: boolean }) => {
+      inventoryRequested = options.all === true;
       const target = findCommand(root, path);
       if (!target) throw usageError("Unknown help topic.");
       target.help();
@@ -96,5 +100,5 @@ export function createCommandTree(
     command.commands.forEach(configure);
   };
   configure(root);
-  return { root, selected: () => selected, helpRequested: () => helpRequested, versionRequested: () => versionRequested };
+  return { root, selected: () => selected, helpRequested: () => helpRequested, versionRequested: () => versionRequested, inventoryRequested: () => inventoryRequested };
 }

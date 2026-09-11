@@ -145,6 +145,36 @@ test("assignment conflicts retain the created playlist and never create another 
  .on('POST','/api/v1/playlists',()=>response({id:'pl_TEST',revision:1}))
  .on('PATCH','/api/v1/screens/scr_TEST',()=>({status:409,headers:{},body:{code:'revision_conflict',title:'Conflict',status:409,detail:'Screen changed',current_revision:8}}));
  const options={client:new ApiClient({transport}),runtime:processRuntime(),configPath:dir+'/config.json',apiUrl:'https://api.screenrig.ai',screenId:'scr_TEST',revision:'7',document:document()};
- for(let i=0;i<2;i++) await assert.rejects(()=>publishScreen(options),(e:any)=>{assert.equal(e.problem.errors.at(-1).playlist_id,'pl_TEST');return true;});
+ for(let i=0;i<2;i++) await assert.rejects(()=>publishScreen(options),(e:any)=>{
+  assert.equal(e.problem.errors.at(-1).playlist_id,'pl_TEST');
+  assert.deepEqual(e.problem.next.argv,['screen','show','scr_TEST','--config',options.configPath,'--api-url',options.apiUrl]);
+  assert.deepEqual(e.problem.next.after_inspection.argv,['screen','assign','scr_TEST','--playlist-id','pl_TEST','--expect-rev','<REVIEWED_REVISION>','--config',options.configPath,'--api-url',options.apiUrl]);
+  assert.match(e.problem.next.reason,/Do not rerun publish with a new revision/);
+  assert.match(e.problem.next.after_inspection.reason,/Only if this assignment is still intended/);
+  // The placeholder cannot accidentally execute a write before reconciliation.
+  assert.throws(()=>parseArgv(e.problem.next.after_inspection.argv));
+  const reconciled=e.problem.next.after_inspection.argv.map((arg:string)=>arg==='<REVIEWED_REVISION>'?'8':arg);
+  assert.equal(parseArgv(reconciled).flags['if-match'],'8');
+  return true;
+ });
  assert.equal(transport.calls.filter(c=>c.method==='POST').length,1);
+ assert.equal(transport.calls.filter(c=>c.method==='GET'&&c.path==='/api/v1/screens/scr_TEST').length,1);
+ for(const call of transport.calls.filter(c=>c.method==='PATCH')) assert.equal(call.headers?.['if-match'],'"7"');
+});
+
+test("publish recovery arguments preserve paths with spaces without exposing URL credentials",async t=>{
+ const dir=await mkdtemp('/tmp/publish guidance-');t.after(()=>rm(dir,{recursive:true,force:true}));
+ const transport=new FakeTransport().on('GET','/api/v1/account',()=>response({id:'acc_TEST'})).on('GET','/api/v1/screens/scr_TEST',()=>response({id:'scr_TEST',revision:7}))
+ .on('POST','/api/v1/playlists',()=>response({id:'pl_TEST',revision:1}))
+ .on('PATCH','/api/v1/screens/scr_TEST',()=>({status:409,headers:{},body:{code:'revision_conflict',title:'Conflict',status:409,detail:'Screen changed',next:{command:'retry',reason:'Try again'}}}));
+ const options={client:new ApiClient({transport,token:'private-test-token'}),runtime:processRuntime(),configPath:dir+'/selected config.json',apiUrl:'https://user:password@api.screenrig.ai/prefix?secret=value#private',screenId:'scr_TEST',revision:'7',document:document()};
+ await assert.rejects(()=>publishScreen(options),(e:any)=>{
+  for(const args of [e.problem.next.argv,e.problem.next.after_inspection.argv]) {
+   assert.equal(args[args.indexOf('--config')+1],options.configPath);
+   assert.equal(args[args.indexOf('--api-url')+1],'https://api.screenrig.ai/prefix');
+  }
+  assert.doesNotMatch(JSON.stringify(e.problem.next),/password|secret=value|private-test-token/);
+  assert.equal(e.problem.next.after_inspection.argv.includes('7'),false);
+  return true;
+ });
 });

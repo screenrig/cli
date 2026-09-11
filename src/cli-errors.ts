@@ -17,6 +17,15 @@ export function commandError(error: CommanderError, command: Command): never {
   }
   if (path === "media list" && has("kind")) throw usageError("media list uses --primitive image|video, not --kind.");
   switch (error.code) {
+    case "commander.invalidArgument": {
+      const option = command.options.find((candidate) => candidate.argChoices && error.message.startsWith(`error: option '${candidate.flags}'`));
+      if (option?.argChoices) {
+        const choices = option.argChoices;
+        const allowed = choices.length > 2 ? `${choices.slice(0, -1).join(", ")}, or ${choices.at(-1)}` : choices.join(" or ");
+        throw usageError(`${option.long} must be ${allowed}.`);
+      }
+      throw usageError("Invalid argument. See command help for supported values.");
+    }
     case "commander.missingArgument":
       if (path === "screen set-timezone") throw usageError("screen set-timezone requires <id> --timezone --expect-rev.");
       throw usageError(`${path} requires ${command.registeredArguments.filter((arg) => arg.required).map((arg) => `<${arg.name()}>`).join(" ")}.`);
@@ -38,4 +47,3 @@ export function commandError(error: CommanderError, command: Command): never {
       throw usageError("Unknown command or unsupported option. See command help for supported arguments.", { command: `screenrig${path ? ` ${path}` : ""} --help`, reason: "List supported commands, arguments, and options." });
   }
 }
-
