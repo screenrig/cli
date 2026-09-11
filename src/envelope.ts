@@ -1,6 +1,10 @@
 export interface ProblemNext {
   command: string;
   reason: string;
+  /** Arguments excluding the executable; avoids shell quoting ambiguity. */
+  argv?: string[];
+  /** Conditional template: inspect and reconcile before replacing placeholders. */
+  after_inspection?: { command: string; argv: string[]; reason: string };
 }
 
 export interface NormalizedProblem {

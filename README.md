@@ -199,7 +199,11 @@ repeat the identical command and input with the same config to resume. If playli
 creation succeeded before assignment failed, the error identifies the created
 playlist. Do not delete it or start another create to recover. A revision conflict
 requires inspecting the screen and reconciling the intended assignment; an already
-created playlist can be assigned explicitly with `screen assign`. Publishing never
+created playlist can be assigned explicitly with `screen assign`. Assignment-conflict
+guidance includes an inspection command and a separate assignment template with
+`<REVIEWED_REVISION>`. Replace that placeholder only after inspecting the screen and
+deciding the assignment is still intended. Structured argument arrays preserve the
+selected configuration and API origin without requiring shell parsing. Publishing never
 silently refreshes the expected revision. Unfinished recovery stops after the
 24-hour server idempotency window; inspect and reconcile before making more writes.
 
