@@ -3651,7 +3651,7 @@ components:
       additionalProperties: false
       required: [password]
       properties:
-        password: { type: string, minLength: 12, maxLength: 128, writeOnly: true, description: Stored only as a fixed-parameter Argon2id hash. }
+        password: { type: string, minLength: 12, maxLength: 128, pattern: "^\\S+$", writeOnly: true, description: "Stored only as a fixed-parameter Argon2id hash. New passwords cannot contain whitespace; password login remains compatible with previously stored credentials." }
     DashboardSession:
       type: object
       additionalProperties: false
