@@ -47,7 +47,9 @@ test("command-specific flags are scoped to their command", () => {
 test("required options are discoverable and enforced before dispatch", () => {
   assert.throws(() => parseArgv(["screen", "assign", "scr_TEST"]), usage);
   const help = commandHelp(["screen", "assign"]);
-  for (const name of ["--playlist-id", "--expect-rev"]) assert.equal(help.options.find((option) => option.name === name)?.required, true);
+  assert.equal(help.options.find((option) => option.name === "--playlist-id")?.required, true);
+  assert.equal(help.options.find((option) => option.name === "--expect-rev")?.required, false);
+  assert.doesNotThrow(() => parseArgv(["screen", "assign", "scr_TEST", "--playlist-id", "pl_TEST"]));
   assert.doesNotThrow(() => parseArgv(["screen", "assign", "--help"]));
 });
 

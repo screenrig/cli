@@ -899,7 +899,6 @@ test("import validates create/update flags and all local bytes before any networ
   await writeBundle(dir, [{ id: "med_SOURCE", filename: "hero.png", bytes: Uint8Array.from([1, 2]) }]);
   const transport = importTransport([]);
   const common = { directory: dir, client: new ApiClient({ transport, token: "token" }), runtime: runtimeForImport([]) };
-  await assert.rejects(() => importPlaylistBundle({ ...common, updateId: "pl_TARGET" }), /requires --expect-rev/);
   await assert.rejects(() => importPlaylistBundle({ ...common, ifMatch: "1" }), /requires --update/);
   await assert.rejects(() => importPlaylistBundle({ ...common, updateId: "pl_TARGET", ifMatch: "not-a-revision" }), /--expect-rev/);
   assert.equal(transport.calls.length, 0);
@@ -1059,3 +1058,16 @@ for (const failure of ["headers", "open"] as const) {
     }
   });
 }
+
+test("import can replace a playlist without a revision lookup or header", async () => {
+ const dir = await testTemp("bundle-optional-revision-");
+ try {
+  await writeBundle(dir, [{id: "med_SOURCE", filename: "hero.png", bytes: Uint8Array.from([1, 2])}]);
+  const transport = importTransport([]);
+  await importPlaylistBundle({directory: dir, client: new ApiClient({transport, token: "token"}), runtime: runtimeForImport([]), updateId: "pl_TARGET"});
+  const writes = transport.calls.filter(c => c.method === "PUT" && c.path === "/api/v1/playlists/pl_TARGET");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0]?.headers?.["if-match"], undefined);
+  assert.equal(transport.calls.some(c => c.method === "GET" && c.path === "/api/v1/playlists/pl_TARGET"), false);
+ } finally { await rm(dir, {recursive: true, force: true}); }
+});

@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
+import { readInputBytes } from "./authoring-input.js";
+import type { CliRuntime } from "./runtime.js";
 import type { KVWrite } from "./adapters/protocol.js";
 import type { ParsedArgs } from "./argv.js";
 import { usageError } from "./problems.js";
@@ -46,7 +46,7 @@ function stringFlag(args: ParsedArgs, name: string): string | undefined {
 }
 
 function checkedContentType(args: ParsedArgs): string {
-  const contentType = stringFlag(args, "content-type");
+  const contentType = stringFlag(args, "content-type") ?? "application/octet-stream";
   if (!contentType || contentType.length > 127) {
     throw usageError("--file and --value-base64 require --content-type with 1 to 127 characters.");
   }
@@ -60,7 +60,7 @@ function checkedLength(valueBase64: string): string {
   return valueBase64;
 }
 
-export async function kvWriteFromArgs(args: ParsedArgs, cwd: string): Promise<KVWrite> {
+export async function kvWriteFromArgs(args: ParsedArgs, cwd: string, runtime?: CliRuntime): Promise<KVWrite> {
   if (Object.hasOwn(args.flags, "value")) {
     throw usageError("--value used the retired JSON-unsafe contract; use --json-value, --file, or --value-base64.");
   }
@@ -73,7 +73,7 @@ export async function kvWriteFromArgs(args: ParsedArgs, cwd: string): Promise<KV
   if (mode === "json-value") {
     const input = stringFlag(args, mode);
     if (input === undefined || input.length === 0) throw usageError("--json-value requires a JSON value.");
-    if (Object.hasOwn(args.flags, "content-type")) {
+    if (Object.hasOwn(args.flags, "content-type") && stringFlag(args, "content-type")?.toLowerCase() !== "application/json") {
       throw usageError("--json-value always uses application/json; omit --content-type.");
     }
     const valueBase64 = Buffer.from(canonicalJson(input), "utf8").toString("base64");
@@ -91,7 +91,7 @@ export async function kvWriteFromArgs(args: ParsedArgs, cwd: string): Promise<KV
   if (!file) throw usageError("--file requires a path.");
   let bytes: Buffer;
   try {
-    bytes = await readFile(path.resolve(cwd, file));
+    bytes = await readInputBytes(file, cwd, runtime, 1048576);
   } catch (error) {
     throw usageError(`Cannot read K/V file: ${error instanceof Error ? error.message : "read failed"}`);
   }

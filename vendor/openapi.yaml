@@ -324,7 +324,7 @@ paths:
         application revision. A live manifest reference blocks deletion
         with application_in_use; there is no force-delete path.
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "204": { description: Application and releases tombstoned. }
         "409": { description: application_in_use — a live manifest still references one of the application's releases., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
@@ -363,7 +363,7 @@ paths:
     post:
       operationId: createPlaylist
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PlaylistWrite" } } } }
       responses:
         "201": { description: Playlist, content: { application/json: { schema: { $ref: "#/components/schemas/Playlist" } } } }
@@ -379,7 +379,7 @@ paths:
     put:
       operationId: updatePlaylist
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PlaylistWrite" } } } }
       responses:
         "200": { description: Playlist, content: { application/json: { schema: { $ref: "#/components/schemas/Playlist" } } } }
@@ -387,7 +387,7 @@ paths:
     delete:
       operationId: deletePlaylist
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "204": { description: Deleted }
         default: { $ref: "#/components/responses/Problem" }
@@ -413,7 +413,7 @@ paths:
         Last-write-wins on the comments field only; revision, updated_at, and
         the runtime manifest are unchanged.
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CommentsWrite" } } } }
       responses:
         "200": { description: Comments, content: { application/json: { schema: { $ref: "#/components/schemas/Comments" } } } }
@@ -422,7 +422,7 @@ paths:
       operationId: deleteScreenComments
       description: Unsets screen comments. Idempotent if already unset. Does not bump revision or remint the runtime manifest.
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "204": { description: Unset }
         default: { $ref: "#/components/responses/Problem" }
@@ -445,7 +445,7 @@ paths:
         of the comments object must be at most 1024 bytes. Last-write-wins on
         the comments field only; revision and the runtime manifest are unchanged.
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CommentsWrite" } } } }
       responses:
         "200": { description: Comments, content: { application/json: { schema: { $ref: "#/components/schemas/Comments" } } } }
@@ -454,7 +454,7 @@ paths:
       operationId: deletePlaylistComments
       description: Unsets playlist comments. Idempotent if already unset. Does not bump revision or remint the runtime manifest.
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "204": { description: Unset }
         default: { $ref: "#/components/responses/Problem" }
@@ -479,7 +479,7 @@ paths:
         that page's comments field only; playlist revision and the runtime
         manifest are unchanged.
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CommentsWrite" } } } }
       responses:
         "200": { description: Comments, content: { application/json: { schema: { $ref: "#/components/schemas/Comments" } } } }
@@ -488,7 +488,7 @@ paths:
       operationId: deletePlaylistPageComments
       description: Unsets comments on one playlist page. Idempotent if already unset. Does not bump revision or remint the runtime manifest.
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "204": { description: Unset }
         default: { $ref: "#/components/responses/Problem" }
@@ -570,7 +570,7 @@ paths:
     patch:
       operationId: updateScreen
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenPatch" } } } }
       responses:
         "200": { description: Screen, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
@@ -579,7 +579,7 @@ paths:
       operationId: deleteScreen
       description: Account delete is not a de-associate. Archive the screen instead. Returns screen_archive_required.
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "409": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
@@ -587,7 +587,7 @@ paths:
     post:
       operationId: rotateScreenPublicId
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "200": { description: "Public URL credential rotated; player public-key enrollment preserved. Every runtime session is invalidated by the new content_access_generation and the live desired and active grants are reissued at that generation for their unchanged manifest revision, so a paired player that re-mints its session keeps authorizing the content it is already showing.", content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
         default: { $ref: "#/components/responses/Problem" }
@@ -620,7 +620,7 @@ paths:
         when the identifier is attached in more than one place. Problem
         responses never echo device identifiers.
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/OptionalIfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/OptionalIfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "200": { description: "Screen recovered onto the pairing device's key; the response carries the current ETag.", content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
         "401": { $ref: "#/components/responses/Problem" }
@@ -634,7 +634,7 @@ paths:
       operationId: archiveScreen
       description: Hides the screen from the default list and darkens the live glass. Does not unbind the player public key. Releases screen_count quota.
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "200": { description: Screen archived., content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
         "401": { $ref: "#/components/responses/Problem" }
@@ -647,7 +647,7 @@ paths:
       operationId: unarchiveScreen
       description: Restores an archived screen to the default list and remints a normal manifest. Must pass screen admission. Does not change the bound public key.
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "200": { description: Screen unarchived., content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
         "401": { $ref: "#/components/responses/Problem" }
@@ -826,7 +826,7 @@ paths:
     put:
       operationId: putKV
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/OptionalIfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/OptionalIfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/KVWrite" } } } }
       responses:
         "200": { description: KV entry, content: { application/json: { schema: { $ref: "#/components/schemas/KVEntry" } } } }
@@ -834,7 +834,7 @@ paths:
     delete:
       operationId: deleteKV
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "204": { description: Deleted }
         default: { $ref: "#/components/responses/Problem" }
@@ -919,7 +919,7 @@ paths:
     patch:
       operationId: patchMedia
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MediaTagPatch" } } } }
       responses:
         "200": { description: Ready media with the updated tag. Matching by:tag playlists rematerialize in the same transaction., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Media" } } } }
@@ -927,7 +927,7 @@ paths:
     delete:
       operationId: deleteMedia
       security: [{ accountBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "204": { description: Tombstoned. Referenced desired or active grants cannot be deleted. }
         default: { $ref: "#/components/responses/Problem" }
@@ -1591,7 +1591,7 @@ paths:
       x-rate-limit-policies: [{ name: runtime-kv-write, quota: 120, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ pairedRuntimeCookie: [], primitiveCapability: [] }, { nativeSessionAuthorization: [], primitiveCapability: [] }]
-      parameters: [{ $ref: "#/components/parameters/OptionalIfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/OptionalIfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/KVWrite" } } } }
       responses:
         "200": { description: Paired-device KV mutation, headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/KVEntry" } } } }
@@ -1601,7 +1601,7 @@ paths:
       x-rate-limit-policies: [{ name: runtime-kv-write, quota: 120, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ pairedRuntimeCookie: [], primitiveCapability: [] }, { nativeSessionAuthorization: [], primitiveCapability: [] }]
-      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "204": { description: Paired-device KV deletion, headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         default: { $ref: "#/components/responses/Problem" }
@@ -2453,6 +2453,7 @@ components:
     PlaylistPageID: { name: page_id, in: path, required: true, schema: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, description: Playlist page id string. }
     ApplicationID: { name: application_id, in: path, required: true, schema: { type: string } }
     IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 8, maxLength: 200 } }
+    OptionalIdempotencyKey: { name: Idempotency-Key, in: header, required: false, schema: { type: string, minLength: 8, maxLength: 200 }, description: "Omit for a fresh operation. Supply and reuse a key to deduplicate retries; the CLI manages keys automatically." }
     ArchiveSHA256: { name: ScreenRig-Archive-SHA256, in: header, required: true, schema: { type: string, pattern: "^[0-9a-f]{64}$" } }
     ExpandedBytes: { name: ScreenRig-Expanded-Bytes, in: header, required: true, schema: { type: integer, minimum: 1, maximum: 262144000 } }
     FileCount: { name: ScreenRig-File-Count, in: header, required: true, schema: { type: integer, minimum: 1, maximum: 5000 } }
@@ -2476,8 +2477,8 @@ components:
         to 120 Unicode scalar values. Neither name header may rename a release
         update. This avoids raw Unicode in HTTP header values.
       schema: { type: string, maxLength: 1447 }
-    IfMatch: { name: If-Match, in: header, required: true, schema: { type: string } }
-    OptionalIfMatch: { name: If-Match, in: header, required: false, schema: { type: string }, description: Omit only when creating a new key; updates require the current quoted revision. }
+    IfMatch: { name: If-Match, in: header, required: false, schema: { type: string }, description: "Optional positive resource revision. Omit to write the current resource; a supplied stale revision is revision_conflict." }
+    OptionalIfMatch: { name: If-Match, in: header, required: false, schema: { type: string }, description: "Optional positive resource revision. Omit to create or overwrite a key; a supplied stale revision is revision_conflict." }
     AfterCursor: { name: after, in: query, required: false, schema: { type: string } }
     EventListLimit: { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 }, description: "Page size. A value outside 1-200 is refused with invalid_request and an errors[] member whose field is limit." }
     PlaybackScreenID: { name: screen_id, in: query, required: false, schema: { type: string, pattern: "^(?:(?:stage|qa|development)_)?scr_" } }
@@ -3227,7 +3228,7 @@ components:
         first_started_at: { type: string, format: date-time }
         last_started_at: { type: string, format: date-time }
     PlaybackAggregateList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/PlaybackAggregate" } } } }
-    KVWrite: { type: object, additionalProperties: false, required: [value_base64, content_type], properties: { value_base64: { type: string, contentEncoding: base64, maxLength: 1398104 }, content_type: { type: string, minLength: 1, maxLength: 127 } } }
+    KVWrite: { type: object, additionalProperties: false, required: [value_base64], properties: { value_base64: { type: string, contentEncoding: base64, maxLength: 1398104 }, content_type: { type: string, minLength: 1, maxLength: 127, default: application/octet-stream } } }
     KVEntry: { type: object, additionalProperties: false, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, value_base64: { type: string, contentEncoding: base64 }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer } } }
     KVSummary: { type: object, additionalProperties: false, required: [application_id, key, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string }, updated_at: { type: string } } }
     KVList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/KVSummary" } } } }

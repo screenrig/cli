@@ -228,7 +228,7 @@ test("declared relationships and choices reject invalid commands before authenti
     ["media", "generate", "--prompt", "test", "--quality", "ultra"],
     ["playlist", "init", "med_TEST", "--name", "Test", "--output", "out.json", "--target-width", "1920"],
     ["compose", "render", "input.json", "--target-height", "1080"],
-    ["playlist", "import", "bundle", "--update", "pl_TEST"],
+    ["playlist", "import", "bundle", "--expect-rev", "1"],
   ]) {
     assert.throws(() => invoke(args), (error: unknown) => {
       const failure = error as { status: number; stdout: string };
@@ -263,16 +263,12 @@ test("value dependencies and mutation requirements fail before runtime access", 
   const runtime = new Proxy({}, { get() { throw new Error("Runtime must not be accessed"); } });
   for (const args of [
     ["kv", "set", "key", "--app-id", "app_TEST"],
-    ["kv", "set", "key", "--application-id", "app_TEST", "--file", "input.txt"],
-    ["kv", "set", "key", "--app-id", "app_TEST", "--value-base64="],
     ["comment", "set", "screen", "scr_TEST"],
     ["comment", "set", "playlist", "pl_TEST"],
-    ["screen", "provision"],
     ["screen", "provision", "--open", "--print-url"],
     ["screen", "update", "scr_TEST", "--expect-rev", "1"],
     ["media", "update", "med_TEST", "--expect-rev", "1"],
     ["feedback", "bug", "Title"],
-    ["playlist", "replace-release", "pl_TEST", "--page", "page_1", "--primitive", "app", "--release-id", "rel_TEST", "--apply"],
   ]) {
     await assert.rejects(executeCommand(args, runtime as Parameters<typeof executeCommand>[1]), (error: any) => error.problem?.code === "usage_error", JSON.stringify(args));
   }
@@ -281,8 +277,6 @@ test("value dependencies and mutation requirements fail before runtime access", 
   const set = commandHelp(["kv", "set"]);
   assert.deepEqual(set.relationships, [
     { kind: "exactlyOne", options: ["--json-value", "--file", "--value-base64"] },
-    { kind: "requires", options: ["--file", "--content-type"] },
-    { kind: "requires", options: ["--value-base64", "--content-type"] },
   ]);
 });
 

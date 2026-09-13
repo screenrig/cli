@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
+import { readInputBytes } from "./authoring-input.js";
+import type { CliRuntime } from "./runtime.js";
 import type { CommentsWrite } from "./adapters/protocol.js";
 import type { ParsedArgs } from "./argv.js";
 import { usageError } from "./problems.js";
@@ -32,7 +32,7 @@ function stringFlag(args: ParsedArgs, name: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-export async function commentsWriteFromArgs(args: ParsedArgs, cwd: string): Promise<CommentsWrite> {
+export async function commentsWriteFromArgs(args: ParsedArgs, cwd: string, runtime?: CliRuntime): Promise<CommentsWrite> {
   if (Object.hasOwn(args.flags, "value") || Object.hasOwn(args.flags, "value-base64")) {
     throw usageError("comment set accepts --json-value or --file; it does not take --value or --value-base64.");
   }
@@ -57,7 +57,7 @@ export async function commentsWriteFromArgs(args: ParsedArgs, cwd: string): Prom
   }
   let text: string;
   try {
-    text = await readFile(path.resolve(cwd, file), "utf8");
+    text = (await readInputBytes(file, cwd, runtime, 1048576)).toString("utf8");
   } catch (error) {
     throw usageError(`Cannot read comments file: ${error instanceof Error ? error.message : "read failed"}`);
   }

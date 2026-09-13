@@ -50,7 +50,7 @@ Use `screenrig help --all` for the complete command inventory, or
 immediate children. Add `--json` for structured command paths, positional arguments,
 option choices and defaults, relationships, and examples;
 help runs without configuration or authentication. Command-specific options follow
-that command, for example `screenrig screen update ID --name Lobby --expect-rev 1`.
+that command, for example `screenrig screen update ID --name Lobby`.
 Global options such as `--json` may appear before or after the command. Use
 `--name=VALUE` for a value starting with a dash, and `--` before option-like file
 names. Duplicate options are rejected.
@@ -137,8 +137,7 @@ is still online and limits how many offers each screen receives.
 `app upload` and `app update` return the same JSON data paths with or without
 `--no-wait`: `data.application` contains the accepted application `id`,
 `release_id`, and `operation_id`; `data.pack` contains `sha256` and `file_count`.
-The accepted response does not include an application revision. Read `app show`
-for the current revision before an update.
+The accepted response does not include an application revision. Updates need no prior read. For an optional revision guard, read `app show` and pass `--expect-rev`.
 
 `data.operation` contains the observed completed operation when waiting. With
 `--no-wait` it is `null`: upload acceptance does not establish operation state
@@ -192,7 +191,7 @@ group/action, never request payloads. Fingerprints include the origin, credentia
 body, and revision. Changed requests receive different keys. A completed command
 clears its pending state; application acceptance followed by a failed processing
 wait retains it so retrying does not create another application. Definite
-refusals still require reconciliation; revision checks remain in force.
+refusals still require reconciliation; explicit revision checks remain in force.
 
 Automatic replay stops after 23 hours, before the server's 24-hour replay window
 ends. Inspect the resource before explicitly supplying a new `--idempotency-key`
@@ -256,7 +255,7 @@ For ready images and videos, prepare a full-screen playlist in playback order:
 ```sh
 screenrig playlist init med_POSTER med_VIDEO --name "Lobby loop" --screen-id scr_LOBBY --output lobby.json
 screenrig playlist preview lobby.json --output preview --contact-sheet
-screenrig screen publish scr_LOBBY lobby.json --expect-rev 7
+screenrig screen publish scr_LOBBY lobby.json
 ```
 
 Inspect the document and preview before publishing. `playlist init` accepts ordered
@@ -288,19 +287,15 @@ are pinned to the supplied release and use timed advancement, without controller
 privileges. Edit the document for application-controlled advancement.
 
 With `--screen-id`, the result includes `screen_id`, `screen_revision`, and a
-`publish.argv` array containing the output path and observed revision. It also
+`publish.argv` array containing the output path and optional revision guard. It also
 returns `preview.argv`. These arrays preserve the selected config/API and paths
-with spaces; execute preview, inspect it, then use the publish arguments. A later
-screen change still produces a revision conflict. Target metadata stays outside
+with spaces; execute preview, inspect it, then use the publish arguments. Add `--expect-rev` explicitly to guard against later screen changes. Target metadata stays outside
 the playlist file. Override canvas dimensions with both `--target-width` and
 `--target-height`; these also work without `--screen-id` (no publish arguments).
-Unknown or multiple reported surfaces require explicit dimensions. Output files
-must not already exist.
+Unknown or multiple reported surfaces require explicit dimensions. Output files are exclusive by default; use `--overwrite` to replace an existing authoring file atomically. Parent directories are created automatically. URL and release-ID inputs with explicit dimensions work without login.
 
-`screen publish <screen-id> <file>` creates a new playlist, assigns it using the
-expected **screen** revision, and reads back the assignment. It does not update an
-existing playlist by name. A name collision requires a different name or an
-explicit `playlist update`. Its JSON result reports `playlist_id`,
+`screen publish <screen-id> <file>` creates a new playlist, assigns it with an optional **screen** revision guard, and reads back the assignment. It does not update an
+existing playlist by name. Display names may repeat; use the playlist ID for an explicit `playlist update`. Its JSON result reports `playlist_id`,
 `playlist_revision`, `screen_id`, `screen_revision`, `assignment_verified`, and
 `playback_verified`. Assignment verification does not prove playback; request and
 inspect a screenshot and relevant playback evidence separately.
@@ -322,12 +317,11 @@ To edit an existing playlist:
 
 ```sh
 screenrig playlist show pl_EXISTING --output lobby.json
-screenrig playlist update pl_EXISTING lobby.json --expect-rev 4
+screenrig playlist update pl_EXISTING lobby.json
 ```
 
 `playlist show --output` writes the editable `{name, pages}` document and returns
-its path, `playlist_id`, and source `revision` on stdout. Use that returned revision
-for the update. It preserves dynamic selectors, schedules, motion, and pinned
+its path, `playlist_id`, and source `revision` on stdout. Optionally pass that revision with `--expect-rev` to guard the update. It preserves dynamic selectors, schedules, motion, and pinned
 application releases, removing server-derived media and timing fields. Comments
 remain separate. Plain `playlist show` is an inspection response; `--editable`
 without `--output` returns `data.document`, `data.playlist_id`, and `data.revision`.
@@ -341,18 +335,17 @@ screenrig playlist replace-release pl_EXISTING --page board-page --primitive boa
 ```
 
 Review `data.previous_release_id`, `data.release_id`, and `data.affected_screens`
-(including archived assignments). Then use the returned `data.revision` and
-`data.impact` to apply that exact replacement:
+(including archived assignments). Then use the returned `data.impact` to apply that exact replacement:
 
 ```sh
-screenrig playlist replace-release pl_EXISTING --page board-page --primitive board --release-id rel_NEW --apply --expect-rev 4 --expect-impact TOKEN_FROM_PREVIEW
+screenrig playlist replace-release pl_EXISTING --page board-page --primitive board --release-id rel_NEW --apply
 ```
 
 The CLI preserves the other primitives and playlist settings. Every screen
 assigned to this shared playlist receives the new pin; archived screens retain
 it for later use. A changed replacement, playlist revision, or observed screen
 impact requires a fresh preview and review. Screen assignments can change after
-the snapshot; the server atomically checks only the playlist revision. Release
+the snapshot; the server checks the playlist revision atomically only when `--expect-rev` is supplied. Release
 availability and ownership are validated by the server on apply. After writing,
 verify screen manifest revisions and playback. Existing pins stay unchanged
 until the replacement is applied.
@@ -360,7 +353,7 @@ until the replacement is applied.
 Playlist validate, create, update, preview, and screen publish accept `-` as their
 input file to read stdin. JSON envelopes are never written into authored files.
 `--expect-rev` is the preferred revision spelling; `--if-match` remains a compatible
-alias. Supply only one. The HTTP revision contract is unchanged.
+alias. Supply only one. Omit the flag to write the current resource without a revision precondition. A supplied stale revision still returns `revision_conflict`.
 
 Generation accepts either `--prompt TEXT` or `--prompt-file FILE`, including
 `--prompt-file -` for stdin. The file is the complete prompt, with no trimming;

@@ -84,7 +84,7 @@ test("stdin validation and editable output need no jq or metadata stripping", as
  assert.throws(()=>parseArgv(['media','generate','--prompt','a','--prompt-file','b']));
 });
 
-for (const failure of ['create','assign','verify']) test(`publish resumes an ambiguous ${failure} without duplicating resources`, async t => {
+for (const revision of [undefined, '7']) for (const failure of ['create','assign','verify']) test(`publish revision ${revision} resumes an ambiguous ${failure} without duplicating resources`, async t => {
  const dir=await mkdtemp('/tmp/publish-workflows-'); t.after(()=>rm(dir,{recursive:true,force:true}));
  let created=false, assigned=false, failed=false, reads=0;
  const createKeys:string[]=[],assignKeys:string[]=[];
@@ -100,11 +100,11 @@ for (const failure of ['create','assign','verify']) test(`publish resumes an amb
   return response({id:'pl_TEST',revision:1});
  })
  .on('PATCH','/api/v1/screens/scr_TEST',req=>{
-  assert.equal(req.headers!['if-match'],'"7"');assignKeys.push(req.headers!['idempotency-key']!);assigned=true;
+  assert.equal(req.headers!['if-match'],revision ? '"7"' : undefined);assignKeys.push(req.headers!['idempotency-key']!);assigned=true;
   if(failure==='assign'&&!failed){failed=true;throw networkError('Test connection failure');}
   return response({id:'scr_TEST',revision:8,playlist_id:'pl_TEST'});
  });
- const options={client:new ApiClient({transport,token:'test-token'}),runtime:processRuntime(),configPath:dir+'/config.json',apiUrl:'https://api.screenrig.ai',screenId:'scr_TEST',revision:'7',document:document()};
+ const options={client:new ApiClient({transport,token:'test-token'}),runtime:processRuntime(),configPath:dir+'/config.json',apiUrl:'https://api.screenrig.ai',screenId:'scr_TEST',revision,document:document()};
  await assert.rejects(()=>publishScreen(options));
  const result=await publishScreen(options);
  assert.equal(result.assignment_verified,true); assert.equal(result.playback_verified,false);
@@ -216,7 +216,7 @@ test("mixed preparation carries target revision without publishing and guards up
  assert.deepEqual(doc.pages[1].advance,{mode:'duration',after_ms:8000});
  assert.equal(doc.pages[2].primitives[0].src,'https://example.com/board');
  const publish=parseArgv(result.body.data.publish.argv);
- assert.equal(publish.flags['if-match'],'7'); assert.equal(publish.positionals[3],dir+'/prepared.json');
+ assert.equal(publish.flags['if-match'],undefined); assert.equal(publish.positionals[3],dir+'/prepared.json');
  assert.equal(parseArgv(result.body.data.preview.argv).positionals[2],dir+'/prepared.json');
  assert.equal((await invoke(['https://user:secret@example.com'],'bad.json')).code,2);
  assert.equal((await invoke(['http://example.com'],'bad.json')).code,2);
@@ -327,3 +327,17 @@ for (const sameFile of [false, true]) for (const explicitKey of [false, true]) {
   }
  });
 }
+
+test("local URL authoring works offline, creates parents, and supports explicit overwrite", async t => {
+ const dir=await mkdtemp('/tmp/offline-authoring-');t.after(()=>rm(dir,{recursive:true,force:true}));
+ const output=dir+'/nested/playlist.json';
+ async function invoke(extra:string[]=[]) {
+  let out=''; const transport=new FakeTransport();
+  const code=await run({...processRuntime(),argv:['--config',dir+'/config.json','playlist','init','https://example.com','--name','Offline','--target-width','1920','--target-height','1080','--output',output,...extra],env:{},cwd:()=>dir,transport,stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
+  assert.equal(transport.calls.length,0);return {code,out};
+ }
+ assert.equal((await invoke()).code,0);
+ assert.equal((await invoke()).code,2);
+ assert.equal((await invoke(['--overwrite'])).code,0);
+ assert.equal(JSON.parse(await readFile(output,'utf8')).name,'Offline');
+});

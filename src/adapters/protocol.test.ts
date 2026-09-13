@@ -426,7 +426,7 @@ test("screen observation is optional, read-only, and absent from ScreenPatch", (
   // The CLI reads observation from GET /api/v1/screens/{id}. Players PUT the
   // runtime route; this command surface must not.
   assert.doesNotMatch(commands, /\/runtime\/v1\/observation/);
-  assert.match(commands, /screen update requires <id>, --expect-rev, and --name, --playlist-id, or --timezone/);
+  assert.match(commands, /screen update requires <id>, and --name, --playlist-id, or --timezone/);
 });
 
 test("screen online is required, last_online_at and last_ip are optional, and ScreenPatch cannot write them", () => {
@@ -462,7 +462,7 @@ test("screen online is required, last_online_at and last_ip are optional, and Sc
   assert.match(screenSchema, /maxLength: 45/);
   assert.match(screenSchema, /ScreenPatch, pairing bodies, session[\s\S]*runtime manifest\s+body cannot write it/);
   assert.doesNotMatch(commands, /--online|--last-online-at|--last-ip/);
-  assert.match(commands, /screen update requires <id>, --expect-rev, and --name, --playlist-id, or --timezone/);
+  assert.match(commands, /screen update requires <id>, and --name, --playlist-id, or --timezone/);
 });
 
 test("recovery_pending.host is a local optional description without identifiers", () => {
@@ -891,7 +891,7 @@ test("opaque agent comments are optional on GET resources, dedicated comment rou
     openapi.indexOf("/api/v1/comment/screen/{id}:"),
     openapi.indexOf("/api/v1/comment/playlist/{id}:"),
   );
-  assert.match(screenComments, /parameters: \[\{ \$ref: "#\/components\/parameters\/IdempotencyKey" \}\]/);
+  assert.match(screenComments, /parameters: \[\{ \$ref: "#\/components\/parameters\/OptionalIdempotencyKey" \}\]/);
   assert.doesNotMatch(screenComments, /IfMatch/);
 
   for (const action of ["show", "set", "delete"]) {
@@ -915,7 +915,7 @@ test("opaque agent comments are optional on GET resources, dedicated comment rou
 
 test("control-plane KV adapter follows the authoritative binary-safe OpenAPI schema", () => {
   const source = readFileSync(OPENAPI_CONTRACT, "utf8");
-  assert.match(source, /KVWrite:.*required: \[value_base64, content_type\].*value_base64:.*contentEncoding: base64.*content_type:/);
+  assert.match(source, /KVWrite:.*required: \[value_base64\].*value_base64:.*contentEncoding: base64.*content_type:/);
   assert.match(source, /KVEntry:.*required: \[application_id, key, value_base64, content_type, bytes, sha256, revision\]/);
   assert.match(source, /KVSummary:.*required: \[application_id, key, content_type, bytes, sha256, revision\]/);
   assert.match(source, /KVList:.*maxItems: 200/);

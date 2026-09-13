@@ -27,7 +27,7 @@ const invalid = [
   ["kv", "set", "key", "--application-id", "app_TEST", "--json-value", "{}", "--file", "x"],
   ["compose", "render", "page.json", "--target-width", "1920"],
   ["events", "list", "--after", "a", "--cursor", "b"],
-  ["playlist", "import", "bundle", "--update", "pl_TEST"],
+  ["playlist", "import", "bundle", "--expect-rev", "1"],
 ];
 
 for (const [index, argv] of invalid.entries()) {

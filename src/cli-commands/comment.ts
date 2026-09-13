@@ -22,14 +22,14 @@ export function registerCommentCommands(root: Command, bind: CommandActionBinder
   commentSet.command("screen").description("Replace screen comments")
     .argument("<id>", "Screen or playlist identifier")
     .addOption(new Option("--json-value <JSON>", "Supply a JSON value").conflicts(["file"]))
-    .addOption(new Option("--file <FILE>", "Read the value from a file").conflicts(["jsonValue"]))
+    .addOption(new Option("--file <FILE>", "Read the value from a file, or - for stdin").conflicts(["jsonValue"]))
     .action(bind(handleCommentSetScreen));
 
   commentSet.command("playlist").description("Replace playlist comments")
     .argument("<id>", "Screen or playlist identifier")
     .option("--page <PAGE_ID>", "Select playlist page comments")
     .addOption(new Option("--json-value <JSON>", "Supply a JSON value").conflicts(["file"]))
-    .addOption(new Option("--file <FILE>", "Read the value from a file").conflicts(["jsonValue"]))
+    .addOption(new Option("--file <FILE>", "Read the value from a file, or - for stdin").conflicts(["jsonValue"]))
     .action(bind(handleCommentSetPlaylist));
 
   const commentDelete = comment.command("delete").description("Delete screen or playlist comments");

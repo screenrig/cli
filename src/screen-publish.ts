@@ -22,11 +22,11 @@ function conflict(detail: string, revision?: number): never {
 /** Multi-request publishing is resumable, not atomic. The journal contains no authored content. */
 export async function publishScreen(options: {
   client: ApiClient; runtime: CliRuntime; configPath: string; apiUrl: string;
-  screenId: string; revision: string; document: any; requestedKey?: string;
+  screenId: string; revision?: string; document: any; requestedKey?: string;
 }) {
   const { client, screenId, document } = options;
-  const expected = Number(options.revision.replaceAll('"', ''));
-  quotedRevision(options.revision);
+  const expected = options.revision === undefined ? undefined : Number(options.revision.replaceAll('"', ''));
+  if (options.revision !== undefined) quotedRevision(options.revision);
   if (!/^scr_[A-Za-z0-9_-]+$/.test(screenId)) throw usageError("screen publish requires a screen identifier.");
   const account = (await client.call({ method: "GET", path: "/api/v1/account" })).body as { id: string };
   if (!account?.id?.startsWith("acc_")) throw usageError("Account identity is missing.");
@@ -74,7 +74,7 @@ export async function publishScreen(options: {
     if (!state) {
       const screen = resource((await client.call({ method: "GET", path: `/api/v1/screens/${screenId}` })).body, "scr_");
       if (screen.id !== screenId) throw usageError("Screen response identity did not match.");
-      if (screen.revision !== expected) conflict("Screen changed before publishing. Inspect it and retry with its intended revision.", screen.revision);
+      if (expected !== undefined && screen.revision !== expected) conflict("Screen changed before publishing. Inspect it and retry with its intended revision.", screen.revision);
       if (document.pages.some((page: any) => page.visibility !== undefined) && !screen.timezone) throw usageError("Set the screen timezone before publishing a scheduled playlist.");
       state = { version: 1, created_at: options.runtime.now().getTime(), fingerprint, create_key: newIdempotencyKey(), assign_key: newIdempotencyKey() };
       await save();
@@ -90,7 +90,7 @@ export async function publishScreen(options: {
       await save();
     }
     if (!state.assigned) {
-      await client.call({ method: "PATCH", path: `/api/v1/screens/${screenId}`, body: { playlist_id: state.playlist.id }, headers: { "if-match": quotedRevision(options.revision) }, idempotent: true, idempotencyKey: state.assign_key });
+      await client.call({ method: "PATCH", path: `/api/v1/screens/${screenId}`, body: { playlist_id: state.playlist.id }, headers: options.revision ? { "if-match": quotedRevision(options.revision) } : undefined, idempotent: true, idempotencyKey: state.assign_key });
       state.assigned = true;
       await save();
     }

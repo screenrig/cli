@@ -24,7 +24,7 @@ for (const action of ["upload", "update"] as const) {
       const transport = memoryBackend();
       if (action === "update") {
         transport.on("POST", "/api/v1/applications/app_EXISTING/releases", (request) => {
-          assert.equal(request.headers?.["if-match"], '"7"');
+          assert.equal(request.headers?.["if-match"], noWait ? undefined : '"7"');
           return { status: 202, headers: {}, body: {
             id: "app_EXISTING", release_id: "rel_NEW", operation_id: "op_NEW",
           } };
@@ -34,7 +34,7 @@ for (const action of ["upload", "update"] as const) {
       const stdout = new Writable({ write(chunk, _encoding, callback) { output += chunk; callback(); } });
       const stderr = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
       const argv = ["--json", "app", action,
-        ...(action === "update" ? ["app_EXISTING", appDir, "--expect-rev", "7"] : [appDir]),
+        ...(action === "update" ? ["app_EXISTING", appDir, ...(noWait ? [] : ["--expect-rev", "7"])] : [appDir]),
         ...(noWait ? ["--no-wait"] : ["--poll-ms", "1"]),
       ];
       const code = await run({

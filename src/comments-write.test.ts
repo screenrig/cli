@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+import { processRuntime } from "./runtime.js";
 import assert from "node:assert/strict";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -60,4 +62,9 @@ test("comment writes accept exactly one of --json-value or --file", async () => 
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
+});
+
+
+test("comments accept piped JSON", async () => {
+  assert.deepEqual(await commentsWriteFromArgs(args({file:"-"}), ".", {...processRuntime(),stdin:Readable.from(['{"note":"hello"}']),isStdinTty:()=>false}),{comments:{note:"hello"}});
 });

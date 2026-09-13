@@ -13,13 +13,13 @@ export async function replacePlaylistRelease(options: {
   revision?: string; impact?: string;
 }) {
   const { client, playlistId, pageId, primitiveId, releaseId } = options;
-  if (options.apply ? !options.revision || !options.impact : options.revision || options.impact) {
-    throw usageError("Preview without write flags first. Apply requires --apply, --expect-rev and --expect-impact from that preview.");
+  if (!options.apply && (options.revision || options.impact)) {
+    throw usageError("Preview without write flags first. Use --apply to write; revision and impact guards are optional.");
   }
   const response = await client.call({ method: "GET", path: `/api/v1/playlists/${playlistId}` });
   const resource = response.body as { id: string; revision: number };
   if (resource?.id !== playlistId || !Number.isSafeInteger(resource.revision) || resource.revision < 1) throw usageError("Playlist response has invalid identity or revision.");
-  if (options.apply && options.revision !== String(resource.revision)) {
+  if (options.apply && options.revision !== undefined && options.revision !== String(resource.revision)) {
     throw new CliError(makeProblem("revision_conflict", "Playlist changed", 409, "Preview the replacement again before applying.", { current_revision: resource.revision }));
   }
   const document = editablePlaylist(response.body);
@@ -29,11 +29,12 @@ export async function replacePlaylistRelease(options: {
   if (primitives.length !== 1 || primitives[0].primitive !== "application") throw usageError("Primitive ID must identify exactly one application on the selected page.");
   const primitive = primitives[0];
   const previousRelease = primitive.release_id;
-  if (previousRelease === releaseId) throw usageError("The selected primitive already pins this release.");
+  const unchanged = previousRelease === releaseId;
   primitive.release_id = releaseId;
   assertPlaylistValid(document);
+  const impactChecked = !options.apply || options.impact !== undefined;
   const screens: Pick<Screen, "id" | "label" | "state" | "revision">[] = [];
-  for (const query of [undefined, { state: "archived" }]) {
+  for (const query of (!options.apply || options.impact ? [undefined, { state: "archived" }] : [])) {
     const listed = await client.call({ method: "GET", path: "/api/v1/screens", query });
     const items = (listed.body as { items?: Screen[] })?.items;
     if (!Array.isArray(items)) throw usageError("Cannot determine affected screens: invalid screen list.");
@@ -49,13 +50,14 @@ export async function replacePlaylistRelease(options: {
     playlist_id: playlistId, playlist_name: document.name, revision: resource.revision,
     page_id: pageId, primitive_id: primitiveId,
     previous_release_id: previousRelease, release_id: releaseId,
-    affected_screens: screens,
-    consequence: "Every assigned screen uses this shared playlist. Archived screens retain the new pin for later use. Screen assignments may change after this snapshot; only the playlist revision is checked atomically. Release availability and ownership are checked by the server on apply.",
+    affected_screens: impactChecked ? screens : undefined,
+    consequence: "Every assigned screen uses this shared playlist. Archived screens retain the new pin for later use. Screen assignments may change after this snapshot; a supplied playlist revision is checked atomically. Release availability and ownership are checked by the server on apply.",
   };
   const impact = createHash("sha256").update(JSON.stringify({ api_url: options.apiUrl, review, document })).digest("hex");
   if (!options.apply) return { ...review, impact, applied: false };
-  if (options.impact !== impact) throw usageError("Replacement or affected screens changed. Preview again and review the new impact before applying.");
+  if (options.impact !== undefined && options.impact !== impact) throw usageError("Replacement or affected screens changed. Preview again and review the new impact before applying.");
+  if (unchanged) return { ...review, impact, applied: true, unchanged: true, playlist: response.body };
   const updated = await client.call({ method: "PUT", path: `/api/v1/playlists/${playlistId}`, idempotent: true,
-    headers: { "if-match": quotedRevision(options.revision!) }, body: document });
+    headers: options.revision ? { "if-match": quotedRevision(options.revision) } : undefined, body: document });
   return { ...review, impact, applied: true, playlist: updated.body };
 }

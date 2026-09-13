@@ -40,7 +40,7 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
 
   media.command("upload-batch").description("Upload a manifest with resumable state")
     .argument("<manifest.json>", "Upload manifest file")
-    .requiredOption("--state <FILE>", "Persist resumable upload state in this file (required)")
+    .option("--state <FILE>", "Override the automatic private resumable state file")
     .option("--concurrency <N>", "Set concurrent batch uploads", positiveInteger("concurrency"))
     .addOption(new Option("--no-transcode", "Upload accepted source bytes unchanged").conflicts(["codec", "maxFps", "maxEdge", "webpQuality", "preset", "audio"]))
     .option("--tag <TAG>", "Set the media tag")
@@ -72,12 +72,12 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .argument("<id>", "Media identifier")
     .addOption(new Option("--tag <TAG>", "Set the media tag").conflicts(["clearTag"]))
     .addOption(new Option("--clear-tag", "Remove the media tag").conflicts(["tag"]))
-    .requiredOption("--expect-rev <REVISION>", "Require the current resource revision (required)", revision)
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleMediaUpdate));
 
   media.command("delete").description("Delete media")
     .argument("<id>", "Media identifier")
-    .requiredOption("--expect-rev <REVISION>", "Require the current resource revision (required)", revision)
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleMediaDelete));
   requireOptionGroup(media.commands.find(command => command.name() === "update")!, "exactlyOne", ["--tag", "--clear-tag"]);
 }

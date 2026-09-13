@@ -27,7 +27,7 @@ test("preview is read-only and apply changes only the explicitly scoped pin", as
   const f = fixture();
   const preview = await replacePlaylistRelease(f.options);
   assert.equal(preview.applied, false);
-  assert.deepEqual(preview.affected_screens.map(s => s.id), ["scr_A", "scr_B"]);
+  assert.deepEqual(preview.affected_screens!.map(s => s.id), ["scr_A", "scr_B"]);
   assert.equal(preview.previous_release_id, "rel_OLD");
   assert.ok(f.transport.calls.every(c => c.method === "GET"));
   const applied = await replacePlaylistRelease({ ...f.options, apply: true, revision: String(preview.revision), impact: preview.impact });
@@ -59,8 +59,8 @@ test("server revision race is surfaced without a retry", async () => {
   assert.equal(f.transport.calls.filter(c => c.method === "PUT").length, 1);
 });
 
-test("missing review, wrong target and no-op never write", async () => {
-  for (const override of [{ apply: true }, { revision: "4" }, { pageId: "missing" }, { primitiveId: "missing" }, { releaseId: "rel_OLD" }]) {
+test("invalid preview flags and wrong targets never write", async () => {
+  for (const override of [{ revision: "4" }, { pageId: "missing" }, { primitiveId: "missing" }]) {
     const f = fixture();
     await assert.rejects(() => replacePlaylistRelease({ ...f.options, ...override }));
     assert.ok(f.transport.calls.every(c => c.method === "GET"));
@@ -74,4 +74,23 @@ test("CLI exposes explicit targets and revision aliases", () => {
   assert.equal(parseArgv(argv).flags.page, "page_1");
   assert.equal(parseArgv([...argv, "--apply", "--expect-rev", "4", "--expect-impact", "token"]).flags["if-match"], "4");
   assert.throws(() => parseArgv(["playlist", "replace-release", "pl_BOARD"]));
+});
+
+test("apply accepts omitted revision and sends no precondition", async () => {
+ const f = fixture(); const preview = await replacePlaylistRelease(f.options);
+ const applied = await replacePlaylistRelease({...f.options, apply: true, impact: preview.impact});
+ assert.equal(applied.applied, true);
+ assert.equal(f.transport.calls.find(c => c.method === "PUT")?.headers?.["if-match"], undefined);
+});
+
+test("direct apply needs no preview or screen inventory, and a no-op succeeds", async () => {
+ const f = fixture();
+ const applied = await replacePlaylistRelease({...f.options, apply:true});
+ assert.equal(applied.applied,true);
+ assert.deepEqual(f.transport.calls.map(c=>c.method),["GET","PUT"]);
+ assert.equal(f.transport.calls[1]?.headers?.["if-match"],undefined);
+ const noOp = fixture();
+ const result = await replacePlaylistRelease({...noOp.options, apply:true, releaseId:"rel_OLD"});
+ assert.equal(result.applied,true);
+ assert.deepEqual(noOp.transport.calls.map(c=>c.method),["GET"]);
 });

@@ -883,7 +883,7 @@ test("declare records the operation id in state before the signed PUT", async ()
   }
 });
 
-test("media upload-batch requires --state and rejects a bad concurrency", async () => {
+test("media upload-batch accepts automatic state and rejects a bad concurrency", async () => {
   const configDir = await testTemp("batch-usage-cfg-");
   const cwdDir = await testTemp("batch-usage-cwd-");
   const fsLike = await enrolled(configDir);
@@ -895,8 +895,8 @@ test("media upload-batch requires --state and rejects a bad concurrency", async 
       new FakeTransport(),
       { configDir, cwdDir, fs: fsLike },
     );
-    assert.equal(missing.code, ExitCode.Usage);
-    assert.match(missing.stdout, /requires --state/);
+    assert.notEqual(missing.code, ExitCode.Usage);
+    assert.doesNotMatch(missing.stdout, /requires --state/);
     const bad = await withRuntime(
       ["--json", "media", "upload-batch", manifest, "--state", "s.json", "--concurrency", "9", "--no-transcode"],
       new FakeTransport(),
@@ -907,5 +907,28 @@ test("media upload-batch requires --state and rejects a bad concurrency", async 
   } finally {
     await rm(configDir, { recursive: true, force: true });
     await rm(cwdDir, { recursive: true, force: true });
+  }
+});
+
+test("batch uploads resume from automatic private state without --state", async () => {
+  const configDir = await testTemp("batch-auto-cfg-");
+  const cwdDir = await testTemp("batch-auto-cwd-");
+  const fsLike = await enrolled(configDir);
+  try {
+    const file = await writePng(cwdDir, "one.png", "one-bytes");
+    const manifest = await writeManifest(cwdDir, [file]);
+    const argv = ["media", "upload-batch", manifest, "--no-transcode", "--no-progress"];
+    const first = batchTransport();
+    const result = await withRuntime(argv, first.transport, {configDir,cwdDir,fs:fsLike});
+    assert.equal(result.code, ExitCode.Success, result.stdout);
+    assert.equal(first.declareCount(), 1);
+    const second = batchTransport();
+    const resumed = await withRuntime(argv, second.transport, {configDir,cwdDir,fs:fsLike});
+    assert.equal(resumed.code, ExitCode.Success, resumed.stdout);
+    assert.equal(JSON.parse(resumed.stdout).data.resumed, 1);
+    assert.equal(second.declareCount(), 0);
+  } finally {
+    await rm(configDir,{recursive:true,force:true});
+    await rm(cwdDir,{recursive:true,force:true});
   }
 });

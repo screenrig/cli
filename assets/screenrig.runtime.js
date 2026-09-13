@@ -2301,12 +2301,12 @@
     }
     async kvDelete(key, expectedRevision, options = {}) {
       const context = this.requireCapability("kv.write");
-      if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+      if (expectedRevision !== void 0 && (!Number.isInteger(expectedRevision) || expectedRevision < 0)) {
         throw new SdkValidationError("invalid_revision", "expectedRevision must be a non-negative integer");
       }
       const payload = {
         key: this.requireKey(key),
-        expected_revision: expectedRevision,
+        ...expectedRevision === void 0 ? {} : { expected_revision: expectedRevision },
         idempotency_key: options.idempotencyKey ?? randomIdempotencyKey(),
         generation: context.generation,
         nonce: context.nonce

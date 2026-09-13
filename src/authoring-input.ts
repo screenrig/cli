@@ -1,4 +1,4 @@
-import { open } from "node:fs/promises";
+import { open, mkdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import type { CliRuntime } from "./runtime.js";
 import { usageError } from "./problems.js";
@@ -34,11 +34,35 @@ export async function readAuthoringJson(file: string, runtime: CliRuntime): Prom
   try { return JSON.parse(text); } catch { throw usageError("Input is not valid JSON."); }
 }
 /** Exclusive creation keeps a prepared document safe from accidental replacement. */
-export async function writeAuthoringJson(file: string, document: unknown, runtime: CliRuntime): Promise<string> {
+export async function writeAuthoringJson(file: string, document: unknown, runtime: CliRuntime, overwrite = false): Promise<string> {
   const output = path.resolve(runtime.cwd(), file);
+  await mkdir(path.dirname(output), { recursive: true });
+  const destination = overwrite ? `${output}.${crypto.randomUUID()}.tmp` : output;
   try {
-    const handle = await open(output, "wx", 0o600);
+    const handle = await open(destination, "wx", 0o600);
     try { await handle.writeFile(JSON.stringify(document, null, 2) + "\n"); } finally { await handle.close(); }
-  } catch { throw usageError("Cannot create output; choose a new file in an existing directory."); }
+    if (overwrite) await rename(destination, output);
+  } catch { if (overwrite) await rm(destination, { force: true }); throw usageError("Cannot create output; use --overwrite to replace an existing file."); }
   return output;
+}
+
+export async function readInputBytes(file: string, cwd: string, runtime: CliRuntime | undefined, maxBytes: number): Promise<Buffer> {
+  if (file === "-" && (!runtime?.stdin || runtime.isStdinTty?.())) {
+    throw usageError("Pipe input when using '-'.");
+  }
+  const handle = file === "-" ? undefined : await open(path.resolve(cwd, file), "r");
+  try {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const input = handle ? handle.createReadStream({ autoClose: false }) : runtime!.stdin!;
+    for await (const chunk of input) {
+      const bytes = Buffer.from(chunk);
+      size += bytes.length;
+      if (size > maxBytes) throw usageError("Input exceeds its size limit.");
+      chunks.push(bytes);
+    }
+    return Buffer.concat(chunks);
+  } finally {
+    await handle?.close();
+  }
 }

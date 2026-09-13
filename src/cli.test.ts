@@ -1228,9 +1228,8 @@ test("screen pair rejects ambiguous or malformed codes before claiming", async (
   assert.match(result.stdout, /23456789ABCDEFGHJKMNPQRSTUVWXYZ/);
 });
 
-test("screen provision requires exactly one explicit delivery mode", async () => {
+test("screen provision rejects conflicting delivery modes", async () => {
   for (const argv of [
-    ["--json", "screen", "provision"],
     ["--json", "screen", "provision", "--open", "--print-url"],
   ]) {
     const transport = memoryBackend();
@@ -4454,19 +4453,18 @@ test("screen set-timezone forwards the identifier unchanged and never carries a 
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("screen set-timezone rejects a missing id, zone, or revision", async () => {
+test("screen set-timezone rejects a missing id or zone", async () => {
   const transport = memoryBackend();
   const { configDir, fsLike } = await scheduledPlaylistFixture(false, "tz-usage-");
   for (const argv of [
     ["screen", "set-timezone", "--timezone", "America/Los_Angeles", "--expect-rev", "1"],
     ["screen", "set-timezone", "scr_1", "--expect-rev", "1"],
-    ["screen", "set-timezone", "scr_1", "--timezone", "America/Los_Angeles"],
   ]) {
     const result = await withRuntime(["--json", ...argv], transport, { fs: fsLike });
     assert.equal(result.code, ExitCode.Usage, `${argv.join(" ")}: ${result.stdout}`);
     const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string } };
     assert.equal(envelope.error.code, "usage_error");
-    assert.match(envelope.error.detail, /requires <id> --timezone --expect-rev/);
+    assert.match(envelope.error.detail, /requires <id> --timezone/);
   }
   // A rejected invocation never reaches the server.
   assert.equal(transport.calls.some((call) => call.method === "PATCH"), false);
@@ -5258,7 +5256,7 @@ test("app update publishes to the existing application with revision and release
   assert.equal(JSON.parse(result.stdout).data.id, "app_EXISTING");
   assert.equal(JSON.parse(result.stdout).data.release_id, "rel_NEW");
   const count = transport.calls.length;
-  for (const flags of [[], ["--expect-rev", "0"], ["--expect-rev", "7", "--name", "changed"]]) {
+  for (const flags of [["--expect-rev", "0"], ["--expect-rev", "7", "--name", "changed"]]) {
     const invalid = await withRuntime(["--json", "app", "update", "app_EXISTING", appDir, ...flags], transport, { fs: fsLike });
     assert.equal(invalid.code, ExitCode.Usage, invalid.stdout);
     assert.equal(transport.calls.length, count, "invalid update does not upload or request capabilities");
@@ -5675,4 +5673,32 @@ test("playlist create refuses a mixed template-and-primitives page before the wr
   assert.match(envelope.error.detail, /mixes template and primitives/);
   assert.equal(transport.calls.some((call) => call.method === "POST" && call.path === "/api/v1/playlists"), false);
   await rm(configDir, { recursive: true, force: true });
+});
+
+for (const argv of [
+ ["screen", "update", "scr_TEST", "--name", "Updated"],
+ ["screen", "set-timezone", "scr_TEST", "--timezone", "UTC"],
+ ["screen", "archive", "scr_TEST"], ["screen", "unarchive", "scr_TEST"],
+ ["screen", "delete", "scr_TEST"], ["screen", "rotate-public-id", "scr_TEST"],
+ ["media", "update", "med_TEST", "--tag", "Updated"], ["media", "delete", "med_TEST"],
+ ["playlist", "delete", "pl_TEST"], ["kv", "delete", "key", "--app-id", "app_TEST"],
+ ["kv", "set", "key", "--app-id", "app_TEST", "--json-value", "{}"],
+]) test(`revision is optional on ${argv.slice(0,2).join(" ")}`, async () => {
+ const transport = new FakeTransport();
+ const configDir = await testTemp("optional-revision-");
+ const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+ await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {api_url: "https://api.screenrig.ai", token: "sr_live_existing_secret"}, fsLike);
+ const mutations: any[] = [];
+ const paths = ["/api/v1/screens/scr_TEST", "/api/v1/screens/scr_TEST/archive", "/api/v1/screens/scr_TEST/unarchive", "/api/v1/screens/scr_TEST/public-id/rotate", "/api/v1/media/med_TEST", "/api/v1/playlists/pl_TEST", "/api/v1/applications/app_TEST/kv/key"];
+ for (const method of ["PATCH", "POST", "PUT", "DELETE"] as const) for (const target of paths) transport.on(method, target, request => {
+  mutations.push(request);
+  return {status: method === "DELETE" ? 204 : 200, headers: {}, body: {id: argv[2], revision: 8, key: "key", value_base64: "e30=", content_type: "application/json"}};
+ });
+ try {
+  const result = await withRuntime(["--json", ...argv], transport, {fs: fsLike});
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  assert.equal(mutations.length, 1);
+  assert.equal(mutations[0].headers?.["if-match"], undefined);
+  assert.equal(transport.calls.filter(call => call.method === "GET").length, 0, "no revision lookup");
+ } finally { await rm(configDir, {recursive: true, force: true}); }
 });

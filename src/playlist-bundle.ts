@@ -846,7 +846,6 @@ export async function importPlaylistBundle(options: {
     const trimmed = options.name.trim();
     if (trimmed.length === 0 || trimmed.length > 120) throw usageError("playlist import --name must be 1 to 120 characters.");
   }
-  if (options.updateId && !options.ifMatch) throw usageError("playlist import --update requires --expect-rev REVISION.");
   if (!options.updateId && options.ifMatch) throw usageError("playlist import --expect-rev requires --update PLAYLIST_ID.");
   if (options.updateId && !options.updateId.startsWith("pl_")) throw usageError("playlist import --update requires a playlist id starting with pl_.");
   const ifMatch = options.ifMatch ? quotedRevision(options.ifMatch) : undefined;

@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+import { processRuntime } from "./runtime.js";
 import assert from "node:assert/strict";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -57,11 +59,18 @@ test("KV write modes are exclusive and reject the retired value contract", async
   );
   await assert.rejects(() => kvWriteFromArgs(args({ file: "x" }), "."), CliError);
   await assert.rejects(
-    () => kvWriteFromArgs(args({ "json-value": "null", "content-type": "application/json" }), "."),
+    () => kvWriteFromArgs(args({ "json-value": "null", "content-type": "text/plain" }), "."),
     CliError,
   );
   await assert.rejects(
     () => kvWriteFromArgs(args({ "value-base64": "A".repeat(1_398_105), "content-type": "application/octet-stream" }), "."),
     CliError,
   );
+});
+
+
+test("KV byte defaults and stdin preserve binary data; explicit JSON MIME is accepted", async () => {
+  assert.deepEqual(await kvWriteFromArgs(args({"value-base64":"AP8="}), "."), {value_base64:"AP8=",content_type:"application/octet-stream"});
+  assert.deepEqual(await kvWriteFromArgs(args({file:"-"}), ".", {...processRuntime(), stdin:Readable.from([Buffer.from([0,255])]),isStdinTty:()=>false}), {value_base64:"AP8=",content_type:"application/octet-stream"});
+  assert.deepEqual(await kvWriteFromArgs(args({"json-value":"null","content-type":"application/json"}), "."), {value_base64:"bnVsbA==",content_type:"application/json"});
 });

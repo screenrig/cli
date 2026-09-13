@@ -12,7 +12,8 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
   const init = playlist.command("init").description("Prepare an editable playlist from files, ready media, application releases, or HTTPS URLs")
     .argument("<inputs...>", "Local image/video files, med_ IDs, rel_ IDs, or HTTPS URLs in playback order")
     .requiredOption("--name <NAME>", "Playlist name")
-    .requiredOption("--output <FILE>", "Create an editable playlist file")
+    .requiredOption("--output <FILE>", "Write an editable playlist file")
+    .option("--overwrite", "Replace an existing output file atomically")
     .option("--target-width <PX>", "Override canvas width", positiveInteger("target-width"))
     .option("--target-height <PX>", "Override canvas height", positiveInteger("target-height"))
     .addOption(new Option("--duration-ms <MS>", "Non-video page duration").argParser(positiveInteger("duration-ms")).default(8000))
@@ -50,7 +51,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
   playlist.command("update").description("Update a playlist")
     .argument("<id>", "Playlist identifier")
     .argument("<file>", "Playlist JSON file, or - for stdin")
-    .requiredOption("--expect-rev <REVISION>", "Require the current resource revision (required)", revision)
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handlePlaylistUpdate));
 
   const replaceRelease = playlist.command("replace-release").description("Preview or apply one application release replacement and its shared-screen impact")
@@ -62,10 +63,11 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--expect-rev <REVISION>", "Playlist revision from the preview", revision)
     .option("--expect-impact <TOKEN>", "Impact token from the preview")
     .action(bind(handlePlaylistReplaceRelease));
-  requireOptionGroup(replaceRelease, "together", ["--apply", "--expect-rev", "--expect-impact"]);
-  addCommandNotes(replaceRelease, "Defaults to a read-only preview including active and archived assigned screens. Apply requires the preview revision and impact token. Changed impact requires a fresh review. Screen assignments are a snapshot; only playlist revision is checked atomically. Server validates release availability and ownership on apply.");
+  requireOptionGroup(replaceRelease, "requires", ["--expect-impact", "--apply"]);
+  requireOptionGroup(replaceRelease, "requires", ["--expect-rev", "--apply"]);
+  addCommandNotes(replaceRelease, "Defaults to a read-only preview including active and archived assigned screens. Apply writes directly; --expect-impact and --expect-rev are optional guards. Changed impact requires a fresh review. Screen assignments are a snapshot; a supplied playlist revision is checked atomically. Server validates release availability and ownership on apply.");
   addCommandExamples(replaceRelease, 'screenrig playlist replace-release pl_PLAYLIST --page board-page --primitive board --release-id rel_NEW',
-    'screenrig playlist replace-release pl_PLAYLIST --page board-page --primitive board --release-id rel_NEW --apply --expect-rev 4 --expect-impact TOKEN');
+    'screenrig playlist replace-release pl_PLAYLIST --page board-page --primitive board --release-id rel_NEW --apply');
 
   playlist.command("export").description("Export a playlist bundle")
     .argument("<id>", "Playlist identifier")
@@ -79,11 +81,12 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--expect-rev <REVISION>", "Require the current resource revision", revision)
     .option("--poll-ms <MS>", "Set the operation polling interval", positiveInteger("poll-ms"))
     .action(bind(handlePlaylistImport));
-  requireOptionGroup(importCommand, "together", ["--update", "--expect-rev"]);
+  requireOptionGroup(importCommand, "requires", ["--expect-rev", "--update"]);
 
   const show = playlist.command("show").description("Inspect a playlist or write an editable document")
     .option("--output <FILE>", "Create an editable playlist file; report its revision on stdout")
     .option("--editable", "Return an editable document and revision in the JSON envelope")
+    .option("--overwrite", "Replace an existing output file atomically")
     .alias("get")
     .argument("<id>", "Playlist identifier")
     .action(bind(handlePlaylistShow));
@@ -95,6 +98,6 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
 
   playlist.command("delete").description("Delete a playlist")
     .argument("<id>", "Playlist identifier")
-    .requiredOption("--expect-rev <REVISION>", "Require the current resource revision (required)", revision)
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handlePlaylistDelete));
 }
