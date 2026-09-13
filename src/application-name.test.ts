@@ -6,7 +6,7 @@ import { FetchTransport } from "./transport/http.js";
 test("application name preserves ASCII and encodes Unicode as RFC 8187 ASCII bytes", async () => {
   assert.deepEqual(applicationNameHeaders(" Lobby board "), { "screenrig-application-name": "Lobby board" });
   assert.deepEqual(applicationNameHeaders(undefined), {});
-  for (const name of ["TelemetryOS engineering — Fleet and usage lab", "Café", "東京 🖥️", "L'été (1) * — 100%", "😀".repeat(120)]) {
+  for (const name of ["Harbour Lane engineering — Fleet and usage lab", "Café", "東京 🖥️", "L'été (1) * — 100%", "😀".repeat(120)]) {
     const headers = applicationNameHeaders(name);
     assert.equal(headers["screenrig-application-name"], undefined);
     const encoded = headers["screenrig-application-name*"]!;
