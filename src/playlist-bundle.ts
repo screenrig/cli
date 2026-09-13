@@ -836,7 +836,7 @@ export async function importPlaylistBundle(options: {
   runtime: CliRuntime;
   updateId?: string;
   ifMatch?: string;
-  /** Replaces the bundle's playlist name on the written playlist. Names are unique per account. */
+  /** Replaces the bundle's display name on the written playlist. */
   name?: string;
   timeoutMs?: number;
   pollMs?: number;
@@ -979,13 +979,7 @@ export async function importPlaylistBundle(options: {
   }
 }
 
-/**
- * Playlist names are unique per account, so importing an account's own export
- * unchanged is refused with 409 `resource_conflict`. The problem gains a
- * `next` that names the two ways forward: import under another name, or
- * replace the existing playlist. The mapping stays truthful: all media was
- * reused or confirmed before the write, and the write itself did not happen.
- */
+/** Retain actionable recovery for older servers that still reject duplicate names. */
 function rethrowNameConflict(error: unknown, state: {
   directory: string;
   updateId: string | undefined;
@@ -996,10 +990,10 @@ function rethrowNameConflict(error: unknown, state: {
   throw new CliError(
     {
       ...error.problem,
-      detail: `${error.problem.detail} Playlist names are unique per account, and this bundle's name is already taken.`,
+      detail: error.problem.detail,
       next: {
         command: `screenrig playlist import ${state.directory} --name NAME`,
-        reason: "Import as a new playlist under a different name, or replace the existing one with --update ID --expect-rev REVISION.",
+        reason: "Import as a new playlist under a different name, or replace the existing one with --update ID; --expect-rev is optional.",
       },
     },
     error.exitCode,

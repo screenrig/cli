@@ -48,7 +48,7 @@ function stringFlag(args: ParsedArgs, name: string): string | undefined {
 function checkedContentType(args: ParsedArgs): string {
   const contentType = stringFlag(args, "content-type") ?? "application/octet-stream";
   if (!contentType || contentType.length > 127) {
-    throw usageError("--file and --value-base64 require --content-type with 1 to 127 characters.");
+    throw usageError("--content-type must contain 1 to 127 characters.");
   }
   return contentType;
 }

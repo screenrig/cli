@@ -785,7 +785,7 @@ function nameConflictResponse(): TransportResponse {
 
 /**
  * UAT round 1, F5: importing an account's own export unchanged is refused
- * because playlist names are unique per account. The 409 gains a `next` that
+ * by older servers that enforce unique playlist names. The 409 gains a `next` that
  * names `--name`, and `--name` itself replaces the bundle's playlist name.
  */
 test("import of a bundle whose playlist name is taken points at --name, and --name overrides the bundle name", async () => {
@@ -805,9 +805,9 @@ test("import of a bundle whose playlist name is taken points at --name, and --na
       assert.equal(error.problem.status, 409);
       assert.equal(error.problem.code, "resource_conflict");
       assert.match(error.problem.detail, /playlist name is already in use/);
-      assert.match(error.problem.detail, /unique per account/);
+      assert.doesNotMatch(error.problem.detail, /unique per account/);
       assert.equal(error.problem.next?.command, `screenrig playlist import ${dir} --name NAME`);
-      assert.match(error.problem.next?.reason ?? "", /--update ID --expect-rev REVISION/);
+      assert.match(error.problem.next?.reason ?? "", /--update ID; --expect-rev is optional/);
       return true;
     },
   );
