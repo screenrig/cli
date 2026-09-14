@@ -696,6 +696,81 @@ test("agent connect defaults to a snapshot, returns a pending handoff and resume
   await rm(result.configDir, { recursive: true, force: true });
 });
 
+test("agent disconnect locally cleans an unauthorized credential without retrying revoke", async () => {
+  const transport = new FakeTransport();
+  transport.on("GET", "/api/v1/agents/self", () => ({
+    status: 401,
+    headers: { "content-type": "application/problem+json" },
+    body: {
+      type: "https://screenrig.ai/problems/unauthorized",
+      title: "Authentication is required",
+      status: 401,
+      detail: "A valid agent credential is required.",
+      code: "unauthorized",
+    },
+  }));
+  const configDir = await testTemp("agent-disconnect-unauthorized-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const configPath = path.join(configDir, "screenrig", "config.json");
+  await writeConfigAtomic(configPath, {
+    api_url: "https://api.screenrig.ai",
+    token: `sr_live_rejected_${"R".repeat(43)}`,
+    account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    agent_id: TEST_AGENT.id,
+  }, fsLike);
+  const result = await withRuntime(["--json", "agent", "disconnect", "--yes"], transport, { fs: fsLike });
+  assert.equal(result.code, 0, result.stdout);
+  assert.equal(JSON.parse(result.stdout).data.status, "disconnected");
+  assert.equal(JSON.parse(result.stdout).data.local_credential_removed, true);
+  assert.equal(JSON.parse(result.stdout).data.credential_accepted, false);
+  assert.equal(transport.calls.length, 1);
+  assert.equal(transport.calls[0]?.path, "/api/v1/agents/self");
+  assert.doesNotMatch(result.stdout, /sr_live_|account_id|token/i);
+  const local = await readConfigFile(configPath, fsLike);
+  assert.equal(local?.token, undefined);
+  assert.equal(local?.account_id, undefined);
+  assert.equal(local?.agent_id, undefined);
+  const status = await withRuntime(["--json", "agent", "status"], new FakeTransport(), { fs: fsLike });
+  assert.equal(JSON.parse(status.stdout).data.status, "not_enrolled");
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("agent status names disconnect --yes when the stored credential is rejected", async () => {
+  const transport = new FakeTransport();
+  transport.on("GET", "/api/v1/agents/self", () => ({
+    status: 401,
+    headers: { "content-type": "application/problem+json" },
+    body: {
+      type: "https://screenrig.ai/problems/unauthorized",
+      title: "Authentication is required",
+      status: 401,
+      detail: "A valid agent credential is required.",
+      code: "unauthorized",
+    },
+  }));
+  const configDir = await testTemp("agent-status-unauthorized-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
+    api_url: "https://api.screenrig.ai",
+    token: `sr_live_rejected_${"S".repeat(43)}`,
+    account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+  }, fsLike);
+  const result = await withRuntime(["--json", "agent", "status"], transport, { fs: fsLike });
+  assert.equal(result.code, 0, result.stdout);
+  const data = JSON.parse(result.stdout).data as {
+    status: string;
+    credential_accepted: boolean;
+    local_cleanup_required: boolean;
+    next: { command: string };
+  };
+  assert.equal(data.status, "disconnected");
+  assert.equal(data.credential_accepted, false);
+  assert.equal(data.local_cleanup_required, true);
+  assert.equal(data.next.command, "screenrig agent disconnect --yes");
+  assert.doesNotMatch(result.stdout, /sr_live_|token/i);
+  await rm(configDir, { recursive: true, force: true });
+});
+
 test("agent disconnect revokes only this installation and preserves safe disconnected status", async () => {
   const transport = new FakeTransport();
   const active = { ...TEST_AGENT, name: "Office Codex" };

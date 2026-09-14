@@ -662,13 +662,22 @@ async function agentStatus(
     };
   } catch (err) {
     if (!(err instanceof CliError) || err.problem.code !== "unauthorized") throw err;
+    const next = {
+      command: "screenrig agent disconnect --yes",
+      reason: "The stored credential is no longer accepted. Complete local cleanup before connecting or enrolling.",
+    };
     return {
-      envelope: successEnvelope({ status: "disconnected", credential_accepted: false, local_cleanup_required: true }),
+      envelope: successEnvelope({
+        status: "disconnected",
+        credential_accepted: false,
+        local_cleanup_required: true,
+        next,
+      }),
       exitCode: ExitCode.Success,
       human: humanLines("Agent", [
         ["status", "disconnected"],
         ["credential_accepted", "false"],
-        ["next", "run screenrig agent disconnect --yes to complete local cleanup before reconnecting"],
+        ["next", next.command],
       ]),
     };
   }
@@ -1198,6 +1207,33 @@ async function agentConnect(
   };
 }
 
+async function removeLocalAgentCredential(
+  runtime: CliRuntime,
+  resolved: Awaited<ReturnType<typeof resolveConfig>>,
+  token: string,
+  agent: Agent | undefined,
+): Promise<void> {
+  const fsLike = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
+  await withConfigLock(resolved.configPath, fsLike, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
+    const current = await readConfigFile(resolved.configPath, fsLike);
+    if (!current?.token || current.token !== token) {
+      throw configError("The stored agent credential changed before local disconnect cleanup.");
+    }
+    const lastAgent = agent ? {
+      id: agent.id,
+      name: agent.name,
+      agent_type: agent.agent_type,
+      state: "revoked" as const,
+      revoked_at: runtime.now().toISOString(),
+    } : current.last_agent;
+    await writeConfigAtomic(resolved.configPath, preserveLogSocket(current, {
+      api_url: current.api_url,
+      ...(lastAgent ? { last_agent: lastAgent } : {}),
+      updated_at: runtime.now().toISOString(),
+    }), fsLike);
+  });
+}
+
 async function agentDisconnect(
   args: ParsedArgs,
   runtime: CliRuntime,
@@ -1216,66 +1252,60 @@ async function agentDisconnect(
   const token = resolved.token;
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   let agent: Agent | undefined;
+  let credentialRejected = false;
   try {
     const current = await client.call({ method: "GET", path: "/api/v1/agents/self" });
     requirePrivateNoStore(current.headers, "Agent status response");
     agent = validateAgentSelfStatus(current.body).agent;
   } catch (err) {
     if (!(err instanceof CliError) || err.problem.code !== "unauthorized") throw err;
+    credentialRejected = true;
   }
-  const request: AgentDisconnectRequest = flagBool(args.flags, "allow-lockout") ? { allow_last_agent: true } : {};
-  let response;
-  try {
-    response = await client.call({
-      method: "POST",
-      path: "/api/v1/agents/self/disconnect",
-      ...(request.allow_last_agent ? { body: request } : {}),
-    });
-  } catch (err) {
-    if (err instanceof CliError) {
-      throw new CliError({
-        ...err.problem,
-        next: err.problem.code === "agent_lockout_risk"
-          ? {
-              command: "screenrig agent disconnect --yes --allow-lockout",
-              reason: "Use only after confirming a registered dashboard passkey or explicitly accepting loss of this account.",
-            }
-          : {
-              command: "screenrig agent disconnect --yes",
-              reason: "Local credential state was retained. Retrying the exact disconnect is safe after an ambiguous response.",
-            },
-      }, err.exitCode);
-    }
-    throw err;
-  }
-  if (response.status !== 204 || response.body !== undefined) {
-    throw configError("The agent disconnect endpoint did not return the required empty 204 response; local credential state was retained.");
-  }
-  requirePrivateNoStore(response.headers, "Agent disconnect response");
-
-  const fsLike = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
-  try {
-    await withConfigLock(resolved.configPath, fsLike, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
-      const current = await readConfigFile(resolved.configPath, fsLike);
-      if (!current?.token || current.token !== token) {
-        throw configError("The stored agent credential changed before local disconnect cleanup.");
+  if (!credentialRejected) {
+    const request: AgentDisconnectRequest = flagBool(args.flags, "allow-lockout") ? { allow_last_agent: true } : {};
+    let response;
+    try {
+      response = await client.call({
+        method: "POST",
+        path: "/api/v1/agents/self/disconnect",
+        ...(request.allow_last_agent ? { body: request } : {}),
+      });
+    } catch (err) {
+      if (err instanceof CliError && err.problem.code === "unauthorized") {
+        credentialRejected = true;
+      } else if (err instanceof CliError) {
+        throw new CliError({
+          ...err.problem,
+          next: err.problem.code === "agent_lockout_risk"
+            ? {
+                command: "screenrig agent disconnect --yes --allow-lockout",
+                reason: "Use only after confirming a registered dashboard passkey or explicitly accepting loss of this account.",
+              }
+            : {
+                command: "screenrig agent disconnect --yes",
+                reason: "Local credential state was retained. Retrying the exact disconnect is safe after an ambiguous response.",
+              },
+        }, err.exitCode);
+      } else {
+        throw err;
       }
-      const lastAgent = agent ? {
-        id: agent.id,
-        name: agent.name,
-        agent_type: agent.agent_type,
-        state: "revoked" as const,
-        revoked_at: runtime.now().toISOString(),
-      } : current.last_agent;
-      await writeConfigAtomic(resolved.configPath, preserveLogSocket(current, {
-        api_url: current.api_url,
-        ...(lastAgent ? { last_agent: lastAgent } : {}),
-        updated_at: runtime.now().toISOString(),
-      }), fsLike);
-    });
+    }
+    if (!credentialRejected) {
+      if (!response || response.status !== 204 || response.body !== undefined) {
+        throw configError("The agent disconnect endpoint did not return the required empty 204 response; local credential state was retained.");
+      }
+      requirePrivateNoStore(response.headers, "Agent disconnect response");
+    }
+  }
+
+  try {
+    await removeLocalAgentCredential(runtime, resolved, token, agent);
   } catch (err) {
+    const prefix = credentialRejected
+      ? "The stored credential is no longer accepted, but atomic local cleanup failed"
+      : "The server disconnected this agent, but atomic local cleanup failed";
     throw configError(
-      `The server disconnected this agent, but atomic local cleanup failed: ${redactText(err instanceof Error ? err.message : "unknown filesystem error")}. The retained credential no longer authorizes account operations.`,
+      `${prefix}: ${redactText(err instanceof Error ? err.message : "unknown filesystem error")}. The retained credential no longer authorizes account operations.`,
       {
         command: "screenrig agent disconnect --yes",
         reason: "Retrying with the retained exact credential safely completes local cleanup.",
@@ -1289,6 +1319,7 @@ async function agentDisconnect(
       account_preserved: true,
       screens_preserved: true,
       other_agents_preserved: true,
+      ...(credentialRejected ? { credential_accepted: false } : {}),
     }, { request_id: client.requestId }),
     exitCode: ExitCode.Success,
     human: humanLines("Agent disconnected", [
