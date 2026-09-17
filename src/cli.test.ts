@@ -5777,3 +5777,30 @@ for (const argv of [
   assert.equal(transport.calls.filter(call => call.method === "GET").length, 0, "no revision lookup");
  } finally { await rm(configDir, {recursive: true, force: true}); }
 });
+
+for (const prefix of ["development_", "qa_", "stage_"]) test(`enrollment and pairing preserve ${prefix} resource IDs`, async () => {
+  const transport = memoryBackend();
+  const request = transport.request.bind(transport);
+  transport.request = async (req) => {
+    const response = await request(req);
+    // Model Backend-issued identities without altering credentials or routing.
+    const qualify = (value: unknown): unknown => {
+      if (typeof value === "string" && /^(acc|agt|scr)_/.test(value)) return prefix + value;
+      if (Array.isArray(value)) return value.map(qualify);
+      if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, qualify(item)]));
+      return value;
+    };
+    return { ...response, body: qualify(response.body) };
+  };
+  const configDir = await testTemp("environment-enrollment-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  try {
+    const enrolled = await withRuntime(["agent", "enroll", "--email", "owner@example.com"], transport, { fs: fsLike });
+    assert.equal(enrolled.code, 0, enrolled.stdout);
+    assert.equal(JSON.parse(enrolled.stdout).data.agent.id, prefix + TEST_AGENT.id);
+    const paired = await withRuntime(["screen", "pair", "abc234", "--label", "Lobby"], transport, { fs: fsLike });
+    assert.equal(paired.code, 0, paired.stdout);
+    assert.ok(JSON.parse(paired.stdout).data.screen.id.startsWith(prefix + "scr_"));
+    assert.doesNotMatch(enrolled.stdout + paired.stdout, /sr_live_/);
+  } finally { await rm(configDir, { recursive: true, force: true }); }
+});

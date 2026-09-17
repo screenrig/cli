@@ -1,3 +1,4 @@
+import { RESOURCE_ID_PATTERNS, isResourceID, type ResourceIDKind } from "./generated/resource-ids.js";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -10,9 +11,9 @@ import type { CliRuntime } from "./runtime.js";
 type Resource = { id: string; revision: number; playlist_id?: string; timezone?: string };
 interface Journal { version: 1; created_at: number; fingerprint: string; create_key: string; assign_key: string; playlist?: Resource; assigned?: boolean }
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
-function resource(value: unknown, prefix: string): Resource {
+function resource(value: unknown, kind: ResourceIDKind): Resource {
   const item = value as Resource;
-  if (!item || typeof item.id !== "string" || !item.id.startsWith(prefix) || !Number.isSafeInteger(item.revision) || item.revision < 1) throw usageError("Server response has invalid resource identity or revision.");
+  if (!item || typeof item.id !== "string" || !isResourceID(item.id, kind) || !Number.isSafeInteger(item.revision) || item.revision < 1) throw usageError("Server response has invalid resource identity or revision.");
   return item;
 }
 function conflict(detail: string, revision?: number): never {
@@ -27,9 +28,9 @@ export async function publishScreen(options: {
   const { client, screenId, document } = options;
   const expected = options.revision === undefined ? undefined : Number(options.revision.replaceAll('"', ''));
   if (options.revision !== undefined) quotedRevision(options.revision);
-  if (!/^scr_[A-Za-z0-9_-]+$/.test(screenId)) throw usageError("screen publish requires a screen identifier.");
+  if (!RESOURCE_ID_PATTERNS.screen.test(screenId)) throw usageError("screen publish requires a screen identifier.");
   const account = (await client.call({ method: "GET", path: "/api/v1/account" })).body as { id: string };
-  if (!account?.id?.startsWith("acc_")) throw usageError("Account identity is missing.");
+  if (!isResourceID(account?.id, "account")) throw usageError("Account identity is missing.");
   const fingerprint = digest(JSON.stringify([options.apiUrl, account.id, screenId, expected, document, options.requestedKey ?? ""]));
   const directory = path.join(path.dirname(options.configPath), "publishes");
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -69,10 +70,10 @@ export async function publishScreen(options: {
       if ((info.mode & 0o077) !== 0) throw usageError("Publish journal must be private.");
       state = JSON.parse(await readFile(journalPath, "utf8"));
       if (state?.version !== 1 || state.fingerprint !== fingerprint || !Number.isFinite(state.created_at) || !state.create_key || !state.assign_key) throw usageError("Publish journal is invalid.");
-      if (state.playlist) resource(state.playlist, "pl_");
+      if (state.playlist) resource(state.playlist, "playlist");
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     if (!state) {
-      const screen = resource((await client.call({ method: "GET", path: `/api/v1/screens/${screenId}` })).body, "scr_");
+      const screen = resource((await client.call({ method: "GET", path: `/api/v1/screens/${screenId}` })).body, "screen");
       if (screen.id !== screenId) throw usageError("Screen response identity did not match.");
       if (expected !== undefined && screen.revision !== expected) conflict("Screen changed before publishing. Inspect it and retry with its intended revision.", screen.revision);
       if (document.pages.some((page: any) => page.visibility !== undefined) && !screen.timezone) throw usageError("Set the screen timezone before publishing a scheduled playlist.");
@@ -84,7 +85,7 @@ export async function publishScreen(options: {
     }
     if (!state.playlist) {
       const response = await client.call({ method: "POST", path: "/api/v1/playlists", body: document, idempotent: true, idempotencyKey: state.create_key });
-      state.playlist = resource(response.body, "pl_");
+      state.playlist = resource(response.body, "playlist");
       // Persist identity only, never the returned playlist or resolved media.
       state.playlist = { id: state.playlist.id, revision: state.playlist.revision };
       await save();
@@ -94,7 +95,7 @@ export async function publishScreen(options: {
       state.assigned = true;
       await save();
     }
-    const screen = resource((await client.call({ method: "GET", path: `/api/v1/screens/${screenId}` })).body, "scr_");
+    const screen = resource((await client.call({ method: "GET", path: `/api/v1/screens/${screenId}` })).body, "screen");
     if (screen.id !== screenId || screen.playlist_id !== state.playlist.id) conflict("The screen no longer has this playlist assigned. Inspect it before making another change.", screen.revision);
     return { playlist_id: state.playlist.id, playlist_revision: state.playlist.revision, screen_id: screenId, screen_revision: screen.revision, assignment_verified: true, playback_verified: false, journal: journalPath };
   } catch (error) {

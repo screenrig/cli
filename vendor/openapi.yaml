@@ -1456,7 +1456,7 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     parameters:
       - { name: manifest_revision, in: path, required: true, schema: { type: string, pattern: "^man_" } }
-      - { name: release_id, in: path, required: true, schema: { type: string, pattern: "^rel_" } }
+      - { name: release_id, in: path, required: true, schema: { type: string, pattern: "^(?:(?:stage|qa|development)_)?rel_" } }
       - { $ref: "#/components/parameters/Range" }
       - { $ref: "#/components/parameters/SecFetchSite" }
       - { $ref: "#/components/parameters/SecFetchMode" }
@@ -2614,7 +2614,7 @@ components:
       additionalProperties: false
       required: [id, name, agent_type, state, authenticated_requests, metered_credits, created_at]
       properties:
-        id: { type: string, pattern: "^agt_" }
+        id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?agt_" }
         name: { type: string, minLength: 1, maxLength: 80 }
         agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$" }
         platform: { type: string, maxLength: 80 }
@@ -2631,8 +2631,8 @@ components:
     AgentSelfStatus: { type: object, additionalProperties: false, required: [agent, connection_ready], properties: { agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, description: True when the existing account has either a persisted WebAuthn credential or an Argon2id password credential owned by a dashboard user and can authorize another agent. } } }
     X25519PublicJWK: { type: object, additionalProperties: false, required: [kty, crv, x], properties: { kty: { type: string, enum: [OKP] }, crv: { type: string, enum: [X25519] }, x: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
     AgentConnectionRequest: { type: object, additionalProperties: false, required: [recipient_public_key], properties: { name: { type: string, minLength: 1, maxLength: 80 }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$" }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 }, recipient_public_key: { $ref: "#/components/schemas/X25519PublicJWK" } } }
-    AgentConnectionStart: { type: object, additionalProperties: false, required: [connection_id, connection_token, approval_url, expires_at], properties: { connection_id: { type: string, pattern: "^acn_" }, connection_token: { type: string, pattern: "^sac_[A-Za-z0-9_-]{43}$", description: Temporary header credential. Never place in a URL or log. }, approval_url: { type: string, format: uri, description: Safe URL containing only the non-authority connection id. }, expires_at: { type: string, format: date-time } } }
-    AgentConnection: { type: object, additionalProperties: false, required: [connection_id, name, agent_type, status, expires_at, created_at], properties: { connection_id: { type: string, pattern: "^acn_" }, name: { type: string }, agent_type: { type: string }, platform: { type: string }, version: { type: string }, status: { type: string, enum: [pending, approved, connected, denied, expired, cancelled] }, expires_at: { type: string, format: date-time }, created_at: { type: string, format: date-time } } }
+    AgentConnectionStart: { type: object, additionalProperties: false, required: [connection_id, connection_token, approval_url, expires_at], properties: { connection_id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?acn_" }, connection_token: { type: string, pattern: "^sac_[A-Za-z0-9_-]{43}$", description: Temporary header credential. Never place in a URL or log. }, approval_url: { type: string, format: uri, description: Safe URL containing only the non-authority connection id. }, expires_at: { type: string, format: date-time } } }
+    AgentConnection: { type: object, additionalProperties: false, required: [connection_id, name, agent_type, status, expires_at, created_at], properties: { connection_id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?acn_" }, name: { type: string }, agent_type: { type: string }, platform: { type: string }, version: { type: string }, status: { type: string, enum: [pending, approved, connected, denied, expired, cancelled] }, expires_at: { type: string, format: date-time }, created_at: { type: string, format: date-time } } }
     AgentCredentialEnvelope: { type: object, additionalProperties: false, required: [algorithm, ephemeral_public_key, nonce, ciphertext], properties: { algorithm: { type: string, enum: [X25519-HKDF-SHA256-A256GCM] }, ephemeral_public_key: { $ref: "#/components/schemas/X25519PublicJWK" }, nonce: { type: string, description: Unpadded base64url AES-GCM nonce. }, ciphertext: { type: string, description: Unpadded base64url ciphertext and authentication tag. Decrypt with AAD screenrig/agent-credential-envelope/aad/v1 NUL connection_id NUL agent_id. } } }
     AgentCredentialCollection: { type: object, additionalProperties: false, required: [agent, credential_envelope, issuance_expires_at], properties: { agent: { $ref: "#/components/schemas/Agent" }, credential_envelope: { $ref: "#/components/schemas/AgentCredentialEnvelope" }, issuance_expires_at: { type: string, format: date-time } } }
     AgentDisconnectRequest: { type: object, additionalProperties: false, properties: { allow_last_agent: { type: boolean, default: false, description: Explicitly accept loss of the last active agent bearer. A registered dashboard passkey remains independent administrative authority. } } }
@@ -2974,7 +2974,7 @@ components:
         to any account other than the owner's. Read-only on the account API;
         ScreenPatch cannot write it.
       properties:
-        platform: { type: string, enum: [tizen, android, windows, qt, apple, chromeos, browser] }
+        platform: { type: string, enum: [tizen, android, windows, qt, apple, chromeos, browser, brightsign] }
         host_version: { type: string, minLength: 1, maxLength: 40, description: "Shell or container product version, CalVer or vendor form." }
         device: { $ref: "#/components/schemas/HostDevice" }
         capabilities: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[a-z0-9_]{1,40}$" } }
@@ -3018,7 +3018,7 @@ components:
         the pairing start's host object. Descriptive fields only; it never
         carries duid, serial, or mac. Absent fields were not reported.
       properties:
-        platform: { type: string, enum: [tizen, android, windows, qt, apple, chromeos, browser] }
+        platform: { type: string, enum: [tizen, android, windows, qt, apple, chromeos, browser, brightsign] }
         model: { type: string, minLength: 1, maxLength: 80 }
         firmware: { type: string, minLength: 1, maxLength: 80 }
         manufacturer: { type: string, minLength: 1, maxLength: 80 }
@@ -3772,7 +3772,7 @@ components:
       required: [agent_id, name, agent_type]
       description: Safe agent principal attribution present only when the event was directly caused by an authenticated agent bearer. It is never authorization.
       properties:
-        agent_id: { type: string, pattern: "^agt_" }
+        agent_id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?agt_" }
         name: { type: string, maxLength: 80 }
         agent_type: { type: string, maxLength: 32 }
     DashboardPasskeyRegistration:
@@ -3866,7 +3866,7 @@ components:
         ceremony_id: { type: string }
         credential: { type: object, additionalProperties: true }
         dev_confirm: { type: boolean, description: Must be true only on a server running dashboard development authentication; rejected as a substitute for a production passkey assertion. }
-        session_confirm: { type: boolean, description: Must be true only to approve an agent connection from a password-authenticated account session; it is not accepted as passkey proof or development confirmation. }
+        session_confirm: { type: boolean, description: "Must be true only to approve, deny, or disconnect an agent from a password-authenticated account session; it is not accepted as passkey proof or development confirmation." }
     DashboardSummary:
       type: object
       additionalProperties: false

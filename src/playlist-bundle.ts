@@ -1,3 +1,4 @@
+import { RESOURCE_ID_PATTERNS, isResourceID } from "./generated/resource-ids.js";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
@@ -26,7 +27,7 @@ const MEDIA_UPLOAD_ADMISSION_QUOTA = 20;
 const MEDIA_UPLOAD_ADMISSION_WINDOW_MS = 60_000;
 const MEDIA_UPLOAD_RATE_LIMIT_RETRIES = 1;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
-const MEDIA_ID_PATTERN = /^med_[A-Za-z0-9_-]+$/;
+const MEDIA_ID_PATTERN = RESOURCE_ID_PATTERNS.media;
 const CONTROL_PATTERN = /[\u0000-\u001F\u007F]/u;
 
 const EXTENSION_BY_TYPE: Readonly<Record<string, string>> = {
@@ -276,7 +277,7 @@ function parseManifest(input: unknown): PlaylistBundleManifest {
   const playlist = record(root.playlist, `${PLAYLIST_BUNDLE_MANIFEST}.playlist`);
   exactKeys(playlist, ["source_id", "source_revision", "path"], `${PLAYLIST_BUNDLE_MANIFEST}.playlist`);
   const sourceId = stringField(playlist, "source_id", `${PLAYLIST_BUNDLE_MANIFEST}.playlist`);
-  if (!sourceId.startsWith("pl_")) throw usageError("Bundle source playlist id must start with pl_.");
+  if (!isResourceID(sourceId, "playlist")) throw usageError("Bundle source playlist id must be a playlist identifier.");
   const sourceRevision = integerField(playlist, "source_revision", `${PLAYLIST_BUNDLE_MANIFEST}.playlist`);
   if (sourceRevision < 1) throw usageError("Bundle source playlist revision must be positive.");
   if (playlist.path !== PLAYLIST_BUNDLE_PLAYLIST) {
@@ -560,7 +561,7 @@ export async function exportPlaylistBundle(options: {
   outputDirectory: string;
   client: ApiClient;
 }): Promise<PlaylistBundleExportResult> {
-  if (!options.playlistId.startsWith("pl_")) throw usageError("playlist export requires a playlist id starting with pl_.");
+  if (!isResourceID(options.playlistId, "playlist")) throw usageError("playlist export requires a playlist identifier.");
   const destination = path.resolve(options.outputDirectory);
   await assertNoSymlinkAncestors(destination, true);
   await destinationAbsent(destination);
@@ -847,7 +848,7 @@ export async function importPlaylistBundle(options: {
     if (trimmed.length === 0 || trimmed.length > 120) throw usageError("playlist import --name must be 1 to 120 characters.");
   }
   if (!options.updateId && options.ifMatch) throw usageError("playlist import --expect-rev requires --update PLAYLIST_ID.");
-  if (options.updateId && !options.updateId.startsWith("pl_")) throw usageError("playlist import --update requires a playlist id starting with pl_.");
+  if (options.updateId && !isResourceID(options.updateId, "playlist")) throw usageError("playlist import --update requires a playlist identifier.");
   const ifMatch = options.ifMatch ? quotedRevision(options.ifMatch) : undefined;
 
   // This completes every local structure, path, type, size, and digest check before a network mutation.
