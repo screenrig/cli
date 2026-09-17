@@ -1,3 +1,4 @@
+import { RESOURCE_ID_PATTERNS } from "./generated/resource-ids.js";
 import {
   createDecipheriv,
   createHash,
@@ -19,8 +20,8 @@ import type {
 import type { ScreenRigConfig } from "./config.js";
 import { configError, usageError } from "./problems.js";
 
-const CONNECTION_ID = /^acn_[A-Za-z0-9_-]+$/;
-const AGENT_ID = /^agt_[A-Za-z0-9_-]+$/;
+const CONNECTION_ID = RESOURCE_ID_PATTERNS.connection;
+const AGENT_ID = RESOURCE_ID_PATTERNS.agent;
 const CONNECTION_TOKEN = /^sac_[A-Za-z0-9_-]{43}$/;
 const BASE64URL_32 = /^[A-Za-z0-9_-]{43}$/;
 const CONNECTION_FIELDS = new Set([

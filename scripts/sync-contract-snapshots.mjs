@@ -32,6 +32,10 @@ const sourceRoot = sourceRootGiven
 
 const snapshots = [
   {
+    path: 'src/generated/resource-ids.ts',
+    source: 'packages/protocol/src/resource-ids.ts',
+  },
+  {
     path: 'assets/playlist-write.schema.json',
     source: 'packages/protocol/schema/playlist-write.schema.json',
   },

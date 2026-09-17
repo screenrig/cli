@@ -1,10 +1,11 @@
+import { RESOURCE_ID_PATTERNS } from "./generated/resource-ids.js";
 import { isIP } from "node:net";
 import { usageError } from "./problems.js";
 
 interface JsonRecord { [key: string]: unknown }
 
 const ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
-const MEDIA_ID_PATTERN = /^med_[A-Za-z0-9_-]+$/;
+const MEDIA_ID_PATTERN = RESOURCE_ID_PATTERNS.media;
 const COLOR_PATTERN = /^#[0-9A-F]{8}$/;
 const CIVIL_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):([0-5]\d)$/;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;

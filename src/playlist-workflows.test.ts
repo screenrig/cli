@@ -84,27 +84,27 @@ test("stdin validation and editable output need no jq or metadata stripping", as
  assert.throws(()=>parseArgv(['media','generate','--prompt','a','--prompt-file','b']));
 });
 
-for (const revision of [undefined, '7']) for (const failure of ['create','assign','verify']) test(`publish revision ${revision} resumes an ambiguous ${failure} without duplicating resources`, async t => {
+for (const prefix of ["", "development_", "qa_", "stage_"]) for (const revision of [undefined, '7']) for (const failure of ['create','assign','verify']) test(`publish ${prefix || "production"} revision ${revision} resumes an ambiguous ${failure} without duplicating resources`, async t => {
  const dir=await mkdtemp('/tmp/publish-workflows-'); t.after(()=>rm(dir,{recursive:true,force:true}));
  let created=false, assigned=false, failed=false, reads=0;
  const createKeys:string[]=[],assignKeys:string[]=[];
  const transport=new FakeTransport()
- .on('GET','/api/v1/account',()=>response({id:'acc_TEST'}))
- .on('GET','/api/v1/screens/scr_TEST',()=>{
+ .on('GET','/api/v1/account',()=>response({id:`${prefix}acc_TEST`}))
+ .on('GET',`/api/v1/screens/${prefix}scr_TEST`,()=>{
   reads++; if(failure==='verify'&&assigned&&!failed){failed=true;throw networkError('Test connection failure');}
-  return response({id:'scr_TEST',revision:assigned?8:7,playlist_id:assigned?'pl_TEST':undefined});
+  return response({id:`${prefix}scr_TEST`,revision:assigned?8:7,playlist_id:assigned?`${prefix}pl_TEST`:undefined});
  })
  .on('POST','/api/v1/playlists',req=>{
   createKeys.push(req.headers!['idempotency-key']!); created=true;
   if(failure==='create'&&!failed){failed=true;throw networkError('Test connection failure');}
-  return response({id:'pl_TEST',revision:1});
+  return response({id:`${prefix}pl_TEST`,revision:1});
  })
- .on('PATCH','/api/v1/screens/scr_TEST',req=>{
+ .on('PATCH',`/api/v1/screens/${prefix}scr_TEST`,req=>{
   assert.equal(req.headers!['if-match'],revision ? '"7"' : undefined);assignKeys.push(req.headers!['idempotency-key']!);assigned=true;
   if(failure==='assign'&&!failed){failed=true;throw networkError('Test connection failure');}
-  return response({id:'scr_TEST',revision:8,playlist_id:'pl_TEST'});
+  return response({id:`${prefix}scr_TEST`,revision:8,playlist_id:`${prefix}pl_TEST`});
  });
- const options={client:new ApiClient({transport,token:'test-token'}),runtime:processRuntime(),configPath:dir+'/config.json',apiUrl:'https://api.screenrig.ai',screenId:'scr_TEST',revision,document:document()};
+ const options={client:new ApiClient({transport,token:'test-token'}),runtime:processRuntime(),configPath:dir+'/config.json',apiUrl:'https://api.screenrig.ai',screenId:`${prefix}scr_TEST`,revision,document:document()};
  await assert.rejects(()=>publishScreen(options));
  const result=await publishScreen(options);
  assert.equal(result.assignment_verified,true); assert.equal(result.playback_verified,false);
@@ -192,26 +192,26 @@ test("publish recovery arguments preserve paths with spaces without exposing URL
  });
 });
 
-test("mixed preparation carries target revision without publishing and guards uploads", async t => {
+for (const prefix of ["", "development_", "qa_", "stage_"]) test(`mixed preparation ${prefix || "production"} carries IDs unchanged`, async t => {
  const dir = await mkdtemp('/tmp/prepare mixed-'); t.after(() => rm(dir, {recursive:true,force:true}));
  const config = dir + '/config.json';
  await writeFile(config, JSON.stringify({api_url:'https://api.screenrig.ai',token:'test-token'}), {mode:0o600});
- let mediaState = "ready", targetId = "scr_TEST";
+ let mediaState = "ready", targetId = `${prefix}scr_TEST`;
  const transport = new FakeTransport()
-  .on('GET','/api/v1/screens/scr_TEST',()=>response({id:targetId,revision:7,observation:{surfaces:[{width:1080,height:1920}]}}))
+  .on('GET',`/api/v1/screens/${prefix}scr_TEST`,()=>response({id:targetId,revision:7,observation:{surfaces:[{width:1080,height:1920}]}}))
   .on('GET','/api/v1/media/med_IMAGE',()=>response({...media[0],state:mediaState}));
  async function invoke(inputs:string[], output='prepared.json') {
-  let out=''; const code = await run({...processRuntime(),argv:['--config',config,'playlist','init',...inputs,'--name','Lobby','--screen','scr_TEST','--output',output],env:{},cwd:()=>dir,transport,
+  let out=''; const code = await run({...processRuntime(),argv:['--config',config,'playlist','init',...inputs,'--name','Lobby','--screen',`${prefix}scr_TEST`,'--output',output],env:{},cwd:()=>dir,transport,
    stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
   return {code,body:JSON.parse(out)};
  }
- const result = await invoke(['med_IMAGE','rel_TEST','https://example.com/board']);
+ const result = await invoke(['med_IMAGE',`${prefix}rel_TEST`,'https://example.com/board']);
  assert.equal(result.code,0,JSON.stringify(result.body));
- assert.equal(result.body.data.screen_id,'scr_TEST'); assert.equal(result.body.data.screen_revision,7);
+ assert.equal(result.body.data.screen_id,`${prefix}scr_TEST`); assert.equal(result.body.data.screen_revision,7);
  const doc = JSON.parse(await readFile(dir+'/prepared.json','utf8'));
  assert.deepEqual(Object.keys(doc).sort(),['name','pages']);
  assert.deepEqual(doc.pages.map((p:any)=>p.primitives[0].primitive),['image','application','iframe']);
- assert.equal(doc.pages[1].primitives[0].release_id,'rel_TEST');
+ assert.equal(doc.pages[1].primitives[0].release_id,`${prefix}rel_TEST`);
  assert.equal(doc.pages[1].primitives[0].content_fit,'fill');
  assert.deepEqual(doc.pages[1].advance,{mode:'duration',after_ms:8000});
  assert.equal(doc.pages[2].primitives[0].src,'https://example.com/board');
@@ -224,7 +224,7 @@ test("mixed preparation carries target revision without publishing and guards up
  mediaState = 'processing';
  assert.equal((await invoke(['med_IMAGE'],'not-ready.json')).code,2);
  targetId = 'scr_OTHER';
- assert.equal((await invoke(['rel_TEST'],'wrong-target.json')).code,2);
+ assert.equal((await invoke([`${prefix}rel_TEST`],'wrong-target.json')).code,2);
  assert.equal(transport.calls.some(c=>c.method!=='GET'),false);
 });
 

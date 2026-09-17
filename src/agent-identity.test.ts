@@ -51,24 +51,24 @@ function sealForTest(recipient: X25519PublicJWK, connectionId: string, agentId: 
   };
 }
 
-test("agent credential envelope decrypts only for the persisted recipient key and exact binding", () => {
+for (const prefix of ["", "development_", "qa_", "stage_"]) test(`agent credential envelope ${prefix || "production"} preserves exact ID binding`, () => {
   const privateJwk = generateAgentConnectionKey();
   const connection = {
     private_jwk: privateJwk,
-    connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA",
+    connection_id: `${prefix}acn_AAAAAAAAAAAAAAAAAAAAAAAA`,
   };
   const token = `sr_live_test_${"T".repeat(43)}`;
-  const collection = sealForTest(publicAgentConnectionKey(privateJwk), connection.connection_id, "agt_AAAAAAAAAAAAAAAAAAAAAAAA", token);
+  const collection = sealForTest(publicAgentConnectionKey(privateJwk), connection.connection_id, `${prefix}agt_AAAAAAAAAAAAAAAAAAAAAAAA`, token);
   assert.deepEqual(decryptAgentCredential(collection, connection), {
     token,
-    agentId: "agt_AAAAAAAAAAAAAAAAAAAAAAAA",
+    agentId: `${prefix}agt_AAAAAAAAAAAAAAAAAAAAAAAA`,
   });
   assert.throws(
     () => decryptAgentCredential(collection, { ...connection, private_jwk: generateAgentConnectionKey() }),
     /could not be authenticated/,
   );
   assert.throws(
-    () => decryptAgentCredential(collection, { ...connection, connection_id: "acn_BBBBBBBBBBBBBBBBBBBBBBBB" }),
+    () => decryptAgentCredential(collection, { ...connection, connection_id: `${prefix}acn_BBBBBBBBBBBBBBBBBBBBBBBB` }),
     /could not be authenticated/,
   );
 });

@@ -3,10 +3,16 @@
   "purpose": "cli-contract-and-sdk-inputs",
   "files": [
     {
+      "path": "src/generated/resource-ids.ts",
+      "source": "packages/protocol/src/resource-ids.ts",
+      "bytes": 984,
+      "sha256": "91e6b893e6a8ecfe7c3f550465449e041b54e49c3b86427a7cb7fb65aa15fd1f"
+    },
+    {
       "path": "assets/playlist-write.schema.json",
       "source": "packages/protocol/schema/playlist-write.schema.json",
       "bytes": 25438,
-      "sha256": "dd59548e7649453d8ef5805e48b8d16086f74bc8958d5004e395cbb703515741"
+      "sha256": "2906314caa4e059a1b4f7b24dc5424542d6df0bffb29015d35d6b4a60c13422a"
     },
     {
       "path": "src/generated/playlist-write-semantics.ts",
@@ -17,14 +23,14 @@
     {
       "path": "vendor/protocol/openapi.gen.ts",
       "source": "packages/protocol/src/openapi.gen.ts",
-      "bytes": 43520,
-      "sha256": "dc708b021e2fc349ad3d8c06f84d7a8bde2aacdc25285adc4444bf07695d2e22"
+      "bytes": 43550,
+      "sha256": "7b45e5c10657554135cdd6ca84a8c95f02e6ffea0acc0f06009a6b6d4b9b063a"
     },
     {
       "path": "vendor/openapi.yaml",
       "source": "api/openapi.yaml",
-      "bytes": 324096,
-      "sha256": "0b3d50daa0155690822dedb58db295982e3b33e84389f22ffa463093b48b1e60"
+      "bytes": 324282,
+      "sha256": "771381b39950f56df6b6f220d4787ccac26271ca56cdb9d9e9a164ad97515a1c"
     },
     {
       "path": "assets/screenrig.runtime.js",
