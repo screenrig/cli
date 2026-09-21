@@ -937,9 +937,11 @@ async function clearAgentConnectionForEnrollment(
     const current = await readConfigFile(resolved.configPath, fsLike);
     if (!current?.agent_connection) return;
     const { agent_connection: connection, ...rest } = current;
-    const cleaned = connection.pending_agent_id
-      ? (({ token: _token, account_id: _account, agent_id: _agent, ...safe }) => safe)(rest)
-      : rest;
+    let cleaned = rest;
+    if (connection.pending_agent_id) {
+      const { token: _token, account_id: _account, agent_id: _agent, ...withoutPendingCredential } = rest;
+      cleaned = withoutPendingCredential;
+    }
     await writeConfigAtomic(resolved.configPath, {
       ...cleaned,
       updated_at: runtime.now().toISOString(),

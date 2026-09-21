@@ -360,12 +360,16 @@ test("agent enroll --force discards an unwanted pending connection before enroll
   const configPath = path.join(configDir, "screenrig", "config.json");
   await writeConfigAtomic(configPath, {
     api_url: "https://api.screenrig.ai",
+    token: `sr_live_pending_${"P".repeat(43)}`,
+    account_id: "acc_PENDINGAAAAAAAAAAAAAAAA",
+    agent_id: "agt_PENDINGAAAAAAAAAAAAAAAA",
     agent_connection: {
       private_jwk: { kty: "OKP", crv: "X25519", x: "pending-public", d: "pending-private" },
       connection_id: "acn_UNWANTED",
       connection_token: "private-connection-token",
       approval_url: "https://app.screenrig.ai/agent-connections/acn_UNWANTED",
       expires_at: "2099-01-01T00:00:00Z",
+      pending_agent_id: "agt_PENDINGAAAAAAAAAAAAAAAA",
     },
   }, fsLike);
 
@@ -391,7 +395,7 @@ test("agent enroll --force discards an unwanted pending connection before enroll
   const config = await readConfigFile(configPath, fsLike);
   assert.equal(config?.agent_connection, undefined);
   assert.ok(config?.token);
-  assert.doesNotMatch(JSON.stringify(config), /acn_UNWANTED|private-connection-token|pending-private/);
+  assert.doesNotMatch(JSON.stringify(config), /acn_UNWANTED|private-connection-token|pending-private|sr_live_pending|acc_PENDING|agt_PENDING/);
   assert.equal(transport.calls.some((call) => call.path === "/api/v1/agent-connections"), false);
   await rm(configDir, { recursive: true, force: true });
 });
