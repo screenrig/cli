@@ -354,6 +354,48 @@ test("agent enroll rejects missing or malformed contact email before the network
   await rm(malformed.configDir, { recursive: true, force: true });
 });
 
+test("agent enroll --force discards an unwanted pending connection before enrolling", async () => {
+  const configDir = await testTemp("enroll-force-pending-connect-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const configPath = path.join(configDir, "screenrig", "config.json");
+  await writeConfigAtomic(configPath, {
+    api_url: "https://api.screenrig.ai",
+    agent_connection: {
+      private_jwk: { kty: "OKP", crv: "X25519", x: "pending-public", d: "pending-private" },
+      connection_id: "acn_UNWANTED",
+      connection_token: "private-connection-token",
+      approval_url: "https://app.screenrig.ai/agent-connections/acn_UNWANTED",
+      expires_at: "2099-01-01T00:00:00Z",
+    },
+  }, fsLike);
+
+  const blocked = await withRuntime(
+    ["--json", "agent", "enroll", "--email", "owner@example.com"],
+    new FakeTransport(),
+    { fs: fsLike },
+  );
+  assert.equal(blocked.code, ExitCode.Usage, blocked.stdout);
+  assert.equal(
+    JSON.parse(blocked.stdout).error.next.command,
+    "screenrig agent enroll --force --email ADDRESS",
+  );
+
+  const transport = memoryBackend();
+  const enrolled = await withRuntime(
+    ["--json", "agent", "enroll", "--force", "--email", "owner@example.com"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(enrolled.code, ExitCode.Success, enrolled.stdout);
+  assert.equal(JSON.parse(enrolled.stdout).data.status, "active");
+  const config = await readConfigFile(configPath, fsLike);
+  assert.equal(config?.agent_connection, undefined);
+  assert.ok(config?.token);
+  assert.doesNotMatch(JSON.stringify(config), /acn_UNWANTED|private-connection-token|pending-private/);
+  assert.equal(transport.calls.some((call) => call.path === "/api/v1/agent-connections"), false);
+  await rm(configDir, { recursive: true, force: true });
+});
+
 test("email_conflict is terminal and generic, clears only pending enrollment, and requires a new explicit enrollment", async () => {
   const configDir = await testTemp("email-conflict-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
@@ -416,11 +458,36 @@ test("every authenticated command reports not_enrolled instead of enrolling", as
   }
 });
 
+test("revoked agent history without a pending reconnect directs authenticated commands to enroll", async () => {
+  const configDir = await testTemp("revoked-prefers-enroll-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
+    api_url: "https://api.screenrig.ai",
+    last_agent: {
+      id: TEST_AGENT.id,
+      name: TEST_AGENT.name,
+      agent_type: TEST_AGENT.agent_type,
+      state: "revoked",
+      revoked_at: "2026-09-21T00:00:00.000Z",
+    },
+  }, fsLike);
+  const result = await withRuntime(["--json", "account", "show"], new FakeTransport(), { fs: fsLike });
+  assert.equal(result.code, ExitCode.Auth, result.stdout);
+  const envelope = JSON.parse(result.stdout) as {
+    error: { code: string; next: { command: string; reason: string } };
+  };
+  assert.equal(envelope.error.code, "not_enrolled");
+  assert.equal(envelope.error.next.command, "screenrig agent enroll --email ADDRESS");
+  assert.match(envelope.error.next.reason, /contact email/i);
+  await rm(configDir, { recursive: true, force: true });
+});
+
 test("agent status never enrolls a missing installation", async () => {
   const transport = new FakeTransport();
   const status = await withRuntime(["--json", "agent", "status"], transport);
   assert.equal(status.code, 0, status.stdout);
   assert.equal(JSON.parse(status.stdout).data.status, "not_enrolled");
+  assert.equal(JSON.parse(status.stdout).data.path, "first_run_enroll");
   assert.equal(transport.calls.length, 0);
   await rm(status.configDir, { recursive: true, force: true });
 });
@@ -731,7 +798,10 @@ test("agent disconnect locally cleans an unauthorized credential without retryin
   assert.equal(local?.account_id, undefined);
   assert.equal(local?.agent_id, undefined);
   const status = await withRuntime(["--json", "agent", "status"], new FakeTransport(), { fs: fsLike });
-  assert.equal(JSON.parse(status.stdout).data.status, "not_enrolled");
+  assert.deepEqual(JSON.parse(status.stdout).data, {
+    status: "not_enrolled",
+    path: "first_run_enroll",
+  });
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -807,6 +877,7 @@ test("agent disconnect revokes only this installation and preserves safe disconn
   assert.equal(local?.last_agent?.id, active.id);
   const status = await withRuntime(["--json", "agent", "status"], new FakeTransport(), { fs: fsLike });
   assert.equal(JSON.parse(status.stdout).data.status, "disconnected");
+  assert.equal(JSON.parse(status.stdout).data.path, "first_run_enroll");
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -2850,13 +2921,14 @@ test("doctor warns, exits 0, and names agent enroll when a fresh install has no 
     data: {
       status: string;
       next?: { command: string; reason: string };
-      checks: Array<{ name: string; status: string; detail: string; next?: { command: string; reason: string } }>;
+      checks: Array<{ name: string; status: string; detail: string; path?: string; next?: { command: string; reason: string } }>;
     };
   };
   assert.equal(envelope.data.status, "warn");
   const token = envelope.data.checks.find((check) => check.name === "token");
   assert.ok(token, stdout);
   assert.equal(token.status, "warn");
+  assert.equal(token.path, "first_run_enroll");
   assert.match(token.detail, /^\(none\); this installation is not enrolled/);
   assert.equal(token.next?.command, "screenrig agent enroll --email ADDRESS");
   assert.equal(envelope.data.next?.command, "screenrig agent enroll --email ADDRESS");
@@ -2885,13 +2957,40 @@ test("doctor points a pending agent connection at agent connect instead of enrol
   const { code, stdout } = await withRuntime(["--json", "doctor"], memoryBackend(), { fs: fsLike, runProcess: fullToolchainProbe() });
   assert.equal(code, ExitCode.Success, stdout);
   const envelope = JSON.parse(stdout) as {
-    data: { next?: { command: string }; checks: Array<{ name: string; status: string; next?: { command: string } }> };
+    data: { next?: { command: string }; checks: Array<{ name: string; status: string; path?: string; next?: { command: string } }> };
   };
   const token = envelope.data.checks.find((check) => check.name === "token");
   assert.equal(token?.status, "warn");
+  assert.equal(token?.path, "reconnect_existing");
   assert.equal(token?.next?.command, "screenrig agent connect");
   assert.equal(envelope.data.next?.command, "screenrig agent connect");
   assert.doesNotMatch(stdout, /acn_PENDING/);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("doctor treats revoked agent history without a pending reconnect as first-run enrollment", async () => {
+  resetFfmpegToolchainCache();
+  const configDir = await testTemp("doctor-revoked-enroll-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
+    api_url: "https://api.screenrig.ai",
+    last_agent: {
+      id: TEST_AGENT.id,
+      name: TEST_AGENT.name,
+      agent_type: TEST_AGENT.agent_type,
+      state: "revoked",
+    },
+  }, fsLike);
+  const result = await withRuntime(["--json", "doctor"], memoryBackend(), { fs: fsLike, runProcess: fullToolchainProbe() });
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  const envelope = JSON.parse(result.stdout) as {
+    data: { next?: { command: string }; checks: Array<{ name: string; path?: string; next?: { command: string; reason: string } }> };
+  };
+  const token = envelope.data.checks.find((check) => check.name === "token");
+  assert.equal(token?.path, "first_run_enroll");
+  assert.equal(token?.next?.command, "screenrig agent enroll --email ADDRESS");
+  assert.match(token?.next?.reason ?? "", /contact email/i);
+  assert.equal(envelope.data.next?.command, "screenrig agent enroll --email ADDRESS");
   await rm(configDir, { recursive: true, force: true });
 });
 

@@ -383,13 +383,13 @@ function commandHandler(
       if (resolved.agentConnection) {
         throw notEnrolledError("This installation has a pending agent connection and no active credential.", {
           command: "screenrig agent connect",
-          reason: "Resume the passkey-approved connection before running account commands.",
+          reason: "Resume the intentional existing-account connection before running account commands.",
         });
       }
       if (resolved.lastAgent) {
         throw notEnrolledError("This installation is disconnected and cannot run account commands.", {
-          command: "screenrig agent connect",
-          reason: "Connect a new independently revocable agent through dashboard passkey approval.",
+          command: "screenrig agent enroll --email ADDRESS",
+          reason: "Ask the user for their contact email, then create a new account agent. Use agent connect only for an intentional existing-account reconnect.",
         });
       }
       throw notEnrolledError("This installation is not enrolled. Enrollment is an explicit step and is never a side effect of another command.", {
@@ -611,6 +611,7 @@ async function agentStatus(
     const connection = resolved.agentConnection;
     const data = {
       status: "connecting",
+      path: "reconnect_existing",
       phase: resolved.token && connection.pending_agent_id ? "activating" : connection.connection_id ? "approval" : "starting",
       ...(connection.connection_id ? { connection_id: connection.connection_id } : {}),
       ...(connection.expires_at ? { expires_at: connection.expires_at } : {}),
@@ -630,7 +631,7 @@ async function agentStatus(
     const local = resolved.lastAgent;
     const status = local ? "disconnected" : "not_enrolled";
     return {
-      envelope: successEnvelope({ status, ...(local ? { agent: local } : {}) }),
+      envelope: successEnvelope({ status, path: "first_run_enroll", ...(local ? { agent: local } : {}) }),
       exitCode: ExitCode.Success,
       human: humanLines("Agent", [
         ["status", status],
@@ -706,13 +707,21 @@ async function agentEnroll(
   requireFlagValue(args, "name", "Office MacBook Codex");
   const name = flagString(args.flags, "name");
   if (name && name.length > 80) throw usageError("agent enroll --name is at most 80 characters.");
+  let enrollmentConfig = resolved;
   if (resolved.agentConnection) {
-    throw usageError("A different agent connection is already pending in this config.", {
-      command: "screenrig agent connect",
-      reason: "Resume the pending connection before creating a new account.",
+    if (!flagBool(args.flags, "force")) {
+      throw usageError("A different agent connection is already pending in this config.", {
+        command: "screenrig agent enroll --force --email ADDRESS",
+        reason: "Use --force only to discard the unwanted existing-account connection and enroll a new account.",
+      });
+    }
+    await clearAgentConnectionForEnrollment(runtime, resolved);
+    enrollmentConfig = await resolveConfig({
+      flags: args.flags,
+      fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir },
     });
   }
-  const enrolled = await enrollForCommand(args, runtime, resolved, {
+  const enrolled = await enrollForCommand(args, runtime, enrollmentConfig, {
     ...(name ? { name } : {}),
     explicit: true,
   });
@@ -916,6 +925,25 @@ async function clearAgentConnection(
       return;
     }
     await writeConfigAtomic(resolved.configPath, { ...rest, updated_at: runtime.now().toISOString() }, fsLike);
+  });
+}
+
+async function clearAgentConnectionForEnrollment(
+  runtime: CliRuntime,
+  resolved: Awaited<ReturnType<typeof resolveConfig>>,
+): Promise<void> {
+  const fsLike = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
+  await withConfigLock(resolved.configPath, fsLike, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
+    const current = await readConfigFile(resolved.configPath, fsLike);
+    if (!current?.agent_connection) return;
+    const { agent_connection: connection, ...rest } = current;
+    const cleaned = connection.pending_agent_id
+      ? (({ token: _token, account_id: _account, agent_id: _agent, ...safe }) => safe)(rest)
+      : rest;
+    await writeConfigAtomic(resolved.configPath, {
+      ...cleaned,
+      updated_at: runtime.now().toISOString(),
+    }, fsLike);
   });
 }
 
@@ -4000,6 +4028,7 @@ interface DoctorCheck {
   name: string;
   status: DoctorStatus;
   detail: string;
+  path?: "first_run_enroll" | "reconnect_existing";
   /** The command that clears a `warn` or `fail` row, when one exists. */
   next?: ProblemNext;
 }
@@ -4021,9 +4050,10 @@ function credentialCheck(resolved: Awaited<ReturnType<typeof resolveConfig>>): D
       name: "token",
       status: "warn",
       detail: `${detail}; an agent connection is pending dashboard approval`,
+      path: "reconnect_existing",
       next: {
         command: "screenrig agent connect",
-        reason: "Resume the pending passkey-approved connection, then rerun doctor.",
+        reason: "Resume the intentional existing-account connection, then rerun doctor.",
       },
     };
   }
@@ -4032,9 +4062,10 @@ function credentialCheck(resolved: Awaited<ReturnType<typeof resolveConfig>>): D
       name: "token",
       status: "warn",
       detail: `${detail}; this installation was disconnected`,
+      path: "first_run_enroll",
       next: {
-        command: "screenrig agent connect",
-        reason: "Connect a new independently revocable agent through dashboard passkey approval, then rerun doctor.",
+        command: "screenrig agent enroll --email ADDRESS",
+        reason: "Ask the user for their contact email, enroll a new account agent, then rerun doctor. Use agent connect only for an intentional existing-account reconnect.",
       },
     };
   }
@@ -4042,6 +4073,7 @@ function credentialCheck(resolved: Awaited<ReturnType<typeof resolveConfig>>): D
     name: "token",
     status: "warn",
     detail: `${detail}; this installation is not enrolled`,
+    path: "first_run_enroll",
     next: {
       command: resolved.enrollment?.email ? "screenrig agent enroll" : "screenrig agent enroll --email ADDRESS",
       reason: resolved.enrollment?.email

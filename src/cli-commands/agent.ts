@@ -6,13 +6,14 @@ import { addCommandNotes } from "./notes.js";
 export function registerAgentCommands(root: Command, bind: CommandActionBinder): void {
   const agent = root.command("agent").description("Enroll, connect, and manage this agent");
 
-  agent.command("enroll").description("Create the first agent with an email address")
+  agent.command("enroll").description("Create a new account agent (default first-run path)")
     .option("--email <ADDRESS>", "Set the account contact email")
     .option("--name <NAME>", "Set this agent installation name")
+    .option("--force", "Discard a pending existing-account connection before enrolling")
     .option("--open-dashboard", "Open the dashboard after enrolling")
     .action(bind(handleAgentEnroll));
 
-  addCommandNotes(agent.command("connect").description("Connect this installation with approval")
+  addCommandNotes(agent.command("connect").description("Reconnect this installation to an existing account")
     .option("--name <NAME>", "Set this agent installation name")
     .option("--print-url", "Return the browser handoff URL")
     .option("--wait", "Wait for dashboard approval (30000 ms default; bounded by --timeout)")

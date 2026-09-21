@@ -6,7 +6,7 @@ import { addCommandExamples, addCommandNotes, commandExamples } from "./notes.js
 export function registerGuidance(root: Command): void {
   const examples: Record<string, string[]> = {
     "account show": [""],
-    "agent enroll": ["--email operator@example.com --name Lobby-agent"],
+    "agent enroll": ["--email operator@example.com --name Lobby-agent", "--force --email operator@example.com"],
     "agent connect": ["--print-url", "--wait --timeout 10000"],
     "agent status": [""],
     "agent disconnect": ["--yes"],
@@ -63,7 +63,8 @@ export function registerGuidance(root: Command): void {
     if (!commandExamples(command).length) addCommandExamples(command, ...suffixes.map(suffix => `screenrig ${path}${suffix ? ` ${suffix}` : ""}`));
   }
   const notes: Record<string, string> = {
-    "agent enroll": "For a new account, supply the user's contact email with --email. Existing accounts use agent connect. An already enrolled installation can reuse its saved enrollment.",
+    "agent enroll": "The default first-run path. For a new account, ask the user for their contact email and supply it with --email. If an unwanted existing-account connection is pending, --force discards it before enrollment. Intentional existing-account reconnects use agent connect. An already enrolled installation can reuse its saved enrollment.",
+    "agent connect": "Existing-account reconnect only. Requires dashboard approval and resumes a pending connection when present. New accounts and first-run installations use agent enroll.",
     "app pack": "Local and unauthenticated. Pack an already-built static directory with a root index.html. app upload packs the directory itself; packing first is optional.",
     "app upload": "Creates a new application and its first immutable release. Packs the built directory and waits for processing by default (120000 ms, polling every 1000 ms). With --no-wait, use operations wait on the returned operation_id before using the release.",
     "app update": "Creates a new immutable release for the same application and preserves its K/V. Existing playlists remain pinned to their previous release. Use playlist replace-release to preview and apply an explicit replacement. Wait defaults: 120000 ms, polling every 1000 ms.",
