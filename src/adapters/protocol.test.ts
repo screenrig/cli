@@ -541,6 +541,7 @@ test("published problem codes include payment_required and dependency_timeout", 
     "recovery_ambiguous",
     "recovery_expired",
     "recovery_not_offered",
+    "invitation_limit_reached",
   ]);
   assert.match(source, /payment_required/);
   assert.doesNotMatch(source, /stripe|x402/i);

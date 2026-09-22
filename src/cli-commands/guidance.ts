@@ -6,6 +6,7 @@ import { addCommandExamples, addCommandNotes, commandExamples } from "./notes.js
 export function registerGuidance(root: Command): void {
   const examples: Record<string, string[]> = {
     "account show": [""],
+    "account invite": ["--email operator@example.com"],
     "agent enroll": ["--email operator@example.com --name Lobby-agent", "--force --email operator@example.com"],
     "agent connect": ["--print-url", "--wait --timeout 10000"],
     "agent status": [""],
@@ -63,6 +64,7 @@ export function registerGuidance(root: Command): void {
     if (!commandExamples(command).length) addCommandExamples(command, ...suffixes.map(suffix => `screenrig ${path}${suffix ? ` ${suffix}` : ""}`));
   }
   const notes: Record<string, string> = {
+    "account invite": "Existing-account only: this invites an additional user by email and never enrolls a new account. HTTP 202 accepts the request, not a delivery; status queued means delivery is still pending and sent means the mail provider accepted the send, not that the recipient received it. At most 10 invitations may be outstanding, counting the invitation queued when the account was created, and each expires 24 hours after creation. Retry with the same --idempotency-key to avoid another send or slot.",
     "agent enroll": "The default first-run path. For a new account, ask the user for their contact email and supply it with --email. If an unwanted existing-account connection is pending, --force discards it before enrollment. Intentional existing-account reconnects use agent connect. An already enrolled installation can reuse its saved enrollment.",
     "agent connect": "Existing-account reconnect only. Requires dashboard approval and resumes a pending connection when present. New accounts and first-run installations use agent enroll.",
     "app pack": "Local and unauthenticated. Pack an already-built static directory with a root index.html. app upload packs the directory itself; packing first is optional.",

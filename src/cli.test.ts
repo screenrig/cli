@@ -443,6 +443,7 @@ test("email_conflict is terminal and generic, clears only pending enrollment, an
 test("every authenticated command reports not_enrolled instead of enrolling", async () => {
   for (const argv of [
     ["--json", "account", "show"],
+    ["--json", "account", "invite", "--email", "guest@example.com"],
     ["--json", "dashboard"],
     ["--json", "screen", "list"],
     ["--json", "media", "list"],
@@ -3659,6 +3660,144 @@ test("no remaining header and remaining at or above 1000 does not add credits_lo
   assert.equal(json.code, 0, json.stdout);
   const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string }> };
   assert.equal(envelope.warnings.some((item) => item.code === "credits_low"), false, json.stdout);
+});
+
+function inviteTransport(): FakeTransport {
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/v1/account/invitations", (req) => ({
+    status: 202,
+    headers: { "cache-control": "private, no-store", "x-request-id": req.headers?.["x-request-id"] ?? "req_invite" },
+    body: {
+      invitation_id: "inv_AAAAAAAAAAAAAAAAAAAAAAAA",
+      status: "queued",
+      created_at: "2026-08-14T17:00:00.000Z",
+      expires_at: "2026-08-15T17:00:00.000Z",
+    },
+  }));
+  return transport;
+}
+
+test("account invite posts an idempotent request for the current account and reports request status, not delivery", async () => {
+  const configDir = await testTemp("invite-cfg-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const transport = inviteTransport();
+  try {
+    const json = await withAuthenticatedRuntime(["--json", "account", "invite", "--email", "guest@example.com"], transport, { fs: fsLike });
+    assert.equal(json.code, ExitCode.Success, json.stdout);
+    const sent = transport.calls.at(-1);
+    assert.equal(sent?.method, "POST");
+    assert.equal(sent?.path, "/api/v1/account/invitations");
+    assert.match(sent?.headers?.authorization ?? "", /^Bearer sr_live_/);
+    assert.ok(sent?.headers?.["idempotency-key"], "invite must carry an Idempotency-Key");
+    assert.deepEqual(sent?.body, { email: "guest@example.com" });
+    const envelope = JSON.parse(json.stdout) as { ok: boolean; data: Record<string, unknown> };
+    assert.equal(envelope.ok, true);
+    assert.deepEqual(envelope.data, {
+      invitation_id: "inv_AAAAAAAAAAAAAAAAAAAAAAAA",
+      status: "queued",
+      created_at: "2026-08-14T17:00:00.000Z",
+      expires_at: "2026-08-15T17:00:00.000Z",
+    });
+    assert.doesNotMatch(json.stdout, /guest@example\.com|sr_live_/);
+
+    const human = await withAuthenticatedRuntime(["--human", "account", "invite", "--email", "guest@example.com"], transport, { fs: fsLike });
+    assert.equal(human.code, ExitCode.Success, human.stdout);
+    assert.match(human.stdout, /^status: queued$/m);
+    assert.match(human.stdout, /expires_at: 2026-08-15T17:00:00\.000Z/);
+    assert.doesNotMatch(human.stdout, /guest@example\.com|sr_live_/);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("account invite surfaces the outstanding-invitation cap without retrying", async () => {
+  const configDir = await testTemp("invite-cap-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const transport = new FakeTransport();
+  let calls = 0;
+  transport.on("POST", "/api/v1/account/invitations", () => {
+    calls += 1;
+    return {
+      status: 409,
+      headers: { "content-type": "application/problem+json" },
+      body: {
+        type: "https://screenrig.ai/problems/invitation-limit-reached",
+        title: "Invitation limit reached",
+        status: 409,
+        code: "invitation_limit_reached",
+        detail: "At most 10 invitations may be outstanding; a slot frees when one is accepted, expired, or permanently failed.",
+      },
+    };
+  });
+  try {
+    const result = await withAuthenticatedRuntime(["--json", "account", "invite", "--email", "guest@example.com"], transport, { fs: fsLike });
+    assert.equal(result.code, ExitCode.Conflict, result.stdout);
+    const envelope = JSON.parse(result.stdout) as { ok: boolean; error: { code: string; status: number; detail: string } };
+    assert.equal(envelope.ok, false);
+    assert.equal(envelope.error.code, "invitation_limit_reached");
+    assert.equal(envelope.error.status, 409);
+    assert.match(envelope.error.detail, /10 invitations/);
+    assert.equal(calls, 1, "a cap refusal must not be retried automatically");
+    assert.doesNotMatch(result.stdout, /guest@example\.com/);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("account invite reuses its saved idempotency key after an ambiguous failure", async () => {
+  const configDir = await testTemp("invite-retry-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const transport = new FakeTransport();
+  let calls = 0;
+  transport.on("POST", "/api/v1/account/invitations", (req) => {
+    calls += 1;
+    if (calls === 1) throw networkError("connection reset by peer");
+    return {
+      status: 202,
+      headers: { "cache-control": "private, no-store", "x-request-id": req.headers?.["x-request-id"] ?? "req_invite" },
+      body: {
+        invitation_id: "inv_AAAAAAAAAAAAAAAAAAAAAAAA",
+        status: "queued",
+        created_at: "2026-08-14T17:00:00.000Z",
+        expires_at: "2026-08-15T17:00:00.000Z",
+      },
+    };
+  });
+  try {
+    const failed = await withAuthenticatedRuntime(["--json", "account", "invite", "--email", "guest@example.com"], transport, { fs: fsLike });
+    assert.equal(failed.code, ExitCode.Network, failed.stdout);
+    const failedEnvelope = JSON.parse(failed.stdout) as { error: { code: string }; warnings: Array<{ code: string }> };
+    assert.equal(failedEnvelope.error.code, "transport_error");
+    assert.ok(failedEnvelope.warnings.some((warning) => warning.code === "write_recovery_saved"), failed.stdout);
+    const firstKey = transport.calls.at(-1)?.headers?.["idempotency-key"];
+    assert.ok(firstKey);
+
+    // The identical rerun reuses the saved key, so the server replays instead
+    // of sending a second invitation or consuming another slot.
+    const retried = await withAuthenticatedRuntime(["--json", "account", "invite", "--email", "guest@example.com"], transport, { fs: fsLike });
+    assert.equal(retried.code, ExitCode.Success, retried.stdout);
+    assert.equal(transport.calls.at(-1)?.headers?.["idempotency-key"], firstKey);
+    assert.equal(calls, 2);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("account invite validates --email before any network call without echoing it", async () => {
+  const transport = new FakeTransport();
+  const missing = await withAuthenticatedRuntime(["--json", "account", "invite"], transport);
+  assert.equal(missing.code, ExitCode.Usage, missing.stdout);
+
+  const malformed = await withAuthenticatedRuntime(
+    ["--json", "account", "invite", "--email", "Private Person <guest@example.com>"],
+    transport,
+  );
+  assert.equal(malformed.code, ExitCode.Usage, malformed.stdout);
+  assert.doesNotMatch(malformed.stdout, /Private Person|guest@example\.com/);
+  assert.equal(transport.calls.length, 0);
+
+  await rm(missing.configDir, { recursive: true, force: true });
+  await rm(malformed.configDir, { recursive: true, force: true });
 });
 
 test("unauthenticated version does not add credits_low", async () => {

@@ -12,6 +12,8 @@ import {
   TEMPORARY_PROTOCOL_VERSION,
   type Account,
   type AccountEvent,
+  type AccountInvitation,
+  type AccountInvitationRequest,
   type Agent,
   type AgentConnection,
   type AgentConnectionRequest,
@@ -160,22 +162,39 @@ function nonemptyEnv(value: string | undefined): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function enrollmentEmail(value: string | undefined): string {
-  const email = value?.trim();
-  if (!email) {
-    throw usageError("agent enroll requires --email ADDRESS for unverified account contact metadata.");
-  }
-  const parts = email?.split("@");
-  const local = parts?.[0] ?? "";
-  const domain = parts?.[1] ?? "";
+/** One plain ASCII addr-spec with an unquoted local part and dotted DNS domain. */
+function isPlainContactEmail(email: string): boolean {
+  const parts = email.split("@");
+  const local = parts[0] ?? "";
+  const domain = parts[1] ?? "";
   const localValid = local.length > 0 && local.length <= 64
     && !local.startsWith(".") && !local.endsWith(".") && !local.includes("..")
     && /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+$/.test(local);
   const labels = domain.split(".");
   const domainValid = labels.length >= 2 && labels.every((label) => label.length > 0 && label.length <= 63
     && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label));
-  if (email.length < 3 || email.length > 254 || parts?.length !== 2 || !localValid || !domainValid) {
+  return email.length >= 3 && email.length <= 254 && parts.length === 2 && localValid && domainValid;
+}
+
+function enrollmentEmail(value: string | undefined): string {
+  const email = value?.trim();
+  if (!email) {
+    throw usageError("agent enroll requires --email ADDRESS for unverified account contact metadata.");
+  }
+  if (!isPlainContactEmail(email)) {
     throw usageError("agent enroll --email must be one plain ASCII address with an unquoted local part and dotted DNS domain.");
+  }
+  return email;
+}
+
+/** account invite targets an existing account and never enrolls as a side effect. */
+function invitationEmail(value: string | undefined): string {
+  const email = value?.trim();
+  if (!email) {
+    throw usageError("account invite requires --email ADDRESS.");
+  }
+  if (!isPlainContactEmail(email)) {
+    throw usageError("account invite --email must be one plain ASCII address with an unquoted local part and dotted DNS domain.");
   }
   return email;
 }
@@ -409,7 +428,8 @@ function commandHandler(
       (group === "app" && ["upload", "update"].includes(action ?? "")) ||
       (group === "playlist" && ["create", "update", "delete"].includes(action ?? "")) ||
       (group === "media" && ["update", "delete"].includes(action ?? "")) ||
-      (group === "screen" && !["provision", "publish"].includes(action ?? ""))
+      (group === "screen" && !["provision", "publish"].includes(action ?? "")) ||
+      (group === "account" && action === "invite")
     );
     const recovery = ordinary ? new WriteRecovery(resolved, runtime, args.command.slice(0, 2).join(" ")) : undefined;
     if (recovery) writeRecoveries.set(runtime, recovery);
@@ -542,6 +562,8 @@ export const handleAgentEnroll = commandHandler(async (args, runtime, resolved) 
 export const handleAgentDisconnect = commandHandler(agentDisconnect, false);
 
 export const handleAccountShow = commandHandler(accountShow);
+
+export const handleAccountInvite = commandHandler(accountInvite);
 
 export const handleDashboard = commandHandler(dashboardCommand);
 
@@ -1631,6 +1653,65 @@ async function accountShow(args: ParsedArgs, runtime: CliRuntime, resolved: Awai
       ["credit_remaining", account.credit_remaining !== undefined ? String(account.credit_remaining) : undefined],
       ["token", describeTokenPresence(token)],
       ["request_id", client.requestId],
+    ]),
+  };
+}
+
+function isDateTime(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && Number.isFinite(Date.parse(value));
+}
+
+/** Reject a body that does not match the generated account invitation contract. */
+function validateAccountInvitation(value: unknown): AccountInvitation {
+  const invitation = value as Partial<AccountInvitation> | undefined;
+  if (!invitation || typeof invitation.invitation_id !== "string" || invitation.invitation_id.length === 0
+    || !["queued", "sent", "accepted", "expired", "failed"].includes(invitation.status ?? "")
+    || !isDateTime(invitation.created_at) || !isDateTime(invitation.expires_at)) {
+    throw usageError("Invitation response does not match the generated account invitation contract.");
+  }
+  return invitation as AccountInvitation;
+}
+
+/** status describes request progress, never delivery. */
+function invitationDelivery(status: AccountInvitation["status"]): string {
+  switch (status) {
+    case "queued": return "queued; delivery has not completed and the recipient may receive nothing yet";
+    case "sent": return "sent; the mail provider accepted it, which is not proof of receipt";
+    case "accepted": return "accepted; the recipient claimed the invitation and the slot is free";
+    case "expired": return "expired without being claimed; the slot is free";
+    case "failed": return "permanently failed; the slot is free";
+  }
+}
+
+/**
+ * Invite an additional user to the current account by email. Existing-account
+ * only: this never enrolls. The server returns 202 with request progress, not
+ * proof of delivery, and caps outstanding invitations.
+ */
+async function accountInvite(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>): Promise<CommandResult> {
+  const email = invitationEmail(flagString(args.flags, "email"));
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+  // Idempotent by contract. The client mints one key per invocation; retry with
+  // --idempotency-key, or via the durable write ledger, to avoid a new send or
+  // slot. The attached address is never echoed to stdout or logs.
+  const body: AccountInvitationRequest = { email };
+  const response = await client.call({
+    method: "POST",
+    path: "/api/v1/account/invitations",
+    idempotent: true,
+    body,
+  });
+  const invitation = validateAccountInvitation(response.body);
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: humanLines("Invitation request accepted", [
+      ["invitation_id", invitation.invitation_id],
+      ["status", invitation.status],
+      ["delivery", invitationDelivery(invitation.status)],
+      ["created_at", invitation.created_at],
+      ["expires_at", invitation.expires_at],
     ]),
   };
 }

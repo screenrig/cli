@@ -26,6 +26,25 @@ export interface Account {
   used_bytes: number;
 }
 
+/**
+ * One email invitation for an existing account.
+ *
+ * Local mirror of the generated POST /api/v1/account/invitations contract
+ * until `@screenrig/protocol` publishes declarations. `status` reports request
+ * progress, never delivery: 202 acceptance is not proof the recipient received
+ * any mail.
+ */
+export interface AccountInvitation {
+  created_at: string;
+  expires_at: string;
+  invitation_id: string;
+  status: "queued" | "sent" | "accepted" | "expired" | "failed";
+}
+
+export interface AccountInvitationRequest {
+  email: string;
+}
+
 export interface CLIEnrollment {
   account: Account;
   agent: Agent;

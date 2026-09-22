@@ -91,6 +91,30 @@ Option `relationships` describe `exactlyOne`, `atLeastOne`, and `together` group
 `requires` means the first option requires every remaining option. These same
 rules validate invocations before configuration or network access.
 
+## Invite people to your account
+
+An enrolled agent can email another person a single-use dashboard invitation:
+
+```sh
+screenrig account invite --email teammate@example.com
+```
+
+This uses the existing account; it never enrolls a new one. The response reports
+the invitation ID, status, and expiry, not a sign-in link. `queued` means delivery
+is pending; `sent` means the mail provider accepted the message, not that it
+reached the inbox. Invited people receive the account's existing dashboard
+access, not a restricted guest role.
+
+At most **10 invitations** may be outstanding per account, including the initial
+invitation queued when the account was created. Claiming an invitation, its
+24-hour expiry, or a terminal delivery failure releases its slot. An outstanding
+invitation to the same address is reused. At the limit, the command reports
+`invitation_limit_reached` without automatically retrying.
+
+After an ambiguous failure, rerun the same command unchanged; the CLI preserves
+its request key. Automation may supply `--idempotency-key` to explicitly replay
+the same request without adding another invitation.
+
 ## Screen host and recovery
 
 Native players report the shell and hardware they run on. `screen show` prints

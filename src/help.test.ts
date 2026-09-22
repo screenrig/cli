@@ -38,6 +38,7 @@ test("root help is compact and every command is discoverable through immediate c
     "recovery show",
     "recovery reconcile",
     "account show",
+    "account invite",
     "agent enroll",
     "agent connect",
     "agent status",
@@ -213,6 +214,17 @@ test("structured discovery exposes positional cardinality, choices, defaults and
   assert.deepEqual(generate.options.find((option) => option.name === "--prompt")?.conflicts, ["--prompt-file"]);
   assert.deepEqual(generate.relationships, [{ kind: "exactlyOne", options: ["--prompt", "--prompt-file"] }]);
   assert.equal(generate.usage.split("Provide exactly one").length, 2, "notes should appear only once");
+});
+
+test("account invite advertises its required flag, example, and outstanding-invitation cap", () => {
+  const invite = commandHelp(["account", "invite"]);
+  assert.equal(invite.kind, "command");
+  assert.equal(invite.options.find((option) => option.name === "--email")?.required, true);
+  assert.ok(invite.examples.includes("screenrig account invite --email operator@example.com"));
+  const notes = invite.notes.join(" ");
+  assert.match(notes, /at most 10 outstanding invitations/);
+  assert.match(notes, /HTTP 202/);
+  assert.match(notes, /24 hours after creation/);
 });
 
 test("explicit JSON inventory can be scoped to a group", () => {
