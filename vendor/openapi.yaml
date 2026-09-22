@@ -127,7 +127,7 @@ paths:
 
         Supply a contact email. Missing or malformed addresses return invalid_request;
         an address already used by an account returns email_conflict. The address is
-        unverified and cannot recover an account or attach an agent. Once a signed-in
+        unverified. A second enrollment for it returns email_conflict and directs the operator to `screenrig account recover --email ADDRESS`; the address never attaches an agent. Once a signed-in
         dashboard user sets a password, this email also identifies that account at login.
 
         Persist client_id, email, and Idempotency-Key before sending. An exact retry
@@ -254,6 +254,37 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "402": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/account/recovery:
+    post:
+      operationId: requestAccountRecovery
+      x-rate-limit-policies: [{ name: account-recovery-email, quota: 3, windowSeconds: 3600 }, { name: account-recovery-ip, quota: 10, windowSeconds: 3600 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Starts account recovery for the existing account whose enrolled contact
+        address matches the supplied email. It is unauthenticated and requires
+        the same Idempotency-Key as enrollment. The response is identical for a
+        known and an unknown address: 202 with only {"status":"accepted"}. It
+        never carries an account id, the address, a single-use link, a
+        credential, or a delivery status, so the endpoint cannot enumerate
+        accounts. When the address matches, a single-use dashboard recovery
+        message is queued for the account's own stored contact address and
+        delivered through the durable recovery outbox; an invited recipient's
+        address never recovers the account. Opening the emailed link restores a
+        signed-in dashboard session for the existing account through the
+        ordinary /#link= claim: it issues no agent credential and changes no
+        password and no device. The same request is served on
+        POST /dashboard/v1/account/recovery with the same body, key, response,
+        and fixed-window policies, so the two paths cannot be combined to
+        double the quota.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AccountRecoveryRequest" } } } }
+      responses:
+        "202": { description: "Recovery accepted. Identical for a known and an unknown address; no account, address, link, credential, or delivery status is returned.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/AccountRecoveryAccepted" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "409": { description: "idempotency_mismatch — the key was already used for a different contact address.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         "503": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
@@ -1761,6 +1792,30 @@ paths:
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         "503": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/account/recovery:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: requestDashboardAccountRecovery
+      x-rate-limit-policies: [{ name: account-recovery-email, quota: 3, windowSeconds: 3600 }, { name: account-recovery-ip, quota: 10, windowSeconds: 3600 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Dashboard same-origin twin of POST /api/v1/account/recovery for a
+        signed-out visitor. It sends the same request through the dashboard's
+        own origin and returns the same 202 {"status":"accepted"} for a known
+        and an unknown address. It shares the CLI path's account-recovery fixed
+        windows, so the two routes cannot be combined to double the quota. The
+        dashboard route enforces its origin, rejects any Authorization header,
+        and validates same-origin mutation metadata.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AccountRecoveryRequest" } } } }
+      responses:
+        "202": { description: "Recovery accepted. Identical for a known and an unknown address; no account, address, link, credential, or delivery status is returned.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/AccountRecoveryAccepted" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { description: "idempotency_mismatch — the key was already used for a different contact address.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        "503": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/password:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
     put:
@@ -2635,7 +2690,21 @@ components:
         status: { type: string, enum: [queued, sent, accepted, expired, failed], description: "queued waits for delivery, sent is accepted by the mail provider and unclaimed, accepted is claimed, expired lapsed unclaimed, and failed is terminal." }
         created_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time, description: "24 hours after creation. An unclaimed invitation at this instant frees its slot." }
-    CLIEnrollmentRequest: { type: object, additionalProperties: false, required: [client_id, email], properties: { client_id: { type: string, pattern: "^cli_[A-Za-z0-9_-]{43}$", description: "Stable anonymous installation identity generated from 32 CSPRNG bytes and persisted before the first request. It is rate-limit material, not an account credential." }, email: { type: string, format: email, minLength: 3, maxLength: 254, description: "Required account contact address: one plain ASCII addr-spec with an unquoted local part and dotted DNS domain, with no display name, angle bracket, comma, quote, whitespace, or control character. The server trims surrounding whitespace, lowercases the address into a private uniqueness key, and preserves the trimmed capitalization for display. It is unique across accounts: a second enrollment with the same normalized address is rejected with email_conflict. A malformed or missing address is rejected with invalid_request, and the rejection never echoes the address. It is stored unverified and email_verified stays false. Account creation queues a single-use dashboard invitation through Postmark. It grants no authority by itself. After an authenticated dashboard user sets a password, the normalized address identifies this same account for password login; it provides no signup, recovery, or attach-by-address behavior." }, beta_key: { type: string, description: "Required when the server has a configured enrollment beta key. Omit when the server does not gate enrollment." }, name: { type: string, minLength: 1, maxLength: 80, default: "ScreenRig CLI" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
+    CLIEnrollmentRequest: { type: object, additionalProperties: false, required: [client_id, email], properties: { client_id: { type: string, pattern: "^cli_[A-Za-z0-9_-]{43}$", description: "Stable anonymous installation identity generated from 32 CSPRNG bytes and persisted before the first request. It is rate-limit material, not an account credential." }, email: { type: string, format: email, minLength: 3, maxLength: 254, description: "Required account contact address: one plain ASCII addr-spec with an unquoted local part and dotted DNS domain, with no display name, angle bracket, comma, quote, whitespace, or control character. The server trims surrounding whitespace, lowercases the address into a private uniqueness key, and preserves the trimmed capitalization for display. It is unique across accounts: a second enrollment with the same normalized address is rejected with email_conflict. A malformed or missing address is rejected with invalid_request, and the rejection never echoes the address. It is stored unverified and email_verified stays false. Account creation queues a single-use dashboard invitation through Postmark. It grants no authority by itself. After an authenticated dashboard user sets a password, the normalized address identifies this same account for password login; it provides no signup or attach-by-address behavior; it is the recovery channel for this account." }, beta_key: { type: string, description: "Required when the server has a configured enrollment beta key. Omit when the server does not gate enrollment." }, name: { type: string, minLength: 1, maxLength: 80, default: "ScreenRig CLI" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
+    AccountRecoveryRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      description: "Start account recovery for the existing account whose enrolled contact address matches this address. It is normalized by the same rule as enrollment and is never echoed in the response, a problem detail, or a log."
+      properties:
+        email: { type: string, format: email, minLength: 3, maxLength: 254, description: "One plain ASCII addr-spec, normalized exactly as at enrollment. It is never echoed in the response, a problem detail, or a log." }
+    AccountRecoveryAccepted:
+      type: object
+      additionalProperties: false
+      required: [status]
+      description: "The only recovery response body. It is identical for a known and an unknown address and carries no account id, address, link, credential, or delivery status."
+      properties:
+        status: { type: string, enum: [accepted] }
     Account: { type: object, additionalProperties: false, required: [id, revision, status, email, email_verified, used_bytes, reserved_bytes, screen_count, content_limit_bytes, screen_limit, credit_remaining, created_at, updated_at], properties: { id: { type: string }, revision: { type: integer }, status: { type: string, enum: [active, cancelled, deleted] }, email: { type: string, minLength: 3, maxLength: 254, description: "Required contact address supplied at enrollment, preserving its capitalization after surrounding whitespace is trimmed. Read-only: no route updates it, and it is published only on an authenticated read of the caller's own account." }, email_verified: { type: boolean, enum: [false], description: "Always false. The address is stored unverified; enrollment queues one invitation delivery to it, but no route treats a delivery as proof of possession and no flow sets this true. It is published so a later recovery feature cannot mistake an unverified string for authority. It is not an authorization factor." }, used_bytes: { type: integer, description: "Durable bytes the account owns across media, expanded application release trees, and application key/value entries." }, reserved_bytes: { type: integer, description: "Bytes held by uploads in flight. They count against a custom storage ceiling until the upload commits or its reservation is released." }, screen_count: { type: integer }, content_limit_bytes: { type: integer, description: "Storage ceiling the account's plan allows. Zero means no product storage cap." }, screen_limit: { type: integer, description: "Screen limit the account's plan allows. Zero means no screen cap." }, credit_remaining: { type: integer, minimum: 0, description: "Remaining prepaid credits as a whole integer. Never negative. Standard includes no monthly credit grant. Every account waives the first 10 GB of bandwidth, 1 GB-month of storage, and 10,000 API or billed listen-stream taxes each UTC month." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     RuntimeChrome: { type: object, additionalProperties: false, required: [schema_version, banner], properties: { schema_version: { type: integer, enum: [1] }, banner: { type: "null" } } }
     CLIEnrollment: { type: object, additionalProperties: false, required: [account, agent, connection_ready, token, issuance_id, issuance_expires_at], properties: { account: { $ref: "#/components/schemas/Account" }, agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, enum: [false], description: "A newly enrolled account has neither a registered dashboard passkey nor password, so approval of another agent is not ready. Re-read GET /api/v1/agents/self after configuring either retained dashboard credential." }, token: { type: string, minLength: 32, description: Permanent bearer credential for exactly this first agent. It has no scheduled expiry and is redelivered only through this short-lived encrypted issuance envelope. }, issuance_id: { type: string, description: Opaque identifier for the encrypted exact-retry delivery envelope. }, issuance_expires_at: { type: string, format: date-time, description: Exact-retry redelivery deadline for this credential issuance; ten minutes after first enrollment. Later exact retries return credential_issuance_expired while the permanent token remains valid. } } }
@@ -3915,7 +3984,7 @@ components:
         status: { type: string, enum: [active, cancelled, deleted] }
         created_at: { type: string, format: date-time }
         email: { type: string, minLength: 3, maxLength: 254, description: "Required contact address supplied at enrollment, preserving its capitalization after surrounding whitespace is trimmed. No dashboard route updates it. It identifies this same account for password login only after an authenticated user sets a password; possession of the address alone grants nothing." }
-        email_verified: { type: boolean, enum: [false], description: "Always false. The address is stored unverified; enrollment queues one invitation delivery to it, but a delivery is not verification. Show it as unverified; do not present it as a recovery channel." }
+        email_verified: { type: boolean, enum: [false], description: "Always false. The address is stored unverified; enrollment queues one invitation delivery to it, but a delivery is not verification. Show it as unverified. This stored contact address is the recovery destination; requesting or delivering a recovery email does not verify it." }
         screen_count: { type: integer, minimum: 0, description: Paired and pairing-pending screens together. Archived screens are excluded. }
         screen_limit: { type: integer, minimum: 0, description: "Plan screen cap. Zero means no cap, not a cap of zero." }
         used_bytes: { type: integer, minimum: 0, description: "Every durable byte the account owns: committed media, expanded release trees, and key/value entries." }

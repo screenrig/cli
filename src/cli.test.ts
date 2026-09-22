@@ -424,10 +424,13 @@ test("email_conflict is terminal and generic, clears only pending enrollment, an
   assert.equal(rejected.code, ExitCode.Conflict, rejected.stdout);
   assert.doesNotMatch(rejected.stdout, /Victim@example\.com/i);
   assert.doesNotMatch(rejected.stdout, /\[redacted-email\]/i);
-  const envelope = JSON.parse(rejected.stdout) as { error: { code: string; errors: unknown[]; next: { command: string } } };
+  const envelope = JSON.parse(rejected.stdout) as { error: { title: string; code: string; errors: unknown[]; next: { command: string; reason: string } } };
   assert.equal(envelope.error.code, "email_conflict");
   assert.deepEqual(envelope.error.errors, []);
-  assert.equal(envelope.error.next.command, "screenrig agent connect");
+  assert.match(envelope.error.title, /already exists/);
+  assert.equal(envelope.error.next.command, "screenrig account recover --email ADDRESS");
+  assert.match(envelope.error.next.reason, /agent connect/);
+  assert.match(envelope.error.next.reason, /Never retry enrollment with another address/);
   const configPath = path.join(configDir, "screenrig", "config.json");
   assert.equal((await readConfigFile(configPath, fsLike))?.enrollment, undefined);
 
@@ -3798,6 +3801,223 @@ test("account invite validates --email before any network call without echoing i
 
   await rm(missing.configDir, { recursive: true, force: true });
   await rm(malformed.configDir, { recursive: true, force: true });
+});
+
+test("account recover posts an unauthenticated idempotent request and reports accepted, not delivery", async () => {
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/v1/account/recovery", () => ({
+    status: 202,
+    headers: { "cache-control": "private, no-store", "x-request-id": "req_recover" },
+    body: { status: "accepted" },
+  }));
+  const json = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], transport);
+  try {
+    assert.equal(json.code, ExitCode.Success, json.stdout);
+    assert.equal(transport.calls.length, 1, "recovery must not enroll, verify a credential, or open a dashboard");
+    const sent = transport.calls.at(-1);
+    assert.equal(sent?.method, "POST");
+    assert.equal(sent?.path, "/api/v1/account/recovery");
+    assert.equal(sent?.headers?.authorization, undefined, "recovery must never send a credential");
+    assert.ok(sent?.headers?.["idempotency-key"], "recovery must carry an Idempotency-Key");
+    assert.deepEqual(sent?.body, { email: "owner@example.com" });
+    const envelope = JSON.parse(json.stdout) as { ok: boolean; data: Record<string, unknown>; request_id?: string };
+    assert.equal(envelope.ok, true);
+    assert.deepEqual(envelope.data, { status: "accepted" });
+    assert.equal(envelope.request_id, "req_recover");
+    assert.doesNotMatch(json.stdout, /owner@example\.com|sr_live_|https?:\/\//);
+  } finally {
+    await rm(json.configDir, { recursive: true, force: true });
+  }
+
+
+  const human = await withRuntime(["--human", "account", "recover", "--email", "owner@example.com"], transport);
+  try {
+    assert.equal(human.code, ExitCode.Success, human.stdout);
+    assert.match(human.stdout, /^Recovery request accepted$/m);
+    assert.match(human.stdout, /^status: accepted$/m);
+    assert.match(human.stdout, /If this email belongs to an account, check its inbox\./m);
+    assert.match(human.stdout, /Delivery is not confirmed\./m);
+    assert.match(human.stdout, /run screenrig agent connect here, then approve the connection request in the recovered dashboard/m);
+    assert.doesNotMatch(human.stdout, /owner@example\.com|sr_live_|https?:\/\//);
+  } finally {
+    await rm(human.configDir, { recursive: true, force: true });
+  }
+});
+
+test("account recover never sends a stored credential and leaves credential state untouched", async () => {
+  const configDir = await testTemp("recover-credential-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const configPath = path.join(configDir, "screenrig", "config.json");
+  const token = "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  await writeConfigAtomic(configPath, {
+    api_url: "https://api.screenrig.ai",
+    token,
+    account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    agent_id: TEST_AGENT.id,
+  }, fsLike);
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/v1/account/recovery", () => ({
+    status: 202,
+    headers: { "cache-control": "private, no-store" },
+    body: { status: "accepted" },
+  }));
+  try {
+    const result = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], transport, { fs: fsLike });
+    assert.equal(result.code, ExitCode.Success, result.stdout);
+    assert.equal(transport.calls.length, 1, result.stdout);
+    assert.equal(transport.calls.at(-1)?.headers?.authorization, undefined);
+    const after = await readConfigFile(configPath, fsLike);
+    assert.equal(after?.token, token);
+    assert.equal(after?.account_id, "acc_AAAAAAAAAAAAAAAAAAAAAAAA");
+    assert.equal(after?.pending_writes, undefined);
+    assert.equal(after?.enrollment, undefined);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("account recover reuses its saved idempotency key after an ambiguous failure on a fresh install", async () => {
+  const configDir = await testTemp("recover-retry-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const transport = new FakeTransport();
+  let calls = 0;
+  transport.on("POST", "/api/v1/account/recovery", () => {
+    calls += 1;
+    if (calls === 1) throw networkError("connection reset by peer");
+    return {
+      status: 202,
+      headers: { "cache-control": "private, no-store" },
+      body: { status: "accepted" },
+    };
+  });
+  try {
+    const failed = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], transport, { fs: fsLike });
+    assert.equal(failed.code, ExitCode.Network, failed.stdout);
+    const failedEnvelope = JSON.parse(failed.stdout) as { error: { code: string }; warnings: Array<{ code: string }> };
+    assert.equal(failedEnvelope.error.code, "transport_error");
+    assert.ok(failedEnvelope.warnings.some((warning) => warning.code === "write_recovery_saved"), failed.stdout);
+    const firstKey = transport.calls.at(-1)?.headers?.["idempotency-key"];
+    assert.ok(firstKey);
+
+    const retried = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], transport, { fs: fsLike });
+    assert.equal(retried.code, ExitCode.Success, retried.stdout);
+    assert.equal(transport.calls.at(-1)?.headers?.["idempotency-key"], firstKey);
+    assert.equal(calls, 2);
+    const configPath = path.join(configDir, "screenrig", "config.json");
+    const config = await readConfigFile(configPath, fsLike);
+    assert.equal(config?.token, undefined, "recovery must not enroll or store a credential");
+    assert.equal(config?.pending_writes, undefined, "a completed recovery clears its retry ledger entry");
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("account recover validates --email before any network call without echoing it", async () => {
+  const transport = new FakeTransport();
+  const missing = await withRuntime(["--json", "account", "recover"], transport);
+  assert.equal(missing.code, ExitCode.Usage, missing.stdout);
+  assert.equal(transport.calls.length, 0);
+
+  const malformed = await withRuntime(
+    ["--json", "account", "recover", "--email", "Owner <owner@example.com>"],
+    transport,
+  );
+  assert.equal(malformed.code, ExitCode.Usage, malformed.stdout);
+  assert.doesNotMatch(malformed.stdout, /Owner|owner@example\.com/);
+  assert.equal(transport.calls.length, 0);
+
+  await rm(missing.configDir, { recursive: true, force: true });
+  await rm(malformed.configDir, { recursive: true, force: true });
+});
+
+test("account recover rejects a response that deviates from the closed accepted contract", async () => {
+  const extraField = new FakeTransport().on("POST", "/api/v1/account/recovery", () => ({
+    status: 202,
+    headers: { "cache-control": "private, no-store" },
+    body: { status: "accepted", account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" },
+  }));
+  const withExtra = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], extraField);
+  assert.equal(withExtra.code, ExitCode.Usage, withExtra.stdout);
+  assert.doesNotMatch(withExtra.stdout, /acc_AAAAAAAAAAAAAAAAAAAAAAAA/);
+
+  const wrongStatus = new FakeTransport().on("POST", "/api/v1/account/recovery", () => ({
+    status: 202,
+    headers: { "cache-control": "private, no-store" },
+    body: { status: "queued" },
+  }));
+  const withWrong = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], wrongStatus);
+  assert.equal(withWrong.code, ExitCode.Usage, withWrong.stdout);
+
+  const missingPolicy = new FakeTransport().on("POST", "/api/v1/account/recovery", () => ({
+    status: 202,
+    headers: {},
+    body: { status: "accepted" },
+  }));
+  const withPolicy = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], missingPolicy);
+  assert.equal(withPolicy.code, ExitCode.Usage, withPolicy.stdout);
+  assert.match(withPolicy.stdout, /private, no-store/);
+
+  await rm(withExtra.configDir, { recursive: true, force: true });
+  await rm(withWrong.configDir, { recursive: true, force: true });
+  await rm(withPolicy.configDir, { recursive: true, force: true });
+});
+
+test("account recover surfaces server validation, key mismatch, and rate limits unchanged", async () => {
+  const invalid = new FakeTransport().on("POST", "/api/v1/account/recovery", () => ({
+    status: 400,
+    headers: { "content-type": "application/problem+json" },
+    body: {
+      type: "https://screenrig.ai/problems/invalid-request",
+      title: "Invalid request",
+      status: 400,
+      code: "invalid_request",
+      detail: "email is malformed",
+    },
+  }));
+  const invalidResult = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], invalid);
+  assert.equal(invalidResult.code, ExitCode.Client, invalidResult.stdout);
+  const invalidEnvelope = JSON.parse(invalidResult.stdout) as { error: { code: string; detail: string; next?: unknown } };
+  assert.equal(invalidEnvelope.error.code, "invalid_request");
+  assert.equal(invalidEnvelope.error.detail, "email is malformed");
+  assert.equal(invalidEnvelope.error.next, undefined);
+
+  const mismatch = new FakeTransport().on("POST", "/api/v1/account/recovery", () => ({
+    status: 409,
+    headers: { "content-type": "application/problem+json" },
+    body: {
+      type: "https://screenrig.ai/problems/idempotency-key-conflict",
+      title: "Idempotency key conflict",
+      status: 409,
+      code: "idempotency_key_conflict",
+      detail: "this key was already used by a different request",
+    },
+  }));
+  const mismatchResult = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], mismatch);
+  assert.equal(mismatchResult.code, ExitCode.Conflict, mismatchResult.stdout);
+  const mismatchEnvelope = JSON.parse(mismatchResult.stdout) as { error: { code: string; detail: string } };
+  assert.equal(mismatchEnvelope.error.code, "idempotency_key_conflict");
+  assert.equal(mismatchEnvelope.error.detail, "this key was already used by a different request");
+
+  const limited = new FakeTransport().on("POST", "/api/v1/account/recovery", () => ({
+    status: 429,
+    headers: { "content-type": "application/problem+json", "retry-after": "30" },
+    body: {
+      type: "https://screenrig.ai/problems/rate-limited",
+      title: "Too many requests",
+      status: 429,
+      code: "rate_limited",
+      detail: "too many recovery requests",
+    },
+  }));
+  const limitedResult = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], limited);
+  assert.equal(limitedResult.code, ExitCode.RateLimited, limitedResult.stdout);
+  const limitedEnvelope = JSON.parse(limitedResult.stdout) as { error: { code: string; retry_after_seconds?: number } };
+  assert.equal(limitedEnvelope.error.code, "rate_limited");
+  assert.equal(limitedEnvelope.error.retry_after_seconds, 30);
+
+  await rm(invalidResult.configDir, { recursive: true, force: true });
+  await rm(mismatchResult.configDir, { recursive: true, force: true });
+  await rm(limitedResult.configDir, { recursive: true, force: true });
 });
 
 test("unauthenticated version does not add credits_low", async () => {

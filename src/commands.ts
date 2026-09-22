@@ -198,6 +198,17 @@ function invitationEmail(value: string | undefined): string {
   }
   return email;
 }
+/** account recover is unauthenticated and targets the account's owner contact address. */
+function recoveryEmail(value: string | undefined): string {
+  const email = value?.trim();
+  if (!email) {
+    throw usageError("account recover requires --email ADDRESS.");
+  }
+  if (!isPlainContactEmail(email)) {
+    throw usageError("account recover --email must be one plain ASCII address with an unquoted local part and dotted DNS domain.");
+  }
+  return email;
+}
 
 function rethrowCompose(err: unknown): never {
   if (err instanceof CliError) {
@@ -346,14 +357,14 @@ function transportFor(runtime: CliRuntime, apiUrl: string, token?: string): Tran
 
 const writeRecoveries = new WeakMap<CliRuntime, WriteRecovery>();
 
-function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?: string): ApiClient {
+function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?: string, recovery?: WriteRecovery): ApiClient {
   return new ApiClient({
     transport: transportFor(runtime, apiUrl, token),
     token,
     requestId: flagString(args.flags, "request-id"),
     idempotencyKey: flagString(args.flags, "idempotency-key"),
     timeoutMs: flagNumber(args.flags, "timeout"),
-    writeRecovery: token ? writeRecoveries.get(runtime) : undefined,
+    writeRecovery: recovery ?? (token ? writeRecoveries.get(runtime) : undefined),
     creditsOwner: runtime,
     logger: loggerOf(runtime),
   });
@@ -423,14 +434,18 @@ function commandHandler(
     // Specialized enrollment, generation, upload/bundle, and handoff flows own
     // their recovery. Ordinary mutations share the durable request ledger.
     const [group, action] = args.command;
-    const ordinary = authenticated && resolved.token && (
-      ["kv", "comment", "feedback", "operations"].includes(group ?? "") ||
-      (group === "app" && ["upload", "update"].includes(action ?? "")) ||
-      (group === "playlist" && ["create", "update", "delete"].includes(action ?? "")) ||
-      (group === "media" && ["update", "delete"].includes(action ?? "")) ||
-      (group === "screen" && !["provision", "publish"].includes(action ?? "")) ||
-      (group === "account" && action === "invite")
-    );
+    // `account recover` persists its idempotency key like an ordinary write
+    // even though it is unauthenticated; a fresh installation has no config
+    // file until the command seeds one before its request.
+    const ordinary = (group === "account" && action === "recover")
+      || Boolean(authenticated && resolved.token && (
+        ["kv", "comment", "feedback", "operations"].includes(group ?? "") ||
+        (group === "app" && ["upload", "update"].includes(action ?? "")) ||
+        (group === "playlist" && ["create", "update", "delete"].includes(action ?? "")) ||
+        (group === "media" && ["update", "delete"].includes(action ?? "")) ||
+        (group === "screen" && !["provision", "publish"].includes(action ?? "")) ||
+        (group === "account" && action === "invite")
+      ));
     const recovery = ordinary ? new WriteRecovery(resolved, runtime, args.command.slice(0, 2).join(" ")) : undefined;
     if (recovery) writeRecoveries.set(runtime, recovery);
     try {
@@ -564,6 +579,7 @@ export const handleAgentDisconnect = commandHandler(agentDisconnect, false);
 export const handleAccountShow = commandHandler(accountShow);
 
 export const handleAccountInvite = commandHandler(accountInvite);
+export const handleAccountRecover = commandHandler(accountRecover, false);
 
 export const handleDashboard = commandHandler(dashboardCommand);
 
@@ -1562,12 +1578,12 @@ async function enrollForCommand(
           if (err instanceof CliError && err.problem.code === "email_conflict") {
             throw new CliError({
               ...err.problem,
-              title: "Contact email is already enrolled",
-              detail: "That contact email belongs to another account. It cannot attach this installation or recover access.",
+              title: "An account with this contact email already exists",
+              detail: "This contact email belongs to an existing account, so enrollment cannot proceed. Ask the mailbox owner to recover dashboard access, then approve this installation. Never retry enrollment with another address.",
               errors: [],
               next: {
-                command: "screenrig agent connect",
-                reason: "Attach this installation to the existing account with dashboard passkey approval. Never retry enrollment with another address.",
+                command: "screenrig account recover --email ADDRESS",
+                reason: "The mailbox owner opens the emailed recovery link (single use, expires in 24 hours) to restore the dashboard session, then runs screenrig agent connect here and approves the connection request in the recovered dashboard. Never retry enrollment with another address.",
               },
             }, err.exitCode, err.warnings);
           }
@@ -1712,6 +1728,70 @@ async function accountInvite(args: ParsedArgs, runtime: CliRuntime, resolved: Aw
       ["delivery", invitationDelivery(invitation.status)],
       ["created_at", invitation.created_at],
       ["expires_at", invitation.expires_at],
+    ]),
+  };
+}
+
+/** The contract is closed: only {status:"accepted"}, identically for enrolled and unknown addresses. */
+function validateAccountRecoveryAccepted(value: unknown): void {
+  const body = value as { status?: unknown } | undefined;
+  if (!body || typeof body !== "object" || Array.isArray(body)
+    || Object.keys(body).length !== 1 || body.status !== "accepted") {
+    throw usageError("Account recovery response does not match the accepted contract.");
+  }
+}
+
+/**
+ * `account recover` is unauthenticated by design: access was lost, so nothing
+ * enrolls, no Authorization is sent even when a local credential exists, and no
+ * stored credential, account, or enrollment state changes. The server queues
+ * one live recovery per account and emails the mailbox owner a single-use
+ * dashboard link; HTTP 202 accepted is not proof of delivery and is identical
+ * whether or not the address belongs to an account.
+ */
+async function accountRecover(
+  args: ParsedArgs,
+  runtime: CliRuntime,
+  resolved: Awaited<ReturnType<typeof resolveConfig>>,
+): Promise<CommandResult> {
+  const email = recoveryEmail(flagString(args.flags, "email"));
+  const configFs = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
+  // The durable retry ledger lives in the user config, which an unenrolled
+  // installation does not have yet. Seed a credential-free config; recovery
+  // never writes a token, account, agent, or enrollment state into it.
+  if (!(await readConfigFile(resolved.configPath, configFs))) {
+    await withConfigLock(
+      resolved.configPath,
+      configFs,
+      { sleep: runtime.sleep, now: () => runtime.now().getTime() },
+      async () => {
+        if (await readConfigFile(resolved.configPath, configFs)) return;
+        await writeConfigAtomic(resolved.configPath, {
+          api_url: resolved.apiUrl,
+          updated_at: runtime.now().toISOString(),
+        }, configFs);
+      },
+    );
+  }
+  const client = clientFor(runtime, args, resolved.apiUrl, undefined, writeRecoveries.get(runtime));
+  const response = await client.call({
+    method: "POST",
+    path: "/api/v1/account/recovery",
+    idempotent: true,
+    body: { email },
+  });
+  requirePrivateNoStore(response.headers, "Account recovery response");
+  validateAccountRecoveryAccepted(response.body);
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: humanLines("Recovery request accepted", [
+      ["status", "accepted"],
+      ["delivery", "If this email belongs to an account, check its inbox. Delivery is not confirmed."],
+      ["link", "the recovery link is single use and expires after 24 hours"],
+      ["open", "open the emailed link in a browser to restore access to the existing account"],
+      ["then", "run screenrig agent connect here, then approve the connection request in the recovered dashboard"],
+      ["request_id", client.requestId],
     ]),
   };
 }

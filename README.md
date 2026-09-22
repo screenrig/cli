@@ -115,6 +115,38 @@ After an ambiguous failure, rerun the same command unchanged; the CLI preserves
 its request key. Automation may supply `--idempotency-key` to explicitly replay
 the same request without adding another invitation.
 
+## Recover dashboard access to your account
+
+If every agent credential for an account is lost, the mailbox owner can email
+the account's contact address a single-use dashboard recovery link:
+
+```sh
+screenrig account recover --email owner@example.com
+```
+
+This command is unauthenticated: it never enrolls, never sends a stored token,
+and never changes stored credential, account, or enrollment state. It can run
+on a fresh installation with no configuration.
+
+HTTP 202 accepts the request; it is not proof the email arrived, and the
+response is identical whether or not the address belongs to an account. One
+live recovery per account is in flight at a time; rerunning the same command
+reuses its saved Idempotency-Key instead of sending another link. Recovery is
+separate from the invitation quota, so a full invitation cap never blocks it.
+
+The mailbox owner opens the emailed link (single use, expires after 24 hours)
+to restore access to the existing account, then attaches this installation by
+running `screenrig agent connect` in the CLI and approving the connection
+request in the recovered dashboard:
+
+```sh
+screenrig agent connect
+```
+
+Enrollment with a contact address that already belongs to an account stops
+with `email_conflict` and directs to this recovery flow; never retry
+enrollment with another address.
+
 ## Screen host and recovery
 
 Native players report the shell and hardware they run on. `screen show` prints

@@ -39,6 +39,7 @@ test("root help is compact and every command is discoverable through immediate c
     "recovery reconcile",
     "account show",
     "account invite",
+    "account recover",
     "agent enroll",
     "agent connect",
     "agent status",
@@ -225,6 +226,19 @@ test("account invite advertises its required flag, example, and outstanding-invi
   assert.match(notes, /at most 10 outstanding invitations/);
   assert.match(notes, /HTTP 202/);
   assert.match(notes, /24 hours after creation/);
+});
+
+test("account recover advertises its required flag, example, and unauthenticated guarantee", () => {
+  const recover = commandHelp(["account", "recover"]);
+  assert.equal(recover.kind, "command");
+  assert.equal(recover.options.find((option) => option.name === "--email")?.required, true);
+  assert.ok(recover.examples.includes("screenrig account recover --email operator@example.com"));
+  const notes = recover.notes.join(" ");
+  assert.match(notes, /never enrolls/);
+  assert.match(notes, /never sends a stored token/);
+  assert.match(notes, /HTTP 202/);
+  assert.match(notes, /separate from the invitation quota/);
+  assert.match(notes, /expires after 24 hours/);
 });
 
 test("explicit JSON inventory can be scoped to a group", () => {
