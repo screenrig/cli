@@ -40,6 +40,10 @@ const snapshots = [
     source: 'packages/protocol/schema/playlist-write.schema.json',
   },
   {
+    path: 'assets/playlist-write-v2.schema.json',
+    source: 'packages/protocol/schema/playlist-write-v2.schema.json',
+  },
+  {
     path: 'src/generated/playlist-write-semantics.ts',
     source: 'packages/protocol/src/playlist-write-semantics.ts',
   },

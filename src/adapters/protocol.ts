@@ -1,3 +1,6 @@
+/** Optional enrollment purpose. Omitted means signage, the existing default. */
+export type EnrollmentIntent = "advertising" | "signage";
+
 /**
  * Temporary compile-time adapter for the generated `packages/protocol` API.
  *
@@ -16,6 +19,8 @@ export interface Account {
   credit_remaining: number;
   email: string;
   email_verified: false;
+  feature_revision: number;
+  features: AccountFeatures;
   id: string;
   reserved_bytes: number;
   revision: number;
@@ -45,6 +50,26 @@ export interface AccountInvitationRequest {
   email: string;
 }
 
+/** Independent account product features. Neither flag is a billing plan. */
+export interface AccountFeatures {
+  advertiser: boolean;
+  screens: boolean;
+}
+
+/**
+ * Local mirror of the generated GET /api/v1/account/capabilities contract
+ * until `@screenrig/protocol` publishes declarations. `capabilities` is the
+ * closed server-derived set for the authenticated account; a client never
+ * asserts it, and no plan label or numeric quota implies permission.
+ */
+export interface AccountCapabilities {
+  account_id: string;
+  plan_id: string;
+  features: AccountFeatures;
+  feature_revision: number;
+  capabilities: string[];
+}
+
 export interface CLIEnrollment {
   account: Account;
   agent: Agent;
@@ -59,6 +84,11 @@ export interface CLIEnrollmentRequest {
   email: string;
   /** Present only when the operator supplies --beta-key or SCREENRIG_BETA_KEY. */
   beta_key?: string;
+  /**
+   * Advertising-purpose enrollment sets advertiser=true/screens=false without
+   * changing billing-plan assignment. Omitted means signage (screens=true).
+   */
+  intent?: EnrollmentIntent;
   name?: string;
   agent_type?: string;
   platform?: string;

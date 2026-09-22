@@ -13,6 +13,8 @@ import {
   validateMediaUploadSession,
 } from "./media-upload.js";
 import { validatePlaylistWrite } from "./playlist-write-validation.js";
+import { callVersionedPlaylist } from "./playlist-api.js";
+import { isAdSlotPage } from "./playlist-authoring.js";
 import { CliError, makeProblem, usageError } from "./problems.js";
 import { fetchSignedRawPut, type CliRuntime } from "./runtime.js";
 import type { MediaUploadSession, Operation } from "./adapters/protocol.js";
@@ -414,6 +416,9 @@ export function normalizePlaylistForBundle(input: unknown): { id: string; revisi
   if (!Array.isArray(source.pages)) throw usageError("Playlist.pages must be an array.");
   const mediaIds = new Set<string>();
   const pages = source.pages.map((pageValue, pageIndex) => {
+    if (isAdSlotPage(pageValue)) {
+      throw usageError(`Playlist.pages[${pageIndex}] is an adslot page. A bundle carries fixed media only, and an adslot page selects its fill at runtime; export stopped before media download.`);
+    }
     const page = record(pageValue, `Playlist.pages[${pageIndex}]`);
     if (!Array.isArray(page.primitives)) throw usageError(`Playlist.pages[${pageIndex}].primitives must be an array.`);
     const primitives = page.primitives.map((primitiveValue, primitiveIndex) => {
@@ -563,9 +568,8 @@ export async function exportPlaylistBundle(options: {
 }): Promise<PlaylistBundleExportResult> {
   if (!isResourceID(options.playlistId, "playlist")) throw usageError("playlist export requires a playlist identifier.");
   const destination = path.resolve(options.outputDirectory);
-  await assertNoSymlinkAncestors(destination, true);
   await destinationAbsent(destination);
-  const playlistResponse = await options.client.call({ method: "GET", path: `/api/v1/playlists/${options.playlistId}` });
+  const playlistResponse = await callVersionedPlaylist(options.client, { method: "GET", id: options.playlistId, preferred: "v1" });
   const normalized = normalizePlaylistForBundle(playlistResponse.body);
   if (normalized.id !== options.playlistId) throw usageError("Playlist export response id did not match the requested playlist.");
 
@@ -863,7 +867,7 @@ export async function importPlaylistBundle(options: {
 
   try {
     if (options.updateId && options.ifMatch) {
-      const target = await options.client.call({ method: "GET", path: `/api/v1/playlists/${options.updateId}` });
+      const target = await callVersionedPlaylist(options.client, { method: "GET", id: options.updateId, preferred: "v1" });
       const targetBody = record(target.body, "Playlist update target");
       if (targetBody.id !== options.updateId) throw usageError("Playlist update target response did not match --update.");
       const current = targetBody.revision;
@@ -955,14 +959,24 @@ export async function importPlaylistBundle(options: {
       options.updateId ?? bundle.manifest.playlist.source_id,
     );
     playlistWriteStarted = true;
-    const response = await options.client.call({
-      method: options.updateId ? "PUT" : "POST",
-      path: options.updateId ? `/api/v1/playlists/${options.updateId}` : "/api/v1/playlists",
-      idempotent: true,
-      idempotencyKey: playlistKey,
-      headers: ifMatch ? { "if-match": ifMatch } : undefined,
-      body: playlist,
-    });
+    // A bundle never carries an adslot page, but --update may be replacing an
+    // ad-bearing playlist, so the update follows the version-required conflict.
+    const response = options.updateId
+      ? await callVersionedPlaylist(options.client, {
+        method: "PUT",
+        id: options.updateId,
+        preferred: "v1",
+        idempotencyKey: playlistKey,
+        body: playlist,
+        ...(ifMatch ? { headers: { "if-match": ifMatch } } : {}),
+      })
+      : await options.client.call({
+        method: "POST",
+        path: "/api/v1/playlists",
+        idempotent: true,
+        idempotencyKey: playlistKey,
+        body: playlist,
+      });
     return {
       schema: PLAYLIST_BUNDLE_SCHEMA,
       directory: bundle.root,

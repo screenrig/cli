@@ -1,3 +1,4 @@
+import type { EnrollmentIntent } from "./adapters/protocol.js";
 import {
   preserveLogSocket,
   readConfigFile,
@@ -20,6 +21,8 @@ export interface EnrollmentState {
   clientId: string;
   idempotencyKey: string;
   email: string;
+  /** Enrollment purpose, fixed for the lifetime of one pending enrollment. */
+  intent?: EnrollmentIntent;
 }
 
 export interface EnrollmentRuntime {
@@ -39,6 +42,12 @@ export async function ensureCredential(options: {
   verify: (token: string, accountId?: string) => Promise<void>;
   /** Exact validated, trimmed contact address for a new or pending enrollment. */
   enrollmentEmail?: string;
+  /**
+   * Enrollment purpose for a new enrollment; a pending enrollment keeps the
+   * intent it was created with, and a changed one is rejected rather than
+   * silently mutating the request behind the same idempotency key.
+   */
+  enrollmentIntent?: EnrollmentIntent;
   generateClientId?: () => string;
   generateIdempotencyKey?: () => string;
 }): Promise<ResolvedConfig> {
@@ -71,16 +80,21 @@ export async function ensureCredential(options: {
       if (existingEnrollment?.email && options.enrollmentEmail && existingEnrollment.email !== options.enrollmentEmail) {
         throw configError("Pending enrollment is bound to a different contact email. Resume it without changing --email.");
       }
+      if (existingEnrollment?.intent && options.enrollmentIntent && existingEnrollment.intent !== options.enrollmentIntent) {
+        throw configError("Pending enrollment is bound to a different purpose. Resume it without changing --intent, or discard it with agent enroll --force.");
+      }
       const email = existingEnrollment?.email ?? options.enrollmentEmail;
       if (!email) {
         throw configError("Enrollment requires a contact email. Run screenrig agent enroll --email ADDRESS.");
       }
+      const intent = existingEnrollment?.intent ?? options.enrollmentIntent;
       const enrollment = {
         ...(existingEnrollment ?? {
           client_id: (options.generateClientId ?? (() => randomPrefixedId("cli", 32)))(),
           idempotency_key: (options.generateIdempotencyKey ?? newIdempotencyKey)(),
         }),
         email,
+        ...(intent ? { intent } : {}),
       };
       if (!/^cli_[A-Za-z0-9_-]{43}$/.test(enrollment.client_id)) {
         throw configError("Enrollment client state is invalid.");
@@ -98,6 +112,7 @@ export async function ensureCredential(options: {
         clientId: enrollment.client_id,
         idempotencyKey: enrollment.idempotency_key,
         email: enrollment.email,
+        ...(enrollment.intent ? { intent: enrollment.intent } : {}),
       });
       if (!credential.token || credential.token.trim() !== credential.token) {
         throw configError("Enrollment returned an invalid credential.");

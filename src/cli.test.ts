@@ -6266,3 +6266,310 @@ for (const prefix of ["development_", "qa_", "stage_"]) test(`enrollment and pai
     assert.doesNotMatch(enrolled.stdout + paired.stdout, /sr_live_/);
   } finally { await rm(configDir, { recursive: true, force: true }); }
 });
+
+
+test("campaign draft preflight rejects invalid duration and unsafe price ceilings before requests", async () => {
+  const transport = new FakeTransport();
+  const directory = await testTemp("ads-campaign-");
+  const draft = {
+    name: "Autumn pass campaign",
+    daily_cap_mcr: "100000000",
+    lifetime_cap_mcr: "500000000",
+    flight_start: "2026-09-01T00:00:00Z",
+    flight_end: "2026-09-30T00:00:00Z",
+    image_duration_ms: 15000,
+    max_play_price_mcr: "250000",
+    networks: [{ seller_account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA", screen_ids: ["scr_TEST"], slot_ids: ["ads_TEST"], creative_ids: ["cre_TEST"] }],
+  };
+  const write = async (name: string, body: unknown): Promise<string> => {
+    const file = path.join(directory, name);
+    const handle = await open(file, "w");
+    try { await handle.writeFile(JSON.stringify(body)); } finally { await handle.close(); }
+    return file;
+  };
+  const tooShort = await withAuthenticatedRuntime(["--json", "ads", "campaigns", "create", await write("short.json", { ...draft, image_duration_ms: 4000 })], transport);
+  assert.equal(tooShort.code, ExitCode.Usage);
+  const numericCeiling = await withAuthenticatedRuntime(["--json", "ads", "campaigns", "create", await write("numeric.json", { ...draft, max_play_price_mcr: 250000 })], transport);
+  assert.equal(numericCeiling.code, ExitCode.Usage);
+  // A zero ceiling is not "no ceiling": the contract requires a positive amount.
+  const zeroCeiling = await withAuthenticatedRuntime(["--json", "ads", "campaigns", "create", await write("zero.json", { ...draft, max_play_price_mcr: "0" })], transport);
+  assert.equal(zeroCeiling.code, ExitCode.Usage);
+  assert.equal(transport.calls.length, 0);
+  await rm(directory, { recursive: true, force: true });
+});
+
+test("campaign preview respects the current revision and never replaces an explicit stale precondition", async () => {
+  let revision = 9;
+  const headers = { "cache-control": "private, no-store" };
+  const transport = new FakeTransport()
+    .on("GET", "/api/v1/advertising/campaigns/cmp_TEST", () => ({
+      status: 200, headers, body: { id: "cmp_TEST", revision },
+    }))
+    .on("POST", "/api/v1/advertising/campaigns/cmp_TEST/quote", request => {
+      if (request.headers?.["if-match"] !== `"${revision}"`) {
+        return { status: 412, headers, body: makeProblem("revision_conflict", "Campaign changed", 412, "Read and accept the current campaign revision.") };
+      }
+      return { status: 200, headers, body: { id: `quo_revision_${revision}`, campaign_revision: revision } };
+    });
+  const current = await withAuthenticatedRuntime(["--json", "ads", "campaigns", "preview", "cmp_TEST"], transport);
+  assert.equal(current.code, ExitCode.Success, current.stdout);
+  assert.equal(JSON.parse(current.stdout).data.campaign_revision, 9);
+  revision = 11;
+  const stale = await withAuthenticatedRuntime(["--json", "ads", "campaigns", "preview", "cmp_TEST", "--expect-rev", "9"], transport);
+  assert.notEqual(stale.code, ExitCode.Success);
+  assert.equal(JSON.parse(stale.stdout).error.code, "revision_conflict");
+  const accepted = await withAuthenticatedRuntime(["--json", "ads", "campaigns", "preview", "cmp_TEST", "--expect-rev", "11"], transport);
+  assert.equal(accepted.code, ExitCode.Success, accepted.stdout);
+  assert.equal(JSON.parse(accepted.stdout).data.campaign_revision, 11);
+});
+
+test("partial advertising edits preserve stored eligibility, pricing, metadata and membership scope", async () => {
+  const headers = { "cache-control": "private, no-store" };
+  let slot: Record<string, unknown> = {
+    id: "ads_TEST", name: "Old name", revision: 3, enabled: true, accepted_media: ["image", "video"],
+    max_image_duration_ms: 15000, max_video_duration_ms: 30000, rate_override_mcr_per_15s: "9007199254740993",
+  };
+  let inventory: Record<string, unknown> = {
+    screen_id: "scr_TEST", revision: 4, ads_enabled: true, site_name: "Lobby", city: "Old city",
+    region: "North", venue_type: "office", audience_tags: ["commuters"], placement: "Entrance",
+    public_description: "Reception display", rate_override_mcr_per_15s: "250000",
+  };
+  let membership: Record<string, unknown> = {
+    id: "mem_TEST", revision: 5, policy: "review_required",
+    scope: { screen_ids: ["scr_TEST"], slot_ids: ["ads_TEST"] },
+  };
+  const conflict = () => ({
+    status: 412, headers, body: makeProblem("revision_conflict", "Resource changed", 412, "Revision precondition failed."),
+  });
+  const transport = new FakeTransport()
+    .on("GET", "/api/v1/advertising/slots", () => ({ status: 200, headers, body: { slots: [slot] } }))
+    .on("POST", "/api/v1/advertising/slots/ads_TEST", request => {
+      if (request.headers?.["if-match"] !== `"${slot.revision}"`) return conflict();
+      slot = { ...(request.body as Record<string, unknown>), id: slot.id, revision: Number(slot.revision) + 1 };
+      return { status: 200, headers, body: slot };
+    })
+    .on("GET", "/api/v1/advertising/inventory", () => ({ status: 200, headers, body: { inventory: [inventory] } }))
+    .on("PUT", "/api/v1/advertising/inventory/scr_TEST", request => {
+      if (request.headers?.["if-match"] !== `"${inventory.revision}"`) return conflict();
+      inventory = { ...(request.body as Record<string, unknown>), screen_id: inventory.screen_id, revision: Number(inventory.revision) + 1 };
+      return { status: 200, headers, body: inventory };
+    })
+    .on("GET", "/api/v1/advertising/memberships", () => ({ status: 200, headers, body: { memberships: [membership] } }))
+    .on("POST", "/api/v1/advertising/memberships/mem_TEST", request => {
+      if (request.headers?.["if-match"] !== `"${membership.revision}"`) return conflict();
+      const body = request.body as Record<string, unknown>;
+      membership = {
+        id: membership.id, revision: Number(membership.revision) + 1, policy: body.policy,
+        scope: { screen_ids: body.screen_ids, slot_ids: body.slot_ids },
+      };
+      return { status: 200, headers, body: membership };
+    });
+  const originalSlot = structuredClone(slot);
+  const originalInventory = structuredClone(inventory);
+  const originalMembership = structuredClone(membership);
+  for (const argv of [
+    ["ads", "slots", "update", "ads_TEST", "--name", "New name", "--expect-rev", "3"],
+    ["ads", "inventory", "update", "scr_TEST", "--city", "New city"],
+    ["ads", "memberships", "update", "mem_TEST", "--policy", "trusted", "--expect-rev", "5"],
+  ]) {
+    const result = await withAuthenticatedRuntime(["--json", ...argv], transport);
+    assert.equal(result.code, ExitCode.Success, result.stdout);
+  }
+  const slots = await withAuthenticatedRuntime(["--json", "ads", "slots", "list"], transport);
+  const inventoryList = await withAuthenticatedRuntime(["--json", "ads", "inventory", "list"], transport);
+  const memberships = await withAuthenticatedRuntime(["--json", "ads", "memberships", "list"], transport);
+  assert.deepEqual(JSON.parse(slots.stdout).data.slots, [{ ...originalSlot, name: "New name", revision: 4 }]);
+  assert.deepEqual(JSON.parse(inventoryList.stdout).data.inventory, [{ ...originalInventory, city: "New city", revision: 5 }]);
+  assert.deepEqual(JSON.parse(memberships.stdout).data.memberships, [{ ...originalMembership, policy: "trusted", revision: 6 }]);
+});
+
+test("advertising lifecycle mutations send required If-Match preconditions and canonical bodies", async () => {
+  const headers = { "cache-control": "private, no-store" };
+  const transport = new FakeTransport()
+    .on("POST", "/api/v1/advertising/network/rate", request => {
+      assert.equal(request.headers?.["if-match"], '"7"');
+      assert.deepEqual(request.body, { rate_mcr_per_15s: "150000" });
+      return { status: 200, headers, body: { id: "net_TEST", revision: 8, default_rate_mcr_per_15s: "150000" } };
+    })
+    .on("POST", "/api/v1/advertising/campaigns/cmp_TEST", request => {
+      assert.equal(request.headers?.["if-match"], '"2"');
+      return { status: 200, headers, body: { id: "cmp_TEST", revision: 3 } };
+    })
+    .on("POST", "/api/v1/advertising/campaigns/cmp_TEST/activate", request => {
+      assert.equal(request.headers?.["if-match"], '"2"');
+      assert.deepEqual(request.body, { quote_id: "quo_OK" });
+      return { status: 200, headers, body: { id: "cmp_TEST", revision: 3, state: "active" } };
+    })
+    .on("POST", "/api/v1/advertising/campaigns/cmp_TEST/pause", request => {
+      assert.equal(request.headers?.["if-match"], '"4"');
+      assert.equal(request.body, undefined);
+      return { status: 200, headers, body: { id: "cmp_TEST", revision: 5, state: "paused" } };
+    })
+    .on("POST", "/api/v1/advertising/campaigns/cmp_TEST/resume", request => {
+      assert.equal(request.headers?.["if-match"], '"5"');
+      assert.equal(request.body, undefined);
+      return { status: 200, headers, body: { id: "cmp_TEST", revision: 6, state: "active" } };
+    })
+    .on("POST", "/api/v1/advertising/campaigns/cmp_TEST/accept-rates", request => {
+      assert.equal(request.headers?.["if-match"], '"3"');
+      assert.deepEqual(request.body, { quote_id: "quo_FRESH" });
+      return { status: 200, headers, body: { id: "cmp_TEST", revision: 7, state: "active" } };
+    });
+  const directory = await testTemp("ads-lifecycle-");
+  const write = async (name: string, body: unknown): Promise<string> => {
+    const file = path.join(directory, name);
+    const handle = await open(file, "w");
+    try { await handle.writeFile(JSON.stringify(body)); } finally { await handle.close(); }
+    return file;
+  };
+  const draft = {
+    name: "Autumn pass campaign",
+    daily_cap_mcr: "100000000",
+    lifetime_cap_mcr: "500000000",
+    flight_start: "2026-09-01T00:00:00Z",
+    flight_end: "2026-09-30T00:00:00Z",
+    image_duration_ms: 5000,
+    networks: [{ seller_account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA", screen_ids: ["scr_TEST"], slot_ids: ["ads_TEST"], creative_ids: ["cre_TEST"] }],
+  };
+  try {
+    const uncapped = await withAuthenticatedRuntime(["--json", "ads", "campaigns", "update", "cmp_TEST", await write("uncapped.json", draft), "--expect-rev", "2"], transport);
+    assert.equal(uncapped.code, ExitCode.Success, uncapped.stdout);
+    const sent = transport.calls.find(call => call.method === "POST" && call.path === "/api/v1/advertising/campaigns/cmp_TEST");
+    assert.deepEqual(sent?.body, { ...draft, networks: [{ ...draft.networks[0] }] });
+    assert.equal(Object.hasOwn(sent?.body as object, "max_play_price_mcr"), false, "an omitted ceiling stays omitted");
+    transport.calls.length = 0;
+    const capped = await withAuthenticatedRuntime(
+      ["--json", "ads", "campaigns", "update", "cmp_TEST", await write("capped.json", { ...draft, max_play_price_mcr: "250000" }), "--expect-rev", "2"],
+      transport,
+    );
+    assert.equal(capped.code, ExitCode.Success, capped.stdout);
+    assert.equal((transport.calls.at(-1)?.body as Record<string, unknown>).max_play_price_mcr, "250000");
+    transport.calls.length = 0;
+    for (const argv of [
+      ["ads", "network", "rate", "--rate-mcr-per-15s", "150000", "--expect-rev", "7"],
+      ["ads", "campaigns", "activate", "cmp_TEST", "--quote-id", "quo_OK", "--expect-rev", "2"],
+      ["ads", "campaigns", "pause", "cmp_TEST", "--expect-rev", "4"],
+      ["ads", "campaigns", "resume", "cmp_TEST", "--expect-rev", "5"],
+      ["ads", "campaigns", "accept-rates", "cmp_TEST", "--quote-id", "quo_FRESH", "--expect-rev", "3"],
+    ]) {
+      const result = await withAuthenticatedRuntime(["--json", ...argv], transport);
+      assert.equal(result.code, ExitCode.Success, `${argv.join(" ")}: ${result.stdout}`);
+      transport.calls.length = 0;
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("stale advertising revisions surface as precondition failures and are never silently refreshed", async () => {
+  const headers = { "cache-control": "private, no-store" };
+  const conflict = () => ({
+    status: 412, headers, body: makeProblem("revision_conflict", "Resource changed", 412, "Read and accept the current revision."),
+  });
+  let mutations = 0;
+  const transport = new FakeTransport()
+    .on("POST", "/api/v1/advertising/network/rate", () => { mutations += 1; return conflict(); })
+    .on("POST", "/api/v1/advertising/campaigns/cmp_TEST", () => { mutations += 1; return conflict(); })
+    .on("POST", /\/api\/v1\/advertising\/campaigns\/cmp_TEST\/(activate|pause|resume|accept-rates)/, () => { mutations += 1; return conflict(); });
+  const directory = await testTemp("ads-stale-");
+  const draftFile = path.join(directory, "draft.json");
+  const handle = await open(draftFile, "w");
+  try {
+    await handle.writeFile(JSON.stringify({
+      name: "Autumn pass campaign", daily_cap_mcr: "100000000", lifetime_cap_mcr: "500000000",
+      flight_start: "2026-09-01T00:00:00Z", flight_end: "2026-09-30T00:00:00Z",
+      networks: [{ seller_account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA", screen_ids: [], slot_ids: [], creative_ids: [] }],
+    }));
+  } finally { await handle.close(); }
+  try {
+    for (const argv of [
+      ["ads", "network", "rate", "--rate-mcr-per-15s", "150000", "--expect-rev", "1"],
+      ["ads", "campaigns", "update", "cmp_TEST", draftFile, "--expect-rev", "1"],
+      ["ads", "campaigns", "activate", "cmp_TEST", "--quote-id", "quo_OK", "--expect-rev", "1"],
+      ["ads", "campaigns", "pause", "cmp_TEST", "--expect-rev", "1"],
+      ["ads", "campaigns", "resume", "cmp_TEST", "--expect-rev", "1"],
+      ["ads", "campaigns", "accept-rates", "cmp_TEST", "--quote-id", "quo_OK", "--expect-rev", "1"],
+    ]) {
+      const before = mutations;
+      const result = await withAuthenticatedRuntime(["--json", ...argv], transport);
+      assert.equal(result.code, ExitCode.Precondition, `${argv.join(" ")}: ${result.stdout}`);
+      assert.equal(JSON.parse(result.stdout).error.code, "revision_conflict");
+      assert.equal(mutations, before + 1, "one rejected mutation, no silent retry or revision refresh");
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("advertising mutations refuse to leave without their required preconditions", async () => {
+  const transport = new FakeTransport();
+  for (const argv of [
+    ["ads", "network", "rate", "--rate-mcr-per-15s", "150000"],
+    ["ads", "campaigns", "update", "cmp_TEST", "draft.json"],
+    ["ads", "campaigns", "activate", "cmp_TEST", "--quote-id", "quo_OK"],
+    ["ads", "campaigns", "pause", "cmp_TEST"],
+    ["ads", "campaigns", "resume", "cmp_TEST"],
+    ["ads", "campaigns", "accept-rates", "cmp_TEST", "--quote-id", "quo_OK"],
+    ["ads", "campaigns", "activate", "cmp_TEST", "--expect-rev", "2"],
+    ["ads", "slots", "create", "--accepted-media", "image"],
+    ["ads", "slots", "create", "--name", "Lobby"],
+  ]) {
+    const result = await withAuthenticatedRuntime(["--json", ...argv], transport);
+    assert.equal(result.code, ExitCode.Usage, `${argv.join(" ")}: ${result.stdout}`);
+  }
+  assert.equal(transport.calls.length, 0, "no server call happens before the preconditions are supplied");
+});
+
+test("slot create writes the canonical required body and inventory creation needs an eligibility flag", async () => {
+  const headers = { "cache-control": "private, no-store" };
+  const transport = new FakeTransport()
+    .on("POST", "/api/v1/advertising/slots", request => {
+      assert.deepEqual(request.body, {
+        enabled: true, name: "Lobby break", accepted_media: ["image"],
+        max_image_duration_ms: 30000, max_video_duration_ms: 30000,
+      });
+      return { status: 201, headers, body: { id: "ads_NEW", revision: 1, ...request.body as object, muted: true } };
+    })
+    .on("GET", "/api/v1/advertising/inventory", () => ({ status: 200, headers, body: { inventory: [] } }))
+    .on("PUT", "/api/v1/advertising/inventory/scr_NEW", request => ({
+      status: 200, headers, body: { screen_id: "scr_NEW", revision: 1, ...request.body as object },
+    }));
+  const created = await withAuthenticatedRuntime(["--json", "ads", "slots", "create", "--name", "Lobby break", "--accepted-media", "image"], transport);
+  assert.equal(created.code, ExitCode.Success, created.stdout);
+  const bareInventory = await withAuthenticatedRuntime(["--json", "ads", "inventory", "update", "scr_NEW", "--site-name", "Lobby"], transport);
+  assert.equal(bareInventory.code, ExitCode.Usage, bareInventory.stdout);
+  assert.match(bareInventory.stdout, /--enabled or --disabled/);
+  assert.equal(transport.calls.some(call => call.method === "PUT"), false);
+  transport.calls.length = 0;
+  const optIn = await withAuthenticatedRuntime(["--json", "ads", "inventory", "update", "scr_NEW", "--enabled", "--site-name", "Lobby"], transport);
+  assert.equal(optIn.code, ExitCode.Success, optIn.stdout);
+  const write = transport.calls.find(call => call.method === "PUT" && call.path === "/api/v1/advertising/inventory/scr_NEW");
+  assert.equal(write?.headers?.["if-match"], undefined, "a new row has no revision to check");
+  assert.deepEqual(write?.body, { ads_enabled: true, site_name: "Lobby" });
+});
+
+test("membership update carries the stored policy and scope when rows are readable", async () => {
+  const headers = { "cache-control": "private, no-store" };
+  let membership: Record<string, unknown> | undefined = {
+    id: "mem_TEST", revision: 5, policy: "review_required",
+    scope: { screen_ids: ["scr_TEST"], slot_ids: ["ads_TEST"] },
+  };
+  const transport = new FakeTransport()
+    .on("GET", "/api/v1/advertising/memberships", () => ({
+      status: 200, headers, body: { memberships: membership ? [membership] : [] },
+    }))
+    .on("POST", "/api/v1/advertising/memberships/mem_TEST", request => {
+      assert.equal(request.headers?.["if-match"], '"5"');
+      assert.deepEqual(request.body, { screen_ids: ["scr_TEST"], slot_ids: ["ads_TEST"], policy: "trusted" });
+      membership = { ...membership, revision: 6, policy: "trusted" };
+      return { status: 200, headers, body: membership };
+  });
+  const merged = await withAuthenticatedRuntime(["--json", "ads", "memberships", "update", "mem_TEST", "--policy", "trusted", "--expect-rev", "5"], transport);
+  assert.equal(merged.code, ExitCode.Success, merged.stdout);
+  membership = undefined;
+  transport.calls.length = 0;
+  const missing = await withAuthenticatedRuntime(["--json", "ads", "memberships", "update", "mem_TEST", "--expect-rev", "6"], transport);
+  assert.equal(missing.code, ExitCode.Usage, missing.stdout);
+  assert.match(missing.stdout, /review policy cannot be carried over/);
+  assert.equal(transport.calls.some(call => call.method === "POST" && call.path.endsWith("/memberships/mem_TEST") === true && (call.body as object | undefined) !== undefined), false);
+});

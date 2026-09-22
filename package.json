@@ -27,6 +27,7 @@
     "SECURITY.md",
     "assets/screenrig.runtime.js",
     "assets/playlist-write.schema.json",
+    "assets/playlist-write-v2.schema.json",
     "dist/**/*.js",
     "dist/**/*.d.ts",
     "dist/**/*.js.map",

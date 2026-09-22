@@ -63,7 +63,7 @@ info:
     response headers in x-rate-limit-admitted-response-headers.
 x-api-lifecycle:
   documentVersionMeaning: Contract-document version; not a URL or product API major.
-  urlMajorFamilies: [/api/v1, /runtime/v1, /content/v1, /dashboard/v1]
+  urlMajorFamilies: [/api/v1, /api/v2, /runtime/v1, /runtime/v2, /content/v1, /dashboard/v1]
   compatibleWithinMajor:
     - Additive endpoints and methods.
     - Optional request members.
@@ -390,6 +390,47 @@ paths:
       parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
       responses:
         "200": { description: Cancelled durable operation. A current worker fence can no longer finalize it., content: { application/json: { schema: { $ref: "#/components/schemas/Operation" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v2/playlists:
+    get:
+      operationId: listPlaylistsV2
+      description: Versioned playlist list that may expose adslot pages. The v1 list refuses an ad-bearing document with version_required instead of filtering it.
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Playlists with the adslot page union., content: { application/json: { schema: { $ref: "#/components/schemas/PlaylistV2List" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createPlaylistV2
+      description: Authoring entry for the adslot page union. At most 16 adslot pages, at least one ordinary page with no visibility, and the reuse of one slot definition on different pages remain server checks. Reference resolution and DNS stay server checks.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PlaylistWriteV2" } } } }
+      responses:
+        "201": { description: Playlist with its adslot pages., content: { application/json: { schema: { $ref: "#/components/schemas/PlaylistV2" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v2/playlists/{id}:
+    get:
+      operationId: getPlaylistV2
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Playlist with its adslot pages., content: { application/json: { schema: { $ref: "#/components/schemas/PlaylistV2" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: updatePlaylistV2
+      description: Versioned update accepting the adslot page union. If-Match carries the playlist revision.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PlaylistWriteV2" } } } }
+      responses:
+        "200": { description: Updated playlist., content: { application/json: { schema: { $ref: "#/components/schemas/PlaylistV2" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deletePlaylistV2
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      responses:
+        "204": { description: Playlist tombstoned. }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/playlists:
     get:
@@ -841,6 +882,335 @@ paths:
         "200": { description: "Replayable SSE stream. The query cursor takes precedence over Last-Event-ID. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. No ScreenRig-Credits-* headers.", content: { text/event-stream: { schema: { type: string } } } }
         "402": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
+  /api/v1/account/capabilities:
+    get:
+      operationId: getAccountCapabilities
+      description: The calling account's plan, independent advertiser/screens flags with their revision, and the derived effective capability set. Never reflects a client claim; an unknown plan fails closed as forbidden.
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Account capabilities., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/AccountCapabilities" } } } }
+        "403": { description: "forbidden - the account plan is not in the catalog.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/billing/balance:
+    get:
+      operationId: getBillingBalance
+      description: The calling account's source-aware balance snapshot. All millicredit amounts are canonical decimal strings. It is a snapshot, not authority to pay; rails_available is false while card, tax and cash-out rail are unavailable.
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Balance snapshot., content: { application/json: { schema: { $ref: "#/components/schemas/BillingBalance" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/billing/statement:
+    get:
+      operationId: getBillingStatement
+      description: Stable cursor pagination over immutable posted journal entries for the calling account. Holds are not posted entries. Corrections link to the original event instead of rewriting it. There is no arbitrary grant or payout mutation on this surface.
+      security: [{ accountBearer: [] }]
+      parameters:
+        - { name: cursor, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100 } }
+      responses:
+        "200": { description: Statement page., content: { application/json: { schema: { $ref: "#/components/schemas/BillingStatement" } } } }
+        "400": { description: "invalid_request - limit is out of range.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/network:
+    get:
+      operationId: getAdvertisingNetwork
+      description: The calling seller's one network, including its resolved ScreenRig serving fee. Sellers cannot change that fee.
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Network., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingNetwork" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createAdvertisingNetwork
+      description: Creates the calling seller's one network if absent. Requires screens=true. Idempotent; repeating returns the same network.
+      security: [{ accountBearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingNetworkCreate" } } } }
+      responses:
+        "200": { description: Network., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingNetwork" } } } }
+        "403": { description: "forbidden - the account lacks screen capability or has an unknown plan.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/network/rate:
+    post:
+      operationId: setAdvertisingDefaultRate
+      description: Sets the seller's account default rate per 15 seconds of completed playback. A change that alters an accepted campaign's effective rate pauses that whole campaign with price_change_pending; a masked or no-op change does not. If-Match carries the network revision.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingRate" } } } }
+      responses:
+        "200": { description: Updated network., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingNetwork" } } } }
+        "412": { description: "revision_conflict - If-Match is stale.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/inventory:
+    get:
+      operationId: listAdvertisingInventory
+      description: The calling seller's opted-in inventory.
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Inventory., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingInventoryList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/inventory/{screen_id}:
+    put:
+      operationId: putAdvertisingInventory
+      description: Upserts one owned screen's inventory. Verifies screen ownership. A rate override of null restores inheritance, not zero. A change that alters an accepted campaign's effective rate pauses that campaign.
+      security: [{ accountBearer: [] }]
+      parameters: [{ name: screen_id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingInventoryWrite" } } } }
+      responses:
+        "200": { description: Stored inventory., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingInventory" } } } }
+        "403": { description: "forbidden - the screen is not owned by this account.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: "revision_conflict.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/slots:
+    get:
+      operationId: listAdvertisingSlots
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Slots., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingSlotList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createAdvertisingSlot
+      description: Creates a reusable seller slot. Images are 5-30 seconds and videos at most the platform ceiling of 120 seconds. Ads are always muted.
+      security: [{ accountBearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingSlotWrite" } } } }
+      responses:
+        "201": { description: Slotslot., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingSlot" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/slots/{id}:
+    post:
+      operationId: updateAdvertisingSlot
+      description: Updates one seller slot. If-Match carries the slot revision. A rate override change re-runs the pricing fence.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingSlotWrite" } } } }
+      responses:
+        "200": { description: Updated slot., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingSlot" } } } }
+        "412": { description: "revision_conflict.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/invitations:
+    get:
+      operationId: listAdvertisingInvitations
+      description: Seller invitation lifecycle records. Never carries a recipient address or claim token.
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Invitations., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingInvitationList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createAdvertisingInvitations
+      description: Issues at most 50 single-use, email-bound invitations expiring after seven days. The raw claim token is returned once here and never stored. An empty scope permits nothing. Claim remains a dashboard ceremony with the invited user's verified email.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingInvitationCreate" } } } }
+      responses:
+        "201": { description: Invitations with one-time claim tokens., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingInvitationIssued" } } } }
+        "400": { description: "invalid_request - batch or scope is invalid.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/invitations/{id}/revoke:
+    post:
+      operationId: revokeAdvertisingInvitation
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Revoked invitation., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingInvitation" } } } }
+        "409": { description: "resource_conflict - the invitation is already claimed.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/memberships:
+    get:
+      operationId: listAdvertisingMemberships
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Memberships., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingMembershipList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/memberships/{id}:
+    post:
+      operationId: updateAdvertisingMembership
+      description: Explicit seller policy/scope edit. An active membership is changed here, never by sending a second invitation. Scope changes stop new selection; financial history is preserved.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingMembershipScope" } } } }
+      responses:
+        "200": { description: Updated membership., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingMembership" } } } }
+        "412": { description: "revision_conflict.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/memberships/{id}/revoke:
+    post:
+      operationId: revokeAdvertisingMembership
+      description: Revokes one membership. Stops new selection for that network; it does not clear the advertiser flag, other memberships, or settled history.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Revoked membership., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingMembership" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/networks:
+    get:
+      operationId: listAdvertisingJoinedNetworks
+      description: Networks the calling advertiser currently belongs to, with the scope and review policy it was granted. Screen count is not a guaranteed impression count.
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Joined networks., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingJoinedNetworkList" } } } }
+        "403": { description: "forbidden - the account lacks the advertiser flag.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/networks/{seller_account_id}/inventory:
+    get:
+      operationId: listAdvertisingJoinedInventory
+      description: Opted-in inventory and reusable slots inside the caller's membership. Never exposes the seller's screenshots, playlists, or account-wide data.
+      security: [{ accountBearer: [] }]
+      parameters: [{ name: seller_account_id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Permitted inventory and slots., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingJoinedInventory" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/creatives:
+    get:
+      operationId: listAdvertisingCreatives
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Creatives., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCreativeList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createAdvertisingCreative
+      description: Binds one ready owned media revision to an immutable creative. Does not copy bytes, re-upload, or re-charge generation. Unknown or non-ready media is rejected.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCreativeCreate" } } } }
+      responses:
+        "201": { description: Creative., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCreative" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/creatives/{id}:
+    get:
+      operationId: getAdvertisingCreative
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Creative., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCreative" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/campaigns:
+    get:
+      operationId: listAdvertisingCampaigns
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Campaigns., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaignList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createAdvertisingCampaign
+      description: Creates a draft campaign. Drafts hold no money, reserve nothing, and authorize no delivery. Activation requires an explicitly accepted quote.
+      security: [{ accountBearer: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaignDraft" } } } }
+      responses:
+        "201": { description: Draft campaign., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaign" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/campaigns/{id}:
+    get:
+      operationId: getAdvertisingCampaign
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Campaign., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaign" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: updateAdvertisingCampaign
+      description: Updates a draft campaign. If-Match carries the campaign revision. A budget reduction below already spent plus committed reservations is rejected with the minimum permitted value.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaignDraft" } } } }
+      responses:
+        "200": { description: Updated campaign., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaign" } } } }
+        "412": { description: "revision_conflict.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/campaigns/{id}/quote:
+    post:
+      operationId: quoteAdvertisingCampaign
+      description: Prices the campaign's current effective rates, formats, durations, flight and caps before activation. The quote is time-bounded and becomes stale when any pricing generation or effective rate changes.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }]
+      responses:
+        "201": { description: Quote., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingQuote" } } } }
+        "412": { description: "revision_conflict.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/campaigns/{id}/activate:
+    post:
+      operationId: activateAdvertisingCampaign
+      description: Explicitly accepts the named current quote and activates the campaign. Atomically checks ownership, membership, quote expiry, rate revisions, accepted scope and same-account denial, then records purchase terms. No wallet debit and no seller revenue occur from accepting terms. The same key with the same body replays; a changed body is a conflict.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingQuoteAccept" } } } }
+      responses:
+        "200": { description: Active or pending-review campaign., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaign" } } } }
+        "409": { description: "quote_stale or self_deal or resource_conflict.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/campaigns/{id}/pause:
+    post:
+      operationId: pauseAdvertisingCampaign
+      description: Pauses new reservations for this campaign. Already-started valid ads normally finish and are charged on completion.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }]
+      responses:
+        "200": { description: Paused campaign., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaign" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/campaigns/{id}/resume:
+    post:
+      operationId: resumeAdvertisingCampaign
+      description: Resumes a manually paused campaign. It cannot clear a price_change_pending block; a top-up, schedule tick, or seller action cannot supply that consent.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }]
+      responses:
+        "200": { description: Resumed campaign., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaign" } } } }
+        "409": { description: "price_change_pending - accept current rates first.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/campaigns/{id}/accept-rates:
+    post:
+      operationId: acceptAdvertisingRates
+      description: The buyer's explicit acceptance of changed effective rates, bound to quote ID, campaign revision and current pricing generations. It atomically replaces future delivery terms, records the actor and time, and clears the sticky price-change block. Another concurrent rate change leaves the campaign paused.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingQuoteAccept" } } } }
+      responses:
+        "200": { description: Reactivated campaign., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaign" } } } }
+        "409": { description: "price_change_pending or quote_stale.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/reviews:
+    get:
+      operationId: listAdvertisingReviews
+      description: Creative versions submitted to the calling seller for review. A seller sees only exact submitted creative, never the buyer's library.
+      security: [{ accountBearer: [] }]
+      responses:
+        "200": { description: Reviews., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingReviewList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/reviews/{id}/approve:
+    post:
+      operationId: approveAdvertisingReview
+      description: Approves one exact submitted creative revision. Approval does not choose the buyer's budget or grant access to its media library.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Approved review., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingReview" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/reviews/{id}/reject:
+    post:
+      operationId: rejectAdvertisingReview
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingReviewRejection" } } } }
+      responses:
+        "200": { description: Rejected review., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingReview" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/reports/spend:
+    get:
+      operationId: getAdvertisingSpend
+      description: Buyer-scoped spend and delivery counts for one campaign. Amounts are decimal mcr strings. It never exposes the seller's income, bank status, or account-wide usage.
+      security: [{ accountBearer: [] }]
+      parameters: [{ name: campaign_id, in: query, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Spend report., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingSpendReport" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/reports/delivery:
+    get:
+      operationId: getAdvertisingDelivery
+      description: Seller-scoped gross, serving fee and net for one window, with its own delivery evidence. It never exposes the buyer's wallet or other networks. Only authorized completed-play evidence establishes billable delivery.
+      security: [{ accountBearer: [] }]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+      responses:
+        "200": { description: Delivery report., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingDeliveryReport" } } } }
+        default: { $ref: "#/components/responses/Problem" }
   /api/v1/playback:
     get:
       operationId: listPlaybackAggregates
@@ -1005,6 +1375,33 @@ paths:
         "206": { description: Byte-range metadata with no body., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } }, Content-Length: { schema: { type: integer } }, Content-Type: { schema: { type: string } }, Content-Disposition: { schema: { type: string } }, ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } } } }
         "304": { description: The exact immutable media ETag matches If-None-Match. No body is produced., headers: { ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } } }
         "416": { description: Unsatisfiable or malformed range., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/reviews/{id}:
+    get:
+      operationId: getAdvertisingReview
+      description: Seller detail for one review of its network. Returns the review and the exact submitted creative revision. It never exposes the buyer's other media.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Review and its creative., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingReviewDetail" } } } }
+        "404": { description: "not_found - the review is unknown to this seller.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/advertising/reviews/{id}/content:
+    get:
+      operationId: getAdvertisingReviewContent
+      description: Streams only the exact creative revision this seller's own review refers to. Ownership stays with the buyer account; no object key or signed location is published, and no other buyer media is reachable.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/Range" }]
+      responses:
+        "200": { description: The review's exact creative bytes., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } } } }
+        "206": { description: One standards-correct byte range., headers: { Content-Range: { schema: { type: string } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    head:
+      operationId: headAdvertisingReviewContent
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/Range" }]
+      responses:
+        "200": { description: Metadata only., headers: { Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/feedback/bugs:
     get:
@@ -1416,6 +1813,39 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
+  /runtime/v2/manifest:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    get:
+      operationId: getRuntimeManifestV2
+      description: Versioned runtime manifest that may carry adslot pages. Requires the declared adslot-v1 capability. schemaVersion is 3. The root keys stay camelCase; adslot page keys stay id, type, adslot_id and optional snake_case visibility.
+      security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
+      parameters: [{ name: manifest_revision, in: query, required: false, schema: { type: string } }]
+      responses:
+        "200": { description: Resolved player manifest., content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeManifestV2" } } } }
+        "403": { description: "forbidden - the session lacks the adslot capability.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/adslots/resolve:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    post:
+      operationId: resolveAdslots
+      description: Resolves up to 16 server-verified page occurrences. A fresh candidate is atomically priced, budget-checked and reserved against the campaign-wide pricing fence. No eligible or affordable campaign is a successful empty result with no content and no debit; it is never a payment challenge. A lease renewal reuses the same reservation and does not advance rotation, and is denied while the campaign requires price reacceptance.
+      security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeAdslotResolveRequest" } } } }
+      responses:
+        "200": { description: Per-candidate filled or empty results in request order., headers: { Cache-Control: { schema: { type: string, enum: ["no-store"] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeAdslotResolveResponse" } } } }
+        "400": { description: "invalid_request - batch size, duplicate keys, or forecast window is invalid.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: "resource_conflict - a candidate was reused with a different request hash.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/adslots/events:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    post:
+      operationId: reportAdslotEvents
+      description: Authenticated playback evidence. Events dedupe on screen and event ID. A valid completion consumes its held reservation once at the reserved price and fee, credits the seller gross and debits the serving fee in one transaction. A confirmed non-play terminal event releases the hold once. Completion received after release is unbillable and never debits fresh credits. Completion before start is held pending reconciliation.
+      security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeAdslotEventBatch" } } } }
+      responses:
+        "200": { description: Per-event outcomes., headers: { Cache-Control: { schema: { type: string, enum: ["no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeAdslotEventResponse" } } } }
+        default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/observation:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     put:
@@ -1478,6 +1908,28 @@ paths:
         - { name: release_id, in: path, required: true, schema: { type: string } }
       responses:
         "201": { description: Single-use 30-second exact-release-host launch ticket, headers: { Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/ReleaseLaunch" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /content/v1/ad-decisions/{decision_id}:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    get:
+      operationId: getAdDecisionContent
+      description: Serves the one private object bound to an issued decision. Authority is the live paired identity plus the decision binding; the buyer account and media ID are resolved server-side, never from the caller, and no object key or signed URL is published. A zero-length probe returns metadata only.
+      security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
+      parameters: [{ name: decision_id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/Range" }]
+      responses:
+        "200": { description: Complete decision-bound private media., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } } } }
+        "206": { description: One standards-correct byte range., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } }, Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } } } }
+        "404": { description: "not_found - unknown decision.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "410": { description: "decision expired or otherwise not servable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "416": { description: "invalid_range.", headers: { Content-Range: { schema: { type: string } }, Accept-Ranges: { schema: { type: string, enum: [bytes] } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    head:
+      operationId: headAdDecisionContent
+      description: Identical authority and metadata to the GET with no body.
+      security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
+      parameters: [{ name: decision_id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/Range" }]
+      responses:
+        "200": { description: Metadata only., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } } } }
         default: { $ref: "#/components/responses/Problem" }
   /content/v1/manifests/{manifest_revision}/media/{media_id}:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -1650,6 +2102,96 @@ paths:
       responses:
         "204": { description: Paired-device KV deletion, headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/reviews/{id}:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardAdvertisingReview
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Review and its creative., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingReviewDetail" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/reviews/{id}/content:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardAdvertisingReviewContent
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/Range" }]
+      responses:
+        "200": { description: The review's exact creative bytes., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Length: { schema: { type: integer } } } }
+        "206": { description: One standards-correct byte range. }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/users/enrollments:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: beginDashboardUserEnrollment
+      description: Begins ordinary user enrollment under the setup cookie, collecting the intended user's own display name and email. A mail-scanner GET never completes it.
+      security: [{ dashboardSetup: [] }]
+      responses:
+        "201": { description: Pending enrollment., content: { application/json: { schema: { type: object, additionalProperties: false } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/users/enrollments/current:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: currentDashboardUserEnrollment
+      security: [{ dashboardSetup: [] }]
+      responses:
+        "200": { description: This setup session's pending enrollment., content: { application/json: { schema: { type: object, additionalProperties: false } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/email/verify:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: peekDashboardEmailVerification
+      description: Scanner-safe verification peek. It never mutates user email or account features.
+      parameters: [{ name: token, in: query, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Verification status., content: { application/json: { schema: { $ref: "#/components/schemas/EmailVerifyResult" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: verifyDashboardEmail
+      description: The explicit human confirmation that consumes one purpose-bound verification challenge.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/EmailVerifyRequest" } } } }
+      responses:
+        "200": { description: Verification status., content: { application/json: { schema: { $ref: "#/components/schemas/EmailVerifyResult" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/account/email:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardEmail
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: The user's own email state., content: { application/json: { schema: { $ref: "#/components/schemas/DashboardEmail" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/account/email/change/assertions:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: startDashboardEmailChange
+      description: Starts the user-specific passkey confirmation required before an email change. A shared account password cannot start or complete it.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Development-mode confirmation marker., content: { application/json: { schema: { $ref: "#/components/schemas/DevAuthorizationRequired" } } } }
+        "201": { description: Assertion., content: { application/json: { schema: { $ref: "#/components/schemas/Assertion" } } } }
+  /dashboard/v1/account/email/change:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: changeDashboardEmail
+      description: Requests the user's own email change. A non-development session must complete the passkey ceremony started at the change/assertions route; development authentication must send dev_confirm instead and cannot carry ceremony fields. The current verified address stays effective while the change is pending.
+      security: [{ dashboardSession: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/UserEmailChangeRequest" } } } }
+      responses:
+        "202": { description: Pending change accepted., content: { application/json: { schema: { $ref: "#/components/schemas/UserEmailChangeAccepted" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/invitations/claim/assertions:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: startAdvertisingClaimAssertion
+      description: Starts the user-specific passkey ceremony that authorizes one invitation claim. The assertion is bound to the invitation id and completes with kind advertising_invitation_claim.
+      security: [{ dashboardSession: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, properties: { invitation_id: { type: string, description: "Invitation identity. Supply this, or supply token so the server resolves it." }, token: { type: string, writeOnly: true, description: "Claim token; the server resolves the invitation id from it. Nothing is consumed." } } } } } }
+      responses:
+        "201": { description: Assertion bound to the resolved invitation id., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingClaimAssertion" } } } }
+        "403": { description: "passkeys_disabled or forbidden.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/links/claim:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
     post:
@@ -1705,6 +2247,17 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/webauthn/registrations/assertions:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: startDashboardPasskeyAddition
+      description: Starts the fresh passkey assertion of an already-enrolled credential that authorizes registering another passkey for the same user. The setup-cookie first-passkey enrollment does not use it. A shared account password cannot satisfy it. Kind is passkey_add.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "201": { description: Assertion ceremony for the fresh authorization., content: { application/json: { schema: { $ref: "#/components/schemas/Assertion" } } } }
+        "403": { description: "passkeys_disabled or forbidden.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/webauthn/registrations/complete:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
     post:
@@ -1719,7 +2272,7 @@ paths:
         verify. When the server runs dashboard development authentication, this
         route returns passkeys_disabled.
       security: [{ dashboardSetup: [] }, { dashboardSession: [] }]
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardPasskeyRegistrationComplete" } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardPasskeyAdditionComplete" } } } }
       responses:
         "200": { description: Credential stored. Set-Cookie is present only when this call created the session., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Set-Cookie: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardSession" } } } }
         "400": { $ref: "#/components/responses/Problem" }
@@ -2057,6 +2610,453 @@ paths:
         "200": { description: "Account status, unverified contact address, enforced limits, usage, retention, and public whole-credit state.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/DashboardAccount" } } } }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/account/capabilities:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardCapabilities
+      description: The session account's plan, independent advertiser/screens flags with their revision, and the derived effective capability set. Identical body to the account-bearer route.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Account capabilities., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/AccountCapabilities" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/billing/balance:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardBillingBalance
+      description: Source-aware balance snapshot for the session account. All millicredit amounts are canonical decimal strings. It is a snapshot, not authority to pay.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Balance snapshot., content: { application/json: { schema: { $ref: "#/components/schemas/BillingBalance" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/billing/statement:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardBillingStatement
+      security: [{ dashboardSession: [] }]
+      parameters:
+        - { name: cursor, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100 } }
+      responses:
+        "200": { description: Statement page., content: { application/json: { schema: { $ref: "#/components/schemas/BillingStatement" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/billing/payout-status:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardPayoutStatus
+      description: Truthful payout capability state. rails_available is false and unavailable_reason is financial_rails_unavailable while card, tax and cash-out rail are unavailable. No raw bank credentials are returned.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Payout status., content: { application/json: { schema: { $ref: "#/components/schemas/BillingPayoutStatus" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/billing/receipts/{id}:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardReceipt
+      description: One finalized receipt/tax document owned by the caller. No receipt exists while money collection is unshipped, so this is not_found rather than a fabricated document.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "404": { description: "not_found - no receipt exists.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/billing/topups:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: createDashboardTopup
+      description: Unavailable. Card checkout, tax collection and cash movement are not shipped; the route answers billing_unavailable rather than quoting a payment.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "503": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/billing/topups/{id}/checkout:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: checkoutDashboardTopup
+      description: Unavailable. No payment attempt is created.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "503": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/billing/withdrawal-quotes:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: createDashboardWithdrawalQuote
+      description: Unavailable. Cash withdrawal is not shipped.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "503": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/billing/withdrawals:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: createDashboardWithdrawal
+      description: Unavailable. Cash withdrawal is not shipped; the account bearer never authorizes a cash-out.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "503": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/billing/payout-onboarding:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: startDashboardPayoutOnboarding
+      description: Unavailable. No hosted payout onboarding is created.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "503": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/invitations/claim:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: claimAdvertisingInvitation
+      description: The invited user's explicit claim. One transaction revalidates the user's own verified email binding, consumes the single-use token, creates the unique seller/buyer membership, and enables advertiser=true while preserving plan and screens. A retry returns the same membership without a second feature revision bump. A mail-scanner GET cannot claim; only this POST with an explicit token can.
+      security: [{ dashboardSession: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingInvitationClaim" } } } }
+      responses:
+        "200": { description: Membership., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingMembership" } } } }
+        "404": { description: "invitation_invalid.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "410": { description: "invitation_expired.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: "invitation_consumed, user_binding_stale, or self_deal.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/network:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardAdvertisingNetwork
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Network., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingNetwork" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createDashboardAdvertisingNetwork
+      security: [{ dashboardSession: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingNetworkCreate" } } } }
+      responses:
+        "200": { description: Network., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingNetwork" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/network/rate:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: setDashboardAdvertisingDefaultRate
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingRate" } } } }
+      responses:
+        "200": { description: Updated network., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingNetwork" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/inventory:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardAdvertisingInventory
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Inventory., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingInventoryList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/inventory/{screen_id}:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: putDashboardAdvertisingInventory
+      security: [{ dashboardSession: [] }]
+      parameters: [{ name: screen_id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/IfMatch" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingInventoryWrite" } } } }
+      responses:
+        "200": { description: Stored inventory., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingInventory" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/slots:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardAdvertisingSlots
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Slots., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingSlotList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createDashboardAdvertisingSlot
+      security: [{ dashboardSession: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingSlotWrite" } } } }
+      responses:
+        "201": { description: Slot., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingSlot" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/slots/{id}:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: updateDashboardAdvertisingSlot
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingSlotWrite" } } } }
+      responses:
+        "200": { description: Updated slot., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingSlot" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/invitations:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardAdvertisingInvitations
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Invitations., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingInvitationList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createDashboardAdvertisingInvitations
+      description: Issues at most 50 single-use, email-bound invitations. The claim link is {dashboard_origin}{claim_path}#invite={token}&invitation={invitation_id}; the fragment is never sent in a request. A mail-scanner GET cannot claim.
+      security: [{ dashboardSession: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingInvitationCreate" } } } }
+      responses:
+        "201": { description: Invitations with one-time claim tokens., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingInvitationIssued" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/invitations/{id}/revoke:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: revokeDashboardAdvertisingInvitation
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Revoked invitation., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingInvitation" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/memberships:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardAdvertisingMemberships
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Memberships., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingMembershipList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/memberships/{id}:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: updateDashboardAdvertisingMembership
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingMembershipScope" } } } }
+      responses:
+        "200": { description: Updated membership., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingMembership" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/memberships/{id}/revoke:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: revokeDashboardAdvertisingMembership
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Revoked membership., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingMembership" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/networks:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardAdvertisingJoinedNetworks
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Joined networks., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingJoinedNetworkList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/networks/{seller_account_id}/inventory:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardAdvertisingJoinedInventory
+      security: [{ dashboardSession: [] }]
+      parameters: [{ name: seller_account_id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Permitted inventory and slots., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingJoinedInventory" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/creatives:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardAdvertisingCreatives
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Creatives., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCreativeList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createDashboardAdvertisingCreative
+      security: [{ dashboardSession: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCreativeCreate" } } } }
+      responses:
+        "201": { description: Creative., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCreative" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/creatives/{id}:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardAdvertisingCreative
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Creative., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCreative" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/campaigns:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardAdvertisingCampaigns
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Campaigns., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaignList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createDashboardAdvertisingCampaign
+      security: [{ dashboardSession: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaignDraft" } } } }
+      responses:
+        "201": { description: Draft campaign., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaign" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/campaigns/{id}:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardAdvertisingCampaign
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Campaign., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaign" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: updateDashboardAdvertisingCampaign
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaignDraft" } } } }
+      responses:
+        "200": { description: Updated campaign., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaign" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/campaigns/{id}/quote:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: quoteDashboardAdvertisingCampaign
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }]
+      responses:
+        "201": { description: Quote., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingQuote" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/campaigns/{id}/activate:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: activateDashboardAdvertisingCampaign
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingQuoteAccept" } } } }
+      responses:
+        "200": { description: Active or pending-review campaign., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaign" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/campaigns/{id}/pause:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: pauseDashboardAdvertisingCampaign
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }]
+      responses:
+        "200": { description: Paused campaign., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaign" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/campaigns/{id}/resume:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: resumeDashboardAdvertisingCampaign
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }]
+      responses:
+        "200": { description: Resumed campaign., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaign" } } } }
+        "409": { description: "price_change_pending.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/campaigns/{id}/accept-rates:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: acceptDashboardAdvertisingRates
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingQuoteAccept" } } } }
+      responses:
+        "200": { description: Reactivated campaign., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaign" } } } }
+        "409": { description: "price_change_pending or quote_stale.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/reviews:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: listDashboardAdvertisingReviews
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: Reviews., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingReviewList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/reviews/{id}/approve:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: approveDashboardAdvertisingReview
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Approved review., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingReview" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/reviews/{id}/reject:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: rejectDashboardAdvertisingReview
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingReviewRejection" } } } }
+      responses:
+        "200": { description: Rejected review., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingReview" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/reports/spend:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardAdvertisingSpend
+      security: [{ dashboardSession: [] }]
+      parameters: [{ name: campaign_id, in: query, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Spend report., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingSpendReport" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/advertising/reports/delivery:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardAdvertisingDelivery
+      security: [{ dashboardSession: [] }]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+      responses:
+        "200": { description: Delivery report., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingDeliveryReport" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/media/uploads:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: createDashboardMediaUpload
+      description: Same-origin cookie media upload session. upload_url is omitted; bytes are PUT to /dashboard/v1/media/uploads/{id}/content. Media upload does not require screens capability.
+      security: [{ dashboardSession: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MediaUploadDeclaration" } } } }
+      responses:
+        "201": { description: Upload session without a signed URL., content: { application/json: { schema: { $ref: "#/components/schemas/MediaUploadSession" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/media/uploads/{id}/content:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    put:
+      operationId: putDashboardMediaUploadContent
+      description: Same-origin object write for one cookie media upload. No signed URL is involved and the session cookie is the authority.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      requestBody: { required: true, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+      responses:
+        "204": { description: Bytes stored. }
+        "404": { description: "not_found - the upload is unknown.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/media/uploads/{id}/commit:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: commitDashboardMediaUpload
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MediaCommit" } } } }
+      responses:
+        "202": { description: Commit accepted., content: { application/json: { schema: { $ref: "#/components/schemas/Operation" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/media/generations:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: createDashboardMediaGeneration
+      description: Cookie twin of the account media generation request. The same media service and credit pricing apply; screens capability is not required.
+      security: [{ dashboardSession: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MediaGenerationRequest" } } } }
+      responses:
+        "201": { description: Generation accepted., content: { application/json: { schema: { $ref: "#/components/schemas/MediaGeneration" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/operations/{id}:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    get:
+      operationId: getDashboardOperation
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      responses:
+        "200": { description: Operation., content: { application/json: { schema: { $ref: "#/components/schemas/Operation" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/balance:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
@@ -2690,7 +3690,7 @@ components:
         status: { type: string, enum: [queued, sent, accepted, expired, failed], description: "queued waits for delivery, sent is accepted by the mail provider and unclaimed, accepted is claimed, expired lapsed unclaimed, and failed is terminal." }
         created_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time, description: "24 hours after creation. An unclaimed invitation at this instant frees its slot." }
-    CLIEnrollmentRequest: { type: object, additionalProperties: false, required: [client_id, email], properties: { client_id: { type: string, pattern: "^cli_[A-Za-z0-9_-]{43}$", description: "Stable anonymous installation identity generated from 32 CSPRNG bytes and persisted before the first request. It is rate-limit material, not an account credential." }, email: { type: string, format: email, minLength: 3, maxLength: 254, description: "Required account contact address: one plain ASCII addr-spec with an unquoted local part and dotted DNS domain, with no display name, angle bracket, comma, quote, whitespace, or control character. The server trims surrounding whitespace, lowercases the address into a private uniqueness key, and preserves the trimmed capitalization for display. It is unique across accounts: a second enrollment with the same normalized address is rejected with email_conflict. A malformed or missing address is rejected with invalid_request, and the rejection never echoes the address. It is stored unverified and email_verified stays false. Account creation queues a single-use dashboard invitation through Postmark. It grants no authority by itself. After an authenticated dashboard user sets a password, the normalized address identifies this same account for password login; it provides no signup or attach-by-address behavior; it is the recovery channel for this account." }, beta_key: { type: string, description: "Required when the server has a configured enrollment beta key. Omit when the server does not gate enrollment." }, name: { type: string, minLength: 1, maxLength: 80, default: "ScreenRig CLI" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
+    CLIEnrollmentRequest: { type: object, additionalProperties: false, required: [client_id, email], properties: { intent: { type: string, enum: [signage, advertising], description: "Optional enrollment purpose. Omit or signage keeps screens=true, advertiser=false. advertising sets advertiser=true, screens=false, and never changes the billing-plan assignment." }, client_id: { type: string, pattern: "^cli_[A-Za-z0-9_-]{43}$", description: "Stable anonymous installation identity generated from 32 CSPRNG bytes and persisted before the first request. It is rate-limit material, not an account credential." }, email: { type: string, format: email, minLength: 3, maxLength: 254, description: "Required account contact address: one plain ASCII addr-spec with an unquoted local part and dotted DNS domain, with no display name, angle bracket, comma, quote, whitespace, or control character. The server trims surrounding whitespace, lowercases the address into a private uniqueness key, and preserves the trimmed capitalization for display. It is unique across accounts: a second enrollment with the same normalized address is rejected with email_conflict. A malformed or missing address is rejected with invalid_request, and the rejection never echoes the address. It is stored unverified and email_verified stays false. Account creation queues a single-use dashboard invitation through Postmark. It grants no authority by itself. After an authenticated dashboard user sets a password, the normalized address identifies this same account for password login; it provides no signup or attach-by-address behavior; it is the recovery channel for this account." }, beta_key: { type: string, description: "Required when the server has a configured enrollment beta key. Omit when the server does not gate enrollment." }, name: { type: string, minLength: 1, maxLength: 80, default: "ScreenRig CLI" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
     AccountRecoveryRequest:
       type: object
       additionalProperties: false
@@ -2705,7 +3705,7 @@ components:
       description: "The only recovery response body. It is identical for a known and an unknown address and carries no account id, address, link, credential, or delivery status."
       properties:
         status: { type: string, enum: [accepted] }
-    Account: { type: object, additionalProperties: false, required: [id, revision, status, email, email_verified, used_bytes, reserved_bytes, screen_count, content_limit_bytes, screen_limit, credit_remaining, created_at, updated_at], properties: { id: { type: string }, revision: { type: integer }, status: { type: string, enum: [active, cancelled, deleted] }, email: { type: string, minLength: 3, maxLength: 254, description: "Required contact address supplied at enrollment, preserving its capitalization after surrounding whitespace is trimmed. Read-only: no route updates it, and it is published only on an authenticated read of the caller's own account." }, email_verified: { type: boolean, enum: [false], description: "Always false. The address is stored unverified; enrollment queues one invitation delivery to it, but no route treats a delivery as proof of possession and no flow sets this true. It is published so a later recovery feature cannot mistake an unverified string for authority. It is not an authorization factor." }, used_bytes: { type: integer, description: "Durable bytes the account owns across media, expanded application release trees, and application key/value entries." }, reserved_bytes: { type: integer, description: "Bytes held by uploads in flight. They count against a custom storage ceiling until the upload commits or its reservation is released." }, screen_count: { type: integer }, content_limit_bytes: { type: integer, description: "Storage ceiling the account's plan allows. Zero means no product storage cap." }, screen_limit: { type: integer, description: "Screen limit the account's plan allows. Zero means no screen cap." }, credit_remaining: { type: integer, minimum: 0, description: "Remaining prepaid credits as a whole integer. Never negative. Standard includes no monthly credit grant. Every account waives the first 10 GB of bandwidth, 1 GB-month of storage, and 10,000 API or billed listen-stream taxes each UTC month." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    Account: { type: object, additionalProperties: false, required: [id, revision, status, email, email_verified, used_bytes, reserved_bytes, screen_count, content_limit_bytes, screen_limit, credit_remaining, created_at, updated_at], properties: { id: { type: string }, features: { $ref: "#/components/schemas/AccountFeatures" }, feature_revision: { type: integer }, revision: { type: integer }, status: { type: string, enum: [active, cancelled, deleted] }, email: { type: string, minLength: 3, maxLength: 254, description: "Required contact address supplied at enrollment, preserving its capitalization after surrounding whitespace is trimmed. Read-only: no route updates it, and it is published only on an authenticated read of the caller's own account." }, email_verified: { type: boolean, enum: [false], description: "Always false. The address is stored unverified; enrollment queues one invitation delivery to it, but no route treats a delivery as proof of possession and no flow sets this true. It is published so a later recovery feature cannot mistake an unverified string for authority. It is not an authorization factor." }, used_bytes: { type: integer, description: "Durable bytes the account owns across media, expanded application release trees, and application key/value entries." }, reserved_bytes: { type: integer, description: "Bytes held by uploads in flight. They count against a custom storage ceiling until the upload commits or its reservation is released." }, screen_count: { type: integer }, content_limit_bytes: { type: integer, description: "Storage ceiling the account's plan allows. Zero means no product storage cap." }, screen_limit: { type: integer, description: "Screen limit the account's plan allows. Zero means no screen cap." }, credit_remaining: { type: integer, minimum: 0, description: "Remaining prepaid credits as a whole integer. Never negative. Standard includes no monthly credit grant. Every account waives the first 10 GB of bandwidth, 1 GB-month of storage, and 10,000 API or billed listen-stream taxes each UTC month." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     RuntimeChrome: { type: object, additionalProperties: false, required: [schema_version, banner], properties: { schema_version: { type: integer, enum: [1] }, banner: { type: "null" } } }
     CLIEnrollment: { type: object, additionalProperties: false, required: [account, agent, connection_ready, token, issuance_id, issuance_expires_at], properties: { account: { $ref: "#/components/schemas/Account" }, agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, enum: [false], description: "A newly enrolled account has neither a registered dashboard passkey nor password, so approval of another agent is not ready. Re-read GET /api/v1/agents/self after configuring either retained dashboard credential." }, token: { type: string, minLength: 32, description: Permanent bearer credential for exactly this first agent. It has no scheduled expiry and is redelivered only through this short-lived encrypted issuance envelope. }, issuance_id: { type: string, description: Opaque identifier for the encrypted exact-retry delivery envelope. }, issuance_expires_at: { type: string, format: date-time, description: Exact-retry redelivery deadline for this credential issuance; ten minutes after first enrollment. Later exact retries return credential_issuance_expired while the permanent token remains valid. } } }
     AgentInput: { type: object, additionalProperties: false, properties: { name: { type: string, minLength: 1, maxLength: 80, default: "ScreenRig CLI" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
@@ -2768,6 +3768,27 @@ components:
         advance: { $ref: "#/components/schemas/PlaylistAdvanceWrite" }
         visibility: { $ref: "#/components/schemas/PageVisibility" }
         primitives: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/PlaylistPrimitiveWrite" } }
+    AdslotPageWrite:
+      type: object
+      additionalProperties: false
+      required: [id, type, adslot_id]
+      description: "Whole-page advertising slot. At most 16 adslot pages, and at least one ordinary page with no visibility, are server checks and are not expressed here."
+      properties:
+        id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }
+        type: { type: string, enum: [adslot] }
+        adslot_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }
+        visibility: { $ref: "#/components/schemas/PageVisibility" }
+    PlaylistPageWriteV2:
+      oneOf:
+        - { $ref: "#/components/schemas/PlaylistPageWrite" }
+        - { $ref: "#/components/schemas/AdslotPageWrite" }
+    PlaylistWriteV2:
+      type: object
+      additionalProperties: false
+      required: [name, pages]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        pages: { type: array, minItems: 1, maxItems: 100, items: { $ref: "#/components/schemas/PlaylistPageWriteV2" } }
     PlaylistPage:
       type: object
       additionalProperties: false
@@ -2780,6 +3801,623 @@ components:
         visibility: { $ref: "#/components/schemas/PageVisibility" }
         primitives: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/PlaylistPrimitive" } }
         comments: { type: object, additionalProperties: true, description: "Opaque agent JSON object, compact UTF-8 ≤ 1024 bytes. Absent when unset. ScreenRig never reads or uses it. PlaylistPageWrite cannot set it. Copied across playlist updates by page id. Not on the runtime manifest." }
+    AccountCapabilities:
+      type: object
+      additionalProperties: false
+      required: [account_id, plan_id, features, feature_revision, capabilities]
+      properties:
+        account_id: { type: string }
+        plan_id: { type: string }
+        features: { $ref: "#/components/schemas/AccountFeatures" }
+        feature_revision: { type: integer }
+        capabilities: { type: array, items: { type: string, enum: [media, credits, signage.pairing, signage.playlists, signage.publish, advertising] } }
+    AccountFeatures:
+      type: object
+      additionalProperties: false
+      required: [advertiser, screens]
+      properties:
+        advertiser: { type: boolean }
+        screens: { type: boolean }
+    BillingBalance:
+      type: object
+      additionalProperties: false
+      required: [wallet_revision, remaining_mcr, reserved_mcr, available_mcr, sources, withdrawal]
+      properties:
+        wallet_revision: { type: integer }
+        remaining_mcr: { $ref: "#/components/schemas/McrString" }
+        reserved_mcr: { $ref: "#/components/schemas/McrString" }
+        available_mcr: { $ref: "#/components/schemas/McrString" }
+        sources: { $ref: "#/components/schemas/BillingSources" }
+        withdrawal: { $ref: "#/components/schemas/BillingWithdrawal" }
+    BillingSources:
+      type: object
+      additionalProperties: false
+      required: [nonredeemable, purchased, ad_earned]
+      properties:
+        nonredeemable: { $ref: "#/components/schemas/BillingSourceBucket" }
+        purchased: { $ref: "#/components/schemas/BillingSourceBucket" }
+        ad_earned: { $ref: "#/components/schemas/BillingSourceBucket" }
+    BillingSourceBucket:
+      type: object
+      additionalProperties: false
+      required: [remaining_mcr, reserved_mcr]
+      properties:
+        remaining_mcr: { $ref: "#/components/schemas/McrString" }
+        reserved_mcr: { $ref: "#/components/schemas/McrString" }
+    BillingWithdrawal:
+      type: object
+      additionalProperties: false
+      required: [eligible_earned_mcr, amount_usd_cents, threshold_exclusive_usd_cents, allowed, blockers, rails_available]
+      properties:
+        eligible_earned_mcr: { $ref: "#/components/schemas/McrString" }
+        amount_usd_cents: { type: integer }
+        threshold_exclusive_usd_cents: { type: integer }
+        allowed: { type: boolean, description: "Snapshot only; false while financial rails are unavailable. It is never authority to pay." }
+        blockers: { type: array, items: { type: string } }
+        rails_available: { type: boolean, enum: [false] }
+        unavailable_reason: { type: string }
+    BillingStatement:
+      type: object
+      additionalProperties: false
+      required: [entries, next_cursor]
+      properties:
+        entries: { type: array, items: { $ref: "#/components/schemas/BillingStatementEntry" } }
+        next_cursor: { type: string, description: "Empty at the end of the history so a paging loop terminates without a probe request." }
+    BillingStatementEntry:
+      type: object
+      additionalProperties: false
+      required: [sequence, journal_id, kind, amount_mcr, amount_credits, amount_usd, occurred_at]
+      properties:
+        sequence: { type: integer }
+        journal_id: { type: string }
+        kind: { type: string }
+        source: { type: string }
+        category: { type: string }
+        amount_mcr: { $ref: "#/components/schemas/McrString" }
+        amount_credits: { type: string }
+        amount_usd: { type: string }
+        reservation_id: { type: string }
+        journal_of: { type: string }
+        occurred_at: { type: string, format: date-time }
+    BillingPayoutStatus:
+      type: object
+      additionalProperties: false
+      required: [rails_available, unavailable_reason]
+      properties:
+        rails_available: { type: boolean, enum: [false] }
+        unavailable_reason: { type: string, enum: [financial_rails_unavailable] }
+        country: { anyOf: [{ type: string }, { type: "null" }] }
+        currency: { anyOf: [{ type: string }, { type: "null" }] }
+    McrString:
+      type: string
+      pattern: "^-?[0-9]+$"
+      description: Exact integer millicredit amount as a canonical decimal string. 1 credit is 1000 mcr.
+    AdvertisingScope:
+      type: object
+      additionalProperties: false
+      required: [screen_ids, slot_ids]
+      properties:
+        screen_ids: { type: array, items: { type: string } }
+        slot_ids: { type: array, items: { type: string } }
+    AdvertisingNetworkCreate: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string, maxLength: 120 } } }
+    AdvertisingRate: { type: object, additionalProperties: false, required: [rate_mcr_per_15s], properties: { rate_mcr_per_15s: { $ref: "#/components/schemas/McrString" } } }
+    AdvertisingNetwork:
+      type: object
+      additionalProperties: false
+      required: [id, revision, enabled, rate_revision, pricing_generation, seller_fee_bps, seller_fee_revision, created_at, updated_at]
+      properties:
+        id: { type: string }
+        revision: { type: integer }
+        enabled: { type: boolean }
+        name: { type: string }
+        default_rate_mcr_per_15s: { anyOf: [{ $ref: "#/components/schemas/McrString" }, { type: "null" }], description: "Null until the seller sets a positive default rate." }
+        rate_revision: { type: integer }
+        pricing_generation: { type: integer }
+        seller_fee_bps: { type: integer, minimum: 0, maximum: 10000, description: "ScreenRig serving fee resolved for the seller plan or audited override. Sellers cannot change it." }
+        seller_fee_revision: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AdvertisingInventoryWrite:
+      type: object
+      additionalProperties: false
+      required: [ads_enabled]
+      properties:
+        ads_enabled: { type: boolean }
+        site_name: { type: string, maxLength: 120 }
+        city: { type: string, maxLength: 120 }
+        region: { type: string, maxLength: 120 }
+        venue_type: { type: string, maxLength: 64 }
+        audience_tags: { type: array, maxItems: 20, items: { type: string, maxLength: 32, pattern: "^[a-z0-9_]+$" } }
+        placement: { type: string, maxLength: 120 }
+        public_description: { type: string, maxLength: 500 }
+        rate_override_mcr_per_15s: { anyOf: [{ $ref: "#/components/schemas/McrString" }, { type: "null" }], description: "Null restores inheritance from the account default; it never means zero." }
+    AdvertisingInventory:
+      type: object
+      additionalProperties: false
+      required: [screen_id, revision, ads_enabled, audience_tags, rate_override_mcr_per_15s, rate_revision, created_at, updated_at]
+      properties:
+        screen_id: { type: string }
+        revision: { type: integer }
+        ads_enabled: { type: boolean }
+        site_name: { type: string }
+        city: { type: string }
+        region: { type: string }
+        venue_type: { type: string }
+        audience_tags: { type: array, items: { type: string } }
+        placement: { type: string }
+        public_description: { type: string }
+        rate_override_mcr_per_15s: { anyOf: [{ $ref: "#/components/schemas/McrString" }, { type: "null" }] }
+        rate_revision: { type: integer }
+        timezone: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AdvertisingInventoryList: { type: object, additionalProperties: false, required: [inventory], properties: { inventory: { type: array, items: { $ref: "#/components/schemas/AdvertisingInventory" } } } }
+    AdvertisingSlotWrite:
+      type: object
+      additionalProperties: false
+      required: [name, accepted_media, max_image_duration_ms, max_video_duration_ms]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        enabled: { type: boolean }
+        accepted_media: { type: array, items: { type: string, enum: [image, video] } }
+        max_image_duration_ms: { type: integer, minimum: 5000, maximum: 30000 }
+        max_video_duration_ms: { type: integer, minimum: 1000, maximum: 120000 }
+        rate_override_mcr_per_15s: { anyOf: [{ $ref: "#/components/schemas/McrString" }, { type: "null" }] }
+    AdvertisingSlot:
+      type: object
+      additionalProperties: false
+      required: [id, revision, name, enabled, accepted_media, max_image_duration_ms, max_video_duration_ms, muted, rate_override_mcr_per_15s, rate_revision, created_at, updated_at]
+      properties:
+        id: { type: string }
+        revision: { type: integer }
+        name: { type: string }
+        enabled: { type: boolean }
+        accepted_media: { type: array, items: { type: string } }
+        max_image_duration_ms: { type: integer }
+        max_video_duration_ms: { type: integer }
+        muted: { type: boolean, enum: [true] }
+        rate_override_mcr_per_15s: { anyOf: [{ $ref: "#/components/schemas/McrString" }, { type: "null" }] }
+        rate_revision: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AdvertisingSlotList: { type: object, additionalProperties: false, required: [slots], properties: { slots: { type: array, items: { $ref: "#/components/schemas/AdvertisingSlot" } } } }
+    AdvertisingInvitationCreate:
+      type: object
+      additionalProperties: false
+      required: [emails, screen_ids, slot_ids, policy]
+      properties:
+        emails: { type: array, minItems: 1, maxItems: 50, items: { type: string, format: email } }
+        screen_ids: { type: array, items: { type: string } }
+        slot_ids: { type: array, items: { type: string } }
+        policy: { type: string, enum: [trusted, review_required] }
+    AdvertisingInvitation:
+      type: object
+      additionalProperties: false
+      required: [id, policy, scope, state, expires_at, created_at]
+      properties:
+        id: { type: string }
+        recipient_email: { type: string, description: "Returned only to the issuing seller: the recipient address that seller supplied, not the user's current private email." }
+        policy: { type: string, enum: [trusted, review_required] }
+        scope: { $ref: "#/components/schemas/AdvertisingScope" }
+        state: { type: string, enum: [pending, claimed, revoked, expired] }
+        expires_at: { type: string, format: date-time }
+        membership_id: { type: string }
+        created_at: { type: string, format: date-time }
+        claimed_at: { type: string, format: date-time }
+    AdvertisingInvitationList: { type: object, additionalProperties: false, required: [invitations], properties: { invitations: { type: array, items: { $ref: "#/components/schemas/AdvertisingInvitation" } } } }
+    AdvertisingInvitationIssued: { type: object, additionalProperties: false, required: [invitations], properties: { invitations: { type: array, items: { $ref: "#/components/schemas/AdvertisingInvitationIssuedItem" } } } }
+    AdvertisingInvitationIssuedItem:
+      type: object
+      additionalProperties: false
+      required: [invitation, token, invitation_id, claim_path, claim_fragment]
+      properties:
+        invitation: { $ref: "#/components/schemas/AdvertisingInvitation" }
+        token: { type: string, description: "Single-use claim secret, returned exactly once in this response. It is never stored and never listed again. It is a response value, not a request field, so it is not writeOnly." }
+        invitation_id: { type: string, description: "Invitation identity, needed to bind the claim passkey assertion to this invitation." }
+        claim_path: { type: string, enum: ["/advertising/invitations/claim"] }
+        claim_fragment: { type: string, description: "Fragment to append to the dashboard origin: invite={token}&invitation={invitation_id}. It is never sent in a request." }
+    AdvertisingInvitationClaim:
+      type: object
+      additionalProperties: false
+      required: [token, ceremony_id, credential]
+      description: "Every claim requires a fresh passkey assertion from /dashboard/v1/advertising/invitations/claim/assertions. The server resolves the token and requires the assertion subject to be that invitation; an existing signed-in session is not a substitute."
+      properties:
+        token: { type: string, minLength: 1, writeOnly: true }
+        invitation_id: { type: string, description: "Optional invitation identity; when supplied, it must match the token and assertion subject." }
+        ceremony_id: { type: string, minLength: 1, description: "The fresh invitation-bound passkey assertion proving the claiming user's identity." }
+        credential: { type: object, additionalProperties: true, writeOnly: true, description: "The assertion response from that ceremony." }
+    AdvertisingMembershipScope:
+      type: object
+      additionalProperties: false
+      required: [policy, screen_ids, slot_ids]
+      properties:
+        policy: { type: string, enum: [trusted, review_required] }
+        screen_ids: { type: array, items: { type: string } }
+        slot_ids: { type: array, items: { type: string } }
+    AdvertisingMembership:
+      type: object
+      additionalProperties: false
+      required: [id, seller_account_id, admission_generation, policy_revision, policy, scope, state, revision, created_at, updated_at]
+      properties:
+        id: { type: string }
+        seller_account_id: { type: string }
+        buyer_account_id: { type: string, description: "Returned only in seller-owned membership responses to identify the granted buyer account." }
+        admission_generation: { type: integer }
+        policy_revision: { type: integer }
+        policy: { type: string, enum: [trusted, review_required] }
+        scope: { $ref: "#/components/schemas/AdvertisingScope" }
+        state: { type: string, enum: [active, revoked] }
+        revision: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AdvertisingMembershipList: { type: object, additionalProperties: false, required: [memberships], properties: { memberships: { type: array, items: { $ref: "#/components/schemas/AdvertisingMembership" } } } }
+    AdvertisingJoinedNetwork:
+      type: object
+      additionalProperties: false
+      required: [seller_account_id, membership_id, policy, admission_generation, scope, price_change_pending, default_rate_mcr_per_15s]
+      properties:
+        seller_account_id: { type: string }
+        name: { type: string }
+        default_rate_mcr_per_15s: { anyOf: [{ $ref: "#/components/schemas/McrString" }, { type: "null" }], description: "Seller default rate in mcr per 15 seconds, before screen and slot overrides. Null means unset; a campaign quote determines the accepted play price." }
+        membership_id: { type: string }
+        policy: { type: string, enum: [trusted, review_required] }
+        admission_generation: { type: integer }
+        scope: { $ref: "#/components/schemas/AdvertisingScope" }
+        price_change_pending: { type: boolean }
+    AdvertisingJoinedNetworkList: { type: object, additionalProperties: false, required: [networks], properties: { networks: { type: array, items: { $ref: "#/components/schemas/AdvertisingJoinedNetwork" } } } }
+    AdvertisingJoinedInventory:
+      type: object
+      additionalProperties: false
+      required: [inventory, slots]
+      properties:
+        inventory: { type: array, items: { $ref: "#/components/schemas/AdvertisingInventory" } }
+        slots: { type: array, items: { $ref: "#/components/schemas/AdvertisingSlot" } }
+    AdvertisingCreativeCreate: { type: object, additionalProperties: false, required: [media_id], properties: { media_id: { type: string }, copy: { type: string, maxLength: 500 } } }
+    AdvertisingCreative:
+      type: object
+      additionalProperties: false
+      required: [id, revision, media_id, media_revision, sha256, kind, content_type, duration_ms, width, height, bytes, state, created_at]
+      properties:
+        id: { type: string }
+        revision: { type: integer }
+        media_id: { type: string }
+        media_revision: { type: integer }
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+        kind: { type: string, enum: [image, video] }
+        content_type: { type: string }
+        codecs: { type: string }
+        duration_ms: { type: integer }
+        width: { type: integer }
+        height: { type: integer }
+        bytes: { type: integer }
+        copy: { type: string }
+        state: { type: string, enum: [ready] }
+        created_at: { type: string, format: date-time }
+    AdvertisingCreativeList: { type: object, additionalProperties: false, required: [creatives], properties: { creatives: { type: array, items: { $ref: "#/components/schemas/AdvertisingCreative" } } } }
+    AdvertisingReviewRejection: { type: object, additionalProperties: false, required: [reason], properties: { reason: { type: string, minLength: 1, maxLength: 500 } } }
+    AdvertisingReview:
+      type: object
+      additionalProperties: false
+      required: [id, creative_id, creative_revision, state, created_at]
+      properties:
+        id: { type: string }
+        creative_id: { type: string }
+        creative_revision: { type: integer }
+        campaign_id: { type: string }
+        state: { type: string, enum: [pending, approved, rejected] }
+        created_at: { type: string, format: date-time }
+        decided_at: { type: string, format: date-time }
+    AdvertisingReviewList: { type: object, additionalProperties: false, required: [reviews], properties: { reviews: { type: array, items: { $ref: "#/components/schemas/AdvertisingReview" } } } }
+    AdvertisingDaypart:
+      type: object
+      additionalProperties: false
+      required: [start, end]
+      properties:
+        days: { type: array, maxItems: 7, items: { type: string, enum: [mon, tue, wed, thu, fri, sat, sun] } }
+        start: { type: string, pattern: "^([01]\\d|2[0-3]):[0-5]\\d$" }
+        end: { type: string, pattern: "^([01]\\d|2[0-3]):[0-5]\\d$" }
+    AdvertisingCampaignNetworkDraft:
+      type: object
+      additionalProperties: false
+      required: [seller_account_id, screen_ids, slot_ids, creative_ids]
+      properties:
+        seller_account_id: { type: string }
+        screen_ids: { type: array, items: { type: string } }
+        slot_ids: { type: array, items: { type: string } }
+        creative_ids: { type: array, items: { type: string } }
+        venue_types: { type: array, items: { type: string } }
+        cities: { type: array, items: { type: string } }
+        tags: { type: array, items: { type: string } }
+        dayparts: { type: array, items: { $ref: "#/components/schemas/AdvertisingDaypart" } }
+        network_cap_mcr: { $ref: "#/components/schemas/McrString" }
+    AdvertisingCampaignDraft:
+      type: object
+      additionalProperties: false
+      required: [name, daily_cap_mcr, lifetime_cap_mcr, flight_start, flight_end, networks]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        daily_cap_mcr: { $ref: "#/components/schemas/McrString" }
+        lifetime_cap_mcr: { $ref: "#/components/schemas/McrString" }
+        image_duration_ms: { type: integer, minimum: 5000, maximum: 30000, default: 10000, description: "Campaign-wide image dwell time. Videos keep their server-verified duration." }
+        max_play_price_mcr: { allOf: [{ $ref: "#/components/schemas/McrString" }], description: "Positive maximum completed-play price. Omit for no additional ceiling." }
+        flight_start: { type: string, format: date-time }
+        flight_end: { type: string, format: date-time }
+        networks: { type: array, minItems: 1, items: { $ref: "#/components/schemas/AdvertisingCampaignNetworkDraft" } }
+    AdvertisingCampaignNetwork:
+      type: object
+      additionalProperties: false
+      required: [seller_account_id, membership_id, admission_generation, screen_ids, slot_ids, creative_ids, network_cap_mcr, network_reserved_mcr, network_spent_mcr, accepted_pricing_generation, price_change_pending, barrier_generation, enabled]
+      properties:
+        seller_account_id: { type: string }
+        membership_id: { type: string }
+        admission_generation: { type: integer }
+        screen_ids: { type: array, items: { type: string } }
+        slot_ids: { type: array, items: { type: string } }
+        venue_types: { type: array, items: { type: string } }
+        cities: { type: array, items: { type: string } }
+        tags: { type: array, items: { type: string } }
+        dayparts: { type: array, items: { $ref: "#/components/schemas/AdvertisingDaypart" } }
+        creative_ids: { type: array, items: { type: string } }
+        network_cap_mcr: { $ref: "#/components/schemas/McrString" }
+        network_reserved_mcr: { $ref: "#/components/schemas/McrString" }
+        network_spent_mcr: { $ref: "#/components/schemas/McrString" }
+        accepted_terms_id: { type: string }
+        accepted_pricing_generation: { type: integer }
+        price_change_pending: { type: boolean }
+        barrier_generation: { type: integer }
+        review_state: { type: string, enum: [pending, approved, rejected] }
+        enabled: { type: boolean }
+    AdvertisingCampaign:
+      type: object
+      additionalProperties: false
+      required: [id, revision, name, state, pause_reasons, price_change_pending, daily_cap_mcr, lifetime_cap_mcr, reserved_mcr, spent_mcr, flight_start, flight_end, networks, created_at, updated_at]
+      properties:
+        id: { type: string }
+        revision: { type: integer }
+        name: { type: string }
+        state: { type: string, enum: [draft, pending_review, active, paused, ended] }
+        pause_reasons: { type: array, items: { type: string, enum: [manual, price_change_pending, review_required, membership_revoked, budget] } }
+        price_change_pending: { type: boolean, description: "Sticky: reverting a rate never clears it. Only an explicit buyer acceptance clears it." }
+        daily_cap_mcr: { $ref: "#/components/schemas/McrString" }
+        lifetime_cap_mcr: { $ref: "#/components/schemas/McrString" }
+        image_duration_ms: { type: integer, minimum: 5000, maximum: 30000, default: 10000, description: "Campaign-wide image dwell time. Videos keep their server-verified duration." }
+        max_play_price_mcr: { allOf: [{ $ref: "#/components/schemas/McrString" }], description: "Positive maximum completed-play price. Omit for no additional ceiling." }
+        reserved_mcr: { $ref: "#/components/schemas/McrString" }
+        spent_mcr: { $ref: "#/components/schemas/McrString" }
+        flight_start: { type: string, format: date-time }
+        flight_end: { type: string, format: date-time }
+        networks: { type: array, items: { $ref: "#/components/schemas/AdvertisingCampaignNetwork" } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AdvertisingCampaignList: { type: object, additionalProperties: false, required: [campaigns], properties: { campaigns: { type: array, items: { $ref: "#/components/schemas/AdvertisingCampaign" } } } }
+    AdvertisingQuoteAccept: { type: object, additionalProperties: false, required: [quote_id], properties: { quote_id: { type: string } } }
+    AdvertisingQuoteItem:
+      type: object
+      additionalProperties: false
+      required: [seller_account_id, screen_id, slot_id, creative_id, duration_ms, rate_mcr_per_15s, play_price_mcr, pricing_generation, fee_bps, fee_revision]
+      properties:
+        seller_account_id: { type: string }
+        screen_id: { type: string }
+        slot_id: { type: string }
+        creative_id: { type: string }
+        duration_ms: { type: integer }
+        rate_mcr_per_15s: { $ref: "#/components/schemas/McrString" }
+        play_price_mcr: { $ref: "#/components/schemas/McrString" }
+        pricing_generation: { type: integer }
+        fee_bps: { type: integer, minimum: 0, maximum: 10000 }
+        fee_revision: { type: integer }
+    AdvertisingQuote:
+      type: object
+      additionalProperties: false
+      required: [id, campaign_id, campaign_revision, revision, state, expires_at, items, pricing_generations, created_at]
+      properties:
+        id: { type: string }
+        campaign_id: { type: string }
+        campaign_revision: { type: integer }
+        revision: { type: integer }
+        state: { type: string, enum: [open, accepted, stale, expired] }
+        expires_at: { type: string, format: date-time }
+        items: { type: array, items: { $ref: "#/components/schemas/AdvertisingQuoteItem" } }
+        pricing_generations: { type: object, additionalProperties: { type: integer } }
+        created_at: { type: string, format: date-time }
+    AdvertisingSpendReport:
+      type: object
+      additionalProperties: false
+      required: [campaign_id, spent_mcr, reserved_mcr, completed, unbillable, pending]
+      properties:
+        campaign_id: { type: string }
+        spent_mcr: { $ref: "#/components/schemas/McrString" }
+        reserved_mcr: { $ref: "#/components/schemas/McrString" }
+        completed: { type: integer }
+        unbillable: { type: integer }
+        pending: { type: integer }
+    AdvertisingDeliveryRow:
+      type: object
+      additionalProperties: false
+      required: [screen_id, slot_id, reservation_id, gross_mcr, fee_mcr, net_mcr, completed_at]
+      properties:
+        screen_id: { type: string }
+        slot_id: { type: string }
+        reservation_id: { type: string }
+        gross_mcr: { $ref: "#/components/schemas/McrString" }
+        fee_mcr: { $ref: "#/components/schemas/McrString" }
+        net_mcr: { $ref: "#/components/schemas/McrString" }
+        completed_at: { type: string, format: date-time }
+    AdvertisingDeliveryReport:
+      type: object
+      additionalProperties: false
+      required: [gross_mcr, fee_mcr, net_mcr, completed, interrupted, unbillable, rows]
+      properties:
+        gross_mcr: { $ref: "#/components/schemas/McrString" }
+        fee_mcr: { $ref: "#/components/schemas/McrString" }
+        net_mcr: { $ref: "#/components/schemas/McrString" }
+        completed: { type: integer }
+        interrupted: { type: integer }
+        unbillable: { type: integer }
+        rows: { type: array, items: { $ref: "#/components/schemas/AdvertisingDeliveryRow" } }
+    RuntimeManifestV2:
+      type: object
+      additionalProperties: true
+      required: [schemaVersion, manifestRevision, grantId, contentGeneration, screenId, playlistId, playlistRevision, generatedAt, pages]
+      properties:
+        schemaVersion: { type: integer, enum: [3] }
+        manifestRevision: { type: string }
+        grantId: { type: string }
+        contentGeneration: { type: integer }
+        screenId: { type: string }
+        screenLabel: { type: string }
+        playlistId: { type: string }
+        playlistRevision: { type: integer }
+        generatedAt: { type: string }
+        timezone: { type: string }
+        pages: { type: array, items: { type: object, additionalProperties: true } }
+        diagnostics: { type: array, items: { type: object, additionalProperties: true } }
+    RuntimeAdslotCandidate:
+      type: object
+      additionalProperties: false
+      required: [page_id, occurrence_id, check_sequence, earliest_start_at]
+      properties:
+        page_id: { type: string }
+        occurrence_id: { type: string }
+        check_sequence: { type: integer, minimum: 1 }
+        earliest_start_at: { type: string, format: date-time }
+    RuntimeAdslotResolveRequest:
+      type: object
+      additionalProperties: false
+      required: [manifest_revision, candidates]
+      properties:
+        manifest_revision: { type: string }
+        candidates: { type: array, minItems: 1, maxItems: 16, items: { $ref: "#/components/schemas/RuntimeAdslotCandidate" } }
+    RuntimeAdslotMedia:
+      type: object
+      additionalProperties: false
+      required: [kind, duration_ms, content_type, bytes, sha256, content_path, fit]
+      properties:
+        kind: { type: string, enum: [image, video] }
+        duration_ms: { type: integer }
+        content_type: { type: string }
+        bytes: { type: integer }
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+        content_path: { type: string }
+        fit: { type: string, enum: [contain] }
+        codecs: { type: string }
+    RuntimeAdslotResult:
+      type: object
+      additionalProperties: false
+      required: [occurrence_id, check_sequence, state]
+      properties:
+        occurrence_id: { type: string }
+        check_sequence: { type: integer }
+        state: { type: string, enum: [filled, empty] }
+        decision_id: { type: string }
+        reservation_id: { type: string }
+        start_not_before: { type: string, format: date-time }
+        start_before: { type: string, format: date-time }
+        playback_deadline: { type: string, format: date-time }
+        report_before: { type: string, format: date-time }
+        creative_revision: { type: integer }
+        media: { $ref: "#/components/schemas/RuntimeAdslotMedia" }
+        hint_until: { type: string, format: date-time, description: "No-fill hint expiry on the server clock." }
+    RuntimeAdslotResolveResponse:
+      type: object
+      additionalProperties: false
+      required: [server_time, results]
+      properties:
+        server_time: { type: string, format: date-time }
+        results: { type: array, items: { $ref: "#/components/schemas/RuntimeAdslotResult" } }
+    RuntimeAdslotEvent:
+      type: object
+      additionalProperties: false
+      required: [event_id, decision_id, occurrence_id, kind, client_sequence]
+      properties:
+        event_id: { type: string }
+        decision_id: { type: string }
+        occurrence_id: { type: string }
+        kind: { type: string, enum: [started, completed, skipped, interrupted, failed] }
+        client_sequence: { type: integer, minimum: 1 }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        duration_ms: { type: integer, minimum: 0 }
+    RuntimeAdslotEventBatch:
+      type: object
+      additionalProperties: false
+      required: [events]
+      properties:
+        events: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/RuntimeAdslotEvent" } }
+    RuntimeAdslotEventResult:
+      type: object
+      additionalProperties: false
+      required: [event_id, state]
+      properties:
+        event_id: { type: string }
+        state: { type: string, enum: [accepted, duplicate, rejected, pending_evidence, unbillable] }
+    RuntimeAdslotEventResponse:
+      type: object
+      additionalProperties: false
+      required: [results]
+      properties:
+        results: { type: array, items: { $ref: "#/components/schemas/RuntimeAdslotEventResult" } }
+    AdvertisingReviewDetail:
+      type: object
+      additionalProperties: false
+      required: [review, creative]
+      properties:
+        review: { $ref: "#/components/schemas/AdvertisingReview" }
+        creative: { $ref: "#/components/schemas/AdvertisingCreative" }
+    Assertion: { type: object, additionalProperties: false, required: [ceremony_id, request_options], properties: { ceremony_id: { type: string }, request_options: { type: object, additionalProperties: true } } }
+    AdvertisingClaimAssertion: { type: object, additionalProperties: false, required: [ceremony_id, request_options, invitation_id], properties: { ceremony_id: { type: string }, request_options: { type: object, additionalProperties: true }, invitation_id: { type: string, description: "The invitation this ceremony is bound to, resolved from the request or its token. Send it back with the credential on the claim." } } }
+    DashboardEmail:
+      type: object
+      additionalProperties: false
+      required: [email, email_verified, email_revision]
+      description: The current user's own email view. The verified address stays effective while a change is pending, and the pending candidate is visible only to its owner.
+      properties:
+        email: { type: string }
+        email_verified: { type: boolean }
+        email_revision: { type: integer }
+        pending_email: { allOf: [{ $ref: "#/components/schemas/DashboardPendingEmail" }] }
+    DashboardPendingEmail: { type: object, additionalProperties: false, required: [email, expires_at], properties: { email: { type: string }, expires_at: { type: string, format: date-time } } }
+    UserEnrollment: { type: object, additionalProperties: false, required: [enrollment_id, email_verified, expires_at], properties: { enrollment_id: { type: string }, email_verified: { type: boolean }, expires_at: { type: string, format: date-time } } }
+    UserEnrollmentCurrent: { $ref: "#/components/schemas/UserEnrollment" }
+    EmailVerifyRequest: { type: object, additionalProperties: false, required: [token], properties: { token: { type: string, minLength: 1, writeOnly: true } } }
+    EmailVerifyResult: { type: object, additionalProperties: false, required: [purpose, status], properties: { purpose: { type: string }, status: { type: string, enum: [pending, verified, superseded, expired] } } }
+    UserEmailChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      description: "A non-development session must complete the passkey ceremony started at the change/assertions route. Development authentication must send dev_confirm instead and cannot carry ceremony fields."
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        ceremony_id: { type: string }
+        credential: { type: object, additionalProperties: true, writeOnly: true }
+        dev_confirm: { type: boolean }
+    UserEmailChangeAccepted: { $ref: "#/components/schemas/DashboardEmail" }
+    DevAuthorizationRequired: { type: object, additionalProperties: false, required: [dev_auth, confirmation_required], properties: { dev_auth: { type: boolean, enum: [true] }, confirmation_required: { type: boolean, enum: [true] } } }
+    PasskeyAdditionProof: { type: object, additionalProperties: false, required: [authorization_ceremony_id, authorization_credential], properties: { authorization_ceremony_id: { type: string, description: "The ceremony_id of the fresh passkey_add assertion that authorizes registering another credential." }, authorization_credential: { type: object, additionalProperties: true, description: "The assertion response from that ceremony, serialized from the authenticator." } } }
+    PlaylistPageV2:
+      oneOf:
+        - { $ref: "#/components/schemas/PlaylistPage" }
+        - { $ref: "#/components/schemas/AdslotPageWrite" }
+    PlaylistV2:
+      type: object
+      additionalProperties: false
+      required: [id, name, revision, pages]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        revision: { type: integer }
+        pages: { type: array, minItems: 1, maxItems: 100, items: { $ref: "#/components/schemas/PlaylistPageV2" } }
+    PlaylistV2List: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/PlaylistV2" } } } }
+    DashboardPasskeyAdditionComplete:
+      type: object
+      additionalProperties: false
+      required: [ceremony_id, credential]
+      description: "Completes a registration for an already-signed-in user. The authorization_ceremony_id and authorization_credential pair is the fresh passkey_add assertion that authorizes this second registration; the setup-cookie first-passkey path omits it."
+      properties:
+        ceremony_id: { type: string }
+        credential: { type: object, additionalProperties: true, description: WebAuthn registration response serialized from the PublicKeyCredential the authenticator returned. }
+        authorization_ceremony_id: { type: string, description: "The passkey_add ceremony that authorizes this addition." }
+        authorization_credential: { type: object, additionalProperties: true, description: "The assertion response from that passkey_add ceremony." }
     PageVisibility:
       type: object
       additionalProperties: false
@@ -3906,10 +5544,11 @@ components:
     DashboardSessionCreate:
       type: object
       additionalProperties: false
-      required: [display_name]
-      description: "Local-development-only request body. The hosted service rejects this credential-free session request."
+      required: [display_name, email]
+      description: "Local-development-only request body. The hosted service rejects this credential-free session request. The development-minted user still has an email; it is stored and treated as verified only because development authentication is on."
       properties:
         display_name: { $ref: "#/components/schemas/DashboardDisplayName" }
+        email: { type: string, format: email, minLength: 3, maxLength: 254, description: "The development user's own email address. Required: the user record now carries it independently of the account contact address." }
     DashboardPasswordLogin:
       type: object
       additionalProperties: false
@@ -3926,7 +5565,7 @@ components:
     DashboardSession:
       type: object
       additionalProperties: false
-      required: [user_id, account_id, display_name, dev_auth, expires_at]
+      required: [user_id, account_id, display_name, dev_auth, auth_method, expires_at]
       description: >-
         Current dashboard session. Every field is descriptive: authority is the
         session cookie and the server-side row it names, never these
@@ -3937,6 +5576,7 @@ components:
         account_id: { type: string }
         display_name: { $ref: "#/components/schemas/DashboardDisplayName" }
         dev_auth: { type: boolean, description: "Reserved for local development; false on the hosted service." }
+        auth_method: { type: string, enum: [passkey, password, development], description: "Server-derived authentication strength of this session. A password session cannot satisfy an operation that requires independently authenticated user email authority." }
         expires_at: { type: string, format: date-time, description: Instant the twenty-four-hour session row stops being accepted. Logout deletes the row before this time. }
     DashboardUser:
       type: object
@@ -4055,4 +5695,4 @@ components:
         errors: { type: array, items: { $ref: "#/components/schemas/ProblemField" } }
         next: { $ref: "#/components/schemas/NextAction" }
 x-problem-registry: ./problems.yaml
-x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_account_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, dashboard_link_invalid, dashboard_link_expired, dashboard_link_consumed, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk, recovery_ambiguous, recovery_expired, recovery_not_offered, invitation_limit_reached]
+x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_account_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, dashboard_link_invalid, dashboard_link_expired, dashboard_link_consumed, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk, recovery_ambiguous, recovery_expired, recovery_not_offered, invitation_limit_reached, version_required, price_change_pending, quote_stale, insufficient_credits, self_deal, invitation_invalid, invitation_expired, invitation_consumed, billing_unavailable, user_binding_stale]

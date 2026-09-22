@@ -6,6 +6,7 @@ function object(value: unknown): RecordValue {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw usageError("Expected a playlist object.");
   return value as RecordValue;
 }
+
 /** Preserve authored selectors; strip only fields the backend derives on reads. */
 export function editablePlaylist(value: unknown): RecordValue {
   const resource = object(value);
@@ -13,6 +14,9 @@ export function editablePlaylist(value: unknown): RecordValue {
   if (!Array.isArray(document.pages)) throw usageError("Playlist pages are missing.");
   for (const page of document.pages) {
     object(page);
+    // An adslot page is a whole-page reference: id, type, adslot_id, visibility.
+    // It carries no canvas or primitives, so nothing is stripped or rewrapped.
+    if (page.type === "adslot") continue;
     if (page.advance?.mode === "media_end") delete page.advance.max_ms;
     if (!Array.isArray(page.primitives)) throw usageError("Playlist primitives are missing.");
     for (const primitive of page.primitives) {
@@ -26,6 +30,24 @@ export function editablePlaylist(value: unknown): RecordValue {
   }
   assertPlaylistValid(document);
   return document;
+}
+
+/**
+ * The advertising branch of the versioned page union: a whole-page slot
+ * reference (`id`, `type`, `adslot_id`, optional `visibility`) with no canvas,
+ * primitives, creative, duration, or price.
+ */
+export function isAdSlotPage(page: unknown): boolean {
+  if (typeof page !== "object" || page === null || Array.isArray(page)) return false;
+  return "type" in page && page.type === "adslot";
+}
+
+/**
+ * Ad-bearing documents are authored, read, and written under the version 2
+ * union. A document of ordinary pages keeps the v1 contract unchanged.
+ */
+export function playlistApiVersion(pages: unknown): "v1" | "v2" {
+  return Array.isArray(pages) && pages.some(isAdSlotPage) ? "v2" : "v1";
 }
 
 export function initializePlaylist(options: {

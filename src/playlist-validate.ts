@@ -4,13 +4,20 @@ import addFormats from "ajv-formats";
 import { validatePlaylistWriteSemantics } from "./generated/playlist-write-semantics.js";
 import { lintPlaylistPages, type LintFinding } from "./compose/lint.js";
 import { ExitCode } from "./exit-codes.js";
+import { isAdSlotPage } from "./playlist-authoring.js";
 import { CliError, makeProblem } from "./problems.js";
 
-let validators: ReturnType<typeof buildValidators> | undefined;
-function buildValidators() {
+const validators = new Map<"v1" | "v2", ReturnType<typeof buildValidators>>();
+/**
+ * Local validation compiles the canonical generated schema for the document's
+ * own union: ordinary documents use the closed v1 schema, and a document with
+ * an adslot page uses the v2 union. Neither schema is reimplemented here.
+ */
+function buildValidators(version: "v1" | "v2") {
+  const asset = version === "v2" ? "../assets/playlist-write-v2.schema.json" : "../assets/playlist-write.schema.json";
 const ajv = new Ajv2020({ allErrors: true, strict: true });
 addFormats.default(ajv);
-const schema = JSON.parse(readFileSync(new URL("../assets/playlist-write.schema.json", import.meta.url), "utf8"));
+const schema = JSON.parse(readFileSync(new URL(asset, import.meta.url), "utf8"));
 const validate = ajv.compile(schema);
 // Route diagnostics to the selected tagged branch. This changes only error
 // presentation: the unmodified canonical validator above decides validity.
@@ -32,10 +39,43 @@ const diagnosticAjv = new Ajv2020({ allErrors: true, strict: true, discriminator
 addFormats.default(diagnosticAjv);
 const diagnose = diagnosticAjv.compile(diagnosticSchema);
 return { validate, diagnose };
+
  }
+/** Compile each canonical union once per process. */
+function cached(version: "v1" | "v2"): ReturnType<typeof buildValidators> {
+  const existing = validators.get(version);
+  if (existing) return existing;
+  const built = buildValidators(version);
+  validators.set(version, built);
+  return built;
+}
 export const PLAYLIST_SERVER_CHECKS = ["reference authorization and readiness", "dynamic selector cardinality", "media durations", "DNS and remote availability"];
+
+/**
+ * The cross-field checks for an ad-bearing document that the canonical v2
+ * schema cannot express, mirroring the server's own v2 rules. They run only on
+ * a document that already passed that schema, and the server remains the
+ * authority.
+ */
+function adslotPageIssues(pages: unknown[]): Array<{ path: string; message: string }> {
+  const issues: Array<{ path: string; message: string }> = [];
+  const adslots = pages.reduce<number>((count, page) => count + (isAdSlotPage(page) ? 1 : 0), 0);
+  if (adslots > 16) {
+    issues.push({ path: "/pages", message: "must contain at most 16 adslot pages so player lookahead stays bounded" });
+  }
+  const ordinaryUnscheduled = pages.some((page) => !isAdSlotPage(page)
+    && (typeof page !== "object" || page === null || !Object.hasOwn(page, "visibility")));
+  if (!ordinaryUnscheduled) {
+    issues.push({ path: "/pages", message: "must retain at least one ordinary page with no visibility rule as the ad-slot fallback" });
+  }
+  return issues;
+}
+
 export function playlistIssues(value: unknown): Array<{ path: string; message: string }> {
-  const { validate, diagnose } = validators ??= buildValidators();
+  const pages = value !== null && typeof value === "object" && !Array.isArray(value)
+    && "pages" in value && Array.isArray(value.pages) ? value.pages : undefined;
+  const version = pages?.some(isAdSlotPage) ? "v2" : "v1";
+  const { validate, diagnose } = cached(version);
   if (!validate(value)) {
     diagnose(value);
     const errors = diagnose.errors ?? validate.errors ?? [];
@@ -47,7 +87,7 @@ export function playlistIssues(value: unknown): Array<{ path: string; message: s
     }));
     return [...new Map(issues.map((issue) => [`${issue.path}:${issue.message}`, issue])).values()];
   }
-  return validatePlaylistWriteSemantics(value);
+  return version === "v2" && pages ? [...validatePlaylistWriteSemantics(value), ...adslotPageIssues(pages)] : validatePlaylistWriteSemantics(value);
 }
 export function assertPlaylistValid(value: unknown): void {
   const errors = playlistIssues(value);

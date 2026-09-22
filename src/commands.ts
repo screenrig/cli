@@ -1,8 +1,10 @@
+import { requireCapability, validateAccountCapabilities } from "./account-capabilities.js";
 import { RESOURCE_ID_PATTERNS, isResourceID } from "./generated/resource-ids.js";
 import { replacePlaylistRelease } from "./playlist-release.js";
-import { publishScreen } from "./screen-publish.js";
 import { readAuthoringJson, readAuthoringText, writeAuthoringJson } from "./authoring-input.js";
-import { editablePlaylist, preparePlaylist, targetDimensions } from "./playlist-authoring.js";
+import { publishScreen } from "./screen-publish.js";
+import { editablePlaylist, isAdSlotPage, playlistApiVersion, preparePlaylist, targetDimensions } from "./playlist-authoring.js";
+import { callVersionedPlaylist } from "./playlist-api.js";
 import { WriteRecovery } from "./write-recovery.js";
 import { createHash } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -11,7 +13,9 @@ import {
   limitsFromCapabilities,
   TEMPORARY_PROTOCOL_VERSION,
   type Account,
+  type AccountCapabilities,
   type AccountEvent,
+  type AccountFeatures,
   type AccountInvitation,
   type AccountInvitationRequest,
   type Agent,
@@ -42,6 +46,7 @@ import {
   type BrowserLinkClaim,
   type BrowserLinkClaimRequest,
   type DashboardLink,
+  type EnrollmentIntent,
   type HostContext,
   type ProvisionScreen,
   type Screen,
@@ -77,10 +82,10 @@ import {
 import { successEnvelope, type ProblemNext, type Warning } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
 import { CliError, configError, makeProblem, notEnrolledError, timeoutError, usageError } from "./problems.js";
+import type { Transport } from "./transport/types.js";
 import { packDirectory } from "./pack/index.js";
 import type { CliRuntime } from "./runtime.js";
 import { FetchTransport } from "./transport/http.js";
-import type { Transport } from "./transport/types.js";
 import { parseSse } from "./sse.js";
 import { kvWriteFromArgs } from "./kv-write.js";
 import { commentsWriteFromArgs } from "./comments-write.js";
@@ -208,6 +213,16 @@ function recoveryEmail(value: string | undefined): string {
     throw usageError("account recover --email must be one plain ASCII address with an unquoted local part and dotted DNS domain.");
   }
   return email;
+}
+
+/** agent enroll --intent names the account purpose; omitted keeps the signage default. */
+function enrollmentPurpose(value: string | undefined): EnrollmentIntent | undefined {
+  const intent = value?.trim();
+  if (!intent) return undefined;
+  if (intent !== "signage" && intent !== "advertising") {
+    throw usageError("agent enroll --intent must be signage or advertising.");
+  }
+  return intent;
 }
 
 function rethrowCompose(err: unknown): never {
@@ -578,6 +593,8 @@ export const handleAgentDisconnect = commandHandler(agentDisconnect, false);
 
 export const handleAccountShow = commandHandler(accountShow);
 
+export const handleAccountCapabilities = commandHandler(accountCapabilities);
+
 export const handleAccountInvite = commandHandler(accountInvite);
 export const handleAccountRecover = commandHandler(accountRecover, false);
 
@@ -745,6 +762,7 @@ async function agentEnroll(
   requireFlagValue(args, "name", "Office MacBook Codex");
   const name = flagString(args.flags, "name");
   if (name && name.length > 80) throw usageError("agent enroll --name is at most 80 characters.");
+  const enrollIntent = enrollmentPurpose(flagString(args.flags, "intent"));
   let enrollmentConfig = resolved;
   if (resolved.agentConnection) {
     if (!flagBool(args.flags, "force")) {
@@ -761,6 +779,7 @@ async function agentEnroll(
   }
   const enrolled = await enrollForCommand(args, runtime, enrollmentConfig, {
     ...(name ? { name } : {}),
+    ...(enrollIntent ? { intent: enrollIntent } : {}),
     explicit: true,
   });
   const token = requireToken(enrolled.token);
@@ -1530,7 +1549,7 @@ async function enrollForCommand(
   args: ParsedArgs,
   runtime: CliRuntime,
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
-  options: { name?: string; explicit?: boolean } = {},
+  options: { name?: string; explicit?: boolean; intent?: EnrollmentIntent } = {},
 ): Promise<Awaited<ReturnType<typeof resolveConfig>>> {
   if (resolved.agentConnection) {
     throw configError("An agent connection is pending in this config.", {
@@ -1550,6 +1569,7 @@ async function enrollForCommand(
     return await ensureCredential({
       resolved,
       enrollmentEmail: email,
+      ...(options.intent ? { enrollmentIntent: options.intent } : {}),
       runtime: {
         fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir },
         now: runtime.now,
@@ -1562,6 +1582,7 @@ async function enrollForCommand(
           client_id: state.clientId,
           email: state.email,
           ...(betaKey !== undefined ? { beta_key: betaKey } : {}),
+          ...(state.intent ? { intent: state.intent } : {}),
           ...(options.name ? { name: options.name } : {}),
           ...(options.explicit ? { agent_type: "cli", platform: agentPlatform(), version: CLI_VERSION } : {}),
         };
@@ -1672,6 +1693,703 @@ async function accountShow(args: ParsedArgs, runtime: CliRuntime, resolved: Awai
     ]),
   };
 }
+
+/**
+ * Read the authenticated account's plan, feature flags and effective server
+ * capabilities. The set is the server's current decision for this account and
+ * actor: a plan label or a numeric quota never implies permission here, and a
+ * route denial still wins over a cached capability.
+ */
+async function accountCapabilities(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+  const response = await client.call({ method: "GET", path: "/api/v1/account/capabilities" });
+  requirePrivateNoStore(response.headers, "Account capabilities response");
+  const capabilities = validateAccountCapabilities(response.body);
+  return {
+    envelope: jsonBody(response, client.requestId, { token_present: hasToken(token) }),
+    exitCode: ExitCode.Success,
+    human: humanLines("Account capabilities", [
+      ["account_id", capabilities.account_id],
+      ["plan_id", capabilities.plan_id],
+      ["features", `advertiser=${capabilities.features.advertiser} screens=${capabilities.features.screens}`],
+      ["feature_revision", String(capabilities.feature_revision)],
+      ["capabilities", [...capabilities.capabilities].sort().join(", ") || "(none)"],
+      ["request_id", client.requestId],
+    ]),
+  };
+}
+
+/** One comma-separated option expanded to values; no empty entry is allowed. */
+function adsListOption(value: string | undefined, option: string): string[] {
+  if (value === undefined) return [];
+  const items = value.split(",").map((item) => item.trim());
+  if (items.some((item) => item.length === 0)) {
+    throw usageError(`--${option} must be a comma-separated list without empty entries.`);
+  }
+  return items;
+}
+
+/**
+ * One advertising or billing mutation.
+ *
+ * Every mutation is idempotent by contract, revision-checked writes carry
+ * If-Match, and no advertising or billing response may be cached. Nothing here
+ * moves money: a draft authorizes nothing and activation is a separate,
+ * explicitly quoted request.
+ */
+async function adsMutation(
+  args: ParsedArgs,
+  runtime: CliRuntime,
+  resolved: ResolvedCommandConfig,
+  options: { method: "POST" | "PUT"; path: string; body?: unknown; ifMatch?: string; human: string },
+): Promise<CommandResult> {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({
+    method: options.method,
+    path: options.path,
+    idempotent: true,
+    ...(options.ifMatch ? { headers: { "if-match": quotedRevision(options.ifMatch) } } : {}),
+    ...(options.body === undefined ? {} : { body: options.body }),
+  });
+  requirePrivateNoStore(response.headers, "Advertising response");
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: options.human };
+}
+
+/** Optional body member: the key is omitted entirely when the operator supplied nothing. */
+function plugged(key: string, value: unknown): Record<string, unknown> {
+  return value === undefined ? {} : { [key]: value };
+}
+/** mcr amounts travel as canonical decimal strings in both directions. */
+function adsNetworkRateBody(args: ParsedArgs): Record<string, unknown> {
+  return { rate_mcr_per_15s: flagString(args.flags, "rate-mcr-per-15s") };
+}
+
+function adsInventoryBody(args: ParsedArgs): Record<string, unknown> {
+  const enabled = flagBool(args.flags, "enabled") ? true : flagBool(args.flags, "disabled") ? false : undefined;
+  const rate = flagString(args.flags, "rate-mcr-per-15s");
+  const tags = flagString(args.flags, "audience-tags");
+  return {
+    ...(enabled === undefined ? {} : { ads_enabled: enabled }),
+    ...plugged("site_name", flagString(args.flags, "site-name")),
+    ...plugged("city", flagString(args.flags, "city")),
+    ...plugged("region", flagString(args.flags, "region")),
+    ...plugged("venue_type", flagString(args.flags, "venue-type")),
+    ...(tags === undefined ? {} : { audience_tags: adsListOption(tags, "audience-tags") }),
+    ...plugged("placement", flagString(args.flags, "placement")),
+    ...plugged("public_description", flagString(args.flags, "public-description")),
+    ...(rate === undefined ? {} : { rate_override_mcr_per_15s: rate }),
+    ...(flagBool(args.flags, "clear-rate") ? { rate_override_mcr_per_15s: null } : {}),
+  };
+}
+
+function adsSlotBody(args: ParsedArgs): Record<string, unknown> {
+  const media = flagString(args.flags, "accepted-media");
+  const rate = flagString(args.flags, "rate-mcr-per-15s");
+  const enabled = flagBool(args.flags, "enabled") ? true : flagBool(args.flags, "disabled") ? false : undefined;
+  return {
+    ...plugged("enabled", enabled),
+    ...plugged("name", flagString(args.flags, "name")),
+    ...(media === undefined ? {} : { accepted_media: adsListOption(media, "accepted-media") }),
+    ...plugged("max_image_duration_ms", flagNumber(args.flags, "max-image-duration-ms")),
+    ...plugged("max_video_duration_ms", flagNumber(args.flags, "max-video-duration-ms")),
+    ...(rate === undefined ? {} : { rate_override_mcr_per_15s: rate }),
+    ...(flagBool(args.flags, "clear-rate") ? { rate_override_mcr_per_15s: null } : {}),
+  };
+}
+
+/** One row of a list route by key, or undefined when the account has none. */
+async function adsExistingRow(
+  client: ApiClient,
+  path: string,
+  collection: string,
+  key: string,
+  value: string,
+): Promise<Record<string, unknown> | undefined> {
+  const response = await client.call({ method: "GET", path });
+  const rows = (response.body as { [name: string]: unknown } | undefined)?.[collection];
+  if (!Array.isArray(rows)) return undefined;
+  const row = rows.find((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+    return key in item && item[key] === value;
+  });
+  return row && typeof row === "object" && !Array.isArray(row) ? row as Record<string, unknown> : undefined;
+}
+
+/**
+ * The full slot row the update route expects. The server replaces the whole
+ * definition, so every field the operator did not change is carried over from
+ * the stored row rather than dropped; only an explicit flag overrides it.
+ */
+function adsSlotWriteBody(current: Record<string, unknown> | undefined, args: ParsedArgs): Record<string, unknown> {
+  const supplied = adsSlotBody(args);
+  if (!current) return supplied;
+  return {
+    name: current.name,
+    enabled: current.enabled,
+    accepted_media: current.accepted_media,
+    max_image_duration_ms: current.max_image_duration_ms,
+    max_video_duration_ms: current.max_video_duration_ms,
+    rate_override_mcr_per_15s: current.rate_override_mcr_per_15s ?? null,
+    ...supplied,
+  };
+}
+
+/**
+ * The full inventory row the update route expects, for the same reason: a
+ * partial body would reset the opt-in flag, the price override, and the public
+ * metadata the operator did not touch.
+ */
+function adsInventoryWriteBody(current: Record<string, unknown> | undefined, args: ParsedArgs): Record<string, unknown> {
+  const supplied = adsInventoryBody(args);
+  if (!current) return supplied;
+  return {
+    ads_enabled: typeof current.ads_enabled === "boolean" ? current.ads_enabled : false,
+    site_name: current.site_name,
+    city: current.city,
+    region: current.region,
+    venue_type: current.venue_type,
+    audience_tags: current.audience_tags,
+    placement: current.placement,
+    public_description: current.public_description,
+    rate_override_mcr_per_15s: current.rate_override_mcr_per_15s ?? null,
+    ...supplied,
+  };
+}
+
+/**
+ * The full membership body. The route takes the policy and both scope lists, so
+ * an unspecified list keeps the stored scope instead of clearing it. The policy
+ * is always sent: the server replaces it rather than defaulting it.
+ */
+function adsMembershipWriteBody(current: Record<string, unknown> | undefined, args: ParsedArgs): Record<string, unknown> {
+  const screenIds = flagString(args.flags, "screen-id");
+  const slotIds = flagString(args.flags, "slot-id");
+  const policy = flagString(args.flags, "policy")
+    ?? (typeof current?.policy === "string" && current.policy.length > 0 ? current.policy : undefined);
+  if (policy === undefined) {
+    throw usageError(`The membership row was not found, so its current review policy cannot be carried over. Run ads memberships list, or pass --policy trusted|review_required explicitly.`);
+  }
+  const scope = current?.scope;
+  if ((screenIds === undefined || slotIds === undefined)
+    && (!scope || typeof scope !== "object" || Array.isArray(scope))) {
+    throw usageError("The membership did not report its scope; refusing to replace an omitted list with an empty one.");
+  }
+  const storedScope = (scope ?? {}) as Record<string, unknown>;
+  return {
+    screen_ids: screenIds === undefined ? storedScope.screen_ids ?? [] : adsListOption(screenIds, "screen-id"),
+    slot_ids: slotIds === undefined ? storedScope.slot_ids ?? [] : adsListOption(slotIds, "slot-id"),
+    policy,
+  };
+}
+
+/** Money in a campaign draft is a canonical decimal mcr string, never a number. */
+function isDecimalMcr(value: unknown): boolean {
+  return typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value);
+}
+
+/** A positive mcr amount for a price ceiling: a decimal string, never zero. */
+function isPositiveMcr(value: unknown): boolean {
+  return typeof value === "string" && /^[1-9][0-9]*$/.test(value);
+}
+
+/**
+ * Read and preflight one campaign draft document.
+ *
+ * The required field set is the published draft contract. A malformed draft is
+ * refused here so the operator learns which field is wrong instead of receiving
+ * a server field error about a body the CLI wrote; the server still validates
+ * everything, including fields this preflight does not name.
+ */
+async function campaignDraft(file: string | undefined, runtime: CliRuntime): Promise<Record<string, unknown>> {
+  if (!file) throw usageError("ads campaigns requires a draft JSON document.");
+  let parsed: unknown;
+  try {
+    parsed = await readAuthoringJson(file, runtime);
+  } catch (error) {
+    throw usageError(`Cannot read the campaign draft JSON: ${error instanceof Error ? error.message : "invalid JSON"}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw usageError("A campaign draft must be a JSON object.");
+  }
+  const draft = parsed as Record<string, unknown>;
+  const fail = (field: string, expectation: string): never => {
+    throw usageError(`Campaign draft field ${field} ${expectation}`);
+  };
+  if (typeof draft.name !== "string" || draft.name.trim().length === 0) fail("name", "must be a non-empty string.");
+  for (const field of ["daily_cap_mcr", "lifetime_cap_mcr"] as const) {
+    if (!isDecimalMcr(draft[field])) fail(field, "must be a decimal mcr string, for example \"100000000\".");
+  }
+  // Chosen at drafting time: the image display duration inside the authoring
+  // range, and an optional per-play price ceiling as a decimal mcr string.
+  const imageDurationMs = draft.image_duration_ms;
+  if (imageDurationMs !== undefined
+    && (typeof imageDurationMs !== "number" || !Number.isInteger(imageDurationMs) || imageDurationMs < 5000 || imageDurationMs > 30000)) {
+    fail("image_duration_ms", "must be a whole number of milliseconds from 5000 to 30000 when present.");
+  }
+  if (draft.max_play_price_mcr !== undefined && !isPositiveMcr(draft.max_play_price_mcr)) {
+    fail("max_play_price_mcr", "must be a positive decimal mcr string when present; omit it for no extra price ceiling.");
+  }
+  for (const field of ["flight_start", "flight_end"] as const) {
+    if (typeof draft[field] !== "string" || draft[field].trim().length === 0) fail(field, "must be a UTC timestamp string.");
+  }
+  if (!Array.isArray(draft.networks) || draft.networks.length === 0) {
+    fail("networks", "must be a non-empty array of network configurations.");
+  }
+  for (const [index, value] of (draft.networks as unknown[]).entries()) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) fail(`networks[${index}]`, "must be an object.");
+    const network = value as Record<string, unknown>;
+    if (typeof network.seller_account_id !== "string" || network.seller_account_id.length === 0) {
+      fail(`networks[${index}].seller_account_id`, "must name the invited seller account.");
+    }
+    for (const field of ["screen_ids", "slot_ids", "creative_ids"] as const) {
+      const list = network[field];
+      if (!Array.isArray(list) || list.some((item) => typeof item !== "string")) {
+        fail(`networks[${index}].${field}`, "must be an array of string identifiers.");
+      }
+    }
+    if (network.network_cap_mcr !== undefined && !isDecimalMcr(network.network_cap_mcr)) {
+      fail(`networks[${index}].network_cap_mcr`, "must be a decimal mcr string when present.");
+    }
+  }
+  return draft;
+}
+
+export const handleAdsNetworksList = commandHandler((args, runtime, resolved) =>
+  simpleGet(args, runtime, resolved, "/api/v1/advertising/networks", "Invited networks"));
+
+export const handleAdsNetworkInventoryShow = commandHandler(async (args, runtime, resolved) => {
+  const seller = args.positionals[3];
+  if (!seller) throw usageError("ads networks show requires <seller-account-id>.");
+  return simpleGet(args, runtime, resolved, `/api/v1/advertising/networks/${encodeURIComponent(seller)}/inventory`, "Permitted inventory");
+});
+
+export const handleAdsNetworkShow = commandHandler((args, runtime, resolved) =>
+  simpleGet(args, runtime, resolved, "/api/v1/advertising/network", "Advertising network"));
+
+export const handleAdsNetworkCreate = commandHandler((args, runtime, resolved) =>
+  adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: "/api/v1/advertising/network",
+    body: { name: flagString(args.flags, "name") },
+    human: "Network created. Set the default rate before enabling paid supply.",
+  }));
+
+export const handleAdsNetworkRate = commandHandler((args, runtime, resolved) =>
+  adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: "/api/v1/advertising/network/rate",
+    body: adsNetworkRateBody(args),
+    ifMatch: flagString(args.flags, "if-match"),
+    human: "Default rate updated. Affected campaigns are paused until each buyer accepts a fresh quote.",
+  }));
+
+export const handleAdsInventoryList = commandHandler((args, runtime, resolved) =>
+  simpleGet(args, runtime, resolved, "/api/v1/advertising/inventory", "Advertising inventory"));
+
+/**
+ * Upsert one screen's advertising inventory. When the row already exists the
+ * route replaces it, so the CLI reads the stored row, merges the supplied
+ * changes, and writes the whole record with the current revision as its
+ * precondition; an unsupplied field keeps its stored value.
+ */
+export const handleAdsInventoryUpdate = commandHandler(async (args, runtime, resolved) => {
+  const screenId = args.positionals[3];
+  if (!screenId) throw usageError("ads inventory update requires <screen-id>.");
+  const requested = flagString(args.flags, "if-match");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const current = await adsExistingRow(client, "/api/v1/advertising/inventory", "inventory", "screen_id", screenId);
+  if (!current && requested) {
+    throw usageError(`No advertising inventory row exists for ${screenId}, so --expect-rev has nothing to check. Omit it to create the row.`);
+  }
+  if (!current && !flagBool(args.flags, "enabled") && !flagBool(args.flags, "disabled")) {
+    throw usageError(`No advertising inventory row exists for ${screenId} yet; a new row needs --enabled or --disabled so the write carries its ads_enabled field.`);
+  }
+  const currentRevision = typeof current?.revision === "number" ? String(current.revision) : undefined;
+  return adsMutation(args, runtime, resolved, {
+    method: "PUT",
+    path: `/api/v1/advertising/inventory/${encodeURIComponent(screenId)}`,
+    body: adsInventoryWriteBody(current, args),
+    ifMatch: requested ?? (current ? currentRevision : undefined),
+    human: `Updated advertising inventory for ${screenId}. Fields you did not change keep their stored values.`,
+  });
+});
+
+export const handleAdsSlotsList = commandHandler((args, runtime, resolved) =>
+  simpleGet(args, runtime, resolved, "/api/v1/advertising/slots", "Ad slots"));
+
+export const handleAdsSlotsCreate = commandHandler((args, runtime, resolved) =>
+  adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: "/api/v1/advertising/slots",
+    // The canonical slot write requires both duration limits; the values below
+    // are the server's own normalization defaults for an omitted limit, so the
+    // create body is complete without a second server round-trip.
+    body: {
+      enabled: true,
+      max_image_duration_ms: 30000,
+      max_video_duration_ms: 30000,
+      ...adsSlotBody(args),
+    },
+    human: "Slot created. Place an adslot page in a playlist to give it an ad break.",
+  }));
+
+/**
+ * Update one slot. The route replaces the stored definition, so the CLI reads
+ * it first and writes the merged record; a rename alone keeps the accepted
+ * formats, duration limits, and the rate override.
+ */
+export const handleAdsSlotsUpdate = commandHandler(async (args, runtime, resolved) => {
+  const slotId = args.positionals[3];
+  if (!slotId) throw usageError("ads slots update requires <slot-id>.");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const current = await adsExistingRow(client, "/api/v1/advertising/slots", "slots", "id", slotId);
+  if (!current) {
+    throw usageError(`No slot ${slotId} exists for this account, so there is nothing to update. Create it with ads slots create.`);
+  }
+  const currentRevision = typeof current.revision === "number" ? String(current.revision) : undefined;
+  return adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: `/api/v1/advertising/slots/${encodeURIComponent(slotId)}`,
+    body: adsSlotWriteBody(current, args),
+    ifMatch: flagString(args.flags, "if-match") ?? currentRevision,
+    human: "Slot updated. A changed effective rate pauses affected campaigns until each buyer accepts a fresh quote.",
+  });
+});
+
+/**
+ * Invitations return each claim token exactly once. The token is a secret: the
+ * JSON envelope carries it for the seller to deliver, and the human rendering
+ * never repeats it.
+ */
+export const handleAdsInvitesCreate = commandHandler(async (args, runtime, resolved) => {
+  const emails = adsListOption(flagString(args.flags, "email"), "email");
+  if (emails.length === 0) throw usageError("ads invites create requires --email ADDRESSES.");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({
+    method: "POST",
+    path: "/api/v1/advertising/invitations",
+    idempotent: true,
+    body: {
+      emails,
+      screen_ids: adsListOption(flagString(args.flags, "screen-id"), "screen-id"),
+      slot_ids: adsListOption(flagString(args.flags, "slot-id"), "slot-id"),
+      policy: flagString(args.flags, "policy") ?? "trusted",
+    },
+  });
+  requirePrivateNoStore(response.headers, "Invitation response");
+  const body = (response.body ?? {}) as { invitations?: unknown };
+  const count = Array.isArray(body.invitations) ? body.invitations.length : 0;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [
+      humanLines("Invitations created", [
+        ["invitations", String(count)],
+        ["tokens", "each claim token appears once in data.invitations[].token; deliver it only to its recipient and keep it out of logs"],
+        ["claim", "the invited person claims the link in the dashboard; their own verified user email must match the invited address"],
+        ["expires", "each invitation is single use and expires seven days after creation"],
+      ]),
+    ].join("\n"),
+  };
+}, true);
+
+export const handleAdsInvitesList = commandHandler((args, runtime, resolved) =>
+  simpleGet(args, runtime, resolved, "/api/v1/advertising/invitations", "Invitations"));
+
+export const handleAdsInvitesRevoke = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("ads invites revoke requires <invitation-id>.");
+  return adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: `/api/v1/advertising/invitations/${encodeURIComponent(id)}/revoke`,
+    human: `Revoked invitation ${id}.`,
+  });
+});
+
+export const handleAdsMembershipsList = commandHandler((args, runtime, resolved) =>
+  simpleGet(args, runtime, resolved, "/api/v1/advertising/memberships", "Memberships"));
+
+/**
+ * Update one membership. The route takes the policy and both scope lists, so an
+ * unspecified list keeps the stored scope rather than clearing the buyer's
+ * access, and the stored policy is reused when --policy is omitted.
+ */
+export const handleAdsMembershipsUpdate = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("ads memberships update requires <membership-id>.");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const current = await adsExistingRow(client, "/api/v1/advertising/memberships", "memberships", "id", id);
+  const currentRevision = typeof current?.revision === "number" ? String(current.revision) : undefined;
+  return adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: `/api/v1/advertising/memberships/${encodeURIComponent(id)}`,
+    body: adsMembershipWriteBody(current, args),
+    ifMatch: flagString(args.flags, "if-match") ?? currentRevision,
+    human: `Updated membership ${id}. Scope changes stop new selections and invalidate unstarted decisions.`,
+  });
+});
+
+export const handleAdsMembershipsRevoke = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("ads memberships revoke requires <membership-id>.");
+  return adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: `/api/v1/advertising/memberships/${encodeURIComponent(id)}/revoke`,
+    human: `Revoked membership ${id}. The buyer's advertiser flag and other networks are unchanged.`,
+  });
+});
+
+export const handleAdsCreativesList = commandHandler((args, runtime, resolved) =>
+  simpleGet(args, runtime, resolved, "/api/v1/advertising/creatives", "Creatives"));
+
+export const handleAdsCreativesCreate = commandHandler(async (args, runtime, resolved) =>
+  adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: "/api/v1/advertising/creatives",
+    body: { media_id: flagString(args.flags, "media-id"), copy: flagString(args.flags, "copy") },
+    human: "Creative created. It binds the ready media revision; the media is neither charged nor uploaded again.",
+  }));
+
+export const handleAdsCreativesShow = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("ads creatives show requires <creative-id>.");
+  return simpleGet(args, runtime, resolved, `/api/v1/advertising/creatives/${encodeURIComponent(id)}`, "Creative");
+});
+
+export const handleAdsCampaignsList = commandHandler((args, runtime, resolved) =>
+  simpleGet(args, runtime, resolved, "/api/v1/advertising/campaigns", "Campaigns"));
+
+export const handleAdsCampaignsCreate = commandHandler(async (args, runtime, resolved) =>
+  adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: "/api/v1/advertising/campaigns",
+    body: await campaignDraft(args.positionals[3], runtime),
+    human: "Campaign draft created. A draft reserves no credits and cannot deliver until an accepted quote activates it.",
+  }));
+
+export const handleAdsCampaignsShow = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("ads campaigns show requires <campaign-id>.");
+  return simpleGet(args, runtime, resolved, `/api/v1/advertising/campaigns/${encodeURIComponent(id)}`, "Campaign");
+});
+/**
+ * Quote a campaign. The route requires the current campaign revision as its
+ * precondition: the operator can override it with --expect-rev, otherwise the
+ * CLI reads that one campaign and uses the revision it just saw.
+ */
+export const handleAdsCampaignsPreview = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("ads campaigns preview requires <campaign-id>.");
+  let ifMatch = flagString(args.flags, "if-match");
+  if (ifMatch === undefined) {
+    const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+    const campaign = (await client.call({ method: "GET", path: `/api/v1/advertising/campaigns/${encodeURIComponent(id)}` })).body;
+    const revision = campaign !== null && typeof campaign === "object" && !Array.isArray(campaign) && "revision" in campaign
+      ? campaign.revision : undefined;
+    if (!Number.isSafeInteger(revision) || (revision as number) < 1) {
+      throw usageError(`Campaign ${id} did not report a usable revision, so its quote cannot be revision-checked.`);
+    }
+    ifMatch = String(revision);
+  }
+  return adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: `/api/v1/advertising/campaigns/${encodeURIComponent(id)}/quote`,
+    ifMatch,
+    human: "Quote priced for current inventory and rates. Preview reserves and spends nothing; activate with --quote-id only after the user accepts this quote.",
+  });
+});
+
+export const handleAdsCampaignsUpdate = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("ads campaigns update requires <campaign-id> <file>.");
+  return adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: `/api/v1/advertising/campaigns/${encodeURIComponent(id)}`,
+    body: await campaignDraft(args.positionals[4], runtime),
+    ifMatch: flagString(args.flags, "if-match"),
+    human: `Campaign ${id} draft replaced. Changing accepted scope requires a fresh quote and explicit acceptance.`,
+  });
+});
+
+export const handleAdsCampaignsActivate = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("ads campaigns activate requires <campaign-id>.");
+  return adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: `/api/v1/advertising/campaigns/${encodeURIComponent(id)}/activate`,
+    body: { quote_id: flagString(args.flags, "quote-id") },
+    ifMatch: flagString(args.flags, "if-match"),
+    human: "Campaign activation accepted the quote. No wallet debit happens here: a per-occurrence hold is placed when the runtime resolves a play and it settles only on the verified completion. Activation is not proof that a screen displayed anything.",
+  });
+});
+
+export const handleAdsCampaignsPause = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("ads campaigns pause requires <campaign-id>.");
+  return adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: `/api/v1/advertising/campaigns/${encodeURIComponent(id)}/pause`,
+    ifMatch: flagString(args.flags, "if-match"),
+    human: `Paused campaign ${id}. New reservations stop; already-started valid plays settle at their reserved price.`,
+  });
+});
+
+export const handleAdsCampaignsResume = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("ads campaigns resume requires <campaign-id>.");
+  return adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: `/api/v1/advertising/campaigns/${encodeURIComponent(id)}/resume`,
+    ifMatch: flagString(args.flags, "if-match"),
+    human: `Resumed campaign ${id} after a manual pause. Resume cannot clear a price-change pause; that needs a fresh quote accepted with campaigns accept-rates.`,
+  });
+});
+
+export const handleAdsCampaignsAcceptRates = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("ads campaigns accept-rates requires <campaign-id>.");
+  return adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: `/api/v1/advertising/campaigns/${encodeURIComponent(id)}/accept-rates`,
+    body: { quote_id: flagString(args.flags, "quote-id") },
+    ifMatch: flagString(args.flags, "if-match"),
+    human: `Accepted the fresh quote for campaign ${id}. Delivery resumes only if every other blocker, such as review or funds, is also clear.`,
+  });
+});
+
+export const handleAdsReviewsList = commandHandler((args, runtime, resolved) =>
+  simpleGet(args, runtime, resolved, "/api/v1/advertising/reviews", "Creative reviews"));
+
+/**
+ * The seller's preview of one submission: the dedicated review metadata route
+ * returns the review and the exact creative it decided on, and nothing from the
+ * buyer's wider media library.
+ */
+export const handleAdsReviewsShow = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("ads reviews show requires <review-id>.");
+  return simpleGet(args, runtime, resolved, `/api/v1/advertising/reviews/${encodeURIComponent(id)}`, "Review");
+});
+
+export const handleAdsReviewsApprove = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("ads reviews approve requires <review-id>.");
+  return adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: `/api/v1/advertising/reviews/${encodeURIComponent(id)}/approve`,
+    human: `Approved review ${id} for that exact creative version.`,
+  });
+});
+
+export const handleAdsReviewsReject = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("ads reviews reject requires <review-id>.");
+  return adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: `/api/v1/advertising/reviews/${encodeURIComponent(id)}/reject`,
+    body: { reason: flagString(args.flags, "reason") },
+    human: `Rejected review ${id}; the buyer sees the supplied reason.`,
+  });
+});
+
+/**
+ * One report body as readable columns. Money is printed exactly as the server
+ * sends it (a decimal mcr string), a missing field is simply absent, and the
+ * whole body stays in the JSON envelope unchanged.
+ */
+function reportLines(title: string, body: unknown, fields: readonly string[], rows?: readonly string[]): string {
+  const record = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  const lines = humanLines(title, fields.map((field) => {
+    const value = record[field];
+    return [field, typeof value === "string" || typeof value === "number" ? String(value) : undefined] as [string, string | undefined];
+  })).split("\n");
+  const rowValues = rows ? record.rows : undefined;
+  if (!rows || !Array.isArray(rowValues)) {
+    return lines.join("\n");
+  }
+  lines.push("rows:");
+  for (const value of rowValues) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const row = value as Record<string, unknown>;
+    lines.push(`  ${rows.map((field) => `${field}=${typeof row[field] === "string" || typeof row[field] === "number" ? String(row[field]) : ""}`).join(" ")}`);
+  }
+  return lines.join("\n");
+}
+
+export const handleAdsReportsSpend = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+  const response = await client.call({
+    method: "GET",
+    path: "/api/v1/advertising/reports/spend",
+    query: { campaign_id: flagString(args.flags, "campaign-id") },
+  });
+  requirePrivateNoStore(response.headers, "Advertising report response");
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: reportLines("Ad spend", response.body, ["campaign_id", "spent_mcr", "reserved_mcr", "completed", "unbillable", "pending"]),
+  };
+});
+
+export const handleAdsReportsDelivery = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+  const response = await client.call({
+    method: "GET",
+    path: "/api/v1/advertising/reports/delivery",
+    query: { from: flagString(args.flags, "from"), to: flagString(args.flags, "to") },
+  });
+  requirePrivateNoStore(response.headers, "Advertising report response");
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: reportLines("Delivery statement", response.body,
+      ["gross_mcr", "fee_mcr", "net_mcr", "completed", "interrupted", "unbillable"],
+      ["screen_id", "slot_id", "reservation_id", "gross_mcr", "fee_mcr", "net_mcr", "completed_at"]),
+  };
+});
+
+/**
+ * Read this account's shared balance. The withdrawal section is reported as the
+ * server states it: while payment rails are unconfigured the balance explains
+ * that plainly instead of implying a payout path or a second wallet.
+ */
+export const handleBillingBalance = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+  const response = await client.call({ method: "GET", path: "/api/v1/billing/balance" });
+  requirePrivateNoStore(response.headers, "Billing balance response");
+  const body = (response.body ?? {}) as {
+    remaining_mcr?: unknown; reserved_mcr?: unknown; available_mcr?: unknown;
+    withdrawal?: { allowed?: unknown; eligible_earned_mcr?: unknown; rails_available?: unknown; unavailable_reason?: unknown; blockers?: unknown };
+  };
+  const withdrawal = body.withdrawal ?? {};
+  const blockers = Array.isArray(withdrawal.blockers) ? withdrawal.blockers.filter((item): item is string => typeof item === "string") : [];
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: humanLines("Credit balance", [
+      ["remaining_mcr", typeof body.remaining_mcr === "string" ? body.remaining_mcr : undefined],
+      ["reserved_mcr", typeof body.reserved_mcr === "string" ? body.reserved_mcr : undefined],
+      ["available_mcr", typeof body.available_mcr === "string" ? body.available_mcr : undefined],
+      ["withdrawal_allowed", withdrawal.allowed === undefined ? undefined : String(withdrawal.allowed)],
+      ["eligible_earned_mcr", typeof withdrawal.eligible_earned_mcr === "string" ? withdrawal.eligible_earned_mcr : undefined],
+      ["rails", withdrawal.rails_available === false
+        ? `unavailable (${typeof withdrawal.unavailable_reason === "string" ? withdrawal.unavailable_reason : "no payment rail"}); credits are spent in the dashboard and no payout can be requested from this CLI`
+        : withdrawal.rails_available === true ? "available to the verified financial administrator in the dashboard" : undefined],
+      ["blockers", blockers.length > 0 ? blockers.join(", ") : undefined],
+      ["note", "purchased credits are not withdrawable, and promotional or included grants cannot fund paid ad spend"],
+    ]),
+  };
+});
+
+export const handleBillingStatement = commandHandler((args, runtime, resolved) =>
+  simpleGet(args, runtime, resolved, "/api/v1/billing/statement", "Credit statement", {
+    cursor: flagString(args.flags, "cursor"),
+    limit: flagString(args.flags, "limit"),
+  }));
 
 function isDateTime(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && Number.isFinite(Date.parse(value));
@@ -2813,7 +3531,7 @@ async function playlistPreviewCommand(
     }
     const token = requireToken(resolved.token);
     client = clientFor(runtime, args, resolved.apiUrl, token);
-    const response = await client.call({ method: "GET", path: `/api/v1/playlists/${target}` });
+    const response = await callVersionedPlaylist(client, { method: "GET", id: target, preferred: "v1" });
     playlist = response.body;
     searchDirs = [runtime.cwd(), outputDir];
   }
@@ -2850,9 +3568,11 @@ export const handlePlaylistShow = commandHandler(async (args, runtime, resolved)
   const id = args.positionals[2];
   if (!id) throw usageError("playlist get requires an id.");
   const output = flagString(args.flags, "output");
-  if (!output && !flagBool(args.flags, "editable")) return simpleGet(args, runtime, resolved, `/api/v1/playlists/${id}`, "Playlist");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "GET", path: `/api/v1/playlists/${id}` });
+  const response = await callVersionedPlaylist(client, { method: "GET", id, preferred: "v1" });
+  if (!output && !flagBool(args.flags, "editable")) {
+    return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Playlist\n${JSON.stringify(response.body, null, 2)}` };
+  }
   const resource = response.body as { id: string; revision: number };
   if (resource.id !== id || !Number.isSafeInteger(resource.revision) || resource.revision < 1) throw usageError("Playlist response has invalid identity or revision.");
   const document = editablePlaylist(response.body);
@@ -2946,18 +3666,33 @@ async function playlistCreateUpdateAction(args: ParsedArgs, runtime: CliRuntime,
   const pages = expandPlaylistPages(parsed.pages);
   const body = { name: parsed.name, pages };
   assertPlaylistValid(body);
+  // An ad-bearing document is authored under the v2 union, and only a
+  // signage-capable account may place adslot pages at all. The ordinary
+  // document path above stays byte-for-byte the existing v1 write.
+  const version = playlistApiVersion(pages);
+  if (version === "v2") {
+    await requireCapability(client, "signage.playlists", `playlist ${action} with adslot pages`, {
+      command: "screenrig account capabilities",
+      reason: "Read the account's effective capabilities before authoring an ad-bearing playlist; only a screens-capable account can place adslot pages.",
+    });
+  }
   // A create has no assigned screen yet, so there is nothing to check. An
   // update can add a schedule to a playlist screens are already running.
   if (action === "update" && id) {
     await assertAssignedScreensHaveZone(client, id, pages);
   }
-  const response = await client.call({
-    method: action === "create" ? "POST" : "PUT",
-    path: action === "create" ? "/api/v1/playlists" : `/api/v1/playlists/${id}`,
-    idempotent: true,
-    headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
-    body,
-  });
+  // A document known to hold an adslot page is created on the v2 union. An
+  // update may also be replacing a stored ad-bearing playlist, so it follows
+  // the version-required conflict rather than assuming the document's version.
+  const response = action === "create"
+    ? await client.call({ method: "POST", path: `/api/${version}/playlists`, idempotent: true, body })
+    : await callVersionedPlaylist(client, {
+      method: "PUT",
+      id: id!,
+      preferred: version,
+      body,
+      ...(ifMatch ? { headers: { "if-match": quotedRevision(ifMatch) } } : {}),
+    });
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Playlist ${action}d.` };
 
 }
@@ -2988,11 +3723,11 @@ export const handlePlaylistDelete = commandHandler(async (args, runtime, resolve
   const id = args.positionals[2];
   const ifMatch = flagString(args.flags, "if-match");
   if (!id) throw usageError("playlist delete requires <id>.");
-  const response = await client.call({
+  const response = await callVersionedPlaylist(client, {
     method: "DELETE",
-    path: `/api/v1/playlists/${id}`,
-    idempotent: true,
-    headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
+    id,
+    preferred: "v1",
+    ...(ifMatch ? { headers: { "if-match": quotedRevision(ifMatch) } } : {}),
   });
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted playlist ${id}` };
 }, true);
@@ -3031,7 +3766,7 @@ function scheduleZoneError(screenId: string): CliError {
  * between a clear message and an opaque rejection.
  */
 async function assertScheduledPlaylistHasZone(client: ApiClient, screenId: string, playlistId: string): Promise<unknown> {
-  const playlist = await client.call({ method: "GET", path: `/api/v1/playlists/${playlistId}` });
+  const playlist = await callVersionedPlaylist(client, { method: "GET", id: playlistId, preferred: "v1" });
   if (!usesPageVisibility(playlist.body)) {
     return playlist.body;
   }
@@ -3273,7 +4008,7 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
     // This read exists only for advisory aspect warnings. A missing warning
     // must not block a patch that supplies the required timezone itself.
     try {
-      playlist = (await client.call({ method: "GET", path: `/api/v1/playlists/${playlistId}` })).body;
+      playlist = (await callVersionedPlaylist(client, { method: "GET", id: playlistId, preferred: "v1" })).body;
     } catch {
       playlist = undefined;
     }

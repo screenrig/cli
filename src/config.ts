@@ -36,6 +36,11 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
         idempotency_key: string;
         /** Exact trimmed contact address retained only until enrollment verifies. */
         email?: string;
+        /**
+         * Enrollment purpose chosen once. A resumed enrollment reuses it so the
+         * same idempotency key cannot change intent into a conflicting request.
+         */
+        intent?: "advertising" | "signage";
       };
       screen_provision?: {
         idempotency_key: string;

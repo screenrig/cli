@@ -195,6 +195,25 @@ async function preparePages(
       background: canvasValue.background ?? "#000000FF",
     };
     const transition = recordOf(raw.transition);
+    // An adslot page holds no authored pixels: a fill is selected at runtime.
+    // Render one labelled placeholder so the sheet never implies a black page.
+    if (raw.type === "adslot") {
+      const slot = typeof raw.adslot_id === "string" ? raw.adslot_id : "adslot";
+      const rect: Rect = { x: 0, y: 0, width: canvas.width, height: canvas.height };
+      const placeholder: ResolvedPrimitive = {
+        id: `${id}-adslot`, kind: "adslot", sourceIndex: 0, layer: 0, paintOrder: 0,
+        rect, viewportRect: rect, clipRect: rect, contentRect: rect, contentFit: "contain",
+        label: `adslot ${slot}`,
+      };
+      prepared.push({
+        id,
+        raw,
+        canvas,
+        transitionDurationMs: numberOf(transition.duration_ms, 0),
+        primitives: resolvePage({ canvas, primitives: [placeholder], viewport }),
+      });
+      continue;
+    }
     const source = Array.isArray(raw.primitives) ? raw.primitives : [];
     const primitives: ResolvedPrimitive[] = [];
     for (const [sourceIndex, item] of source.entries()) {

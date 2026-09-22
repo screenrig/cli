@@ -178,6 +178,8 @@ export function memoryBackend(): FakeTransport {
     credit_remaining: 0,
     email: "owner@example.com",
     email_verified: false,
+    feature_revision: 1,
+    features: { advertiser: false, screens: true },
     id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
     reserved_bytes: 0,
     revision: 1,
