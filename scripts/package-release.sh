@@ -26,7 +26,7 @@ node "${root}/scripts/calver.mjs" stamp --root "${temporary}/normalized/package"
 node "${root}/scripts/normalize-release-tree.mjs" \
   "${temporary}/normalized/package"
 
-install -d "$(dirname "${target}")"
+mkdir -p -- "$(dirname "${target}")"
 if tar --version 2>/dev/null | grep -q "GNU tar"; then
   (
     cd "${temporary}/normalized"
