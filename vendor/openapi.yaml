@@ -758,9 +758,8 @@ paths:
         (docs/player-compatibility.md §6.3). Appends the durable per-screen
         player.reload event with details.reason account, a new reload_id,
         spread_s 0, and expires_at ten minutes later. The runtime SSE stream
-        relays it only to sessions granted reload-v1; a Player without the
-        grant never sees it, and a Player ignores a reload within ten minutes
-        of the last one it acted on. A web Player reloads at its next page
+        relays it to every runtime session. A Player ignores a reload within
+        ten minutes of the last one it acted on. A web Player reloads at its next page
         boundary; a native Player remints, refetches its manifest, and checks
         for an update. The screen revision does not change. If-Match and
         Idempotency-Key are optional, as on archive; an exact Idempotency-Key
@@ -1808,7 +1807,7 @@ paths:
           in: query
           description: "Comma-separated supported stream transports (hls,udp-mpegts). Omission projects streams to fallback images. Rendering negotiation only, never authorization. Advertise udp-mpegts only when locally enabled."
           schema: { type: string, maxLength: 64 }
-      description: Resolved player manifest. Projection is fail-safe; invalid pages and primitives are omitted and listed in diagnostics. Compatibility rule 4 — 200 with pages [] and non-empty diagnostics is a degraded projection (player keeps last-known-good); 200 with pages [] and no diagnostics is an authored empty assignment. The degraded answer is decided per session (docs/player-compatibility.md §1.4, §4.3). A session granted rule4 gets the 200 degraded projection; every other session gets 503 manifest_degraded, so it holds last-known-good on 5xx. An archived screen returns problem screen_archived and must not refresh last-known-good.
+      description: Resolved player manifest. Projection is fail-safe; invalid pages and primitives are omitted and listed in diagnostics. Compatibility rule 4 — 200 with pages [] and non-empty diagnostics is a degraded projection (player keeps last-known-good); 200 with pages [] and no diagnostics is an authored empty assignment (docs/player-compatibility.md §1.4). An archived screen returns problem screen_archived and must not refresh last-known-good.
       security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
       responses:
         "200": { description: Resolved player manifest, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeManifest" } } } }
@@ -1824,7 +1823,7 @@ paths:
         - { $ref: "#/components/parameters/AfterCursor" }
         - { $ref: "#/components/parameters/LastEventID" }
       responses:
-        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.archived and screen.unarchived are runtime audience events; they do not wipe credentials. screen.deleted is a runtime audience event delivered when signed identity reset tombstones the screen. No runtime event authorizes clearing local identity. Only successful signed reset initiated by a confirmed local player action permits local identity rotation. account.suspended and account.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive. The runtime audience is an allowlist (docs/player-compatibility.md §7.1): screen.content_changed, screen.manifest_changed, screen.toast, screen.screenshot_requested, screen.archived, screen.unarchived, screen.deleted, screen.device_credential_revoked, account.suspended, account.resumed, and player.reload, which reaches only sessions granted reload-v1. Every other type stops at the scan, and stream.cursor advances the cursor past it. Players ignore unknown event types, including the default message type, and unknown field names, and advance the cursor from every id. The stream opens with retry: 3000; a draining host sends each stream its own retry between 1000 and 30000 ms. The in-band problem frame (event: problem) has no id; its data is {code, detail, action?}, where action is present only for sessions granted problem-actions-v1, and the stream then closes (payment_required sets retry: 60000). The fleet player.reload control frame has no id and never moves the cursor. No frame carries more than 64 KiB of data.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
+        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.archived and screen.unarchived are runtime audience events; they do not wipe credentials. screen.deleted is a runtime audience event delivered when signed identity reset tombstones the screen. No runtime event authorizes clearing local identity. Only successful signed reset initiated by a confirmed local player action permits local identity rotation. account.suspended and account.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive. The runtime audience is an allowlist (docs/player-compatibility.md §7.1): screen.content_changed, screen.manifest_changed, screen.toast, screen.screenshot_requested, screen.archived, screen.unarchived, screen.deleted, screen.device_credential_revoked, account.suspended, account.resumed, and player.reload, which reaches every runtime session. Every other type stops at the scan, and stream.cursor advances the cursor past it. Players ignore unknown event types, including the default message type, and unknown field names, and advance the cursor from every id. The stream opens with retry: 3000; a draining host sends each stream its own retry between 1000 and 30000 ms. The in-band problem frame (event: problem) has no id; its data is {code, detail, action?}, where action is present when the registry defines one, and the stream then closes (payment_required sets retry: 60000). The fleet player.reload control frame has no id and never moves the cursor. No frame carries more than 64 KiB of data.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/reports:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -1923,6 +1922,36 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/screen-label:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    put:
+      operationId: putRuntimeScreenLabel
+      x-rate-limit-policies: [{ name: runtime-screen-label, quota: 30, windowSeconds: 60 }, { name: runtime-screen-label-ip, quota: 300, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Renames the screen bound to the paired runtime session. It is the
+        same rename as PATCH /api/v1/screens/{id} name: the server trims
+        screen_label and requires 1 to 120 UTF-8 bytes without control
+        characters, otherwise invalid_request. The rename records the same
+        screen events, and on an assigned screen it changes the manifest
+        screen_label and emits screen.manifest_changed to the Player.
+        Path and body do not name screen_id; the paired runtime session
+        binds it. No If-Match or Idempotency-Key; last write wins. Auth is
+        the runtime cookie or ScreenRig-Session, as GET /runtime/v1/chrome.
+        Anonymous and unpaired sessions are unauthorized. An archived
+        screen is screen_archived. Prepaid remaining credit is not a gate.
+        A Player that receives 404 treats the route as unsupported and
+        keeps the name locally (docs/player-compatibility.md §2.5).
+      security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeScreenLabelWrite" } } } }
+      responses:
+        "200": { description: Screen renamed. screen_label is the stored name., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeScreenLabel" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/unpair:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -3789,6 +3818,23 @@ components:
       properties:
         schema_version: { type: integer, minimum: 1 }
         banner: { oneOf: [{ type: "null" }, { type: object, additionalProperties: true }] }
+    RuntimeScreenLabelWrite:
+      type: object
+      additionalProperties: true
+      required: [screen_label]
+      description: >-
+        The PUT /runtime/v1/screen-label body. The server trims screen_label
+        and stores 1 to 120 UTF-8 bytes without control characters. Unknown
+        members are ignored (docs/player-compatibility.md §1.1).
+      properties:
+        screen_label: { type: string, minLength: 1 }
+    RuntimeScreenLabel:
+      type: object
+      additionalProperties: true
+      required: [screen_label]
+      description: The stored screen name, the value the manifest carries as screen_label.
+      properties:
+        screen_label: { type: string, minLength: 1, maxLength: 120 }
     CLIEnrollment: { type: object, additionalProperties: false, required: [account, agent, connection_ready, token, issuance_id, issuance_expires_at], properties: { account: { $ref: "#/components/schemas/Account" }, agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, enum: [false], description: "A newly enrolled account has neither a registered dashboard passkey nor password, so approval of another agent is not ready. Re-read GET /api/v1/agents/self after configuring either retained dashboard credential." }, token: { type: string, minLength: 32, description: Permanent bearer credential for exactly this first agent. It has no scheduled expiry and is redelivered only through this short-lived encrypted issuance envelope. }, issuance_id: { type: string, description: Opaque identifier for the encrypted exact-retry delivery envelope. }, issuance_expires_at: { type: string, format: date-time, description: Exact-retry redelivery deadline for this credential issuance; ten minutes after first enrollment. Later exact retries return credential_issuance_expired while the permanent token remains valid. } } }
     AgentInput: { type: object, additionalProperties: false, properties: { name: { type: string, minLength: 1, maxLength: 80, default: "ScreenRig CLI" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
     Agent:
@@ -4351,10 +4397,10 @@ components:
         playlistId: { type: string }
         playlistRevision: { type: integer }
         generatedAt: { type: string }
-        playlistName: { type: string, description: "Emitted only to sessions granted playlist-name (docs/player-compatibility.md §4.4)." }
-        timezone: { type: string, description: "Legacy sessions: emitted when the screen has a zone. Contract sessions: emitted only with the timezone grant (docs/player-compatibility.md §4.2)." }
+        playlistName: { type: string, description: "Name of the assigned playlist." }
+        timezone: { type: string, description: "IANA time zone of the screen. Emitted when the screen has one. Every page visibility rule in this manifest is evaluated in this zone (docs/player-compatibility.md §1.3)." }
         pages: { type: array, items: { type: object, additionalProperties: true } }
-        diagnostics: { type: array, items: { type: object, additionalProperties: true }, description: "Legacy sessions: emitted when non-empty. Contract sessions: emitted only with the diagnostics grant. A session granted rule4 gets a degraded projection as 200 pages [] with diagnostics; every other session gets 503 manifest_degraded." }
+        diagnostics: { type: array, items: { type: object, additionalProperties: true }, description: "Page- and primitive-level projection omissions. Emitted when non-empty. Compatibility rule 4: HTTP 200 with pages [] and diagnostics is a degraded projection. HTTP 200 with pages [] and no diagnostics is an authored empty assignment." }
     RuntimeAdslotCandidate:
       type: object
       additionalProperties: true
@@ -4756,8 +4802,8 @@ components:
             token, or its manifest no longer carries such primitives), each
             transition appending one account-only event,
             screen.applications_unsupported or
-            screen.applications_unsupported_cleared. A legacy Player, whose
-            capability is unknown, never sets or clears it. Read-only account
+            screen.applications_unsupported_cleared. A paired session without
+            web-content-v1 sets it when served application or iframe primitives. Read-only account
             health metadata; it does not change screen revision or manifest
             authority.
           properties:
@@ -5361,9 +5407,7 @@ components:
         and shell versions drift over a screen's life. The hint never affects
         authorization; only the signed proof does. Unknown members are ignored,
         and host and playback are read tolerantly (docs/player-compatibility.md
-        §1.1). A backend that predates the playback handshake refuses playback
-        with invalid_request; retry once without it, with a new Idempotency-Key
-        and a fresh proof.
+        §1.1).
       properties:
         kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
         public_key: { $ref: "#/components/schemas/PlayerPublicKey" }
@@ -5405,7 +5449,7 @@ components:
       type: object
       additionalProperties: true
       required: [public_id]
-      description: Anonymous viewer mint. Unknown members are ignored (docs/player-compatibility.md §1.1). A backend that predates the playback handshake or player refuses them with invalid_request; retry once without player, then once without playback (§5.4).
+      description: Anonymous viewer mint. Unknown members are ignored (docs/player-compatibility.md §1.1).
       properties:
         public_id: { type: string }
         playback: { $ref: "#/components/schemas/PlaybackHandshake" }
@@ -5428,7 +5472,7 @@ components:
         authorization, and it is not covered by the native proof. It is read
         tolerantly: unknown members are ignored, an invalid optional member
         is dropped on its own, and a player that is not an object or has no
-        valid kind makes the session legacy. It is never a 400. A paired mint
+        valid kind declares nothing. It is never a 400. A paired mint
         stores it on the screen for the operator fleet histogram.
       properties:
         kind: { type: string, pattern: "^[a-z][a-z0-9-]{0,31}$", description: "Rendering codebase, not hardware. Registered: web, android, qt, windows, apple. Unknown kinds are stored as given." }
@@ -5471,8 +5515,8 @@ components:
       additionalProperties: true
       required: [state, player_kind, recommended]
       description: >-
-        Present on a mint response only for a Player granted upgrade-v1 whose
-        comparable version is below the recommended version for player_kind
+        Present on a mint response when the player's comparable version is
+        below the recommended version for player_kind
         (docs/player-compatibility.md §6.1). The Player starts a platform
         update check and shows nothing on glass. A reader ignores the member
         for a state it does not know.
@@ -5517,7 +5561,7 @@ components:
         event_cursor: { type: string }
         public_url: { type: string, format: uri }
         playback: { $ref: "#/components/schemas/PlaybackGrant" }
-        compat: { type: array, items: { type: string }, description: "Granted compat tokens, in registry order. Present only when the mint carried a valid player, and [] when nothing was granted, so a Player can tell a contract backend from one that predates compat (docs/player-compatibility.md §4.1). Readers ignore tokens they do not know." }
+        compat: { type: array, items: { type: string }, description: "Granted compat tokens, in registry order. Present only when the mint carried a valid player, and [] when nothing was granted (docs/player-compatibility.md §4.1). Readers ignore tokens they do not know." }
         upgrade: { $ref: "#/components/schemas/RuntimeUpgradeNotice" }
         origins: { $ref: "#/components/schemas/RuntimeOrigins" }
     NativeRuntimeSession:
@@ -5551,10 +5595,10 @@ components:
         playlistId: { type: string }
         playlistRevision: { type: integer }
         generatedAt: { type: string }
-        playlistName: { type: string, description: "Name of the assigned playlist. Emitted only to sessions granted playlist-name (docs/player-compatibility.md §4.4); a legacy session never receives it." }
-        timezone: { type: string, description: "IANA time zone identifier of the screen. Every page visibility rule in this manifest is evaluated in this zone. A legacy session (minted without a valid player) receives it whenever the screen has one. A contract session receives it only with the timezone grant; without it a Player shows every page whose visibility it cannot evaluate (docs/player-compatibility.md §1.3, §4.2)." }
+        playlistName: { type: string, description: "Name of the assigned playlist." }
+        timezone: { type: string, description: "IANA time zone identifier of the screen. Every page visibility rule in this manifest is evaluated in this zone. Emitted when the screen has one (docs/player-compatibility.md §1.3)." }
         pages: { type: array, items: { $ref: "#/components/schemas/RuntimePage" } }
-        diagnostics: { type: array, items: { $ref: "#/components/schemas/RuntimeManifestDiagnostic" }, description: "Page- and primitive-level projection omissions. Emitted only when projection dropped a field, primitive, or page; a healthy manifest omits this key. A legacy session receives it whenever it is non-empty; a contract session only with the diagnostics grant. Compatibility rule 4: HTTP 200 with pages [] and a non-empty diagnostics array is a degraded projection — the player keeps last-known-good, shows the offline chip, and does not persist. HTTP 200 with pages [] and no diagnostics is an authored empty assignment — the player replaces last-known-good and shows no-content. A session granted rule4 receives the degraded case as that 200; every other session receives 503 manifest_degraded instead." }
+        diagnostics: { type: array, items: { $ref: "#/components/schemas/RuntimeManifestDiagnostic" }, description: "Page- and primitive-level projection omissions. Emitted when projection dropped a field, primitive, or page; a healthy manifest omits this key. Compatibility rule 4: HTTP 200 with pages [] and a non-empty diagnostics array is a degraded projection — the player keeps last-known-good, shows the offline chip, and does not persist. HTTP 200 with pages [] and no diagnostics is an authored empty assignment — the player replaces last-known-good and shows no-content." }
     RuntimeManifestDiagnostic:
       type: object
       additionalProperties: true
@@ -6038,11 +6082,11 @@ components:
         request_id: { type: string }
         trace_id: { type: string }
         retryable: { type: boolean, description: "Present on every 5xx problem response and absent below 500. True when retrying the same operation may succeed without changing the request; false when the unchanged request is not retryable." }
-        action: { type: string, description: "Player action class from the problem registry (docs/player-compatibility.md §5): retry_backoff, hold_lkg, remint, repair, clear_lkg, or upgrade_required. Present only on runtime problems answered to a request whose effective compat grants include problem-actions-v1; every other client gets the body without it. A reader applies the status default to a class it does not know." }
+        action: { type: string, description: "Player action class from the problem registry (docs/player-compatibility.md §5): retry_backoff, hold_lkg, remint, repair, clear_lkg, or upgrade_required. Present when the registry defines one. A reader applies the status default to a class it does not know." }
         server_time: { type: string, format: date-time, description: "Present on proof_clock_skew: the server clock when the proof was rejected. A Player re-signs with its clock offset from this value." }
         player_kind: { type: string, description: "Present on upgrade_required: the version floor that failed, a player kind such as web or shell:<kind> such as shell:tizen (docs/player-compatibility.md §6.1)." }
         min_supported: { type: string, description: "Present on upgrade_required for a version floor: the minimum supported YY.MM.N version for player_kind." }
-        required_compat: { type: array, items: { type: string }, description: "Present on upgrade_required for the required-token floor (SCREENRIG__RUNTIME__COMPAT_REQUIRED, docs/player-compatibility.md §14): the required compat tokens this mint would not be granted. player_kind is then the mint's player kind, absent for a legacy mint." }
+        required_compat: { type: array, items: { type: string }, description: "Present on upgrade_required for the required-token floor (SCREENRIG__RUNTIME__COMPAT_REQUIRED, docs/player-compatibility.md §14): the required compat tokens this mint would not be granted. player_kind is the mint's player kind when a player was sent." }
         current_revision: { type: integer }
         errors: { type: array, items: { $ref: "#/components/schemas/ProblemField" } }
         next: { $ref: "#/components/schemas/NextAction" }

@@ -5783,7 +5783,7 @@ test("screen reload posts the reload route with an idempotency key and returns r
     assert.equal(guarded.code, ExitCode.Success, guarded.stdout);
     assert.equal(reloadCalls().at(-1)?.headers?.["if-match"], `"${archivedScreen.revision}"`);
     assert.match(guarded.stdout, /^Reload accepted\nscreen_id: scr_PAIRINGAAAAAAAAAAAAAAAA\nreload_id: \S+\nexpires_at: 2026-08-14T17:10:00\.000Z\n/);
-    assert.match(guarded.stdout, /granted reload-v1/);
+    assert.match(guarded.stdout, /The Player reloads once/);
 
     const stale = await withRuntime(
       ["--json", "screen", "reload", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", String(archivedScreen.revision - 1)],

@@ -4310,7 +4310,7 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
         ["reload_id", accepted.reload_id],
         ["expires_at", accepted.expires_at],
       ]),
-      "A Player granted reload-v1 reloads once; a Player without the grant, or one that reloaded in the last ten minutes, ignores it.",
+      "The Player reloads once; a Player that reloaded in the last ten minutes ignores it.",
     ].join("\n"),
   };
 }, true);

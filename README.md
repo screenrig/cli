@@ -212,8 +212,8 @@ screenrig screen unarchive scr_LOBBY
 `screen reload` asks a screen's player to reload once and returns a
 `reload_id` and `expires_at` ten minutes later. A web player reloads at its
 next page boundary; a native player reconnects, refetches its manifest, and
-checks for an update. Only a player that registered reload support acts on it,
-and a player ignores a reload within ten minutes of the last one it acted on.
+checks for an update. The Player reloads once, and ignores a reload within
+ten minutes of the last one it acted on.
 It works on active and archived screens and does not change the screen
 revision; a screen still waiting to pair answers `resource_conflict`.
 
