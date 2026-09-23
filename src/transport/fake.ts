@@ -671,6 +671,8 @@ export function memoryBackend(): FakeTransport {
     const item: Screen = {
       ...current,
       state: "archived",
+      archive_reason: "account",
+      archived_at: "2026-08-14T17:00:03.000Z",
       revision: current.revision + 1,
       content_access_generation: current.content_access_generation + 1,
       updated_at: "2026-08-14T17:00:03.000Z",
@@ -680,7 +682,7 @@ export function memoryBackend(): FakeTransport {
   });
   transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/unarchive$/, (req) => {
     const id = req.path.split("/")[4] ?? "";
-    const current = screens.get(id) as Screen;
+    const { archive_reason: _reason, archived_at: _archivedAt, ...current } = screens.get(id) as Screen;
     const item: Screen = {
       ...current,
       state: "active",
@@ -708,6 +710,30 @@ export function memoryBackend(): FakeTransport {
     };
     screens.set(id, item);
     return { status: 200, headers: { etag: `"${item.revision}"` }, body: item };
+  });
+  const reloads = new Map<string, { reload_id: string; expires_at: string }>();
+  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/reload$/, (req): TransportResponse => {
+    const id = req.path.split("/")[4] ?? "";
+    const current = screens.get(id);
+    if (!current) {
+      return { status: 404, headers: { "content-type": "application/problem+json" }, body: { type: "https://screenrig.ai/problems/not-found", title: "Not found", status: 404, code: "not_found", detail: "Screen not found." } };
+    }
+    if (current.state === "pairing_pending") {
+      return { status: 409, headers: { "content-type": "application/problem+json" }, body: { type: "https://screenrig.ai/problems/resource-conflict", title: "Resource conflict", status: 409, code: "resource_conflict", detail: "The screen has no Player yet." } };
+    }
+    const ifMatch = req.headers?.["if-match"];
+    if (ifMatch && ifMatch !== `"${current.revision}"`) {
+      return { status: 412, headers: { "content-type": "application/problem+json" }, body: { type: "https://screenrig.ai/problems/revision-conflict", title: "Revision conflict", status: 412, code: "revision_conflict", detail: "The screen revision changed." } };
+    }
+    // An exact Idempotency-Key retry returns the original reload.
+    const key = req.headers?.["idempotency-key"] ?? "";
+    const accepted = reloads.get(key) ?? { reload_id: `rld_${String(reloads.size + 1).padStart(8, "0")}`, expires_at: "2026-08-14T17:10:00.000Z" };
+    if (key) reloads.set(key, accepted);
+    return {
+      status: 202,
+      headers: { "cache-control": "no-store", etag: `"${current.revision}"`, "x-request-id": req.headers?.["x-request-id"] ?? "req_reload" },
+      body: accepted,
+    };
   });
   transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/toast$/, (req) => {
     const body = (req.body ?? {}) as { duration_ms?: number };

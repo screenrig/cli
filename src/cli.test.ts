@@ -10,6 +10,7 @@ import { test } from "node:test";
 import { CLI_VERSION, EVENT_STREAM_BACKOFF_CAP_MS, EVENT_STREAM_BACKOFF_MS, formatEventLine } from "./commands.js";
 import { run, type CliRuntime } from "./main.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
+import type { TransportResponse } from "./transport/types.js";
 import { ExitCode } from "./exit-codes.js";
 import { CliError, makeProblem, networkError } from "./problems.js";
 import type { ConfigFs } from "./config.js";
@@ -5630,6 +5631,269 @@ test("screen list appends the platform column only when a screen reports a host"
   assert.match(plain.stdout.split("\n")[1]!, /^ID\s+LABEL\s+STATE$/);
   assert.doesNotMatch(plain.stdout, /PLATFORM/);
   await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen show explains an archived screen's reason and how unarchive resumes it", async () => {
+  const transport = new FakeTransport();
+  let body: Record<string, unknown> = hostScreen({ state: "archived", archive_reason: "device_reset", archived_at: "2026-09-21T10:00:00Z" });
+  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body }));
+  const { configDir, fsLike } = await hostConfigFs("screen-show-archived-");
+  try {
+    const json = await withRuntime(["--json", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.equal(json.code, ExitCode.Success, json.stdout);
+    const envelope = JSON.parse(json.stdout) as { data: Record<string, unknown> };
+    assert.equal(envelope.data.archive_reason, "device_reset");
+    assert.equal(envelope.data.archived_at, "2026-09-21T10:00:00Z");
+
+    const human = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.equal(human.code, ExitCode.Success, human.stdout);
+    assert.match(
+      human.stdout,
+      /\nArchived \(device_reset\) at 2026-09-21T10:00:00Z\nThe player was reset on the display\. Its key is still bound to this screen\. If the display now shows a pairing code, screen show may report recovery_pending: screen recover moves this screen to the display's new key and retires the old one, and the screen stays archived until screen unarchive\.\nRestore with screen unarchive scr_PAIRINGAAAAAAAAAAAAAAAA\. It re-admits the same key, so a display that still holds it resumes without re-pairing\.\n?$/,
+    );
+
+    body = hostScreen({ state: "archived", archive_reason: "device_unpair", archived_at: "2026-09-21T10:00:00Z" });
+    const unpaired = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.match(unpaired.stdout, /\nArchived \(device_unpair\) at 2026-09-21T10:00:00Z\nThe paired browser unpaired itself\./);
+
+    // A reason this CLI does not know prints without an explanation; a
+    // value that is not token-shaped is not printed at all.
+    body = hostScreen({ state: "archived", archive_reason: "future_reason", archived_at: "2026-09-21T10:00:00Z" });
+    const unknown = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.match(unknown.stdout, /\nArchived \(future_reason\) at 2026-09-21T10:00:00Z\nRestore with screen unarchive/);
+    body = hostScreen({ state: "archived", archive_reason: "bad\nline" });
+    const hostile = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.match(hostile.stdout, /\nArchived\nRestore with screen unarchive/);
+    // archived_at prints only when it is an RFC 3339 instant.
+    body = hostScreen({ state: "archived", archive_reason: "account", archived_at: "2026-09-21T10:00:00Z\u001b[2Jspoof" });
+    const hostileAt = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.match(hostileAt.stdout, /\nArchived \(account\)\nAn account or dashboard request archived it\.\n/);
+    assert.doesNotMatch(hostileAt.stdout, /\u001b\[2J/);
+
+    // A screen archived before reasons were recorded still gets the recovery line.
+    body = hostScreen({ state: "archived" });
+    const legacy = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.match(legacy.stdout, /\nArchived\nRestore with screen unarchive scr_PAIRINGAAAAAAAAAAAAAAAA\./);
+
+    body = hostScreen({ archive_reason: "account" });
+    const active = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.doesNotMatch(active.stdout, /\nArchived|Restore with screen unarchive/);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("screen show and list surface applications_unsupported health", async () => {
+  const transport = new FakeTransport();
+  const unsupported = hostScreen({ applications_unsupported: { at: "2026-09-22T09:00:00Z" } });
+  const plain = hostScreen({ id: "scr_BROWSERAAAAAAAAAAAAAAAA", label: "Cafe", public_id: "scr_public_cafe" });
+  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: unsupported }));
+  transport.on("GET", "/api/v1/screens/scr_BROWSERAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: plain }));
+  transport.on("GET", "/api/v1/screens", () => ({ status: 200, headers: {}, body: { items: [unsupported, plain] } }));
+  const { configDir, fsLike } = await hostConfigFs("screen-applications-unsupported-");
+  try {
+    const human = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.equal(human.code, ExitCode.Success, human.stdout);
+    assert.match(human.stdout, /\nThis player can't show applications or web pages \(since 2026-09-22T09:00:00Z\)\.\nIts manifest is unchanged: the player skips application and iframe primitives, and skips a page left with none\.\n?$/);
+    const json = await withRuntime(["--json", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.deepEqual((JSON.parse(json.stdout) as { data: Record<string, unknown> }).data.applications_unsupported, { at: "2026-09-22T09:00:00Z" });
+
+    const other = await withRuntime(["--human", "screen", "show", "scr_BROWSERAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.doesNotMatch(other.stdout, /can't show applications/);
+    const malformed = hostScreen({ id: "scr_BROWSERAAAAAAAAAAAAAAAA", applications_unsupported: { at: "yesterday\nforged line" } });
+    transport.on("GET", "/api/v1/screens/scr_BROWSERAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: malformed }));
+    const garbled = await withRuntime(["--human", "screen", "show", "scr_BROWSERAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.doesNotMatch(garbled.stdout, /can't show applications|\nforged line/);
+    transport.on("GET", "/api/v1/screens/scr_BROWSERAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: plain }));
+
+    const list = await withRuntime(["--human", "screen", "list"], transport, { fs: fsLike });
+    const lines = list.stdout.split("\n");
+    assert.match(lines[1]!, /^ID\s+LABEL\s+STATE$/);
+    assert.match(lines[2]!, /^scr_PAIRINGAAAAAAAAAAAAAAAA\s+Lobby\s+active\s+applications unsupported$/);
+    assert.match(lines[3]!, /^scr_BROWSERAAAAAAAAAAAAAAAA\s+Cafe\s+active$/);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("screen list adds the reason column only when an archived screen reports one", async () => {
+  const transport = new FakeTransport();
+  const items = [
+    hostScreen({ state: "archived", archive_reason: "device_reset", archived_at: "2026-09-21T10:00:00Z" }),
+    hostScreen({ id: "scr_BROWSERAAAAAAAAAAAAAAAA", label: "Cafe", public_id: "scr_public_cafe", state: "archived" }),
+  ];
+  let body: unknown = { items };
+  transport.on("GET", "/api/v1/screens", () => ({ status: 200, headers: {}, body }));
+  const { configDir, fsLike } = await hostConfigFs("screen-list-reason-");
+  try {
+    const human = await withRuntime(["--human", "screen", "list", "--state", "archived"], transport, { fs: fsLike });
+    assert.equal(human.code, ExitCode.Success, human.stdout);
+    const lines = human.stdout.split("\n");
+    assert.match(lines[1]!, /^ID\s+LABEL\s+STATE\s+REASON$/);
+    assert.match(lines[2]!, /^scr_PAIRINGAAAAAAAAAAAAAAAA\s+Lobby\s+archived\s+device_reset$/);
+    assert.match(lines[3]!, /^scr_BROWSERAAAAAAAAAAAAAAAA\s+Cafe\s+archived$/);
+    assert.equal(transport.calls.at(-1)?.query?.state, "archived");
+
+    body = { items: [items[1]] };
+    const plain = await withRuntime(["--human", "screen", "list", "--state", "archived"], transport, { fs: fsLike });
+    assert.match(plain.stdout.split("\n")[1]!, /^ID\s+LABEL\s+STATE$/);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("screen reload posts the reload route with an idempotency key and returns reload_id", async () => {
+  const transport = memoryBackend();
+  const paired = await withAuthenticatedRuntime(["--json", "screen", "pair", "ABC234"], transport);
+  assert.equal(paired.code, ExitCode.Success, paired.stdout);
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => paired.configDir, env: { XDG_CONFIG_HOME: paired.configDir } };
+  const reloadCalls = () => transport.calls.filter((call) => call.path === "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/reload");
+  try {
+    // A screen still waiting to pair has no Player; the refusal points at screen show.
+    const pending = await withRuntime(["--json", "screen", "reload", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.notEqual(pending.code, ExitCode.Success, pending.stdout);
+    const refused = JSON.parse(pending.stdout) as { error: { code: string; next?: { command?: string } } };
+    assert.equal(refused.error.code, "resource_conflict");
+    assert.equal(refused.error.next?.command, "screenrig screen show scr_PAIRINGAAAAAAAAAAAAAAAA");
+
+    const archived = await withRuntime(["--json", "screen", "archive", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.equal(archived.code, ExitCode.Success, archived.stdout);
+    const archivedScreen = (JSON.parse(archived.stdout) as { data: { revision: number; archive_reason?: string } }).data;
+    assert.equal(archivedScreen.archive_reason, "account");
+
+    // Reload works on an archived screen and leaves the revision alone.
+    const result = await withRuntime(["--json", "screen", "reload", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+    assert.equal(result.code, ExitCode.Success, result.stdout);
+    const post = reloadCalls().at(-1);
+    assert.ok(post, "must bind POST /api/v1/screens/{id}/reload");
+    assert.equal(post.method, "POST");
+    assert.ok(post.headers?.["idempotency-key"], "a reload must carry an idempotency key");
+    assert.equal(post.headers?.["if-match"], undefined, "If-Match is optional");
+    assert.equal(post.body, undefined, "the reload route takes no body");
+    const envelope = JSON.parse(result.stdout) as { ok: boolean; data: { reload_id: string; expires_at: string } };
+    assert.equal(envelope.ok, true);
+    assert.match(envelope.data.reload_id, /^[A-Za-z0-9_-]{8,64}$/);
+    assert.equal(envelope.data.expires_at, "2026-08-14T17:10:00.000Z");
+
+    const guarded = await withRuntime(
+      ["--human", "screen", "reload", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", String(archivedScreen.revision)],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(guarded.code, ExitCode.Success, guarded.stdout);
+    assert.equal(reloadCalls().at(-1)?.headers?.["if-match"], `"${archivedScreen.revision}"`);
+    assert.match(guarded.stdout, /^Reload accepted\nscreen_id: scr_PAIRINGAAAAAAAAAAAAAAAA\nreload_id: \S+\nexpires_at: 2026-08-14T17:10:00\.000Z\n/);
+    assert.match(guarded.stdout, /granted reload-v1/);
+
+    const stale = await withRuntime(
+      ["--json", "screen", "reload", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", String(archivedScreen.revision - 1)],
+      transport,
+      { fs: fsLike },
+    );
+    assert.notEqual(stale.code, ExitCode.Success, stale.stdout);
+    assert.equal((JSON.parse(stale.stdout) as { error: { code: string } }).error.code, "revision_conflict");
+
+    const replayed = await withRuntime(
+      ["--json", "--idempotency-key", "reload-replay-key-0001", "screen", "reload", "scr_PAIRINGAAAAAAAAAAAAAAAA"],
+      transport,
+      { fs: fsLike },
+    );
+    const again = await withRuntime(
+      ["--json", "--idempotency-key", "reload-replay-key-0001", "screen", "reload", "scr_PAIRINGAAAAAAAAAAAAAAAA"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(replayed.code, ExitCode.Success, replayed.stdout);
+    assert.equal(again.code, ExitCode.Success, again.stdout);
+    assert.equal(reloadCalls().at(-1)?.headers?.["idempotency-key"], "reload-replay-key-0001");
+    assert.equal(
+      (JSON.parse(again.stdout) as { data: { reload_id: string } }).data.reload_id,
+      (JSON.parse(replayed.stdout) as { data: { reload_id: string } }).data.reload_id,
+    );
+  } finally {
+    await rm(paired.configDir, { recursive: true, force: true });
+  }
+});
+
+test("screen reload validates its id and revision before calling the server and rejects a malformed answer", async () => {
+  const transport = new FakeTransport();
+  let body: unknown = { expires_at: "2026-08-14T17:10:00.000Z" };
+  transport.on("POST", "/api/v1/screens/scr_TEST/reload", () => ({ status: 202, headers: {}, body }));
+  const { configDir, fsLike } = await hostConfigFs("screen-reload-usage-");
+  try {
+    for (const argv of [["screen", "reload"], ["screen", "reload", "scr_TEST", "--expect-rev", "oops"]]) {
+      const result = await withRuntime(["--json", ...argv], transport, { fs: fsLike });
+      assert.equal(result.code, ExitCode.Usage, `${argv.join(" ")}: ${result.stdout}`);
+    }
+    assert.equal(transport.calls.length, 0, "invalid reloads must not reach the server");
+
+    const malformed = await withRuntime(["--json", "screen", "reload", "scr_TEST"], transport, { fs: fsLike });
+    assert.notEqual(malformed.code, ExitCode.Success, malformed.stdout);
+    assert.match((JSON.parse(malformed.stdout) as { error: { detail: string } }).error.detail, /ScreenReloadAccepted/);
+
+    body = { reload_id: "rld\n0001forged", expires_at: "2026-08-14T17:10:00.000Z" };
+    const badId = await withRuntime(["--json", "screen", "reload", "scr_TEST"], transport, { fs: fsLike });
+    assert.notEqual(badId.code, ExitCode.Success, badId.stdout);
+    assert.match((JSON.parse(badId.stdout) as { error: { detail: string } }).error.detail, /ScreenReloadAccepted/);
+
+    body = { reload_id: "rld_00000001", expires_at: "2026-08-14T17:10:00.000Z" };
+    const ok = await withRuntime(["--json", "screen", "reload", "scr_TEST"], transport, { fs: fsLike });
+    assert.equal(ok.code, ExitCode.Success, ok.stdout);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("screen reload explains a server that predates the route and encodes the id", async () => {
+  const transport = new FakeTransport();
+  let answer: TransportResponse = { status: 404, headers: { "content-type": "text/plain; charset=utf-8" }, body: "404 page not found\n" };
+  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/reload$/, () => answer);
+  const { configDir, fsLike } = await hostConfigFs("screen-reload-old-server-");
+  try {
+    const old = await withRuntime(["--json", "screen", "reload", "scr_TEST"], transport, { fs: fsLike });
+    assert.notEqual(old.code, ExitCode.Success, old.stdout);
+    const oldError = (JSON.parse(old.stdout) as { error: { status: number; detail: string; next?: { command?: string } } }).error;
+    assert.equal(oldError.status, 404);
+    assert.match(oldError.detail, /does not offer screen reload/);
+    assert.equal(oldError.next?.command, "screenrig screen show scr_TEST");
+
+    answer = { status: 405, headers: { "content-type": "text/plain; charset=utf-8" }, body: "Method Not Allowed\n" };
+    const notAllowed = await withRuntime(["--json", "screen", "reload", "scr_TEST"], transport, { fs: fsLike });
+    assert.match((JSON.parse(notAllowed.stdout) as { error: { detail: string } }).error.detail, /does not offer screen reload/);
+
+    // A real missing screen keeps the server's not_found problem.
+    answer = { status: 404, headers: { "content-type": "application/problem+json" }, body: { type: "https://screenrig.ai/problems/not-found", title: "Resource was not found", status: 404, code: "not_found", detail: "Resource was not found." } };
+    const missing = await withRuntime(["--json", "screen", "reload", "scr_TEST"], transport, { fs: fsLike });
+    const missingError = (JSON.parse(missing.stdout) as { error: { code: string; detail: string } }).error;
+    assert.equal(missingError.code, "not_found");
+    assert.equal(missingError.detail, "Resource was not found.");
+
+    answer = { status: 202, headers: {}, body: { reload_id: "rld_00000001", expires_at: "2026-08-14T17:10:00.000Z" } };
+    const traversal = await withRuntime(["--json", "screen", "reload", "scr_TEST/../../account"], transport, { fs: fsLike });
+    assert.equal(traversal.code, ExitCode.Success, traversal.stdout);
+    assert.equal(transport.calls.at(-1)?.path, "/api/v1/screens/scr_TEST%2F..%2F..%2Faccount/reload");
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("screen help describes reload, archive recovery, and archive reasons", () => {
+  const reload = commandHelp(["screen", "reload"]).usage;
+  assert.match(reload, /screen reload \[options\] <id>/);
+  assert.match(reload, /--expect-rev/);
+  assert.match(reload, /reload_id/);
+  assert.match(reload, /ten minutes/);
+  assert.match(reload, /archived screens/);
+  assert.match(reload, /resource_conflict/);
+  assert.match(reload, /screenrig screen reload scr_SCREEN/);
+  const unarchive = commandHelp(["screen", "unarchive"]).usage;
+  assert.match(unarchive, /device_reset/);
+  assert.match(unarchive, /device_unpair/);
+  assert.match(unarchive, /no re-pairing/);
+  assert.match(unarchive, /retired by a confirmed screen recover stays retired/);
+  assert.match(commandHelp(["screen", "archive"]).usage, /resumes on screen unarchive/);
+  assert.match(commandHelp(["screen", "show"]).usage, /archive_reason and archived_at[\s\S]*applications_unsupported/);
+  assert.match(commandHelp(["screen", "list"]).usage, /REASON column/);
 });
 
 test("screen recover confirms a pending offer with a fresh idempotency key and prints the screen summary", async () => {

@@ -29,6 +29,7 @@ const KEEP = new Set([
   "archive",
   "unarchive",
   "toast",
+  "reload",
   "screenshot",
   "status",
   "public-id",

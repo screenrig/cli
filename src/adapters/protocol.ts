@@ -380,6 +380,11 @@ export interface ScreenRecoveryPending {
   host?: ScreenRecoveryPendingHost;
 }
 
+/** Screen health: the paired Player cannot show application or iframe primitives. */
+export interface ScreenApplicationsUnsupported {
+  at: string;
+}
+
 export interface Screen {
   content_access_generation: number;
   created_at: string;
@@ -417,6 +422,23 @@ export interface Screen {
   public_id: string;
   /** Read-only recovery offer awaiting confirmation. Absent once confirmed, lapsed, or claimed as a new screen. */
   recovery_pending?: ScreenRecoveryPending;
+  /**
+   * Present only while archived: what archived the screen. Known values are
+   * account, device_reset, and device_unpair; readers keep a value they do
+   * not know. Every reason keeps the device binding, so unarchive resumes the
+   * display with no re-pairing. Absent on screens archived before reasons
+   * were recorded. Read-only.
+   */
+  archive_reason?: string;
+  /** Present only while archived with archive_reason. Instant the screen was archived. Read-only. */
+  archived_at?: string;
+  /**
+   * Present while the paired Player cannot show the application or iframe
+   * primitives its manifest carries. at is when the condition began. The
+   * manifest is unchanged; the Player drops those primitives. Read-only
+   * account health metadata.
+   */
+  applications_unsupported?: ScreenApplicationsUnsupported;
   revision: number;
   state: "pairing_pending" | "active" | "archived";
   /**
@@ -431,8 +453,9 @@ export interface Screen {
  * The screen patch body. Every member is optional and the server requires at
  * least one, which is why each command builds only the members it was asked
  * for rather than sending undefined placeholders. Observation, online,
- * last_online_at, last_ip, comments, host, host_updated_at, and
- * recovery_pending are not patchable fields.
+ * last_online_at, last_ip, comments, host, host_updated_at,
+ * recovery_pending, archive_reason, archived_at, and applications_unsupported
+ * are not patchable fields.
  */
 export interface ScreenPatch {
   name?: string;
@@ -480,6 +503,16 @@ export interface ScreenToastWrite {
 
 /** Accepted toast write. The toast itself lives on the durable screen.toast event. */
 export interface ScreenToastAccepted {
+  expires_at: string;
+}
+
+/**
+ * Accepted POST /api/v1/screens/{id}/reload. The reload itself is the durable
+ * per-screen player.reload event; a Player acts on one reload_id at most once
+ * and ignores it after expires_at.
+ */
+export interface ScreenReloadAccepted {
+  reload_id: string;
   expires_at: string;
 }
 

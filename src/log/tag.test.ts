@@ -13,6 +13,7 @@ const HTTP_CASES: Array<[method: string, path: string, tag: string]> = [
   ["GET", "/.ready", "get_ready"],
   ["GET", "/.version", "get_version"],
   ["POST", "/api/v1/screens/scr_x/toast", "post_screen_toast"],
+  ["POST", "/api/v1/screens/scr_x/reload", "post_screen_reload"],
   ["POST", "/api/v1/screens/scr_x/public-id/rotate", "post_screen_public_id_rotate"],
   ["POST", "/api/v1/media/uploads/upl_1/commit", "post_media_upload_commit"],
   ["POST", "/api/v1/media/generations", "post_media_generations"],

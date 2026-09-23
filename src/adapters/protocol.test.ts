@@ -251,6 +251,15 @@ test("published problem codes include payment_required and dependency_timeout", 
     "invitation_consumed",
     "billing_unavailable",
     "user_binding_stale",
+    // Runtime (Player) codes from the compatibility contract. The account
+    // commands never receive them; they are pinned so a contract change is
+    // reviewed here.
+    "session_expired",
+    "credential_revoked",
+    "proof_clock_skew",
+    "key_retired",
+    "assignment_not_found",
+    "upgrade_required",
   ]);
   assert.match(source, /payment_required/);
   assert.doesNotMatch(source, /stripe|x402/i);
@@ -464,6 +473,48 @@ test("toast contract is a closed POST with idempotency, no queue, and no colour 
   assert.match(source, /level: \{ type: string, enum: \[error, alert, info\]/);
   assert.match(source, /duration_ms: \{ type: integer, minimum: 2000, maximum: 60000, default: 10000/);
   assert.doesNotMatch(source.slice(source.indexOf("ScreenToastWrite:"), source.indexOf("ScreenToastAccepted:")), /color/);
+});
+
+test("reload contract is an optional-revision POST that answers ScreenReloadAccepted", () => {
+  const source = readFileSync(OPENAPI_CONTRACT, "utf8");
+  const generated = readFileSync(GENERATED_CONTRACT, "utf8");
+  const adapter = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../src/adapters/protocol.ts"), "utf8");
+  const start = source.indexOf("  /api/v1/screens/{id}/reload:");
+  const end = source.indexOf("  /api/v1/screens/{id}/toast:");
+  assert.ok(start !== -1 && end > start, "missing reload route");
+  const route = source.slice(start, end);
+  assert.match(route, /operationId: reloadScreen/);
+  assert.match(route, /post:/);
+  assert.doesNotMatch(route, /get:|patch:|put:|delete:|requestBody/);
+  assert.match(route, /IfMatch/);
+  assert.match(route, /OptionalIdempotencyKey/);
+  assert.match(route, /"202":[\s\S]*ScreenReloadAccepted/);
+  assert.match(route, /RateLimitedProblem/);
+  assert.match(route, /player\.reload/);
+  assert.match(route, /pairing_pending screen has no Player yet[\s\S]*resource_conflict/);
+  assert.deepEqual(quotedProperties(interfaceBody(generated, "ScreenReloadAccepted")), ["expires_at", "reload_id"]);
+  assert.match(interfaceBody(adapter, "ScreenReloadAccepted"), /reload_id: string;[\s\S]*expires_at: string;/);
+});
+
+test("Screen exposes archive_reason, archived_at, and applications_unsupported as read-only fields", () => {
+  const generated = readFileSync(GENERATED_CONTRACT, "utf8");
+  const openapi = readFileSync(OPENAPI_CONTRACT, "utf8");
+  const adapter = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../src/adapters/protocol.ts"), "utf8");
+  const screen = interfaceBody(generated, "Screen");
+  assert.match(screen, /"archive_reason"\?: string/);
+  assert.match(screen, /"archived_at"\?: string/);
+  assert.match(screen, /"applications_unsupported"\?:/);
+  assert.doesNotMatch(interfaceBody(generated, "ScreenPatch"), /archive_reason|archived_at|applications_unsupported/);
+  const screenSchema = openapi.slice(openapi.indexOf("    Screen:\n"), openapi.indexOf("    HostContext:"));
+  assert.match(screenSchema, /Known values: account[\s\S]*device_reset[\s\S]*device_unpair/);
+  assert.match(screenSchema, /Readers ignore a value they do not\s+know/);
+  assert.match(screenSchema, /applications_unsupported:[\s\S]*required: \[at\]/);
+  const local = interfaceBody(adapter, "Screen");
+  assert.match(local, /archive_reason\?: string/);
+  assert.match(local, /archived_at\?: string/);
+  assert.match(local, /applications_unsupported\?: ScreenApplicationsUnsupported/);
+  assert.match(interfaceBody(adapter, "ScreenApplicationsUnsupported"), /at: string/);
+  assert.doesNotMatch(interfaceBody(adapter, "ScreenPatch"), /archive_reason|archived_at|applications_unsupported/);
 });
 
 test("screenshot contract is latest-wins POST, status GET, and binary WebP GET", () => {

@@ -188,6 +188,40 @@ any application running on it, so an offer alone does not prove which display
 is asking. The service also refuses offers while the screen's current player
 is still online and limits how many offers each screen receives.
 
+## Archived screens and reload
+
+Archiving a screen darkens its display but keeps the display's binding: the
+player stays connected, never re-pairs, and resumes when you run
+`screen unarchive`. A screen is also archived when its player is reset on the
+display or a paired browser unpairs itself. While archived, `screen show`
+prints `archive_reason` (`account`, `device_reset`, or `device_unpair`) and
+`archived_at` when the server reports them, and `screen list --state archived`
+adds a `REASON` column. `screen unarchive` re-admits the same display key for
+every reason, so a display that still holds it resumes with no re-pairing. A
+display reset on the device may start pairing again with a new key; when that
+pairing is offered as a recovery of the archived screen, `screen show` reports
+`recovery_pending`, and `screen recover` moves the screen to the new key while
+it stays archived until `screen unarchive`. A key retired by a confirmed
+`screen recover` stays retired.
+
+```bash
+screenrig screen list --state archived
+screenrig screen unarchive scr_LOBBY
+```
+
+`screen reload` asks a screen's player to reload once and returns a
+`reload_id` and `expires_at` ten minutes later. A web player reloads at its
+next page boundary; a native player reconnects, refetches its manifest, and
+checks for an update. Only a player that registered reload support acts on it,
+and a player ignores a reload within ten minutes of the last one it acted on.
+It works on active and archived screens and does not change the screen
+revision; a screen still waiting to pair answers `resource_conflict`.
+
+When a screen's player cannot show the application or web page primitives in
+its playlist, `screen show` reports `applications_unsupported` with the time
+the condition began, and `screen list` marks the row. The manifest is
+unchanged; the player skips those primitives.
+
 ## Application command results
 
 `app upload` and `app update` return the same JSON data paths with or without

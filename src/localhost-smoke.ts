@@ -297,7 +297,10 @@ async function main(): Promise<void> {
     assert.equal(((listed.data as { items?: unknown[] }).items ?? []).length, 0);
     const archivedList = await run("screen", "list", "--state", "archived");
     assert.equal(((archivedList.data as { items?: Array<{ id?: string }> }).items ?? [])[0]?.id, "scr_PAIRINGAAAAAAAAAAAAAAAA");
+    assert.equal(((archivedList.data as { items?: Array<{ archive_reason?: string }> }).items ?? [])[0]?.archive_reason, "account");
     await run("screen", "unarchive", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", "4");
+    const reloaded = await run("screen", "reload", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", "5");
+    assert.match(String((reloaded.data as { reload_id?: string }).reload_id ?? ""), /^[A-Za-z0-9_-]{8,64}$/);
     const deleted = await invoke(["screen", "delete", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", "5"]);
     assert.equal(deleted.code, 5, `screen delete must surface screen_archive_required: ${deleted.stderr || deleted.stdout}`);
     assert.equal((JSON.parse(deleted.stdout) as { error?: { code?: string } }).error?.code, "screen_archive_required");

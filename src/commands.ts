@@ -52,6 +52,7 @@ import {
   type Screen,
   type ScreenPatch,
   type ScreenProvisioning,
+  type ScreenReloadAccepted,
   type ScreenScreenshotAccepted,
   type ScreenScreenshotStatus,
   type ScreenToastAccepted,
@@ -3811,21 +3812,84 @@ export const handleScreenList = commandHandler(async (args, runtime, resolved) =
 
 /**
  * One row per screen. The platform column appears only when at least one
- * screen reports a host, so a fleet without native players keeps the table it
- * had. The JSON body follows unchanged in both output modes.
+ * screen reports a host, and the reason column only when at least one
+ * archived screen reports why it was archived, so a fleet without either keeps
+ * the table it had. The JSON body follows unchanged in both output modes.
  */
 function screenTableLines(items: Screen[]): string[] {
   if (!items.length) return [];
   const withPlatform = items.some((screen) => typeof screen?.host?.platform === "string");
+  const withReason = items.some((screen) => archiveReason(screen) !== undefined);
   const rows = items.map((screen) => [
     screen?.id ?? "", screen?.label ?? "", screen?.state ?? "",
     ...(withPlatform ? [screen?.host?.platform ?? ""] : []),
+    ...(withReason ? [archiveReason(screen) ?? ""] : []),
     ...(screen?.recovery_pending?.expires_at ? [`recovery pending until ${screen.recovery_pending.expires_at}`] : []),
+    ...(applicationsUnsupportedAt(screen) ? ["applications unsupported"] : []),
   ]);
-  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : [])];
+  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : []), ...(withReason ? ["REASON"] : [])];
   const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => (row[index] ?? "").length)));
   const render = (row: string[]) => row.map((cell, index) => index < widths.length ? cell.padEnd(widths[index]!) : cell).join("  ").trimEnd();
   return [render(header), ...rows.map(render)];
+}
+
+const ARCHIVE_REASON_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+
+/**
+ * Why an archived screen was archived, when the server says so. Only a
+ * token-shaped value is printed; the JSON body carries whatever the server
+ * sent. Unknown tokens print as they are, without an explanation.
+ */
+function archiveReason(screen: Screen | undefined): string | undefined {
+  const reason = screen?.state === "archived" ? screen.archive_reason : undefined;
+  return typeof reason === "string" && ARCHIVE_REASON_PATTERN.test(reason) ? reason : undefined;
+}
+
+const ARCHIVE_REASON_TEXT: Record<string, string> = {
+  account: "An account or dashboard request archived it.",
+  device_reset: "The player was reset on the display. Its key is still bound to this screen. If the display now shows a pairing code, screen show may report recovery_pending: screen recover moves this screen to the display's new key and retires the old one, and the screen stays archived until screen unarchive.",
+  device_unpair: "The paired browser unpaired itself. Its device credential is still bound to this screen.",
+};
+
+/**
+ * The archive block `screen show` prints. Every archive keeps the device
+ * binding: the display stays dark, and unarchive re-admits the same key so a
+ * display that still holds it resumes with no re-pairing.
+ */
+function archivedLines(screen: Screen | undefined): string[] {
+  if (screen?.state !== "archived") return [];
+  const reason = archiveReason(screen);
+  const at = serverInstant(screen.archived_at);
+  const id = typeof screen.id === "string" && screen.id ? screen.id : "<id>";
+  return [
+    `Archived${reason ? ` (${reason})` : ""}${at ? ` at ${at}` : ""}`,
+    ...(reason && ARCHIVE_REASON_TEXT[reason] ? [ARCHIVE_REASON_TEXT[reason]] : []),
+    `Restore with screen unarchive ${id}. It re-admits the same key, so a display that still holds it resumes without re-pairing.`,
+  ];
+}
+
+function applicationsUnsupportedAt(screen: Screen | undefined): string | undefined {
+  return serverInstant(screen?.applications_unsupported?.at);
+}
+
+/**
+ * A server date-time that is safe to print on its own line: RFC 3339 shaped
+ * and parseable. Anything else stays in the JSON body only.
+ */
+function serverInstant(value: unknown): string | undefined {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T[0-9:.]+(?:Z|[+-]\d{2}:\d{2})$/i.test(value) && !Number.isNaN(Date.parse(value))
+    ? value
+    : undefined;
+}
+
+/** The screen health line for a Player that cannot host applications or web pages. */
+function applicationsUnsupportedLines(screen: Screen | undefined): string[] {
+  const at = applicationsUnsupportedAt(screen);
+  if (!at) return [];
+  return [
+    `This player can't show applications or web pages (since ${at}).`,
+    "Its manifest is unchanged: the player skips application and iframe primitives, and skips a page left with none.",
+  ];
 }
 
 /** The `Host` block `screen show` prints. Absent fields are omitted; identifiers belong to the owning account. */
@@ -3981,6 +4045,8 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       "Screen",
       JSON.stringify(response.body, null, 2),
       ...hostLines(screen?.host, screen?.host_updated_at),
+      ...archivedLines(screen),
+      ...applicationsUnsupportedLines(screen),
       ...recoveryPendingLine(screen),
     ].join("\n"),
   };
@@ -4191,6 +4257,60 @@ export const handleScreenRecover = commandHandler(async (args, runtime, resolved
         ["platform", screen?.host?.platform],
       ]),
       "The display now runs this screen with its new key; the previous key retires after a fifteen-minute grace window.",
+    ].join("\n"),
+  };
+}, true);
+
+export const handleScreenReload = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+
+  const id = args.positionals[2];
+  if (!id) throw usageError("screen reload requires <id>.");
+  const revision = flagString(args.flags, "if-match");
+  let response;
+  try {
+    response = await client.call({
+      method: "POST",
+      path: `/api/v1/screens/${encodeURIComponent(id)}/reload`,
+      idempotent: true,
+      ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+    });
+  } catch (error) {
+    if (!(error instanceof CliError) || error.problem.next) throw error;
+    // A pairing_pending screen has no Player to reload yet.
+    if (error.problem.code === "resource_conflict") {
+      throw new CliError({
+        ...error.problem,
+        next: { command: `screenrig screen show ${id}`, reason: "A screen still waiting to pair has no Player to reload. Pair it first." },
+      }, error.exitCode, error.warnings);
+    }
+    // A server that predates the reload route answers a bare 404 or a 405
+    // rather than a not_found problem for the screen.
+    if ((error.problem.status === 404 && error.problem.code === "http_error") || error.problem.status === 405) {
+      throw new CliError({
+        ...error.problem,
+        detail: "This API server does not offer screen reload. Nothing was sent to the screen's player.",
+        next: { command: `screenrig screen show ${id}`, reason: "Confirm the screen exists; if it does, the server predates screen reload." },
+      }, error.exitCode, error.warnings);
+    }
+    throw error;
+  }
+  const accepted = (response.body ?? {}) as Partial<ScreenReloadAccepted>;
+  if (typeof accepted.reload_id !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(accepted.reload_id)
+    || serverInstant(accepted.expires_at) === undefined) {
+    throw usageError("Screen reload response does not match the generated ScreenReloadAccepted contract.");
+  }
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [
+      humanLines("Reload accepted", [
+        ["screen_id", id],
+        ["reload_id", accepted.reload_id],
+        ["expires_at", accepted.expires_at],
+      ]),
+      "A Player granted reload-v1 reloads once; a Player without the grant, or one that reloaded in the last ten minutes, ignores it.",
     ].join("\n"),
   };
 }, true);

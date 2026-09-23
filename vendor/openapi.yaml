@@ -103,6 +103,12 @@ paths:
   /.ready:
     get:
       operationId: getReadiness
+      description: >-
+        Serving readiness. A required dependency failure answers 503
+        not_ready with Retry-After. A live database schema that does not
+        satisfy this release (a desired index missing or different for more
+        than two minutes) answers 503 schema_incompatible without
+        Retry-After: it does not clear by waiting.
       responses:
         "200": { description: Ready, content: { application/json: { schema: { $ref: "#/components/schemas/ReadyResponse" } } } }
         "503": { $ref: "#/components/responses/Problem" }
@@ -741,6 +747,37 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "413": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/{id}/reload:
+    post:
+      operationId: reloadScreen
+      x-rate-limit-policies: [{ name: reload-account, quota: 60, windowSeconds: 60 }, { name: reload-screen, quota: 6, windowSeconds: 60 }, { name: reload-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Asks the Player of the named active or archived screen to reload
+        (docs/player-compatibility.md §6.3). Appends the durable per-screen
+        player.reload event with details.reason account, a new reload_id,
+        spread_s 0, and expires_at ten minutes later. The runtime SSE stream
+        relays it only to sessions granted reload-v1; a Player without the
+        grant never sees it, and a Player ignores a reload within ten minutes
+        of the last one it acted on. A web Player reloads at its next page
+        boundary; a native Player remints, refetches its manifest, and checks
+        for an update. The screen revision does not change. If-Match and
+        Idempotency-Key are optional, as on archive; an exact Idempotency-Key
+        retry returns the original reload_id and expires_at for twenty-four
+        hours. A pairing_pending screen has no Player yet and answers
+        resource_conflict. Screen messages are exempt from the 1-credit API
+        meter.
+      security: [{ accountBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      responses:
+        "202": { description: "Accepted. The reload is durable until expires_at. The ETag is the unchanged screen revision.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, ETag: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenReloadAccepted" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/toast:
     post:
@@ -1693,7 +1730,7 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: createNativeIdentityChallenge
-      x-rate-limit-policies: [{ name: native-identity-challenge-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: native-identity-challenge-ip, quota: 600, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Issues a short-lived nonce bound to one player public-key thumbprint. Cookies, query credentials, and Authorization are rejected.
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityChallengeRequest" } } } }
@@ -1708,7 +1745,7 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: createNativeIdentityRuntimeSession
-      x-rate-limit-policies: [{ name: native-identity-session-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: native-identity-session, quota: 60, windowSeconds: 60 }, { name: native-identity-session-ip, quota: 600, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Verifies an EdDSA compact JWS (op=session.mint) against the enrolled public key and returns a signed 24-hour ScreenRig-Session. Cookies are neither accepted nor set. Exact Idempotency-Key replay precedes new abuse admission. An archived screen still mints a session so the player can show the archived glass. Session mint requires the exact durable account and screen binding established by signed completion; pending claim offers have no session authority. Exact replay rechecks that binding and rejects retired identities.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
@@ -1729,10 +1766,24 @@ paths:
       operationId: resetNativeIdentity
       x-rate-limit-policies: [{ name: native-identity-reset-ip, quota: 60, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
-      description: The only de-associate, invoked by an explicit confirmed on-player reset. Verifies an EdDSA compact JWS (op=identity.reset), retires the public key, and tombstones its bound screen and pending native claim offers. The terminal enrollment retains key and prior account/screen history so a fresh signed reset can safely retry a lost response; the retired key cannot pair or mint sessions again. No account bearer. Cookies are neither accepted nor set. A missing local key or network error is not a reset.
+      description: >-
+        The on-player reset, invoked by an explicit confirmed operator action
+        on the device. Verifies an EdDSA compact JWS (op=identity.reset). The
+        screen bound to this key is archived with archive_reason device_reset
+        (already archived: unchanged), and the key stays bound to it: a device
+        that still holds the key mints an archived session (dark glass) and
+        resumes on unarchive with no re-pairing, and the key cannot start a
+        new pairing (enrollment_bound). Pending native claim offers for the
+        key are withdrawn. A key that never bound a screen, or a key already
+        retired by screen recovery, becomes terminal instead: it cannot pair
+        or mint sessions again, and resetting a retired key never touches the
+        screen its successor owns. A fresh signed reset safely retries a lost
+        response. No account bearer. Cookies are neither accepted nor set. A
+        missing local key or network error is not a reset
+        (docs/player-compatibility.md §5.1).
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityProof" } } } }
       responses:
-        "204": { description: "Identity retired and screen tombstoned, or an authenticated retry of the same retired identity; no Set-Cookie.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
+        "204": { description: "Reset recorded: the bound screen archived with the key kept, or the unbound or retired key made terminal, or an authenticated retry of either; no Set-Cookie.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -1757,7 +1808,7 @@ paths:
           in: query
           description: "Comma-separated supported stream transports (hls,udp-mpegts). Omission projects streams to fallback images. Rendering negotiation only, never authorization. Advertise udp-mpegts only when locally enabled."
           schema: { type: string, maxLength: 64 }
-      description: Resolved player manifest. Projection is fail-safe; invalid pages and primitives are omitted and listed in diagnostics. Compatibility rule 4 — 200 with pages [] and non-empty diagnostics is a degraded projection (player keeps last-known-good); 200 with pages [] and no diagnostics is an authored empty assignment. Until every player ships rule 4, the degraded case returns 503 manifest_degraded so deployed players hold last-known-good on 5xx. An archived screen returns problem screen_archived and must not refresh last-known-good.
+      description: Resolved player manifest. Projection is fail-safe; invalid pages and primitives are omitted and listed in diagnostics. Compatibility rule 4 — 200 with pages [] and non-empty diagnostics is a degraded projection (player keeps last-known-good); 200 with pages [] and no diagnostics is an authored empty assignment. The degraded answer is decided per session (docs/player-compatibility.md §1.4, §4.3). A session granted rule4 gets the 200 degraded projection; every other session gets 503 manifest_degraded, so it holds last-known-good on 5xx. An archived screen returns problem screen_archived and must not refresh last-known-good.
       security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
       responses:
         "200": { description: Resolved player manifest, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeManifest" } } } }
@@ -1773,13 +1824,13 @@ paths:
         - { $ref: "#/components/parameters/AfterCursor" }
         - { $ref: "#/components/parameters/LastEventID" }
       responses:
-        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.archived and screen.unarchived are runtime audience events; they do not wipe credentials. screen.deleted is a runtime audience event delivered when signed identity reset tombstones the screen. No runtime event authorizes clearing local identity. Only successful signed reset initiated by a confirmed local player action permits local identity rotation. account.suspended and account.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
+        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.archived and screen.unarchived are runtime audience events; they do not wipe credentials. screen.deleted is a runtime audience event delivered when signed identity reset tombstones the screen. No runtime event authorizes clearing local identity. Only successful signed reset initiated by a confirmed local player action permits local identity rotation. account.suspended and account.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive. The runtime audience is an allowlist (docs/player-compatibility.md §7.1): screen.content_changed, screen.manifest_changed, screen.toast, screen.screenshot_requested, screen.archived, screen.unarchived, screen.deleted, screen.device_credential_revoked, account.suspended, account.resumed, and player.reload, which reaches only sessions granted reload-v1. Every other type stops at the scan, and stream.cursor advances the cursor past it. Players ignore unknown event types, including the default message type, and unknown field names, and advance the cursor from every id. The stream opens with retry: 3000; a draining host sends each stream its own retry between 1000 and 30000 ms. The in-band problem frame (event: problem) has no id; its data is {code, detail, action?}, where action is present only for sessions granted problem-actions-v1, and the stream then closes (payment_required sets retry: 60000). The fleet player.reload control frame has no id and never moves the cursor. No frame carries more than 64 KiB of data.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/reports:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: createRuntimeReport
-      x-rate-limit-policies: [{ name: runtime-report, quota: 120, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: runtime-report, quota: 120, windowSeconds: 60 }, { name: runtime-report-ip, quota: 1200, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeReport" } } } }
@@ -1804,7 +1855,7 @@ paths:
         capture_id, bytes, width, height, and sha256; they never include pixels
         or an object key.
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
-      parameters: [{ $ref: "#/components/parameters/ScreenshotCaptureIDHeader" }, { name: ScreenRig-Capture-Failure, in: header, required: false, schema: { type: string, enum: [unsupported_surface, capture_failed] }, description: "Report unavailable capture with an empty body. Only the current pending capture may fail. No pixels or partial image are stored; screen.screenshot_failed carries this reason and status becomes unavailable." }]
+      parameters: [{ $ref: "#/components/parameters/ScreenshotCaptureIDHeader" }, { name: ScreenRig-Capture-Failure, in: header, required: false, schema: { type: string }, description: "Report unavailable capture with an empty body. Players send unsupported_surface or capture_failed. Any other non-empty value is recorded as capture_failed, never refused (docs/player-compatibility.md §1.1). Only the current pending capture may fail. No pixels or partial image are stored; screen.screenshot_failed carries this reason and status becomes unavailable." }]
       requestBody: { required: false, description: "Raw still WebP for success; empty when ScreenRig-Capture-Failure is supplied.", content: { image/webp: { schema: { type: string, format: binary } } } }
       responses:
         "204": { description: Still WebP stored as the current slot., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
@@ -1866,7 +1917,7 @@ paths:
         gate. Observation is absent from GET /api/v1/screens until the first
         accepted report. ScreenPatch cannot write it.
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenObservation" } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeObservationWrite" } } } }
       responses:
         "204": { description: Observation stored as the current surfaces array., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
         "400": { $ref: "#/components/responses/Problem" }
@@ -1880,9 +1931,13 @@ paths:
       x-rate-limit-policies: [{ name: runtime-unpair, quota: 30, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
-        Cookie-only unpair. Tombstones a cookie-paired screen that has no
-        player public-key enrollment. Identity-enrolled screens return
-        screen_archive_required; those players de-associate only via
+        Cookie-only unpair. Archives a cookie-paired screen that has no
+        player public-key enrollment, with archive_reason device_unpair. The
+        device credential stays bound: a browser that still holds it mints
+        an archived session (dark glass), and unarchive resumes it with no
+        re-pairing (docs/player-compatibility.md §5.1). A screen that is
+        already archived, or already gone, is success. Identity-enrolled
+        screens return screen_archive_required; those players reset only via
         POST /runtime/v1/native/identity/reset. Path and body do not name
         screen_id; the paired runtime session binds it. No If-Match or
         Idempotency-Key. Browser 204 expires the runtime, device, and pairing
@@ -1890,7 +1945,7 @@ paths:
         unpaired sessions are forbidden. Prepaid remaining credit is not a gate.
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
       responses:
-        "204": { description: Cookie-paired screen tombstoned. Browser pairing cookies expired., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
+        "204": { description: Cookie-paired screen archived with its credential kept. Browser pairing cookies expired., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
@@ -1900,7 +1955,7 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: launchApplicationRelease
-      x-rate-limit-policies: [{ name: release-launch, quota: 120, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: release-launch, quota: 120, windowSeconds: 60 }, { name: release-launch-ip, quota: 1200, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
       parameters:
@@ -2072,7 +2127,7 @@ paths:
       security: [{ runtimeCookie: [], primitiveCapability: [] }, { nativeSessionAuthorization: [], primitiveCapability: [] }]
       parameters: [{ $ref: "#/components/parameters/ApplicationID" }]
       responses:
-        "200": { description: Manifest-authorized application KV, content: { application/json: { schema: { $ref: "#/components/schemas/KVList" } } } }
+        "200": { description: Manifest-authorized application KV, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeKVList" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/apps/{application_id}/kv/{key}:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -2081,21 +2136,21 @@ paths:
       operationId: getRuntimeKV
       security: [{ runtimeCookie: [], primitiveCapability: [] }, { nativeSessionAuthorization: [], primitiveCapability: [] }]
       responses:
-        "200": { description: Manifest-authorized application KV value, content: { application/json: { schema: { $ref: "#/components/schemas/KVEntry" } } } }
+        "200": { description: Manifest-authorized application KV value, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeKVEntry" } } } }
         default: { $ref: "#/components/responses/Problem" }
     put:
       operationId: putRuntimeKV
-      x-rate-limit-policies: [{ name: runtime-kv-write, quota: 120, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: runtime-kv-write, quota: 120, windowSeconds: 60 }, { name: runtime-kv-write-ip, quota: 1200, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ pairedRuntimeCookie: [], primitiveCapability: [] }, { nativeSessionAuthorization: [], primitiveCapability: [] }]
       parameters: [{ $ref: "#/components/parameters/OptionalIfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/KVWrite" } } } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeKVWrite" } } } }
       responses:
-        "200": { description: Paired-device KV mutation, headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/KVEntry" } } } }
+        "200": { description: Paired-device KV mutation, headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeKVEntry" } } } }
         default: { $ref: "#/components/responses/Problem" }
     delete:
       operationId: deleteRuntimeKV
-      x-rate-limit-policies: [{ name: runtime-kv-write, quota: 120, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: runtime-kv-write, quota: 120, windowSeconds: 60 }, { name: runtime-kv-write-ip, quota: 1200, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ pairedRuntimeCookie: [], primitiveCapability: [] }, { nativeSessionAuthorization: [], primitiveCapability: [] }]
       parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
@@ -3187,6 +3242,26 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/screens/{id}/reload:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
+    post:
+      operationId: reloadDashboardScreen
+      x-rate-limit-policies: [{ name: reload-account, quota: 60, windowSeconds: 60 }, { name: reload-screen, quota: 6, windowSeconds: 60 }, { name: reload-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        The dashboard twin of POST /api/v1/screens/{id}/reload: same account
+        fence, same player.reload event, same problems, and the same 202 body.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      responses:
+        "202": { description: "Accepted. The ETag is the unchanged screen revision.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, ETag: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenReloadAccepted" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/screens/{id}/archive:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned account dashboard origin }]
     post:
@@ -3623,7 +3698,7 @@ components:
     operatorBearer: { type: http, scheme: bearer }
   responses:
     Problem:
-      description: Stable RFC 9457 problem response.
+      description: Stable RFC 9457 problem response. A 503 not_ready or dependency_unavailable carries Retry-After of 5 seconds and a 503 manifest_degraded carries 60, unless the handler set a more specific value.
       content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
     RateLimitedProblem:
       description: Stable rate_limited problem. Retry only after the authoritative Retry-After interval. Fixed-window denials also include the applicable RateLimit-Policy and RateLimit members; concurrency and byte-budget denials omit those optional disclosures.
@@ -3706,7 +3781,14 @@ components:
       properties:
         status: { type: string, enum: [accepted] }
     Account: { type: object, additionalProperties: false, required: [id, revision, status, email, email_verified, used_bytes, reserved_bytes, screen_count, content_limit_bytes, screen_limit, credit_remaining, created_at, updated_at], properties: { id: { type: string }, features: { $ref: "#/components/schemas/AccountFeatures" }, feature_revision: { type: integer }, revision: { type: integer }, status: { type: string, enum: [active, cancelled, deleted] }, email: { type: string, minLength: 3, maxLength: 254, description: "Required contact address supplied at enrollment, preserving its capitalization after surrounding whitespace is trimmed. Read-only: no route updates it, and it is published only on an authenticated read of the caller's own account." }, email_verified: { type: boolean, enum: [false], description: "Always false. The address is stored unverified; enrollment queues one invitation delivery to it, but no route treats a delivery as proof of possession and no flow sets this true. It is published so a later recovery feature cannot mistake an unverified string for authority. It is not an authorization factor." }, used_bytes: { type: integer, description: "Durable bytes the account owns across media, expanded application release trees, and application key/value entries." }, reserved_bytes: { type: integer, description: "Bytes held by uploads in flight. They count against a custom storage ceiling until the upload commits or its reservation is released." }, screen_count: { type: integer }, content_limit_bytes: { type: integer, description: "Storage ceiling the account's plan allows. Zero means no product storage cap." }, screen_limit: { type: integer, description: "Screen limit the account's plan allows. Zero means no screen cap." }, credit_remaining: { type: integer, minimum: 0, description: "Remaining prepaid credits as a whole integer. Never negative. Standard includes no monthly credit grant. Every account waives the first 10 GB of bandwidth, 1 GB-month of storage, and 10,000 API or billed listen-stream taxes each UTC month." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
-    RuntimeChrome: { type: object, additionalProperties: false, required: [schema_version, banner], properties: { schema_version: { type: integer, enum: [1] }, banner: { type: "null" } } }
+    RuntimeChrome:
+      type: object
+      additionalProperties: true
+      required: [schema_version, banner]
+      description: Runtime-owned chrome (docs/player-compatibility.md §8). Readers read the members they know and ignore the rest; a banner shape a reader does not understand shows no banner.
+      properties:
+        schema_version: { type: integer, minimum: 1 }
+        banner: { oneOf: [{ type: "null" }, { type: object, additionalProperties: true }] }
     CLIEnrollment: { type: object, additionalProperties: false, required: [account, agent, connection_ready, token, issuance_id, issuance_expires_at], properties: { account: { $ref: "#/components/schemas/Account" }, agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, enum: [false], description: "A newly enrolled account has neither a registered dashboard passkey nor password, so approval of another agent is not ready. Re-read GET /api/v1/agents/self after configuring either retained dashboard credential." }, token: { type: string, minLength: 32, description: Permanent bearer credential for exactly this first agent. It has no scheduled expiry and is redelivered only through this short-lived encrypted issuance envelope. }, issuance_id: { type: string, description: Opaque identifier for the encrypted exact-retry delivery envelope. }, issuance_expires_at: { type: string, format: date-time, description: Exact-retry redelivery deadline for this credential issuance; ten minutes after first enrollment. Later exact retries return credential_issuance_expired while the permanent token remains valid. } } }
     AgentInput: { type: object, additionalProperties: false, properties: { name: { type: string, minLength: 1, maxLength: 80, default: "ScreenRig CLI" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
     Agent:
@@ -4269,12 +4351,13 @@ components:
         playlistId: { type: string }
         playlistRevision: { type: integer }
         generatedAt: { type: string }
-        timezone: { type: string }
+        playlistName: { type: string, description: "Emitted only to sessions granted playlist-name (docs/player-compatibility.md §4.4)." }
+        timezone: { type: string, description: "Legacy sessions: emitted when the screen has a zone. Contract sessions: emitted only with the timezone grant (docs/player-compatibility.md §4.2)." }
         pages: { type: array, items: { type: object, additionalProperties: true } }
-        diagnostics: { type: array, items: { type: object, additionalProperties: true } }
+        diagnostics: { type: array, items: { type: object, additionalProperties: true }, description: "Legacy sessions: emitted when non-empty. Contract sessions: emitted only with the diagnostics grant. A session granted rule4 gets a degraded projection as 200 pages [] with diagnostics; every other session gets 503 manifest_degraded." }
     RuntimeAdslotCandidate:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [page_id, occurrence_id, check_sequence, earliest_start_at]
       properties:
         page_id: { type: string }
@@ -4283,14 +4366,14 @@ components:
         earliest_start_at: { type: string, format: date-time }
     RuntimeAdslotResolveRequest:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [manifest_revision, candidates]
       properties:
         manifest_revision: { type: string }
         candidates: { type: array, minItems: 1, maxItems: 16, items: { $ref: "#/components/schemas/RuntimeAdslotCandidate" } }
     RuntimeAdslotMedia:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [kind, duration_ms, content_type, bytes, sha256, content_path, fit]
       properties:
         kind: { type: string, enum: [image, video] }
@@ -4303,7 +4386,7 @@ components:
         codecs: { type: string }
     RuntimeAdslotResult:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [occurrence_id, check_sequence, state]
       properties:
         occurrence_id: { type: string }
@@ -4320,14 +4403,14 @@ components:
         hint_until: { type: string, format: date-time, description: "No-fill hint expiry on the server clock." }
     RuntimeAdslotResolveResponse:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [server_time, results]
       properties:
         server_time: { type: string, format: date-time }
         results: { type: array, items: { $ref: "#/components/schemas/RuntimeAdslotResult" } }
     RuntimeAdslotEvent:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [event_id, decision_id, occurrence_id, kind, client_sequence]
       properties:
         event_id: { type: string }
@@ -4340,20 +4423,20 @@ components:
         duration_ms: { type: integer, minimum: 0 }
     RuntimeAdslotEventBatch:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [events]
       properties:
         events: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/RuntimeAdslotEvent" } }
     RuntimeAdslotEventResult:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [event_id, state]
       properties:
         event_id: { type: string }
         state: { type: string, enum: [accepted, duplicate, rejected, pending_evidence, unbillable] }
     RuntimeAdslotEventResponse:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [results]
       properties:
         results: { type: array, items: { $ref: "#/components/schemas/RuntimeAdslotEventResult" } }
@@ -4646,6 +4729,39 @@ components:
         observation: { $ref: "#/components/schemas/ScreenObservation" }
         last_page_failure: { $ref: "#/components/schemas/PageFailure" }
         comments: { type: object, additionalProperties: true, description: "Opaque agent JSON object, compact UTF-8 ≤ 1024 bytes. Absent when unset. ScreenRig never reads or uses it. ScreenPatch cannot write it. Not on the runtime manifest and never authorization." }
+        ads_unsupported:
+          type: object
+          additionalProperties: false
+          required: [at]
+          description: >-
+            Present once a paired Player that did not register adslot-v1 was
+            served a manifest with an adslot page: that Player shows house
+            content only. at is the latest observation, refreshed at most once
+            a day. Read-only account health metadata; it does not change screen
+            revision or manifest authority.
+          properties:
+            at: { type: string, format: date-time }
+        applications_unsupported:
+          type: object
+          additionalProperties: false
+          required: [at]
+          description: >-
+            Present while this screen's paired Player cannot show the
+            application or iframe primitives its manifest carries: a contract
+            Player that did not declare web-content-v1 (the Apple Player never
+            does; docs/player-compatibility.md §4.4, §10). The manifest is
+            unchanged; the Player drops those primitives, and a page left with
+            none. at is when the condition began. It is set once when the
+            condition begins and removed when it ends (the Player gains the
+            token, or its manifest no longer carries such primitives), each
+            transition appending one account-only event,
+            screen.applications_unsupported or
+            screen.applications_unsupported_cleared. A legacy Player, whose
+            capability is unknown, never sets or clears it. Read-only account
+            health metadata; it does not change screen revision or manifest
+            authority.
+          properties:
+            at: { type: string, format: date-time }
         revision: { type: integer }
         manifest_revision: { type: integer }
         content_access_generation: { type: integer }
@@ -4697,6 +4813,24 @@ components:
             Account cannot write it.
         recovery_pending:
           $ref: "#/components/schemas/ScreenRecoveryPending"
+        archive_reason:
+          type: string
+          description: >-
+            Present only while state is archived: what archived the screen.
+            Known values: account (an account or dashboard archive request),
+            device_reset (a signed on-player native identity.reset of the key
+            bound to this screen), and device_unpair (a cookie-paired
+            browser's own POST /runtime/v1/unpair). Every reason has the same
+            effect: the screen leaves the default list, its glass is dark, and
+            its device binding is kept, so the device keeps minting and
+            unarchive resumes it with no re-pairing
+            (docs/player-compatibility.md §5.1). Absent on screens archived
+            before reasons were recorded. Readers ignore a value they do not
+            know. Read-only.
+        archived_at:
+          type: string
+          format: date-time
+          description: Present only while state is archived and archive_reason is present. Instant the screen was archived. Read-only.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     HostContext:
@@ -4712,7 +4846,7 @@ components:
         to any account other than the owner's. Read-only on the account API;
         ScreenPatch cannot write it.
       properties:
-        platform: { type: string, enum: [tizen, android, windows, qt, apple, chromeos, browser, brightsign] }
+        platform: { type: string, pattern: "^[a-z][a-z0-9-]{0,31}$", description: "Registered values: tizen, android, windows, qt, apple, chromeos, browser, brightsign. Another value matching the pattern is stored as the player reported it." }
         host_version: { type: string, minLength: 1, maxLength: 40, description: "Shell or container product version, CalVer or vendor form." }
         device: { $ref: "#/components/schemas/HostDevice" }
         capabilities: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[a-z0-9_]{1,40}$" } }
@@ -4724,6 +4858,36 @@ components:
         duid: { type: string, minLength: 6, maxLength: 128, pattern: "^[A-Za-z0-9:_-]+$" }
         serial: { type: string, minLength: 4, maxLength: 128, pattern: "^[A-Za-z0-9:_-]+$" }
         mac: { type: string, minLength: 6, maxLength: 64, pattern: "^[A-Za-z0-9:_-]+$", description: Colon or dash separated hex accepted as-is. }
+        model: { type: string, minLength: 1, maxLength: 80 }
+        firmware: { type: string, minLength: 1, maxLength: 80 }
+        manufacturer: { type: string, minLength: 1, maxLength: 80 }
+    RuntimeHostHint:
+      type: object
+      additionalProperties: true
+      required: [platform]
+      description: >-
+        The optional native host hint on pairing start, pairing completion, and
+        identity session mint. It names a device and is never authorization.
+        It is read tolerantly (docs/player-compatibility.md §1.1.1): unknown
+        members are ignored, a malformed field or capabilities entry is
+        dropped, at most 32 capabilities are kept, and a value that is not an
+        object or a platform outside the pattern drops the whole hint. None of
+        these refuses the request. A Player still sends only the registered
+        platform values and the members below, because a pre-contract backend
+        refuses anything else.
+      properties:
+        platform: { type: string, pattern: "^[a-z][a-z0-9-]{0,31}$", description: "Registered values: tizen, android, windows, qt, apple, chromeos, browser, brightsign." }
+        host_version: { type: string, minLength: 1, maxLength: 40 }
+        device: { $ref: "#/components/schemas/RuntimeHostHintDevice" }
+        capabilities: { type: array, items: { type: string, pattern: "^[a-z0-9_]{1,40}$" } }
+    RuntimeHostHintDevice:
+      type: object
+      additionalProperties: true
+      description: Optional hardware identifiers in the native host hint. A malformed field is dropped.
+      properties:
+        duid: { type: string, minLength: 6, maxLength: 128, pattern: "^[A-Za-z0-9:_-]+$" }
+        serial: { type: string, minLength: 4, maxLength: 128, pattern: "^[A-Za-z0-9:_-]+$" }
+        mac: { type: string, minLength: 6, maxLength: 64, pattern: "^[A-Za-z0-9:_-]+$" }
         model: { type: string, minLength: 1, maxLength: 80 }
         firmware: { type: string, minLength: 1, maxLength: 80 }
         manufacturer: { type: string, minLength: 1, maxLength: 80 }
@@ -4803,6 +4967,27 @@ components:
       properties:
         observed_at: { type: string, format: date-time }
         surfaces: { type: array, minItems: 1, maxItems: 1, items: { $ref: "#/components/schemas/ScreenObservationSurface" } }
+    RuntimeObservationWrite:
+      type: object
+      additionalProperties: true
+      required: [observed_at, surfaces]
+      description: >-
+        The PUT /runtime/v1/observation body. Unknown members are ignored
+        (docs/player-compatibility.md §1.1). The stored value is the account
+        ScreenObservation.
+      properties:
+        observed_at: { type: string, format: date-time }
+        surfaces: { type: array, minItems: 1, maxItems: 1, items: { $ref: "#/components/schemas/RuntimeObservationSurfaceWrite" } }
+    RuntimeObservationSurfaceWrite:
+      type: object
+      additionalProperties: true
+      required: [id, width, height, pixel_ratio, presentation]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 64 }
+        width: { type: integer, minimum: 1, maximum: 100000 }
+        height: { type: integer, minimum: 1, maximum: 100000 }
+        pixel_ratio: { type: number, exclusiveMinimum: 0, maximum: 32 }
+        presentation: { type: string, minLength: 1, description: "output or windowed. Another value is recorded as output, because the account ScreenObservation knows only those two." }
     ScreenToastWrite:
       type: object
       additionalProperties: false
@@ -4811,6 +4996,13 @@ components:
         level: { type: string, enum: [error, alert, info], description: Closed severity token. Player chrome chooses the fill; the API never carries a colour. }
         text: { type: string, minLength: 1, maxLength: 120, description: "1 to 120 characters. Line feed is the only accepted line break. At most three lines. Other control characters and recognizable ScreenRig credential material are rejected." }
         duration_ms: { type: integer, minimum: 2000, maximum: 60000, default: 10000, description: Visible duration in milliseconds. Omitted values default to 10000. }
+    ScreenReloadAccepted:
+      type: object
+      additionalProperties: false
+      required: [reload_id, expires_at]
+      properties:
+        reload_id: { type: string, pattern: "^[A-Za-z0-9_-]{8,64}$", description: "details.reload_id of the player.reload event. A Player acts on one reload_id at most once." }
+        expires_at: { type: string, format: date-time, description: Instant after which runtime scan must not deliver the reload and a Player ignores it. }
     ScreenToastAccepted:
       type: object
       additionalProperties: false
@@ -4970,6 +5162,10 @@ components:
     KVEntry: { type: object, additionalProperties: false, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, value_base64: { type: string, contentEncoding: base64 }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer } } }
     KVSummary: { type: object, additionalProperties: false, required: [application_id, key, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string }, updated_at: { type: string } } }
     KVList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/KVSummary" } } } }
+    RuntimeKVWrite: { type: object, additionalProperties: true, required: [value_base64], properties: { value_base64: { type: string, contentEncoding: base64, maxLength: 1398104 }, content_type: { type: string, minLength: 1, maxLength: 127, default: application/octet-stream } } }
+    RuntimeKVEntry: { type: object, additionalProperties: true, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, value_base64: { type: string, contentEncoding: base64 }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer } } }
+    RuntimeKVSummary: { type: object, additionalProperties: true, required: [application_id, key, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string }, updated_at: { type: string } } }
+    RuntimeKVList: { type: object, additionalProperties: true, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/RuntimeKVSummary" } } } }
     MediaGenerationRequest:
       type: object
       additionalProperties: false
@@ -5061,8 +5257,8 @@ components:
         context: { $ref: "#/components/schemas/FeedbackContext" }
         created_at: { type: string, format: date-time }
     FeedbackList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/FeedbackSubmission" } } } }
-    PairingSession: { type: object, additionalProperties: false, required: [code, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, expires_at: { type: string, format: date-time } } }
-    NativePairingSession: { type: object, additionalProperties: false, required: [code, pairing_credential, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, pairing_credential: { type: string, pattern: "^srp_[A-Za-z0-9_-]{43}$" }, expires_at: { type: string, format: date-time, description: Unclaimed native pairing deadline; seventy-two hours after issuance. After claim this deadline does not expire native delivery or device identity. }, recovery: { $ref: "#/components/schemas/NativePairingRecovery" } } }
+    PairingSession: { type: object, additionalProperties: true, required: [code, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, expires_at: { type: string, format: date-time } } }
+    NativePairingSession: { type: object, additionalProperties: true, required: [code, pairing_credential, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, pairing_credential: { type: string, pattern: "^srp_[A-Za-z0-9_-]{43}$" }, expires_at: { type: string, format: date-time, description: Unclaimed native pairing deadline; seventy-two hours after issuance. After claim this deadline does not expire native delivery or device identity. }, recovery: { $ref: "#/components/schemas/NativePairingRecovery" } } }
     NativePairingRecovery:
       type: object
       additionalProperties: false
@@ -5082,8 +5278,8 @@ components:
         offered: { type: boolean, enum: [true] }
     PairingClaimedEvent: { type: object, additionalProperties: false, required: [type, completion_nonce], properties: { type: { type: string, enum: [pairing.claimed] }, completion_nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
     PairingClaim: { type: object, additionalProperties: false, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri } } }
-    PairingComplete: { type: object, additionalProperties: false, required: [completion_nonce], properties: { completion_nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
-    PairingCompletion: { type: object, additionalProperties: false, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri } } }
+    PairingComplete: { type: object, additionalProperties: true, required: [completion_nonce], properties: { completion_nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
+    PairingCompletion: { type: object, additionalProperties: true, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/RuntimePairingScreen" }, public_url: { type: string, format: uri } } }
     PlayerPublicKey:
       type: object
       additionalProperties: false
@@ -5095,27 +5291,27 @@ components:
         kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$", description: Optional RFC 7638 SHA-256 JWK thumbprint; the server computes kid from the JWK. }
     NativePairingStart:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [kid, public_key, signature]
-      description: Proof of private-key possession is required before enrollment or locator creation. Sign a fresh pairing.start challenge bound to the exact Idempotency-Key; unsigned starts are rejected. The optional host object is a hint about the device, not a credential; it is stored on the screen at claim and may open a recovery offer account-side. Unknown host keys or out-of-range values are invalid_request.
+      description: Proof of private-key possession is required before enrollment or locator creation. Sign a fresh pairing.start challenge bound to the exact Idempotency-Key; unsigned starts are rejected. The optional host object is a hint about the device, not a credential; it is stored on the screen at claim and may open a recovery offer account-side. Unknown body members are ignored. The host hint is read tolerantly. An unknown host key is ignored and a malformed host field is dropped, never refused (docs/player-compatibility.md §1.1.1).
       properties:
         kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
         public_key: { $ref: "#/components/schemas/PlayerPublicKey" }
         signature: { type: string, minLength: 80, maxLength: 4096 }
-        host: { $ref: "#/components/schemas/HostContext" }
+        host: { $ref: "#/components/schemas/RuntimeHostHint" }
     NativePairingComplete:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [completion_nonce, public_key, signature]
       properties:
         kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
         completion_nonce: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
         public_key: { $ref: "#/components/schemas/PlayerPublicKey" }
         signature: { type: string, minLength: 80, maxLength: 4096, description: Compact EdDSA JWS with op=pairing.complete and request_hash binding the exact pairing credential and completion nonce. }
-        host: { $ref: "#/components/schemas/HostContext" }
+        host: { $ref: "#/components/schemas/RuntimeHostHint" }
     NativeIdentityChallengeRequest:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [kid, op, request_hash]
       description: Supply the operation and its request_hash for every challenge. An unknown key also requires public_key and op=pairing.start. Creating a challenge does not enroll the key.
       properties:
@@ -5125,7 +5321,7 @@ components:
         request_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
     NativeIdentityChallenge:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [nonce, expires_at, aud, op, request_hash]
       description: Compare the returned op and request_hash with your locally computed values before signing. Each nonce expires in 120 seconds and can be consumed once.
       properties:
@@ -5136,7 +5332,7 @@ components:
         request_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
     NativeIdentityProof:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [kid, public_key, signature]
       description: >-
         Compact JWS protected header is exactly {"alg":"EdDSA"}. Claims are kid,
@@ -5150,38 +5346,195 @@ components:
         Every proof must include request_hash. A cached
         operation result still requires a fresh issued proof or the exact accepted
         proof while its short-lived receipt remains valid. Duplicate or unknown
-        JWS/JWK members, noncanonical base64url, and non-prime-order keys are rejected.
+        JWS/JWK members, noncanonical base64url, and non-prime-order keys are rejected. Unknown request body members are ignored.
       properties:
         kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
         public_key: { $ref: "#/components/schemas/PlayerPublicKey" }
         signature: { type: string, minLength: 80, maxLength: 4096, description: Compact EdDSA JWS. }
     NativeIdentitySessionRequest:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [kid, public_key, signature]
       description: >-
         NativeIdentityProof with op=session.mint plus the optional host hint. A
         present host REPLACES the host stored on the screen, because firmware
         and shell versions drift over a screen's life. The hint never affects
-        authorization; only the signed proof does.
+        authorization; only the signed proof does. Unknown members are ignored,
+        and host and playback are read tolerantly (docs/player-compatibility.md
+        §1.1). A backend that predates the playback handshake refuses playback
+        with invalid_request; retry once without it, with a new Idempotency-Key
+        and a fresh proof.
       properties:
         kid: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
         public_key: { $ref: "#/components/schemas/PlayerPublicKey" }
         signature: { type: string, minLength: 80, maxLength: 4096, description: Compact EdDSA JWS with op=session.mint. }
-        host: { $ref: "#/components/schemas/HostContext" }
-    NativePairingCompletion: { type: object, additionalProperties: false, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri } } }
-    BrowserProvisioningExchange: { type: object, additionalProperties: false, required: [provisioning_token, exchange_id], properties: { provisioning_token: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }, exchange_id: { type: string, pattern: "^xchg_[A-Za-z0-9_-]{43}$" } } }
-    BrowserProvisioningCompletion: { type: object, additionalProperties: false, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri } } }
+        host: { $ref: "#/components/schemas/RuntimeHostHint" }
+        playback: { $ref: "#/components/schemas/PlaybackHandshake" }
+        player: { $ref: "#/components/schemas/PlayerIdentity" }
+    NativePairingCompletion: { type: object, additionalProperties: true, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/RuntimePairingScreen" }, public_url: { type: string, format: uri } } }
+    BrowserProvisioningExchange: { type: object, additionalProperties: true, required: [provisioning_token, exchange_id], properties: { provisioning_token: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }, exchange_id: { type: string, pattern: "^xchg_[A-Za-z0-9_-]{43}$" } } }
+    BrowserProvisioningCompletion: { type: object, additionalProperties: true, required: [screen, public_url], properties: { screen: { $ref: "#/components/schemas/RuntimePairingScreen" }, public_url: { type: string, format: uri } } }
+    RuntimePairingScreen:
+      type: object
+      additionalProperties: true
+      required: [id, public_id, label, state, revision, manifest_revision, content_access_generation, created_at, updated_at]
+      description: >-
+        Runtime-owned screen summary in pairing and browser provisioning
+        completions. Its member set is frozen: account Screen fields never
+        appear here (docs/player-compatibility.md §8). state stays within the
+        three values below.
+      properties:
+        id: { type: string }
+        public_id: { type: string }
+        label: { type: string }
+        playlist_id: { type: string }
+        state: { type: string, enum: [pairing_pending, active, archived] }
+        revision: { type: integer }
+        manifest_revision: { type: integer }
+        content_access_generation: { type: integer }
+        online: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     BrowserLinkSession: { type: object, additionalProperties: false, required: [session_id, code, display_code, status, expires_at], properties: { session_id: { type: string, pattern: "^blink_" }, code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, display_code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{3}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{3}$" }, status: { type: string, enum: [waiting, claimed] }, expires_at: { type: string, format: date-time } } }
     BrowserLinkStatus: { type: object, additionalProperties: false, required: [session_id, code, display_code, status, continuation_path, expires_at], properties: { session_id: { type: string, pattern: "^blink_" }, code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, display_code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{3}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{3}$" }, status: { type: string, enum: [waiting, claimed] }, continuation_path: { type: string, enum: [/runtime/v1/browser-links/continue] }, expires_at: { type: string, format: date-time } } }
     BrowserLinkEvent: { type: object, additionalProperties: false, required: [session_id, status, event_id, expires_at], properties: { session_id: { type: string, pattern: "^blink_" }, status: { type: string, enum: [waiting, claimed] }, event_id: { type: string, enum: ["1", "2"] }, expires_at: { type: string, format: date-time } } }
     BrowserLinkClaimRequest: { type: object, additionalProperties: false, required: [code], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{3}-?[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{3}$" } } }
     BrowserLinkClaimScreen: { type: object, additionalProperties: false, required: [id, public_id, state, public_url], properties: { id: { type: string }, public_id: { type: string }, state: { type: string, enum: [pairing_pending] }, public_url: { type: string, format: uri, pattern: "^[^#]+$" } } }
     BrowserLinkClaim: { type: object, additionalProperties: false, required: [session_id, status, screen], properties: { session_id: { type: string, pattern: "^blink_" }, status: { type: string, enum: [claimed] }, screen: { $ref: "#/components/schemas/BrowserLinkClaimScreen" } } }
-    RuntimeSessionRequest: { type: object, additionalProperties: false, required: [public_id], properties: { public_id: { type: string } } }
-    DeviceSessionRequest: { type: object, additionalProperties: false, properties: { public_id: { type: string, minLength: 1 } } }
-    RuntimeSession: { type: object, additionalProperties: false, required: [paired, capabilities, event_cursor, public_url], properties: { paired: { type: boolean }, capabilities: { type: array, items: { type: string, enum: [manifest.read, events.read, content.read, kv.read, kv.write, runtime.report, presence.write] } }, event_cursor: { type: string }, public_url: { type: string, format: uri } } }
-    NativeRuntimeSession: { type: object, additionalProperties: false, required: [paired, capabilities, event_cursor, public_url, runtime_credential], properties: { paired: { type: boolean, enum: [true] }, capabilities: { type: array, items: { type: string, enum: [manifest.read, events.read, content.read, kv.read, kv.write, runtime.report, presence.write] } }, event_cursor: { type: string }, public_url: { type: string, format: uri }, runtime_credential: { type: string, pattern: "^srs_[A-Za-z0-9_-]+$" } } }
+    RuntimeSessionRequest:
+      type: object
+      additionalProperties: true
+      required: [public_id]
+      description: Anonymous viewer mint. Unknown members are ignored (docs/player-compatibility.md §1.1). A backend that predates the playback handshake or player refuses them with invalid_request; retry once without player, then once without playback (§5.4).
+      properties:
+        public_id: { type: string }
+        playback: { $ref: "#/components/schemas/PlaybackHandshake" }
+        player: { $ref: "#/components/schemas/PlayerIdentity" }
+    DeviceSessionRequest:
+      type: object
+      additionalProperties: true
+      description: Cookie-paired browser mint. The body is optional. Unknown members are ignored (docs/player-compatibility.md §1.1).
+      properties:
+        public_id: { type: string, minLength: 1 }
+        playback: { $ref: "#/components/schemas/PlaybackHandshake" }
+        player: { $ref: "#/components/schemas/PlayerIdentity" }
+    PlayerIdentity:
+      type: object
+      additionalProperties: true
+      required: [kind]
+      description: >-
+        Player self-identification, sent only on the three mint routes
+        (docs/player-compatibility.md §3.1). It is a hint and never
+        authorization, and it is not covered by the native proof. It is read
+        tolerantly: unknown members are ignored, an invalid optional member
+        is dropped on its own, and a player that is not an object or has no
+        valid kind makes the session legacy. It is never a 400. A paired mint
+        stores it on the screen for the operator fleet histogram.
+      properties:
+        kind: { type: string, pattern: "^[a-z][a-z0-9-]{0,31}$", description: "Rendering codebase, not hardware. Registered: web, android, qt, windows, apple. Unknown kinds are stored as given." }
+        version: { type: string, minLength: 1, maxLength: 40, description: "Running build's CalVer YY.MM.N with an optional -suffix. Only exactly YY.MM.N or YY.MM.N-direct is comparable; every other value is served and never refused." }
+        build: { type: string, pattern: "^[0-9a-f]{7,40}$" }
+        version_code: { type: integer, minimum: 1, maximum: 2147483647 }
+        flavor: { type: string, pattern: "^[a-z0-9-]{1,32}$" }
+        shell: { $ref: "#/components/schemas/PlayerShellIdentity" }
+        compat: { type: array, maxItems: 64, items: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$", maxLength: 40 }, description: "Declared compat tokens. Invalid entries are dropped and duplicates collapse. The mint response echoes the granted subset as compat." }
+    PlayerShellIdentity:
+      type: object
+      additionalProperties: true
+      required: [kind]
+      description: The shell a web Player runs under. Its compat tokens are recorded, never granted. An invalid kind drops the shell.
+      properties:
+        kind: { type: string, pattern: "^[a-z][a-z0-9-]{0,31}$", description: "Shell kind such as tizen or brightsign." }
+        version: { type: string, minLength: 1, maxLength: 40 }
+        build: { type: string, pattern: "^[0-9a-f]{7,40}$" }
+        compat: { type: array, items: { type: string } }
+    RuntimeOrigins:
+      type: object
+      additionalProperties: true
+      required: [content]
+      description: >-
+        The delivered origin allowlist (docs/player-compatibility.md §2.3).
+        Present on a mint response only for a Player granted origins-v1. The
+        Player unions content with its compiled content origins and ignores
+        an invalid entry. release_suffix replaces the compiled release suffix
+        only when it is a valid DNS suffix of at least two labels; it is absent
+        when the runtime origin serves releases itself (local development).
+        The delivered set never changes the credential origin, and the
+        backend never puts a URL on an origin this session's mint did not
+        deliver. A Player stores the object it validated last-known-good
+        under, so a later session without origins keeps that LKG valid.
+      properties:
+        content: { type: array, items: { type: string, format: uri }, description: "https origins with no path. The runtime origin first, then any operator-configured content origins." }
+        release_suffix: { type: string, description: "DNS suffix of application release origins, such as apps.screenrig.ai." }
+    RuntimeUpgradeNotice:
+      type: object
+      additionalProperties: true
+      required: [state, player_kind, recommended]
+      description: >-
+        Present on a mint response only for a Player granted upgrade-v1 whose
+        comparable version is below the recommended version for player_kind
+        (docs/player-compatibility.md §6.1). The Player starts a platform
+        update check and shows nothing on glass. A reader ignores the member
+        for a state it does not know.
+      properties:
+        state: { type: string, description: "Known value: recommended." }
+        player_kind: { type: string, description: "The floor key: a player kind, or shell:<kind>." }
+        min_supported: { type: string, description: "The configured minimum for player_kind, when one is set." }
+        recommended: { type: string }
+    PlaybackHandshake:
+      type: object
+      additionalProperties: true
+      description: >-
+        Optional playback handshake a Player declares at mint. It is a hint that
+        selects behavior, never authorization: unknown members and entries of
+        the wrong type are ignored, and a value that is not an object
+        negotiates nothing. The mint response echoes the supported
+        intersection as PlaybackGrant. adslot-v1 is granted only to paired
+        sessions.
+      properties:
+        capabilities: { type: array, items: { type: string }, description: "Requested playback features. Known value: adslot-v1." }
+        manifest_versions: { type: array, items: { type: integer }, description: "Manifest schemaVersion values the Player renders. Known values: 2 and 3." }
+    PlaybackGrant:
+      type: object
+      additionalProperties: true
+      description: >-
+        The playback handshake the backend granted: the intersection of the
+        mint's PlaybackHandshake and what this backend supports, signed into the
+        session. Omitted from the session when nothing intersects, so a session
+        minted without a handshake is unchanged. A Player uses
+        /runtime/v2/manifest only when manifest_versions contains 3.
+      properties:
+        capabilities: { type: array, items: { type: string }, description: "Granted playback features. Known value: adslot-v1." }
+        manifest_versions: { type: array, items: { type: integer }, description: "Granted manifest schemaVersion values: 2 for /runtime/v1/manifest, 3 for /runtime/v2/manifest." }
+    RuntimeSession:
+      type: object
+      additionalProperties: true
+      required: [paired, capabilities, event_cursor, public_url]
+      description: Runtime-owned session (docs/player-compatibility.md §8). Readers ignore unknown members and unknown capabilities values. A new member is sent only to sessions whose grants cover it.
+      properties:
+        paired: { type: boolean }
+        capabilities: { type: array, items: { type: string }, description: "Session scopes. Known values: manifest.read, events.read, content.read, kv.read, kv.write, runtime.report, presence.write." }
+        event_cursor: { type: string }
+        public_url: { type: string, format: uri }
+        playback: { $ref: "#/components/schemas/PlaybackGrant" }
+        compat: { type: array, items: { type: string }, description: "Granted compat tokens, in registry order. Present only when the mint carried a valid player, and [] when nothing was granted, so a Player can tell a contract backend from one that predates compat (docs/player-compatibility.md §4.1). Readers ignore tokens they do not know." }
+        upgrade: { $ref: "#/components/schemas/RuntimeUpgradeNotice" }
+        origins: { $ref: "#/components/schemas/RuntimeOrigins" }
+    NativeRuntimeSession:
+      type: object
+      additionalProperties: true
+      required: [paired, capabilities, event_cursor, public_url, runtime_credential]
+      description: Runtime-owned native session (docs/player-compatibility.md §8). Readers ignore unknown members and unknown capabilities values. A new member is sent only to sessions whose grants cover it.
+      properties:
+        paired: { type: boolean, enum: [true] }
+        capabilities: { type: array, items: { type: string }, description: "Session scopes. Known values: manifest.read, events.read, content.read, kv.read, kv.write, runtime.report, presence.write." }
+        event_cursor: { type: string }
+        public_url: { type: string, format: uri }
+        runtime_credential: { type: string, pattern: "^srs_[A-Za-z0-9_-]+$" }
+        playback: { $ref: "#/components/schemas/PlaybackGrant" }
+        compat: { type: array, items: { type: string }, description: "Granted compat tokens, in registry order. Present only when the mint carried a valid player, and [] when nothing was granted (docs/player-compatibility.md §4.1)." }
+        upgrade: { $ref: "#/components/schemas/RuntimeUpgradeNotice" }
+        origins: { $ref: "#/components/schemas/RuntimeOrigins" }
     RuntimeManifest:
       type: object
       description: >-
@@ -5198,16 +5551,17 @@ components:
         playlistId: { type: string }
         playlistRevision: { type: integer }
         generatedAt: { type: string }
-        timezone: { type: string, description: "IANA time zone identifier of the screen. Emitted only when the screen has one. Every page visibility rule in this manifest is evaluated in this zone. A manifest that carries any page visibility always carries it." }
+        playlistName: { type: string, description: "Name of the assigned playlist. Emitted only to sessions granted playlist-name (docs/player-compatibility.md §4.4); a legacy session never receives it." }
+        timezone: { type: string, description: "IANA time zone identifier of the screen. Every page visibility rule in this manifest is evaluated in this zone. A legacy session (minted without a valid player) receives it whenever the screen has one. A contract session receives it only with the timezone grant; without it a Player shows every page whose visibility it cannot evaluate (docs/player-compatibility.md §1.3, §4.2)." }
         pages: { type: array, items: { $ref: "#/components/schemas/RuntimePage" } }
-        diagnostics: { type: array, items: { $ref: "#/components/schemas/RuntimeManifestDiagnostic" }, description: "Page- and primitive-level projection omissions. Emitted only when projection dropped a field, primitive, or page. A healthy manifest omits this key. Compatibility rule 4: HTTP 200 with pages [] and a non-empty diagnostics array is a degraded projection — the player keeps last-known-good, shows the offline chip, and does not persist. HTTP 200 with pages [] and no diagnostics is an authored empty assignment — the player replaces last-known-good and shows no-content. Until every player ships rule 4, GET /runtime/v1/manifest returns 503 manifest_degraded instead of 200 for the degraded case." }
+        diagnostics: { type: array, items: { $ref: "#/components/schemas/RuntimeManifestDiagnostic" }, description: "Page- and primitive-level projection omissions. Emitted only when projection dropped a field, primitive, or page; a healthy manifest omits this key. A legacy session receives it whenever it is non-empty; a contract session only with the diagnostics grant. Compatibility rule 4: HTTP 200 with pages [] and a non-empty diagnostics array is a degraded projection — the player keeps last-known-good, shows the offline chip, and does not persist. HTTP 200 with pages [] and no diagnostics is an authored empty assignment — the player replaces last-known-good and shows no-content. A session granted rule4 receives the degraded case as that 200; every other session receives 503 manifest_degraded instead." }
     RuntimeManifestDiagnostic:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [level, code, detail]
       description: One fail-safe runtime projection omission. Players and the CLI may show these; they are never authorization.
       properties:
-        level: { type: string, enum: [warning] }
+        level: { type: string, description: "Always warning today. A reader treats a level it does not know as warning." }
         code: { type: string, description: "Stable machine code such as unknown_field, unknown_enter_type, unknown_motion_type, unknown_transition_type, capability_issue, invalid_stagger, invalid_enter, invalid_motion, invalid_primitive, invalid_page, or invalid_visibility." }
         pageId: { type: string }
         primitiveId: { type: string }
@@ -5225,7 +5579,6 @@ components:
         primitives: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/RuntimePrimitive" }, description: Source array order is the deterministic tie-breaker for equal layers. }
     RuntimeCanvas:
       type: object
-      additionalProperties: false
       required: [width, height, viewportFit, background]
       properties:
         width: { type: number, exclusiveMinimum: 0 }
@@ -5234,7 +5587,6 @@ components:
         background: { $ref: "#/components/schemas/CanvasBackground" }
     RuntimeRect:
       type: object
-      additionalProperties: false
       required: [x, y, width, height]
       properties:
         x: { type: number }
@@ -5243,14 +5595,12 @@ components:
         height: { type: number, exclusiveMinimum: 0 }
     RuntimeIntrinsicSize:
       type: object
-      additionalProperties: false
       required: [width, height]
       properties:
         width: { type: number, exclusiveMinimum: 0 }
         height: { type: number, exclusiveMinimum: 0 }
     RuntimeTransition:
       type: object
-      additionalProperties: false
       required: [type, durationMs]
       description: Authored page transition. The runtime mint passes type through; it does not rewrite swipe to crossfade.
       properties:
@@ -5258,7 +5608,6 @@ components:
         durationMs: { type: integer }
     RuntimeAdvance:
       type: object
-      additionalProperties: false
       required: [mode]
       properties:
         mode: { type: string, enum: [duration, application, media_end] }
@@ -5282,7 +5631,7 @@ components:
         releaseId: { type: string }
         launchUrl: { type: string }
         origin: { type: string }
-        protocol: { type: string, enum: ["1"] }
+        protocol: { type: string, description: "SDK bridge protocol. Known value: \"1\". A reader drops the primitive for a protocol it does not implement." }
         grantId: { type: string }
         package: { $ref: "#/components/schemas/RuntimeApplicationPackage" }
         rect: { $ref: "#/components/schemas/RuntimeRect" }
@@ -5330,7 +5679,7 @@ components:
     UDPStreamSource: {"type": "object", "additionalProperties": false, "required": ["protocol", "group", "port"], "properties": {"protocol": {"type": "string", "enum": ["udp-mpegts"]}, "group": {"type": "string", "description": "IPv4 ASM group within 239.0.0.0/8. Raw MPEG-TS over UDP, not RTP."}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}}}
     PlaylistStreamPrimitiveWrite: {"type": "object", "additionalProperties": false, "required": ["id", "primitive", "sources", "fallback_media_id", "rect", "layer", "content_fit"], "properties": {"id": {"type": "string"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSource"}}, "muted": {"type": "boolean", "default": true}, "rect": {"$ref": "#/components/schemas/PlaylistRect"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "content_fit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "fallback_media_id": {"type": "string", "pattern": "^med_"}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}}}
     PlaylistStreamPrimitive: {"type": "object", "additionalProperties": false, "required": ["id", "primitive", "sources", "fallback_media_id", "rect", "layer", "content_fit", "muted", "controller", "resolved_media"], "properties": {"id": {"type": "string"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSource"}}, "muted": {"type": "boolean", "default": true}, "rect": {"$ref": "#/components/schemas/PlaylistRect"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "content_fit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "fallback_media_id": {"type": "string", "pattern": "^med_"}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}, "controller": {"type": "boolean", "enum": [false]}, "resolved_media": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"$ref": "#/components/schemas/PlaylistResolvedMedia"}}}}
-    RuntimeStreamPrimitive: {"type": "object", "additionalProperties": false, "required": ["id", "primitive", "sources", "muted", "fallback", "grantId", "rect", "layer", "contentFit"], "properties": {"id": {"type": "string"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSource"}}, "muted": {"type": "boolean"}, "fallback": {"$ref": "#/components/schemas/RuntimeImageResolvedMedia"}, "grantId": {"type": "string"}, "rect": {"$ref": "#/components/schemas/RuntimeRect"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "contentFit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}}}
+    RuntimeStreamPrimitive: {"type": "object", "required": ["id", "primitive", "sources", "muted", "fallback", "grantId", "rect", "layer", "contentFit"], "properties": {"id": {"type": "string"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSource"}}, "muted": {"type": "boolean"}, "fallback": {"$ref": "#/components/schemas/RuntimeImageResolvedMedia"}, "grantId": {"type": "string"}, "rect": {"$ref": "#/components/schemas/RuntimeRect"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "contentFit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}}}
     RuntimeIframePrimitive:
       type: object
       required: [id, primitive, src, title, rect, layer, contentFit]
@@ -5351,13 +5700,12 @@ components:
         - { $ref: "#/components/schemas/RuntimeMediaSelectorByAll" }
         - { $ref: "#/components/schemas/RuntimeMediaSelectorByTag" }
       discriminator: { propertyName: by }
-    RuntimeMediaSelectorByID: { type: object, additionalProperties: false, required: [by, mediaId, oneAtATime], properties: { by: { type: string, enum: [id] }, mediaId: { type: string, pattern: "^med_" }, oneAtATime: { type: boolean, enum: [false] } } }
-    RuntimeMediaSelectorByIDs: { type: object, additionalProperties: false, required: [by, mediaIds, oneAtATime], properties: { by: { type: string, enum: [ids] }, mediaIds: { type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^med_" } }, oneAtATime: { type: boolean } } }
-    RuntimeMediaSelectorByAll: { type: object, additionalProperties: false, required: [by, oneAtATime], properties: { by: { type: string, enum: [all] }, oneAtATime: { type: boolean } } }
-    RuntimeMediaSelectorByTag: { type: object, additionalProperties: false, required: [by, tag, oneAtATime], properties: { by: { type: string, enum: [tag] }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, oneAtATime: { type: boolean } } }
+    RuntimeMediaSelectorByID: { type: object, required: [by, mediaId, oneAtATime], properties: { by: { type: string, enum: [id] }, mediaId: { type: string, pattern: "^med_" }, oneAtATime: { type: boolean, enum: [false] } } }
+    RuntimeMediaSelectorByIDs: { type: object, required: [by, mediaIds, oneAtATime], properties: { by: { type: string, enum: [ids] }, mediaIds: { type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^med_" } }, oneAtATime: { type: boolean } } }
+    RuntimeMediaSelectorByAll: { type: object, required: [by, oneAtATime], properties: { by: { type: string, enum: [all] }, oneAtATime: { type: boolean } } }
+    RuntimeMediaSelectorByTag: { type: object, required: [by, tag, oneAtATime], properties: { by: { type: string, enum: [tag] }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, oneAtATime: { type: boolean } } }
     RuntimeApplicationPackage:
       type: object
-      additionalProperties: false
       description: >-
         Immutable normalized package built only from the independently validated application tree. Native players
         verify bytes and SHA-256 before atomically retaining this release for offline last-known-good restoration.
@@ -5395,7 +5743,6 @@ components:
         contentType: { type: string, enum: ["application/vnd.screenrig.webapp-package+tar+gzip"] }
     RuntimeImageResolvedMedia:
       type: object
-      additionalProperties: false
       required: [mediaId, src, intrinsicSize, sha256, bytes, contentType]
       properties:
         mediaId: { type: string }
@@ -5406,7 +5753,6 @@ components:
         contentType: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif] }
     RuntimeVideoResolvedMedia:
       type: object
-      additionalProperties: false
       required: [mediaId, src, intrinsicSize, sha256, bytes, contentType]
       properties:
         mediaId: { type: string }
@@ -5422,6 +5768,7 @@ components:
       pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$"
       description: "Server-derived RFC 6381 codec list for this exact rendition, never client-declared. It is a sibling of contentType; a Player can form a capability query as contentType followed by codecs=\"VALUE\". A video whose codec cannot be derived is rejected at upload. The property is optional. An absent value does not mean that the codec is unsupported. A present value currently contains one video-track entry; the grammar permits comma-separated entries."
     RuntimeReport:
+      description: Report bodies and contexts are read tolerantly (docs/player-compatibility.md §1.1). A code needs its own context members; other members are ignored. Players still send only the members below, because a pre-contract backend refuses any other.
       oneOf:
         - { $ref: "#/components/schemas/ManifestActivatedReport" }
         - { $ref: "#/components/schemas/PlaybackMediaStartedReport" }
@@ -5429,15 +5776,15 @@ components:
         - { $ref: "#/components/schemas/PlaybackPageFailedReport" }
         - { $ref: "#/components/schemas/ApplicationEventReport" }
         - { $ref: "#/components/schemas/RuntimeConditionReport" }
-    ManifestActivatedReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [manifest.activated] }, context: { $ref: "#/components/schemas/ManifestActivatedContext" } } }
-    ManifestActivatedContext: { type: object, additionalProperties: false, required: [manifest_revision], properties: { manifest_revision: { type: string, pattern: "^man_" } } }
-    PlaybackMediaStartedReport: { type: object, additionalProperties: false, required: [severity, code, context], description: "One visible start of an image or video primitive on a page. Players send this once per page appearance of the media, for images exactly as for videos; loops inside one appearance are not restarts. The media must be on the session screen's grant at the reported manifest revision, and context.primitive must match the ready media's primitive or the report is rejected. Upserts the daily PlaybackAggregate for the screen, media, and UTC day.", properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [playback.media_started] }, context: { $ref: "#/components/schemas/PlaybackMediaStartedContext" } } }
-    PlaybackMediaStartedContext: { type: object, additionalProperties: false, required: [media_id, manifest_revision, page_id, primitive], properties: { media_id: { type: string, pattern: "^med_" }, manifest_revision: { type: string, pattern: "^man_" }, page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [image, video], description: The primitive kind of the media that started. Must match the ready media. } } }
-    PlaybackVideoStartedReport: { type: object, additionalProperties: false, required: [severity, code, context], description: "Report one visible video start. This uses the same daily aggregation as playback.media_started with primitive video. Send one report per start; sending both event types counts the start twice. Use playback.media_started when reporting both images and videos.", properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [playback.video_started] }, context: { $ref: "#/components/schemas/PlaybackVideoStartedContext" } } }
-    PlaybackVideoStartedContext: { type: object, additionalProperties: false, required: [media_id, manifest_revision, page_id], properties: { media_id: { type: string, pattern: "^med_" }, manifest_revision: { type: string, pattern: "^man_" }, page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" } } }
+    ManifestActivatedReport: { type: object, additionalProperties: true, required: [severity, code, context], properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [manifest.activated] }, context: { $ref: "#/components/schemas/ManifestActivatedContext" } } }
+    ManifestActivatedContext: { type: object, additionalProperties: true, required: [manifest_revision], properties: { manifest_revision: { type: string, pattern: "^man_" } } }
+    PlaybackMediaStartedReport: { type: object, additionalProperties: true, required: [severity, code, context], description: "One visible start of an image or video primitive on a page. Players send this once per page appearance of the media, for images exactly as for videos; loops inside one appearance are not restarts. The media must be on the session screen's grant at the reported manifest revision, and context.primitive must match the ready media's primitive or the report is rejected. Upserts the daily PlaybackAggregate for the screen, media, and UTC day.", properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [playback.media_started] }, context: { $ref: "#/components/schemas/PlaybackMediaStartedContext" } } }
+    PlaybackMediaStartedContext: { type: object, additionalProperties: true, required: [media_id, manifest_revision, page_id, primitive], properties: { media_id: { type: string, pattern: "^med_" }, manifest_revision: { type: string, pattern: "^man_" }, page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [image, video], description: The primitive kind of the media that started. Must match the ready media. } } }
+    PlaybackVideoStartedReport: { type: object, additionalProperties: true, required: [severity, code, context], description: "Report one visible video start. This uses the same daily aggregation as playback.media_started with primitive video. Send one report per start; sending both event types counts the start twice. Use playback.media_started when reporting both images and videos.", properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [playback.video_started] }, context: { $ref: "#/components/schemas/PlaybackVideoStartedContext" } } }
+    PlaybackVideoStartedContext: { type: object, additionalProperties: true, required: [media_id, manifest_revision, page_id], properties: { media_id: { type: string, pattern: "^med_" }, manifest_revision: { type: string, pattern: "^man_" }, page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" } } }
     PlaybackPageFailedReport:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [severity, code, context]
       description: >-
         Reports that one page could not become ready. On acceptance the
@@ -5450,14 +5797,14 @@ components:
         context: { $ref: "#/components/schemas/PlaybackPageFailedContext" }
     PlaybackPageFailedContext:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [page_id, code]
       properties:
         page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }
         code: { type: string, pattern: "^[a-z0-9._-]{1,80}$" }
-    ApplicationEventReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [application.event] }, context: { $ref: "#/components/schemas/ApplicationEventContext" } } }
-    ApplicationEventContext: { type: object, additionalProperties: false, required: [primitive_id, code], properties: { primitive_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, code: { type: string, pattern: "^[A-Za-z0-9._-]{1,64}$" } } }
-    RuntimeConditionReport: { type: object, additionalProperties: false, required: [severity, code, context], properties: { severity: { type: string, enum: [info, warning, error] }, code: { type: string, pattern: "^[a-z0-9._-]{1,80}$", not: { enum: [manifest.activated, playback.media_started, playback.video_started, playback.page_failed, application.event] } }, context: { type: object, additionalProperties: true } } }
+    ApplicationEventReport: { type: object, additionalProperties: true, required: [severity, code, context], properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [application.event] }, context: { $ref: "#/components/schemas/ApplicationEventContext" } } }
+    ApplicationEventContext: { type: object, additionalProperties: true, required: [primitive_id, code], properties: { primitive_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, code: { type: string, pattern: "^[A-Za-z0-9._-]{1,64}$" } } }
+    RuntimeConditionReport: { type: object, additionalProperties: true, required: [severity, code, context], properties: { severity: { type: string, enum: [info, warning, error] }, code: { type: string, pattern: "^[a-z0-9._-]{1,80}$", not: { enum: [manifest.activated, playback.media_started, playback.video_started, playback.page_failed, application.event] } }, context: { type: object, additionalProperties: true } } }
     ReleaseLaunch: { type: object, additionalProperties: false, required: [launch_url, expires_at], properties: { launch_url: { type: string }, expires_at: { type: string } } }
     DashboardDisplayName:
       type: string
@@ -5691,8 +6038,13 @@ components:
         request_id: { type: string }
         trace_id: { type: string }
         retryable: { type: boolean, description: "Present on every 5xx problem response and absent below 500. True when retrying the same operation may succeed without changing the request; false when the unchanged request is not retryable." }
+        action: { type: string, description: "Player action class from the problem registry (docs/player-compatibility.md §5): retry_backoff, hold_lkg, remint, repair, clear_lkg, or upgrade_required. Present only on runtime problems answered to a request whose effective compat grants include problem-actions-v1; every other client gets the body without it. A reader applies the status default to a class it does not know." }
+        server_time: { type: string, format: date-time, description: "Present on proof_clock_skew: the server clock when the proof was rejected. A Player re-signs with its clock offset from this value." }
+        player_kind: { type: string, description: "Present on upgrade_required: the version floor that failed, a player kind such as web or shell:<kind> such as shell:tizen (docs/player-compatibility.md §6.1)." }
+        min_supported: { type: string, description: "Present on upgrade_required for a version floor: the minimum supported YY.MM.N version for player_kind." }
+        required_compat: { type: array, items: { type: string }, description: "Present on upgrade_required for the required-token floor (SCREENRIG__RUNTIME__COMPAT_REQUIRED, docs/player-compatibility.md §14): the required compat tokens this mint would not be granted. player_kind is then the mint's player kind, absent for a legacy mint." }
         current_revision: { type: integer }
         errors: { type: array, items: { $ref: "#/components/schemas/ProblemField" } }
         next: { $ref: "#/components/schemas/NextAction" }
 x-problem-registry: ./problems.yaml
-x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_account_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, dashboard_link_invalid, dashboard_link_expired, dashboard_link_consumed, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk, recovery_ambiguous, recovery_expired, recovery_not_offered, invitation_limit_reached, version_required, price_change_pending, quote_stale, insufficient_credits, self_deal, invitation_invalid, invitation_expired, invitation_consumed, billing_unavailable, user_binding_stale]
+x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_account_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, dashboard_link_invalid, dashboard_link_expired, dashboard_link_consumed, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk, recovery_ambiguous, recovery_expired, recovery_not_offered, invitation_limit_reached, version_required, price_change_pending, quote_stale, insufficient_credits, self_deal, invitation_invalid, invitation_expired, invitation_consumed, billing_unavailable, user_binding_stale, session_expired, credential_revoked, proof_clock_skew, key_retired, assignment_not_found, upgrade_required]

@@ -10,7 +10,8 @@
   var SUPPORT_WEB_WORKER = IN_BROWSER && "Worker" in window;
   var SUPPORT_ATOB = IN_BROWSER && "atob" in window;
   var SUPPORT_BTOA = IN_BROWSER && "btoa" in window;
-  var USER_AGENT = IN_BROWSER ? window.navigator?.userAgent : "";
+  var _a;
+  var USER_AGENT = IN_BROWSER ? (_a = window.navigator) == null ? void 0 : _a.userAgent : "";
   var IN_CHROME = USER_AGENT.includes("Chrome");
   var IN_SAFARI = USER_AGENT.includes("AppleWebKit") && !IN_CHROME;
   var IN_FIREFOX = USER_AGENT.includes("Firefox");
@@ -37,7 +38,8 @@
   var isIFrameElement = (node) => node.tagName === "IFRAME";
   var consoleWarn = (...args) => console.warn(PREFIX, ...args);
   function supportWebp(ownerDocument) {
-    const canvas = ownerDocument?.createElement?.("canvas");
+    var _a2;
+    const canvas = (_a2 = ownerDocument == null ? void 0 : ownerDocument.createElement) == null ? void 0 : _a2.call(ownerDocument, "canvas");
     if (canvas) {
       canvas.height = canvas.width = 1;
     }
@@ -64,7 +66,7 @@
     return a.href;
   }
   function getDocument(target) {
-    return (target && isElementNode(target) ? target?.ownerDocument : target) ?? window.document;
+    return (target && isElementNode(target) ? target == null ? void 0 : target.ownerDocument : target) ?? window.document;
   }
   var XMLNS = "http://www.w3.org/2000/svg";
   function createSvg(width, height, ownerDocument) {
@@ -111,7 +113,7 @@
       function onResolve() {
         resolve(node);
         timer && clearTimeout(timer);
-        removeEventListeners?.();
+        removeEventListeners == null ? void 0 : removeEventListeners();
       }
       if (timeout) {
         timer = setTimeout(onResolve, timeout);
@@ -129,12 +131,12 @@
         }
         const onLoadeddata = onResolve;
         const onError = (error) => {
-          onWarn?.(
+          onWarn == null ? void 0 : onWarn(
             "Failed video load",
             currentSrc,
             error
           );
-          userOnError?.(error);
+          userOnError == null ? void 0 : userOnError(error);
           onResolve();
         };
         removeEventListeners = () => {
@@ -153,7 +155,7 @@
             try {
               await node.decode();
             } catch (error) {
-              onWarn?.(
+              onWarn == null ? void 0 : onWarn(
                 "Failed to decode image, trying to render anyway",
                 node.dataset.originalSrc || currentSrc,
                 error
@@ -163,7 +165,7 @@
           onResolve();
         };
         const onError = (error) => {
-          onWarn?.(
+          onWarn == null ? void 0 : onWarn(
             "Failed image load",
             node.dataset.originalSrc || currentSrc,
             error
@@ -204,7 +206,7 @@
     };
   })();
   function splitFontFamily(fontFamily) {
-    return fontFamily?.split(",").map((val) => val.trim().replace(/"|'/g, "").toLowerCase()).filter(Boolean);
+    return fontFamily == null ? void 0 : fontFamily.split(",").map((val) => val.trim().replace(/"|'/g, "").toLowerCase()).filter(Boolean);
   }
   var uid = 0;
   function createLogger(debug) {
@@ -227,11 +229,12 @@
     return isContext(node) ? node : createContext(node, { ...options, autoDestruct: true });
   }
   async function createContext(node, options) {
+    var _a2, _b;
     const { scale = 1, workerUrl, workerNumber = 1 } = options || {};
-    const debug = Boolean(options?.debug);
-    const features = options?.features ?? true;
+    const debug = Boolean(options == null ? void 0 : options.debug);
+    const features = (options == null ? void 0 : options.features) ?? true;
     const ownerDocument = node.ownerDocument ?? (IN_BROWSER ? window.document : void 0);
-    const ownerWindow = node.ownerDocument?.defaultView ?? (IN_BROWSER ? window : void 0);
+    const ownerWindow = ((_a2 = node.ownerDocument) == null ? void 0 : _a2.defaultView) ?? (IN_BROWSER ? window : void 0);
     const requests = /* @__PURE__ */ new Map();
     const context = {
       // Options
@@ -248,10 +251,10 @@
       progress: null,
       debug,
       fetch: {
-        requestInit: getDefaultRequestInit(options?.fetch?.bypassingCache),
+        requestInit: getDefaultRequestInit((_b = options == null ? void 0 : options.fetch) == null ? void 0 : _b.bypassingCache),
         placeholderImage: "data:image/png;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
         bypassingCache: false,
-        ...options?.fetch
+        ...options == null ? void 0 : options.fetch
       },
       fetchFn: null,
       font: {},
@@ -273,7 +276,7 @@
       ownerWindow,
       dpi: scale === 1 ? null : 96 * scale,
       svgStyleElement: createStyleElement(ownerDocument),
-      svgDefsElement: ownerDocument?.createElementNS(XMLNS, "defs"),
+      svgDefsElement: ownerDocument == null ? void 0 : ownerDocument.createElementNS(XMLNS, "defs"),
       svgStyles: /* @__PURE__ */ new Map(),
       defaultComputedStyles: /* @__PURE__ */ new Map(),
       workers: [
@@ -284,16 +287,18 @@
         try {
           const worker = new Worker(workerUrl);
           worker.onmessage = async (event) => {
+            var _a3, _b2, _c, _d;
             const { url, result } = event.data;
             if (result) {
-              requests.get(url)?.resolve?.(result);
+              (_b2 = (_a3 = requests.get(url)) == null ? void 0 : _a3.resolve) == null ? void 0 : _b2.call(_a3, result);
             } else {
-              requests.get(url)?.reject?.(new Error(`Error receiving message from worker: ${url}`));
+              (_d = (_c = requests.get(url)) == null ? void 0 : _c.reject) == null ? void 0 : _d.call(_c, new Error(`Error receiving message from worker: ${url}`));
             }
           };
           worker.onmessageerror = (event) => {
+            var _a3, _b2;
             const { url } = event.data;
-            requests.get(url)?.reject?.(new Error(`Error receiving message from worker: ${url}`));
+            (_b2 = (_a3 = requests.get(url)) == null ? void 0 : _a3.reject) == null ? void 0 : _b2.call(_a3, new Error(`Error receiving message from worker: ${url}`));
           };
           return worker;
         } catch (error) {
@@ -366,7 +371,7 @@
     const { canvas, context2d } = createCanvas(image.ownerDocument, context);
     const drawImage = () => {
       try {
-        context2d?.drawImage(loaded, 0, 0, canvas.width, canvas.height);
+        context2d == null ? void 0 : context2d.drawImage(loaded, 0, 0, canvas.width, canvas.height);
       } catch (error) {
         context.log.warn("Failed to drawImage", error);
       }
@@ -376,7 +381,7 @@
       for (let i = 0; i < drawImageCount; i++) {
         await new Promise((resolve) => {
           setTimeout(() => {
-            context2d?.clearRect(0, 0, canvas.width, canvas.height);
+            context2d == null ? void 0 : context2d.clearRect(0, 0, canvas.width, canvas.height);
             drawImage();
             resolve();
           }, i + drawImageInterval);
@@ -449,8 +454,9 @@
     return cloned;
   }
   function cloneIframe(iframe, context) {
+    var _a2;
     try {
-      if (iframe?.contentDocument?.documentElement) {
+      if ((_a2 = iframe == null ? void 0 : iframe.contentDocument) == null ? void 0 : _a2.documentElement) {
         return cloneNode(iframe.contentDocument.documentElement, context);
       }
     } catch (error) {
@@ -570,10 +576,10 @@
     if (defaultComputedStyles.has(key))
       return defaultComputedStyles.get(key);
     const sandbox = getSandBox(context);
-    const sandboxWindow = sandbox?.contentWindow;
+    const sandboxWindow = sandbox == null ? void 0 : sandbox.contentWindow;
     if (!sandboxWindow)
       return /* @__PURE__ */ new Map();
-    const sandboxDocument = sandboxWindow?.document;
+    const sandboxDocument = sandboxWindow == null ? void 0 : sandboxWindow.document;
     let root;
     let el;
     if (isSvgNode) {
@@ -601,6 +607,7 @@
     return styles;
   }
   function getDiffStyle(style, defaultStyle, includeStyleProperties) {
+    var _a2;
     const diffStyle = /* @__PURE__ */ new Map();
     const prefixs = [];
     const prefixTree = /* @__PURE__ */ new Map();
@@ -615,7 +622,7 @@
       }
     }
     for (let len = prefixs.length, i = 0; i < len; i++) {
-      prefixTree.get(prefixs[i])?.forEach((value, name) => diffStyle.set(name, value));
+      (_a2 = prefixTree.get(prefixs[i])) == null ? void 0 : _a2.forEach((value, name) => diffStyle.set(name, value));
     }
     function applyTo(name) {
       const value = style.getPropertyValue(name);
@@ -641,11 +648,12 @@
     return diffStyle;
   }
   function copyCssStyles(node, cloned, isRoot, context) {
+    var _a2, _b, _c, _d;
     const { ownerWindow, includeStyleProperties, currentParentNodeStyle } = context;
     const clonedStyle = cloned.style;
     const computedStyle = ownerWindow.getComputedStyle(node);
     const defaultStyle = getDefaultStyle(node, null, context);
-    currentParentNodeStyle?.forEach((_, key) => {
+    currentParentNodeStyle == null ? void 0 : currentParentNodeStyle.forEach((_, key) => {
       defaultStyle.delete(key);
     });
     const style = getDiffStyle(computedStyle, defaultStyle, includeStyleProperties);
@@ -665,13 +673,13 @@
       style.delete("margin-inline-end");
       style.set("box-sizing", ["border-box", ""]);
     }
-    if (style.get("background-clip")?.[0] === "text") {
+    if (((_a2 = style.get("background-clip")) == null ? void 0 : _a2[0]) === "text") {
       cloned.classList.add("______background-clip--text");
     }
     if (IN_CHROME) {
       if (!style.has("font-kerning"))
         style.set("font-kerning", ["normal", ""]);
-      if ((style.get("overflow-x")?.[0] === "hidden" || style.get("overflow-y")?.[0] === "hidden") && style.get("text-overflow")?.[0] === "ellipsis" && node.scrollWidth === node.clientWidth) {
+      if ((((_b = style.get("overflow-x")) == null ? void 0 : _b[0]) === "hidden" || ((_c = style.get("overflow-y")) == null ? void 0 : _c[0]) === "hidden") && ((_d = style.get("text-overflow")) == null ? void 0 : _d[0]) === "ellipsis" && node.scrollWidth === node.clientWidth) {
         style.set("text-overflow", ["clip", ""]);
       }
     }
@@ -709,21 +717,22 @@
     if (!svgStyleElement || !ownerWindow)
       return;
     function copyBy(pseudoClass) {
+      var _a2;
       const computedStyle = ownerWindow.getComputedStyle(node, pseudoClass);
       let content = computedStyle.getPropertyValue("content");
       if (!content || content === "none")
         return;
-      addWordToFontFamilies?.(content);
+      addWordToFontFamilies == null ? void 0 : addWordToFontFamilies(content);
       content = content.replace(/(')|(")|(counter\(.+\))/g, "");
       const klasses = [uuid()];
       const defaultStyle = getDefaultStyle(node, pseudoClass, context);
-      currentNodeStyle?.forEach((_, key) => {
+      currentNodeStyle == null ? void 0 : currentNodeStyle.forEach((_, key) => {
         defaultStyle.delete(key);
       });
       const style = getDiffStyle(computedStyle, defaultStyle, context.includeStyleProperties);
       style.delete("content");
       style.delete("-webkit-locale");
-      if (style.get("background-clip")?.[0] === "text") {
+      if (((_a2 = style.get("background-clip")) == null ? void 0 : _a2[0]) === "text") {
         cloned.classList.add("______background-clip--text");
       }
       const cloneStyle = [
@@ -773,10 +782,11 @@
     cloned.appendChild(childCloned);
   }
   async function cloneChildNodes(node, cloned, context, addWordToFontFamilies) {
+    var _a2;
     let firstChild = node.firstChild;
     if (isElementNode(node)) {
       if (node.shadowRoot) {
-        firstChild = node.shadowRoot?.firstChild;
+        firstChild = (_a2 = node.shadowRoot) == null ? void 0 : _a2.firstChild;
         context.shadowRoots.push(node.shadowRoot);
       }
     }
@@ -829,6 +839,7 @@
   }
   var NORMAL_ATTRIBUTE_RE = /^[\w-:]+$/;
   async function cloneNode(node, context, isRoot = false, addWordToFontFamilies) {
+    var _a2, _b, _c, _d;
     const { ownerDocument, ownerWindow, fontFamilies, onCloneEachNode } = context;
     if (ownerDocument && isTextNode(node)) {
       if (addWordToFontFamilies && /\S/.test(node.data)) {
@@ -853,13 +864,13 @@
       let copyScrollbar = false;
       if (context.isEnable("copyScrollbar")) {
         const overflow = [
-          style.get("overflow-x")?.[0],
-          style.get("overflow-y")?.[0]
+          (_a2 = style.get("overflow-x")) == null ? void 0 : _a2[0],
+          (_b = style.get("overflow-y")) == null ? void 0 : _b[0]
         ];
         copyScrollbar = overflow.includes("scroll") || (overflow.includes("auto") || overflow.includes("overlay")) && (node.scrollHeight > node.clientHeight || node.scrollWidth > node.clientWidth);
       }
-      const textTransform = style.get("text-transform")?.[0];
-      const families = splitFontFamily(style.get("font-family")?.[0]);
+      const textTransform = (_c = style.get("text-transform")) == null ? void 0 : _c[0];
+      const families = splitFontFamily((_d = style.get("font-family")) == null ? void 0 : _d[0]);
       const addWordToFontFamilies2 = families ? (word) => {
         if (textTransform === "uppercase") {
           word = word.toUpperCase();
@@ -892,12 +903,12 @@
           addWordToFontFamilies2
         );
       }
-      await onCloneEachNode?.(cloned2);
+      await (onCloneEachNode == null ? void 0 : onCloneEachNode(cloned2));
       return cloned2;
     }
     const cloned = node.cloneNode(false);
     await cloneChildNodes(node, cloned, context);
-    await onCloneEachNode?.(cloned);
+    await (onCloneEachNode == null ? void 0 : onCloneEachNode(cloned));
     return cloned;
   }
   function destroyContext(context) {
@@ -1134,15 +1145,15 @@
         (res, root) => {
           return res ?? root.querySelector(`svg ${query}`);
         },
-        ownerDocument?.querySelector(`svg ${query}`)
+        ownerDocument == null ? void 0 : ownerDocument.querySelector(`svg ${query}`)
       );
       if (svgUrl) {
         cloned.setAttribute("href", query);
       }
-      if (svgDefsElement?.querySelector(query))
+      if (svgDefsElement == null ? void 0 : svgDefsElement.querySelector(query))
         return [];
       if (definition) {
-        svgDefsElement?.appendChild(definition.cloneNode(true));
+        svgDefsElement == null ? void 0 : svgDefsElement.appendChild(definition.cloneNode(true));
         return [];
       } else if (svgUrl) {
         return [
@@ -1150,7 +1161,7 @@
             url: svgUrl,
             responseType: "text"
           }).then((svgData) => {
-            svgDefsElement?.insertAdjacentHTML("beforeend", svgData);
+            svgDefsElement == null ? void 0 : svgDefsElement.insertAdjacentHTML("beforeend", svgData);
           })
         ];
       }
@@ -1239,7 +1250,10 @@
       styleSheets.forEach((sheet) => {
         unwrapCssLayers(sheet.cssRules, cssRules);
       });
-      cssRules.filter((cssRule) => isCssFontFaceRule(cssRule) && hasCssUrl(cssRule.style.getPropertyValue("src")) && splitFontFamily(cssRule.style.getPropertyValue("font-family"))?.some((val) => fontFamilies.has(val))).forEach((value) => {
+      cssRules.filter((cssRule) => {
+        var _a2;
+        return isCssFontFaceRule(cssRule) && hasCssUrl(cssRule.style.getPropertyValue("src")) && ((_a2 = splitFontFamily(cssRule.style.getPropertyValue("font-family"))) == null ? void 0 : _a2.some((val) => fontFamilies.has(val)));
+      }).forEach((value) => {
         const rule = value;
         const cssText = fontCssTexts.get(rule.cssText);
         if (cssText) {
@@ -1302,7 +1316,7 @@
   var FONT_SRC_RE = /src:\s*(?:url\([^)]+\)\s*format\([^)]+\)[,;]\s*)+/g;
   function filterPreferredFormat(str, context) {
     const { font } = context;
-    const preferredFormat = font ? font?.preferredFormat : void 0;
+    const preferredFormat = font ? font == null ? void 0 : font.preferredFormat : void 0;
     return preferredFormat ? str.replace(FONT_SRC_RE, (match) => {
       while (true) {
         const [src, , format] = URL_WITH_FORMAT_RE.exec(match) || [];
@@ -1360,7 +1374,7 @@
       svgStyleElement.appendChild(ownerDocument.createTextNode(allCssText));
     }
     log.timeEnd("clone node");
-    await onCloneNode?.(clone);
+    await (onCloneNode == null ? void 0 : onCloneNode(clone));
     if (font !== false && isElementNode(clone)) {
       log.time("embed web font");
       await embedWebFont(clone, context);
@@ -1380,18 +1394,18 @@
         } catch (error) {
           context.log.warn("Failed to run task", error);
         }
-        progress?.(++current, count);
+        progress == null ? void 0 : progress(++current, count);
       }
     };
-    progress?.(current, count);
+    progress == null ? void 0 : progress(current, count);
     await Promise.all([...Array.from({ length: 4 })].map(runTask));
     log.timeEnd("embed node");
-    await onEmbedNode?.(clone);
+    await (onEmbedNode == null ? void 0 : onEmbedNode(clone));
     const svg = createForeignObjectSvg(clone, context);
     svgDefsElement && svg.insertBefore(svgDefsElement, svg.children[0]);
     svgStyleElement && svg.insertBefore(svgStyleElement, svg.children[0]);
     autoDestruct && destroyContext(context);
-    await onCreateForeignObjectSvg?.(svg);
+    await (onCreateForeignObjectSvg == null ? void 0 : onCreateForeignObjectSvg(svg));
     return svg;
   }
   function createForeignObjectSvg(clone, context) {
@@ -1407,12 +1421,13 @@
     return svg;
   }
   async function domToCanvas(node, options) {
+    var _a2;
     const context = await orCreateContext(node, options);
     const svg = await domToForeignObjectSvg(context);
     const dataUrl = svgToDataUrl(svg, context.isEnable("removeControlCharacter"));
     if (!context.autoDestruct) {
       context.svgStyleElement = createStyleElement(context.ownerDocument);
-      context.svgDefsElement = context.ownerDocument?.createElementNS(XMLNS, "defs");
+      context.svgDefsElement = (_a2 = context.ownerDocument) == null ? void 0 : _a2.createElementNS(XMLNS, "defs");
       context.svgStyles.clear();
     }
     const image = createImage(dataUrl, svg.ownerDocument);
@@ -1462,18 +1477,19 @@
   function validCaptureRequest(value, context) {
     if (!context || !value || typeof value !== "object") return false;
     const request = value;
-    return Object.keys(request).length === 5 && request.protocol === CAPTURE_PROTOCOL && request.kind === "capture" && request.primitive_id === context.primitive_id && request.generation === context.generation && request.nonce === context.nonce;
+    if (Object.prototype.hasOwnProperty.call(request, "__proto__") || Object.prototype.hasOwnProperty.call(request, "constructor")) return false;
+    return request.protocol === CAPTURE_PROTOCOL && request.kind === "capture" && request.primitive_id === context.primitive_id && request.generation === context.generation && request.nonce === context.nonce;
   }
   function attachCaptureReceiver(win, context) {
     let busy = false;
     const listener = (event) => {
       const binding = context();
-      if (busy || event.source !== win.parent || event.origin === "null" || event.origin !== binding?.player_origin || !validCaptureRequest(event.data, binding) || event.ports.length !== 1) return;
+      if (busy || event.source !== win.parent || event.origin === "null" || event.origin !== (binding == null ? void 0 : binding.player_origin) || !validCaptureRequest(event.data, binding) || event.ports.length !== 1) return;
       const port = event.ports[0];
       busy = true;
       void captureDOM(win.document.documentElement).then(async (canvas) => {
         const current = context();
-        if (current?.nonce !== binding.nonce || current.generation !== binding.generation) throw new CaptureUnavailable();
+        if ((current == null ? void 0 : current.nonce) !== binding.nonce || current.generation !== binding.generation) throw new CaptureUnavailable();
         const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/webp", 1));
         if (!blob || blob.type !== "image/webp" || blob.size > CAPTURE_MAX_BYTES) throw new CaptureUnavailable("capture_failed");
         port.postMessage({ blob });
@@ -1488,14 +1504,15 @@
     return () => win.removeEventListener("message", listener);
   }
   async function captureFrame(frame, signal) {
-    const binding = frames.get(frame)?.();
+    var _a2;
+    const binding = (_a2 = frames.get(frame)) == null ? void 0 : _a2();
     const child = frame.contentWindow;
     if (!binding || !child || binding.origin === "null" || binding.origin === "*") throw new CaptureUnavailable();
     return new Promise((resolve, reject) => {
       const channel = new MessageChannel();
       const finish = (blob) => {
         clearTimeout(timer);
-        signal?.removeEventListener("abort", abort);
+        signal == null ? void 0 : signal.removeEventListener("abort", abort);
         channel.port1.close();
         channel.port2.close();
         if (blob) resolve(blob);
@@ -1504,14 +1521,15 @@
       const abort = () => finish();
       const timer = setTimeout(abort, CAPTURE_TIMEOUT_MS);
       channel.port1.onmessage = (event) => {
-        const current = frames.get(frame)?.();
+        var _a3;
+        const current = (_a3 = frames.get(frame)) == null ? void 0 : _a3();
         const data = event.data;
-        if (current?.nonce !== binding.nonce || current.generation !== binding.generation || !frame.isConnected) return finish();
-        const blob = data?.blob;
+        if ((current == null ? void 0 : current.nonce) !== binding.nonce || current.generation !== binding.generation || !frame.isConnected) return finish();
+        const blob = data == null ? void 0 : data.blob;
         finish(blob instanceof Blob && blob.type === "image/webp" && blob.size > 0 && blob.size <= CAPTURE_MAX_BYTES ? blob : void 0);
       };
-      signal?.addEventListener("abort", abort, { once: true });
-      if (signal?.aborted) return finish();
+      signal == null ? void 0 : signal.addEventListener("abort", abort, { once: true });
+      if (signal == null ? void 0 : signal.aborted) return finish();
       try {
         child.postMessage({
           protocol: CAPTURE_PROTOCOL,
@@ -1530,6 +1548,7 @@
     return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) !== 0;
   }
   async function captureFonts(document2, families) {
+    var _a2;
     const rules = [];
     const visit = (list) => {
       for (const rule of list) {
@@ -1545,11 +1564,9 @@
       let css = rule.cssText;
       const urls = [...css.matchAll(/url\(["']?([^"')]+)["']?\)/g)];
       for (const match of urls) {
-        const url = new URL(match[1], rule.parentStyleSheet?.href ?? document2.baseURI);
+        const url = new URL(match[1], ((_a2 = rule.parentStyleSheet) == null ? void 0 : _a2.href) ?? document2.baseURI);
         if (url.origin !== document2.location.origin) throw new CaptureUnavailable();
-        const response = await fetch(url, { credentials: "same-origin", cache: "force-cache", signal: AbortSignal.timeout(2e3) });
-        if (!response.ok) throw new CaptureUnavailable("capture_failed");
-        const buffer = await response.arrayBuffer();
+        const buffer = await fetchFontBytes(url);
         total += buffer.byteLength;
         if (total > MAX_PIXELS) throw new CaptureUnavailable("capture_failed");
         const bytes = new Uint8Array(buffer);
@@ -1561,6 +1578,23 @@
     }
     return output.join("\n") || "/* system fonts */";
   }
+  var FONT_FETCH_TIMEOUT_MS = 2e3;
+  async function fetchFontBytes(url, timeoutMs = FONT_FETCH_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { credentials: "same-origin", cache: "force-cache", signal: controller.signal });
+      if (!response.ok) throw new CaptureUnavailable("capture_failed");
+      return await response.arrayBuffer();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  function captureMarker() {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return `data-capture-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+  }
   var previous = Promise.resolve();
   function captureDOM(root, signal) {
     const result = previous.catch(() => void 0).then(() => capture(root, signal));
@@ -1568,10 +1602,10 @@
     return result;
   }
   async function capture(root, signal) {
-    if (signal?.aborted) throw new CaptureUnavailable();
+    if (signal == null ? void 0 : signal.aborted) throw new CaptureUnavailable();
     const width = root.clientWidth, height = root.clientHeight;
     if (width < 1 || height < 1 || width * height > MAX_PIXELS) throw new CaptureUnavailable("capture_failed");
-    const marker = `data-capture-${crypto.randomUUID()}`;
+    const marker = captureMarker();
     const replacements = /* @__PURE__ */ new Map();
     const marked = [];
     const videoClones = /* @__PURE__ */ new Map();
@@ -1660,7 +1694,7 @@
         failed = true;
       };
       const canvas = await domToCanvas(context);
-      if (failed || signal?.aborted) throw new CaptureUnavailable("capture_failed");
+      if (failed || (signal == null ? void 0 : signal.aborted)) throw new CaptureUnavailable("capture_failed");
       return canvas;
     } catch (error) {
       throw error instanceof CaptureUnavailable ? error : new CaptureUnavailable("capture_failed");
@@ -1692,6 +1726,9 @@
     "response.ack",
     "response.problem"
   ];
+  var BASELINE_FEATURES = MESSAGE_KINDS;
+  var MAX_FEATURES = 64;
+  var MAX_FEATURE_LENGTH = 64;
   var EMPTY_CAPABILITIES = {
     "page.advance": false,
     "kv.read": false,
@@ -1734,20 +1771,20 @@
   function isParentHandshakeCandidate(data) {
     return isRecord(data) && data.protocol === PARENT_HANDSHAKE_PROTOCOL && data.kind === "parent.handshake";
   }
+  function hasForbiddenKeys(value) {
+    return Object.prototype.hasOwnProperty.call(value, "__proto__") || Object.prototype.hasOwnProperty.call(value, "constructor");
+  }
   function parseParentHandshakeOffer(data) {
     if (!isRecord(data) || serializedSize(data) > MAX_MESSAGE_BYTES) {
       throw new SdkValidationError("invalid_handshake", "Parent handshake must be a bounded object");
     }
-    if (!hasExactKeys(data, ["protocol", "kind", "challenge"])) {
-      throw new SdkValidationError("invalid_handshake", "Parent handshake has an invalid shape");
+    if (hasForbiddenKeys(data)) {
+      throw new SdkValidationError("invalid_handshake", "Parent handshake contains forbidden keys");
     }
     if (data.protocol !== PARENT_HANDSHAKE_PROTOCOL || data.kind !== "parent.handshake" || typeof data.challenge !== "string" || !NONCE_RE.test(data.challenge)) {
       throw new SdkValidationError("invalid_handshake", "Parent handshake is invalid");
     }
     return { protocol: PARENT_HANDSHAKE_PROTOCOL, kind: "parent.handshake", challenge: data.challenge };
-  }
-  function hasExactKeys(value, keys) {
-    return Object.keys(value).length === keys.length && keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
   }
   function isAllowedKind(kind) {
     return MESSAGE_KINDS.includes(kind);
@@ -1766,7 +1803,7 @@
     if (!isRecord(data)) {
       throw new SdkValidationError("invalid_shape", "Message must be an object");
     }
-    if (Object.prototype.hasOwnProperty.call(data, "__proto__") || Object.prototype.hasOwnProperty.call(data, "constructor")) {
+    if (hasForbiddenKeys(data)) {
       throw new SdkValidationError("invalid_shape", "Message contains forbidden keys");
     }
     if (serializedSize(data) > MAX_MESSAGE_BYTES) {
@@ -1789,14 +1826,8 @@
     if (typeof primitive_id !== "string" || !PRIMITIVE_ID_RE.test(primitive_id)) {
       throw new SdkValidationError("invalid_primitive", "Invalid primitive_id");
     }
-    if (!isRecord(payload)) {
+    if (!isRecord(payload) || hasForbiddenKeys(payload)) {
       throw new SdkValidationError("invalid_payload", "payload must be an object");
-    }
-    const allowed = /* @__PURE__ */ new Set(["protocol", "message_id", "kind", "primitive_id", "payload"]);
-    for (const key of Object.keys(data)) {
-      if (!allowed.has(key)) {
-        throw new SdkValidationError("invalid_shape", `Unexpected field ${key}`);
-      }
     }
     return { protocol, message_id, kind, primitive_id, payload };
   }
@@ -1813,6 +1844,36 @@
       throw new SdkValidationError("invalid_context", `${name} dimensions out of range`);
     }
     return { width, height };
+  }
+  function parsePrimitiveSize(payload) {
+    if (payload.primitive !== void 0) {
+      try {
+        return parseSize(payload.primitive, "primitive");
+      } catch (err) {
+        if (payload.placement === void 0) throw err;
+      }
+    }
+    if (payload.placement !== void 0) {
+      return parseSize(payload.placement, "placement");
+    }
+    throw new SdkValidationError("invalid_context", "primitive must be an object");
+  }
+  function readSize(value) {
+    try {
+      return parseSize(value, "size");
+    } catch {
+      return void 0;
+    }
+  }
+  function parseFeatures(value) {
+    if (!Array.isArray(value)) return void 0;
+    const features = [];
+    for (const entry of value.slice(0, MAX_FEATURES)) {
+      if (typeof entry === "string" && entry.length > 0 && entry.length <= MAX_FEATURE_LENGTH && !features.includes(entry)) {
+        features.push(entry);
+      }
+    }
+    return features;
   }
   function parseCapabilities(value) {
     if (!isRecord(value)) {
@@ -1852,6 +1913,7 @@
     if (player_origin === "*" || expectedOrigin === "*") {
       throw new SdkValidationError("wildcard_origin", "Wildcard origins are not allowed");
     }
+    const features = parseFeatures(payload.features);
     return {
       application_id,
       release_id,
@@ -1861,8 +1923,9 @@
       player_origin,
       capabilities: parseCapabilities(payload.capabilities),
       viewport: parseSize(payload.viewport, "viewport"),
-      primitive: parseSize(payload.primitive, "primitive"),
-      screen_id: typeof payload.screen_id === "string" && ID_RE.test(payload.screen_id) ? payload.screen_id : void 0
+      primitive: parsePrimitiveSize(payload),
+      screen_id: typeof payload.screen_id === "string" && ID_RE.test(payload.screen_id) ? payload.screen_id : void 0,
+      ...features === void 0 ? {} : { features }
     };
   }
   function parseResponseAckPayload(payload) {
@@ -2057,8 +2120,8 @@
         }
         if (message.kind === "viewport.changed") {
           if (!this.matchesRuntime(message.payload.generation, message.payload.nonce)) return;
-          const viewport = message.payload.viewport;
-          const primitive = message.payload.primitive;
+          const viewport = readSize(message.payload.viewport);
+          const primitive = readSize(message.payload.primitive) ?? readSize(message.payload.placement);
           if (!viewport || !primitive) {
             return;
           }
@@ -2128,9 +2191,18 @@
         handler(this.capabilities);
       }
     }
+    supports(kind) {
+      var _a2;
+      const features = ((_a2 = this.context) == null ? void 0 : _a2.features) ?? BASELINE_FEATURES;
+      return features.includes(kind);
+    }
     post(message, wait) {
       if (this.targetOrigin === null || this.handshakeChallenge === null) {
         throw new SdkValidationError("inert", "SDK has not bound a parent handshake");
+      }
+      if (!this.supports(message.kind)) {
+        if (!wait) return Promise.resolve(void 0);
+        return Promise.reject(new SdkValidationError("not_supported", `The Player does not support ${message.kind}`));
       }
       if (!wait) {
         this.host.postToParent(message, this.targetOrigin, this.opaqueSourceBound);
@@ -2369,10 +2441,10 @@
     return [DEFAULT_PLAYER_ORIGIN];
   }
   function resolveTrustedParentPolicy(location) {
-    const namedQtPackage = location?.protocol === "screenrig-app:" && /^[a-f0-9]{32}\.[a-f0-9]{32}$/.test(location.hostname) && location.port === "" && location.origin === `screenrig-app://${location.hostname}`;
+    const namedQtPackage = (location == null ? void 0 : location.protocol) === "screenrig-app:" && /^[a-f0-9]{32}\.[a-f0-9]{32}$/.test(location.hostname) && location.port === "" && location.origin === `screenrig-app://${location.hostname}`;
     return {
       origins: resolveTrustedPlayerOrigins(location),
-      allowOpaqueNativeParent: location?.protocol === "screenrig-app:" && location.origin === "null",
+      allowOpaqueNativeParent: (location == null ? void 0 : location.protocol) === "screenrig-app:" && location.origin === "null",
       ...namedQtPackage ? { nativeParentOrigin: "qrc:" } : {}
     };
   }
@@ -2393,7 +2465,7 @@
 
   // src/browser.ts
   var candidate = globalThis.window;
-  if (candidate?.parent && typeof candidate.addEventListener === "function") {
+  if ((candidate == null ? void 0 : candidate.parent) && typeof candidate.addEventListener === "function") {
     const client = attachScreenRig(candidate);
     if (typeof document !== "undefined") attachCaptureReceiver(window, () => client.readyState === "active" ? client.context : null);
   }

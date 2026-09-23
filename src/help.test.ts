@@ -124,6 +124,7 @@ test("root help is compact and every command is discoverable through immediate c
     "screen delete",
     "screen rotate-public-id",
     "screen recover",
+    "screen reload",
     "screen toast",
     "screen screenshot",
     "kv get",
