@@ -485,6 +485,30 @@ export interface ScreenStorageForecast {
   received_at: string;
 }
 
+/** Body of the pre-assignment fit dry run. playlist_id is a playlist of the authenticated project; another project's or an unknown id is not_found. */
+export interface ScreenStorageForecastRequest {
+  playlist_id: string;
+  /** Optional expected playlist revision. A different stored revision is revision_conflict and no forecast is returned. */
+  playlist_revision?: number;
+}
+
+/**
+ * Pre-assignment fit dry run for one playlist against the screen's last
+ * reported capacity. fit unknown means the screen has no storage report, or
+ * the playlist's content references are not ready; the byte counts and
+ * received_at are null then. A report older than 24 hours is stale but still
+ * forecast from. Read-only; it writes nothing and is never authorization or
+ * admission.
+ */
+export interface ScreenStorageForecastDryRun {
+  basis: "reported_capacity";
+  capacity_bytes: number | null;
+  excluded_page_count: number;
+  fit: "fits" | "partial" | "none_fit" | "unknown";
+  received_at: string | null;
+  required_bytes: number | null;
+}
+
 /**
  * Present while the player's reported fit is partial, transition_blocked, or
  * none_fit. at is when the condition began. Read-only project health metadata.

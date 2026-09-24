@@ -1514,6 +1514,36 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/{id}/storage-forecast:
+    post:
+      operationId: forecastScreenStorage
+      x-rate-limit-policies: [{ name: storage-forecast-project, quota: 60, windowSeconds: 60 }, { name: storage-forecast-screen, quota: 30, windowSeconds: 60 }, { name: storage-forecast-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Pre-assignment fit dry run: answers whether one playlist would fit
+        the named screen before it is assigned, with the same target
+        selection as Screen.storage_forecast (the screen's last reported
+        capacity, plan A.3 only, no transition prediction, nothing treated
+        as local). It writes nothing: no assignment, no screen revision, no
+        event, and the screen's storage_forecast read model is untouched.
+        The project bearer is authoritative; a screen or playlist of
+        another project is not_found. fit is unknown when the screen has no
+        storage report, or when the playlist's content references are not
+        ready, and both byte counts are null then. An optional
+        playlist_revision refuses a playlist that changed since the caller
+        read it with revision_conflict. A report older than 24 hours is
+        stale but still forecast from, exactly like Screen.storage_forecast.
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenStorageForecastRequest" } } } }
+      responses:
+        "200": { description: Dry-run forecast. fit unknown means there is nothing to forecast from; the byte counts and received_at are null., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenStorageForecastDryRun" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { description: revision_conflict — playlist_revision is not the playlist's current revision; no forecast is returned., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/screenshot:
     post:
       operationId: requestScreenScreenshot
@@ -6660,6 +6690,40 @@ components:
         excluded_page_count: { type: integer, minimum: 0 }
         basis: { type: string, enum: [reported_capacity] }
         received_at: { type: string, format: date-time }
+    ScreenStorageForecastRequest:
+      type: object
+      additionalProperties: false
+      required: [playlist_id]
+      description: >-
+        Body of the pre-assignment fit dry run. playlist_id must be a playlist
+        of the authenticated project; another project's or an unknown id is
+        not_found.
+      properties:
+        playlist_id: { type: string, minLength: 1 }
+        playlist_revision: { type: integer, minimum: 1, description: "Optional expected playlist revision. A different stored revision is revision_conflict and no forecast is returned." }
+    ScreenStorageForecastDryRun:
+      type: object
+      additionalProperties: false
+      required: [fit, excluded_page_count, required_bytes, capacity_bytes, basis, received_at]
+      description: >-
+        Pre-assignment fit dry run for one playlist. fit,
+        excluded_page_count, and required_bytes come from plan A.3 target
+        selection against the screen's last reported capacity (basis
+        reported_capacity); there is no transition prediction and nothing is
+        treated as local. required_bytes is the retained cost of every page
+        of the playlist. fit unknown means the screen has no storage report,
+        or the playlist's content references are not ready; required_bytes,
+        capacity_bytes, and received_at are null then. received_at is the
+        storage report's receipt time, and a report older than 24 hours is
+        stale but still forecast from, exactly like Screen.storage_forecast.
+        It is read-only metadata and never authorization or admission.
+      properties:
+        fit: { type: string, enum: [fits, partial, none_fit, unknown] }
+        excluded_page_count: { type: integer, minimum: 0, maximum: 100 }
+        required_bytes: { anyOf: [{ type: integer, minimum: 0, maximum: 9007199254740991 }, { type: "null" }] }
+        capacity_bytes: { anyOf: [{ type: integer, minimum: 0, maximum: 9007199254740991 }, { type: "null" }] }
+        basis: { type: string, enum: [reported_capacity] }
+        received_at: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
     ScreenToastWrite:
       type: object
       additionalProperties: false

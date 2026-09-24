@@ -242,6 +242,23 @@ storage block. In JSON mode the fields pass through as `storage`,
 player's last observed state; it is never a credential and never authorizes
 anything.
 
+`screen storage-forecast <id> --playlist-id pl_PLAYLIST [--playlist-rev N]`
+answers whether one playlist would fit the named screen's last reported
+storage *before* it is assigned. It is a read-only dry run: it writes nothing
+(no assignment, no screen revision, no event) and leaves the screen's stored
+forecast untouched. The answer uses the same target selection as the forecast
+in `screen show` — the screen's last reported capacity, no transition
+prediction, nothing treated as local — and prints it as a `Storage forecast`
+block: fit, excluded page count, bytes required versus capacity in binary
+units, the basis, and when the storage report was received; a report older
+than 24 hours is marked `(stale)` but is still forecast from. `fit` is
+`unknown` when the screen has never reported storage or the playlist's
+content references are not ready, and the byte counts and report time are
+null then. `--playlist-rev` refuses a playlist that changed since you read it
+with `revision_conflict` (exit 6); a screen or playlist of another project is
+`not_found` (exit 4), and rate limits are `rate_limited` (exit 7). JSON mode
+returns the server response as `data` unchanged.
+
 ## Application command results
 
 `app upload` and `app update` return the same JSON data paths with or without

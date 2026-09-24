@@ -85,6 +85,7 @@ export function registerGuidance(root: Command): void {
     "screen delete": ["scr_SCREEN"], "screen rotate-public-id": ["scr_SCREEN"],
     "screen toast": ['scr_SCREEN --text "Welcome" --duration-ms 5000'],
     "screen screenshot": ["scr_SCREEN --output screenshot.webp"],
+    "screen storage-forecast": ["scr_SCREEN --playlist-id pl_PLAYLIST", "scr_SCREEN --playlist-id pl_PLAYLIST --playlist-rev 7"],
     "browser setup": ["--code SETUP_CODE --open"],
     "kv get": ["greeting --app-id app_APP"],
     "kv set": ['greeting --app-id app_APP --json-value \'{"message":"Welcome"}\'', "greeting --app-id app_APP --file greeting.txt --content-type text/plain"],
@@ -138,6 +139,7 @@ export function registerGuidance(root: Command): void {
     "comment set": "Replaces comments with a JSON value from --json-value or --file, including - for stdin. Last write wins; comments do not take --expect-rev or bump the resource revision.",
     "operations wait": "Wait defaults to 120000 ms, polling every 1000 ms. --timeout sets the wait budget. Use the operation_id returned by an accepted asynchronous command.",
     "events follow": "Writes NDJSON: one JSON envelope per event on stdout. --after resumes from a cursor; --cursor is a compatibility alias. --timeout is in milliseconds; zero or omitted leaves the stream unbounded.",
+    "screen storage-forecast": "Read-only fit dry run: answers whether one playlist would fit the named screen's last reported storage before it is assigned, with the same target selection as the forecast in screen show (plan A.3 only, no transition prediction). It writes nothing: no assignment, no screen revision, no event. fit is unknown when the screen has never reported storage or the playlist's content references are not ready, and the byte counts and report time are null then. A report older than 24 hours is marked (stale) but is still forecast from. --playlist-rev refuses a playlist that changed since you read it with revision_conflict.",
   };
   for (const [path, note] of Object.entries(notes)) {
     const command = findCommand(root, path.split(" "));

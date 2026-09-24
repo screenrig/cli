@@ -117,6 +117,7 @@ test("root help is compact and every command is discoverable through immediate c
     "screen update",
     "screen list",
     "screen show",
+    "screen storage-forecast",
     "screen assign",
     "screen set-timezone",
     "screen archive",

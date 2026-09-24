@@ -5628,6 +5628,168 @@ test("screen show prints the active storage shortfall with needed versus capacit
   await rm(configDir, { recursive: true, force: true });
 });
 
+test("screen storage-forecast dry-runs a playlist fit without writing", async () => {
+  const transport = new FakeTransport();
+  let body: Record<string, unknown> = {
+    fit: "fits",
+    excluded_page_count: 0,
+    required_bytes: 375809638400,
+    capacity_bytes: 118111600640,
+    basis: "reported_capacity",
+    received_at: "2026-08-14T16:56:00Z",
+  };
+  transport.on("POST", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/storage-forecast", () => ({
+    status: 200,
+    headers: { "cache-control": "no-store" },
+    body,
+  }));
+  const { configDir, fsLike } = await hostConfigFs("screen-forecast-fits-");
+  try {
+    const json = await withRuntime(
+      ["--json", "screen", "storage-forecast", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_LOBBY"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(json.code, ExitCode.Success, json.stdout);
+    const post = transport.calls.at(-1);
+    assert.equal(post?.method, "POST");
+    assert.equal(post?.path, "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/storage-forecast");
+    assert.deepEqual(post?.body, { playlist_id: "pl_LOBBY" });
+    assert.equal(post?.headers?.["idempotency-key"], undefined, "a dry run writes nothing and mints no idempotency key");
+    const envelope = JSON.parse(json.stdout) as Record<string, unknown>;
+    assert.equal(envelope.ok, true);
+    assert.deepEqual(envelope.data, body);
+
+    const human = await withRuntime(
+      ["--human", "screen", "storage-forecast", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_LOBBY"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(human.code, ExitCode.Success, human.stdout);
+    assert.match(
+      human.stdout,
+      /^Storage forecast\nscreen_id: scr_PAIRINGAAAAAAAAAAAAAAAA\nplaylist_id: pl_LOBBY\nfit: fits\nexcluded pages: 0\nrequired: 350 GiB\ncapacity: 110 GiB\nbasis: reported_capacity\nreceived_at: 2026-08-14T16:56:00Z\n?$/,
+    );
+
+    // An optional expected playlist revision rides in the request body; a
+    // playlist that changed since the caller read it is revision_conflict.
+    const guarded = await withRuntime(
+      ["--json", "screen", "storage-forecast", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_LOBBY", "--playlist-rev", "7"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(guarded.code, ExitCode.Success, guarded.stdout);
+    assert.deepEqual(transport.calls.at(-1)?.body, { playlist_id: "pl_LOBBY", playlist_revision: 7 });
+
+    // A report older than 24 hours is stale but still forecast from.
+    body = { ...body, received_at: "2026-08-13T16:00:00Z" };
+    const stale = await withRuntime(
+      ["--human", "screen", "storage-forecast", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_LOBBY"],
+      transport,
+      { fs: fsLike },
+    );
+    assert.equal(stale.code, ExitCode.Success, stale.stdout);
+    assert.match(stale.stdout, /^Storage forecast \(stale\)\nscreen_id: scr_PAIRINGAAAAAAAAAAAAAAAA\nplaylist_id: pl_LOBBY\nfit: fits\n/);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("screen storage-forecast explains a partial fit with the excluded page count", async () => {
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/storage-forecast", () => ({
+    status: 200,
+    headers: { "cache-control": "no-store" },
+    body: {
+      fit: "partial",
+      excluded_page_count: 1,
+      required_bytes: 134217728000,
+      capacity_bytes: 118111600640,
+      basis: "reported_capacity",
+      received_at: "2026-08-14T16:56:00Z",
+    },
+  }));
+  const { configDir, fsLike } = await hostConfigFs("screen-forecast-partial-");
+  const human = await withRuntime(
+    ["--human", "screen", "storage-forecast", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_LOBBY"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(human.code, ExitCode.Success, human.stdout);
+  assert.match(
+    human.stdout,
+    /^Storage forecast\nscreen_id: scr_PAIRINGAAAAAAAAAAAAAAAA\nplaylist_id: pl_LOBBY\nfit: partial\nexcluded pages: 1\nrequired: 125 GiB\ncapacity: 110 GiB\nbasis: reported_capacity\nreceived_at: 2026-08-14T16:56:00Z\n?$/,
+  );
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen storage-forecast reports unknown without byte counts when there is no report", async () => {
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/storage-forecast", () => ({
+    status: 200,
+    headers: { "cache-control": "no-store" },
+    body: { fit: "unknown", excluded_page_count: 0, required_bytes: null, capacity_bytes: null, basis: "reported_capacity", received_at: null },
+  }));
+  const { configDir, fsLike } = await hostConfigFs("screen-forecast-unknown-");
+  const json = await withRuntime(
+    ["--json", "screen", "storage-forecast", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_LOBBY"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(json.code, ExitCode.Success, json.stdout);
+  assert.deepEqual(
+    (JSON.parse(json.stdout) as Record<string, unknown>).data,
+    { fit: "unknown", excluded_page_count: 0, required_bytes: null, capacity_bytes: null, basis: "reported_capacity", received_at: null },
+  );
+
+  const human = await withRuntime(
+    ["--human", "screen", "storage-forecast", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_LOBBY"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.match(human.stdout, /^Storage forecast\nscreen_id: scr_PAIRINGAAAAAAAAAAAAAAAA\nplaylist_id: pl_LOBBY\nfit: unknown\nexcluded pages: 0\nbasis: reported_capacity\n?$/);
+  assert.doesNotMatch(human.stdout, /required|capacity:|received_at|stale/);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen storage-forecast maps a changed playlist to revision_conflict and a nonzero exit", async () => {
+  const transport = new FakeTransport();
+  transport.on("POST", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/storage-forecast", () => ({
+    status: 412,
+    headers: { "content-type": "application/problem+json", "x-request-id": "req_forecast_conflict" },
+    body: {
+      type: "https://screenrig.ai/problems/revision-conflict",
+      title: "Playlist changed",
+      status: 412,
+      code: "revision_conflict",
+      detail: "server wording",
+      current_revision: 8,
+    },
+  }));
+  const { configDir, fsLike } = await hostConfigFs("screen-forecast-conflict-");
+  const json = await withRuntime(
+    ["--json", "screen", "storage-forecast", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_LOBBY", "--playlist-rev", "7"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(json.code, ExitCode.Precondition, json.stdout);
+  const envelope = JSON.parse(json.stdout) as Record<string, unknown>;
+  assert.equal(envelope.ok, false);
+  const error = envelope.error;
+  assert.ok(error && typeof error === "object", json.stdout);
+  const problem = error as Record<string, unknown>;
+  assert.equal(problem.code, "revision_conflict");
+  assert.equal(problem.status, 412);
+
+  const human = await withRuntime(
+    ["--human", "screen", "storage-forecast", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_LOBBY", "--playlist-rev", "7"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(human.code, ExitCode.Precondition, human.stdout);
+  await rm(configDir, { recursive: true, force: true });
+});
+
 test("screen list appends the platform column only when a screen reports a host", async () => {
   const transport = new FakeTransport();
   const items = [
