@@ -8,12 +8,12 @@ const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
  * credential, so a link that reaches an error detail, an event, or a message
  * must lose its fragment rather than be echoed back.
  */
-const URL_FRAGMENT_TOKEN_RE = /#(link|provision)=[A-Za-z0-9_-]{8,}/gi;
+const URL_FRAGMENT_TOKEN_RE = /#(token|link|provision)=[A-Za-z0-9_-]{8,}/gi;
 
 const SENSITIVE_KEY_RE =
   /(authorization|access_token|token|password|secret|private|ciphertext|nonce|cookie|object_key|signed_url|completion_nonce|upload_url|image_bytes|pixels|prompt)/i;
 const SENSITIVE_VALUE_RE =
-  /(sr_live_|sac_|Bearer\s|ScreenRig-Agent-Connect\s|data:image\/|#(link|provision)=|[?&](X-Amz-Signature|X-Goog-Signature|signature)=)/i;
+  /(sr_live_|sac_|Bearer\s|ScreenRig-Agent-Connect\s|data:image\/|#(token|link|provision)=|[?&](X-Amz-Signature|X-Goog-Signature|signature)=)/i;
 
 /**
  * Lookup segment of a credential, for internal correlation only. A redacted

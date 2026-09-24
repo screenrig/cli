@@ -750,7 +750,7 @@ test("playlist-write 429 preserves Retry-After and reports an unknown write outc
       assert.match(error.problem.detail, /remains limited for 17 seconds/);
       assert.match(error.problem.detail, /Retry-After is 17 seconds/);
       assert.match(error.problem.next?.reason ?? "", /Wait 17 seconds/);
-      assert.match(error.problem.next?.reason ?? "", /Read back the destination account/);
+      assert.match(error.problem.next?.reason ?? "", /Read back the destination project/);
       assert.match(error.problem.next?.reason ?? "", /same idempotency key/);
       assert.match(error.problem.detail, /1 new media object is confirmed ready/);
       assert.match(error.problem.detail, /playlist write request was sent and its outcome may be unknown/);
@@ -784,7 +784,7 @@ function nameConflictResponse(): TransportResponse {
 }
 
 /**
- * UAT round 1, F5: importing an account's own export unchanged is refused
+ * UAT round 1, F5: importing an project's own export unchanged is refused
  * by older servers that enforce unique playlist names. The 409 gains a `next` that
  * names `--name`, and `--name` itself replaces the bundle's playlist name.
  */
@@ -805,7 +805,7 @@ test("import of a bundle whose playlist name is taken points at --name, and --na
       assert.equal(error.problem.status, 409);
       assert.equal(error.problem.code, "resource_conflict");
       assert.match(error.problem.detail, /playlist name is already in use/);
-      assert.doesNotMatch(error.problem.detail, /unique per account/);
+      assert.doesNotMatch(error.problem.detail, /unique per project/);
       assert.equal(error.problem.next?.command, `screenrig playlist import ${dir} --name NAME`);
       assert.match(error.problem.next?.reason ?? "", /--update ID; --expect-rev is optional/);
       return true;

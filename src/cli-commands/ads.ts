@@ -14,9 +14,6 @@ import {
   handleAdsCreativesShow,
   handleAdsInventoryList,
   handleAdsInventoryUpdate,
-  handleAdsInvitesCreate,
-  handleAdsInvitesList,
-  handleAdsInvitesRevoke,
   handleAdsMembershipsList,
   handleAdsMembershipsRevoke,
   handleAdsMembershipsUpdate,
@@ -41,24 +38,24 @@ import { positiveInteger, revision } from "./options.js";
 
 /**
  * Advertising commands. Buyer operations act through invited memberships;
- * seller operations act on the calling account's own network and inventory. No
+ * seller operations act on the calling project's own network and inventory. No
  * command here mutates a wallet: a draft is not spending, and a campaign only
  * becomes deliverable through an explicitly accepted, unexpired quote.
  */
 export function registerAdsCommands(root: Command, bind: CommandActionBinder): void {
   const ads = root.command("ads").description("Buy advertising and sell owned inventory");
 
-  const networks = ads.command("networks").description("Inspect the networks this account may buy ads in");
-  networks.command("list").description("List invited networks this account has joined")
+  const networks = ads.command("networks").description("Inspect the networks this project may buy ads in");
+  networks.command("list").description("List invited networks this project has joined")
     .action(bind(handleAdsNetworksList));
   networks.command("show").description("Inspect one joined network's permitted inventory and slots")
-    .argument("<seller-account-id>", "Seller account that owns the network")
+    .argument("<seller-project-id>", "Seller project that owns the network")
     .action(bind(handleAdsNetworkInventoryShow));
 
-  const network = ads.command("network").description("Inspect or configure this account's own seller network");
-  network.command("show").description("Inspect this seller account's network")
+  const network = ads.command("network").description("Inspect or configure this project's own seller network");
+  network.command("show").description("Inspect this seller project's network")
     .action(bind(handleAdsNetworkShow));
-  network.command("create").description("Create this seller account's network")
+  network.command("create").description("Create this seller project's network")
     .requiredOption("--name <NAME>", "Network display name")
     .action(bind(handleAdsNetworkCreate));
   const rate = network.command("rate").description("Set the network default rate per 15 seconds")
@@ -67,8 +64,8 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     .action(bind(handleAdsNetworkRate));
   addCommandNotes(rate, "Changing the effective rate for accepted inventory pauses every affected campaign with price_change_pending. Each buyer must accept a fresh quote before delivery resumes; a top-up, schedule tick, or ordinary resume cannot supply that consent.");
 
-  const inventory = ads.command("inventory").description("Opt this account's screens in or out of advertising and describe them");
-  inventory.command("list").description("List this seller account's advertising inventory")
+  const inventory = ads.command("inventory").description("Opt this project's screens in or out of advertising and describe them");
+  inventory.command("list").description("List this seller project's advertising inventory")
     .action(bind(handleAdsInventoryList));
   const inventoryUpdate = inventory.command("update").description("Update one screen's advertising inventory")
     .argument("<screen-id>", "Owned screen identifier")
@@ -83,7 +80,7 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     .option("--expect-rev <REVISION>", "Override the precondition with this inventory revision", revision)
     .option("--public-description <TEXT>", "Public description shown to invited buyers")
     .addOption(new Option("--rate-mcr-per-15s <MCR>", "Positive integer mcr rate override per 15 seconds").argParser(positiveInteger("rate-mcr-per-15s")).conflicts("clearRate"))
-    .addOption(new Option("--clear-rate", "Remove this screen's rate override and inherit the account default").conflicts("rateMcrPer15s"))
+    .addOption(new Option("--clear-rate", "Remove this screen's rate override and inherit the project default").conflicts("rateMcrPer15s"))
     .action(bind(handleAdsInventoryUpdate));
   requireOptionGroup(inventoryUpdate, "atLeastOne", [
     "--enabled", "--disabled", "--site-name", "--city", "--region", "--venue-type",
@@ -92,7 +89,7 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
   addCommandNotes(inventoryUpdate, "The stored row is read first, then written as a whole record: flags you omit keep the current opt-in flag, price override, and public metadata, and the row's current revision is sent as the precondition. When no row exists yet the supplied fields create it (a new row requires --enabled or --disabled) and --expect-rev has nothing to check.");
 
   const slots = ads.command("slots").description("Manage the reusable ad slots this seller offers");
-  slots.command("list").description("List this seller account's slot definitions")
+  slots.command("list").description("List this seller project's slot definitions")
     .action(bind(handleAdsSlotsList));
   const slotFields = (command: Command, create: boolean): Command => command
     .addOption(new Option("--enabled", "Enable this slot (the default for a new slot)").conflicts("disabled"))
@@ -106,7 +103,7 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     .option("--max-image-duration-ms <MS>", "Longest accepted image duration", positiveInteger("max-image-duration-ms"))
     .option("--max-video-duration-ms <MS>", "Longest accepted finite video duration", positiveInteger("max-video-duration-ms"))
     .addOption(new Option("--rate-mcr-per-15s <MCR>", "Positive integer mcr rate override for this slot").argParser(positiveInteger("rate-mcr-per-15s")).conflicts("clearRate"))
-    .addOption(new Option("--clear-rate", "Remove this slot's rate override and inherit the screen or account rate").conflicts("rateMcrPer15s"));
+    .addOption(new Option("--clear-rate", "Remove this slot's rate override and inherit the screen or project rate").conflicts("rateMcrPer15s"));
   const slotsCreate = slotFields(slots.command("create").description("Create a reusable slot definition")
     .action(bind(handleAdsSlotsCreate)), true);
   const slotsUpdate = slotFields(slots.command("update").description("Update a reusable slot definition")
@@ -116,22 +113,8 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
   addCommandNotes(slotsCreate, "Creating a slot definition does not put an ad break into any playlist: place an adslot page through playlist authoring. Omitted duration limits adopt the server defaults: images up to 30000 ms and finite videos up to 30000 ms.");
   addCommandNotes(slotsUpdate, "The stored definition is read first, then written as a whole record: flags you omit keep the current accepted formats, duration limits, and rate override. A changed effective rate installs a pricing barrier that pauses affected campaigns with price_change_pending until each buyer accepts a fresh quote.");
 
-  const invites = ads.command("invites").description("Invite buyers into this seller's network");
-  const invitesCreate = invites.command("create").description("Create single-use email-bound invitations")
-    .requiredOption("--email <ADDRESSES>", "Comma-separated recipient addresses (each gets its own single-use link)")
-    .option("--screen-id <IDS>", "Comma-separated screen identifiers this invitation allows")
-    .option("--slot-id <IDS>", "Comma-separated slot identifiers this invitation allows")
-    .addOption(new Option("--policy <POLICY>", "Review policy for creatives from this buyer").choices(["trusted", "review_required"]).default("trusted"))
-    .action(bind(handleAdsInvitesCreate));
-  invites.command("list").description("List this seller account's invitations")
-    .action(bind(handleAdsInvitesList));
-  invites.command("revoke").description("Revoke an unclaimed invitation")
-    .argument("<invitation-id>", "Invitation identifier")
-    .action(bind(handleAdsInvitesRevoke));
-  addCommandNotes(invitesCreate, "Each response item carries a claim token exactly once; a token is a secret and is never retrievable again. The invited person claims it in the dashboard, where their own verified user email must match the invited address. Sending an invitation changes no account.");
-
   const memberships = ads.command("memberships").description("Manage buyers admitted to this seller's network");
-  memberships.command("list").description("List this seller account's memberships")
+  memberships.command("list").description("List this seller project's memberships")
     .action(bind(handleAdsMembershipsList));
   memberships.command("update").description("Change one membership's policy or inventory scope")
     .argument("<membership-id>", "Membership identifier")
@@ -146,10 +129,10 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     .action(bind(handleAdsMembershipsRevoke));
 
   const creatives = ads.command("creatives").description("Bind ready owned media to an immutable advertising creative");
-  creatives.command("list").description("List this buyer account's creatives")
+  creatives.command("list").description("List this buyer project's creatives")
     .action(bind(handleAdsCreativesList));
   const creativeCreate = creatives.command("create").description("Create a creative from ready owned media")
-    .requiredOption("--media-id <ID>", "Ready media identifier owned by this account")
+    .requiredOption("--media-id <ID>", "Ready media identifier owned by this project")
     .requiredOption("--copy <TEXT>", "Approved copy shown with the creative")
     .action(bind(handleAdsCreativesCreate));
   creatives.command("show").description("Inspect one creative and its review state")
@@ -158,7 +141,7 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
   addCommandNotes(creativeCreate, "Binding a creative neither charges nor uploads the media again. An approved creative never changes pixels in place: edit the source media and bind a new creative version.");
 
   const campaigns = ads.command("campaigns").description("Draft, price, activate, and operate buyer campaigns");
-  campaigns.command("list").description("List this buyer account's campaigns")
+  campaigns.command("list").description("List this buyer project's campaigns")
     .action(bind(handleAdsCampaignsList));
   campaigns.command("show").description("Inspect one campaign")
     .argument("<campaign-id>", "Campaign identifier")
@@ -218,7 +201,7 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     addCommandNotes(command, "Approval covers the exact submitted version only. It does not choose the buyer's budget or grant access to its media library; editing the pixels requires a new version and a new decision.");
   }
 
-  const reports = ads.command("reports").description("Read delivery and spend for this account");
+  const reports = ads.command("reports").description("Read delivery and spend for this project");
   const reportSpend = reports.command("spend").description("Read buyer ad spend for one campaign")
     .requiredOption("--campaign-id <ID>", "Campaign to report")
     .action(bind(handleAdsReportsSpend));
@@ -226,6 +209,6 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     .requiredOption("--from <TIMESTAMP>", "Inclusive RFC 3339 start of the reporting period")
     .requiredOption("--to <TIMESTAMP>", "Exclusive RFC 3339 end of the reporting period")
     .action(bind(handleAdsReportsDelivery));
-  addCommandNotes(reportSpend, "A buyer report shows this account's own debit and campaign evidence, never a seller's other income or account-wide usage. Money is reported as decimal mcr strings.");
-  addCommandNotes(reportDelivery, "A seller report shows gross ad income, the serving-fee debit, and net credits for this account's own delivery, with one row per completed occurrence. Normal account costs consume the shared balance.");
+  addCommandNotes(reportSpend, "A buyer report shows this project's own debit and campaign evidence, never a seller's other income or project-wide usage. Money is reported as decimal mcr strings.");
+  addCommandNotes(reportDelivery, "A seller report shows gross ad income, the serving-fee debit, and net credits for this project's own delivery, with one row per completed occurrence. Normal project costs consume the shared balance.");
 }

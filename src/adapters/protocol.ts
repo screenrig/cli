@@ -13,15 +13,16 @@ export type EnrollmentIntent = "advertising" | "signage";
 
 export type OperationState = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
-export interface Account {
+export interface Project {
   content_limit_bytes: number;
   created_at: string;
   credit_remaining: number;
   email: string;
   email_verified: false;
-  feature_revision: number;
-  features: AccountFeatures;
+  feature_revision?: number;
+  features?: ProjectFeatures;
   id: string;
+  name: string;
   reserved_bytes: number;
   revision: number;
   screen_count: number;
@@ -31,47 +32,79 @@ export interface Account {
   used_bytes: number;
 }
 
-/**
- * One email invitation for an existing account.
- *
- * Local mirror of the generated POST /api/v1/account/invitations contract
- * until `@screenrig/protocol` publishes declarations. `status` reports request
- * progress, never delivery: 202 acceptance is not proof the recipient received
- * any mail.
- */
-export interface AccountInvitation {
-  created_at: string;
+export type InvitationStatus = "queued" | "sent" | "issued" | "accepted" | "revoked" | "expired" | "failed";
+
+export interface EnrollmentInvitation {
   expires_at: string;
-  invitation_id: string;
-  status: "queued" | "sent" | "accepted" | "expired" | "failed";
+  id: string;
+  status: InvitationStatus;
 }
 
-export interface AccountInvitationRequest {
+export interface InvitationAdvertising {
+  policy: "trusted" | "review_required";
+  screen_ids: string[];
+  slot_ids: string[];
+}
+
+export interface Invitation {
+  advertising?: InvitationAdvertising;
+  created_at: string;
+  delivery: "email" | "link";
+  expires_at: string;
+  id: string;
+  kind: "project_member" | "ad_buyer";
+  project_id: string;
+  recipient_email?: string;
+  status: InvitationStatus;
+}
+
+export interface InvitationCreate {
+  advertising?: InvitationAdvertising;
+  delivery?: "email" | "link";
+  emails?: string[];
+  kind: "project_member" | "ad_buyer";
+}
+
+/** Only the creation response may carry the explicitly requested link. */
+export interface InvitationIssued extends Invitation {
+  url?: string;
+}
+
+export interface InvitationCreated {
+  invitations: InvitationIssued[];
+}
+
+export interface InvitationList {
+  items: Invitation[];
+  next_cursor: string;
+}
+
+export interface SignInResetRequest {
   email: string;
 }
 
-/** Independent account product features. Neither flag is a billing plan. */
-export interface AccountFeatures {
+export interface SignInResetAccepted {
+  status: "accepted";
+}
+
+/** Independent project product features. Neither flag is a billing plan. */
+export interface ProjectFeatures {
   advertiser: boolean;
   screens: boolean;
 }
 
-/**
- * Local mirror of the generated GET /api/v1/account/capabilities contract
- * until `@screenrig/protocol` publishes declarations. `capabilities` is the
- * closed server-derived set for the authenticated account; a client never
- * asserts it, and no plan label or numeric quota implies permission.
- */
-export interface AccountCapabilities {
-  account_id: string;
+/** The server-derived capability set for the authenticated project. */
+export interface ProjectCapabilities {
+  project_id: string;
   plan_id: string;
-  features: AccountFeatures;
+  features: ProjectFeatures;
   feature_revision: number;
   capabilities: string[];
 }
 
 export interface CLIEnrollment {
-  account: Account;
+  project: Project;
+  invitation: EnrollmentInvitation;
   agent: Agent;
   connection_ready: false;
   issuance_expires_at: string;
@@ -82,6 +115,7 @@ export interface CLIEnrollment {
 export interface CLIEnrollmentRequest {
   client_id: string;
   email: string;
+  project_name?: string;
   /** Present only when the operator supplies --beta-key or SCREENRIG_BETA_KEY. */
   beta_key?: string;
   /**
@@ -202,14 +236,14 @@ export interface EventActor {
   display_name: string;
 }
 
-/** Safe agent principal attribution on directly caused account events. */
+/** Safe agent principal attribution on directly caused project events. */
 export interface EventAgent {
   agent_id: string;
   name: string;
   agent_type: string;
 }
 
-export interface AccountEvent {
+export interface ProjectEvent {
   cursor: string;
   sequence: number;
   type: string;
@@ -230,7 +264,7 @@ export interface AccountEvent {
 }
 
 export interface EventPage {
-  items: AccountEvent[];
+  items: ProjectEvent[];
   /**
    * Cursor of the last returned event while newer events already exist; pass
    * it back as `after`. `null` marks the end of the history and is not an error.
@@ -240,7 +274,7 @@ export interface EventPage {
 
 export interface Capabilities {
   /** Default-plan storage cap. Zero means no product storage cap. */
-  account_content_bytes: 0;
+  project_content_bytes: 0;
   api_version: string;
   application_compressed_bytes: 104857600;
   application_expanded_bytes: 262144000;
@@ -255,7 +289,7 @@ export interface Capabilities {
   playlist_max_media_per_selector: 32;
   playlist_max_pages: 100;
   protocol_version: string;
-  screens_per_account: 100;
+  screens_per_project: 100;
   transition_max_duration_ms: 60000;
 }
 
@@ -316,14 +350,14 @@ export interface ScreenObservationSurface {
 
 /**
  * Player-reported playback surface. Absent until the first accepted player
- * report. Read-only on the account API; ScreenPatch cannot write it.
+ * report. Read-only on the project API; ScreenPatch cannot write it.
  */
 export interface ScreenObservation {
   observed_at: string;
   surfaces: ScreenObservationSurface[];
 }
 
-/** Last durable page failure reported for a screen. Read-only on the account API. */
+/** Last durable page failure reported for a screen. Read-only on the project API. */
 export interface PageFailure {
   at: string;
   code: string;
@@ -346,8 +380,8 @@ export interface HostDevice {
 
 /**
  * The shell and hardware a player runs on, as the player reported it. A hint
- * that names a device; never a credential. Read-only on the account API and
- * returned only to the owning account.
+ * that names a device; never a credential. Read-only on the project API and
+ * returned only to the owning project.
  */
 export interface HostContext {
   platform: "tizen" | "android" | "windows" | "qt" | "apple" | "chromeos" | "browser";
@@ -371,7 +405,7 @@ export interface ScreenRecoveryPendingHost {
 
 /**
  * Present while a native pairing session that presented this screen's
- * hardware identity waits for the owning account to confirm with
+ * hardware identity waits for the owning project to confirm with
  * `screen recover`. Carries the pairing session's deadline and, when the
  * server reports it, a description of the display asking to reconnect.
  */
@@ -390,7 +424,7 @@ export interface Screen {
   created_at: string;
   /** Player-reported host hint. Absent until a native player sends one. */
   host?: HostContext;
-  /** Instant the stored host hint was last replaced. Account cannot write it. */
+  /** Instant the stored host hint was last replaced. Project cannot write it. */
   host_updated_at?: string;
   id: string;
   label: string;
@@ -424,7 +458,7 @@ export interface Screen {
   recovery_pending?: ScreenRecoveryPending;
   /**
    * Present only while archived: what archived the screen. Known values are
-   * account, device_reset, and device_unpair; readers keep a value they do
+   * project, device_reset, and device_unpair; readers keep a value they do
    * not know. Every reason keeps the device binding, so unarchive resumes the
    * display with no re-pairing. Absent on screens archived before reasons
    * were recorded. Read-only.
@@ -436,7 +470,7 @@ export interface Screen {
    * Present while the paired Player cannot show the application or iframe
    * primitives its manifest carries. at is when the condition began. The
    * manifest is unchanged; the Player drops those primitives. Read-only
-   * account health metadata.
+   * project health metadata.
    */
   applications_unsupported?: ScreenApplicationsUnsupported;
   revision: number;
@@ -559,18 +593,6 @@ export interface BrowserLinkClaim {
   session_id: string;
   status: "claimed";
   screen: BrowserLinkClaimScreen;
-}
-
-/**
- * Response of POST /api/v1/account/dashboard-links.
- *
- * The single-use token rides the fragment of `url`, so the whole string is a
- * credential: open it, never print it except as the one documented fallback,
- * and never store it.
- */
-export interface DashboardLink {
-  url: string;
-  expires_at: string;
 }
 
 export interface MediaCommit {

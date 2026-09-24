@@ -47,13 +47,13 @@ for (const outcome of ["success", "rejection"] as const) {
     const requested = new Promise<void>((resolve) => { started = resolve; });
     let release!: () => void;
     const responseReady = new Promise<void>((resolve) => { release = resolve; });
-    const transport = new FakeTransport().on("GET", "/api/v1/account", async () => {
+    const transport = new FakeTransport().on("GET", "/api/v1/project", async () => {
       started();
       await responseReady;
       if (outcome === "rejection") throw networkError("Deferred transport failed.");
       return { status: 200, headers: {}, body: { id: "acc_TEST", revision: 1, credit_remaining: 2000 } };
     });
-    const fixture = await runtimeFor(["account", "show"], transport, true);
+    const fixture = await runtimeFor(["project", "show"], transport, true);
     let settled = false;
     const pending = run(fixture.runtime).then((code) => { settled = true; return code; });
     try {

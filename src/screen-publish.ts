@@ -2,7 +2,7 @@ import { RESOURCE_ID_PATTERNS, isResourceID, type ResourceIDKind } from "./gener
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { requireCapability } from "./account-capabilities.js";
+import { requireCapability } from "./project-capabilities.js";
 import { ApiClient } from "./client.js";
 import { newIdempotencyKey } from "./ids.js";
 import { quotedRevision } from "./if-match.js";
@@ -29,18 +29,18 @@ export async function publishScreen(options: {
 }) {
   const { client, screenId, document } = options;
   const expected = options.revision === undefined ? undefined : Number(options.revision.replaceAll('"', ''));
-  const account = (await client.call({ method: "GET", path: "/api/v1/account" })).body as { id: string };
-  if (!isResourceID(account?.id, "account")) throw usageError("Account identity is missing.");
+  const project = (await client.call({ method: "GET", path: "/api/v1/project" })).body as { id?: string } | undefined;
+  if (typeof project?.id !== "string" || project.id.length === 0) throw usageError("Project identity is missing.");
   // An ad-bearing document is published under the v2 union, and only a
-  // signage/publish-capable account may place adslot pages at all.
+  // signage/publish-capable project may place adslot pages at all.
   const playlistVersion = playlistApiVersion(document.pages);
   if (playlistVersion === "v2") {
     await requireCapability(client, "signage.publish", "screen publish with adslot pages", {
-      command: "screenrig account capabilities",
-      reason: "Read the account's effective capabilities before publishing an ad-bearing playlist; an advertising-only account cannot publish playlists.",
+      command: "screenrig project capabilities",
+      reason: "Read the project's effective capabilities before publishing an ad-bearing playlist; an advertising-only project cannot publish playlists.",
     });
   }
-  const fingerprint = digest(JSON.stringify([options.apiUrl, account.id, screenId, expected, document, options.requestedKey ?? ""]));
+  const fingerprint = digest(JSON.stringify([options.apiUrl, project.id, screenId, expected, document, options.requestedKey ?? ""]));
   const directory = path.join(path.dirname(options.configPath), "publishes");
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const journalPath = path.join(directory, `${fingerprint}.json`);
@@ -90,7 +90,7 @@ export async function publishScreen(options: {
       await save();
     }
     if (!state.assigned && options.runtime.now().getTime() - state.created_at >= 24 * 60 * 60 * 1000) {
-      throw usageError("The publish replay window has expired. Inspect the account and screen before reconciling; this command will not repeat an ambiguous write after server idempotency expiry.");
+      throw usageError("The publish replay window has expired. Inspect the project and screen before reconciling; this command will not repeat an ambiguous write after server idempotency expiry.");
     }
     if (!state.playlist) {
       const response = await client.call({ method: "POST", path: `/api/${playlistVersion}/playlists`, body: document, idempotent: true, idempotencyKey: state.create_key });

@@ -15,10 +15,10 @@ test("maps HTTP statuses onto explicit exit codes", () => {
 });
 
 test("normalizes incomplete problem bodies", () => {
-  const problem = normalizeProblem({ status: 409, code: "account_exists" }, { request_id: "req_1" });
-  assert.equal(problem.code, "account_exists");
+  const problem = normalizeProblem({ status: 409, code: "resource_conflict" }, { request_id: "req_1" });
+  assert.equal(problem.code, "resource_conflict");
   assert.equal(problem.request_id, "req_1");
-  assert.match(problem.type, /account-exists/);
+  assert.match(problem.type, /resource-conflict/);
 });
 
 test("human rendering includes next-action guidance", () => {
@@ -45,7 +45,7 @@ test("payment_required guidance names credit_remaining and not millicredits", ()
     code: "payment_required",
     errors: [],
   });
-  assert.equal(problem.next?.command, "screenrig account show");
+  assert.equal(problem.next?.command, "screenrig project show");
   assert.match(problem.next?.reason ?? "", /credit_remaining/);
   assert.doesNotMatch(problem.next?.reason ?? "", /mcr|millicredit|kCr|stripe|x402|\$/i);
 });

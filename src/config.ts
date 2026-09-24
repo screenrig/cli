@@ -8,7 +8,8 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
       token?: string;
       /** Path to an already-listening AF_UNIX socket for NDJSON operation logs. */
       log_socket?: string;
-      account_id?: string;
+      project_id?: string;
+      project_name?: string;
       agent_id?: string;
       last_agent?: {
         id: string;
@@ -36,6 +37,8 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
         idempotency_key: string;
         /** Exact trimmed contact address retained only until enrollment verifies. */
         email?: string;
+        /** Exact project-name input bound to this enrollment's idempotency key. */
+        project_name?: string;
         /**
          * Enrollment purpose chosen once. A resumed enrollment reuses it so the
          * same idempotency key cannot change intent into a conflicting request.
@@ -343,7 +346,8 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
     export interface ResolvedConfig {
       apiUrl: string;
       token?: string;
-      accountId?: string;
+      projectId?: string;
+      projectName?: string;
       agentId?: string;
       enrollment?: ScreenRigConfig["enrollment"];
       agentConnection?: ScreenRigConfig["agent_connection"];
@@ -430,7 +434,8 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
       return {
         apiUrl: apiUrl.replace(/\/+$/, ""),
         token,
-        accountId: file?.account_id,
+        projectId: file?.project_id,
+        projectName: file?.project_name,
         agentId: file?.agent_id,
         enrollment: file?.enrollment,
         agentConnection: file?.agent_connection,

@@ -137,7 +137,11 @@ export class ApiClient {
     }
     span.response(response.status, {
       request_id: requestId,
-      ...responseSummary(response.body, req.binary === true, response.headers["content-type"]),
+      // Invitation creation can carry a one-time credential URL. Do not put
+      // that body in generic logging fields, even before redaction.
+      ...(req.method === "POST" && req.path === "/api/v1/invitations"
+        ? { content_type: response.headers["content-type"] }
+        : responseSummary(response.body, req.binary === true, response.headers["content-type"])),
     });
     if (this.creditsOwner) {
       observeCreditsRemaining(this.creditsOwner, remaining);

@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import type {
-  Account,
-  AccountEvent,
+  Project,
+  ProjectEvent,
+  CLIEnrollmentRequest,
+  Invitation,
+  InvitationCreate,
+  InvitationIssued,
   Agent,
   Capabilities,
   FeedbackKind,
@@ -171,8 +175,8 @@ export class FakeTransport implements Transport {
 export function memoryBackend(): FakeTransport {
   const transport = new FakeTransport();
   const operations = new Map<string, Operation>();
-  const events: AccountEvent[] = [];
-  let account: Account = {
+  const events: ProjectEvent[] = [];
+  let project: Project = {
     content_limit_bytes: 0,
     created_at: "2026-08-14T17:00:00.000Z",
     credit_remaining: 0,
@@ -181,6 +185,7 @@ export function memoryBackend(): FakeTransport {
     feature_revision: 1,
     features: { advertiser: false, screens: true },
     id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    name: "Amber Acorn",
     reserved_bytes: 0,
     revision: 1,
     screen_count: 0,
@@ -206,6 +211,42 @@ export function memoryBackend(): FakeTransport {
     created_at: "2026-08-14T17:00:00.000Z",
     connected_at: "2026-08-14T17:00:00.000Z",
   };
+  const invitations = new Map<string, Invitation>();
+  const enrollmentReplays = new Map<string, { request: string; response: TransportResponse }>();
+  const invitationReplays = new Map<string, { request: string; response: TransportResponse }>();
+  let projectSequence = 0;
+  let invitationSequence = 0;
+  const privateHeaders = { "cache-control": "private, no-store" };
+  const problem = (status: number, code: string, detail: string): TransportResponse => ({
+    status,
+    headers: { ...privateHeaders, "content-type": "application/problem+json" },
+    body: { status, code, title: "Request refused", detail },
+  });
+  const issueInvitation = (
+    kind: Invitation["kind"],
+    delivery: Invitation["delivery"],
+    email?: string,
+    advertising?: Invitation["advertising"],
+  ): Invitation => {
+    const existing = delivery === "email" ? [...invitations.values()].find((item) =>
+      item.project_id === project.id && item.kind === kind
+      && item.recipient_email?.toLowerCase() === email?.toLowerCase()
+      && (item.status === "queued" || item.status === "sent")) : undefined;
+    if (existing) return existing;
+    const item: Invitation = {
+      id: `inv_${String(++invitationSequence).padStart(24, "0")}`,
+      project_id: project.id,
+      kind,
+      delivery,
+      status: delivery === "link" ? "issued" : "queued",
+      created_at: "2026-08-14T17:00:00.000Z",
+      expires_at: delivery === "link" ? "2026-08-15T17:00:00.000Z" : "2026-08-21T17:00:00.000Z",
+      ...(email ? { recipient_email: email } : {}),
+      ...(advertising ? { advertising } : {}),
+    };
+    invitations.set(item.id, item);
+    return item;
+  };
 
   transport.on("GET", "/.health", () => ({ status: 200, headers: {}, body: { status: "alive" } }));
   transport.on("GET", "/.ready", () => ({ status: 200, headers: {}, body: { status: "ready", degraded: [] } }));
@@ -215,7 +256,7 @@ export function memoryBackend(): FakeTransport {
     status: 200,
     headers: { "x-request-id": "req_AAAAAAAAAAAAAAAAAAAAAAAA" },
     body: {
-      account_content_bytes: 0,
+      project_content_bytes: 0,
       api_version: "0.2.0",
       application_compressed_bytes: 104857600,
       application_expanded_bytes: 262144000,
@@ -229,13 +270,21 @@ export function memoryBackend(): FakeTransport {
       playlist_max_media_per_selector: 32,
       playlist_max_pages: 100,
       protocol_version: "1",
-      screens_per_account: 100,
+      screens_per_project: 100,
       transition_max_duration_ms: 60000,
     } satisfies Capabilities,
   }));
 
   transport.on("POST", "/api/v1/enrollments", (req): TransportResponse => {
-    const email = (req.body as { email?: unknown } | undefined)?.email;
+    const input = req.body as CLIEnrollmentRequest | undefined;
+    const email = input?.email;
+    const replayKey = req.headers?.["idempotency-key"];
+    const request = JSON.stringify(req.body);
+    const replay = replayKey ? enrollmentReplays.get(replayKey) : undefined;
+    if (replay) {
+      return replay.request === request ? replay.response
+        : problem(409, "idempotency_mismatch", "The enrollment request changed.");
+    }
     if (typeof email !== "string") {
       return {
         status: 400,
@@ -243,15 +292,30 @@ export function memoryBackend(): FakeTransport {
         body: { status: 400, code: "invalid_request", title: "Invalid request", detail: "A contact email is required." },
       };
     }
-    account = { ...account, email };
-    return {
+    projectSequence += 1;
+    project = {
+      ...project,
+      id: projectSequence === 1 ? "acc_AAAAAAAAAAAAAAAAAAAAAAAA" : `acc_${String(projectSequence).padStart(24, "0")}`,
+      name: input?.project_name ?? `Amber Acorn ${projectSequence}`,
+      email,
+      features: input?.intent === "advertising"
+        ? { advertiser: true, screens: false } : { advertiser: false, screens: true },
+      revision: 1,
+      feature_revision: 1,
+      used_bytes: 0,
+      reserved_bytes: 0,
+      screen_count: 0,
+    };
+    const invitation = issueInvitation("project_member", "email", email);
+    const response: TransportResponse = {
       status: 201,
       headers: {
         "cache-control": "private, no-store",
         "x-request-id": req.headers?.["x-request-id"] ?? "req_enroll",
       },
       body: {
-        account,
+        project,
+        invitation: { id: invitation.id, status: invitation.status, expires_at: invitation.expires_at },
         agent: currentAgent,
         connection_ready: false,
         token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -259,6 +323,8 @@ export function memoryBackend(): FakeTransport {
         issuance_expires_at: "2026-08-14T17:10:00.000Z",
       },
     };
+    if (replayKey) enrollmentReplays.set(replayKey, { request, response });
+    return response;
   });
 
   transport.on("GET", "/api/v1/agents/self", () => ({
@@ -323,7 +389,7 @@ export function memoryBackend(): FakeTransport {
     };
   });
 
-  transport.on("POST", "/api/v1/account/browser-links/claim", (req) => ({
+  transport.on("POST", "/api/v1/project/browser-links/claim", (req) => ({
     status: 201,
     headers: { "cache-control": "private, no-store", "x-request-id": req.headers?.["x-request-id"] ?? "req_browser_link" },
     body: {
@@ -338,19 +404,86 @@ export function memoryBackend(): FakeTransport {
     },
   }));
 
-  transport.on("POST", "/api/v1/account/dashboard-links", (req) => ({
-    status: 201,
-    headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer", "x-request-id": req.headers?.["x-request-id"] ?? "req_dashboard_link" },
+  transport.on("GET", "/api/v1/project", (req) => ({
+    status: 200,
+    headers: { ...privateHeaders, etag: `"${project.revision}"`, "x-request-id": req.headers?.["x-request-id"] ?? "req_project" },
+    body: project,
+  }));
+  transport.on("PATCH", "/api/v1/project", (req) => {
+    const name = (req.body as { name?: string } | undefined)?.name;
+    if (typeof name !== "string" || !name.trim() || [...name.trim()].length > 60) {
+      return problem(400, "invalid_request", "A project name of 1 to 60 characters is required.");
+    }
+    project = { ...project, name: name.trim(), revision: project.revision + 1 };
+    return { status: 200, headers: { ...privateHeaders, etag: `"${project.revision}"` }, body: project };
+  });
+  transport.on("GET", "/api/v1/project/capabilities", () => ({
+    status: 200,
+    headers: privateHeaders,
     body: {
-      url: `https://dashboard.screenrig.ai/#link=${"D".repeat(43)}`,
-      expires_at: "2026-08-14T17:10:00.000Z",
+      project_id: project.id,
+      plan_id: "default",
+      features: project.features,
+      feature_revision: project.feature_revision,
+      capabilities: [
+        "media", "credits",
+        ...(project.features?.screens ? ["signage.pairing", "signage.playlists", "signage.publish"] : []),
+        ...(project.features?.advertiser ? ["advertising"] : []),
+      ],
     },
   }));
-
-  transport.on("GET", "/api/v1/account", (req) => ({
+  transport.on("POST", "/api/v1/invitations", (req) => {
+    const input = req.body as InvitationCreate | undefined;
+    const delivery = input?.delivery ?? "email";
+    if (!input || !["project_member", "ad_buyer"].includes(input.kind)
+      || (delivery !== "email" && delivery !== "link")
+      || (delivery === "link" && (input.kind !== "project_member" || input.emails !== undefined))
+      || (delivery === "email" && (!input.emails?.length || input.emails.some((email) => !email.includes("@"))))
+      || (input.kind === "ad_buyer" && !input.advertising)
+      || (input.kind === "project_member" && input.advertising !== undefined)) {
+      return problem(400, "invalid_request", "Invalid invitation request.");
+    }
+    const replayKey = req.headers?.["idempotency-key"];
+    const request = JSON.stringify(req.body);
+    const replay = replayKey ? invitationReplays.get(replayKey) : undefined;
+    if (replay) return replay.request === request ? replay.response
+      : problem(409, "idempotency_mismatch", "The invitation request changed.");
+    const issued: InvitationIssued[] = delivery === "link"
+      ? [issueInvitation(input.kind, delivery)]
+      : input.emails!.map((email) => issueInvitation(input.kind, delivery, email, input.advertising));
+    const response: TransportResponse = {
+      status: 201,
+      headers: privateHeaders,
+      body: { invitations: issued.map((item) => {
+        if (item.delivery !== "link") return item;
+        const link = new URL("/invite", "https://dashboard.screenrig.ai");
+        link.hash = `token=${createHash("sha256").update(item.id).digest("base64url")}`;
+        return { ...item, url: link.href };
+      }) },
+    };
+    if (replayKey) invitationReplays.set(replayKey, { request, response });
+    return response;
+  });
+  transport.on("GET", "/api/v1/invitations", (req) => ({
     status: 200,
-    headers: { "x-request-id": req.headers?.["x-request-id"] ?? "req_account" },
-    body: account,
+    headers: privateHeaders,
+    body: {
+      items: [...invitations.values()].filter((item) => item.project_id === project.id
+        && (!req.query?.kind || item.kind === req.query.kind)
+        && (!req.query?.status || item.status === req.query.status)),
+      next_cursor: "",
+    },
+  }));
+  transport.on("POST", /^\/api\/v1\/invitations\/[^/]+\/revoke$/, (req) => {
+    const id = req.path.split("/")[4] ?? "";
+    const item = invitations.get(id);
+    if (!item || item.project_id !== project.id) return problem(404, "not_found", "Invitation not found.");
+    if (item.status === "accepted") return problem(409, "invitation_consumed", "The invitation was already accepted.");
+    invitations.set(id, { ...item, status: "revoked" });
+    return { status: 204, headers: privateHeaders, body: undefined };
+  });
+  transport.on("POST", "/api/v1/sign-in-resets", () => ({
+    status: 202, headers: privateHeaders, body: { status: "accepted" },
   }));
 
   const playbackItems = [
@@ -671,7 +804,7 @@ export function memoryBackend(): FakeTransport {
     const item: Screen = {
       ...current,
       state: "archived",
-      archive_reason: "account",
+      archive_reason: "project",
       archived_at: "2026-08-14T17:00:03.000Z",
       revision: current.revision + 1,
       content_access_generation: current.content_access_generation + 1,
@@ -963,7 +1096,7 @@ export function memoryBackend(): FakeTransport {
     return { status: 204, headers: {}, body: undefined };
   });
 
-  // Feedback: account-scoped, immutable, and keyed by route rather than body.
+  // Feedback: project-scoped, immutable, and keyed by route rather than body.
   let feedbackSequence = 0;
   const submitFeedback = (kind: FeedbackKind) => (req: { body?: unknown }) => {
     const write = (req.body ?? {}) as FeedbackWrite;

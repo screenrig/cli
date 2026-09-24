@@ -39,6 +39,10 @@ test("redacts temporary agent connection authority and envelope material", () =>
 
 test("redacts a fragment-delivered single-use link wherever text carries one", () => {
   const token = "D".repeat(43);
+  const invitation = new URL("https://dashboard.screenrig.ai/invite");
+  invitation.hash = `token=${token}`;
+  assert.equal(redactText(invitation.href).includes(token), false, "invitation authority must not survive redaction");
+  assert.equal(isSensitiveValue(invitation.href), true);
   assert.equal(
     redactText(`open https://dashboard.screenrig.ai/#link=${token} now`),
     "open https://dashboard.screenrig.ai/#link=*** now",
@@ -93,7 +97,7 @@ test("sensitive values match embedded credentials, not only at the start", () =>
 test("redactValue replaces extra secret keys", () => {
   assert.deepEqual(
     redactValue({
-      object_key: "accounts/acc/objects/obj",
+      object_key: "projects/acc/objects/obj",
       upload_url: "https://example.invalid/put",
       pixels: "data:image/webp;base64,AAAA",
       capture_id: "shot_1",
@@ -117,7 +121,7 @@ test("redactEvent omits tokens, pixels, authorization, and object keys", () => {
       extra_token: "sr_live_identifier_secret",
       authorization: "Bearer secret-material",
       pixels: "data:image/webp;base64,AAAA",
-      object_key: "accounts/acc/objects/obj",
+      object_key: "projects/acc/objects/obj",
       upload_url: "https://example.invalid/put?X-Amz-Signature=abc",
       completion_nonce: "nonce-value",
       signed_url: "https://example.invalid/get?signature=abc",

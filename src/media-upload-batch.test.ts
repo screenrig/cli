@@ -27,7 +27,7 @@ import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 import type { TransportRequest, TransportResponse } from "./transport/types.js";
 
-const ACCOUNT_ID = "acc_AAAAAAAAAAAAAAAAAAAAAAAA";
+const PROJECT_ID = "acc_AAAAAAAAAAAAAAAAAAAAAAAA";
 const API_URL = "https://api.screenrig.ai";
 const TOKEN = "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr";
 
@@ -81,11 +81,11 @@ async function withRuntime(
   return { code, stdout: await outP, stderr: await errP };
 }
 
-async function enrolled(configDir: string, accountId = ACCOUNT_ID): Promise<ConfigFs> {
+async function enrolled(configDir: string, projectId = PROJECT_ID): Promise<ConfigFs> {
   const fsLike = realFs(configDir);
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: API_URL, token: TOKEN, account_id: accountId },
+    { api_url: API_URL, token: TOKEN, project_id: projectId },
     fsLike,
   );
   return fsLike;
@@ -111,10 +111,10 @@ function batchTransport(options: BatchTransportOptions = {}): BatchTransport {
   let seq = 0;
   let declares = 0;
   const declareKeys: string[] = [];
-  transport.on("GET", "/api/v1/account", () => ({
+  transport.on("GET", "/api/v1/project", () => ({
     status: 200,
     headers: {},
-    body: { id: ACCOUNT_ID },
+    body: { id: PROJECT_ID },
   }));
   transport.on("POST", "/api/v1/media/uploads", (req: TransportRequest): TransportResponse => {
     declares += 1;
@@ -323,11 +323,11 @@ test("120 accepted then a 429 with Retry-After is honoured and the item succeeds
     assert.equal(result.stderr.trim(), "");
     const state = JSON.parse(await readFile(statePath, "utf8")) as {
       api_url: string;
-      account_id: string;
+      project_id: string;
       items: Record<string, { media_id: string }>;
     };
     assert.equal(state.api_url, API_URL);
-    assert.equal(state.account_id, ACCOUNT_ID);
+    assert.equal(state.project_id, PROJECT_ID);
     assert.equal(Object.keys(state.items).length, 121);
   } finally {
     await rm(configDir, { recursive: true, force: true });
@@ -424,9 +424,9 @@ test("a second run skips accepted hashes and reports resumed", async () => {
   }
 });
 
-test("attempts, wait_ms, and transfer_ms account for retries separately", async () => {
-  const configDir = await testTemp("batch-account-cfg-");
-  const cwdDir = await testTemp("batch-account-cwd-");
+test("attempts, wait_ms, and transfer_ms track retries separately", async () => {
+  const configDir = await testTemp("batch-project-cfg-");
+  const cwdDir = await testTemp("batch-project-cwd-");
   const fsLike = await enrolled(configDir);
   await writePng(cwdDir, "one.png", "one-bytes");
   const manifest = await writeManifest(cwdDir, [path.join(cwdDir, "one.png")]);
@@ -506,7 +506,7 @@ test("attempts, wait_ms, and transfer_ms account for retries separately", async 
       manifestPath: manifest,
       statePath,
       apiUrl: API_URL,
-      accountId: ACCOUNT_ID,
+      projectId: PROJECT_ID,
       concurrency: 1,
       transcodeOptions: DEFAULT_TRANSCODE,
       noTranscode: true,
@@ -554,7 +554,7 @@ test("state file is 0600 and replaced atomically", async () => {
   };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: API_URL, token: TOKEN, account_id: ACCOUNT_ID },
+    { api_url: API_URL, token: TOKEN, project_id: PROJECT_ID },
     fsLike,
   );
   await writePng(cwdDir, "still.png", "mode-bytes");
@@ -576,14 +576,14 @@ test("state file is 0600 and replaced atomically", async () => {
   }
 });
 
-test("state file refuses an api_url or account mismatch", async () => {
+test("state file refuses an api_url or project mismatch", async () => {
   const dir = await testTemp("batch-mismatch-");
   const fsLike = realFs(dir);
   const statePath = path.join(dir, "state.json");
   try {
     await writeUploadBatchStateAtomic(
       statePath,
-      { api_url: API_URL, account_id: ACCOUNT_ID, items: {} },
+      { api_url: API_URL, project_id: PROJECT_ID, items: {} },
       fsLike,
       Date.parse("2026-08-14T17:00:00.000Z"),
     );
@@ -610,7 +610,7 @@ test("state file refuses an api_url or account mismatch", async () => {
           manifestPath: manifest,
           statePath,
           apiUrl: API_URL,
-          accountId: "acc_OTHERACCOUNTAAAAAAAAAAAAAA",
+          projectId: "acc_OTHERPROJECTAAAAAAAAAAAAAA",
           concurrency: 1,
           transcodeOptions: DEFAULT_TRANSCODE,
           noTranscode: true,
@@ -618,7 +618,7 @@ test("state file refuses an api_url or account mismatch", async () => {
           json: true,
           noProgress: true,
         }),
-      /different account or API URL/,
+      /different project or API URL/,
     );
     stdout.end();
     stderr.end();
@@ -657,7 +657,7 @@ test("operation log emits batch and per-item local pairs without signed material
       manifestPath: manifest,
       statePath,
       apiUrl: API_URL,
-      accountId: ACCOUNT_ID,
+      projectId: PROJECT_ID,
       concurrency: 1,
       transcodeOptions: DEFAULT_TRANSCODE,
       noTranscode: true,

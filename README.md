@@ -79,7 +79,7 @@ Use these canonical spellings in new invocations and examples:
 
 The application command group is `app`; use “application” in explanatory prose.
 Keep the established `comment ACTION screen|playlist ID` grammar. `--page` and
-`--primitive` identify objects within a playlist, rather than account resources.
+`--primitive` identify objects within a playlist, rather than project resources.
 Use `--after` for an event cursor (`--cursor` remains an alias). `--output` selects
 an output path; each command states whether it expects a file or directory.
 Durations use milliseconds as stated by `--duration-ms`, `--poll-ms`, and `--timeout`.
@@ -91,61 +91,67 @@ Option `relationships` describe `exactlyOne`, `atLeastOne`, and `together` group
 `requires` means the first option requires every remaining option. These same
 rules validate invocations before configuration or network access.
 
-## Invite people to your account
+## Projects and enrollment
 
-An enrolled agent can email another person a single-use dashboard invitation:
-
-```sh
-screenrig account invite --email teammate@example.com
-```
-
-This uses the existing account; it never enrolls a new one. The response reports
-the invitation ID, status, and expiry, not a sign-in link. `queued` means delivery
-is pending; `sent` means the mail provider accepted the message, not that it
-reached the inbox. Invited people receive the account's existing dashboard
-access, not a restricted guest role.
-
-At most **10 invitations** may be outstanding per account, including the initial
-invitation queued when the account was created. Claiming an invitation, its
-24-hour expiry, or a terminal delivery failure releases its slot. An outstanding
-invitation to the same address is reused. At the limit, the command reports
-`invitation_limit_reached` without automatically retrying.
-
-After an ambiguous failure, rerun the same command unchanged; the CLI preserves
-its request key. Automation may supply `--idempotency-key` to explicitly replay
-the same request without adding another invitation.
-
-## Recover dashboard access to your account
-
-If every agent credential for an account is lost, the mailbox owner can email
-the account's contact address a single-use dashboard recovery link:
+An explicit enrollment creates a project, attaches this agent, and emails a
+member invitation to the contact address. The same person can belong to more
+than one project.
 
 ```sh
-screenrig account recover --email owner@example.com
+screenrig agent enroll --email ADDRESS [--project-name NAME] [--name NAME] [--intent signage|advertising] [--force]
+screenrig project show
+screenrig project capabilities
+screenrig project rename NAME
 ```
 
-This command is unauthenticated: it never enrolls, never sends a stored token,
-and never changes stored credential, account, or enrollment state. It can run
-on a fresh installation with no configuration.
+`--project-name` names the project; `--name` names this agent. Enrollment reports
+the project ID and name and confirms that a member invitation was requested,
+without exposing a credential or invitation URL. Other authenticated commands
+never enroll automatically.
 
-HTTP 202 accepts the request; it is not proof the email arrived, and the
-response is identical whether or not the address belongs to an account. One
-live recovery per account is in flight at a time; rerunning the same command
-reuses its saved Idempotency-Key instead of sending another link. Recovery is
-separate from the invitation quota, so a full invitation cap never blocks it.
+## Invitations
 
-The mailbox owner opens the emailed link (single use, expires after 24 hours)
-to restore access to the existing account, then attaches this installation by
-running `screenrig agent connect` in the CLI and approving the connection
-request in the recovered dashboard:
+Invite people to the current project, or invite advertising buyers through the
+same invitation commands:
 
 ```sh
-screenrig agent connect
+screenrig invitations create --email ADDRESS[,ADDRESS] [--link]
+screenrig invitations create --kind ad-buyer --email ADDRESS[,ADDRESS] [--screen-id ID] [--slot-id ID] [--policy trusted|review_required]
+screenrig invitations list [--kind member|ad-buyer] [--status STATUS]
+screenrig invitations revoke ID
 ```
 
-Enrollment with a contact address that already belongs to an account stops
-with `email_conflict` and directs to this recovery flow; never retry
-enrollment with another address.
+Member invitations are the default. Email delivery reports invitation status,
+not proof that a message reached the inbox. `--link` requests a member invitation
+link instead of email delivery. Its URL appears once in the selected output
+format and is never saved to configuration, write-recovery state, or logs.
+Share it only with the intended person. Advertising invitations use email
+delivery and the selected screen, slot, and approval policy.
+
+The server enforces invitation and member limits. A refused invitation is not
+retried automatically. After an ambiguous failure, rerun the same command
+unchanged; the CLI preserves its request key. Automation can supply
+`--idempotency-key` to explicitly replay a request.
+
+## Dashboard and sign-in reset
+
+```sh
+screenrig dashboard [open]
+screenrig dashboard reset-sign-in --email ADDRESS
+```
+
+`dashboard` and `dashboard open` open the dashboard origin without a credential
+or a network request. If no browser can open, the CLI prints the public origin.
+Sign in as a person and select a project in the dashboard.
+
+A sign-in reset is unauthenticated: it never enrolls, sends a stored credential,
+or changes the stored project or enrollment. It works on a fresh installation.
+The response is neutral whether or not the address is known: if this address can
+receive sign-in instructions, check its inbox. Delivery is not confirmed.
+Rerunning an ambiguous request reuses its saved Idempotency-Key.
+
+To attach an existing project to this installation, run `screenrig agent connect`
+and approve the connection request in that project's dashboard.
 
 ## Screen host and recovery
 
@@ -171,7 +177,7 @@ screenrig screen recover scr_LOBBY
 `screen recover` reconnects the display to the existing screen: the label,
 playlist, timezone, schedules, and history stay; the display's new key replaces
 the previous one, which retires after a fifteen-minute grace window. Recovery
-never happens without this confirmation and never crosses accounts. If you do
+never happens without this confirmation and never crosses projects. If you do
 not confirm, the pairing code still works as a new screen. The command exits
 nonzero with `recovery_not_offered` when nothing is pending,
 `recovery_expired` when the display's pairing session lapsed, and
@@ -194,7 +200,7 @@ Archiving a screen darkens its display but keeps the display's binding: the
 player stays connected, never re-pairs, and resumes when you run
 `screen unarchive`. A screen is also archived when its player is reset on the
 display or a paired browser unpairs itself. While archived, `screen show`
-prints `archive_reason` (`account`, `device_reset`, or `device_unpair`) and
+prints `archive_reason` (`project`, `device_reset`, or `device_unpair`) and
 `archived_at` when the server reports them, and `screen list --state archived`
 adds a `REASON` column. `screen unarchive` re-admits the same display key for
 every reason, so a display that still holds it resumes with no re-pairing. A
@@ -367,7 +373,7 @@ idempotency key and its input position. For retryable preparation, supply
 the same order, within the server's replay window. Declarations and commits then
 reuse their respective per-file keys. Without an explicit key, a new invocation
 gets new upload keys. If preparation fails after an upload, that media remains in
-the account; inspect `media list` and reuse its ID instead of uploading it again.
+the project; inspect `media list` and reuse its ID instead of uploading it again.
 
 The canonical document contains one full-screen page per input, a black background,
 and a 200 ms crossfade. Images use `--fit contain|cover|fill` (default `contain`);

@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { ensureCredential } from "./enrollment.js";
 import { readConfigFile, resolveConfig, type ConfigFs, type ResolvedConfig } from "./config.js";
 import { testTemp } from "./test-temp.js";
+import { CliError } from "./problems.js";
 
 function fixture(home: string): { fs: ConfigFs; resolved: ResolvedConfig } {
   const fs = {
@@ -37,17 +38,20 @@ test("explicit enrollment atomically persists email, verifies, and completes out
     generateClientId: () => `cli_${"A".repeat(43)}`,
     generateIdempotencyKey: () => "enroll-first-idempotency",
     enrollmentEmail: "Owner@example.com",
-    verify: async (token, accountId) => {
+    enrollmentProjectName: "Lobby displays",
+    verify: async (token, projectId) => {
       assert.equal(token, "sr_live_enrollment_secret");
-      assert.equal(accountId, "acc_enrollment");
+      assert.equal(projectId, "acc_enrollment");
       assert.deepEqual(await readConfigFile(resolved.configPath, fs), {
         api_url: "https://api.screenrig.ai",
         token: "sr_live_enrollment_secret",
-        account_id: "acc_enrollment",
+        project_id: "acc_enrollment",
+        project_name: "Lobby displays",
         enrollment: {
           client_id: `cli_${"A".repeat(43)}`,
           idempotency_key: "enroll-first-idempotency",
           email: "Owner@example.com",
+          project_name: "Lobby displays",
         },
         updated_at: "2026-08-14T20:00:00.000Z",
       });
@@ -58,6 +62,7 @@ test("explicit enrollment atomically persists email, verifies, and completes out
         clientId: `cli_${"A".repeat(43)}`,
         idempotencyKey: "enroll-first-idempotency",
         email: "Owner@example.com",
+        projectName: "Lobby displays",
       });
       assert.deepEqual(await readConfigFile(resolved.configPath, fs), {
         api_url: "https://api.screenrig.ai",
@@ -65,19 +70,22 @@ test("explicit enrollment atomically persists email, verifies, and completes out
           client_id: `cli_${"A".repeat(43)}`,
           idempotency_key: "enroll-first-idempotency",
           email: "Owner@example.com",
+          project_name: "Lobby displays",
         },
         updated_at: "2026-08-14T20:00:00.000Z",
       });
-      return { token: "sr_live_enrollment_secret", accountId: "acc_enrollment" };
+      return { token: "sr_live_enrollment_secret", projectId: "acc_enrollment", projectName: "Lobby displays" };
     },
   });
   assert.equal(enrollments, 1);
   assert.equal(result.token, "sr_live_enrollment_secret");
   assert.equal(result.source.token, "config");
+  assert.equal(result.projectName, "Lobby displays");
   assert.deepEqual(await readConfigFile(resolved.configPath, fs), {
     api_url: "https://api.screenrig.ai",
     token: "sr_live_enrollment_secret",
-    account_id: "acc_enrollment",
+    project_id: "acc_enrollment",
+    project_name: "Lobby displays",
     updated_at: "2026-08-14T20:00:00.000Z",
   });
   await rm(home, { recursive: true, force: true });
@@ -111,7 +119,7 @@ test("concurrent explicit enrollment calls perform one enrollment and share the 
   const enroll = async () => {
     enrollments += 1;
     await gate;
-    return { token: "sr_live_shared_secret", accountId: "acc_shared" };
+    return { token: "sr_live_shared_secret", projectId: "acc_shared" };
   };
   const generators = {
     generateClientId: () => `cli_${"B".repeat(43)}`,
@@ -135,7 +143,7 @@ test("concurrent explicit enrollment calls perform one enrollment and share the 
 test("ambiguous enrollment retries reuse the persisted client, contact email, and idempotency state", async () => {
   const home = await testTemp("enrollment-retry-");
   const { fs, resolved } = fixture(home);
-  const seen: Array<{ clientId: string; idempotencyKey: string; email: string }> = [];
+  const seen: Array<{ clientId: string; idempotencyKey: string; email: string; projectName?: string }> = [];
   const runtime = { fs, now: () => new Date(), sleep: async () => undefined };
   const generators = {
     generateClientId: () => `cli_${"C".repeat(43)}`,
@@ -147,6 +155,7 @@ test("ambiguous enrollment retries reuse the persisted client, contact email, an
       runtime,
       ...generators,
       enrollmentEmail: "owner@example.com",
+      enrollmentProjectName: "Lobby displays",
       verify: async () => undefined,
       enroll: async (state) => {
         seen.push(state);
@@ -160,7 +169,16 @@ test("ambiguous enrollment retries reuse the persisted client, contact email, an
     client_id: `cli_${"C".repeat(43)}`,
     idempotency_key: "enroll-retry-idempotency",
     email: "owner@example.com",
+    project_name: "Lobby displays",
   });
+  await assert.rejects(ensureCredential({
+    resolved,
+    runtime,
+    enrollmentProjectName: "Different project",
+    enroll: async () => { throw new Error("must reject before sending another enrollment"); },
+    verify: async () => undefined,
+  }), (error: unknown) => error instanceof CliError && error.problem.code === "config_error");
+  assert.deepEqual((await readConfigFile(resolved.configPath, fs))?.enrollment, pending?.enrollment);
   const result = await ensureCredential({
     resolved,
     runtime,
@@ -168,7 +186,7 @@ test("ambiguous enrollment retries reuse the persisted client, contact email, an
     generateIdempotencyKey: () => { throw new Error("must reuse idempotency key"); },
     enroll: async (state) => {
       seen.push(state);
-      return { token: "sr_live_replayed_secret", accountId: "acc_replayed" };
+      return { token: "sr_live_replayed_secret", projectId: "acc_replayed" };
     },
     verify: async () => undefined,
   });
@@ -188,13 +206,13 @@ test("verification failure preserves the permanent token and exact enrollment re
     generateClientId: () => `cli_${"D".repeat(43)}`,
     generateIdempotencyKey: () => "enroll-verify-retry",
     enrollmentEmail: "owner@example.com",
-    enroll: async () => ({ token: "sr_live_verify_secret", accountId: "acc_verify" }),
+    enroll: async () => ({ token: "sr_live_verify_secret", projectId: "acc_verify" }),
     verify: async () => { throw new Error("verification temporarily unavailable"); },
   }), /verification temporarily unavailable/);
   assert.deepEqual(await readConfigFile(resolved.configPath, fs), {
     api_url: "https://api.screenrig.ai",
     token: "sr_live_verify_secret",
-    account_id: "acc_verify",
+    project_id: "acc_verify",
     enrollment: {
       client_id: `cli_${"D".repeat(43)}`,
       idempotency_key: "enroll-verify-retry",
@@ -209,10 +227,10 @@ test("verification failure preserves the permanent token and exact enrollment re
     resolved: persisted,
     runtime,
     enroll: async () => { throw new Error("must not enroll twice"); },
-    verify: async (token, accountId) => {
+    verify: async (token, projectId) => {
       verifications += 1;
       assert.equal(token, "sr_live_verify_secret");
-      assert.equal(accountId, "acc_verify");
+      assert.equal(projectId, "acc_verify");
     },
   });
   assert.equal(second.token, "sr_live_verify_secret");

@@ -18,7 +18,7 @@ const HTTP_CASES: Array<[method: string, path: string, tag: string]> = [
   ["POST", "/api/v1/media/uploads/upl_1/commit", "post_media_upload_commit"],
   ["POST", "/api/v1/media/generations", "post_media_generations"],
   ["GET", "/api/v1/operations/op_1", "get_operation"],
-  ["POST", "/api/v1/account/dashboard-links", "post_account_dashboard_links"],
+  ["POST", "/api/v1/invitations", "post_invitations"],
   ["GET", "/api/v1/events/stream", "get_events_stream"],
   ["GET", "/runtime/v1/manifest", "get_manifest"],
   ["GET", "/content/v1/manifests/rev_1/media/med_1", "get_manifest_media_id"],

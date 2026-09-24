@@ -782,7 +782,7 @@ function rethrowRateLimitedImport(error: unknown, state: {
     phase = " The playlist write request was sent and its outcome may be unknown. No cleanup was attempted, and no media was deleted.";
     next = {
       command: error.problem.next?.command ?? "retry the same playlist import command",
-      reason: `${error.problem.next?.reason ? `${error.problem.next.reason} ` : ""}Read back the destination account when practical, then retry the exact import with the same idempotency key; an exact playlist-write replay returns the original outcome.`,
+      reason: `${error.problem.next?.reason ? `${error.problem.next.reason} ` : ""}Read back the destination project when practical, then retry the exact import with the same idempotency key; an exact playlist-write replay returns the original outcome.`,
     };
   } else if (count > 0) {
     phase = " No playlist write was started, no cleanup was attempted, and no media was deleted.";

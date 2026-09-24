@@ -81,7 +81,7 @@ test("empty event lists emit one default JSON result without a human-text sentin
 
 test("default event streams emit NDJSON without an extra final result", async () => {
   const transport = new FakeTransport();
-  for (let i = 1; i <= 2; i++) transport.pushStream(`id: ev1_${i}\ndata: ${JSON.stringify({ type: "account.created", at: "2026-09-10T00:00:00Z", severity: "info", message: `event ${i}` })}\n\n`);
+  for (let i = 1; i <= 2; i++) transport.pushStream(`id: ev1_${i}\ndata: ${JSON.stringify({ type: "project.created", at: "2026-09-10T00:00:00Z", severity: "info", message: `event ${i}` })}\n\n`);
   const result = await invoke(["events", "follow", "--timeout", "30"], transport, true);
   assert.equal(result.code, 0);
   const lines = result.stdout.trim().split("\n").map((line) => JSON.parse(line));

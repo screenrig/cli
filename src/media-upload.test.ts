@@ -127,7 +127,7 @@ test("validates hostile signed sessions without leaking signed material", () => 
   }
 });
 
-test("signed PUT preserves exact raw bytes and headers without account credential leakage", async () => {
+test("signed PUT preserves exact raw bytes and headers without project credential leakage", async () => {
   const bytes = Buffer.from([0, 255, 3, 4]);
   const prepared = {
     bytes,

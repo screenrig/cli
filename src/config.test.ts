@@ -18,6 +18,29 @@ function realFs(home: string, env: NodeJS.Dict<string> = { XDG_CONFIG_HOME: home
   return { mkdir, open, rename, rm, chmod, stat, homedir: () => home, env };
 }
 
+test("project identity resolves only from project config fields", async () => {
+  const home = await testTemp("config-project-identity-");
+  const fsLike = realFs(home);
+  const configPath = path.join(home, "screenrig", "config.json");
+  try {
+    const previousIdentity = { api_url: DEFAULT_API_URL, account_id: "acc_previous" };
+    await writeConfigAtomic(configPath, previousIdentity, fsLike);
+    const withoutProject = await resolveConfig({ flags: {}, fs: fsLike });
+    assert.equal(withoutProject.projectId, undefined);
+    assert.equal(withoutProject.projectName, undefined);
+    await writeConfigAtomic(configPath, {
+      ...previousIdentity,
+      project_id: "acc_current",
+      project_name: "Lobby displays",
+    }, fsLike);
+    const current = await resolveConfig({ flags: {}, fs: fsLike });
+    assert.equal(current.projectId, "acc_current");
+    assert.equal(current.projectName, "Lobby displays");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
 test("atomic config writes preserve the prior credential when replacement is interrupted", async () => {
   const home = await testTemp("config-interrupt-");
   const configPath = path.join(home, "screenrig", "config.json");

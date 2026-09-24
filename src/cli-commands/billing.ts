@@ -5,13 +5,13 @@ import { addCommandNotes } from "./notes.js";
 import { positiveInteger } from "./options.js";
 
 /**
- * Account credit reads. These are bearer-authorized reads of this account's own
+ * Project credit reads. These are bearer-authorized reads of this project's own
  * balance and posted journal. No command here grants credits, pays out, or
  * changes a payment destination; cash top-ups and withdrawals belong to the
  * verified dashboard financial flow.
  */
 export function registerBillingCommands(root: Command, bind: CommandActionBinder): void {
-  const billing = root.command("billing").description("Read this account's credits and ledger statement");
+  const billing = root.command("billing").description("Read this project's credits and ledger statement");
 
   billing.command("balance").description("Read remaining, reserved, and available credits with source eligibility")
     .action(bind(handleBillingBalance));

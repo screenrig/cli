@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createCipheriv, createHash, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync } from "node:crypto";
 import { PassThrough } from "node:stream";
 import { readFileSync } from "node:fs";
-import { mkdir, open, readFile, rename, chmod, stat, writeFile, rm } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, chmod, stat, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -20,6 +20,7 @@ import { SDK_PROTOCOL_VERSION } from "./adapters/sdk-injection.js";
 import { testTemp } from "./test-temp.js";
 import { resetFfmpegToolchainCache } from "./media/ffmpeg.js";
 import { generateAgentConnectionKey } from "./agent-identity.js";
+import { createMemoryLogger } from "./log/logger.js";
 
 const TEST_AGENT = {
   id: "agt_AAAAAAAAAAAAAAAAAAAAAAAA",
@@ -104,7 +105,7 @@ async function withAuthenticatedRuntime(
       ...(existing ?? {}),
       api_url: existing?.api_url ?? "https://api.screenrig.ai",
       token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-      account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+      project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
       agent_id: TEST_AGENT.id,
     }, fsLike);
   }
@@ -142,7 +143,7 @@ test("pairing requires explicit enrollment and then preserves the original pairi
   const methods = transport.calls.map((call) => `${call.method} ${call.path}`);
   assert.deepEqual(methods, [
     "POST /api/v1/enrollments",
-    "GET /api/v1/account",
+    "GET /api/v1/project",
     "GET /api/v1/agents/self",
     "POST /api/v1/screens/pair",
   ]);
@@ -152,7 +153,7 @@ test("pairing requires explicit enrollment and then preserves the original pairi
   assert.match(enrollBody.client_id ?? "", /^cli_[A-Za-z0-9_-]{43}$/);
   assert.equal(enrollBody.email, "Owner@example.com");
   assert.deepEqual(Object.keys(enrollBody).sort(), ["agent_type", "client_id", "email", "platform", "version"]);
-  const verification = transport.calls.find((call) => call.path === "/api/v1/account");
+  const verification = transport.calls.find((call) => call.path === "/api/v1/project");
   assert.match(verification?.headers?.authorization ?? "", /^Bearer sr_live_/);
   const pairing = transport.calls.find((call) => call.path === "/api/v1/screens/pair");
   assert.deepEqual(pairing?.body, { code: "ABC234", label: "Lobby" });
@@ -173,7 +174,7 @@ test("pairing requires explicit enrollment and then preserves the original pairi
     homedir: () => configDir,
     env: { XDG_CONFIG_HOME: configDir },
   });
-  assert.equal(config?.account_id, "acc_AAAAAAAAAAAAAAAAAAAAAAAA");
+  assert.equal(config?.project_id, "acc_AAAAAAAAAAAAAAAAAAAAAAAA");
   assert.ok(config?.token);
   assert.equal(config?.enrollment, undefined);
   assert.ok(!JSON.stringify(config).includes("pairing"));
@@ -308,26 +309,29 @@ test("explicit enrollment prefers --beta-key over SCREENRIG_BETA_KEY", async () 
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("agent enroll requires contact email, trims it, and creates the first named agent without echoing it", async () => {
+test("agent enroll names the project independently of its agent and reports the member invitation safely", async () => {
   const transport = memoryBackend();
-  const result = await withRuntime(["--json", "agent", "enroll", "--email", " Owner@example.com ", "--name", "Office Codex"], transport);
+  const result = await withRuntime(["--json", "agent", "enroll", "--email", " Owner@example.com ", "--project-name", "Office Screens", "--name", "Office Codex"], transport);
   assert.equal(result.code, 0, result.stdout);
-  const envelope = JSON.parse(result.stdout) as { data: { status: string; connection_ready: boolean; agent: { id: string; name: string } } };
+  const envelope = JSON.parse(result.stdout) as { data: { status: string; connection_ready: boolean; agent: { id: string; name: string }; project: { id: string; name: string }; invitation: string } };
   assert.equal(envelope.data.status, "active");
   assert.equal(envelope.data.connection_ready, false);
   assert.equal(envelope.data.agent.id, TEST_AGENT.id);
+  assert.deepEqual(envelope.data.project, { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Office Screens" });
+  assert.equal(envelope.data.invitation, "emailed to the contact address");
   const enrollment = transport.calls.find((call) => call.path === "/api/v1/enrollments");
   assert.deepEqual(enrollment?.body, {
     client_id: (enrollment?.body as { client_id: string }).client_id,
     email: "Owner@example.com",
     name: "Office Codex",
+    project_name: "Office Screens",
     agent_type: "cli",
     platform: `${process.platform}/${process.arch}`,
     version: CLI_VERSION,
   });
   assert.deepEqual(transport.calls.map((call) => call.path), [
     "/api/v1/enrollments",
-    "/api/v1/account",
+    "/api/v1/project",
     "/api/v1/agents/self",
   ]);
   assert.doesNotMatch(result.stdout, /sr_live_|issuance|client_id|Owner@example\.com/);
@@ -362,7 +366,7 @@ test("agent enroll --force discards an unwanted pending connection before enroll
   await writeConfigAtomic(configPath, {
     api_url: "https://api.screenrig.ai",
     token: `sr_live_pending_${"P".repeat(43)}`,
-    account_id: "acc_PENDINGAAAAAAAAAAAAAAAA",
+    project_id: "acc_PENDINGAAAAAAAAAAAAAAAA",
     agent_id: "agt_PENDINGAAAAAAAAAAAAAAAA",
     agent_connection: {
       private_jwk: { kty: "OKP", crv: "X25519", x: "pending-public", d: "pending-private" },
@@ -401,54 +405,11 @@ test("agent enroll --force discards an unwanted pending connection before enroll
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("email_conflict is terminal and generic, clears only pending enrollment, and requires a new explicit enrollment", async () => {
-  const configDir = await testTemp("email-conflict-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
-  const rejectedAddress = "Victim@example.com";
-  const conflict = new FakeTransport().on("POST", "/api/v1/enrollments", () => ({
-    status: 409,
-    headers: { "content-type": "application/problem+json" },
-    body: {
-      type: "https://screenrig.ai/problems/email-conflict",
-      title: `Conflict for ${rejectedAddress}`,
-      status: 409,
-      detail: `${rejectedAddress} is already present`,
-      code: "email_conflict",
-      errors: [{ field: "email", detail: rejectedAddress }],
-    },
-  }));
-  const rejected = await withRuntime(
-    ["--json", "agent", "enroll", "--email", rejectedAddress],
-    conflict,
-    { fs: fsLike },
-  );
-  assert.equal(rejected.code, ExitCode.Conflict, rejected.stdout);
-  assert.doesNotMatch(rejected.stdout, /Victim@example\.com/i);
-  assert.doesNotMatch(rejected.stdout, /\[redacted-email\]/i);
-  const envelope = JSON.parse(rejected.stdout) as { error: { title: string; code: string; errors: unknown[]; next: { command: string; reason: string } } };
-  assert.equal(envelope.error.code, "email_conflict");
-  assert.deepEqual(envelope.error.errors, []);
-  assert.match(envelope.error.title, /already exists/);
-  assert.equal(envelope.error.next.command, "screenrig account recover --email ADDRESS");
-  assert.match(envelope.error.next.reason, /agent connect/);
-  assert.match(envelope.error.next.reason, /Never retry enrollment with another address/);
-  const configPath = path.join(configDir, "screenrig", "config.json");
-  assert.equal((await readConfigFile(configPath, fsLike))?.enrollment, undefined);
-
-  const retried = await withRuntime(
-    ["--json", "agent", "enroll", "--email", "different@example.com"],
-    memoryBackend(),
-    { fs: fsLike },
-  );
-  assert.equal(retried.code, 0, retried.stdout);
-  await rm(configDir, { recursive: true, force: true });
-});
 
 test("every authenticated command reports not_enrolled instead of enrolling", async () => {
   for (const argv of [
-    ["--json", "account", "show"],
-    ["--json", "account", "invite", "--email", "guest@example.com"],
-    ["--json", "dashboard"],
+    ["--json", "project", "show"],
+    ["--json", "invitations", "create", "--email", "guest@example.com"],
     ["--json", "screen", "list"],
     ["--json", "media", "list"],
     ["--json", "playlist", "list"],
@@ -480,7 +441,7 @@ test("revoked agent history without a pending reconnect directs authenticated co
       revoked_at: "2026-09-21T00:00:00.000Z",
     },
   }, fsLike);
-  const result = await withRuntime(["--json", "account", "show"], new FakeTransport(), { fs: fsLike });
+  const result = await withRuntime(["--json", "project", "show"], new FakeTransport(), { fs: fsLike });
   assert.equal(result.code, ExitCode.Auth, result.stdout);
   const envelope = JSON.parse(result.stdout) as {
     error: { code: string; next: { command: string; reason: string } };
@@ -519,7 +480,7 @@ test("agent status reports whether a persisted passkey can authorize another age
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
     token: `sr_live_status_${"S".repeat(43)}`,
-    account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
     agent_id: TEST_AGENT.id,
   }, fsLike);
   transport.on("GET", "/api/v1/agents/self", () => ({
@@ -791,7 +752,7 @@ test("agent disconnect locally cleans an unauthorized credential without retryin
   await writeConfigAtomic(configPath, {
     api_url: "https://api.screenrig.ai",
     token: `sr_live_rejected_${"R".repeat(43)}`,
-    account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
     agent_id: TEST_AGENT.id,
   }, fsLike);
   const result = await withRuntime(["--json", "agent", "disconnect", "--yes"], transport, { fs: fsLike });
@@ -801,10 +762,10 @@ test("agent disconnect locally cleans an unauthorized credential without retryin
   assert.equal(JSON.parse(result.stdout).data.credential_accepted, false);
   assert.equal(transport.calls.length, 1);
   assert.equal(transport.calls[0]?.path, "/api/v1/agents/self");
-  assert.doesNotMatch(result.stdout, /sr_live_|account_id|token/i);
+  assert.doesNotMatch(result.stdout, /sr_live_|project_id|token/i);
   const local = await readConfigFile(configPath, fsLike);
   assert.equal(local?.token, undefined);
-  assert.equal(local?.account_id, undefined);
+  assert.equal(local?.project_id, undefined);
   assert.equal(local?.agent_id, undefined);
   const status = await withRuntime(["--json", "agent", "status"], new FakeTransport(), { fs: fsLike });
   assert.deepEqual(JSON.parse(status.stdout).data, {
@@ -832,7 +793,7 @@ test("agent status names disconnect --yes when the stored credential is rejected
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
     token: `sr_live_rejected_${"S".repeat(43)}`,
-    account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
   }, fsLike);
   const result = await withRuntime(["--json", "agent", "status"], transport, { fs: fsLike });
   assert.equal(result.code, 0, result.stdout);
@@ -867,7 +828,7 @@ test("agent disconnect revokes only this installation and preserves safe disconn
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
     token: `sr_live_disconnect_${"D".repeat(43)}`,
-    account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
     agent_id: active.id,
   }, fsLike);
   const result = await withRuntime(["--json", "agent", "disconnect", "--yes"], transport, { fs: fsLike });
@@ -875,14 +836,14 @@ test("agent disconnect revokes only this installation and preserves safe disconn
   assert.deepEqual(JSON.parse(result.stdout).data, {
     status: "disconnected",
     local_credential_removed: true,
-    account_preserved: true,
+    project_preserved: true,
     screens_preserved: true,
     other_agents_preserved: true,
   });
-  assert.doesNotMatch(result.stdout, /sr_live_|account_id|token/i);
+  assert.doesNotMatch(result.stdout, /sr_live_|project_id|token/i);
   const local = await readConfigFile(path.join(configDir, "screenrig", "config.json"), fsLike);
   assert.equal(local?.token, undefined);
-  assert.equal(local?.account_id, undefined);
+  assert.equal(local?.project_id, undefined);
   assert.equal(local?.last_agent?.id, active.id);
   const status = await withRuntime(["--json", "agent", "status"], new FakeTransport(), { fs: fsLike });
   assert.equal(JSON.parse(status.stdout).data.status, "disconnected");
@@ -1178,7 +1139,7 @@ test("agent disconnect requires explicit confirmation and never auto-enrolls", a
   const configDir = await testTemp("revoke-confirm-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
-  const original = { api_url: "https://api.screenrig.ai", token: "sr_live_current_private_secret", account_id: "acc_current" };
+  const original = { api_url: "https://api.screenrig.ai", token: "sr_live_current_private_secret", project_id: "acc_current" };
   await writeConfigAtomic(configPath, original, fsLike);
 
   let result = await withRuntime(["--json", "agent", "disconnect"], transport, { fs: fsLike });
@@ -1214,7 +1175,7 @@ test("agent disconnect confirms server success before atomically removing all lo
   await writeConfigAtomic(configPath, {
     api_url: "https://api.screenrig.ai",
     token,
-    account_id: "acc_current",
+    project_id: "acc_current",
     enrollment: { client_id: `cli_${"a".repeat(43)}`, idempotency_key: "enrollment-retry-key" },
     screen_provision: { idempotency_key: "screen-provision-key", label: "Demo" },
     browser_setup: { idempotency_key: "browser-setup-key", code: "ABC234" },
@@ -1226,7 +1187,7 @@ test("agent disconnect confirms server success before atomically removing all lo
   assert.deepEqual(envelope.data, {
     status: "disconnected",
     local_credential_removed: true,
-    account_preserved: true,
+    project_preserved: true,
     screens_preserved: true,
     other_agents_preserved: true,
   });
@@ -1267,7 +1228,7 @@ test("agent disconnect retains local state on a server failure and gives a safe 
   const original = {
     api_url: "https://api.screenrig.ai",
     token: "sr_live_current_private_secret",
-    account_id: "acc_current",
+    project_id: "acc_current",
     browser_setup: { idempotency_key: "browser-setup-key", code: "ABC234" },
   };
   await writeConfigAtomic(configPath, original, fsLike);
@@ -1301,7 +1262,7 @@ test("agent disconnect retries the exact revoked bearer after cleanup failure an
   const original = {
     api_url: "https://api.screenrig.ai",
     token: "sr_live_current_private_secret",
-    account_id: "acc_current",
+    project_id: "acc_current",
   };
   await writeConfigAtomic(configPath, original, realFs);
   const interruptedFs: ConfigFs = {
@@ -1467,7 +1428,7 @@ test("an enrolled agent completes browser setup with safe fragment-free output",
     player_public_url: "https://play.screenrig.ai/s/browser-link-screen",
   });
   assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), [
-    "POST /api/v1/account/browser-links/claim",
+    "POST /api/v1/project/browser-links/claim",
   ]);
   const claim = transport.calls.at(-1);
   assert.deepEqual(claim?.body, { code: "ABC234" });
@@ -1500,167 +1461,56 @@ test("browser setup --open opens only the public handoff URL by argv", async () 
   await rm(result.configDir, { recursive: true, force: true });
 });
 
-const DASHBOARD_TOKEN = "D".repeat(43);
-const DASHBOARD_URL = `https://dashboard.screenrig.ai/#link=${DASHBOARD_TOKEN}`;
-
-function dashboardLinkTransport(status: number, body: unknown, headers?: Record<string, string>): FakeTransport {
-  const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/enrollments", () => ({
-    status: 201,
-    headers: { "cache-control": "private, no-store" },
-    body: {
-      account: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" },
-      agent: TEST_AGENT,
-      connection_ready: false,
-      token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-      issuance_id: "iss_AAAAAAAAAAAAAAAAAAAAAAAA",
-      issuance_expires_at: "2026-08-14T17:10:00.000Z",
-    },
-  }));
-  transport.on("GET", "/api/v1/account", () => ({ status: 200, headers: {}, body: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" } }));
-  transport.on("POST", "/api/v1/account/dashboard-links", () => ({
-    status,
-    headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer", ...headers },
-    body,
-  }));
-  return transport;
-}
-
-test("dashboard mints one single-use link, opens it, and keeps the URL out of every output", async () => {
-  const transport = memoryBackend();
-  const opened: string[] = [];
-  const result = await withAuthenticatedRuntime(
-    ["--json", "dashboard"],
-    transport,
-    { openUrl: async (url) => { opened.push(url); return true; } },
-  );
-  assert.equal(result.code, 0, result.stdout);
-  assert.deepEqual(opened, [DASHBOARD_URL]);
-  const envelope = JSON.parse(result.stdout) as { data: Record<string, unknown> };
-  assert.deepEqual(envelope.data, {
-    expires_at: "2026-08-14T17:10:00.000Z",
-    single_use: true,
-    opened: true,
-  });
-  // The token was handed to the browser and to nothing else.
-  assert.doesNotMatch(result.stdout, /#link=|dashboard\.screenrig\.ai|DDDDD/);
-  assert.doesNotMatch(result.stderr, /#link=|DDDDD/);
-  assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), [
-    "POST /api/v1/account/dashboard-links",
-  ]);
-  const mint = transport.calls.at(-1);
-  assert.ok(mint?.headers?.["idempotency-key"], "the mint route requires an Idempotency-Key");
-  assert.equal(mint?.body, undefined);
-  // Nothing about the link is persisted; only a fresh mint can produce another.
-  const config = await readConfigFile(path.join(result.configDir, "screenrig", "config.json"), {
-    mkdir, open, rename, rm, chmod, stat,
-    homedir: () => result.configDir,
-    env: { XDG_CONFIG_HOME: result.configDir },
-  });
-  assert.doesNotMatch(JSON.stringify(config), /#link=|dashboard|DDDDD/);
-  await rm(result.configDir, { recursive: true, force: true });
-});
-
-test("dashboard prints the link exactly once when no browser could be opened", async () => {
-  const result = await withAuthenticatedRuntime(
-    ["--human", "dashboard"],
-    memoryBackend(),
-    { openUrl: async () => false },
-  );
-  assert.equal(result.code, 0, result.stderr);
-  assert.equal(result.stdout.match(/#link=/g)?.length, 1);
-  assert.match(result.stdout, /no browser could be opened/);
-  assert.match(result.stdout, /single use, 24 hours from mint/);
-  assert.match(result.stdout, /reissue: run screenrig dashboard again for a fresh link/);
-  assert.match(result.stdout, new RegExp(`url: ${DASHBOARD_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-  await rm(result.configDir, { recursive: true, force: true });
-});
-
-test("dashboard --print-url never starts a browser and reports the same expiry", async () => {
-  const opened: string[] = [];
-  const result = await withAuthenticatedRuntime(
-    ["--json", "dashboard", "--print-url"],
-    memoryBackend(),
-    { openUrl: async (url) => { opened.push(url); return true; } },
-  );
-  assert.equal(result.code, 0, result.stdout);
-  assert.deepEqual(opened, []);
-  const envelope = JSON.parse(result.stdout) as { data: Record<string, unknown> };
-  assert.deepEqual(envelope.data, {
-    expires_at: "2026-08-14T17:10:00.000Z",
-    single_use: true,
-    url: DASHBOARD_URL,
-  });
-  await rm(result.configDir, { recursive: true, force: true });
-});
-
-test("dashboard refuses an unsafe or off-origin minted URL and opens nothing", async () => {
-  for (const url of [
-    `https://dashboard.screenrig.ai/?link=${DASHBOARD_TOKEN}`,
-    `https://evil.invalid/#link=${DASHBOARD_TOKEN}`,
-    `http://dashboard.screenrig.localhost/#link=${DASHBOARD_TOKEN}`,
-  ]) {
+test("dashboard and dashboard open launch the public origin without authentication or network access", async () => {
+  for (const args of [["dashboard"], ["dashboard", "open"]]) {
+    const transport = new FakeTransport();
     const opened: string[] = [];
-    const result = await withAuthenticatedRuntime(
-      ["--json", "dashboard"],
-      dashboardLinkTransport(201, { url, expires_at: "2026-08-14T17:10:00.000Z" }),
-      { openUrl: async (target) => { opened.push(target); return true; } },
-    );
-    assert.equal(result.code, ExitCode.Usage, result.stdout);
-    assert.deepEqual(opened, []);
-    assert.match(result.stdout, /unsafe URL/);
-    assert.doesNotMatch(result.stdout, /DDDDD/);
+    const result = await withRuntime(["--json", ...args], transport, {
+      openUrl: async (url) => { opened.push(url); return true; },
+    });
+    try {
+      assert.equal(result.code, ExitCode.Success, result.stdout);
+      assert.deepEqual(opened, ["https://dashboard.screenrig.ai"]);
+      assert.deepEqual(JSON.parse(result.stdout).data, { opened: true });
+      assert.equal(transport.calls.length, 0);
+      assert.equal(await readConfigFile(path.join(result.configDir, "screenrig", "config.json"), {
+        mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir,
+        env: { XDG_CONFIG_HOME: result.configDir },
+      }), undefined);
+    } finally {
+      await rm(result.configDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("dashboard prints only the public origin when no browser can open", async () => {
+  const transport = new FakeTransport();
+  const result = await withRuntime(["--json", "dashboard"], transport, { openUrl: async () => false });
+  try {
+    assert.equal(result.code, ExitCode.Success, result.stdout);
+    assert.deepEqual(JSON.parse(result.stdout).data, { opened: false, url: "https://dashboard.screenrig.ai" });
+    assert.equal(transport.calls.length, 0);
+    assert.doesNotMatch(result.stdout + result.stderr, /#|token|credential|expires_at/);
+  } finally {
     await rm(result.configDir, { recursive: true, force: true });
   }
 });
 
-test("dashboard surfaces the mint problem verbatim and prints no link", async () => {
-  const cases: Array<{ status: number; code: string; exit: number }> = [
-    { status: 401, code: "unauthorized", exit: ExitCode.Auth },
-    { status: 402, code: "payment_required", exit: ExitCode.Client },
-    { status: 503, code: "not_ready", exit: ExitCode.Server },
-  ];
-  for (const item of cases) {
-    const result = await withAuthenticatedRuntime(
-      ["--json", "dashboard"],
-      dashboardLinkTransport(item.status, {
-        type: `https://screenrig.ai/problems/${item.code.replaceAll("_", "-")}`,
-        title: "Mint refused",
-        status: item.status,
-        code: item.code,
-        detail: "The dashboard link was not minted.",
-      }),
-      { openUrl: async () => true },
-    );
-    const envelope = JSON.parse(result.stdout) as { ok: boolean; error: { code: string; status: number } };
-    assert.equal(envelope.ok, false, result.stdout);
-    assert.equal(envelope.error.code, item.code);
-    assert.equal(envelope.error.status, item.status);
-    assert.equal(result.code, item.exit, `${item.code} exit code`);
-    assert.doesNotMatch(result.stdout, /#link=|DDDDD/);
+test("removed identity commands and dashboard credential switches fail before network access", async () => {
+  for (const args of [
+    ["account", "show"],
+    ["account", "invite", "--email", "guest@example.com"],
+    ["account", "recover", "--email", "owner@example.com"],
+    ["ads", "invites", "list"],
+    ["dashboard", "--print-url"],
+    ["agent", "enroll", "--email", "owner@example.com", "--open-dashboard"],
+  ]) {
+    const transport = new FakeTransport();
+    const result = await withRuntime(["--json", ...args], transport);
+    assert.equal(result.code, ExitCode.Usage);
+    assert.equal(transport.calls.length, 0);
     await rm(result.configDir, { recursive: true, force: true });
   }
-});
-
-test("dashboard rejects positional arguments and a mint response without private no-store", async () => {
-  const positional = await withRuntime(["--json", "dashboard", "open"], memoryBackend());
-  assert.equal(positional.code, ExitCode.Usage, positional.stdout);
-  assert.match(positional.stdout, /does not accept positional arguments/);
-  await rm(positional.configDir, { recursive: true, force: true });
-
-  const cached = await withAuthenticatedRuntime(
-    ["--json", "dashboard"],
-    dashboardLinkTransport(
-      201,
-      { url: DASHBOARD_URL, expires_at: "2026-08-14T17:10:00.000Z" },
-      { "cache-control": "public, max-age=60" },
-    ),
-    { openUrl: async () => true },
-  );
-  assert.equal(cached.code, ExitCode.Usage, cached.stdout);
-  assert.match(cached.stdout, /private, no-store/);
-  assert.doesNotMatch(cached.stdout, /DDDDD/);
-  await rm(cached.configDir, { recursive: true, force: true });
 });
 
 const BROWSER_CLAIM_SCREEN = {
@@ -1676,7 +1526,7 @@ function browserSetupClaimTransport(body: unknown): FakeTransport {
     status: 201,
     headers: { "cache-control": "private, no-store" },
     body: {
-      account: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" },
+      project: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" },
       agent: TEST_AGENT,
       connection_ready: false,
       token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -1684,8 +1534,8 @@ function browserSetupClaimTransport(body: unknown): FakeTransport {
       issuance_expires_at: "2026-08-14T17:10:00.000Z",
     },
   }));
-  transport.on("GET", "/api/v1/account", () => ({ status: 200, headers: {}, body: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" } }));
-  transport.on("POST", "/api/v1/account/browser-links/claim", () => ({
+  transport.on("GET", "/api/v1/project", () => ({ status: 200, headers: {}, body: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" } }));
+  transport.on("POST", "/api/v1/project/browser-links/claim", () => ({
     status: 201,
     headers: { "cache-control": "private, no-store" },
     body,
@@ -1753,7 +1603,7 @@ test("browser setup rejects malformed codes before claim and keeps exact ambiguo
     status: 201,
     headers: { "cache-control": "private, no-store" },
     body: {
-      account: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" },
+      project: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" },
       agent: TEST_AGENT,
       connection_ready: false,
       token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -1761,8 +1611,8 @@ test("browser setup rejects malformed codes before claim and keeps exact ambiguo
       issuance_expires_at: "2026-08-14T17:10:00.000Z",
     },
   }));
-  transport.on("GET", "/api/v1/account", () => ({ status: 200, headers: {}, body: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" } }));
-  transport.on("POST", "/api/v1/account/browser-links/claim", () => ({
+  transport.on("GET", "/api/v1/project", () => ({ status: 200, headers: {}, body: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" } }));
+  transport.on("POST", "/api/v1/project/browser-links/claim", () => ({
     status: 503,
     headers: { "content-type": "application/problem+json" },
     body: { status: 503, code: "dependency_unavailable", title: "Unavailable", detail: "Retry." },
@@ -1771,7 +1621,7 @@ test("browser setup rejects malformed codes before claim and keeps exact ambiguo
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC234"], transport, { fs: fsLike });
   await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC-234"], transport, { fs: fsLike });
-  const claims = transport.calls.filter((call) => call.path === "/api/v1/account/browser-links/claim");
+  const claims = transport.calls.filter((call) => call.path === "/api/v1/project/browser-links/claim");
   assert.equal(claims.length, 2);
   assert.equal(claims[0]?.headers?.["idempotency-key"], claims[1]?.headers?.["idempotency-key"]);
   assert.deepEqual((await readConfigFile(path.join(configDir, "screenrig", "config.json"), fsLike))?.browser_setup, {
@@ -1828,7 +1678,7 @@ test("refuses group-readable config unless repairing", async () => {
   await writeFile(cfgPath, JSON.stringify({ api_url: "https://api.screenrig.ai", token: "sr_live_abc_def" }), { mode: 0o644 });
   await chmod(cfgPath, 0o644);
   const transport = memoryBackend();
-  const { code, stdout } = await withRuntime(["--json", "account", "show"], transport, {
+  const { code, stdout } = await withRuntime(["--json", "project", "show"], transport, {
     fs: {
       mkdir,
       open,
@@ -1849,7 +1699,7 @@ test("refuses group-readable config unless repairing", async () => {
 
 test("normalizes RFC 9457 problems and maps exit codes", async () => {
   const transport = new FakeTransport();
-  transport.on("GET", "/api/v1/account", () => ({
+  transport.on("GET", "/api/v1/project", () => ({
     status: 412,
     headers: { "x-request-id": "req_AAAAAAAAAAAAAAAAAAAAAAAA" },
     body: {
@@ -1872,7 +1722,7 @@ test("normalizes RFC 9457 problems and maps exit codes", async () => {
     { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } },
   );
-  const { code, stdout } = await withRuntime(["--json", "account", "show"], transport, {
+  const { code, stdout } = await withRuntime(["--json", "project", "show"], transport, {
     fs: { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } },
   });
   assert.equal(code, ExitCode.Precondition);
@@ -2003,12 +1853,12 @@ test("formatEventLine prints logfmt, never canned messages", () => {
     formatEventLine({
       cursor: "ev1_3",
       sequence: 3,
-      type: "account.created",
+      type: "project.created",
       severity: "info",
       message: "created",
       at: "2026-08-14T17:00:02.000Z",
     }),
-    "at=2026-08-14T17:00:02.000Z type=account.created severity=info message=created",
+    "at=2026-08-14T17:00:02.000Z type=project.created severity=info message=created",
   );
   assert.equal(
     formatEventLine({
@@ -2047,12 +1897,12 @@ test("formatEventLine prints logfmt, never canned messages", () => {
     formatEventLine({
       cursor: "ev1_7",
       sequence: 7,
-      type: "account.enrolled",
+      type: "project.enrolled",
       severity: "info",
-      message: "account.enrolled",
+      message: "project.enrolled",
       at: "2026-08-14T17:00:05.000Z",
     }),
-    "at=2026-08-14T17:00:05.000Z type=account.enrolled severity=info",
+    "at=2026-08-14T17:00:05.000Z type=project.enrolled severity=info",
   );
   assert.equal(
     formatEventLine({
@@ -2165,7 +2015,7 @@ test("formatEventLine prints logfmt, never canned messages", () => {
       message: "Doors open",
       details: {
         extra_token: "sr_live_identifier_secret",
-        object_key: "accounts/acc/objects/obj",
+        object_key: "projects/acc/objects/obj",
         upload_url: "https://example.invalid/put?X-Amz-Signature=abc",
         completion_nonce: "nonce-value",
         signed_url: "https://example.invalid/get?signature=abc",
@@ -2252,7 +2102,7 @@ test("events list prints data or silence", async () => {
 test("events follow parses SSE frames from the transport stream", async () => {
   const transport = memoryBackend();
   transport.pushStream(
-    "id: ev1_1\nevent: message\ndata: {\"cursor\":\"ev1_1\",\"type\":\"account.created\",\"severity\":\"info\",\"message\":\"created\",\"at\":\"2026-08-14T17:00:00.000Z\"}\n\n",
+    "id: ev1_1\nevent: message\ndata: {\"cursor\":\"ev1_1\",\"type\":\"project.created\",\"severity\":\"info\",\"message\":\"created\",\"at\":\"2026-08-14T17:00:00.000Z\"}\n\n",
   );
   transport.pushStream(
     "id: ev1_2\nevent: message\ndata: {\"cursor\":\"ev1_2\",\"type\":\"screen.paired\",\"severity\":\"info\",\"message\":\"paired\",\"at\":\"2026-08-14T17:00:01.000Z\"}\n\n",
@@ -2274,7 +2124,7 @@ test("events follow parses SSE frames from the transport stream", async () => {
   assert.equal(lines.length, 2, stdout);
   const first = JSON.parse(lines[0] ?? "") as { ok: true; data: { type: string } };
   const second = JSON.parse(lines[1] ?? "") as { ok: true; data: { type: string } };
-  assert.equal(first.data.type, "account.created");
+  assert.equal(first.data.type, "project.created");
   assert.equal(second.data.type, "screen.paired");
   assert.equal(transport.calls.at(-1)?.query?.after, "ev1_0");
   assert.equal(transport.calls.at(-1)?.query?.cursor, undefined);
@@ -2283,7 +2133,7 @@ test("events follow parses SSE frames from the transport stream", async () => {
   assert.equal(human.code, 0, human.stdout);
   assert.equal(
     human.stdout,
-    "at=2026-08-14T17:00:00.000Z type=account.created severity=info message=created\nat=2026-08-14T17:00:01.000Z type=screen.paired severity=info message=paired\n",
+    "at=2026-08-14T17:00:00.000Z type=project.created severity=info message=created\nat=2026-08-14T17:00:01.000Z type=screen.paired severity=info message=paired\n",
   );
   await rm(configDir, { recursive: true, force: true });
 });
@@ -2291,12 +2141,12 @@ test("events follow parses SSE frames from the transport stream", async () => {
 test("events follow writes a human line before the stream closes", async () => {
   const transport = memoryBackend();
   transport.pushStream(
-    "id: ev1_1\nevent: message\ndata: {\"cursor\":\"ev1_1\",\"type\":\"account.created\",\"severity\":\"info\",\"message\":\"created\",\"at\":\"2026-08-14T17:00:00.000Z\"}\n\n",
+    "id: ev1_1\nevent: message\ndata: {\"cursor\":\"ev1_1\",\"type\":\"project.created\",\"severity\":\"info\",\"message\":\"created\",\"at\":\"2026-08-14T17:00:00.000Z\"}\n\n",
   );
   const writes: string[] = [];
   let wroteBeforeClose = false;
   transport.afterStreamChunks = async (req) => {
-    wroteBeforeClose = writes.some((chunk) => chunk.includes("account.created"));
+    wroteBeforeClose = writes.some((chunk) => chunk.includes("project.created"));
     await new Promise<void>((resolve) => {
       if (req.signal?.aborted) {
         resolve();
@@ -2332,7 +2182,7 @@ test("events follow writes a human line before the stream closes", async () => {
   });
   assert.equal(code, 0);
   assert.equal(wroteBeforeClose, true, `stdout before abort: ${JSON.stringify(writes)}`);
-  assert.equal(writes.join(""), "at=2026-08-14T17:00:00.000Z type=account.created severity=info message=created\n");
+  assert.equal(writes.join(""), "at=2026-08-14T17:00:00.000Z type=project.created severity=info message=created\n");
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -2361,7 +2211,7 @@ test("events --json omits tokens, pixels, authorization, and object keys", async
   const leakedToken = "sr_live_evtAAAAAAAAAAAAAAAA_eventsecreeventsecreeventsecreeve";
   const leakedPixels = "data:image/webp;base64,QUFBQQ";
   const leakedAuth = "Bearer event-secret-material";
-  const leakedObjectKey = "accounts/acc/objects/obj_eventsecret";
+  const leakedObjectKey = "projects/acc/objects/obj_eventsecret";
   const event = {
     cursor: "ev1_9",
     sequence: 9,
@@ -2460,7 +2310,7 @@ function followEventFrame(id: string, type: string, at: string): string {
 test("events follow reconnects after the stream ends and prints both connections", async () => {
   const transport = memoryBackend();
   transport.queueStream({
-    chunks: [followEventFrame("ev1_1", "account.created", "2026-08-14T17:00:00.000Z")],
+    chunks: [followEventFrame("ev1_1", "project.created", "2026-08-14T17:00:00.000Z")],
   });
   transport.queueStream({
     chunks: [followEventFrame("ev1_2", "screen.paired", "2026-08-14T17:00:01.000Z")],
@@ -2482,7 +2332,7 @@ test("events follow reconnects after the stream ends and prints both connections
   assert.equal(lines.length, 2, stdout);
   const first = JSON.parse(lines[0] ?? "") as { ok: true; data: { type: string } };
   const second = JSON.parse(lines[1] ?? "") as { ok: true; data: { type: string } };
-  assert.equal(first.data.type, "account.created");
+  assert.equal(first.data.type, "project.created");
   assert.equal(second.data.type, "screen.paired");
   assert.ok(transport.calls.length >= 2, `expected reconnect, calls=${transport.calls.length}`);
   assert.equal(stderr, "");
@@ -2493,7 +2343,7 @@ test("events follow reconnects after the stream ends and prints both connections
 test("events follow reconnects after a mid-stream network error", async () => {
   const transport = memoryBackend();
   transport.queueStream({
-    chunks: [followEventFrame("ev1_1", "account.created", "2026-08-14T17:00:00.000Z")],
+    chunks: [followEventFrame("ev1_1", "project.created", "2026-08-14T17:00:00.000Z")],
     error: networkError("socket hang up"),
   });
   transport.queueStream({
@@ -2516,7 +2366,7 @@ test("events follow reconnects after a mid-stream network error", async () => {
   assert.equal(lines.length, 2, stdout);
   const first = JSON.parse(lines[0] ?? "") as { ok: true; data: { type: string } };
   const second = JSON.parse(lines[1] ?? "") as { ok: true; data: { type: string } };
-  assert.equal(first.data.type, "account.created");
+  assert.equal(first.data.type, "project.created");
   assert.equal(second.data.type, "screen.paired");
   assert.ok(!stderr.includes("secretsecret"));
   assert.ok(!stderr.includes("Bearer"));
@@ -2526,7 +2376,7 @@ test("events follow reconnects after a mid-stream network error", async () => {
 test("events follow resumes with after equal to the last SSE id", async () => {
   const transport = memoryBackend();
   transport.queueStream({
-    chunks: [followEventFrame("ev1_1", "account.created", "2026-08-14T17:00:00.000Z")],
+    chunks: [followEventFrame("ev1_1", "project.created", "2026-08-14T17:00:00.000Z")],
   });
   transport.queueStream({
     chunks: [followEventFrame("ev1_2", "screen.paired", "2026-08-14T17:00:01.000Z")],
@@ -3208,7 +3058,7 @@ test("media upload transcodes before declaring, and uploads only the transcoded 
     };
     assert.equal(envelope.data.upload.content_type, "image/webp");
     assert.equal(envelope.data.upload.source_filename, "poster.png");
-    // The envelope reports what the account now holds. Before this, `filename`
+    // The envelope reports what the project now holds. Before this, `filename`
     // was the local post-transcode guess, so poster.png, poster.jpg and
     // poster.webp all reported poster.webp while the stored rows differed.
     assert.equal(envelope.data.upload.filename, "poster.png.webp");
@@ -3346,7 +3196,7 @@ test("media download writes the verified original rendition to --output or ./<id
     assert.doesNotMatch(defaulted.stdout, /RIFF|WEBP|VP8X/, "no image bytes on stdout");
     const downloadCall = transport.calls.find((call) => call.path === `/api/v1/media/${id}/content`);
     assert.equal(downloadCall?.method, "GET");
-    assert.match(downloadCall?.headers?.authorization ?? "", /^Bearer /, "the content route needs the account bearer");
+    assert.match(downloadCall?.headers?.authorization ?? "", /^Bearer /, "the content route needs the project bearer");
 
     const explicit = path.join(workDir, "hero.webp");
     const named = await withRuntime(["--json", "media", "download", id, "--output", explicit], transport, { fs: fsLike, cwd: () => workDir });
@@ -3512,7 +3362,7 @@ test("a rate-limited submission surfaces Retry-After instead of a bare 429", asy
       type: "https://screenrig.ai/problems/rate-limited",
       title: "Rate limited",
       status: 429,
-      detail: "This account reached the feedback submission limit.",
+      detail: "This project reached the feedback submission limit.",
       code: "rate_limited",
     },
   }));
@@ -3564,12 +3414,13 @@ async function withTokenConfig(
   }
 }
 
-function accountRecord(credit_remaining: number): Record<string, unknown> {
+function projectRecord(credit_remaining: number): Record<string, unknown> {
   return {
     content_limit_bytes: 0,
     created_at: "2026-08-14T17:00:00.000Z",
     credit_remaining,
     id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    name: "Office Screens",
     reserved_bytes: 0,
     revision: 1,
     screen_count: 0,
@@ -3580,23 +3431,23 @@ function accountRecord(credit_remaining: number): Record<string, unknown> {
   };
 }
 
-function accountShowTransport(opts?: { header?: string; remaining?: number }): FakeTransport {
+function projectShowTransport(opts?: { header?: string; remaining?: number }): FakeTransport {
   const transport = new FakeTransport();
-  const headers: Record<string, string> = { "x-request-id": "req_account" };
+  const headers: Record<string, string> = { "x-request-id": "req_project" };
   if (opts?.header !== undefined) {
     headers["ScreenRig-Credits-Remaining"] = opts.header;
   }
-  transport.on("GET", "/api/v1/account", () => ({
+  transport.on("GET", "/api/v1/project", () => ({
     status: 200,
     headers,
-    body: accountRecord(opts?.remaining ?? 5000),
+    body: projectRecord(opts?.remaining ?? 5000),
   }));
   return transport;
 }
 
-test("account show reports integer credit_remaining and warns when remaining is zero", async () => {
+test("project show reports integer credit_remaining and warns when remaining is zero", async () => {
   const transport = memoryBackend();
-  const json = await withTokenConfig(transport, ["--json", "account", "show"]);
+  const json = await withTokenConfig(transport, ["--json", "project", "show"]);
   assert.equal(json.code, 0, json.stdout);
   const envelope = JSON.parse(json.stdout) as {
     ok: boolean;
@@ -3614,7 +3465,7 @@ test("account show reports integer credit_remaining and warns when remaining is 
   assert.match(warning.message, /below 1000 credits/);
   assert.doesNotMatch(json.stdout, /kCr|stripe|x402|mcr|millicredit|\$/i);
 
-  const human = await withTokenConfig(transport, ["--human", "account", "show"]);
+  const human = await withTokenConfig(transport, ["--human", "project", "show"]);
   assert.equal(human.code, 0, human.stdout);
   assert.match(human.stdout, /credit_remaining: 0/);
   assert.match(human.stdout, /^token: present$/m);
@@ -3624,8 +3475,8 @@ test("account show reports integer credit_remaining and warns when remaining is 
 });
 
 test("remaining header 1000 does not add credits_low", async () => {
-  const transport = accountShowTransport({ header: "1000", remaining: 0 });
-  const json = await withTokenConfig(transport, ["--json", "account", "show"]);
+  const transport = projectShowTransport({ header: "1000", remaining: 0 });
+  const json = await withTokenConfig(transport, ["--json", "project", "show"]);
   assert.equal(json.code, 0, json.stdout);
   const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string }> };
   assert.equal(envelope.ok, true);
@@ -3633,8 +3484,8 @@ test("remaining header 1000 does not add credits_low", async () => {
 });
 
 test("remaining header 999 adds credits_low on JSON and human output", async () => {
-  const transport = accountShowTransport({ header: "999", remaining: 5000 });
-  const json = await withTokenConfig(transport, ["--json", "account", "show"]);
+  const transport = projectShowTransport({ header: "999", remaining: 5000 });
+  const json = await withTokenConfig(transport, ["--json", "project", "show"]);
   assert.equal(json.code, 0, json.stdout);
   const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string; message: string }> };
   assert.equal(envelope.ok, true);
@@ -3643,14 +3494,14 @@ test("remaining header 999 adds credits_low on JSON and human output", async () 
   assert.match(warning.message, /\b999\b/);
   assert.doesNotMatch(json.stdout, /kCr|stripe|x402|mcr|millicredit|\$/i);
 
-  const human = await withTokenConfig(transport, ["--human", "account", "show"]);
+  const human = await withTokenConfig(transport, ["--human", "project", "show"]);
   assert.equal(human.code, 0, human.stdout);
   assert.match(human.stdout, /warning: Remaining prepaid credit is 999, below 1000 credits\./);
 });
 
 test("remaining header 0 on a successful command adds credits_low", async () => {
-  const transport = accountShowTransport({ header: "0", remaining: 5000 });
-  const json = await withTokenConfig(transport, ["--json", "account", "show"]);
+  const transport = projectShowTransport({ header: "0", remaining: 5000 });
+  const json = await withTokenConfig(transport, ["--json", "project", "show"]);
   assert.equal(json.code, 0, json.stdout);
   const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string; message: string }> };
   const warning = envelope.warnings.find((item) => item.code === "credits_low");
@@ -3659,67 +3510,140 @@ test("remaining header 0 on a successful command adds credits_low", async () => 
 });
 
 test("no remaining header and remaining at or above 1000 does not add credits_low", async () => {
-  const transport = accountShowTransport({ remaining: 1000 });
-  const json = await withTokenConfig(transport, ["--json", "account", "show"]);
+  const transport = projectShowTransport({ remaining: 1000 });
+  const json = await withTokenConfig(transport, ["--json", "project", "show"]);
   assert.equal(json.code, 0, json.stdout);
   const envelope = JSON.parse(json.stdout) as { ok: boolean; warnings: Array<{ code: string }> };
   assert.equal(envelope.warnings.some((item) => item.code === "credits_low"), false, json.stdout);
 });
 
+function invitationRecord() {
+  return {
+    id: "inv_AAAAAAAAAAAAAAAAAAAAAAAA",
+    kind: "project_member",
+    delivery: "email",
+    status: "queued",
+    project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    created_at: "2026-08-14T17:00:00.000Z",
+    expires_at: "2026-08-15T17:00:00.000Z",
+  };
+}
+
 function inviteTransport(): FakeTransport {
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/account/invitations", (req) => ({
-    status: 202,
+  transport.on("POST", "/api/v1/invitations", (req) => ({
+    status: 201,
     headers: { "cache-control": "private, no-store", "x-request-id": req.headers?.["x-request-id"] ?? "req_invite" },
-    body: {
-      invitation_id: "inv_AAAAAAAAAAAAAAAAAAAAAAAA",
-      status: "queued",
-      created_at: "2026-08-14T17:00:00.000Z",
-      expires_at: "2026-08-15T17:00:00.000Z",
-    },
+    body: { invitations: [invitationRecord()] },
   }));
   return transport;
 }
 
-test("account invite posts an idempotent request for the current account and reports request status, not delivery", async () => {
+test("invitations create --link emits its secret once in the selected format and never persists or logs it", async () => {
+  for (const mode of ["--json", "--human"]) {
+    const secret = "L".repeat(43);
+    const url = new URL("https://dashboard.screenrig.ai/invite");
+    url.hash = `token=${secret}`;
+    const { logger, events } = createMemoryLogger({ command: ["invitations", "create"] });
+    const transport = new FakeTransport().on("POST", "/api/v1/invitations", () => ({
+      status: 201,
+      headers: { "cache-control": "private, no-store" },
+      body: { invitations: [{ ...invitationRecord(), delivery: "link", status: "issued", url: url.href }] },
+    }));
+    const result = await withAuthenticatedRuntime(
+      [mode, "invitations", "create", "--email", "guest@example.com", "--link"],
+      transport,
+      { logger },
+    );
+    try {
+      assert.equal(result.code, ExitCode.Success);
+      assert.deepEqual(transport.calls.at(-1)?.body, { kind: "project_member", delivery: "link" });
+      assert.equal(result.stdout.split(url.href).length - 1, 1, "only the selected output carries the URL");
+      assert.equal(result.stdout.split(secret).length - 1, 1, "no second copy of the credential appears");
+      assert.equal(result.stderr.includes(secret), false, "stderr must not carry invitation credentials");
+      assert.equal(events.some(event => event.kind === "http" && event.phase === "response"), true);
+      assert.equal(JSON.stringify(events).includes(secret), false, "operation logs must redact link invitations");
+      async function checkSavedFiles(directory: string): Promise<void> {
+        for (const entry of await readdir(directory, { withFileTypes: true })) {
+          const filename = path.join(directory, entry.name);
+          if (entry.isDirectory()) await checkSavedFiles(filename);
+          else assert.equal((await readFile(filename, "utf8")).includes(secret), false, "config and recovery ledger must not retain invitation credentials");
+        }
+      }
+      await checkSavedFiles(result.configDir);
+    } finally {
+      await rm(result.configDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("unified ad-buyer invitations preserve scope, filter listings, and revoke the selected invitation", async () => {
+  const advertising = { screen_ids: ["scr_TEST"], slot_ids: ["ads_TEST"], policy: "review_required" };
+  let invitation = { ...invitationRecord(), kind: "ad_buyer", advertising };
+  const headers = { "cache-control": "private, no-store" };
+  const transport = new FakeTransport()
+    .on("POST", "/api/v1/invitations", request => {
+      assert.deepEqual(request.body, {
+        kind: "ad_buyer", delivery: "email", emails: ["buyer@example.com", "second@example.com"], advertising,
+      });
+      return { status: 201, headers, body: { invitations: [invitation] } };
+    })
+    .on("GET", "/api/v1/invitations", request => {
+      const matches = request.query?.kind === invitation.kind && request.query?.status === invitation.status;
+      return { status: 200, headers, body: { items: matches ? [invitation] : [], next_cursor: "" } };
+    })
+    .on("POST", `/api/v1/invitations/${invitation.id}/revoke`, request => {
+      assert.ok(request.headers?.["idempotency-key"]);
+      invitation = { ...invitation, status: "revoked" };
+      return { status: 200, headers, body: invitation };
+    });
+  const created = await withAuthenticatedRuntime([
+    "--json", "invitations", "create", "--kind", "ad-buyer", "--email", "buyer@example.com,second@example.com",
+    "--screen-id", "scr_TEST", "--slot-id", "ads_TEST", "--policy", "review_required",
+  ], transport);
+  assert.equal(created.code, ExitCode.Success, created.stdout);
+  assert.deepEqual(JSON.parse(created.stdout).data.invitations[0].advertising, advertising);
+  const queued = await withAuthenticatedRuntime(["--json", "invitations", "list", "--kind", "ad-buyer", "--status", "queued"], transport);
+  assert.equal(queued.code, ExitCode.Success, queued.stdout);
+  assert.deepEqual(JSON.parse(queued.stdout).data, { items: [invitation], next_cursor: "" });
+  const revoked = await withAuthenticatedRuntime(["--json", "invitations", "revoke", invitation.id], transport);
+  assert.equal(revoked.code, ExitCode.Success, revoked.stdout);
+  assert.equal(JSON.parse(revoked.stdout).data.status, "revoked");
+  const after = await withAuthenticatedRuntime(["--json", "invitations", "list", "--kind", "ad-buyer", "--status", "queued"], transport);
+  assert.equal(after.code, ExitCode.Success, after.stdout);
+  assert.deepEqual(JSON.parse(after.stdout).data.items, []);
+  for (const result of [created, queued, revoked, after]) await rm(result.configDir, { recursive: true, force: true });
+});
+
+test("invitations create posts an idempotent request for the current project and reports request status, not delivery", async () => {
   const configDir = await testTemp("invite-cfg-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   const transport = inviteTransport();
   try {
-    const json = await withAuthenticatedRuntime(["--json", "account", "invite", "--email", "guest@example.com"], transport, { fs: fsLike });
+    const json = await withAuthenticatedRuntime(["--json", "invitations", "create", "--email", "guest@example.com"], transport, { fs: fsLike });
     assert.equal(json.code, ExitCode.Success, json.stdout);
     const sent = transport.calls.at(-1);
     assert.equal(sent?.method, "POST");
-    assert.equal(sent?.path, "/api/v1/account/invitations");
+    assert.equal(sent?.path, "/api/v1/invitations");
     assert.match(sent?.headers?.authorization ?? "", /^Bearer sr_live_/);
     assert.ok(sent?.headers?.["idempotency-key"], "invite must carry an Idempotency-Key");
-    assert.deepEqual(sent?.body, { email: "guest@example.com" });
+    assert.deepEqual(sent?.body, { kind: "project_member", delivery: "email", emails: ["guest@example.com"] });
     const envelope = JSON.parse(json.stdout) as { ok: boolean; data: Record<string, unknown> };
     assert.equal(envelope.ok, true);
-    assert.deepEqual(envelope.data, {
-      invitation_id: "inv_AAAAAAAAAAAAAAAAAAAAAAAA",
-      status: "queued",
-      created_at: "2026-08-14T17:00:00.000Z",
-      expires_at: "2026-08-15T17:00:00.000Z",
-    });
+    assert.deepEqual(envelope.data, { invitations: [invitationRecord()] });
     assert.doesNotMatch(json.stdout, /guest@example\.com|sr_live_/);
 
-    const human = await withAuthenticatedRuntime(["--human", "account", "invite", "--email", "guest@example.com"], transport, { fs: fsLike });
-    assert.equal(human.code, ExitCode.Success, human.stdout);
-    assert.match(human.stdout, /^status: queued$/m);
-    assert.match(human.stdout, /expires_at: 2026-08-15T17:00:00\.000Z/);
-    assert.doesNotMatch(human.stdout, /guest@example\.com|sr_live_/);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
 });
 
-test("account invite surfaces the outstanding-invitation cap without retrying", async () => {
+test("invitations create surfaces the outstanding-invitation cap without retrying", async () => {
   const configDir = await testTemp("invite-cap-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   const transport = new FakeTransport();
   let calls = 0;
-  transport.on("POST", "/api/v1/account/invitations", () => {
+  transport.on("POST", "/api/v1/invitations", () => {
     calls += 1;
     return {
       status: 409,
@@ -3729,18 +3653,17 @@ test("account invite surfaces the outstanding-invitation cap without retrying", 
         title: "Invitation limit reached",
         status: 409,
         code: "invitation_limit_reached",
-        detail: "At most 10 invitations may be outstanding; a slot frees when one is accepted, expired, or permanently failed.",
+        detail: "At most 50 invitations may be outstanding; a slot frees when one is accepted, expired, or permanently failed.",
       },
     };
   });
   try {
-    const result = await withAuthenticatedRuntime(["--json", "account", "invite", "--email", "guest@example.com"], transport, { fs: fsLike });
+    const result = await withAuthenticatedRuntime(["--json", "invitations", "create", "--email", "guest@example.com"], transport, { fs: fsLike });
     assert.equal(result.code, ExitCode.Conflict, result.stdout);
     const envelope = JSON.parse(result.stdout) as { ok: boolean; error: { code: string; status: number; detail: string } };
     assert.equal(envelope.ok, false);
     assert.equal(envelope.error.code, "invitation_limit_reached");
     assert.equal(envelope.error.status, 409);
-    assert.match(envelope.error.detail, /10 invitations/);
     assert.equal(calls, 1, "a cap refusal must not be retried automatically");
     assert.doesNotMatch(result.stdout, /guest@example\.com/);
   } finally {
@@ -3748,27 +3671,22 @@ test("account invite surfaces the outstanding-invitation cap without retrying", 
   }
 });
 
-test("account invite reuses its saved idempotency key after an ambiguous failure", async () => {
+test("invitations create reuses its saved idempotency key after an ambiguous failure", async () => {
   const configDir = await testTemp("invite-retry-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   const transport = new FakeTransport();
   let calls = 0;
-  transport.on("POST", "/api/v1/account/invitations", (req) => {
+  transport.on("POST", "/api/v1/invitations", (req) => {
     calls += 1;
     if (calls === 1) throw networkError("connection reset by peer");
     return {
-      status: 202,
+      status: 201,
       headers: { "cache-control": "private, no-store", "x-request-id": req.headers?.["x-request-id"] ?? "req_invite" },
-      body: {
-        invitation_id: "inv_AAAAAAAAAAAAAAAAAAAAAAAA",
-        status: "queued",
-        created_at: "2026-08-14T17:00:00.000Z",
-        expires_at: "2026-08-15T17:00:00.000Z",
-      },
+      body: { invitations: [invitationRecord()] },
     };
   });
   try {
-    const failed = await withAuthenticatedRuntime(["--json", "account", "invite", "--email", "guest@example.com"], transport, { fs: fsLike });
+    const failed = await withAuthenticatedRuntime(["--json", "invitations", "create", "--email", "guest@example.com"], transport, { fs: fsLike });
     assert.equal(failed.code, ExitCode.Network, failed.stdout);
     const failedEnvelope = JSON.parse(failed.stdout) as { error: { code: string }; warnings: Array<{ code: string }> };
     assert.equal(failedEnvelope.error.code, "transport_error");
@@ -3778,7 +3696,7 @@ test("account invite reuses its saved idempotency key after an ambiguous failure
 
     // The identical rerun reuses the saved key, so the server replays instead
     // of sending a second invitation or consuming another slot.
-    const retried = await withAuthenticatedRuntime(["--json", "account", "invite", "--email", "guest@example.com"], transport, { fs: fsLike });
+    const retried = await withAuthenticatedRuntime(["--json", "invitations", "create", "--email", "guest@example.com"], transport, { fs: fsLike });
     assert.equal(retried.code, ExitCode.Success, retried.stdout);
     assert.equal(transport.calls.at(-1)?.headers?.["idempotency-key"], firstKey);
     assert.equal(calls, 2);
@@ -3787,13 +3705,13 @@ test("account invite reuses its saved idempotency key after an ambiguous failure
   }
 });
 
-test("account invite validates --email before any network call without echoing it", async () => {
+test("invitations create validates --email before any network call without echoing it", async () => {
   const transport = new FakeTransport();
-  const missing = await withAuthenticatedRuntime(["--json", "account", "invite"], transport);
+  const missing = await withAuthenticatedRuntime(["--json", "invitations", "create"], transport);
   assert.equal(missing.code, ExitCode.Usage, missing.stdout);
 
   const malformed = await withAuthenticatedRuntime(
-    ["--json", "account", "invite", "--email", "Private Person <guest@example.com>"],
+    ["--json", "invitations", "create", "--email", "Private Person <guest@example.com>"],
     transport,
   );
   assert.equal(malformed.code, ExitCode.Usage, malformed.stdout);
@@ -3804,20 +3722,20 @@ test("account invite validates --email before any network call without echoing i
   await rm(malformed.configDir, { recursive: true, force: true });
 });
 
-test("account recover posts an unauthenticated idempotent request and reports accepted, not delivery", async () => {
+test("dashboard reset-sign-in posts an unauthenticated idempotent request and reports accepted, not delivery", async () => {
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/account/recovery", () => ({
+  transport.on("POST", "/api/v1/sign-in-resets", () => ({
     status: 202,
     headers: { "cache-control": "private, no-store", "x-request-id": "req_recover" },
     body: { status: "accepted" },
   }));
-  const json = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], transport);
+  const json = await withRuntime(["--json", "dashboard", "reset-sign-in", "--email", "owner@example.com"], transport);
   try {
     assert.equal(json.code, ExitCode.Success, json.stdout);
     assert.equal(transport.calls.length, 1, "recovery must not enroll, verify a credential, or open a dashboard");
     const sent = transport.calls.at(-1);
     assert.equal(sent?.method, "POST");
-    assert.equal(sent?.path, "/api/v1/account/recovery");
+    assert.equal(sent?.path, "/api/v1/sign-in-resets");
     assert.equal(sent?.headers?.authorization, undefined, "recovery must never send a credential");
     assert.ok(sent?.headers?.["idempotency-key"], "recovery must carry an Idempotency-Key");
     assert.deepEqual(sent?.body, { email: "owner@example.com" });
@@ -3830,22 +3748,22 @@ test("account recover posts an unauthenticated idempotent request and reports ac
     await rm(json.configDir, { recursive: true, force: true });
   }
 
-
-  const human = await withRuntime(["--human", "account", "recover", "--email", "owner@example.com"], transport);
-  try {
-    assert.equal(human.code, ExitCode.Success, human.stdout);
-    assert.match(human.stdout, /^Recovery request accepted$/m);
-    assert.match(human.stdout, /^status: accepted$/m);
-    assert.match(human.stdout, /If this email belongs to an account, check its inbox\./m);
-    assert.match(human.stdout, /Delivery is not confirmed\./m);
-    assert.match(human.stdout, /run screenrig agent connect here, then approve the connection request in the recovered dashboard/m);
-    assert.doesNotMatch(human.stdout, /owner@example\.com|sr_live_|https?:\/\//);
-  } finally {
-    await rm(human.configDir, { recursive: true, force: true });
+  const outputs: string[] = [];
+  for (const email of ["owner@example.com", "unknown@example.com"]) {
+    const human = await withRuntime(["--human", "dashboard", "reset-sign-in", "--email", email], transport);
+    try {
+      assert.equal(human.code, ExitCode.Success);
+      outputs.push(human.stdout.replace(/^request_id:.*(?:\n|$)/gm, ""));
+      assert.equal(human.stdout.includes(email), false);
+      assert.doesNotMatch(human.stdout, /sr_live_|https?:\/\//);
+    } finally {
+      await rm(human.configDir, { recursive: true, force: true });
+    }
   }
+  assert.equal(outputs[0], outputs[1], "sign-in reset must not reveal whether an address is known");
 });
 
-test("account recover never sends a stored credential and leaves credential state untouched", async () => {
+test("dashboard reset-sign-in never sends a stored credential and leaves credential state untouched", async () => {
   const configDir = await testTemp("recover-credential-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
@@ -3853,23 +3771,23 @@ test("account recover never sends a stored credential and leaves credential stat
   await writeConfigAtomic(configPath, {
     api_url: "https://api.screenrig.ai",
     token,
-    account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
     agent_id: TEST_AGENT.id,
   }, fsLike);
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/account/recovery", () => ({
+  transport.on("POST", "/api/v1/sign-in-resets", () => ({
     status: 202,
     headers: { "cache-control": "private, no-store" },
     body: { status: "accepted" },
   }));
   try {
-    const result = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], transport, { fs: fsLike });
+    const result = await withRuntime(["--json", "dashboard", "reset-sign-in", "--email", "owner@example.com"], transport, { fs: fsLike });
     assert.equal(result.code, ExitCode.Success, result.stdout);
     assert.equal(transport.calls.length, 1, result.stdout);
     assert.equal(transport.calls.at(-1)?.headers?.authorization, undefined);
     const after = await readConfigFile(configPath, fsLike);
     assert.equal(after?.token, token);
-    assert.equal(after?.account_id, "acc_AAAAAAAAAAAAAAAAAAAAAAAA");
+    assert.equal(after?.project_id, "acc_AAAAAAAAAAAAAAAAAAAAAAAA");
     assert.equal(after?.pending_writes, undefined);
     assert.equal(after?.enrollment, undefined);
   } finally {
@@ -3877,12 +3795,12 @@ test("account recover never sends a stored credential and leaves credential stat
   }
 });
 
-test("account recover reuses its saved idempotency key after an ambiguous failure on a fresh install", async () => {
+test("dashboard reset-sign-in reuses its saved idempotency key after an ambiguous failure on a fresh install", async () => {
   const configDir = await testTemp("recover-retry-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   const transport = new FakeTransport();
   let calls = 0;
-  transport.on("POST", "/api/v1/account/recovery", () => {
+  transport.on("POST", "/api/v1/sign-in-resets", () => {
     calls += 1;
     if (calls === 1) throw networkError("connection reset by peer");
     return {
@@ -3892,7 +3810,7 @@ test("account recover reuses its saved idempotency key after an ambiguous failur
     };
   });
   try {
-    const failed = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], transport, { fs: fsLike });
+    const failed = await withRuntime(["--json", "dashboard", "reset-sign-in", "--email", "owner@example.com"], transport, { fs: fsLike });
     assert.equal(failed.code, ExitCode.Network, failed.stdout);
     const failedEnvelope = JSON.parse(failed.stdout) as { error: { code: string }; warnings: Array<{ code: string }> };
     assert.equal(failedEnvelope.error.code, "transport_error");
@@ -3900,7 +3818,7 @@ test("account recover reuses its saved idempotency key after an ambiguous failur
     const firstKey = transport.calls.at(-1)?.headers?.["idempotency-key"];
     assert.ok(firstKey);
 
-    const retried = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], transport, { fs: fsLike });
+    const retried = await withRuntime(["--json", "dashboard", "reset-sign-in", "--email", "owner@example.com"], transport, { fs: fsLike });
     assert.equal(retried.code, ExitCode.Success, retried.stdout);
     assert.equal(transport.calls.at(-1)?.headers?.["idempotency-key"], firstKey);
     assert.equal(calls, 2);
@@ -3913,14 +3831,14 @@ test("account recover reuses its saved idempotency key after an ambiguous failur
   }
 });
 
-test("account recover validates --email before any network call without echoing it", async () => {
+test("dashboard reset-sign-in validates --email before any network call without echoing it", async () => {
   const transport = new FakeTransport();
-  const missing = await withRuntime(["--json", "account", "recover"], transport);
+  const missing = await withRuntime(["--json", "dashboard", "reset-sign-in"], transport);
   assert.equal(missing.code, ExitCode.Usage, missing.stdout);
   assert.equal(transport.calls.length, 0);
 
   const malformed = await withRuntime(
-    ["--json", "account", "recover", "--email", "Owner <owner@example.com>"],
+    ["--json", "dashboard", "reset-sign-in", "--email", "Owner <owner@example.com>"],
     transport,
   );
   assert.equal(malformed.code, ExitCode.Usage, malformed.stdout);
@@ -3931,30 +3849,30 @@ test("account recover validates --email before any network call without echoing 
   await rm(malformed.configDir, { recursive: true, force: true });
 });
 
-test("account recover rejects a response that deviates from the closed accepted contract", async () => {
-  const extraField = new FakeTransport().on("POST", "/api/v1/account/recovery", () => ({
+test("dashboard reset-sign-in rejects a response that deviates from the closed accepted contract", async () => {
+  const extraField = new FakeTransport().on("POST", "/api/v1/sign-in-resets", () => ({
     status: 202,
     headers: { "cache-control": "private, no-store" },
-    body: { status: "accepted", account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" },
+    body: { status: "accepted", project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" },
   }));
-  const withExtra = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], extraField);
+  const withExtra = await withRuntime(["--json", "dashboard", "reset-sign-in", "--email", "owner@example.com"], extraField);
   assert.equal(withExtra.code, ExitCode.Usage, withExtra.stdout);
   assert.doesNotMatch(withExtra.stdout, /acc_AAAAAAAAAAAAAAAAAAAAAAAA/);
 
-  const wrongStatus = new FakeTransport().on("POST", "/api/v1/account/recovery", () => ({
+  const wrongStatus = new FakeTransport().on("POST", "/api/v1/sign-in-resets", () => ({
     status: 202,
     headers: { "cache-control": "private, no-store" },
     body: { status: "queued" },
   }));
-  const withWrong = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], wrongStatus);
+  const withWrong = await withRuntime(["--json", "dashboard", "reset-sign-in", "--email", "owner@example.com"], wrongStatus);
   assert.equal(withWrong.code, ExitCode.Usage, withWrong.stdout);
 
-  const missingPolicy = new FakeTransport().on("POST", "/api/v1/account/recovery", () => ({
+  const missingPolicy = new FakeTransport().on("POST", "/api/v1/sign-in-resets", () => ({
     status: 202,
     headers: {},
     body: { status: "accepted" },
   }));
-  const withPolicy = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], missingPolicy);
+  const withPolicy = await withRuntime(["--json", "dashboard", "reset-sign-in", "--email", "owner@example.com"], missingPolicy);
   assert.equal(withPolicy.code, ExitCode.Usage, withPolicy.stdout);
   assert.match(withPolicy.stdout, /private, no-store/);
 
@@ -3963,8 +3881,8 @@ test("account recover rejects a response that deviates from the closed accepted 
   await rm(withPolicy.configDir, { recursive: true, force: true });
 });
 
-test("account recover surfaces server validation, key mismatch, and rate limits unchanged", async () => {
-  const invalid = new FakeTransport().on("POST", "/api/v1/account/recovery", () => ({
+test("dashboard reset-sign-in surfaces server validation, key mismatch, and rate limits unchanged", async () => {
+  const invalid = new FakeTransport().on("POST", "/api/v1/sign-in-resets", () => ({
     status: 400,
     headers: { "content-type": "application/problem+json" },
     body: {
@@ -3975,14 +3893,14 @@ test("account recover surfaces server validation, key mismatch, and rate limits 
       detail: "email is malformed",
     },
   }));
-  const invalidResult = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], invalid);
+  const invalidResult = await withRuntime(["--json", "dashboard", "reset-sign-in", "--email", "owner@example.com"], invalid);
   assert.equal(invalidResult.code, ExitCode.Client, invalidResult.stdout);
   const invalidEnvelope = JSON.parse(invalidResult.stdout) as { error: { code: string; detail: string; next?: unknown } };
   assert.equal(invalidEnvelope.error.code, "invalid_request");
   assert.equal(invalidEnvelope.error.detail, "email is malformed");
   assert.equal(invalidEnvelope.error.next, undefined);
 
-  const mismatch = new FakeTransport().on("POST", "/api/v1/account/recovery", () => ({
+  const mismatch = new FakeTransport().on("POST", "/api/v1/sign-in-resets", () => ({
     status: 409,
     headers: { "content-type": "application/problem+json" },
     body: {
@@ -3993,13 +3911,13 @@ test("account recover surfaces server validation, key mismatch, and rate limits 
       detail: "this key was already used by a different request",
     },
   }));
-  const mismatchResult = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], mismatch);
+  const mismatchResult = await withRuntime(["--json", "dashboard", "reset-sign-in", "--email", "owner@example.com"], mismatch);
   assert.equal(mismatchResult.code, ExitCode.Conflict, mismatchResult.stdout);
   const mismatchEnvelope = JSON.parse(mismatchResult.stdout) as { error: { code: string; detail: string } };
   assert.equal(mismatchEnvelope.error.code, "idempotency_key_conflict");
   assert.equal(mismatchEnvelope.error.detail, "this key was already used by a different request");
 
-  const limited = new FakeTransport().on("POST", "/api/v1/account/recovery", () => ({
+  const limited = new FakeTransport().on("POST", "/api/v1/sign-in-resets", () => ({
     status: 429,
     headers: { "content-type": "application/problem+json", "retry-after": "30" },
     body: {
@@ -4010,7 +3928,7 @@ test("account recover surfaces server validation, key mismatch, and rate limits 
       detail: "too many recovery requests",
     },
   }));
-  const limitedResult = await withRuntime(["--json", "account", "recover", "--email", "owner@example.com"], limited);
+  const limitedResult = await withRuntime(["--json", "dashboard", "reset-sign-in", "--email", "owner@example.com"], limited);
   assert.equal(limitedResult.code, ExitCode.RateLimited, limitedResult.stdout);
   const limitedEnvelope = JSON.parse(limitedResult.stdout) as { error: { code: string; retry_after_seconds?: number } };
   assert.equal(limitedEnvelope.error.code, "rate_limited");
@@ -4036,7 +3954,7 @@ test("unauthenticated version does not add credits_low", async () => {
   }
 });
 
-test("an account quota rejection explains itself and points at the remaining allowance", async () => {
+test("an project quota rejection explains itself and points at the remaining allowance", async () => {
   // A custom storage ceiling is checked before the 1 GiB transport bound.
   const transport = new FakeTransport();
   transport.on("POST", "/api/v1/media/uploads", () => ({
@@ -4044,9 +3962,9 @@ test("an account quota rejection explains itself and points at the remaining all
     headers: { "content-type": "application/problem+json" },
     body: {
       type: "https://screenrig.ai/problems/quota-exceeded",
-      title: "Account content quota is exceeded",
+      title: "Project content quota is exceeded",
       status: 413,
-      detail: "This upload would exceed the account storage quota.",
+      detail: "This upload would exceed the project storage quota.",
       code: "quota_exceeded",
     },
   }));
@@ -4071,7 +3989,7 @@ test("an account quota rejection explains itself and points at the remaining all
     };
     assert.equal(envelope.error.code, "quota_exceeded");
     assert.equal(envelope.error.status, 413);
-    assert.match(String(envelope.error.next?.command), /account show/);
+    assert.match(String(envelope.error.next?.command), /project show/);
     assert.match(String(envelope.error.next?.reason), /content_limit_bytes/);
   } finally {
     await rm(configDir, { recursive: true, force: true });
@@ -4113,7 +4031,7 @@ test("a payment_required rejection points at remaining prepaid credit", async ()
     };
     assert.equal(envelope.error.code, "payment_required");
     assert.equal(envelope.error.status, 402);
-    assert.match(String(envelope.error.next?.command), /account show/);
+    assert.match(String(envelope.error.next?.command), /project show/);
     assert.match(String(envelope.error.next?.reason), /credit_remaining/);
     assert.doesNotMatch(String(envelope.error.next?.reason), /mcr|millicredit/);
     assert.equal(envelope.warnings?.some((item) => item.code === "credits_low") ?? false, false, result.stdout);
@@ -4163,7 +4081,7 @@ test("a 402 with remaining header 0 includes payment_required and credits_low", 
     assert.equal(envelope.ok, false);
     assert.equal(envelope.error.code, "payment_required");
     assert.equal(envelope.error.status, 402);
-    assert.match(String(envelope.error.next?.command), /account show/);
+    assert.match(String(envelope.error.next?.command), /project show/);
     const warning = envelope.warnings?.find((item) => item.code === "credits_low");
     assert.ok(warning, result.stdout);
     assert.match(warning.message, /\b0\b/);
@@ -5665,9 +5583,9 @@ test("screen show explains an archived screen's reason and how unarchive resumes
     const hostile = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
     assert.match(hostile.stdout, /\nArchived\nRestore with screen unarchive/);
     // archived_at prints only when it is an RFC 3339 instant.
-    body = hostScreen({ state: "archived", archive_reason: "account", archived_at: "2026-09-21T10:00:00Z\u001b[2Jspoof" });
+    body = hostScreen({ state: "archived", archive_reason: "project", archived_at: "2026-09-21T10:00:00Z\u001b[2Jspoof" });
     const hostileAt = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
-    assert.match(hostileAt.stdout, /\nArchived \(account\)\nAn account or dashboard request archived it\.\n/);
+    assert.match(hostileAt.stdout, /\nArchived \(project\)\nAn project or dashboard request archived it\.\n/);
     assert.doesNotMatch(hostileAt.stdout, /\u001b\[2J/);
 
     // A screen archived before reasons were recorded still gets the recovery line.
@@ -5675,7 +5593,7 @@ test("screen show explains an archived screen's reason and how unarchive resumes
     const legacy = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
     assert.match(legacy.stdout, /\nArchived\nRestore with screen unarchive scr_PAIRINGAAAAAAAAAAAAAAAA\./);
 
-    body = hostScreen({ archive_reason: "account" });
+    body = hostScreen({ archive_reason: "project" });
     const active = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
     assert.doesNotMatch(active.stdout, /\nArchived|Restore with screen unarchive/);
   } finally {
@@ -5759,7 +5677,7 @@ test("screen reload posts the reload route with an idempotency key and returns r
     const archived = await withRuntime(["--json", "screen", "archive", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
     assert.equal(archived.code, ExitCode.Success, archived.stdout);
     const archivedScreen = (JSON.parse(archived.stdout) as { data: { revision: number; archive_reason?: string } }).data;
-    assert.equal(archivedScreen.archive_reason, "account");
+    assert.equal(archivedScreen.archive_reason, "project");
 
     // Reload works on an archived screen and leaves the revision alone.
     const result = await withRuntime(["--json", "screen", "reload", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
@@ -5869,9 +5787,9 @@ test("screen reload explains a server that predates the route and encodes the id
     assert.equal(missingError.detail, "Resource was not found.");
 
     answer = { status: 202, headers: {}, body: { reload_id: "rld_00000001", expires_at: "2026-08-14T17:10:00.000Z" } };
-    const traversal = await withRuntime(["--json", "screen", "reload", "scr_TEST/../../account"], transport, { fs: fsLike });
+    const traversal = await withRuntime(["--json", "screen", "reload", "scr_TEST/../../project"], transport, { fs: fsLike });
     assert.equal(traversal.code, ExitCode.Success, traversal.stdout);
-    assert.equal(transport.calls.at(-1)?.path, "/api/v1/screens/scr_TEST%2F..%2F..%2Faccount/reload");
+    assert.equal(transport.calls.at(-1)?.path, "/api/v1/screens/scr_TEST%2F..%2F..%2Fproject/reload");
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
@@ -6543,7 +6461,7 @@ test("campaign draft preflight rejects invalid duration and unsafe price ceiling
     flight_end: "2026-09-30T00:00:00Z",
     image_duration_ms: 15000,
     max_play_price_mcr: "250000",
-    networks: [{ seller_account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA", screen_ids: ["scr_TEST"], slot_ids: ["ads_TEST"], creative_ids: ["cre_TEST"] }],
+    networks: [{ seller_project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA", screen_ids: ["scr_TEST"], slot_ids: ["ads_TEST"], creative_ids: ["cre_TEST"] }],
   };
   const write = async (name: string, body: unknown): Promise<string> => {
     const file = path.join(directory, name);
@@ -6693,7 +6611,7 @@ test("advertising lifecycle mutations send required If-Match preconditions and c
     flight_start: "2026-09-01T00:00:00Z",
     flight_end: "2026-09-30T00:00:00Z",
     image_duration_ms: 5000,
-    networks: [{ seller_account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA", screen_ids: ["scr_TEST"], slot_ids: ["ads_TEST"], creative_ids: ["cre_TEST"] }],
+    networks: [{ seller_project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA", screen_ids: ["scr_TEST"], slot_ids: ["ads_TEST"], creative_ids: ["cre_TEST"] }],
   };
   try {
     const uncapped = await withAuthenticatedRuntime(["--json", "ads", "campaigns", "update", "cmp_TEST", await write("uncapped.json", draft), "--expect-rev", "2"], transport);
@@ -6742,7 +6660,7 @@ test("stale advertising revisions surface as precondition failures and are never
     await handle.writeFile(JSON.stringify({
       name: "Autumn pass campaign", daily_cap_mcr: "100000000", lifetime_cap_mcr: "500000000",
       flight_start: "2026-09-01T00:00:00Z", flight_end: "2026-09-30T00:00:00Z",
-      networks: [{ seller_account_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA", screen_ids: [], slot_ids: [], creative_ids: [] }],
+      networks: [{ seller_project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA", screen_ids: [], slot_ids: [], creative_ids: [] }],
     }));
   } finally { await handle.close(); }
   try {

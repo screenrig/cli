@@ -37,10 +37,12 @@ test("root help is compact and every command is discoverable through immediate c
     "recovery list",
     "recovery show",
     "recovery reconcile",
-    "account show",
-    "account capabilities",
-    "account invite",
-    "account recover",
+    "project show",
+    "project capabilities",
+    "project rename",
+    "invitations create",
+    "invitations list",
+    "invitations revoke",
     "ads networks list",
     "ads networks show",
     "ads network show",
@@ -51,9 +53,6 @@ test("root help is compact and every command is discoverable through immediate c
     "ads slots list",
     "ads slots create",
     "ads slots update",
-    "ads invites create",
-    "ads invites list",
-    "ads invites revoke",
     "ads memberships list",
     "ads memberships update",
     "ads memberships revoke",
@@ -81,7 +80,8 @@ test("root help is compact and every command is discoverable through immediate c
     "agent connect",
     "agent status",
     "agent disconnect",
-    "dashboard",
+    "dashboard open",
+    "dashboard reset-sign-in",
     "app pack",
     "app upload",
     "app update",
@@ -170,7 +170,7 @@ test("group help stays focused and still names descendant leaf paths", () => {
   for (const path of leafCommandPaths(findCommand(createCommandTree().root, ["media"])!)) {
     assert.ok(media.usage.includes(path), path);
   }
-  assert.doesNotMatch(media.usage, /screen assign|account show|agent enroll|playlist create/);
+  assert.doesNotMatch(media.usage, /screen assign|project show|agent enroll|playlist create/);
 });
 
 test("explicit human inventory includes every leaf while default root stays compact", () => {
@@ -255,29 +255,6 @@ test("structured discovery exposes positional cardinality, choices, defaults and
   assert.equal(generate.usage.split("Provide exactly one").length, 2, "notes should appear only once");
 });
 
-test("account invite advertises its required flag, example, and outstanding-invitation cap", () => {
-  const invite = commandHelp(["account", "invite"]);
-  assert.equal(invite.kind, "command");
-  assert.equal(invite.options.find((option) => option.name === "--email")?.required, true);
-  assert.ok(invite.examples.includes("screenrig account invite --email operator@example.com"));
-  const notes = invite.notes.join(" ");
-  assert.match(notes, /at most 10 outstanding invitations/);
-  assert.match(notes, /HTTP 202/);
-  assert.match(notes, /24 hours after creation/);
-});
-
-test("account recover advertises its required flag, example, and unauthenticated guarantee", () => {
-  const recover = commandHelp(["account", "recover"]);
-  assert.equal(recover.kind, "command");
-  assert.equal(recover.options.find((option) => option.name === "--email")?.required, true);
-  assert.ok(recover.examples.includes("screenrig account recover --email operator@example.com"));
-  const notes = recover.notes.join(" ");
-  assert.match(notes, /never enrolls/);
-  assert.match(notes, /never sends a stored token/);
-  assert.match(notes, /HTTP 202/);
-  assert.match(notes, /separate from the invitation quota/);
-  assert.match(notes, /expires after 24 hours/);
-});
 
 test("explicit JSON inventory can be scoped to a group", () => {
   assert.deepEqual(invoke(["help", "--all"]).data.allCommands, leafCommandPaths(createCommandTree().root));
