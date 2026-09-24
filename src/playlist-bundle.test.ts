@@ -158,9 +158,59 @@ test("rejects application primitives before any media lookup or local output", a
   });
   const transport = new FakeTransport().on("GET", "/api/v1/playlists/pl_SOURCE", () => ({ status: 200, headers: {}, body: source }));
   const client = new ApiClient({ transport, token: "token" });
-  await assert.rejects(() => exportPlaylistBundle({ playlistId: "pl_SOURCE", outputDirectory: output, client }), /application primitives/);
+  await assert.rejects(
+    () => exportPlaylistBundle({ playlistId: "pl_SOURCE", outputDirectory: output, client }),
+    (error: unknown) => error instanceof CliError && error.problem.code === "usage_error" && /--skip-applications/.test(error.problem.detail),
+  );
   assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), ["GET /api/v1/playlists/pl_SOURCE"]);
   await assert.rejects(() => lstat(output), /ENOENT/);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("--skip-applications exports the remaining pages and reports what it dropped", async () => {
+  const dir = await testTemp("bundle-skip-app-");
+  const output = path.join(dir, "export");
+  const bytes = Uint8Array.from([9, 8, 7]);
+  const page = (id: string, primitives: Array<Record<string, unknown>>, advance: Record<string, unknown> = { mode: "duration", after_ms: 5000 }) => ({
+    id,
+    canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
+    transition: { type: "crossfade", duration_ms: 200 },
+    advance,
+    primitives,
+  });
+  const application = (id: string) => ({
+    id,
+    primitive: "application",
+    release_id: "rel_1",
+    rect: { x: 0, y: 0, width: 1, height: 1 },
+    layer: 0,
+    content_fit: "fill",
+    controller: true,
+  });
+  const source = {
+    id: "pl_SOURCE",
+    name: "Mixed playlist",
+    revision: 3,
+    pages: [
+      page("page_app", [application("clock")]),
+      page("page_media", [mediaPrimitive({ by: "id", media_id: "med_SOURCE" })]),
+      // The application controls this page's advance, so the page is dropped
+      // whole and its image is never fetched (the transport has no route for it).
+      page("page_controlled", [application("board"), mediaPrimitive({ by: "id", media_id: "med_DROPPED" })], { mode: "application" }),
+    ],
+  };
+  const transport = exportTransport(bytes, { playlist: source });
+  const result = await exportPlaylistBundle({
+    playlistId: "pl_SOURCE",
+    outputDirectory: output,
+    client: new ApiClient({ transport, token: "token" }),
+    skipApplications: true,
+  });
+  assert.deepEqual(result.skipped_applications, { primitives: ["clock", "board"], pages: ["page_app", "page_controlled"] });
+  assert.equal(result.media_count, 1);
+  const saved = JSON.parse(await readFile(path.join(output, PLAYLIST_BUNDLE_PLAYLIST), "utf8"));
+  assert.deepEqual(saved.pages.map((item: { id: string }) => item.id), ["page_media"]);
+  assert.equal(JSON.stringify(saved).includes("application"), false);
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -784,15 +834,34 @@ function nameConflictResponse(): TransportResponse {
 }
 
 /**
- * UAT round 1, F5: importing an project's own export unchanged is refused
- * by older servers that enforce unique playlist names. The 409 gains a `next` that
- * names `--name`, and `--name` itself replaces the bundle's playlist name.
+ * F-20260924-06, plan.md X4: display names may repeat (architecture.md §names,
+ * migration 0019), so import without `--update` creates a new playlist exactly
+ * like `playlist create` even when the name already exists. The CLI adds no
+ * name-conflict special case; a server 409 is surfaced unchanged, and `--name`
+ * only replaces the bundle's own name.
  */
-test("import of a bundle whose playlist name is taken points at --name, and --name overrides the bundle name", async () => {
-  const dir = await testTemp("bundle-name-conflict-");
+test("import without --update creates like playlist create even when the name repeats", async () => {
+  const dir = await testTemp("bundle-name-repeat-");
   const bytes = Uint8Array.from([7, 8, 9]);
   await writeBundle(dir, [{ id: "med_SOURCE_A", filename: "hero.png", bytes, tag: "Lobby" }]);
   const existing = [remoteMedia("med_SOURCE_A", bytes, { tag: "Lobby" })];
+
+  const transport = importTransport(existing);
+  for (const idempotencyKey of ["bundle-base-key-one", "bundle-base-key-two"]) {
+    const result = await importPlaylistBundle({
+      directory: dir,
+      client: new ApiClient({ transport, token: "token", idempotencyKey }),
+      runtime: runtimeForImport([]),
+    });
+    assert.equal(result.mode, "create");
+  }
+  const creates = transport.calls.filter((call) => call.method === "POST" && call.path === "/api/v1/playlists");
+  assert.equal(creates.length, 2);
+  for (const create of creates) {
+    assert.ok(create.body && typeof create.body === "object");
+    assert.deepEqual(Object.keys(create.body).sort(), ["name", "pages"]);
+  }
+
   const conflicting = importTransport(existing, [], { playlistResponse: () => nameConflictResponse() });
   await assert.rejects(
     () => importPlaylistBundle({
@@ -805,25 +874,24 @@ test("import of a bundle whose playlist name is taken points at --name, and --na
       assert.equal(error.problem.status, 409);
       assert.equal(error.problem.code, "resource_conflict");
       assert.match(error.problem.detail, /playlist name is already in use/);
-      assert.doesNotMatch(error.problem.detail, /unique per project/);
-      assert.equal(error.problem.next?.command, `screenrig playlist import ${dir} --name NAME`);
-      assert.match(error.problem.next?.reason ?? "", /--update ID; --expect-rev is optional/);
+      assert.equal(error.problem.next, undefined);
       return true;
     },
   );
   assert.equal(conflicting.calls.filter((call) => call.path === "/api/v1/playlists").length, 1);
 
-  const transport = importTransport(existing);
+  const named = importTransport(existing);
   const result = await importPlaylistBundle({
     directory: dir,
-    client: new ApiClient({ transport, token: "token", idempotencyKey: "bundle-base-key" }),
+    client: new ApiClient({ transport: named, token: "token", idempotencyKey: "bundle-base-key" }),
     runtime: runtimeForImport([]),
     name: "  Lobby loop (copy) ",
   });
   assert.equal(result.mode, "create");
-  const create = transport.calls.find((call) => call.method === "POST" && call.path === "/api/v1/playlists")!;
-  assert.equal((create.body as { name: string }).name, "Lobby loop (copy)");
-  assert.deepEqual(Object.keys(create.body as object).sort(), ["name", "pages"]);
+  const create = named.calls.find((call) => call.method === "POST" && call.path === "/api/v1/playlists")!;
+  assert.ok(create.body && typeof create.body === "object" && "name" in create.body);
+  assert.equal(create.body.name, "Lobby loop (copy)");
+  assert.deepEqual(Object.keys(create.body).sort(), ["name", "pages"]);
 
   await assert.rejects(
     () => importPlaylistBundle({

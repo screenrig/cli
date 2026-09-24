@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { DEFAULT_ARCHIVE_LIMITS, walkDirectory, packDirectory, parseTar, gzipDeterministic } from "./pack/index.js";
+import { DEFAULT_ARCHIVE_LIMITS, walkDirectory, packDirectory, parseTar, gzipDeterministic, hoistInlineAssets } from "./pack/index.js";
 import { crc32 } from "./pack/archive.js";
 import { gunzipSync } from "node:zlib";
 import { CliError } from "./problems.js";
@@ -247,3 +247,80 @@ for (const [limit, value, code] of [
     }
   });
 }
+
+function inlineEntry(path: string, html: string) {
+  return { path, type: "file" as const, data: Buffer.from(html, "utf8"), size: Buffer.byteLength(html) };
+}
+
+test("hoists inline style and executable script into external files", () => {
+  const html = `<!doctype html><html><head><style>body{background:#123}</style></head><body><script>console.log("hi")</script><script type="module">export default 1</script></body></html>`;
+  const entries = hoistInlineAssets([inlineEntry("index.html", html)]);
+  const rewritten = entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8");
+  assert.doesNotMatch(rewritten, /<style>/);
+  assert.doesNotMatch(rewritten, /console\.log/);
+  assert.doesNotMatch(rewritten, /export default/);
+  const link = /<link rel="stylesheet" href="([^"]+)">/.exec(rewritten);
+  const classic = /<script src="([^"]+)"><\/script>/.exec(rewritten);
+  const module = /<script type="module" src="([^"]+)"><\/script>/.exec(rewritten);
+  assert.ok(link && classic && module);
+  const content = (href: string) => entries.find((entry) => entry.path === path.posix.normalize(href))!.data!.toString("utf8");
+  assert.equal(content(link![1]!), "body{background:#123}");
+  assert.equal(content(classic![1]!), 'console.log("hi")');
+  assert.equal(content(module![1]!), "export default 1");
+  assert.ok(entries.every((entry) => entry.path.startsWith("_screenrig/inline/") || entry.path === "index.html"));
+});
+
+test("hoisted assets resolve relative to a nested HTML page", () => {
+  const entries = hoistInlineAssets([inlineEntry("pages/board.html", "<style>p{margin:0}</style>")]);
+  const rewritten = entries.find((entry) => entry.path === "pages/board.html")!.data!.toString("utf8");
+  const href = /<link rel="stylesheet" href="([^"]+)">/.exec(rewritten)![1]!;
+  const resolved = path.posix.normalize(path.posix.join("pages", href));
+  assert.ok(resolved.startsWith("_screenrig/inline/"));
+  assert.equal(entries.find((entry) => entry.path === resolved)!.data!.toString("utf8"), "p{margin:0}");
+});
+
+test("leaves external scripts and non-executable script data blocks inline", () => {
+  const dataBlock = `<script type="application/json">{"ok":true}</script>`;
+  const external = `<script src="./app.js"></script>`;
+  const entries = hoistInlineAssets([inlineEntry("index.html", `<head></head><body>${dataBlock}${external}</body>`)]);
+  const rewritten = entries.find((entry) => entry.path === "index.html")!.data!.toString("utf8");
+  assert.match(rewritten, /<script type="application\/json">\{"ok":true\}<\/script>/);
+  assert.match(rewritten, /<script src="\.\/app\.js"><\/script>/);
+  assert.equal(entries.length, 1);
+});
+
+test("refuses an inline event handler and a javascript: URL with the file and line", () => {
+  const handler = `<div>\n  <button onclick="go()">Go</button>\n</div>`;
+  assert.throws(
+    () => hoistInlineAssets([inlineEntry("pages/board.html", handler)]),
+    (error: unknown) => error instanceof CliError && error.problem.code === "inline_event_handler" && /pages\/board\.html:2/.test(error.problem.detail),
+  );
+  const javascriptUrl = `<a href="jAvAsCrIpT&#58;go()">x</a>`;
+  assert.throws(
+    () => hoistInlineAssets([inlineEntry("index.html", javascriptUrl)]),
+    (error: unknown) => error instanceof CliError && error.problem.code === "javascript_url",
+  );
+});
+
+test("app pack hoists inline blocks end to end and refuses inline handlers", async () => {
+  const hoisted = await tempDir();
+  await writeFile(path.join(hoisted, "index.html"), `<!doctype html><html><head><style>h1{color:red}</style></head><body><script>1+1</script></body></html>`);
+  try {
+    const result = await packDirectory(hoisted);
+    assert.ok(result.entries.some((entry) => entry.path.startsWith("_screenrig/inline/") && entry.path.endsWith(".css")));
+    assert.ok(result.entries.some((entry) => entry.path.startsWith("_screenrig/inline/") && entry.path.endsWith(".js")));
+  } finally {
+    await rm(hoisted, { recursive: true, force: true });
+  }
+
+  const refused = await tempDir();
+  await writeFile(path.join(refused, "index.html"), `<body onload="boot()"></body>`);
+  try {
+    await assert.rejects(
+      () => packDirectory(refused),
+      (error: unknown) => error instanceof CliError && error.problem.code === "inline_event_handler",
+    );
+  } finally {
+    await rm(refused, { recursive: true, force: true });
+  }
+});

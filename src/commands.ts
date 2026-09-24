@@ -3511,7 +3511,13 @@ export const handlePlaylistExport = commandHandler(async (args, runtime, resolve
   if (!id || !output) {
     throw usageError("playlist export requires <id> --output <directory>.");
   }
-  const result = await exportPlaylistBundle({ playlistId: id, outputDirectory: path.resolve(runtime.cwd(), output), client });
+  const result = await exportPlaylistBundle({
+    playlistId: id,
+    outputDirectory: path.resolve(runtime.cwd(), output),
+    client,
+    skipApplications: flagBool(args.flags, "skip-applications"),
+  });
+  const skipped = result.skipped_applications;
   return {
     envelope: successEnvelope(result, { request_id: client.requestId }),
     exitCode: ExitCode.Success,
@@ -3520,6 +3526,8 @@ export const handlePlaylistExport = commandHandler(async (args, runtime, resolve
       ["directory", result.directory],
       ["media_count", String(result.media_count)],
       ["media_bytes", String(result.media_bytes)],
+      ...(skipped.primitives.length > 0 ? [["skipped_application_primitives", skipped.primitives.join(", ")] as [string, string]] : []),
+      ...(skipped.pages.length > 0 ? [["skipped_pages", skipped.pages.join(", ")] as [string, string]] : []),
     ]),
   };
 }, true);

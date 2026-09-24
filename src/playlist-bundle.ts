@@ -80,6 +80,13 @@ export interface PlaylistBundlePreflight {
   close(): Promise<void>;
 }
 
+export interface PlaylistBundleSkipSummary {
+  /** Application primitive ids removed by --skip-applications. */
+  primitives: string[];
+  /** Page ids removed because every primitive on them was an application. */
+  pages: string[];
+}
+
 export interface PlaylistBundleExportResult {
   schema: typeof PLAYLIST_BUNDLE_SCHEMA;
   directory: string;
@@ -87,6 +94,7 @@ export interface PlaylistBundleExportResult {
   playlist_revision: number;
   media_count: number;
   media_bytes: number;
+  skipped_applications: PlaylistBundleSkipSummary;
 }
 
 export interface PlaylistBundleImportResult {
@@ -408,23 +416,38 @@ function cloneJson<T>(value: T): T {
   return structuredClone(value);
 }
 
-export function normalizePlaylistForBundle(input: unknown): { id: string; revision: number; playlist: JsonRecord; mediaIds: string[] } {
+export function normalizePlaylistForBundle(
+  input: unknown,
+  options: { skipApplications?: boolean } = {},
+): { id: string; revision: number; playlist: JsonRecord; mediaIds: string[]; skipped: PlaylistBundleSkipSummary } {
   const source = record(input, "Playlist");
   const id = stringField(source, "id", "Playlist");
   const revision = integerField(source, "revision", "Playlist");
   const name = stringField(source, "name", "Playlist");
   if (!Array.isArray(source.pages)) throw usageError("Playlist.pages must be an array.");
   const mediaIds = new Set<string>();
-  const pages = source.pages.map((pageValue, pageIndex) => {
+  const skipped: PlaylistBundleSkipSummary = { primitives: [], pages: [] };
+  const pages: JsonRecord[] = [];
+  source.pages.forEach((pageValue, pageIndex) => {
     if (isAdSlotPage(pageValue)) {
       throw usageError(`Playlist.pages[${pageIndex}] is an adslot page. A bundle carries fixed media only, and an adslot page selects its fill at runtime; export stopped before media download.`);
     }
     const page = record(pageValue, `Playlist.pages[${pageIndex}]`);
     if (!Array.isArray(page.primitives)) throw usageError(`Playlist.pages[${pageIndex}].primitives must be an array.`);
-    const primitives = page.primitives.map((primitiveValue, primitiveIndex) => {
+    const primitives: JsonRecord[] = [];
+    const pageMediaIds: string[] = [];
+    let skippedApplications = false;
+    page.primitives.forEach((primitiveValue, primitiveIndex) => {
       const primitive = record(primitiveValue, `Playlist.pages[${pageIndex}].primitives[${primitiveIndex}]`);
       const category = primitive.primitive;
-      if (category === "application") throw usageError("Playlist export does not support application primitives; export stopped before media download.");
+      if (category === "application") {
+        if (!options.skipApplications) {
+          throw usageError("Playlist export does not support application primitives; pass --skip-applications to export the rest or detach them first. Export stopped before media download.");
+        }
+        skipped.primitives.push(stringField(primitive, "id", "Playlist primitive"));
+        skippedApplications = true;
+        return;
+      }
       let normalized: JsonRecord;
       if (category === "iframe") {
         normalized = {
@@ -435,7 +458,7 @@ export function normalizePlaylistForBundle(input: unknown): { id: string; revisi
       } else if (category === "image" || category === "video") {
         const selector = normalizedMediaSelector(primitive.selector);
         const ids = selector.by === "id" ? [selector.media_id] : selector.media_ids;
-        for (const mediaId of ids as string[]) mediaIds.add(mediaId);
+        pageMediaIds.push(...(ids as string[]));
         normalized = {
           primitive: category,
           selector,
@@ -446,7 +469,7 @@ export function normalizePlaylistForBundle(input: unknown): { id: string; revisi
       } else {
         throw usageError("Playlist export encountered an unsupported primitive.");
       }
-      return {
+      primitives.push({
         id: stringField(primitive, "id", "Playlist primitive"),
         ...normalized,
         rect: cloneJson(primitive.rect),
@@ -454,18 +477,30 @@ export function normalizePlaylistForBundle(input: unknown): { id: string; revisi
         content_fit: primitive.content_fit,
         ...(primitive.enter !== undefined ? { enter: cloneJson(primitive.enter) } : {}),
         ...(primitive.motion !== undefined ? { motion: cloneJson(primitive.motion) } : {}),
-      };
+      });
     });
-    return {
-      id: stringField(page, "id", "Playlist page"),
+    const pageID = stringField(page, "id", "Playlist page");
+    // A page with no primitive left, or one the removed application controlled
+    // (`advance.mode: "application"`), cannot stand on its own.
+    const advanceMode = page.advance !== null && typeof page.advance === "object" ? (page.advance as JsonRecord).mode : undefined;
+    if (skippedApplications && (primitives.length === 0 || advanceMode === "application")) {
+      skipped.pages.push(pageID);
+      return;
+    }
+    for (const mediaId of pageMediaIds) mediaIds.add(mediaId);
+    pages.push({
+      id: pageID,
       canvas: cloneJson(page.canvas),
       transition: cloneJson(page.transition),
       advance: cloneJson(page.advance),
       ...(page.visibility !== undefined ? { visibility: cloneJson(page.visibility) } : {}),
       primitives,
-    };
+    });
   });
-  return { id, revision, playlist: { name, pages }, mediaIds: [...mediaIds].sort() };
+  if (pages.length === 0 && skipped.pages.length > 0) {
+    throw usageError("Playlist export would produce no pages after --skip-applications; detach the application primitives instead.");
+  }
+  return { id, revision, playlist: { name, pages }, mediaIds: [...mediaIds].sort(), skipped };
 }
 
 function parseRemoteMedia(input: unknown, expectedId: string): RemoteMedia {
@@ -565,12 +600,14 @@ export async function exportPlaylistBundle(options: {
   playlistId: string;
   outputDirectory: string;
   client: ApiClient;
+  /** Drop application pages and primitives instead of refusing the export. */
+  skipApplications?: boolean;
 }): Promise<PlaylistBundleExportResult> {
   if (!isResourceID(options.playlistId, "playlist")) throw usageError("playlist export requires a playlist identifier.");
   const destination = path.resolve(options.outputDirectory);
   await destinationAbsent(destination);
   const playlistResponse = await callVersionedPlaylist(options.client, { method: "GET", id: options.playlistId, preferred: "v1" });
-  const normalized = normalizePlaylistForBundle(playlistResponse.body);
+  const normalized = normalizePlaylistForBundle(playlistResponse.body, { skipApplications: options.skipApplications === true });
   if (normalized.id !== options.playlistId) throw usageError("Playlist export response id did not match the requested playlist.");
 
   // Resolve and validate every metadata row before creating local output or downloading bytes.
@@ -616,6 +653,7 @@ export async function exportPlaylistBundle(options: {
       playlist_revision: normalized.revision,
       media_count: media.length,
       media_bytes: media.reduce((sum, item) => sum + item.bytes, 0),
+      skipped_applications: normalized.skipped,
     };
   } catch (error) {
     await rm(temporary, { recursive: true, force: true });
@@ -987,31 +1025,9 @@ export async function importPlaylistBundle(options: {
     };
   } catch (error) {
     rethrowRateLimitedImport(error, { uploaded, mutationStarted, playlistWriteStarted });
-    rethrowNameConflict(error, { directory: options.directory, updateId: options.updateId, playlistWriteStarted });
     partialImportError(error, uploaded, mutationStarted, playlistWriteStarted);
   } finally {
     await bundle.close();
   }
 }
 
-/** Retain actionable recovery for older servers that still reject duplicate names. */
-function rethrowNameConflict(error: unknown, state: {
-  directory: string;
-  updateId: string | undefined;
-  playlistWriteStarted: boolean;
-}): void {
-  if (!(error instanceof CliError) || error.problem.status !== 409 || error.problem.code !== "resource_conflict") return;
-  if (!state.playlistWriteStarted || state.updateId) return;
-  throw new CliError(
-    {
-      ...error.problem,
-      detail: error.problem.detail,
-      next: {
-        command: `screenrig playlist import ${state.directory} --name NAME`,
-        reason: "Import as a new playlist under a different name, or replace the existing one with --update ID; --expect-rev is optional.",
-      },
-    },
-    error.exitCode,
-    error.warnings,
-  );
-}
