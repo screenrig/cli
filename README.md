@@ -228,6 +228,20 @@ its playlist, `screen show` reports `applications_unsupported` with the time
 the condition began, and `screen list` marks the row. The manifest is
 unchanged; the player skips those primitives.
 
+## Storage report
+
+A native player reports its content-cache storage to the server, and
+`screen show` prints that as a `Storage` block: cache capacity and used bytes,
+durability, the storage plan's fit and transition with the excluded page
+count, bytes transferred in the last 24 hours, the forecast fit for the
+assigned playlist revision, and, while the plan does not fit, a `shortfall`
+line with the bytes needed versus capacity. A report older than 24 hours is
+marked `(stale)`; a screen that has never reported storage prints no
+storage block. In JSON mode the fields pass through as `storage`,
+`storage_forecast`, and `storage_shortfall`. The report describes the
+player's last observed state; it is never a credential and never authorizes
+anything.
+
 ## Application command results
 
 `app upload` and `app update` return the same JSON data paths with or without

@@ -5520,6 +5520,114 @@ test("screen show omits absent recovery host fields and the description without 
   await rm(configDir, { recursive: true, force: true });
 });
 
+function storageReport(extra: Record<string, unknown> = {}) {
+  return {
+    observed_at: "2026-08-14T16:55:00Z",
+    received_at: "2026-08-14T16:56:00Z",
+    durability: "durable",
+    volume: { total_bytes: 2502197522432, available_bytes: 68719476736 },
+    cache: {
+      house_used_bytes: 53687091200,
+      capacity_bytes: 134217728000,
+      reserve_bytes: 1073741824,
+      protected_bytes: 5368709120,
+      fallback_bytes: 1048576,
+      warm_bytes: 8388608,
+      ad_headroom_bytes: 2147483648,
+    },
+    plan: {
+      manifest_revision: "man_0000000000000007",
+      fit: "fits_after_eviction",
+      transition: "staged",
+      required_bytes: 79691776000,
+      target_bytes: 73400320000,
+      excluded_pages: [
+        { page_id: "pg_billboard", reason: "page_exceeds_capacity" },
+        { page_id: "pg_archive", reason: "not_local" },
+      ],
+    },
+    transfer_24h: { new: 3221225472, refetch: 536870912, repair: 2097152, failed: 8 },
+    ...extra,
+  };
+}
+
+test("screen show prints a Storage block from the player's last storage report", async () => {
+  const transport = new FakeTransport();
+  const storage = storageReport();
+  const screen = hostScreen({
+    storage,
+    storage_forecast: { manifest_revision: "man_0000000000000007", fit: "fits", excluded_page_count: 0, basis: "reported_capacity", received_at: "2026-08-14T16:56:00Z" },
+  });
+  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: screen }));
+  const { configDir, fsLike } = await hostConfigFs("screen-show-storage-");
+
+  const human = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+  assert.equal(human.code, ExitCode.Success, human.stdout);
+  assert.match(
+    human.stdout,
+    /\nStorage\nreceived_at: 2026-08-14T16:56:00Z\ncapacity: 125 GiB\nused: 50\.0 GiB\ndurability: durable\nplan: fits_after_eviction, staged transition\nexcluded pages: 2\ntransferred in 24h: 3\.5 GiB \(new 3\.0 GiB, refetch 512 MiB, repair 2\.0 MiB, failed 8 B\)\nforecast: fits \(manifest man_0000000000000007\)\n?$/,
+  );
+  assert.doesNotMatch(human.stdout, /shortfall|stale/);
+
+  // JSON output stays the raw report; only --human gains the block.
+  const json = await withRuntime(["--json", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+  assert.equal(json.code, ExitCode.Success, json.stdout);
+  const envelope = JSON.parse(json.stdout) as { data: Record<string, unknown> };
+  assert.deepEqual(envelope.data.storage, storage);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen show marks a storage report older than 24 hours stale", async () => {
+  const transport = new FakeTransport();
+  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({
+    status: 200,
+    headers: {},
+    body: hostScreen({ storage: storageReport({ received_at: "2026-08-13T16:00:00Z" }) }),
+  }));
+  const { configDir, fsLike } = await hostConfigFs("screen-show-storage-stale-");
+  const human = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+  assert.equal(human.code, ExitCode.Success, human.stdout);
+  assert.match(human.stdout, /\nStorage \(stale\)\nreceived_at: 2026-08-13T16:00:00Z\n/);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen show prints no Storage block when the screen never reported storage", async () => {
+  const transport = new FakeTransport();
+  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: hostScreen() }));
+  const { configDir, fsLike } = await hostConfigFs("screen-show-storage-absent-");
+  const human = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+  assert.equal(human.code, ExitCode.Success, human.stdout);
+  assert.doesNotMatch(human.stdout, /Storage|capacity|durability|forecast|shortfall/);
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("screen show prints the active storage shortfall with needed versus capacity", async () => {
+  const transport = new FakeTransport();
+  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({
+    status: 200,
+    headers: {},
+    body: hostScreen({
+      storage: storageReport({
+        plan: {
+          fit: "none_fit",
+          transition: "blocked",
+          required_bytes: 134217728000,
+          target_bytes: 117990162432,
+          excluded_pages: [{ page_id: "pg_anchor", reason: "page_exceeds_capacity" }],
+        },
+        transfer_24h: { new: 0, refetch: 0, repair: 0, failed: 0 },
+      }),
+      storage_forecast: { manifest_revision: "man_0000000000000007", fit: "none_fit", excluded_page_count: 1, basis: "reported_capacity", received_at: "2026-08-14T16:56:00Z" },
+      storage_shortfall: { at: "2026-08-14T12:00:00Z", fit: "none_fit", required_bytes: 134217728000, capacity_bytes: 118111600640, excluded_page_count: 1 },
+    }),
+  }));
+  const { configDir, fsLike } = await hostConfigFs("screen-show-storage-shortfall-");
+  const human = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
+  assert.equal(human.code, ExitCode.Success, human.stdout);
+  assert.match(human.stdout, /\nplan: none_fit, blocked transition\nexcluded pages: 1\ntransferred in 24h: 0 B\nforecast: none_fit \(manifest man_0000000000000007\)\nshortfall: needs 125 GiB, capacity 110 GiB \(since 2026-08-14T12:00:00Z\)\n?$/);
+  await rm(configDir, { recursive: true, force: true });
+});
+
 test("screen list appends the platform column only when a screen reports a host", async () => {
   const transport = new FakeTransport();
   const items = [

@@ -103,6 +103,7 @@ import { uploadMediaFile } from "./media-upload.js";
 import { runMediaUploadBatch, UPLOAD_BATCH_DEFAULT_CONCURRENCY, UPLOAD_BATCH_MAX_CONCURRENCY, UPLOAD_BATCH_MIN_CONCURRENCY } from "./media-upload-batch.js";
 import { clearProvisionRetryState, provisionRetryState } from "./provisioning-state.js";
 import { clearGenerateRetryState, generateRequestHash, generateRetryState } from "./media-generate-retry.js";
+import { formatBytes } from "./media/progress.js";
 import { validateProvisioningUrls } from "./provisioning-url.js";
 import { aspectMismatchWarnings } from "./aspect-mismatch.js";
 import {
@@ -3849,6 +3850,47 @@ function recoveryPendingLine(screen: Screen | undefined): string[] {
   ];
 }
 
+/** A storage report older than 24 hours is stale; consumers re-check before trusting it. */
+const STORAGE_STALE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The `Storage` block `screen show` prints from the player's last storage
+ * report. A report older than 24 hours (per received_at) is marked stale; a
+ * screen that never reported prints no storage lines. Absent parts are
+ * omitted: the forecast without a report, the shortfall while the plan fits.
+ */
+function storageLines(screen: Screen | undefined, now: Date): string[] {
+  const storage = screen?.storage;
+  if (!storage || typeof storage !== "object") return [];
+  const receivedMs = Date.parse(storage.received_at);
+  const stale = Number.isFinite(receivedMs) && now.getTime() - receivedMs > STORAGE_STALE_MS;
+  const plan = storage.plan;
+  const planSummary = [plan?.fit, plan?.transition ? `${plan.transition} transition` : undefined]
+    .filter((part): part is string => part !== undefined)
+    .join(", ");
+  const excludedPages = Array.isArray(plan?.excluded_pages) ? plan.excluded_pages.length : undefined;
+  const transfer = storage.transfer_24h;
+  const transferred = transfer.new + transfer.refetch + transfer.repair + transfer.failed;
+  const transferSummary = transferred === 0
+    ? "0 B"
+    : `${formatBytes(transferred)} (new ${formatBytes(transfer.new)}, refetch ${formatBytes(transfer.refetch)}, repair ${formatBytes(transfer.repair)}, failed ${formatBytes(transfer.failed)})`;
+  const forecast = screen?.storage_forecast;
+  const shortfall = screen?.storage_shortfall;
+  return humanLines(stale ? "Storage (stale)" : "Storage", [
+    ["received_at", storage.received_at],
+    ["capacity", formatBytes(storage.cache.capacity_bytes)],
+    ["used", formatBytes(storage.cache.house_used_bytes)],
+    ["durability", storage.durability],
+    ["plan", planSummary],
+    ["excluded pages", excludedPages === undefined ? undefined : String(excludedPages)],
+    ["transferred in 24h", transferSummary],
+    ["forecast", forecast?.fit ? `${forecast.fit} (manifest ${forecast.manifest_revision})` : undefined],
+    ["shortfall", shortfall
+      ? `needs ${formatBytes(shortfall.required_bytes)}, capacity ${formatBytes(shortfall.capacity_bytes)}${serverInstant(shortfall.at) ? ` (since ${shortfall.at})` : ""}`
+      : undefined],
+  ]).split("\n");
+}
+
 export const handleScreenProvision = commandHandler(async (args, runtime, resolved) => {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
@@ -3965,6 +4007,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...archivedLines(screen),
       ...applicationsUnsupportedLines(screen),
       ...recoveryPendingLine(screen),
+      ...storageLines(screen, runtime.now()),
     ].join("\n"),
   };
 }, true);
