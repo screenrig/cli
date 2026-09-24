@@ -4,7 +4,7 @@
  */
 const environment = "(?:(?:stage|qa|development)_)?";
 export const RESOURCE_ID_PATTERNS = {
-  account: new RegExp(`^${environment}acc_[A-Za-z0-9_-]+$`),
+  project: new RegExp(`^${environment}prj_[A-Za-z0-9_-]+$`),
   agent: new RegExp(`^${environment}agt_[A-Za-z0-9_-]+$`),
   connection: new RegExp(`^${environment}acn_[A-Za-z0-9_-]+$`),
   screen: new RegExp(`^${environment}scr_[A-Za-z0-9_-]+$`),

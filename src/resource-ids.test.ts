@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isResourceID, type ResourceIDKind } from "./generated/resource-ids.js";
 
-for (const [kind, type] of Object.entries({account:"acc",agent:"agt",connection:"acn",screen:"scr",playlist:"pl",release:"rel"})) {
+for (const [kind, type] of Object.entries({project:"prj",agent:"agt",connection:"acn",screen:"scr",playlist:"pl",release:"rel"})) {
   test(`${kind} supports retained and environment-qualified IDs without accepting other resources`, () => {
     for (const prefix of ["", "development_", "qa_", "stage_"]) {
       for (const suffix of ["abcdefghijkmnpqr", "Legacy_ABC-123"]) {

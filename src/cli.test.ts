@@ -105,7 +105,7 @@ async function withAuthenticatedRuntime(
       ...(existing ?? {}),
       api_url: existing?.api_url ?? "https://api.screenrig.ai",
       token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-      project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+      project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
       agent_id: TEST_AGENT.id,
     }, fsLike);
   }
@@ -174,7 +174,7 @@ test("pairing requires explicit enrollment and then preserves the original pairi
     homedir: () => configDir,
     env: { XDG_CONFIG_HOME: configDir },
   });
-  assert.equal(config?.project_id, "acc_AAAAAAAAAAAAAAAAAAAAAAAA");
+  assert.equal(config?.project_id, "prj_AAAAAAAAAAAAAAAAAAAAAAAA");
   assert.ok(config?.token);
   assert.equal(config?.enrollment, undefined);
   assert.ok(!JSON.stringify(config).includes("pairing"));
@@ -317,7 +317,7 @@ test("agent enroll names the project independently of its agent and reports the 
   assert.equal(envelope.data.status, "active");
   assert.equal(envelope.data.connection_ready, false);
   assert.equal(envelope.data.agent.id, TEST_AGENT.id);
-  assert.deepEqual(envelope.data.project, { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Office Screens" });
+  assert.deepEqual(envelope.data.project, { id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Office Screens" });
   assert.equal(envelope.data.invitation, "emailed to the contact address");
   const enrollment = transport.calls.find((call) => call.path === "/api/v1/enrollments");
   assert.deepEqual(enrollment?.body, {
@@ -366,7 +366,7 @@ test("agent enroll --force discards an unwanted pending connection before enroll
   await writeConfigAtomic(configPath, {
     api_url: "https://api.screenrig.ai",
     token: `sr_live_pending_${"P".repeat(43)}`,
-    project_id: "acc_PENDINGAAAAAAAAAAAAAAAA",
+    project_id: "prj_PENDINGAAAAAAAAAAAAAAAA",
     agent_id: "agt_PENDINGAAAAAAAAAAAAAAAA",
     agent_connection: {
       private_jwk: { kty: "OKP", crv: "X25519", x: "pending-public", d: "pending-private" },
@@ -400,7 +400,7 @@ test("agent enroll --force discards an unwanted pending connection before enroll
   const config = await readConfigFile(configPath, fsLike);
   assert.equal(config?.agent_connection, undefined);
   assert.ok(config?.token);
-  assert.doesNotMatch(JSON.stringify(config), /acn_UNWANTED|private-connection-token|pending-private|sr_live_pending|acc_PENDING|agt_PENDING/);
+  assert.doesNotMatch(JSON.stringify(config), /acn_UNWANTED|private-connection-token|pending-private|sr_live_pending|prj_PENDING|agt_PENDING/);
   assert.equal(transport.calls.some((call) => call.path === "/api/v1/agent-connections"), false);
   await rm(configDir, { recursive: true, force: true });
 });
@@ -480,7 +480,7 @@ test("agent status reports whether a persisted passkey can authorize another age
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
     token: `sr_live_status_${"S".repeat(43)}`,
-    project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
     agent_id: TEST_AGENT.id,
   }, fsLike);
   transport.on("GET", "/api/v1/agents/self", () => ({
@@ -752,7 +752,7 @@ test("agent disconnect locally cleans an unauthorized credential without retryin
   await writeConfigAtomic(configPath, {
     api_url: "https://api.screenrig.ai",
     token: `sr_live_rejected_${"R".repeat(43)}`,
-    project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
     agent_id: TEST_AGENT.id,
   }, fsLike);
   const result = await withRuntime(["--json", "agent", "disconnect", "--yes"], transport, { fs: fsLike });
@@ -793,7 +793,7 @@ test("agent status names disconnect --yes when the stored credential is rejected
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
     token: `sr_live_rejected_${"S".repeat(43)}`,
-    project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
   }, fsLike);
   const result = await withRuntime(["--json", "agent", "status"], transport, { fs: fsLike });
   assert.equal(result.code, 0, result.stdout);
@@ -828,7 +828,7 @@ test("agent disconnect revokes only this installation and preserves safe disconn
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
     token: `sr_live_disconnect_${"D".repeat(43)}`,
-    project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
     agent_id: active.id,
   }, fsLike);
   const result = await withRuntime(["--json", "agent", "disconnect", "--yes"], transport, { fs: fsLike });
@@ -1139,7 +1139,7 @@ test("agent disconnect requires explicit confirmation and never auto-enrolls", a
   const configDir = await testTemp("revoke-confirm-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
-  const original = { api_url: "https://api.screenrig.ai", token: "sr_live_current_private_secret", project_id: "acc_current" };
+  const original = { api_url: "https://api.screenrig.ai", token: "sr_live_current_private_secret", project_id: "prj_current" };
   await writeConfigAtomic(configPath, original, fsLike);
 
   let result = await withRuntime(["--json", "agent", "disconnect"], transport, { fs: fsLike });
@@ -1175,7 +1175,7 @@ test("agent disconnect confirms server success before atomically removing all lo
   await writeConfigAtomic(configPath, {
     api_url: "https://api.screenrig.ai",
     token,
-    project_id: "acc_current",
+    project_id: "prj_current",
     enrollment: { client_id: `cli_${"a".repeat(43)}`, idempotency_key: "enrollment-retry-key" },
     screen_provision: { idempotency_key: "screen-provision-key", label: "Demo" },
     browser_setup: { idempotency_key: "browser-setup-key", code: "ABC234" },
@@ -1192,7 +1192,7 @@ test("agent disconnect confirms server success before atomically removing all lo
     other_agents_preserved: true,
   });
   assert.deepEqual(envelope.warnings, []);
-  assert.doesNotMatch(result.stdout, /current_private_secret|acc_current|enrollment-retry-key|browser-setup-key/);
+  assert.doesNotMatch(result.stdout, /current_private_secret|prj_current|enrollment-retry-key|browser-setup-key/);
   assert.deepEqual(transport.calls.map((call) => call.path), ["/api/v1/agents/self", "/api/v1/agents/self/disconnect"]);
   assert.equal(transport.calls[1]?.headers?.authorization, `Bearer ${token}`);
   assert.equal(transport.calls[1]?.headers?.["idempotency-key"], undefined);
@@ -1228,7 +1228,7 @@ test("agent disconnect retains local state on a server failure and gives a safe 
   const original = {
     api_url: "https://api.screenrig.ai",
     token: "sr_live_current_private_secret",
-    project_id: "acc_current",
+    project_id: "prj_current",
     browser_setup: { idempotency_key: "browser-setup-key", code: "ABC234" },
   };
   await writeConfigAtomic(configPath, original, fsLike);
@@ -1262,7 +1262,7 @@ test("agent disconnect retries the exact revoked bearer after cleanup failure an
   const original = {
     api_url: "https://api.screenrig.ai",
     token: "sr_live_current_private_secret",
-    project_id: "acc_current",
+    project_id: "prj_current",
   };
   await writeConfigAtomic(configPath, original, realFs);
   const interruptedFs: ConfigFs = {
@@ -1526,7 +1526,7 @@ function browserSetupClaimTransport(body: unknown): FakeTransport {
     status: 201,
     headers: { "cache-control": "private, no-store" },
     body: {
-      project: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" },
+      project: { id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" },
       agent: TEST_AGENT,
       connection_ready: false,
       token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -1534,7 +1534,7 @@ function browserSetupClaimTransport(body: unknown): FakeTransport {
       issuance_expires_at: "2026-08-14T17:10:00.000Z",
     },
   }));
-  transport.on("GET", "/api/v1/project", () => ({ status: 200, headers: {}, body: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" } }));
+  transport.on("GET", "/api/v1/project", () => ({ status: 200, headers: {}, body: { id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" } }));
   transport.on("POST", "/api/v1/project/browser-links/claim", () => ({
     status: 201,
     headers: { "cache-control": "private, no-store" },
@@ -1603,7 +1603,7 @@ test("browser setup rejects malformed codes before claim and keeps exact ambiguo
     status: 201,
     headers: { "cache-control": "private, no-store" },
     body: {
-      project: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" },
+      project: { id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" },
       agent: TEST_AGENT,
       connection_ready: false,
       token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -1611,7 +1611,7 @@ test("browser setup rejects malformed codes before claim and keeps exact ambiguo
       issuance_expires_at: "2026-08-14T17:10:00.000Z",
     },
   }));
-  transport.on("GET", "/api/v1/project", () => ({ status: 200, headers: {}, body: { id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" } }));
+  transport.on("GET", "/api/v1/project", () => ({ status: 200, headers: {}, body: { id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" } }));
   transport.on("POST", "/api/v1/project/browser-links/claim", () => ({
     status: 503,
     headers: { "content-type": "application/problem+json" },
@@ -3419,7 +3419,7 @@ function projectRecord(credit_remaining: number): Record<string, unknown> {
     content_limit_bytes: 0,
     created_at: "2026-08-14T17:00:00.000Z",
     credit_remaining,
-    id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
     name: "Office Screens",
     reserved_bytes: 0,
     revision: 1,
@@ -3523,7 +3523,7 @@ function invitationRecord() {
     kind: "project_member",
     delivery: "email",
     status: "queued",
-    project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
     created_at: "2026-08-14T17:00:00.000Z",
     expires_at: "2026-08-15T17:00:00.000Z",
   };
@@ -3771,7 +3771,7 @@ test("dashboard reset-sign-in never sends a stored credential and leaves credent
   await writeConfigAtomic(configPath, {
     api_url: "https://api.screenrig.ai",
     token,
-    project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
     agent_id: TEST_AGENT.id,
   }, fsLike);
   const transport = new FakeTransport();
@@ -3787,7 +3787,7 @@ test("dashboard reset-sign-in never sends a stored credential and leaves credent
     assert.equal(transport.calls.at(-1)?.headers?.authorization, undefined);
     const after = await readConfigFile(configPath, fsLike);
     assert.equal(after?.token, token);
-    assert.equal(after?.project_id, "acc_AAAAAAAAAAAAAAAAAAAAAAAA");
+    assert.equal(after?.project_id, "prj_AAAAAAAAAAAAAAAAAAAAAAAA");
     assert.equal(after?.pending_writes, undefined);
     assert.equal(after?.enrollment, undefined);
   } finally {
@@ -3853,11 +3853,11 @@ test("dashboard reset-sign-in rejects a response that deviates from the closed a
   const extraField = new FakeTransport().on("POST", "/api/v1/sign-in-resets", () => ({
     status: 202,
     headers: { "cache-control": "private, no-store" },
-    body: { status: "accepted", project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA" },
+    body: { status: "accepted", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" },
   }));
   const withExtra = await withRuntime(["--json", "dashboard", "reset-sign-in", "--email", "owner@example.com"], extraField);
   assert.equal(withExtra.code, ExitCode.Usage, withExtra.stdout);
-  assert.doesNotMatch(withExtra.stdout, /acc_AAAAAAAAAAAAAAAAAAAAAAAA/);
+  assert.doesNotMatch(withExtra.stdout, /prj_AAAAAAAAAAAAAAAAAAAAAAAA/);
 
   const wrongStatus = new FakeTransport().on("POST", "/api/v1/sign-in-resets", () => ({
     status: 202,
@@ -6461,7 +6461,7 @@ test("campaign draft preflight rejects invalid duration and unsafe price ceiling
     flight_end: "2026-09-30T00:00:00Z",
     image_duration_ms: 15000,
     max_play_price_mcr: "250000",
-    networks: [{ seller_project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA", screen_ids: ["scr_TEST"], slot_ids: ["ads_TEST"], creative_ids: ["cre_TEST"] }],
+    networks: [{ seller_project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", screen_ids: ["scr_TEST"], slot_ids: ["ads_TEST"], creative_ids: ["cre_TEST"] }],
   };
   const write = async (name: string, body: unknown): Promise<string> => {
     const file = path.join(directory, name);
@@ -6611,7 +6611,7 @@ test("advertising lifecycle mutations send required If-Match preconditions and c
     flight_start: "2026-09-01T00:00:00Z",
     flight_end: "2026-09-30T00:00:00Z",
     image_duration_ms: 5000,
-    networks: [{ seller_project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA", screen_ids: ["scr_TEST"], slot_ids: ["ads_TEST"], creative_ids: ["cre_TEST"] }],
+    networks: [{ seller_project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", screen_ids: ["scr_TEST"], slot_ids: ["ads_TEST"], creative_ids: ["cre_TEST"] }],
   };
   try {
     const uncapped = await withAuthenticatedRuntime(["--json", "ads", "campaigns", "update", "cmp_TEST", await write("uncapped.json", draft), "--expect-rev", "2"], transport);
@@ -6660,7 +6660,7 @@ test("stale advertising revisions surface as precondition failures and are never
     await handle.writeFile(JSON.stringify({
       name: "Autumn pass campaign", daily_cap_mcr: "100000000", lifetime_cap_mcr: "500000000",
       flight_start: "2026-09-01T00:00:00Z", flight_end: "2026-09-30T00:00:00Z",
-      networks: [{ seller_project_id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA", screen_ids: [], slot_ids: [], creative_ids: [] }],
+      networks: [{ seller_project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", screen_ids: [], slot_ids: [], creative_ids: [] }],
     }));
   } finally { await handle.close(); }
   try {

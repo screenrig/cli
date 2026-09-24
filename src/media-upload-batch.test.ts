@@ -27,7 +27,7 @@ import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 import type { TransportRequest, TransportResponse } from "./transport/types.js";
 
-const PROJECT_ID = "acc_AAAAAAAAAAAAAAAAAAAAAAAA";
+const PROJECT_ID = "prj_AAAAAAAAAAAAAAAAAAAAAAAA";
 const API_URL = "https://api.screenrig.ai";
 const TOKEN = "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr";
 
@@ -610,7 +610,7 @@ test("state file refuses an api_url or project mismatch", async () => {
           manifestPath: manifest,
           statePath,
           apiUrl: API_URL,
-          projectId: "acc_OTHERPROJECTAAAAAAAAAAAAAA",
+          projectId: "prj_OTHERPROJECTAAAAAAAAAAAAAA",
           concurrency: 1,
           transcodeOptions: DEFAULT_TRANSCODE,
           noTranscode: true,

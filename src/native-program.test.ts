@@ -51,7 +51,7 @@ for (const outcome of ["success", "rejection"] as const) {
       started();
       await responseReady;
       if (outcome === "rejection") throw networkError("Deferred transport failed.");
-      return { status: 200, headers: {}, body: { id: "acc_TEST", revision: 1, credit_remaining: 2000 } };
+      return { status: 200, headers: {}, body: { id: "prj_TEST", revision: 1, credit_remaining: 2000 } };
     });
     const fixture = await runtimeFor(["project", "show"], transport, true);
     let settled = false;
@@ -68,7 +68,7 @@ for (const outcome of ["success", "rejection"] as const) {
       assert.equal(lines.length, 1, fixture.output());
       const envelope = JSON.parse(lines[0]!);
       assert.equal(envelope.ok, outcome === "success");
-      if (outcome === "success") assert.equal(envelope.data.id, "acc_TEST");
+      if (outcome === "success") assert.equal(envelope.data.id, "prj_TEST");
       else assert.equal(envelope.error.code, "transport_error");
       assert.equal(fixture.errors(), "");
       assert.equal(transport.calls.length, 1);

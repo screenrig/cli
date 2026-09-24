@@ -184,7 +184,7 @@ export function memoryBackend(): FakeTransport {
     email_verified: false,
     feature_revision: 1,
     features: { advertiser: false, screens: true },
-    id: "acc_AAAAAAAAAAAAAAAAAAAAAAAA",
+    id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
     name: "Amber Acorn",
     reserved_bytes: 0,
     revision: 1,
@@ -295,7 +295,7 @@ export function memoryBackend(): FakeTransport {
     projectSequence += 1;
     project = {
       ...project,
-      id: projectSequence === 1 ? "acc_AAAAAAAAAAAAAAAAAAAAAAAA" : `acc_${String(projectSequence).padStart(24, "0")}`,
+      id: projectSequence === 1 ? "prj_AAAAAAAAAAAAAAAAAAAAAAAA" : `prj_${String(projectSequence).padStart(24, "0")}`,
       name: input?.project_name ?? `Amber Acorn ${projectSequence}`,
       email,
       features: input?.intent === "advertising"

@@ -23,18 +23,18 @@ test("project identity resolves only from project config fields", async () => {
   const fsLike = realFs(home);
   const configPath = path.join(home, "screenrig", "config.json");
   try {
-    const previousIdentity = { api_url: DEFAULT_API_URL, account_id: "acc_previous" };
+    const previousIdentity = { api_url: DEFAULT_API_URL, account_id: "prj_previous" };
     await writeConfigAtomic(configPath, previousIdentity, fsLike);
     const withoutProject = await resolveConfig({ flags: {}, fs: fsLike });
     assert.equal(withoutProject.projectId, undefined);
     assert.equal(withoutProject.projectName, undefined);
     await writeConfigAtomic(configPath, {
       ...previousIdentity,
-      project_id: "acc_current",
+      project_id: "prj_current",
       project_name: "Lobby displays",
     }, fsLike);
     const current = await resolveConfig({ flags: {}, fs: fsLike });
-    assert.equal(current.projectId, "acc_current");
+    assert.equal(current.projectId, "prj_current");
     assert.equal(current.projectName, "Lobby displays");
   } finally {
     await rm(home, { recursive: true, force: true });

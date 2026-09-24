@@ -89,7 +89,7 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) for (const revision 
  let created=false, assigned=false, failed=false, reads=0;
  const createKeys:string[]=[],assignKeys:string[]=[];
  const transport=new FakeTransport()
- .on('GET','/api/v1/project',()=>response({id:`${prefix}acc_TEST`}))
+ .on('GET','/api/v1/project',()=>response({id:`${prefix}prj_TEST`}))
  .on('GET',`/api/v1/screens/${prefix}scr_TEST`,()=>{
   reads++; if(failure==='verify'&&assigned&&!failed){failed=true;throw networkError('Test connection failure');}
   return response({id:`${prefix}scr_TEST`,revision:assigned?8:7,playlist_id:assigned?`${prefix}pl_TEST`:undefined});
@@ -117,7 +117,7 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) for (const revision 
 
 test("publish checks the expected screen revision before creating a playlist",async t=>{
  const dir=await mkdtemp('/tmp/publish-conflict-');t.after(()=>rm(dir,{recursive:true,force:true}));
- const transport=new FakeTransport().on('GET','/api/v1/project',()=>response({id:'acc_TEST'})).on('GET','/api/v1/screens/scr_TEST',()=>response({id:'scr_TEST',revision:9}));
+ const transport=new FakeTransport().on('GET','/api/v1/project',()=>response({id:'prj_TEST'})).on('GET','/api/v1/screens/scr_TEST',()=>response({id:'scr_TEST',revision:9}));
  await assert.rejects(()=>publishScreen({client:new ApiClient({transport}),runtime:processRuntime(),configPath:dir+'/config.json',apiUrl:'https://api.screenrig.ai',screenId:'scr_TEST',revision:'7',document:document()}));
  assert.equal(transport.calls.some(c=>c.method!=='GET'),false);
 });
@@ -145,7 +145,7 @@ test("init CLI writes a reusable document and prompt-file preserves exact text",
 test("expired ambiguous publish journals never retry writes", async t => {
  const dir=await mkdtemp('/tmp/publish-expiry-');t.after(()=>rm(dir,{recursive:true,force:true}));
  let now=Date.now();
- const transport=new FakeTransport().on('GET','/api/v1/project',()=>response({id:'acc_TEST'})).on('GET','/api/v1/screens/scr_TEST',()=>response({id:'scr_TEST',revision:7})).on('POST','/api/v1/playlists',()=>{throw networkError('Test interruption');});
+ const transport=new FakeTransport().on('GET','/api/v1/project',()=>response({id:'prj_TEST'})).on('GET','/api/v1/screens/scr_TEST',()=>response({id:'scr_TEST',revision:7})).on('POST','/api/v1/playlists',()=>{throw networkError('Test interruption');});
  const options={client:new ApiClient({transport}),runtime:{...processRuntime(),now:()=>new Date(now)},configPath:dir+'/config.json',apiUrl:'https://api.screenrig.ai',screenId:'scr_TEST',revision:'7',document:document()};
  await assert.rejects(()=>publishScreen(options));now+=24*60*60*1000;
  await assert.rejects(()=>publishScreen(options),/replay window has expired/);
@@ -154,7 +154,7 @@ test("expired ambiguous publish journals never retry writes", async t => {
 
 test("assignment conflicts retain the created playlist and never create another on retry",async t=>{
  const dir=await mkdtemp('/tmp/publish-assignment-conflict-');t.after(()=>rm(dir,{recursive:true,force:true}));
- const transport=new FakeTransport().on('GET','/api/v1/project',()=>response({id:'acc_TEST'})).on('GET','/api/v1/screens/scr_TEST',()=>response({id:'scr_TEST',revision:7}))
+ const transport=new FakeTransport().on('GET','/api/v1/project',()=>response({id:'prj_TEST'})).on('GET','/api/v1/screens/scr_TEST',()=>response({id:'scr_TEST',revision:7}))
  .on('POST','/api/v1/playlists',()=>response({id:'pl_TEST',revision:1}))
  .on('PATCH','/api/v1/screens/scr_TEST',()=>({status:409,headers:{},body:{code:'revision_conflict',title:'Conflict',status:409,detail:'Screen changed',current_revision:8}}));
  const options={client:new ApiClient({transport}),runtime:processRuntime(),configPath:dir+'/config.json',apiUrl:'https://api.screenrig.ai',screenId:'scr_TEST',revision:'7',document:document()};
@@ -177,7 +177,7 @@ test("assignment conflicts retain the created playlist and never create another 
 
 test("publish recovery arguments preserve paths with spaces without exposing URL credentials",async t=>{
  const dir=await mkdtemp('/tmp/publish guidance-');t.after(()=>rm(dir,{recursive:true,force:true}));
- const transport=new FakeTransport().on('GET','/api/v1/project',()=>response({id:'acc_TEST'})).on('GET','/api/v1/screens/scr_TEST',()=>response({id:'scr_TEST',revision:7}))
+ const transport=new FakeTransport().on('GET','/api/v1/project',()=>response({id:'prj_TEST'})).on('GET','/api/v1/screens/scr_TEST',()=>response({id:'scr_TEST',revision:7}))
  .on('POST','/api/v1/playlists',()=>response({id:'pl_TEST',revision:1}))
  .on('PATCH','/api/v1/screens/scr_TEST',()=>({status:409,headers:{},body:{code:'revision_conflict',title:'Conflict',status:409,detail:'Screen changed',next:{command:'retry',reason:'Try again'}}}));
  const options={client:new ApiClient({transport,token:'private-test-token'}),runtime:processRuntime(),configPath:dir+'/selected config.json',apiUrl:'https://user:password@api.screenrig.ai/prefix?secret=value#private',screenId:'scr_TEST',revision:'7',document:document()};

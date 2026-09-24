@@ -13,7 +13,7 @@ export function registerGuidance(root: Command): void {
     "invitations revoke": ["inv_INVITATION"],
     "dashboard reset-sign-in": ["--email operator@example.com"],
     "ads networks list": [""],
-    "ads networks show": ["acc_SELLER"],
+    "ads networks show": ["prj_SELLER"],
     "ads network show": [""],
     "ads network create": ['--name "Main Street Centre"'],
     "ads network rate": ["--rate-mcr-per-15s 150000 --expect-rev 3"],

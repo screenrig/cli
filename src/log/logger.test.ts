@@ -444,7 +444,7 @@ test("enrollment rewrite keeps log_socket", async () => {
     generateIdempotencyKey: () => "enroll-log-socket-idempotency",
     enrollmentEmail: "Owner@example.com",
     verify: async () => undefined,
-    enroll: async () => ({ token: "sr_live_enrollment_secret", projectId: "acc_enrollment" }),
+    enroll: async () => ({ token: "sr_live_enrollment_secret", projectId: "prj_enrollment" }),
   });
   const stored = await readConfigFile(configPath, fsLike);
   assert.equal(stored?.log_socket, "/tmp/screenrig.sock");

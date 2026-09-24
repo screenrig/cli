@@ -41,11 +41,11 @@ test("explicit enrollment atomically persists email, verifies, and completes out
     enrollmentProjectName: "Lobby displays",
     verify: async (token, projectId) => {
       assert.equal(token, "sr_live_enrollment_secret");
-      assert.equal(projectId, "acc_enrollment");
+      assert.equal(projectId, "prj_enrollment");
       assert.deepEqual(await readConfigFile(resolved.configPath, fs), {
         api_url: "https://api.screenrig.ai",
         token: "sr_live_enrollment_secret",
-        project_id: "acc_enrollment",
+        project_id: "prj_enrollment",
         project_name: "Lobby displays",
         enrollment: {
           client_id: `cli_${"A".repeat(43)}`,
@@ -74,7 +74,7 @@ test("explicit enrollment atomically persists email, verifies, and completes out
         },
         updated_at: "2026-08-14T20:00:00.000Z",
       });
-      return { token: "sr_live_enrollment_secret", projectId: "acc_enrollment", projectName: "Lobby displays" };
+      return { token: "sr_live_enrollment_secret", projectId: "prj_enrollment", projectName: "Lobby displays" };
     },
   });
   assert.equal(enrollments, 1);
@@ -84,7 +84,7 @@ test("explicit enrollment atomically persists email, verifies, and completes out
   assert.deepEqual(await readConfigFile(resolved.configPath, fs), {
     api_url: "https://api.screenrig.ai",
     token: "sr_live_enrollment_secret",
-    project_id: "acc_enrollment",
+    project_id: "prj_enrollment",
     project_name: "Lobby displays",
     updated_at: "2026-08-14T20:00:00.000Z",
   });
@@ -119,7 +119,7 @@ test("concurrent explicit enrollment calls perform one enrollment and share the 
   const enroll = async () => {
     enrollments += 1;
     await gate;
-    return { token: "sr_live_shared_secret", projectId: "acc_shared" };
+    return { token: "sr_live_shared_secret", projectId: "prj_shared" };
   };
   const generators = {
     generateClientId: () => `cli_${"B".repeat(43)}`,
@@ -186,7 +186,7 @@ test("ambiguous enrollment retries reuse the persisted client, contact email, an
     generateIdempotencyKey: () => { throw new Error("must reuse idempotency key"); },
     enroll: async (state) => {
       seen.push(state);
-      return { token: "sr_live_replayed_secret", projectId: "acc_replayed" };
+      return { token: "sr_live_replayed_secret", projectId: "prj_replayed" };
     },
     verify: async () => undefined,
   });
@@ -206,13 +206,13 @@ test("verification failure preserves the permanent token and exact enrollment re
     generateClientId: () => `cli_${"D".repeat(43)}`,
     generateIdempotencyKey: () => "enroll-verify-retry",
     enrollmentEmail: "owner@example.com",
-    enroll: async () => ({ token: "sr_live_verify_secret", projectId: "acc_verify" }),
+    enroll: async () => ({ token: "sr_live_verify_secret", projectId: "prj_verify" }),
     verify: async () => { throw new Error("verification temporarily unavailable"); },
   }), /verification temporarily unavailable/);
   assert.deepEqual(await readConfigFile(resolved.configPath, fs), {
     api_url: "https://api.screenrig.ai",
     token: "sr_live_verify_secret",
-    project_id: "acc_verify",
+    project_id: "prj_verify",
     enrollment: {
       client_id: `cli_${"D".repeat(43)}`,
       idempotency_key: "enroll-verify-retry",
@@ -230,7 +230,7 @@ test("verification failure preserves the permanent token and exact enrollment re
     verify: async (token, projectId) => {
       verifications += 1;
       assert.equal(token, "sr_live_verify_secret");
-      assert.equal(projectId, "acc_verify");
+      assert.equal(projectId, "prj_verify");
     },
   });
   assert.equal(second.token, "sr_live_verify_secret");
