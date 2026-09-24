@@ -827,14 +827,16 @@ paths:
     get:
       operationId: getReadiness
       description: >-
-        Serving readiness. A required dependency failure answers 503
-        not_ready with Retry-After. A live database schema that does not
-        satisfy this release (a desired index missing or different for more
-        than two minutes) answers 503 schema_incompatible without
-        Retry-After: it does not clear by waiting.
+        Serving readiness. A draining host answers 421 server_draining with
+        Retry-After: 1. A required dependency failure answers 500 not_ready
+        with Retry-After. A live database schema that does not satisfy this
+        release (a desired index missing or different for more than two
+        minutes) answers 500 schema_incompatible without Retry-After: it does
+        not clear by waiting.
       responses:
         "200": { description: Ready, content: { application/json: { schema: { $ref: "#/components/schemas/ReadyResponse" } } } }
-        "503": { $ref: "#/components/responses/Problem" }
+        "421": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
   /.version:
     get:
       operationId: getVersion
@@ -900,7 +902,7 @@ paths:
           $ref: '#/components/responses/Problem'
         '429':
           $ref: '#/components/responses/RateLimitedProblem'
-        '503':
+        '500':
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
@@ -1314,7 +1316,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "410": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "503": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/pair:
     post:
@@ -1333,7 +1335,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "413": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "503": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/provision:
     post:
@@ -1352,7 +1354,7 @@ paths:
         "410": { $ref: "#/components/responses/Problem" }
         "413": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "503": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}:
     parameters: [{ $ref: "#/components/parameters/ResourceID" }]
@@ -2014,7 +2016,8 @@ paths:
       responses:
         "201": { description: "Ready still stored as private project media, with billed usage (quality, credits, usd). Fetch original bytes with GET /api/v1/media/{id}/content. GET /api/v1/media/{id} remains Media-only. Never image bytes, b64_json, object keys, signed URLs, vendor URLs, vendor cost, or the prompt.", headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" }, ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/MediaGeneration" } } } }
         "402": { $ref: "#/components/responses/Problem" }
-        "504": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/media/uploads:
     post:
@@ -2193,7 +2196,7 @@ paths:
         "201": { description: Exact six-character pairing code and expiry., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/PairingSession" } } } }
         "403": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "503": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/pairing-events:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -2219,7 +2222,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "503": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/sessions:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -2257,7 +2260,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "410": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "503": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/browser-links:
     servers: [{ url: https://screenrig.ai, description: HTTPS apex browser-link origin }]
@@ -2272,7 +2275,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "503": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
     get:
       operationId: getBrowserLinkStatus
@@ -2367,7 +2370,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "503": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/native/pairing-events:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -2381,7 +2384,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "503": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/native/pairing-sessions/complete:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -2400,7 +2403,7 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "503": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/native/identity/challenges:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -2415,7 +2418,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "503": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/native/identity/sessions:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -2434,7 +2437,7 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "503": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/native/identity/reset:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -2459,12 +2462,12 @@ paths:
         (docs/player-compatibility.md §5.1).
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityProof" } } } }
       responses:
-        "204": { description: "Reset recorded: the bound screen archived with the key kept, or the unbound or retired key made terminal, or an authenticated retry of either; no Set-Cookie.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
+        "204": { description: "Reset recorded: the bound screen archived with the key kept, or the unbound or retired key made terminal, or an unknown key answered as an idempotent no-op that archives nothing; an authenticated retry of any of these; no Set-Cookie.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "503": { $ref: "#/components/responses/Problem" }
+        "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/chrome:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -3093,7 +3096,7 @@ paths:
           $ref: '#/components/responses/Problem'
         '429':
           $ref: '#/components/responses/RateLimitedProblem'
-        '503':
+        '500':
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
@@ -3403,7 +3406,7 @@ paths:
       description: Unavailable. Card checkout, tax collection and cash movement are not shipped; the route answers billing_unavailable rather than quoting a payment.
       security: [{ dashboardSession: [] }]
       responses:
-        "503": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "404": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/billing/topups/{id}/checkout:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
@@ -3413,7 +3416,7 @@ paths:
       security: [{ dashboardSession: [] }]
       parameters: [{ $ref: "#/components/parameters/ResourceID" }]
       responses:
-        "503": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "404": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/billing/withdrawal-quotes:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
@@ -3422,7 +3425,7 @@ paths:
       description: Unavailable. Cash withdrawal is not shipped.
       security: [{ dashboardSession: [] }]
       responses:
-        "503": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "404": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/billing/withdrawals:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
@@ -3431,7 +3434,7 @@ paths:
       description: Unavailable. Cash withdrawal is not shipped; the project bearer never authorizes a cash-out.
       security: [{ dashboardSession: [] }]
       responses:
-        "503": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "404": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/billing/payout-onboarding:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
@@ -3440,7 +3443,7 @@ paths:
       description: Unavailable. No hosted payout onboarding is created.
       security: [{ dashboardSession: [] }]
       responses:
-        "503": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "404": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/advertising/network:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
@@ -4328,7 +4331,7 @@ components:
     operatorBearer: { type: http, scheme: bearer }
   responses:
     Problem:
-      description: Stable RFC 9457 problem response. A 503 not_ready or dependency_unavailable carries Retry-After of 5 seconds and a 503 manifest_degraded carries 60, unless the handler set a more specific value.
+      description: Stable RFC 9457 problem response. A 421 server_draining carries Retry-After of 1 second, a 500 not_ready or dependency_unavailable carries 5, and a 500 manifest_degraded carries 60, unless the handler set a more specific value.
       content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
     RateLimitedProblem:
       description: Stable rate_limited problem. Retry only after the authoritative Retry-After interval. Fixed-window denials also include the applicable RateLimit-Policy and RateLimit members; concurrency and byte-budget denials omit those optional disclosures.
@@ -5171,7 +5174,7 @@ components:
             Plain-language consequence of each degraded dependency, keyed by its
             name, for a client to show verbatim. For example application_processing
             states that application upload is unavailable and that
-            POST /api/v1/applications answers 503 dependency_unavailable until the
+            POST /api/v1/applications answers 500 dependency_unavailable until the
             workers run. Never carries hosts, addresses, or probe error text.
     VersionResponse: { type: object, additionalProperties: false, required: [version, commit, api_version, protocol_version], properties: { version: { type: string }, commit: { type: string }, api_version: { type: string }, protocol_version: { type: string } } }
     Capabilities:
@@ -7733,4 +7736,4 @@ components:
         errors: { type: array, items: { $ref: "#/components/schemas/ProblemField" } }
         next: { $ref: "#/components/schemas/NextAction" }
 x-problem-registry: ./problems.yaml
-x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, user_email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_project_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk, recovery_ambiguous, recovery_expired, recovery_not_offered, invitation_limit_reached, version_required, price_change_pending, quote_stale, insufficient_credits, self_deal, invitation_invalid, invitation_expired, invitation_consumed, invitation_email_mismatch, reauthentication_required, member_limit_reached, last_credential, no_project, billing_unavailable, user_binding_stale, session_expired, credential_revoked, proof_clock_skew, key_retired, assignment_not_found, upgrade_required]
+x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, user_email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_project_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, server_draining, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk, recovery_ambiguous, recovery_expired, recovery_not_offered, invitation_limit_reached, version_required, price_change_pending, quote_stale, insufficient_credits, self_deal, invitation_invalid, invitation_expired, invitation_consumed, invitation_email_mismatch, reauthentication_required, member_limit_reached, last_credential, no_project, billing_unavailable, feature_unavailable, user_binding_stale, session_expired, credential_revoked, proof_clock_skew, key_retired, assignment_not_found, upgrade_required]
