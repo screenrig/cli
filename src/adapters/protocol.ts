@@ -898,3 +898,67 @@ export interface FeedbackList {
 }
 
 export const TEMPORARY_PROTOCOL_VERSION = "screenrig.cli.adapter/0";
+
+/** GET/PATCH /api/v1/webhooks/{id}. The signing secret is never part of this shape. */
+export interface Webhook {
+  created_at: string;
+  description?: string;
+  disabled_at?: string;
+  disabled_reason?: "delivery_failures";
+  enabled: boolean;
+  event_types: string[];
+  failing_since?: string;
+  id: string;
+  last_failure_at?: string;
+  last_success_at?: string;
+  revision: number;
+  status: "active" | "failing" | "disabled";
+  updated_at: string;
+  url: string;
+}
+
+/** Returned only by create and rotate-secret (and their exact idempotent replay for 24 hours). */
+export interface WebhookWithSecret extends Webhook {
+  secret: string;
+}
+
+export interface WebhookList {
+  items: Webhook[];
+}
+
+export interface WebhookWrite {
+  url: string;
+  event_types: string[];
+  enabled?: boolean;
+  description?: string;
+}
+
+export interface WebhookPatch {
+  url?: string;
+  event_types?: string[];
+  enabled?: boolean;
+  /** An empty string clears the description. */
+  description?: string;
+}
+
+export interface WebhookDelivery {
+  attempts: number;
+  completed_at?: string;
+  created_at: string;
+  event_id: string;
+  event_type: string;
+  id: string;
+  last_attempt_at?: string;
+  last_duration_ms?: number;
+  last_error?: "http_status" | "timeout" | "connection_failed" | "tls_failed" | "dns_failed" | "url_rejected" | "payment_required" | "webhook_disabled" | "webhook_deleted" | "event_expired" | "secret_unavailable";
+  last_status?: number;
+  next_attempt_at?: string;
+  state: "pending" | "succeeded" | "failed";
+  test?: boolean;
+  webhook_id: string;
+}
+
+export interface WebhookDeliveryList {
+  items: WebhookDelivery[];
+  next_cursor: string | null;
+}

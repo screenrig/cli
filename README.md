@@ -323,6 +323,77 @@ Each screen applies its own schedule timezone rule and fails individually.
 presence lease has been expired for 60 seconds, so a brief reconnect writes
 neither.
 
+## Webhooks
+
+A webhook POSTs this project's own durable events to an HTTPS endpoint you
+run. A project has at most 10.
+
+```sh
+screenrig webhooks create --url https://hooks.example.com/screenrig --event-types "screen.*,playlist.updated" [--description TEXT] [--disabled]
+screenrig webhooks list
+screenrig webhooks show whk_WEBHOOK
+screenrig webhooks update whk_WEBHOOK [--url URL] [--event-types TYPES] [--description TEXT | --clear-description] [--enable | --disable] [--expect-rev REVISION]
+screenrig webhooks delete whk_WEBHOOK [--expect-rev REVISION]
+screenrig webhooks rotate-secret whk_WEBHOOK [--expect-rev REVISION]
+screenrig webhooks test whk_WEBHOOK
+screenrig webhooks deliveries whk_WEBHOOK [--before CURSOR] [--limit N]
+```
+
+`--url` must be `https` on port 443 (the default) or 8443, and its host must
+resolve only to public Internet addresses. The server checks it on every write
+and again before every delivery. A refusal is `webhook_url_rejected` (exit 8)
+with the server's reason in `error.detail`, for example
+`The webhook URL was rejected: url port must be 443 (the default) or 8443.`
+An eleventh webhook is `webhook_limit_reached` (exit 5); delete one first.
+`--event-types` takes 1 to 32 exact types (`screen.online`) or prefixes ending
+in `.*` (`screen.*`), comma-separated.
+
+`create` and `rotate-secret` return the webhook with its signing secret in
+`data.secret`, plus warning `webhook_secret_shown_once`. Store the secret
+right away. No other command returns it, and the CLI never writes it to its
+config, operation log, or write-recovery state. After an interrupted or
+ambiguous create or rotation, rerun the identical command within 24 hours. It
+reuses the saved Idempotency-Key and the server replays the same answer,
+secret included. After a rotation, at most one attempt that was already in
+flight can still arrive signed with the old secret, so accept both for a short
+while.
+
+`update` changes only the fields you pass. `--enable` clears the failure state
+and starts delivery at the current event. Events from while the webhook was
+disabled are not replayed. `--disable` and `delete` fail pending deliveries.
+`test` queues one `webhook.test` delivery to that webhook only. It is attempted
+once, without retries, at most 20 per minute per project (`rate_limited`,
+exit 7). `deliveries` lists one row per event, newest first, with `state`,
+`attempts`, `last_status`, and a fixed `last_error` class. Pass
+`data.next_cursor` back as `--before` for the next page. A failed attempt is
+retried with backoff for 24 hours. After 72 hours of continuous failure the
+webhook is disabled (`status: disabled`, `disabled_reason: delivery_failures`).
+
+### Verify a delivery
+
+The body is the same JSON event object `events list` returns. The headers are
+`ScreenRig-Webhook-Id`, `ScreenRig-Event-Id` (stable across retries), and
+`ScreenRig-Signature: t=<unix seconds>,v1=<hex>`, where `v1` is HMAC-SHA256
+over `"<t>.<raw body>"` keyed with the secret string. Compute it over the raw
+bytes before parsing JSON, compare in constant time, reject an old `t`, and
+deduplicate on `ScreenRig-Event-Id`, because delivery is at least once and
+unordered. Answer 2xx within 10 seconds.
+
+```js
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+// rawBody: the request body bytes (Buffer) exactly as received.
+function verify(rawBody, signatureHeader, secret, toleranceSeconds = 300) {
+  if (typeof signatureHeader !== "string" || !signatureHeader) return false;
+  const parts = Object.fromEntries(signatureHeader.split(",").map((part) => part.split("=", 2)));
+  const t = Number(parts.t);
+  if (!Number.isInteger(t) || Math.abs(Date.now() / 1000 - t) > toleranceSeconds) return false;
+  const expected = createHmac("sha256", secret).update(`${t}.`).update(rawBody).digest();
+  const given = Buffer.from(parts.v1 ?? "", "hex");
+  return given.length === expected.length && timingSafeEqual(given, expected);
+}
+```
+
 ## Storage report
 
 A native player reports its content-cache storage to the server, and
@@ -402,8 +473,8 @@ cancellation, and expiry remain errors.
 
 Ordinary application uploads/updates, playlist creates/updates/deletes, screen
 mutations other than provisioning, media tag updates/deletes, K/V and comment
-writes, feedback submissions, and operation cancellation persist an idempotency
-key before sending the request. After an ambiguous network failure or server
+writes, webhook writes, feedback submissions, and operation cancellation persist
+an idempotency key before sending the request. After an ambiguous network failure or server
 error, rerun the same command with unchanged input. The CLI reuses the saved key;
 it does not automatically send another request within the failed invocation.
 `write_recovery_saved` indicates that recovery state was retained.

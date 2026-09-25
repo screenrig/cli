@@ -18,6 +18,24 @@ import type { Operation } from "./adapters/protocol.js";
 import { loggerOf, queryKeys, requestSummary, responseSummary } from "./log/logger.js";
 import type { OperationLogger } from "./log/types.js";
 
+/**
+ * Bodies that must not reach the operation log even after redaction: an
+ * invitation create can carry a one-time credential URL, a webhook answer can
+ * carry its signing secret, and a webhook URL path may itself embed a
+ * receiver token.
+ */
+function privateBodies(method: string, path: string): boolean {
+  return (method === "POST" && path === "/api/v1/invitations") || /^\/api\/v1\/webhooks(?:\/|$)/.test(path);
+}
+
+/** 409 codes that are a definite refusal rather than possibly in-progress work. */
+const DEFINITE_CONFLICT_CODES = new Set(["webhook_limit_reached"]);
+
+function problemCode(body: unknown): string | undefined {
+  const code = body && typeof body === "object" ? (body as { code?: unknown }).code : undefined;
+  return typeof code === "string" ? code : undefined;
+}
+
 export interface ApiClientOptions {
   transport: Transport;
   token?: string;
@@ -82,7 +100,8 @@ export class ApiClient {
     const pending = await recovery?.prepare(transportRequest, this.requestedKey, recoverySupersede);
     const headers = this.headers(idempotent === true, req.headers, pending?.key ?? idempotencyKey);
     const extraType = req.headers?.["content-type"];
-    const summary = requestSummary(req.body, extraType);
+    const hideBodies = privateBodies(req.method, req.path);
+    const summary = hideBodies ? requestSummary(undefined, extraType ?? (req.body === undefined ? undefined : "application/json")) : requestSummary(req.body, extraType);
     const keys = queryKeys(req.query);
     const span = this.logger.startHttp({
       op: `${req.method} ${req.path}`,
@@ -107,7 +126,8 @@ export class ApiClient {
     }
     // Definite refusals need reconciliation, not automatic replay of a stale key.
     // Keep ambiguous timeouts and conflicts (which can mean work is in progress).
-    if (pending && response.status >= 400 && response.status < 500 && ![408, 409].includes(response.status)) {
+    if (pending && response.status >= 400 && response.status < 500
+        && (![408, 409].includes(response.status) || DEFINITE_CONFLICT_CODES.has(problemCode(response.body) ?? ""))) {
       await recovery!.clear(pending);
     }
     const remaining = this.token ? parseCreditsRemainingHeader(response.headers) : undefined;
@@ -131,15 +151,16 @@ export class ApiClient {
         status: response.status,
         request_id: requestId,
         problem: { code: wrapped.problem.code, detail: wrapped.problem.detail, message: wrapped.problem.title },
-        ...responseSummary(req.binary ? undefined : response.body, req.binary === true, response.headers["content-type"]),
+        ...(hideBodies
+          ? { content_type: response.headers["content-type"] }
+          : responseSummary(req.binary ? undefined : response.body, req.binary === true, response.headers["content-type"])),
       });
       throw wrapped;
     }
     span.response(response.status, {
       request_id: requestId,
-      // Invitation creation can carry a one-time credential URL. Do not put
-      // that body in generic logging fields, even before redaction.
-      ...(req.method === "POST" && req.path === "/api/v1/invitations"
+      // Never put these bodies in generic logging fields, even before redaction.
+      ...(hideBodies
         ? { content_type: response.headers["content-type"] }
         : responseSummary(response.body, req.binary === true, response.headers["content-type"])),
     });

@@ -284,6 +284,26 @@ async function main(): Promise<void> {
       ((feedbackList.data as { items?: Array<{ kind?: string }> }).items ?? []).map((item) => item.kind).sort(),
       ["bug", "feature"],
     );
+    // Webhooks: the secret appears once in data.secret, never in config.
+    const hook = await run("webhooks", "create", "--url", "https://hooks.example.com/screenrig", "--event-types", "screen.*", "--description", "Smoke");
+    const hookData = hook.data as { id?: string; secret?: string };
+    assert.match(String(hookData.secret), /^whsec_/);
+    const hookId = String(hookData.id);
+    const hookConfig = await readFile(path.join(temp, "config", "screenrig", "config.json"), "utf8");
+    assert.doesNotMatch(hookConfig, /whsec_/, "the webhook secret must never be persisted");
+    const hooks = await run("webhooks", "list");
+    assert.equal(((hooks.data as { items?: Array<{ secret?: string }> }).items ?? [])[0]?.secret, undefined);
+    await run("webhooks", "show", hookId);
+    await run("webhooks", "update", hookId, "--event-types", "screen.offline,playlist.*", "--expect-rev", "1");
+    const hookTest = await run("webhooks", "test", hookId);
+    assert.equal((hookTest.data as { event_type?: string }).event_type, "webhook.test");
+    await run("webhooks", "deliveries", hookId, "--limit", "10");
+    const rotated = await run("webhooks", "rotate-secret", hookId);
+    assert.notEqual((rotated.data as { secret?: string }).secret, hookData.secret);
+    const rejected = await invoke(["webhooks", "create", "--url", "https://hooks.example.com:8080/x", "--event-types", "screen.*"]);
+    assert.equal(rejected.code, 8, `webhook_url_rejected must exit 8: ${rejected.stdout}`);
+    assert.match(rejected.stdout, /url port must be 443 \(the default\) or 8443/);
+    await run("webhooks", "delete", hookId, "--expect-rev", "3");
     await run("events", "list", "--after", "ev1_0");
     await run("events", "follow", "--after", "ev1_0", "--timeout", "200");
     await run("operations", "wait", "op_AAAAAAAAAAAAAAAAAAAAAAAA", "--poll-ms", "1");

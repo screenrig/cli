@@ -1,6 +1,8 @@
 const TOKEN_RE = /\bsr_live_[A-Za-z0-9_-]+_[A-Za-z0-9_-]+\b/g;
 const AGENT_CONNECTION_TOKEN_RE = /\bsac_[A-Za-z0-9_-]{43}\b/g;
 const BEARER_RE = /Bearer\s+\S+/gi;
+/** Customer webhook signing secrets (whsec_ + 43 URL-safe characters). */
+const WEBHOOK_SECRET_RE = /\bwhsec_[A-Za-z0-9_-]{8,}/g;
 const AGENT_CONNECTION_AUTH_RE = /ScreenRig-Agent-Connect\s+\S+/gi;
 const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 /**
@@ -13,7 +15,7 @@ const URL_FRAGMENT_TOKEN_RE = /#(token|link|provision)=[A-Za-z0-9_-]{8,}/gi;
 const SENSITIVE_KEY_RE =
   /(authorization|access_token|token|password|secret|private|ciphertext|nonce|cookie|object_key|signed_url|completion_nonce|upload_url|image_bytes|pixels|prompt)/i;
 const SENSITIVE_VALUE_RE =
-  /(sr_live_|sac_|Bearer\s|ScreenRig-Agent-Connect\s|data:image\/|#(token|link|provision)=|[?&](X-Amz-Signature|X-Goog-Signature|signature)=)/i;
+  /(sr_live_|sac_|whsec_|Bearer\s|ScreenRig-Agent-Connect\s|data:image\/|#(token|link|provision)=|[?&](X-Amz-Signature|X-Goog-Signature|signature)=)/i;
 
 /**
  * Lookup segment of a credential, for internal correlation only. A redacted
@@ -42,6 +44,7 @@ export function redactText(value: string): string {
     .replace(AGENT_CONNECTION_TOKEN_RE, "sac_***")
     .replace(AGENT_CONNECTION_AUTH_RE, "ScreenRig-Agent-Connect ***")
     .replace(BEARER_RE, "Bearer ***")
+    .replace(WEBHOOK_SECRET_RE, "whsec_***")
     .replace(URL_FRAGMENT_TOKEN_RE, (_match, name: string) => `#${name.toLowerCase()}=***`)
     .replace(EMAIL_RE, "[redacted-email]");
 }

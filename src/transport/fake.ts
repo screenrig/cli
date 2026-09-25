@@ -1168,5 +1168,126 @@ export function memoryBackend(): FakeTransport {
     body: { items: feedback.get("feature") ?? [] },
   }));
 
+  // Customer webhooks: at most 10 per project, secret only on create and
+  // rotate-secret, and an exact Idempotency-Key replay returns the same answer
+  // (secret included), like the server's 24-hour idempotency record.
+  const webhooks = new Map<string, Record<string, unknown>>();
+  const webhookDeliveries = new Map<string, Array<Record<string, unknown>>>();
+  const webhookReplays = new Map<string, { request: string; response: TransportResponse }>();
+  let webhookSequence = 0;
+  let webhookSecretSequence = 0;
+  const webhookSecret = () => `whsec_${String(++webhookSecretSequence).padStart(43, "S")}`;
+  const webhookReplay = (req: TransportRequest, work: () => TransportResponse): TransportResponse => {
+    const key = req.headers?.["idempotency-key"];
+    const request = JSON.stringify([req.method, req.path, req.body ?? null]);
+    const replay = key ? webhookReplays.get(key) : undefined;
+    if (replay) return replay.request === request ? replay.response : problem(409, "idempotency_mismatch", "idempotency key does not match original request");
+    const response = work();
+    if (key && response.status < 400) webhookReplays.set(key, { request, response });
+    return response;
+  };
+  const webhookUrlRejected = (value: unknown): string | undefined => {
+    let url: URL;
+    try { url = new URL(String(value)); } catch { return "url must be an absolute https URL"; }
+    if (url.protocol !== "https:") return "url must be an absolute https URL";
+    if (url.port && url.port !== "443" && url.port !== "8443") return "url port must be 443 (the default) or 8443";
+    if (/^(localhost|127\.|10\.|192\.168\.|\[)/.test(url.hostname)) return "url host must be a public Internet address";
+    return undefined;
+  };
+  const rejectedUrl = (reason: string): TransportResponse => ({
+    status: 400,
+    headers: { "content-type": "application/problem+json" },
+    body: { status: 400, code: "webhook_url_rejected", title: "Webhook URL must be HTTPS on a public Internet host", detail: `${reason}.`, errors: [{ field: "url", code: "rejected", detail: `${reason}.` }] },
+  });
+  const webhookFor = (req: TransportRequest): Record<string, unknown> | undefined => webhooks.get(decodeURIComponent(req.path.split("/")[4] ?? ""));
+  const staleRevision = (req: TransportRequest, webhook: Record<string, unknown>): TransportResponse | undefined => {
+    const ifMatch = req.headers?.["if-match"];
+    if (!ifMatch || ifMatch === `"${webhook.revision}"`) return undefined;
+    return { status: 412, headers: { "content-type": "application/problem+json" }, body: { status: 412, code: "revision_conflict", title: "Revision conflict", detail: "The webhook revision does not match If-Match.", current_revision: webhook.revision } };
+  };
+  transport.on("GET", "/api/v1/webhooks", () => ({ status: 200, headers: {}, body: { items: [...webhooks.values()] } }));
+  transport.on("POST", "/api/v1/webhooks", (req) => webhookReplay(req, () => {
+    const body = (req.body ?? {}) as { url?: string; event_types?: string[]; enabled?: boolean; description?: string };
+    const rejected = webhookUrlRejected(body.url);
+    if (rejected) return rejectedUrl(rejected);
+    if (webhooks.size >= 10) return problem(409, "webhook_limit_reached", "The project already has the maximum of 10 webhooks.");
+    webhookSequence += 1;
+    const webhook: Record<string, unknown> = {
+      id: `whk_${String(webhookSequence).padStart(20, "A")}`,
+      url: body.url, event_types: body.event_types ?? [], enabled: body.enabled ?? true,
+      ...(body.description ? { description: body.description } : {}),
+      revision: 1, status: body.enabled === false ? "disabled" : "active",
+      created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
+    };
+    webhooks.set(webhook.id as string, webhook);
+    webhookDeliveries.set(webhook.id as string, []);
+    return { status: 201, headers: { "cache-control": "no-store" }, body: { ...webhook, secret: webhookSecret() } };
+  }));
+  transport.on("GET", /^\/api\/v1\/webhooks\/[^/]+$/, (req) => {
+    const webhook = webhookFor(req);
+    return webhook ? { status: 200, headers: { etag: `"${webhook.revision}"` }, body: webhook } : notFound("Resource was not found.");
+  });
+  transport.on("PATCH", /^\/api\/v1\/webhooks\/[^/]+$/, (req) => webhookReplay(req, () => {
+    const webhook = webhookFor(req);
+    if (!webhook) return notFound("Resource was not found.");
+    const stale = staleRevision(req, webhook);
+    if (stale) return stale;
+    const body = (req.body ?? {}) as { url?: string; event_types?: string[]; enabled?: boolean; description?: string };
+    if (body.url !== undefined) {
+      const rejected = webhookUrlRejected(body.url);
+      if (rejected) return rejectedUrl(rejected);
+      webhook.url = body.url;
+    }
+    if (body.event_types !== undefined) webhook.event_types = body.event_types;
+    if (body.enabled !== undefined) {
+      webhook.enabled = body.enabled;
+      webhook.status = body.enabled ? "active" : "disabled";
+    }
+    if (body.description !== undefined) {
+      if (body.description) webhook.description = body.description;
+      else delete webhook.description;
+    }
+    webhook.revision = (webhook.revision as number) + 1;
+    return { status: 200, headers: { etag: `"${webhook.revision}"` }, body: { ...webhook } };
+  }));
+  transport.on("DELETE", /^\/api\/v1\/webhooks\/[^/]+$/, (req) => webhookReplay(req, () => {
+    const webhook = webhookFor(req);
+    if (!webhook) return notFound("Resource was not found.");
+    const stale = staleRevision(req, webhook);
+    if (stale) return stale;
+    webhooks.delete(webhook.id as string);
+    return { status: 204, headers: { "cache-control": "no-store" }, body: undefined };
+  }));
+  transport.on("POST", /^\/api\/v1\/webhooks\/[^/]+\/rotate-secret$/, (req) => webhookReplay(req, () => {
+    const webhook = webhookFor(req);
+    if (!webhook) return notFound("Resource was not found.");
+    const stale = staleRevision(req, webhook);
+    if (stale) return stale;
+    webhook.revision = (webhook.revision as number) + 1;
+    return { status: 200, headers: { "cache-control": "no-store" }, body: { ...webhook, secret: webhookSecret() } };
+  }));
+  transport.on("POST", /^\/api\/v1\/webhooks\/[^/]+\/test$/, (req) => webhookReplay(req, () => {
+    const webhook = webhookFor(req);
+    if (!webhook) return notFound("Resource was not found.");
+    const rows = webhookDeliveries.get(webhook.id as string)!;
+    const delivery = {
+      id: `whd_${String(rows.length + 1).padStart(20, "A")}`, webhook_id: webhook.id, event_id: `ev1_${rows.length + 100}`,
+      event_type: "webhook.test", test: true, state: "pending", attempts: 0,
+      next_attempt_at: "2026-08-14T17:00:00.000Z", created_at: "2026-08-14T17:00:00.000Z",
+    };
+    rows.unshift(delivery);
+    return { status: 202, headers: {}, body: delivery };
+  }));
+  transport.on("GET", /^\/api\/v1\/webhooks\/[^/]+\/deliveries$/, (req) => {
+    const webhook = webhookFor(req);
+    if (!webhook) return notFound("Resource was not found.");
+    const rows = webhookDeliveries.get(webhook.id as string) ?? [];
+    const limit = Number(req.query?.limit ?? 50);
+    const start = typeof req.query?.before === "string" ? Number(req.query.before.slice(5)) : 0;
+    const items = rows.slice(start, start + limit);
+    const next = start + limit < rows.length ? `whc1_${start + limit}` : null;
+    return { status: 200, headers: {}, body: { items, next_cursor: next } };
+  });
+
   return transport;
 }
