@@ -10,7 +10,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
   const playlist = root.command("playlist").description("Author, validate, preview, and manage playlists");
 
   const init = playlist.command("init").description("Prepare an editable playlist from files, ready media, application releases, or HTTPS URLs")
-    .argument("<inputs...>", "Local image/video files, med_ IDs, rel_ IDs, or HTTPS URLs in playback order")
+    .argument("<inputs...>", "Local image/video/audio files, med_ IDs, rel_ IDs, or HTTPS URLs in playback order; audio becomes the soundtrack")
     .requiredOption("--name <NAME>", "Playlist name")
     .requiredOption("--output <FILE>", "Write an editable playlist file")
     .option("--overwrite", "Replace an existing output file atomically")
@@ -24,7 +24,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .action(bind(handlePlaylistInit));
   addValueAlias(init, "--screen-id", "--screen", "Use this screen’s identity, revision, and reported dimensions");
   requireOptionGroup(init, "together", ["--target-width", "--target-height"]);
-  addCommandNotes(init, "Provide --screen-id for target identity, revision, and reported dimensions, or both target dimensions. Files upload and wait for readiness. Release IDs are pinned; preview/server validation checks availability. Inspect the document and preview before publishing.");
+  addCommandNotes(init, "Provide --screen-id for target identity, revision, and reported dimensions, or both target dimensions. Files upload and wait for readiness. Release IDs are pinned; preview/server validation checks availability. Audio inputs become the playlist soundtrack (tracks in input order) instead of pages. Inspect the document and preview before publishing.");
   addCommandExamples(init, 'screenrig playlist init med_IMAGE --name Lobby --screen-id scr_SCREEN --output lobby.json',
     'screenrig playlist init med_IMAGE med_VIDEO --name Lobby --target-width 1920 --target-height 1080 --output lobby.json');
 

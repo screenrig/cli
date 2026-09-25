@@ -716,13 +716,13 @@ export interface BrowserLinkClaim {
 
 export interface MediaCommit {
   bytes: number;
-  content_type: "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "video/mp4" | "video/webm";
+  content_type: "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "video/mp4" | "video/webm" | "audio/mpeg";
   sha256: string;
 }
 
 export interface MediaUploadDeclaration {
   bytes: number;
-  content_type: "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "video/mp4" | "video/webm";
+  content_type: "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "video/mp4" | "video/webm" | "audio/mpeg";
   /** Name of the bytes being uploaded, as they will be sent. */
   filename: string;
   /**
@@ -742,7 +742,7 @@ export interface MediaRecord {
   filename: string;
   /** Present when the upload declared one; absent for generated stills. */
   source_filename?: string;
-  primitive: "image" | "video";
+  primitive: "image" | "video" | "audio";
   content_type: string;
   sha256: string;
   bytes: number;

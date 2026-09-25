@@ -39,6 +39,7 @@ const EXTENSION_BY_TYPE: Readonly<Record<string, string>> = {
   "image/gif": ".gif",
   "video/mp4": ".mp4",
   "video/webm": ".webm",
+  "audio/mpeg": ".mp3",
 };
 
 interface JsonRecord {
@@ -359,7 +360,7 @@ export async function preflightPlaylistBundle(directory: string): Promise<Playli
   const playlist = record(await readBundleJson(root, PLAYLIST_BUNDLE_PLAYLIST), PLAYLIST_BUNDLE_PLAYLIST);
   const mediaPrimitives = new Map(manifest.media.map((item) => [
     item.source_id,
-    item.content_type.startsWith("image/") ? "image" as const : "video" as const,
+    item.content_type.startsWith("image/") ? "image" as const : item.content_type.startsWith("audio/") ? "audio" as const : "video" as const,
   ]));
   const referenced = validatePlaylistWrite(playlist, mediaPrimitives);
   const listed = new Set(manifest.media.map((item) => item.source_id));
@@ -494,13 +495,40 @@ export function normalizePlaylistForBundle(
       transition: cloneJson(page.transition),
       advance: cloneJson(page.advance),
       ...(page.visibility !== undefined ? { visibility: cloneJson(page.visibility) } : {}),
+      ...(page.audio_cue !== undefined ? { audio_cue: normalizedAudioCue(page.audio_cue) } : {}),
       primitives,
     });
   });
   if (pages.length === 0 && skipped.pages.length > 0) {
     throw usageError("Playlist export would produce no pages after --skip-applications; detach the application primitives instead.");
   }
-  return { id, revision, playlist: { name, pages }, mediaIds: [...mediaIds].sort(), skipped };
+  const audio = source.audio === undefined || source.audio === null ? undefined : normalizedAudio(source.audio);
+  for (const track of (audio?.tracks as JsonRecord[] | undefined) ?? []) mediaIds.add(track.media_id as string);
+  return { id, revision, playlist: { name, ...(audio ? { audio } : {}), pages }, mediaIds: [...mediaIds].sort(), skipped };
+}
+
+function normalizedAudio(input: unknown): JsonRecord {
+  const audio = record(input, "Playlist.audio");
+  if (!Array.isArray(audio.tracks)) throw usageError("Playlist.audio.tracks must be an array.");
+  const tracks = audio.tracks.map((value, index) => {
+    const track = record(value, `Playlist.audio.tracks[${index}]`);
+    const mediaId = stringField(track, "media_id", `Playlist.audio.tracks[${index}]`);
+    if (!MEDIA_ID_PATTERN.test(mediaId)) throw usageError(`Playlist.audio.tracks[${index}].media_id is not a media id.`);
+    return { id: stringField(track, "id", `Playlist.audio.tracks[${index}]`), media_id: mediaId };
+  });
+  return {
+    tracks,
+    ...(typeof audio.loop === "boolean" ? { loop: audio.loop } : {}),
+    ...(typeof audio.volume === "number" ? { volume: audio.volume } : {}),
+  };
+}
+
+function normalizedAudioCue(input: unknown): JsonRecord {
+  const cue = record(input, "Playlist page audio_cue");
+  return {
+    track: stringField(cue, "track", "Playlist page audio_cue"),
+    ...(typeof cue.restart === "boolean" ? { restart: cue.restart } : {}),
+  };
 }
 
 function parseRemoteMedia(input: unknown, expectedId: string): RemoteMedia {
@@ -709,6 +737,13 @@ function exactMediaMatch(candidate: RemoteMedia, source: PlaylistBundleMedia): b
 
 function rewritePlaylistIds(playlist: JsonRecord, mapping: Map<string, string>): JsonRecord {
   const output = cloneJson(playlist);
+  const audio = output.audio as JsonRecord | undefined;
+  for (const track of (audio?.tracks as JsonRecord[] | undefined) ?? []) {
+    const source = track.media_id as string;
+    const destination = mapping.get(source);
+    if (!destination) throw usageError(`No imported media mapping exists for ${source}.`);
+    track.media_id = destination;
+  }
   const pages = output.pages as JsonRecord[];
   for (const page of pages) {
     for (const primitive of page.primitives as JsonRecord[]) {

@@ -48,6 +48,18 @@ test("editable projection preserves dynamic selectors, schedules, motion and app
  assert.throws(() => editablePlaylist(resolved));
 });
 
+test("init turns ready audio into the soundtrack and edits keep it", () => {
+ const withAudio = initializePlaylist({ name: "Lobby", media: [media[0]!, { id: "med_SONG", primitive: "audio", state: "ready" }, media[1]!, { id: "med_BED", primitive: "audio", state: "ready" }], width: 1920, height: 1080, durationMs: 8000, fit: "contain" });
+ assert.equal(withAudio.pages.length, 2);
+ assert.deepEqual(withAudio.audio, { tracks: [{ id: "track_1", media_id: "med_SONG" }, { id: "track_2", media_id: "med_BED" }] });
+ assert.throws(() => initializePlaylist({ name: "Only audio", media: [{ id: "med_SONG", primitive: "audio", state: "ready" }], width: 1920, height: 1080, durationMs: 8000, fit: "contain" }), /at least one page/);
+ const read: Record<string, any> = { ...structuredClone(withAudio), id: "pl_TEST", revision: 2, audio: { ...withAudio.audio, loop: true, volume: 1 } };
+ read.pages[0].audio_cue = { track: "track_2", restart: false };
+ const editable = editablePlaylist(read);
+ assert.deepEqual(editable.audio, { tracks: withAudio.audio.tracks, loop: true, volume: 1 });
+ assert.deepEqual(editable.pages[0].audio_cue, { track: "track_2", restart: false });
+});
+
 test("editable stream preserves sources and fallback without resolved media", () => {
  const authored = document();
  authored.pages = [authored.pages[0]];

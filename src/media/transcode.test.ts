@@ -268,6 +268,8 @@ test("classifies sources by extension and by explicit content type", () => {
   assert.equal(classifySource("/x/still.JPEG"), "image");
   assert.equal(classifySource("/x/mystery.bin", "video/mp4"), "video");
   assert.equal(classifySource("/x/mystery.bin", "image/png"), "image");
+  assert.equal(classifySource("/x/theme.WAV"), "audio");
+  assert.equal(classifySource("/x/mystery.bin", "audio/mpeg"), "audio");
   assert.throws(() => classifySource("/x/mystery.bin"), CliError);
 });
 
@@ -1184,6 +1186,80 @@ test("transcode emits paired local start and finish events without pixels", asyn
     assert.ok(events.some((event) => event.op === "process.spawn"));
   } finally {
     if (result.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+function audioProbe(codec: string, format: string, extra: Record<string, unknown> = {}, duration = "184.2"): string {
+  return JSON.stringify({
+    streams: [
+      { codec_type: "audio", codec_name: codec, sample_rate: "48000", channels: 6, ...extra },
+      // Embedded cover art probes as a video stream and must not make the source video.
+      { codec_type: "video", codec_name: "mjpeg", width: 600, height: 600 },
+    ],
+    format: { duration, format_name: format },
+  });
+}
+
+const LAME_ENCODERS = `${ENCODER_LISTING}\n A....D libmp3lame           libmp3lame MP3 (MPEG audio layer 3) (codec mp3)`;
+
+test("an MP3 source is a soundtrack passthrough with no encode", async () => {
+  resetFfmpegToolchainCache();
+  const dir = await testTemp("transcode-audio-pass-");
+  const source = path.join(dir, "theme.mp3");
+  await writeFile(source, Buffer.alloc(512, 1));
+  const { runtime, calls } = fakeRuntime({ probe: audioProbe("mp3", "mp3") });
+  try {
+    const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() });
+    assert.equal(result.passthrough, true);
+    assert.equal(result.contentType, "audio/mpeg");
+    assert.equal(result.stage, "audio");
+    assert.equal(result.filePath, source);
+    assert.equal(encodeCall(calls), undefined);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("other audio is re-encoded to a 192 kb/s stereo MP3 without cover art", async () => {
+  resetFfmpegToolchainCache();
+  const dir = await testTemp("transcode-audio-encode-");
+  const source = path.join(dir, "theme.flac");
+  await writeFile(source, Buffer.alloc(512, 1));
+  const { runtime, calls } = fakeRuntime({ probe: audioProbe("flac", "flac"), encoders: LAME_ENCODERS, outputProbe: audioProbe("mp3", "mp3") });
+  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() });
+  try {
+    assert.equal(result.passthrough, false);
+    assert.equal(result.contentType, "audio/mpeg");
+    assert.equal(result.filename, "theme.mp3");
+    const args = encodeCall(calls)?.args ?? [];
+    for (const [flag, value] of [["-c:a", "libmp3lame"], ["-b:a", "192k"], ["-ar", "48000"], ["-ac", "2"], ["-map", "0:a:0"]] as const) {
+      assert.equal(args[args.indexOf(flag) + 1], value, flag);
+    }
+    assert.ok(args.includes("-vn"));
+  } finally {
+    await rm(result.cleanupDir!, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("audio transcode names a missing LAME encoder and out-of-range lengths", async () => {
+  resetFfmpegToolchainCache();
+  const dir = await testTemp("transcode-audio-refuse-");
+  const source = path.join(dir, "theme.wav");
+  await writeFile(source, Buffer.alloc(512, 1));
+  try {
+    await assert.rejects(
+      () => transcodeForUpload({ runtime: fakeRuntime({ probe: audioProbe("pcm_s16le", "wav") }).runtime, filePath: source, options: defaultTranscodeOptions() }),
+      /libmp3lame/,
+    );
+    resetFfmpegToolchainCache();
+    await assert.rejects(
+      () => transcodeForUpload({ runtime: fakeRuntime({ probe: audioProbe("pcm_s16le", "wav", {}, "0.4"), encoders: LAME_ENCODERS }).runtime, filePath: source, options: defaultTranscodeOptions() }),
+      /1 second to 4 hours/,
+    );
+  } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });

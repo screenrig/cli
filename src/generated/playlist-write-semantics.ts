@@ -102,5 +102,17 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
     if (mode === "media_end" && (primitives.length !== 1 || !["image", "video"].includes(String(primitives[0]?.primitive)))) fail(`${path}/advance`, "media_end requires exactly one image or video primitive");
   }
   if (pages.length > 0 && unscheduled === 0) fail("/pages", "must retain at least one page without a visibility rule");
+  const trackIds = new Set<unknown>();
+  for (const [index, raw] of array(object(playlist.audio).tracks).entries()) {
+    const track = object(raw);
+    if (trackIds.has(track.id)) fail(`/audio/tracks/${index}/id`, "must be unique within the playlist");
+    trackIds.add(track.id);
+  }
+  for (const [index, raw] of pages.entries()) {
+    const page = object(raw);
+    if (!Object.hasOwn(page, "audio_cue")) continue;
+    if (!Object.hasOwn(playlist, "audio")) fail(`/pages/${index}/audio_cue`, "requires a playlist audio soundtrack");
+    else if (!trackIds.has(object(page.audio_cue).track)) fail(`/pages/${index}/audio_cue/track`, "must name a track id in audio.tracks");
+  }
   return issues;
 }

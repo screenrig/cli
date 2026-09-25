@@ -6624,7 +6624,7 @@ test("playback list, media filters, media update, and app --name bind the consum
       { fs: fsLike },
     );
     assert.equal(badPrimitive.code, ExitCode.Usage, badPrimitive.stdout);
-    assert.match(JSON.parse(badPrimitive.stdout).error.detail, /--primitive must be image or video/);
+    assert.match(JSON.parse(badPrimitive.stdout).error.detail, /--primitive must be image, video, or audio/);
 
     const retiredKind = await withRuntime(
       ["--json", "media", "list", "--kind", "image"],
@@ -6632,7 +6632,7 @@ test("playback list, media filters, media update, and app --name bind the consum
       { fs: fsLike },
     );
     assert.equal(retiredKind.code, ExitCode.Usage, retiredKind.stdout);
-    assert.match(JSON.parse(retiredKind.stdout).error.detail, /uses --primitive image\|video, not --kind/);
+    assert.match(JSON.parse(retiredKind.stdout).error.detail, /uses --primitive image\|video\|audio, not --kind/);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }

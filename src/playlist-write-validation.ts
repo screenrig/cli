@@ -229,7 +229,7 @@ function validateSelector(
   value: unknown,
   name: string,
   primitive: "image" | "video",
-  mediaPrimitives: ReadonlyMap<string, "image" | "video">,
+  mediaPrimitives: ReadonlyMap<string, BundleMediaPrimitive>,
   referenced: Set<string>,
 ): { count: number; oneAtATime: boolean } {
   const selector = record(value, name);
@@ -279,23 +279,66 @@ function validateAdvance(value: unknown, name: string): "duration" | "applicatio
   throw usageError(`${name}.mode is invalid.`);
 }
 
+export type BundleMediaPrimitive = "image" | "video" | "audio";
+
+/** Validate the optional soundtrack and return its track ids for page cues. */
+function validateAudio(
+  value: unknown,
+  mediaPrimitives: ReadonlyMap<string, BundleMediaPrimitive>,
+  referenced: Set<string>,
+): Set<string> {
+  const name = "playlist.audio";
+  const audio = record(value, name);
+  exact(audio, ["tracks", "loop", "volume"], name);
+  if (!Array.isArray(audio.tracks) || audio.tracks.length < 1 || audio.tracks.length > 32) {
+    throw usageError(`${name}.tracks must contain 1 to 32 tracks.`);
+  }
+  optionalBoolean(audio, "loop", name);
+  if (audio.volume !== undefined) number(audio, "volume", name, { min: 0, max: 1 });
+  const trackIds = new Set<string>();
+  for (const [index, trackValue] of audio.tracks.entries()) {
+    const trackName = `${name}.tracks[${index}]`;
+    const track = record(trackValue, trackName);
+    exact(track, ["id", "media_id"], trackName);
+    const id = string(track, "id", trackName, 64, ID_PATTERN);
+    if (trackIds.has(id)) throw usageError(`Playlist audio track id is duplicated: ${id}.`);
+    trackIds.add(id);
+    const mediaId = string(track, "media_id", trackName, 256, MEDIA_ID_PATTERN);
+    const actual = mediaPrimitives.get(mediaId);
+    if (!actual) throw usageError(`${trackName} references media missing from the bundle: ${mediaId}.`);
+    if (actual !== "audio") throw usageError(`${trackName} references ${actual} media; soundtrack tracks must be audio: ${mediaId}.`);
+    referenced.add(mediaId);
+  }
+  return trackIds;
+}
+
+function validateAudioCue(value: unknown, name: string, trackIds: ReadonlySet<string> | undefined): void {
+  const cue = record(value, name);
+  exact(cue, ["track", "restart"], name);
+  const track = string(cue, "track", name, 64, ID_PATTERN);
+  optionalBoolean(cue, "restart", name);
+  if (!trackIds) throw usageError(`${name} requires a playlist audio soundtrack.`);
+  if (!trackIds.has(track)) throw usageError(`${name}.track must name a track id in audio.tracks.`);
+}
+
 export function validatePlaylistWrite(
   value: unknown,
-  mediaPrimitives: ReadonlyMap<string, "image" | "video">,
+  mediaPrimitives: ReadonlyMap<string, BundleMediaPrimitive>,
 ): Set<string> {
   const playlist = record(value, "playlist.json");
-  exact(playlist, ["name", "pages"], "playlist.json");
+  exact(playlist, ["name", "audio", "pages"], "playlist.json");
   string(playlist, "name", "playlist.json", 120);
   if (!Array.isArray(playlist.pages) || playlist.pages.length < 1 || playlist.pages.length > 100) {
     throw usageError("playlist.json.pages must contain 1 to 100 pages.");
   }
   const pageIds = new Set<string>();
   const referenced = new Set<string>();
+  const trackIds = playlist.audio === undefined ? undefined : validateAudio(playlist.audio, mediaPrimitives, referenced);
   let unscheduled = 0;
   for (const [pageIndex, pageValue] of playlist.pages.entries()) {
     const pageName = `playlist.pages[${pageIndex}]`;
     const page = record(pageValue, pageName);
-    exact(page, ["id", "canvas", "transition", "advance", "visibility", "primitives"], pageName);
+    exact(page, ["id", "canvas", "transition", "advance", "visibility", "audio_cue", "primitives"], pageName);
     const pageId = string(page, "id", pageName, 64, ID_PATTERN);
     if (pageIds.has(pageId)) throw usageError(`Playlist page id is duplicated: ${pageId}.`);
     pageIds.add(pageId);
@@ -304,6 +347,7 @@ export function validatePlaylistWrite(
     const advance = validateAdvance(page.advance, `${pageName}.advance`);
     if (page.visibility === undefined) unscheduled += 1;
     else validateVisibility(page.visibility, `${pageName}.visibility`);
+    if (page.audio_cue !== undefined) validateAudioCue(page.audio_cue, `${pageName}.audio_cue`, trackIds);
     if (!Array.isArray(page.primitives) || page.primitives.length < 1 || page.primitives.length > 24) {
       throw usageError(`${pageName}.primitives must contain 1 to 24 primitives.`);
     }

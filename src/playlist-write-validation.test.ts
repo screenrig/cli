@@ -113,3 +113,34 @@ test("playlist write rejects a third iframe primitive on a page", () => {
     },
   );
 });
+
+function soundtrackPlaylist(overrides: Record<string, unknown> = {}, cue?: unknown) {
+  const base = playlistWithPrimitives(TWO_IFRAMES) as Record<string, any>;
+  if (cue !== undefined) base.pages[0].audio_cue = cue;
+  return { ...base, audio: { tracks: [{ id: "intro", media_id: "med_SONG" }, { id: "bed", media_id: "med_BED" }], loop: false, volume: 0.5 }, ...overrides };
+}
+
+const AUDIO_MEDIA = new Map([["med_SONG", "audio"], ["med_BED", "audio"], ["med_STILL", "image"]] as const);
+
+test("playlist write accepts a soundtrack and a page cue and reports the track media", () => {
+  assert.deepEqual(
+    validatePlaylistWrite(soundtrackPlaylist({}, { track: "bed", restart: true }), AUDIO_MEDIA),
+    new Set(["med_SONG", "med_BED"]),
+  );
+});
+
+test("playlist write rejects malformed soundtracks and cues", () => {
+  const cases: Array<[string, unknown]> = [
+    ["no tracks", soundtrackPlaylist({ audio: { tracks: [] } })],
+    ["duplicate id", soundtrackPlaylist({ audio: { tracks: [{ id: "a", media_id: "med_SONG" }, { id: "a", media_id: "med_BED" }] } })],
+    ["image track", soundtrackPlaylist({ audio: { tracks: [{ id: "a", media_id: "med_STILL" }] } })],
+    ["missing media", soundtrackPlaylist({ audio: { tracks: [{ id: "a", media_id: "med_GONE" }] } })],
+    ["volume", soundtrackPlaylist({ audio: { tracks: [{ id: "a", media_id: "med_SONG" }], volume: 1.5 } })],
+    ["extra key", soundtrackPlaylist({ audio: { tracks: [{ id: "a", media_id: "med_SONG" }], fade_ms: 200 } })],
+    ["unknown cue track", soundtrackPlaylist({}, { track: "missing" })],
+    ["cue without soundtrack", (() => { const value = playlistWithPrimitives(TWO_IFRAMES) as any; value.pages[0].audio_cue = { track: "intro" }; return value; })()],
+  ];
+  for (const [name, value] of cases) {
+    assert.throws(() => validatePlaylistWrite(value, AUDIO_MEDIA), CliError, name);
+  }
+});

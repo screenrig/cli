@@ -386,7 +386,7 @@ screenrig screen publish scr_LOBBY lobby.json
 ```
 
 Inspect the document and preview before publishing. `playlist init` accepts ordered
-local image/video files, ready `med_` IDs, pinned `rel_` application releases, and
+local image/video/audio files, ready `med_` IDs, pinned `rel_` application releases, and
 HTTPS iframe URLs, including mixed inputs:
 
 ```sh
@@ -412,6 +412,34 @@ videos are muted, do not loop, and advance on completion. Other pages advance af
 `--duration-ms` (default 8000). Applications and iframes use `fill`; applications
 are pinned to the supplied release and use timed advancement, without controller
 privileges. Edit the document for application-controlled advancement.
+
+### Soundtrack
+
+Audio inputs do not become pages. They become the playlist soundtrack: an
+ordered list of MP3 tracks that plays continuously while pages change, looping
+by default. `media upload` sends an MP3 unchanged and converts WAV, AAC/M4A,
+OGG, and FLAC to a 192 kb/s MP3 first (ffmpeg with libmp3lame). Tracks run 1
+second to 4 hours.
+
+```sh
+screenrig playlist init ./poster.png ./menu.mp4 ./lobby-loop.wav --name Lobby --screen-id scr_LOBBY --output lobby.json
+screenrig media list --primitive audio
+```
+
+The document gains a top-level `audio` object; a page may add an optional
+`audio_cue` hint that jumps to a named track when that page appears:
+
+```json
+{
+  "name": "Lobby",
+  "audio": { "tracks": [{ "id": "intro", "media_id": "med_SONG" }, { "id": "bed", "media_id": "med_BED" }], "loop": true, "volume": 0.8 },
+  "pages": [{ "id": "welcome", "audio_cue": { "track": "intro", "restart": true }, "...": "..." }]
+}
+```
+
+`playlist update` replaces the whole document, so omitting `audio` removes the
+soundtrack. `playlist show --editable`, `playlist export`, and `playlist import`
+keep the soundtrack, its cues, and its audio files.
 
 With `--screen-id`, the result includes `screen_id`, `screen_revision`, and a
 `publish.argv` array containing the output path and optional revision guard. It also

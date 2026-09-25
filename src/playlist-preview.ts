@@ -91,11 +91,21 @@ export interface PreviewPageResult {
   id: string;
   files: Record<PreviewState, string>;
   lint_count: number;
+  /** Soundtrack hint the Player applies when this page becomes current. */
+  audio_cue?: { track: string; restart: boolean };
+}
+
+/** The soundtrack is not drawn; the preview reports the play order instead. */
+export interface PreviewSoundtrack {
+  tracks: Array<{ id: string; media_id: string }>;
+  loop: boolean;
+  volume: number;
 }
 
 export interface PlaylistPreviewResult {
   output: string;
   viewport: Size;
+  soundtrack?: PreviewSoundtrack;
   pages: PreviewPageResult[];
   contact_sheet?: string;
   lint: LintFinding[];
@@ -131,7 +141,8 @@ export async function previewPlaylist(options: {
       if (state === "rest") restPixels.set(page.id, await pixelsFromPng(png));
       if (!options.lintOnly) await writeFile(filename, png);
     }
-    pageResults.push({ id: page.id, files, lint_count: 0 });
+    const audioCue = audioCueOf(page.raw);
+    pageResults.push({ id: page.id, files, lint_count: 0, ...(audioCue ? { audio_cue: audioCue } : {}) });
   }
   const lint = lintPlaylistPages(body.pages, { pixelsByPage: restPixels });
   for (const result of pageResults) {
@@ -143,9 +154,11 @@ export async function previewPlaylist(options: {
     const sheet = await renderContactSheet(pages, viewport, lint, options.lintOnly ? undefined : options.outputDirectory);
     if (!options.lintOnly) await writeFile(contact_sheet, sheet.png);
   }
+  const soundtrack = soundtrackOf(body.audio);
   return {
     output: options.outputDirectory,
     viewport,
+    ...(soundtrack ? { soundtrack } : {}),
     pages: pageResults,
     ...(contact_sheet ? { contact_sheet } : {}),
     lint,
@@ -160,7 +173,7 @@ export function contactSheetSize(pageCount: number): Size {
   };
 }
 
-function normalizePlaylist(input: unknown): { name: string; pages: unknown[] } {
+function normalizePlaylist(input: unknown): { name: string; audio?: unknown; pages: unknown[] } {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw usageError("Playlist JSON must be an object with name and pages.");
   }
@@ -169,7 +182,24 @@ function normalizePlaylist(input: unknown): { name: string; pages: unknown[] } {
   if (typeof raw.name !== "string" || !pages) {
     throw usageError("Playlist JSON must contain string name and array pages.");
   }
-  return { name: raw.name, pages };
+  return { name: raw.name, ...(raw.audio !== undefined ? { audio: raw.audio } : {}), pages };
+}
+
+function soundtrackOf(audio: unknown): PreviewSoundtrack | undefined {
+  if (!audio || typeof audio !== "object" || Array.isArray(audio)) return undefined;
+  const raw = audio as Record<string, unknown>;
+  const tracks = Array.isArray(raw.tracks) ? raw.tracks.map((value) => {
+    const track = recordOf(value);
+    return { id: String(track.id), media_id: String(track.media_id) };
+  }) : [];
+  return { tracks, loop: raw.loop !== false, volume: typeof raw.volume === "number" ? raw.volume : 1 };
+}
+
+function audioCueOf(page: Record<string, unknown>): PreviewPageResult["audio_cue"] {
+  const cue = page.audio_cue;
+  if (!cue || typeof cue !== "object" || Array.isArray(cue)) return undefined;
+  const raw = cue as Record<string, unknown>;
+  return { track: String(raw.track), restart: raw.restart === true };
 }
 
 async function preparePages(

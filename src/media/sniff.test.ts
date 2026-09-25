@@ -59,3 +59,34 @@ test("a declared --content-type the bytes contradict fails as usage_error naming
   // A missing file is reported by the upload path, not the sniffer.
   await assertDeclaredTypeMatchesBytes(path.join(dir, "absent.png"), "video/mp4");
 });
+
+test("sniffMediaContainer classifies soundtrack sources as audio", () => {
+  const id3 = Buffer.concat([Buffer.from("ID3"), Buffer.from([4, 0, 0, 0, 0, 0, 0]), Buffer.alloc(6)]);
+  const frame = Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x64]), Buffer.alloc(12)]);
+  const adts = Buffer.concat([Buffer.from([0xff, 0xf1, 0x50, 0x80]), Buffer.alloc(12)]);
+  const wav = Buffer.concat([Buffer.from("RIFF"), Buffer.from([36, 0, 0, 0]), Buffer.from("WAVEfmt "), Buffer.alloc(4)]);
+  const flac = Buffer.concat([Buffer.from("fLaC"), Buffer.alloc(12)]);
+  const m4a = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypM4A "), Buffer.alloc(8)]);
+  assert.deepEqual([id3, frame].map((head) => sniffMediaContainer(head)?.contentType), ["audio/mpeg", "audio/mpeg"]);
+  assert.equal(sniffMediaContainer(adts)?.contentType, "audio/aac");
+  assert.equal(sniffMediaContainer(wav)?.contentType, "audio/wav");
+  assert.equal(sniffMediaContainer(flac)?.contentType, "audio/flac");
+  assert.equal(sniffMediaContainer(m4a)?.contentType, "audio/mp4");
+  for (const head of [id3, frame, adts, wav, flac, m4a]) assert.equal(sniffMediaContainer(head)?.kind, "audio");
+  // JPEG also starts with 0xFF but is never read as an audio frame.
+  assert.equal(sniffMediaContainer(JPEG)?.kind, "image");
+});
+
+test("an audio claim is checked against the bytes, including container aliases", async () => {
+  const dir = await testTemp("sniff-audio-");
+  const mp3 = path.join(dir, "song.mp3");
+  await writeFile(mp3, Buffer.concat([Buffer.from("ID3"), Buffer.alloc(13)]));
+  await assertDeclaredTypeMatchesBytes(mp3, "audio/mpeg");
+  await assertDeclaredTypeMatchesBytes(mp3, "audio/mp3");
+  const ogg = path.join(dir, "song.ogg");
+  await writeFile(ogg, Buffer.concat([Buffer.from("OggS"), Buffer.alloc(12)]));
+  await assertDeclaredTypeMatchesBytes(ogg, "audio/ogg");
+  const png = path.join(dir, "cover.png");
+  await writeFile(png, PNG);
+  await assert.rejects(() => assertDeclaredTypeMatchesBytes(png, "audio/mpeg"), /bytes are a PNG image/);
+});

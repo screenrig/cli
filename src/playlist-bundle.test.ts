@@ -144,6 +144,16 @@ test("normalizes server playlists, preserves snapshotted selectors and iframes, 
   assert.match(text, /"primitive":"iframe"/);
 });
 
+test("a soundtrack and page cues travel with the bundle and its media is exported", () => {
+  const source = playlist(mediaPrimitive({ by: "id", media_id: "med_A" })) as Record<string, any>;
+  source.audio = { tracks: [{ id: "intro", media_id: "med_SONG" }], loop: true, volume: 0.8 };
+  source.pages[0].audio_cue = { track: "intro", restart: false };
+  const normalized = normalizePlaylistForBundle(source);
+  assert.deepEqual(normalized.mediaIds, ["med_A", "med_SONG"]);
+  assert.deepEqual(normalized.playlist.audio, { tracks: [{ id: "intro", media_id: "med_SONG" }], loop: true, volume: 0.8 });
+  assert.deepEqual((normalized.playlist.pages as any[])[0].audio_cue, { track: "intro", restart: false });
+});
+
 test("rejects application primitives before any media lookup or local output", async () => {
   const dir = await testTemp("bundle-app-");
   const output = path.join(dir, "export");

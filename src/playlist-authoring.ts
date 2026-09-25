@@ -10,7 +10,13 @@ function object(value: unknown): RecordValue {
 /** Preserve authored selectors; strip only fields the backend derives on reads. */
 export function editablePlaylist(value: unknown): RecordValue {
   const resource = object(value);
-  const document = structuredClone({ name: resource.name, pages: resource.pages });
+  // PUT replaces the whole document, so a soundtrack read here must be written
+  // back or an edit would silently remove it.
+  const document = structuredClone({
+    name: resource.name,
+    ...(resource.audio !== undefined && resource.audio !== null ? { audio: resource.audio } : {}),
+    pages: resource.pages,
+  });
   if (!Array.isArray(document.pages)) throw usageError("Playlist pages are missing.");
   for (const page of document.pages) {
     object(page);
@@ -60,9 +66,17 @@ export function initializePlaylist(options: {
 export function preparePlaylist(options: {
   name: string; content: RecordValue[]; width: number; height: number; durationMs: number; fit: string;
 }): RecordValue {
-  const document = { name: options.name, pages: options.content.map((media, index) => {
+  // Ready audio inputs become the soundtrack in input order; every other input
+  // is one page.
+  const tracks = options.content.filter((media) => media.primitive === "audio").map((media, index) => {
+    if (media.state !== "ready") throw usageError("Every media item must be a ready image, video, or audio object.");
+    return { id: `track_${index + 1}`, media_id: media.id };
+  });
+  const pageContent = options.content.filter((media) => media.primitive !== "audio");
+  if (pageContent.length === 0) throw usageError("A playlist needs at least one page; audio inputs only become its soundtrack.");
+  const document = { name: options.name, ...(tracks.length > 0 ? { audio: { tracks } } : {}), pages: pageContent.map((media, index) => {
     const live = media.primitive === "iframe" || media.primitive === "application";
-    if (!live && (media.state !== "ready" || !["image", "video"].includes(media.primitive))) throw usageError("Every media item must be a ready image or video.");
+    if (!live && (media.state !== "ready" || !["image", "video"].includes(media.primitive))) throw usageError("Every media item must be a ready image, video, or audio object.");
     const video = media.primitive === "video";
     return {
       id: `page_${index + 1}`,

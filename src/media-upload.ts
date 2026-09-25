@@ -23,6 +23,7 @@ export const SUPPORTED_MEDIA_CONTENT_TYPES = [
   "image/gif",
   "video/mp4",
   "video/webm",
+  "audio/mpeg",
 ] as const;
 
 export type SupportedMediaContentType = (typeof SUPPORTED_MEDIA_CONTENT_TYPES)[number];
@@ -49,6 +50,7 @@ const EXTENSIONS: Record<string, SupportedMediaContentType> = {
   ".gif": "image/gif",
   ".mp4": "video/mp4",
   ".webm": "video/webm",
+  ".mp3": "audio/mpeg",
 };
 
 function supported(value: string): value is SupportedMediaContentType {
@@ -70,7 +72,7 @@ export async function prepareMediaUpload(filePath: string, explicitContentType?:
   }
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   if (expectedSha256 !== undefined && sha256 !== expectedSha256) {
-    throw usageError("Video bytes changed after delivery verification; retry the upload. No upload was started.");
+    throw usageError("Media bytes changed after delivery verification; retry the upload. No upload was started.");
   }
   const commit: MediaCommit = { content_type: contentType, bytes: bytes.length, sha256 };
   return { bytes, commit, declaration: { filename, ...commit } };

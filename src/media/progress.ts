@@ -1,6 +1,6 @@
 import type { Writable } from "node:stream";
 
-export type ProgressStage = "video" | "image";
+export type ProgressStage = "video" | "image" | "audio";
 
 export interface ProgressStart {
   stage: ProgressStage;
@@ -132,9 +132,10 @@ export function createProgressReporter(options: ProgressOptions): ProgressReport
         });
         return;
       }
-      const size = `${next.width}x${next.height}`;
-      const length = next.durationSeconds > 0 ? `, ${formatClock(next.durationSeconds)}` : "";
-      write(`screenrig: transcoding ${next.stage} to ${next.target} (${size}${length}, ${formatBytes(next.sourceBytes)})\n`);
+      // Audio has no frame size; its detail line is duration and bytes only.
+      const size = next.width > 0 && next.height > 0 ? `${next.width}x${next.height}, ` : "";
+      const length = next.durationSeconds > 0 ? `${formatClock(next.durationSeconds)}, ` : "";
+      write(`screenrig: transcoding ${next.stage} to ${next.target} (${size}${length}${formatBytes(next.sourceBytes)})\n`);
     },
 
     update(rawFraction) {

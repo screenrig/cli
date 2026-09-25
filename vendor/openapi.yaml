@@ -2107,8 +2107,8 @@ paths:
         canonical extension for the verified content type.
       security: [{ projectBearer: [] }]
       responses:
-        "200": { description: Complete original rendition., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Length: { schema: { type: integer } }, Content-Type: { schema: { type: string } }, Content-Disposition: { schema: { type: string, pattern: '^attachment; filename="med_[A-Za-z0-9_-]+\.(png|jpg|webp|gif|mp4|webm)"$' } }, ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } } }, content: { image/png: { schema: { type: string, format: binary } }, image/jpeg: { schema: { type: string, format: binary } }, image/webp: { schema: { type: string, format: binary } }, image/gif: { schema: { type: string, format: binary } }, video/mp4: { schema: { type: string, format: binary } }, video/webm: { schema: { type: string, format: binary } } } }
-        "206": { description: One standards-correct byte range., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } }, Content-Length: { schema: { type: integer } }, Content-Type: { schema: { type: string } }, Content-Disposition: { schema: { type: string } }, ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } } }, content: { image/png: { schema: { type: string, format: binary } }, image/jpeg: { schema: { type: string, format: binary } }, image/webp: { schema: { type: string, format: binary } }, image/gif: { schema: { type: string, format: binary } }, video/mp4: { schema: { type: string, format: binary } }, video/webm: { schema: { type: string, format: binary } } } }
+        "200": { description: Complete original rendition., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Length: { schema: { type: integer } }, Content-Type: { schema: { type: string } }, Content-Disposition: { schema: { type: string, pattern: '^attachment; filename="med_[A-Za-z0-9_-]+\.(png|jpg|webp|gif|mp4|webm|mp3)"$' } }, ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } } }, content: { image/png: { schema: { type: string, format: binary } }, image/jpeg: { schema: { type: string, format: binary } }, image/webp: { schema: { type: string, format: binary } }, image/gif: { schema: { type: string, format: binary } }, video/mp4: { schema: { type: string, format: binary } }, video/webm: { schema: { type: string, format: binary } }, audio/mpeg: { schema: { type: string, format: binary } } } }
+        "206": { description: One standards-correct byte range., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } }, Content-Length: { schema: { type: integer } }, Content-Type: { schema: { type: string } }, Content-Disposition: { schema: { type: string } }, ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } } }, content: { image/png: { schema: { type: string, format: binary } }, image/jpeg: { schema: { type: string, format: binary } }, image/webp: { schema: { type: string, format: binary } }, image/gif: { schema: { type: string, format: binary } }, video/mp4: { schema: { type: string, format: binary } }, video/webm: { schema: { type: string, format: binary } }, audio/mpeg: { schema: { type: string, format: binary } } } }
         "304": { description: The exact immutable media ETag matches If-None-Match. No body or egress increment is produced., headers: { ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } } }
         "416": { description: Unsatisfiable or malformed range., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
@@ -4305,7 +4305,7 @@ components:
     PlaybackScreenID: { name: screen_id, in: query, required: false, schema: { type: string, pattern: "^(?:(?:stage|qa|development)_)?scr_" } }
     PlaybackMediaID: { name: media_id, in: query, required: false, schema: { type: string, pattern: "^med_" } }
     MediaTagQuery: { name: tag, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, description: Exact media tag. Untagged objects are omitted when this filter is present. }
-    MediaPrimitiveQuery: { name: primitive, in: query, required: false, schema: { type: string, enum: [image, video] } }
+    MediaPrimitiveQuery: { name: primitive, in: query, required: false, schema: { type: string, enum: [image, video, audio] } }
     PlaybackDay: { name: day, in: query, required: false, schema: { type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, description: UTC calendar day of the aggregate. }
     LastEventID: { name: Last-Event-ID, in: header, required: false, schema: { type: string }, description: Durable cursor used when after is absent. }
     Range: { name: Range, in: header, required: false, schema: { type: string, pattern: "^bytes=[0-9]*-[0-9]*$" }, description: V1 accepts one byte range only. }
@@ -5210,7 +5210,7 @@ components:
     Capabilities:
       type: object
       additionalProperties: false
-      required: [api_version, protocol_version, application_compressed_bytes, application_expanded_bytes, application_package_bytes, application_file_count, application_file_bytes, application_path_depth, application_path_bytes, media_image_bytes, playlist_max_pages, playlist_max_items_per_page, playlist_max_media_per_selector, transition_max_duration_ms, screens_per_project, project_content_bytes, features]
+      required: [api_version, protocol_version, application_compressed_bytes, application_expanded_bytes, application_package_bytes, application_file_count, application_file_bytes, application_path_depth, application_path_bytes, media_image_bytes, media_audio_bytes, playlist_max_pages, playlist_max_items_per_page, playlist_max_media_per_selector, transition_max_duration_ms, screens_per_project, project_content_bytes, features]
       properties:
         api_version: { type: string }
         protocol_version: { type: string }
@@ -5222,6 +5222,7 @@ components:
         application_path_depth: { type: integer, enum: [16] }
         application_path_bytes: { type: integer, enum: [255] }
         media_image_bytes: { type: integer, enum: [20971520], description: "Maximum declared byte size of one image upload, 20 MiB. It is a byte-only gate rejected with invalid_request before any byte is transferred; the server never decodes the image, and the bound applies to animated GIF and animated WebP exactly as it applies to a still. Pixel dimensions are not validated. A video declaration is bounded only by the plan-independent transport ceiling." }
+        media_audio_bytes: { type: integer, enum: [209715200], description: "Maximum declared byte size of one audio/mpeg (MP3) upload, 200 MiB. It is a byte-only gate rejected with invalid_request before any byte is transferred. Audio media is the playlist soundtrack (docs/playlist-audio.md)." }
         playlist_max_pages: { type: integer, enum: [100] }
         playlist_max_items_per_page: { type: integer, enum: [24] }
         playlist_max_media_per_selector: { type: integer, enum: [32], description: Maximum ready media objects one image or video selector may resolve to. }
@@ -5450,6 +5451,7 @@ components:
       properties:
         name: { type: string, minLength: 1, maxLength: 120 }
         pages: { type: array, minItems: 1, maxItems: 100, items: { $ref: "#/components/schemas/PlaylistPageWrite" } }
+        audio: { $ref: "#/components/schemas/PlaylistAudioWrite" }
     Playlist:
       type: object
       additionalProperties: false
@@ -5459,6 +5461,7 @@ components:
         name: { type: string }
         revision: { type: integer }
         pages: { type: array, minItems: 1, maxItems: 100, items: { $ref: "#/components/schemas/PlaylistPage" } }
+        audio: { $ref: "#/components/schemas/PlaylistAudio" }
         comments: { type: object, additionalProperties: true, description: "Opaque agent JSON object, compact UTF-8 ≤ 1024 bytes. Absent when unset. ScreenRig never reads or uses it. PlaylistWrite cannot set it. Not on the runtime manifest and never authorization." }
     PlaylistPageWrite:
       type: object
@@ -5470,6 +5473,7 @@ components:
         transition: { $ref: "#/components/schemas/PlaylistTransition" }
         advance: { $ref: "#/components/schemas/PlaylistAdvanceWrite" }
         visibility: { $ref: "#/components/schemas/PageVisibility" }
+        audio_cue: { $ref: "#/components/schemas/PlaylistAudioCue" }
         primitives: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/PlaylistPrimitiveWrite" } }
     AdslotPageWrite:
       type: object
@@ -5492,6 +5496,7 @@ components:
       properties:
         name: { type: string, minLength: 1, maxLength: 120 }
         pages: { type: array, minItems: 1, maxItems: 100, items: { $ref: "#/components/schemas/PlaylistPageWriteV2" } }
+        audio: { $ref: "#/components/schemas/PlaylistAudioWrite" }
     PlaylistPage:
       type: object
       additionalProperties: false
@@ -5502,6 +5507,7 @@ components:
         transition: { $ref: "#/components/schemas/PlaylistTransition" }
         advance: { $ref: "#/components/schemas/PlaylistAdvance" }
         visibility: { $ref: "#/components/schemas/PageVisibility" }
+        audio_cue: { $ref: "#/components/schemas/PlaylistAudioCue" }
         primitives: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/PlaylistPrimitive" } }
         comments: { type: object, additionalProperties: true, description: "Opaque agent JSON object, compact UTF-8 ≤ 1024 bytes. Absent when unset. ScreenRig never reads or uses it. PlaylistPageWrite cannot set it. Copied across playlist updates by page id. Not on the runtime manifest." }
     ProjectCapabilities:
@@ -5932,6 +5938,7 @@ components:
         playlistName: { type: string, description: "Name of the assigned playlist." }
         timezone: { type: string, description: "IANA time zone of the screen. Emitted when the screen has one. Every page visibility rule in this manifest is evaluated in this zone (docs/player-compatibility.md §1.3)." }
         pages: { type: array, items: { type: object, additionalProperties: true } }
+        audio: { $ref: "#/components/schemas/RuntimeAudio" }
         diagnostics: { type: array, items: { type: object, additionalProperties: true }, description: "Page- and primitive-level projection omissions. Emitted when non-empty. Compatibility rule 4: HTTP 200 with pages [] and diagnostics is a degraded projection. HTTP 200 with pages [] and no diagnostics is an authored empty assignment." }
     RuntimeAdslotCandidate:
       type: object
@@ -6083,7 +6090,51 @@ components:
         name: { type: string }
         revision: { type: integer }
         pages: { type: array, minItems: 1, maxItems: 100, items: { $ref: "#/components/schemas/PlaylistPageV2" } }
+        audio: { $ref: "#/components/schemas/PlaylistAudio" }
     PlaylistV2List: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/PlaylistV2" } } } }
+    PlaylistAudioWrite:
+      type: object
+      additionalProperties: false
+      required: [tracks]
+      description: >-
+        Optional playlist soundtrack: ordered ready audio (MP3) media that plays
+        continuously while pages change (docs/playlist-audio.md). Page changes
+        never stop or restart it. PUT replaces the whole playlist, so omitting
+        audio removes the soundtrack.
+      properties:
+        tracks: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistAudioTrack" }, description: "Play order. Track ids are unique within the playlist; the same media may appear under two ids." }
+        loop: { type: boolean, default: true, description: "After the last track, start again at the first. false stops after the last track." }
+        volume: { type: number, minimum: 0, maximum: 1, default: 1, description: "Soundtrack gain, multiplied by the Player's own volume." }
+    PlaylistAudio:
+      type: object
+      additionalProperties: false
+      required: [tracks, loop, volume]
+      description: Stored playlist soundtrack with defaults filled in.
+      properties:
+        tracks: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistAudioTrack" } }
+        loop: { type: boolean }
+        volume: { type: number, minimum: 0, maximum: 1 }
+    PlaylistAudioTrack:
+      type: object
+      additionalProperties: false
+      required: [id, media_id]
+      properties:
+        id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$", description: "Playlist-unique track id that page audio_cue hints name." }
+        media_id: { type: string, pattern: "^med_", description: "An owned, ready audio media object." }
+    PlaylistAudioCue:
+      type: object
+      additionalProperties: false
+      required: [track]
+      description: >-
+        Optional soundtrack hint on an ordinary page. When the page becomes
+        current, the Player switches to the named track from its start unless
+        it is already playing; restart true restarts it even then. The sequence
+        continues from that track. Players may ignore a hint. track must name a
+        track id in the playlist audio; a cue without a playlist audio is
+        invalid_request. Not allowed on adslot pages.
+      properties:
+        track: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }
+        restart: { type: boolean, default: false }
     PageVisibility:
       type: object
       additionalProperties: false
@@ -6952,11 +7003,11 @@ components:
         quality: { type: string, enum: [low, medium, high] }
         credits: { type: integer, minimum: 1 }
         usd: { type: string }
-    MediaUploadDeclaration: { type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: the server never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. Remaining prepaid credit of zero rejects declare and commit with payment_required. Read media_image_bytes from the capabilities document to preflight the image bound, and project_content_bytes there, or content_limit_bytes on the project, to know any custom storage ceiling. An optional tag is stored on the ready media object and is not redeclared at commit. An optional source_filename records the caller's original file name when the client transcoded the bytes before upload; the ready object's filename is then derived from it so distinct sources never collide (photo.png uploaded as photo.webp is stored as photo.png.webp, photo.jpg as photo.jpg.webp, and a source photo.webp stays photo.webp).", properties: { filename: { type: string, minLength: 1, maxLength: 255, description: "Name of the bytes being uploaded, as they will be sent." }, source_filename: { type: string, minLength: 1, maxLength: 255, description: "Caller's original file name before any client-side transcode. Bare file name only. Stored verbatim on the ready media as source_filename and used to derive filename." }, content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } } }
+    MediaUploadDeclaration: { type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: the server never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. Remaining prepaid credit of zero rejects declare and commit with payment_required. An audio/mpeg (MP3) declaration is bounded at 209715200 bytes, 200 MiB, and a larger one is rejected the same way; read media_audio_bytes to preflight it. Read media_image_bytes from the capabilities document to preflight the image bound, and project_content_bytes there, or content_limit_bytes on the project, to know any custom storage ceiling. An optional tag is stored on the ready media object and is not redeclared at commit. An optional source_filename records the caller's original file name when the client transcoded the bytes before upload; the ready object's filename is then derived from it so distinct sources never collide (photo.png uploaded as photo.webp is stored as photo.png.webp, photo.jpg as photo.jpg.webp, and a source photo.webp stays photo.webp).", properties: { filename: { type: string, minLength: 1, maxLength: 255, description: "Name of the bytes being uploaded, as they will be sent." }, source_filename: { type: string, minLength: 1, maxLength: 255, description: "Caller's original file name before any client-side transcode. Bare file name only. Stored verbatim on the ready media as source_filename and used to derive filename." }, content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } } }
     MediaTagPatch: { type: object, additionalProperties: false, required: [tag], properties: { tag: { oneOf: [{ type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, { type: "null" }], description: "Replacement tag or null to clear it." } } }
-    MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], description: "Declares only what the server can re-verify against the stored object byte for byte. Codec identity is not declared here: the server derives it from the container during asynchronous verification, so a client cannot assert a codec that drives player behaviour.", properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
+    MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], description: "Declares only what the server can re-verify against the stored object byte for byte. Codec identity is not declared here: the server derives it from the container during asynchronous verification, so a client cannot assert a codec that drives player behaviour.", properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
     MediaUploadSession: { type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: { id: { type: string }, operation: { $ref: "#/components/schemas/Operation" }, upload_url: { type: string, format: uri }, method: { type: string, enum: [PUT] }, headers: { type: object, additionalProperties: { type: string }, description: Exact signed request headers; clients must send every field verbatim. }, expires_at: { type: string, format: date-time } } }
-    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, width, height, revision, state, created_at, updated_at], properties: { id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Caller's original file name as declared at upload. Absent when the upload declared none and for generated stills. This is the human handle for filename-to-id lookups." }, primitive: { type: string, enum: [image, video] }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: Verified immutable intrinsic width in pixels. }, height: { type: integer, minimum: 1, description: Verified immutable intrinsic height in pixels. }, duration_ms: { type: integer, minimum: 1, description: "Verified container duration; present for ready video media." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Caller's original file name as declared at upload. Absent when the upload declared none and for generated stills. This is the human handle for filename-to-id lookups." }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable intrinsic width in pixels. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 14400000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Media" } } } }
     FeedbackWrite:
       type: object
@@ -7288,6 +7339,7 @@ components:
         playlistName: { type: string, description: "Name of the assigned playlist." }
         timezone: { type: string, description: "IANA time zone identifier of the screen. Every page visibility rule in this manifest is evaluated in this zone. Emitted when the screen has one (docs/player-compatibility.md §1.3)." }
         pages: { type: array, items: { $ref: "#/components/schemas/RuntimePage" } }
+        audio: { $ref: "#/components/schemas/RuntimeAudio" }
         diagnostics: { type: array, items: { $ref: "#/components/schemas/RuntimeManifestDiagnostic" }, description: "Page- and primitive-level projection omissions. Emitted when projection dropped a field, primitive, or page; a healthy manifest omits this key. Compatibility rule 4: HTTP 200 with pages [] and a non-empty diagnostics array is a degraded projection — the player keeps last-known-good, shows the offline chip, and does not persist. HTTP 200 with pages [] and no diagnostics is an authored empty assignment — the player replaces last-known-good and shows no-content." }
     RuntimeManifestDiagnostic:
       type: object
@@ -7296,7 +7348,7 @@ components:
       description: One fail-safe runtime projection omission. Players and the CLI may show these; they are never authorization.
       properties:
         level: { type: string, description: "Always warning today. A reader treats a level it does not know as warning." }
-        code: { type: string, description: "Stable machine code such as unknown_field, unknown_enter_type, unknown_motion_type, unknown_transition_type, capability_issue, invalid_stagger, invalid_enter, invalid_motion, invalid_primitive, invalid_page, or invalid_visibility." }
+        code: { type: string, description: "Stable machine code such as unknown_field, unknown_enter_type, unknown_motion_type, unknown_transition_type, capability_issue, invalid_stagger, invalid_enter, invalid_motion, invalid_primitive, invalid_page, invalid_visibility, invalid_audio_track, or invalid_audio_cue." }
         pageId: { type: string }
         primitiveId: { type: string }
         detail: { type: string }
@@ -7310,6 +7362,7 @@ components:
         transition: { $ref: "#/components/schemas/RuntimeTransition" }
         advance: { $ref: "#/components/schemas/RuntimeAdvance" }
         visibility: { $ref: "#/components/schemas/PageVisibility", description: "Emitted only on pages that author a schedule. It is the identical snake_case object stored on the playlist page, deliberately outside contractVersion screenrig.canvas/v1." }
+        audioCue: { $ref: "#/components/schemas/RuntimeAudioCue" }
         primitives: { type: array, minItems: 1, maxItems: 24, items: { $ref: "#/components/schemas/RuntimePrimitive" }, description: Source array order is the deterministic tie-breaker for equal layers. }
     RuntimeCanvas:
       type: object
@@ -7498,6 +7551,47 @@ components:
         bytes: { type: integer, minimum: 1, maximum: 1073741824 }
         contentType: { type: string, enum: [video/mp4, video/webm] }
         codecs: { $ref: "#/components/schemas/RuntimeCodecs" }
+    RuntimeAudio:
+      type: object
+      required: [loop, volume, tracks]
+      description: >-
+        Playlist soundtrack (docs/playlist-audio.md). Emitted only when the
+        playlist has one and at least one track projected. The Player plays
+        tracks in order, independently of the page sequencer; page changes,
+        transitions and visibility never pause or restart it. Track identity is
+        id plus mediaId plus sha256, never src, so a manifest refresh that keeps
+        the playing track does not restart it. Effective gain is volume times
+        the Player volume. A defective track is dropped on its own
+        (invalid_audio_track).
+      properties:
+        loop: { type: boolean }
+        volume: { type: number, minimum: 0, maximum: 1 }
+        tracks: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/RuntimeAudioTrack" } }
+    RuntimeAudioTrack:
+      type: object
+      required: [id, mediaId, src, sha256, bytes, contentType, durationMs, grantId]
+      properties:
+        id: { type: string }
+        mediaId: { type: string }
+        src: { type: string, format: uri-reference, description: *manifest-bound-route }
+        sha256: { type: string, pattern: "^[a-f0-9]{64}$", description: Immutable content digest for integrity and native caching; not an authorization capability. }
+        bytes: { type: integer, minimum: 1, maximum: 209715200 }
+        contentType: { type: string, enum: [audio/mpeg] }
+        codecs: { type: string, enum: [mp3] }
+        durationMs: { type: integer, minimum: 1000, maximum: 14400000 }
+        grantId: { type: string }
+    RuntimeAudioCue:
+      type: object
+      required: [track, restart]
+      description: >-
+        Soundtrack hint emitted on a page that authored audio_cue. When the page
+        becomes current: if a different track is playing, or none, switch to
+        track from its start; if track is playing, restart it only when restart
+        is true. The sequence continues from track. A hint may be ignored. A cue
+        that names no manifest track is dropped (invalid_audio_cue).
+      properties:
+        track: { type: string }
+        restart: { type: boolean }
     RuntimeCodecs:
       type: string
       maxLength: 128
