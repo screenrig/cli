@@ -10,6 +10,10 @@ export interface TransportRequest {
   /** Read the response as bytes. Success bodies stay off `rawText`. */
   binary?: boolean;
   timeout_ms?: number;
+  /** download only: abort when no byte arrives for this long (headers included). */
+  idle_timeout_ms?: number;
+  /** download only: the operation named in transport errors (default "Media download"). */
+  label?: string;
   signal?: AbortSignal;
 }
 

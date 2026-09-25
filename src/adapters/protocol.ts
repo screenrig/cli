@@ -908,6 +908,26 @@ export interface FeedbackList {
   items: FeedbackSubmission[];
 }
 
+/**
+ * GET /api/v1/playback/plays JSON row. primitive_id and started_at are present
+ * only when the Player reported them.
+ */
+export interface PlaybackPlay {
+  media_id: string;
+  page_id: string;
+  playlist_id?: string;
+  primitive: "image" | "video";
+  primitive_id?: string;
+  received_at: string;
+  screen_id: string;
+  started_at?: string;
+}
+
+export interface PlaybackPlayList {
+  items: PlaybackPlay[];
+  next_cursor: string | null;
+}
+
 export const TEMPORARY_PROTOCOL_VERSION = "screenrig.cli.adapter/0";
 
 /** GET/PATCH /api/v1/webhooks/{id}. The signing secret is never part of this shape. */

@@ -2163,13 +2163,76 @@ paths:
   /api/v1/playback:
     get:
       operationId: listPlaybackAggregates
+      x-rate-limit-policies: [{ name: playback-export-project, quota: 30, windowSeconds: 60 }, { name: playback-export-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Daily playback aggregates. JSON returns at most 200 rows and is not
+        rate limited. format=csv (or Accept text/csv without
+        application/json) streams every matching row inside day_from to
+        day_to (inclusive UTC days; defaults day_to today and day_from 30
+        days earlier; at most 366 days, else invalid_request) as CSV with a
+        fixed header row (PlaybackAggregateCsv); only the CSV form spends
+        the playback-export-project (30 per minute) and playback-export-ip
+        (60 per minute) budgets. Either form is one metered API request.
+        Responses carry Vary Accept.
       security: [{ projectBearer: [] }]
       parameters:
         - { $ref: "#/components/parameters/PlaybackScreenID" }
         - { $ref: "#/components/parameters/PlaybackMediaID" }
         - { $ref: "#/components/parameters/PlaybackDay" }
+        - { $ref: "#/components/parameters/PlaybackDayFrom" }
+        - { $ref: "#/components/parameters/PlaybackDayTo" }
+        - { $ref: "#/components/parameters/PlaybackFormat" }
       responses:
-        "200": { description: "Daily playback aggregates for the calling project, images and videos alike. One row per screen, media, and UTC day. Newest days first. Identifiers filter the caller's own rows and are never a cross-project lookup.", content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackAggregateList" } } } }
+        "200": { description: "Daily playback aggregates for the calling project, images and videos alike. One row per screen, media, and UTC day. Newest days first. Identifiers filter the caller's own rows and are never a cross-project lookup.", headers: { Vary: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackAggregateList" } }, text/csv: { schema: { $ref: "#/components/schemas/PlaybackAggregateCsv" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/playback/plays:
+    get:
+      operationId: listPlaybackPlays
+      x-rate-limit-policies: [{ name: playback-export-project, quota: 30, windowSeconds: 60 }, { name: playback-export-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Per-play records: one row per accepted playback.media_started (or
+        legacy playback.video_started) of the calling project, oldest first
+        by received_at, ties by insertion. from (inclusive) and to
+        (exclusive) bound received_at; to defaults to now, from to 24 hours
+        before to, and the range is at most 31 days (invalid_request
+        otherwise). The newest 5 seconds are not returned yet: the
+        effective to is at most now minus 5 seconds (settle lag), so a
+        live tail never skips a row that commits behind its cursor. screen_id, media_id, and tag (a screen tag the screen
+        carried when the play was received) filter. JSON is a page of at
+        most limit rows (default 200, at most 1000) with next_cursor, null
+        at the end of the range; pass it back as cursor with the same
+        filters. A later page never repeats or skips a row that existed
+        when the earlier page was read. format=csv (or Accept text/csv
+        without application/json) streams every play from cursor to the
+        end of the range as CSV (PlaybackPlayCsv); limit is refused with
+        CSV. Metering is per request: every JSON page costs one API request
+        credit, while one CSV stream of the whole range costs one. Every
+        plays request (page or stream) spends the playback-export-project
+        (30 per minute) and playback-export-ip (60 per minute) budgets. A
+        stream bounds each write (15 seconds) and ends when the client
+        disconnects; if it fails after the 200 header the connection is
+        aborted, so an export that reads to a clean end is complete.
+        Responses carry Vary Accept. Plays are kept for the plan's event
+        retention, at least 30 days.
+      security: [{ projectBearer: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/PlaysFrom" }
+        - { $ref: "#/components/parameters/PlaysTo" }
+        - { $ref: "#/components/parameters/PlaybackScreenID" }
+        - { $ref: "#/components/parameters/PlaybackMediaID" }
+        - { $ref: "#/components/parameters/PlaysTag" }
+        - { $ref: "#/components/parameters/PlaysCursor" }
+        - { $ref: "#/components/parameters/PlaysLimit" }
+        - { $ref: "#/components/parameters/PlaybackFormat" }
+      responses:
+        "200": { description: "A page of plays, or the CSV stream.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Vary: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackPlayList" } }, text/csv: { schema: { $ref: "#/components/schemas/PlaybackPlayCsv" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/applications/{application_id}/kv:
     get:
@@ -2875,7 +2938,7 @@ paths:
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeReport" } } } }
       responses:
-        "202": { description: Accepted. manifest.activated is committed before this response and is idempotent for the current active revision. playback.media_started upserts the daily aggregate for an image or video start before this response; playback.video_started reports a video start using the same aggregation. playback.page_failed replaces the screen's latest page-failure slot and appends a project-only durable event in the same transaction without changing screen or manifest revision. application.event appends a durable project event before this response., headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
+        "202": { description: Accepted. manifest.activated is committed before this response and is idempotent for the current active revision. playback.media_started upserts the daily aggregate for an image or video start and stores one per-play record (GET /api/v1/playback/plays) in the same transaction before this response; playback.video_started reports a video start using the same aggregation and play record. playback.page_failed replaces the screen's latest page-failure slot and appends a project-only durable event in the same transaction without changing screen or manifest revision. application.event appends a durable project event before this response., headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/screenshot:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -4608,14 +4671,52 @@ paths:
         Daily playback aggregates for the session's project. One row per
         screen, media, and UTC day, newest days first. Identifiers filter the
         session project's own rows and are never a cross-project lookup.
+        format=csv streams every matching row inside day_from to day_to
+        (default the last 31 days, at most 366), as GET /api/v1/playback;
+        only the CSV form spends the playback-export budgets.
+      x-rate-limit-policies: [{ name: playback-export-project, quota: 30, windowSeconds: 60 }, { name: playback-export-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ dashboardSession: [] }]
       parameters:
         - { $ref: "#/components/parameters/PlaybackScreenID" }
         - { $ref: "#/components/parameters/PlaybackMediaID" }
         - { $ref: "#/components/parameters/PlaybackDay" }
+        - { $ref: "#/components/parameters/PlaybackDayFrom" }
+        - { $ref: "#/components/parameters/PlaybackDayTo" }
+        - { $ref: "#/components/parameters/PlaybackFormat" }
       responses:
-        "200": { description: Daily playback aggregates for the session's project., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackAggregateList" } } } }
+        "200": { description: Daily playback aggregates for the session's project., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, Vary: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackAggregateList" } }, text/csv: { schema: { $ref: "#/components/schemas/PlaybackAggregateCsv" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/playback/plays:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
+    get:
+      operationId: listDashboardPlaybackPlays
+      x-rate-limit-policies: [{ name: playback-export-project, quota: 30, windowSeconds: 60 }, { name: playback-export-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        The dashboard twin of GET /api/v1/playback/plays for the session's
+        project: the same filters, range bound and settle lag, cursor, JSON
+        page, CSV stream (the export button), abort on a mid-stream
+        failure, and playback-export budgets. Dashboard reads are not
+        metered.
+      security: [{ dashboardSession: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/PlaysFrom" }
+        - { $ref: "#/components/parameters/PlaysTo" }
+        - { $ref: "#/components/parameters/PlaybackScreenID" }
+        - { $ref: "#/components/parameters/PlaybackMediaID" }
+        - { $ref: "#/components/parameters/PlaysTag" }
+        - { $ref: "#/components/parameters/PlaysCursor" }
+        - { $ref: "#/components/parameters/PlaysLimit" }
+        - { $ref: "#/components/parameters/PlaybackFormat" }
+      responses:
+        "200": { description: "A page of plays, or the CSV stream.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, Vary: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackPlayList" } }, text/csv: { schema: { $ref: "#/components/schemas/PlaybackPlayCsv" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
 components:
   headers:
@@ -4685,6 +4786,14 @@ components:
     MediaTagQuery: { name: tag, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, description: Exact media tag. Untagged objects are omitted when this filter is present. }
     MediaPrimitiveQuery: { name: primitive, in: query, required: false, schema: { type: string, enum: [image, video, audio] } }
     PlaybackDay: { name: day, in: query, required: false, schema: { type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, description: UTC calendar day of the aggregate. }
+    PlaybackDayFrom: { name: day_from, in: query, required: false, schema: { type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, description: "First UTC day, inclusive. Excludes day. With day_to spans at most 366 days. CSV defaults it to 30 days before day_to." }
+    PlaybackDayTo: { name: day_to, in: query, required: false, schema: { type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, description: "Last UTC day, inclusive. Excludes day. CSV defaults it to today (UTC)." }
+    PlaybackFormat: { name: format, in: query, required: false, schema: { type: string, enum: [json, csv] }, description: "json (default) or csv. Omitted, an Accept header naming text/csv but not application/json selects csv." }
+    PlaysFrom: { name: from, in: query, required: false, schema: { type: string, format: date-time }, description: "Inclusive lower bound on received_at. Defaults to 24 hours before to." }
+    PlaysTo: { name: to, in: query, required: false, schema: { type: string, format: date-time }, description: "Exclusive upper bound on received_at. Defaults to now. to - from is at most 31 days." }
+    PlaysTag: { name: tag, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, description: A screen tag the screen carried when the play was received. }
+    PlaysCursor: { name: cursor, in: query, required: false, schema: { type: string, pattern: "^pc_" }, description: "next_cursor of the previous page, with the same filters. Opaque." }
+    PlaysLimit: { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }, description: JSON page size. Refused with CSV. }
     LastEventID: { name: Last-Event-ID, in: header, required: false, schema: { type: string }, description: Durable cursor used when after is absent. }
     Range: { name: Range, in: header, required: false, schema: { type: string, pattern: "^bytes=[0-9]*-[0-9]*$" }, description: V1 accepts one byte range only. }
     ScreenshotCaptureID: { name: capture_id, in: query, required: false, schema: { $ref: "#/components/schemas/ScreenshotCaptureID" } }
@@ -7599,6 +7708,54 @@ components:
         first_started_at: { type: string, format: date-time }
         last_started_at: { type: string, format: date-time }
     PlaybackAggregateList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/PlaybackAggregate" } } } }
+    PlaybackAggregateCsv:
+      type: string
+      description: >-
+        RFC 4180 CSV, CRLF records, UTF-8, with the header row
+        screen_id,media_id,filename,primitive,day,play_count,last_page_id,last_manifest_revision,first_started_at,last_started_at.
+        Times are RFC 3339 UTC. A cell beginning with =, +, -, @, tab, or
+        carriage return is prefixed with a single quote so spreadsheets do
+        not evaluate it. Content-Disposition names playback-aggregates.csv.
+        A stream that fails after the header is aborted at the connection.
+    PlaybackPlay:
+      type: object
+      additionalProperties: false
+      required: [screen_id, page_id, media_id, primitive, received_at]
+      description: >-
+        One visible start of an image or video. playlist_id is the playlist
+        of the granted manifest revision the page came from (the effective
+        playlist at play time). primitive is server-resolved from the ready
+        media. primitive_id and started_at are present only when the Player
+        reported them; started_at is player time clamped to [received_at -
+        24h, received_at + 5m].
+      properties:
+        screen_id: { type: string }
+        playlist_id: { type: string }
+        page_id: { type: string }
+        primitive_id: { type: string }
+        media_id: { type: string }
+        primitive: { type: string, enum: [image, video] }
+        started_at: { type: string, format: date-time }
+        received_at: { type: string, format: date-time }
+    PlaybackPlayList:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/PlaybackPlay" } }
+        next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: Pass back as cursor for the next page; null at the end of the range. }
+    PlaybackPlayCsv:
+      type: string
+      description: >-
+        RFC 4180 CSV, CRLF records, UTF-8, with the header row
+        screen_id,playlist_id,page_id,primitive_id,media_id,primitive,started_at,received_at
+        in that fixed order; an absent value is an empty cell. Times are RFC
+        3339 UTC. A cell beginning with =, +, -, @, tab, or carriage return
+        is prefixed with a single quote. Content-Disposition names
+        playback-plays.csv. A complete export ends after its last CRLF
+        record with no trailer; a stream that fails after the header is
+        aborted at the connection (the client sees a transport error,
+        never a clean end), so retry from the last received_at.
     KVWrite: { type: object, additionalProperties: false, required: [value_base64], properties: { value_base64: { type: string, contentEncoding: base64, maxLength: 1398104 }, content_type: { type: string, minLength: 1, maxLength: 127, default: application/octet-stream } } }
     KVEntry: { type: object, additionalProperties: false, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, value_base64: { type: string, contentEncoding: base64 }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer } } }
     KVSummary: { type: object, additionalProperties: false, required: [application_id, key, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string }, updated_at: { type: string } } }
@@ -8381,7 +8538,7 @@ components:
     ManifestActivatedReport: { type: object, additionalProperties: true, required: [severity, code, context], properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [manifest.activated] }, context: { $ref: "#/components/schemas/ManifestActivatedContext" } } }
     ManifestActivatedContext: { type: object, additionalProperties: true, required: [manifest_revision], properties: { manifest_revision: { type: string, pattern: "^man_" } } }
     PlaybackMediaStartedReport: { type: object, additionalProperties: true, required: [severity, code, context], description: "One visible start of an image or video primitive on a page. Players send this once per page appearance of the media, for images exactly as for videos; loops inside one appearance are not restarts. The media must be on the session screen's grant at the reported manifest revision, and context.primitive must match the ready media's primitive or the report is rejected. Upserts the daily PlaybackAggregate for the screen, media, and UTC day.", properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [playback.media_started] }, context: { $ref: "#/components/schemas/PlaybackMediaStartedContext" } } }
-    PlaybackMediaStartedContext: { type: object, additionalProperties: true, required: [media_id, manifest_revision, page_id, primitive], properties: { media_id: { type: string, pattern: "^med_" }, manifest_revision: { type: string, pattern: "^man_" }, page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [image, video], description: The primitive kind of the media that started. Must match the ready media. } } }
+    PlaybackMediaStartedContext: { type: object, additionalProperties: true, required: [media_id, manifest_revision, page_id, primitive], properties: { media_id: { type: string, pattern: "^med_" }, manifest_revision: { type: string, pattern: "^man_" }, page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [image, video], description: The primitive kind of the media that started. Must match the ready media. }, primitive_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$", description: "Optional. The page primitive that started, stored on the play record. A malformed value is ignored, not refused." }, started_at: { type: string, format: date-time, description: "Optional. Player-clock instant the media became visible, stored on the play record clamped to [received_at - 24h, received_at + 5m]. A malformed value is ignored, not refused." }, play_id: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$", description: "Optional idempotency key for this start (a UUID or ULID). A repeated (screen, play_id) is accepted with 202 and stores and counts nothing, so a retried report never double-counts. Reports without it are never deduplicated. A malformed value is ignored, not refused." } } }
     PlaybackVideoStartedReport: { type: object, additionalProperties: true, required: [severity, code, context], description: "Report one visible video start. This uses the same daily aggregation as playback.media_started with primitive video. Send one report per start; sending both event types counts the start twice. Use playback.media_started when reporting both images and videos.", properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [playback.video_started] }, context: { $ref: "#/components/schemas/PlaybackVideoStartedContext" } } }
     PlaybackVideoStartedContext: { type: object, additionalProperties: true, required: [media_id, manifest_revision, page_id], properties: { media_id: { type: string, pattern: "^med_" }, manifest_revision: { type: string, pattern: "^man_" }, page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" } } }
     PlaybackPageFailedReport:

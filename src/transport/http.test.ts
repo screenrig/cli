@@ -234,3 +234,24 @@ test("download cancellation does not replace the consumer's original error", asy
   }, /consumer failed/);
   assert.equal(response.body?.locked, false);
 });
+
+test("idle_timeout_ms fails a stalled download but not a slow one that keeps making progress", async () => {
+  let push: ((chunk: Uint8Array) => void) | undefined;
+  const response = new Response(new ReadableStream<Uint8Array>({ start(controller) { push = (chunk) => controller.enqueue(chunk); } }));
+  const transport = new FetchTransport("https://api.screenrig.ai", undefined, async (_url, init) => {
+    init?.signal?.addEventListener("abort", () => undefined);
+    return response;
+  });
+  const result = await transport.download({ method: "GET", path: "/plays", timeout_ms: 0, idle_timeout_ms: 40, label: "Playback export" });
+  const received: number[] = [];
+  const reading = (async () => {
+    for await (const chunk of result.body!) received.push(chunk.byteLength);
+  })();
+  // Three chunks 25 ms apart: 75 ms in total, longer than the idle limit, never idle for 40 ms.
+  for (let index = 0; index < 3; index += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    push!(Uint8Array.from([index]));
+  }
+  await assert.rejects(reading, (error: unknown) => error instanceof CliError && /Playback export timed out/.test(error.message));
+  assert.deepEqual(received, [1, 1, 1]);
+});

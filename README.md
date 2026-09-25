@@ -493,6 +493,66 @@ function verify(rawBody, signatureHeader, secret, toleranceSeconds = 300) {
 }
 ```
 
+## Playback export
+
+`playback plays` reads one row per visible start of an image or video,
+oldest first by `received_at`. `playback list` reads the daily aggregates
+(one row per screen, media, and UTC day).
+
+```sh
+screenrig playback plays [--from TIME] [--to TIME] [--screen-id ID] [--media-id ID] [--tag TAG] [--cursor CURSOR] [--limit N] [--all]
+screenrig playback plays --format csv [--output FILE] [--from TIME] [--to TIME] [--screen-id ID] [--media-id ID] [--tag TAG]
+screenrig playback list [--screen-id ID] [--media-id ID] [--day YYYY-MM-DD | --day-from YYYY-MM-DD --day-to YYYY-MM-DD] [--format csv] [--output FILE]
+```
+
+`--from` (inclusive) and `--to` (exclusive) bound `received_at`. Each takes an
+RFC 3339 instant with seconds and an offset (`2026-09-01T00:00:00Z`,
+`2026-09-01T00:00:00-07:00`), `now`, or an age before now (`7d`, `12h`, `30m`).
+The CLI normalizes both to UTC, defaults to the 24 hours up to now, refuses a
+range longer than 31 days, and sends the resolved bounds (echoed as `data.from`
+and `data.to`) on every request. `--tag` matches a tag the screen carried when
+the play was received. The newest 5 seconds are held back until they settle,
+so a play appears about 5 seconds after it is received; `data.to` reports that
+effective end (at most 5 seconds before now), and `data.next` keeps it.
+
+JSON returns one page in `data.items` (server default 200 rows, `--limit` up
+to 1000) with `data.next_cursor`. Pass it back with `--cursor` and the same
+filters; `data.next.argv` is that exact command. `--all` follows the cursor to
+the end of the range, 1000 rows per page unless `--limit` says otherwise, for
+at most 50 pages. It stops early, with `data.next` and a warning, at the page
+cap (`playback_plays_truncated`) or when the playback export budget is spent
+(`playback_export_rate_limited`), rather than spending requests into a refusal.
+
+`--format csv` streams the whole range as RFC 4180 CSV with a fixed header
+row. The CLI writes it to `--output FILE` (default `./playback-plays.csv`, or
+`./playback-aggregates.csv` for `playback list`) through a private temporary
+file in the same directory, and replaces an existing `FILE` only after the
+stream ends cleanly. `--timeout` is the no-progress limit for the stream
+(default 60000 ms without a byte), not a limit on its total duration. The envelope reports
+`path`, `bytes`, `rows`, `sha256`, and, for plays, `last_received_at`; the CSV
+itself never enters the envelope. `--output -` writes only the CSV to stdout.
+`primitive_id` and `started_at` cells are empty unless the Player reported
+them. A cell that begins with `=`, `+`, `-`, `@`, tab, or carriage return
+carries a leading `'` so spreadsheets do not evaluate it.
+
+If a stream fails partway, the command exits non-zero and never writes the
+target file. For plays, the complete rows already received stay in
+`FILE.partial` (`FILE.partial-2` and so on if that exists), and `error.next`
+exports the rest of the range from the last `received_at` into an unused
+`FILE-rest.csv`; rows received at that exact instant appear in
+both, so drop the repeats when joining them. A failed aggregates export keeps
+nothing; rerun it.
+
+`playback list` takes `--day` for one UTC day, or `--day-from` and `--day-to`
+for an inclusive range of at most 366 days. With `--format csv` and no range it
+exports the 31 days up to today.
+
+Billing and limits: each JSON page is one billed API request, so `--all` bills
+one request per page. A CSV export is one billed request for the whole range.
+Every plays request and every CSV export also spends the playback export budget
+of 30 requests per minute per project; past it the answer is `rate_limited`
+(exit 7) with `retry_after_seconds`.
+
 ## Storage report
 
 A native player reports its content-cache storage to the server, and

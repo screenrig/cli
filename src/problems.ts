@@ -265,6 +265,23 @@ export function configError(detail: string, next?: ProblemNext): CliError {
   );
 }
 
+/** A local output file could not be written (ENOSPC, EACCES, ...). */
+export function fileError(detail: string, error?: unknown): CliError {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return new CliError(
+    makeProblem("file_error", "Cannot write the output file", 500, code ? `${detail} (${code})` : detail),
+    ExitCode.Unexpected,
+  );
+}
+
+/** A 2xx that is not the representation the contract names (a proxy page, JSON for CSV). */
+export function unexpectedResponseError(detail: string, request_id?: string): CliError {
+  return new CliError(
+    makeProblem("unexpected_response", "Unexpected response", 502, detail, { request_id }),
+    ExitCode.Unexpected,
+  );
+}
+
 export function networkError(detail: string, request_id?: string): CliError {
   return new CliError(
     makeProblem("transport_error", "Network error", 503, detail, { request_id }),

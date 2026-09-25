@@ -67,6 +67,8 @@ export class FakeTransport implements Transport {
   afterStreamChunks?: (req: TransportRequest) => Promise<void>;
   /** Repeating stream hook. Takes precedence over the one-shot queue. */
   streamHandler?: (req: TransportRequest) => Promise<TransportStream>;
+  /** memoryBackend hook: remaining playback-export requests before 429. */
+  setPlaybackExportBudget?: (value: number) => void;
   /** Test hook: merged onto every `request` response (not SSE stream frames). */
   extraResponseHeaders?: Record<string, string>;
 
@@ -488,6 +490,11 @@ export function memoryBackend(options: { now?: () => Date } = {}): FakeTransport
     status: 202, headers: privateHeaders, body: { status: "accepted" },
   }));
 
+  const aggregateMatches = (item: { screen_id: string; media_id: string; day: string }, req: TransportRequest) => {
+    const q = req.query ?? {};
+    return (!q.screen_id || item.screen_id === q.screen_id) && (!q.media_id || item.media_id === q.media_id)
+      && (!q.day || item.day === q.day) && (!q.day_from || item.day >= q.day_from) && (!q.day_to || item.day <= q.day_to);
+  };
   const playbackItems = [
     {
       screen_id: "scr_PAIRINGAAAAAAAAAAAAAAAA",
@@ -503,21 +510,127 @@ export function memoryBackend(options: { now?: () => Date } = {}): FakeTransport
     },
   ];
   transport.on("GET", "/api/v1/playback", (req) => {
-    const screenId = req.query?.screen_id;
-    const mediaId = req.query?.media_id;
-    const day = req.query?.day;
-    const items = playbackItems.filter((item) => {
-      if (screenId && item.screen_id !== screenId) return false;
-      if (mediaId && item.media_id !== mediaId) return false;
-      if (day && item.day !== day) return false;
-      return true;
-    });
+    if (req.query?.format === "csv") return aggregatesCsv(req);
+    if (req.query?.day && (req.query.day_from || req.query.day_to)) return playbackInvalid(req, "day excludes day_from and day_to");
+    const items = playbackItems.filter((item) => aggregateMatches(item, req));
     return {
       status: 200,
       headers: { "x-request-id": req.headers?.["x-request-id"] ?? "req_playback" },
       body: { items },
     };
   });
+
+  // Per-play records (GET /api/v1/playback/plays): received_at window, filters,
+  // pc_<offset> cursors, and the fixed-header CSV stream.
+  const playItems = [0, 1, 2, 3, 4].map((index) => ({
+    screen_id: index === 3 ? "scr_LOBBYBBBBBBBBBBBBBBBBBB" : "scr_PAIRINGAAAAAAAAAAAAAAAA",
+    playlist_id: "pl_AAAAAAAAAAAAAAAAAAAAAAAA",
+    page_id: index % 2 === 0 ? "clip" : "poster",
+    media_id: index % 2 === 0 ? "med_AAAAAAAAAAAAAAAAAAAAAAAA" : "med_BBBBBBBBBBBBBBBBBBBBBBBB",
+    primitive: index % 2 === 0 ? "video" : "image",
+    ...(index === 4 ? { primitive_id: "=hero", started_at: "2026-08-14T16:39:59Z" } : {}),
+    received_at: `2026-08-14T16:${String(index * 10).padStart(2, "0")}:00Z`,
+    screen_tags: index === 3 ? ["Lobby"] : [],
+  }));
+  const csvCell = (value: unknown): string => {
+    let text = value === undefined || value === null ? "" : String(value);
+    if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+    return /[",\r\n]/.test(text) ? `"${text.replaceAll("\"", "\"\"")}"` : text;
+  };
+  const csvBody = (columns: string[], rows: Array<Record<string, unknown>>): string =>
+    [columns.join(","), ...rows.map((row) => columns.map((column) => csvCell(row[column])).join(","))].map((line) => `${line}\r\n`).join("");
+  // playback-export-project: 30 per window (the fake window never resets).
+  let exportBudget = 30;
+  const spendExport = (req: TransportRequest): TransportResponse | Record<string, string> => {
+    if (exportBudget === 0) {
+      return {
+        status: 429,
+        headers: { "content-type": "application/problem+json", "retry-after": "42", ratelimit: '"playback-export-project";r=0;t=42' },
+        body: { type: "https://screenrig.ai/problems/rate_limited", title: "Too many requests", status: 429, detail: "The playback export budget is spent.", code: "rate_limited" },
+      };
+    }
+    exportBudget -= 1;
+    return { ratelimit: `"playback-export-project";r=${exportBudget};t=60, "playback-export-ip";r=${exportBudget + 30};t=60`, "x-request-id": req.headers?.["x-request-id"] ?? "req_playback" };
+  };
+  transport.setPlaybackExportBudget = (value: number) => { exportBudget = value; };
+  const csvHeaders = (req: TransportRequest, filename: string) => ({
+    "content-type": "text/csv; charset=utf-8; header=present",
+    "content-disposition": `attachment; filename="${filename}"`,
+    "cache-control": "no-store",
+    "x-request-id": req.headers?.["x-request-id"] ?? "req_playback",
+  });
+  const playbackInvalid = (req: TransportRequest, detail: string): TransportResponse => ({
+    status: 400,
+    headers: { "content-type": "application/problem+json", "x-request-id": req.headers?.["x-request-id"] ?? "req_playback" },
+    body: { type: "https://screenrig.ai/problems/invalid_request", title: "Invalid request", status: 400, detail, code: "invalid_request" },
+  });
+  const wantsCsv = (req: TransportRequest) => req.query?.format === "csv";
+  const playsSelection = (req: TransportRequest): TransportResponse | { rows: typeof playItems; start: number } => {
+    const q = req.query ?? {};
+    const to = q.to ? Date.parse(q.to) : clock().getTime();
+    const from = q.from ? Date.parse(q.from) : to - 86_400_000;
+    if (!Number.isFinite(to) || !Number.isFinite(from)) return playbackInvalid(req, "from must be an RFC 3339 date-time");
+    if (from >= to) return playbackInvalid(req, "from must be before to");
+    if (to - from > 31 * 86_400_000) return playbackInvalid(req, "the range from to to must be at most 31 days");
+    if (q.limit !== undefined && wantsCsv(req)) return playbackInvalid(req, "limit is not allowed with CSV; the export streams the whole range");
+    if (q.cursor !== undefined && !/^pc_\d+$/.test(q.cursor)) return playbackInvalid(req, "cursor is not a plays cursor");
+    const rows = playItems.filter((item) => {
+      const at = Date.parse(item.received_at);
+      return at >= from && at < to
+        && (!q.screen_id || item.screen_id === q.screen_id)
+        && (!q.media_id || item.media_id === q.media_id)
+        && (!q.tag || item.screen_tags.includes(q.tag));
+    });
+    return { rows, start: q.cursor ? Number(q.cursor.slice(3)) : 0 };
+  };
+  const PLAY_COLUMNS = ["screen_id", "playlist_id", "page_id", "primitive_id", "media_id", "primitive", "started_at", "received_at"];
+  const AGGREGATE_COLUMNS = ["screen_id", "media_id", "filename", "primitive", "day", "play_count", "last_page_id", "last_manifest_revision", "first_started_at", "last_started_at"];
+  const playsCsv = (req: TransportRequest): TransportResponse => {
+    const selected = playsSelection(req);
+    if ("status" in selected) return selected;
+    const budget = spendExport(req);
+    if ("status" in budget) return budget as TransportResponse;
+    return { status: 200, headers: { ...csvHeaders(req, "playback-plays.csv"), ...budget }, body: csvBody(PLAY_COLUMNS, selected.rows.slice(selected.start)) };
+  };
+  const bytesOf = (response: TransportResponse) => {
+    const bytes = new TextEncoder().encode(String(response.body));
+    return {
+      async *[Symbol.asyncIterator]() {
+        // Split so record boundaries fall inside chunks.
+        for (let offset = 0; offset < bytes.byteLength; offset += 7) yield bytes.subarray(offset, offset + 7);
+      },
+    };
+  };
+  const asDownload = (response: TransportResponse): TransportDownloadResponse => response.status >= 400
+    ? { status: response.status, headers: response.headers, problem: response.body }
+    : { status: response.status, headers: response.headers, body: bytesOf(response) };
+  transport.on("GET", "/api/v1/playback/plays", (req) => {
+    if (wantsCsv(req)) return playsCsv(req);
+    const selected = playsSelection(req);
+    if ("status" in selected) return selected;
+    const limit = req.query?.limit === undefined ? 200 : Number(req.query.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) return playbackInvalid(req, "limit must be between 1 and 1000");
+    const budget = spendExport(req);
+    if ("status" in budget) return budget as TransportResponse;
+    const items = selected.rows.slice(selected.start, selected.start + limit).map(({ screen_tags: _tags, ...play }) => play);
+    const end = selected.start + items.length;
+    return {
+      status: 200,
+      headers: { "cache-control": "no-store", ...budget },
+      body: { items, next_cursor: end < selected.rows.length ? `pc_${end}` : null },
+    };
+  });
+  transport.onDownload("GET", "/api/v1/playback/plays", (req) => asDownload(playsCsv(req)));
+  const aggregatesCsv = (req: TransportRequest): TransportResponse => {
+    const budget = spendExport(req);
+    if ("status" in budget) return budget as TransportResponse;
+    return {
+      status: 200,
+      headers: { ...csvHeaders(req, "playback-aggregates.csv"), ...budget },
+      body: csvBody(AGGREGATE_COLUMNS, playbackItems.filter((item) => aggregateMatches(item, req))),
+    };
+  };
+  transport.onDownload("GET", "/api/v1/playback", (req) => asDownload(aggregatesCsv(req)));
 
   transport.on("GET", /^\/api\/v1\/operations\/[^/]+$/, (req) => {
     const id = req.path.split("/").pop() ?? "op_unknown";

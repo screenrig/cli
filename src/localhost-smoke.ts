@@ -65,7 +65,8 @@ async function main(): Promise<void> {
       response.body = { ...(response.body as Record<string, unknown>), upload_url: `${apiUrl}/signed-upload` };
     }
     res.writeHead(response.status, { "content-type": response.body === undefined ? "text/plain" : "application/json", ...response.headers });
-    res.end(response.body === undefined ? "" : JSON.stringify(response.body));
+    const csv = (response.headers["content-type"] ?? "").startsWith("text/csv");
+    res.end(response.body === undefined ? "" : csv ? String(response.body) : JSON.stringify(response.body));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -272,6 +273,26 @@ async function main(): Promise<void> {
     await run("media", "list", "--tag", "lobby", "--primitive", "image");
     await run("media", "update", mediaId, "--tag", "lobby2", "--expect-rev", "1");
     await run("playback", "list", "--screen-id", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--day", "2026-08-14");
+    const aggregatesPath = path.join(temp, "aggregates.csv");
+    const aggregates = await run("playback", "list", "--format", "csv", "--output", aggregatesPath);
+    assert.equal((aggregates.data as { rows?: number }).rows, 1);
+    assert.match(await readFile(aggregatesPath, "utf8"), /^screen_id,media_id,filename,/);
+    const playsPage = await run("playback", "plays", "--from", "2026-08-14T00:00:00Z", "--to", "2026-08-15T00:00:00Z", "--limit", "2");
+    const playsData = playsPage.data as { items?: unknown[]; next_cursor?: string | null };
+    assert.equal(playsData.items?.length, 2);
+    assert.match(String(playsData.next_cursor), /^pc_/);
+    const allPlays = await run("playback", "plays", "--from", "2026-08-14T00:00:00Z", "--to", "2026-08-15T00:00:00Z", "--all");
+    assert.equal((allPlays.data as { items?: unknown[] }).items?.length, 5);
+    const playsPath = path.join(temp, "plays.csv");
+    const playsCsv = await run("playback", "plays", "--from", "2026-08-14T00:00:00Z", "--to", "2026-08-15T00:00:00Z", "--tag", "Lobby", "--format", "csv", "--output", playsPath);
+    const playsCsvData = playsCsv.data as { rows?: number; sha256?: string; path?: string };
+    assert.equal(playsCsvData.rows, 1);
+    assert.equal(playsCsvData.path, playsPath);
+    assert.match(String(playsCsvData.sha256), /^[a-f0-9]{64}$/);
+    assert.match(await readFile(playsPath, "utf8"), /^screen_id,playlist_id,page_id,primitive_id,media_id,primitive,started_at,received_at\r\n/);
+    const playsStdout = await invoke(["playback", "plays", "--from", "2026-08-14T00:00:00Z", "--to", "2026-08-15T00:00:00Z", "--format", "csv", "--output", "-"]);
+    assert.equal(playsStdout.code, 0, playsStdout.stderr);
+    assert.equal(playsStdout.stdout.split("\r\n").filter(Boolean).length, 6, "--output - writes only the CSV to stdout");
     await run("kv", "set", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", "{\"message\":\"hello\"}");
     await run("kv", "get", "greeting", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA");
     await run("kv", "list", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA");

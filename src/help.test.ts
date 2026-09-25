@@ -145,6 +145,7 @@ test("root help is compact and every command is discoverable through immediate c
     "events list",
     "events follow",
     "playback list",
+    "playback plays",
     "feedback bug",
     "feedback feature",
     "feedback list",
