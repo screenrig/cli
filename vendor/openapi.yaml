@@ -3027,6 +3027,45 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/health:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    put:
+      operationId: putRuntimeHealth
+      x-rate-limit-policies: [{ name: runtime-health, quota: 1, windowSeconds: 60 }, { name: runtime-health-ip, quota: 600, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Reports device health for the paired session's screen. Send one on
+        session start and every five minutes. Every member is optional and
+        the body is read tolerantly (docs/player-compatibility.md §1.1):
+        unknown members are ignored, a value out of range is dropped, and
+        an unknown display.power or network.kind reads as unknown; only a
+        member of the wrong JSON type is 400 (a number beyond float64
+        range is out of range: that member is dropped). The stored value is the
+        sanitized ScreenHealth plus server reported_at, replacing the
+        previous report. At most one report per screen per minute
+        (runtime-health): a 429 means drop this report and send the next
+        one on schedule, never retry sooner than Retry-After (at least 1
+        second). A 400 or a server error does not spend the minute; all
+        sessions of one screen share it. Requires a
+        paired session holding health.write (a paired session minted
+        before health.write existed is admitted by runtime.report);
+        unpaired and anonymous sessions are forbidden and an archived
+        screen answers 409 screen_archived. A report from a session
+        older than the screen's current content access generation is
+        refused 401. Archive and screen recovery clear Screen.health. A backend without this route
+        answers 404: keep playing and stop reporting health for that
+        session. Transitions append the project-only screen.health_changed
+        (never on GET /runtime/v1/events). Health is never authorization.
+      security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeHealthWrite" } } } }
+      responses:
+        "204": { description: Health report stored., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/storage:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     put:
@@ -6962,6 +7001,7 @@ components:
         playlist_schedule: { $ref: "#/components/schemas/ScreenPlaylistSchedule" }
         takeover: { $ref: "#/components/schemas/ScreenTakeover" }
         effective_playlist: { $ref: "#/components/schemas/ScreenEffectivePlaylist" }
+        health: { $ref: "#/components/schemas/ScreenHealth" }
         timezone: { type: string, description: "IANA time zone identifier. Absent until it is set. Page visibility rules are evaluated in this zone." }
         tags: { $ref: "#/components/schemas/ScreenTags" }
         observation: { $ref: "#/components/schemas/ScreenObservation" }
@@ -8227,7 +8267,7 @@ components:
       description: Runtime-owned session (docs/player-compatibility.md §8). Readers ignore unknown members and unknown capabilities values. A new member is sent only to sessions whose grants cover it.
       properties:
         paired: { type: boolean }
-        capabilities: { type: array, items: { type: string }, description: "Session scopes. Known values: manifest.read, events.read, content.read, kv.read, kv.write, runtime.report, presence.write." }
+        capabilities: { type: array, items: { type: string }, description: "Session scopes. Known values: manifest.read, events.read, content.read, kv.read, kv.write, runtime.report, presence.write, health.write (paired sessions; PUT /runtime/v1/health)." }
         event_cursor: { type: string }
         public_url: { type: string, format: uri }
         playback: { $ref: "#/components/schemas/PlaybackGrant" }
@@ -8241,7 +8281,7 @@ components:
       description: Runtime-owned native session (docs/player-compatibility.md §8). Readers ignore unknown members and unknown capabilities values. A new member is sent only to sessions whose grants cover it.
       properties:
         paired: { type: boolean, enum: [true] }
-        capabilities: { type: array, items: { type: string }, description: "Session scopes. Known values: manifest.read, events.read, content.read, kv.read, kv.write, runtime.report, presence.write." }
+        capabilities: { type: array, items: { type: string }, description: "Session scopes. Known values: manifest.read, events.read, content.read, kv.read, kv.write, runtime.report, presence.write, health.write (paired sessions; PUT /runtime/v1/health)." }
         event_cursor: { type: string }
         public_url: { type: string, format: uri }
         runtime_credential: { type: string, pattern: "^srs_[A-Za-z0-9_-]+$" }
@@ -8685,6 +8725,89 @@ components:
         screens: { $ref: "#/components/schemas/DashboardScreenSummary" }
         media: { $ref: "#/components/schemas/DashboardMediaSummary" }
         applications: { $ref: "#/components/schemas/DashboardApplicationSummary" }
+        health: { $ref: "#/components/schemas/DashboardHealthSummary" }
+    DashboardHealthSummary:
+      type: object
+      additionalProperties: false
+      required: [display_disconnected, hot, crashing, stale]
+      description: >-
+        Active screens with a health report, counted by condition; a screen
+        can count in several. display_disconnected, hot, and crashing count
+        only online screens whose latest report is current (not stale);
+        stale counts online screens whose report is older than 15 minutes
+        and nothing else.
+      properties:
+        display_disconnected: { type: integer, minimum: 0, description: Latest report says display.connected false. }
+        hot: { type: integer, minimum: 0, description: "Temperature reached 80 °C and has not yet fallen below 75 °C." }
+        crashing: { type: integer, minimum: 0, description: "Absolute: the latest current report has crashes_24h of at least 3, however it got there (not the crash_spike transition)." }
+        stale: { type: integer, minimum: 0, description: Online screens whose latest report is older than 15 minutes. }
+    RuntimeHealthWrite:
+      type: object
+      additionalProperties: true
+      description: >-
+        The PUT /runtime/v1/health body. Every member is optional; send
+        what the platform can measure. Unknown members are ignored and a
+        value out of range is dropped (not refused). Integers are whole
+        JSON numbers.
+      properties:
+        uptime_s: { type: integer, minimum: 0, description: Seconds since the device (OS) booted. }
+        app_uptime_s: { type: integer, minimum: 0, description: Seconds since the Player process started. }
+        memory:
+          type: object
+          additionalProperties: true
+          properties:
+            used_bytes: { type: integer, minimum: 0 }
+            total_bytes: { type: integer, minimum: 1 }
+        cpu:
+          type: object
+          additionalProperties: true
+          properties:
+            load_1m: { type: number, minimum: 0, description: One-minute load average. }
+            cores: { type: integer, minimum: 1, maximum: 4096 }
+        temperature_c: { type: number, minimum: -50, maximum: 150, description: SoC or panel temperature in degrees Celsius. }
+        display:
+          type: object
+          additionalProperties: true
+          properties:
+            connected: { type: boolean, description: Whether a display is attached (HDMI hot-plug or equivalent). }
+            power: { type: string, enum: [on, off, standby, unknown], description: "Display power as the Player can observe it (CEC, DDC/CI, backlight). A value this backend does not know reads as unknown." }
+        network:
+          type: object
+          additionalProperties: true
+          properties:
+            kind: { type: string, enum: [ethernet, wifi, cellular, unknown] }
+            wifi_rssi_dbm: { type: integer, minimum: -150, maximum: 0 }
+        crashes_24h: { type: integer, minimum: 0, maximum: 1000000, description: Player crashes in the rolling last 24 hours. }
+        renderer_restarts_24h: { type: integer, minimum: 0, maximum: 1000000, description: Renderer or web-view restarts in the rolling last 24 hours. }
+    ScreenHealth:
+      type: object
+      additionalProperties: false
+      required: [reported_at, stale]
+      description: >-
+        The latest device health report (PUT /runtime/v1/health), sanitized,
+        with server reported_at. A member the Player did not send is absent.
+        stale is true when reported_at is more than 15 minutes old; stale
+        health is still shown, never deleted; archive and screen recovery
+        clear it. Transitions append the
+        project-only screen.health_changed with details.changes, a list of
+        {change, ...}: display_disconnected, display_reconnected,
+        display_power (from, to), temperature_high (at or above 80 °C),
+        temperature_normal (below 75 °C again), crash_spike and
+        renderer_restart_spike (the 24-hour count rose by 3 or more since
+        the last spike event; crashes_24h or renderer_restarts_24h and
+        previous). Read-only; never authorization.
+      properties:
+        reported_at: { type: string, format: date-time }
+        stale: { type: boolean }
+        uptime_s: { type: integer, minimum: 0 }
+        app_uptime_s: { type: integer, minimum: 0 }
+        memory: { type: object, additionalProperties: false, properties: { used_bytes: { type: integer, minimum: 0 }, total_bytes: { type: integer, minimum: 1 } } }
+        cpu: { type: object, additionalProperties: false, properties: { load_1m: { type: number, minimum: 0 }, cores: { type: integer, minimum: 1 } } }
+        temperature_c: { type: number }
+        display: { type: object, additionalProperties: false, properties: { connected: { type: boolean }, power: { type: string, enum: [on, off, standby, unknown] } } }
+        network: { type: object, additionalProperties: false, properties: { kind: { type: string, enum: [ethernet, wifi, cellular, unknown] }, wifi_rssi_dbm: { type: integer } } }
+        crashes_24h: { type: integer, minimum: 0 }
+        renderer_restarts_24h: { type: integer, minimum: 0 }
     DashboardProject:
       type: object
       additionalProperties: false

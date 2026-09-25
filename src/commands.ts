@@ -9,6 +9,7 @@ import { callVersionedPlaylist } from "./playlist-api.js";
 import { WriteRecovery } from "./write-recovery.js";
 import { instantInZone, normalizeInstant, playingLine, playlistInUseProblem, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "./screen-control.js";
 import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLAYS_SETTLE_MS, unusedPath, PLAYS_ALL_MAX_PAGES, PLAYS_LIMIT_MAX, playbackExportBudget, playsCursor, playsLimit, playsRange, requireCsvResponse, writeCsvFile, writeCsvStdout } from "./playback-export.js";
+import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
 import { openTempFile, removeOnSignal, shellQuote, tempPathFor } from "./temp-file.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
 import { createHash } from "node:crypto";
@@ -4067,16 +4068,19 @@ function screenTableLines(items: Screen[]): string[] {
   const withTags = items.some((screen) => screenTags(screen).length > 0);
   // Only when something overrides the assigned default, so plain fleets keep their table.
   const withPlaying = items.some((screen) => screen?.effective_playlist && screen.effective_playlist.source !== "default");
+  // Only when a listed screen needs attention: display disconnected, hot, crashing, or a stale report.
+  const withHealth = items.some((screen) => screenHealthIssues(screen).length > 0);
   const rows = items.map((screen) => [
     screen?.id ?? "", screen?.label ?? "", screen?.state ?? "",
     ...(withPlatform ? [screen?.host?.platform ?? ""] : []),
     ...(withReason ? [archiveReason(screen) ?? ""] : []),
     ...(withTags ? [screenTags(screen).join(",")] : []),
     ...(withPlaying ? [effectivePlaylistText(screen?.effective_playlist, screen?.takeover, screen?.timezone) ?? ""] : []),
+    ...(withHealth ? [screenHealthIssues(screen).join(", ") || (screen?.health ? "ok" : "")] : []),
     ...(screen?.recovery_pending?.expires_at ? [`recovery pending until ${screen.recovery_pending.expires_at}`] : []),
     ...(applicationsUnsupportedAt(screen) ? ["applications unsupported"] : []),
   ]);
-  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : []), ...(withReason ? ["REASON"] : []), ...(withTags ? ["TAGS"] : []), ...(withPlaying ? ["PLAYING"] : [])];
+  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : []), ...(withReason ? ["REASON"] : []), ...(withTags ? ["TAGS"] : []), ...(withPlaying ? ["PLAYING"] : []), ...(withHealth ? ["HEALTH"] : [])];
   const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => (row[index] ?? "").length)));
   const render = (row: string[]) => row.map((cell, index) => index < widths.length ? cell.padEnd(widths[index]!) : cell).join("  ").trimEnd();
   return [render(header), ...rows.map(render)];
@@ -4366,6 +4370,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...applicationsUnsupportedLines(screen),
       ...recoveryPendingLine(screen),
       ...storageLines(screen, runtime.now()),
+      ...healthLines(screen?.health),
     ].join("\n"),
   };
 }, true);
@@ -5452,6 +5457,7 @@ const CANNED_EVENT_MESSAGES = new Set([
   "Screen takeover started",
   "Screen takeover ended",
   "A scheduled playlist cannot be shown; its entries were skipped",
+  "Screen health changed",
 ]);
 
 /**
@@ -5503,6 +5509,12 @@ export function formatEventLine(event: ProjectEvent): string | undefined {
     if (!pushLogfmtField(parts, key, details[key])) continue;
     used.add(key);
     payload += 1;
+  }
+  if (event.type === "screen.health_changed") {
+    // changes[] is a list of objects; print it as one compact value.
+    const changes = healthChangesText(details.changes);
+    if (changes && pushLogfmtField(parts, "changes", changes)) payload += 1;
+    used.add("changes");
   }
   const nullAsNone = NULL_AS_NONE_EVENT_TYPES.has(event.type);
   for (const key of Object.keys(details).sort()) {

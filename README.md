@@ -584,6 +584,23 @@ with `revision_conflict` (exit 6); a screen or playlist of another project is
 `not_found` (exit 4), and rate limits are `rate_limited` (exit 7). JSON mode
 returns the server response as `data` unchanged.
 
+## Device health
+
+Every paired Player reports device health on session start and every five
+minutes. `screen show` returns it as `data.health` with the server's
+`reported_at`; `stale` turns true after 15 minutes without a report, and the
+last report stays visible. With `--human` it prints a `Health` block: report
+time, device and Player uptime, memory in use, CPU load and cores,
+temperature, display connection and power, network kind and Wi-Fi signal, and
+crashes and renderer restarts in the last 24 hours.
+
+`screen list --human` adds a `HEALTH` column when any listed screen needs
+attention: `display disconnected`, `hot` (80 °C or more), `crashing` (3 or more
+crashes in 24 hours), or `stale`. Transitions arrive as `screen.health_changed`
+events, which `events list` and `events follow` print with a compact
+`changes=` value such as
+`display_disconnected,temperature_high temperature_c=82`.
+
 ## Application command results
 
 `app upload` and `app update` return the same JSON data paths with or without
