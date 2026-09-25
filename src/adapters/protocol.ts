@@ -549,7 +549,14 @@ export interface Screen {
    * connect. Read-only; not a player heartbeat.
    */
   online: boolean;
+  /** Assigned default playlist. A takeover or a matching schedule entry takes precedence; effective_playlist names what is shown. */
   playlist_id?: string;
+  /** Server-evaluated playlist schedule (never on the runtime manifest). */
+  playlist_schedule?: ScreenPlaylistSchedule;
+  /** The playlist that wins over the schedule and the assignment. */
+  takeover?: ScreenTakeover;
+  /** What the runtime manifest is built from; absent when the screen shows no playlist. */
+  effective_playlist?: ScreenEffectivePlaylist;
   /**
    * Opaque agent JSON object. Absent when unset. ScreenRig never reads or uses
    * it. Not on the runtime manifest and never authorization.
@@ -638,7 +645,11 @@ export type ScreenAction =
   | ({ type: "toast" } & ScreenToastWrite)
   | { type: "set_tags"; tags: ScreenTags }
   | { type: "add_tags"; tags: string[] }
-  | { type: "remove_tags"; tags: string[] };
+  | { type: "remove_tags"; tags: string[] }
+  | { type: "takeover"; playlist_id: string; until?: string | null; reason?: string }
+  | { type: "takeover_clear" }
+  | { type: "set_playlist_schedule"; entries: ScreenScheduleEntryWrite[] }
+  | { type: "clear_playlist_schedule" };
 
 export type ScreenActionType = ScreenAction["type"];
 
@@ -961,4 +972,60 @@ export interface WebhookDelivery {
 export interface WebhookDeliveryList {
   items: WebhookDelivery[];
   next_cursor: string | null;
+}
+
+export type ScreenScheduleDay = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+
+/** screenrig.schedule/v1 window in the screen timezone; omit start and end for the whole day. */
+export interface ScreenScheduleWindow {
+  days: ScreenScheduleDay[];
+  start?: string;
+  end?: string;
+}
+
+export interface ScreenScheduleEntryWrite {
+  id?: string;
+  playlist_id: string;
+  from?: string;
+  until?: string;
+  windows: ScreenScheduleWindow[];
+}
+
+export interface ScreenScheduleEntry extends ScreenScheduleEntryWrite {
+  id: string;
+}
+
+export interface ScreenPlaylistSchedule {
+  entries: ScreenScheduleEntry[];
+  updated_at: string;
+}
+
+export interface ScreenPlaylistScheduleView {
+  entries: ScreenScheduleEntry[];
+  updated_at?: string;
+  effective_playlist?: ScreenEffectivePlaylist;
+}
+
+export interface ScreenPlaylistScheduleWrite {
+  entries: ScreenScheduleEntryWrite[];
+}
+
+export interface ScreenTakeover {
+  playlist_id: string;
+  until: string | null;
+  reason?: string;
+  set_at: string;
+}
+
+export interface ScreenTakeoverWrite {
+  playlist_id: string;
+  until?: string | null;
+  reason?: string;
+}
+
+export interface ScreenEffectivePlaylist {
+  id: string;
+  source: "takeover" | "schedule" | "default";
+  entry_id?: string;
+  until?: string;
 }

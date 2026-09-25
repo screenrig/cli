@@ -323,6 +323,105 @@ Each screen applies its own schedule timezone rule and fails individually.
 presence lease has been expired for 60 seconds, so a brief reconnect writes
 neither.
 
+## Playlist schedules and takeover
+
+The server decides what each screen plays, in this order: its takeover, else
+the first playlist schedule entry whose windows match the screen's civil time,
+else the playlist assigned with `screen assign`. `screen show`, `screen list`,
+and the write commands below return `effective_playlist`
+(`{id, source: takeover|schedule|default, entry_id?, until?}`), `takeover`,
+and `playlist_schedule`. `until` is the next moment the choice is known to
+change. `screen show --human` prints it in the screen's timezone, as in
+`Playing: pl_LUNCH (schedule entry lunch until 2026-08-14 15:00 America/Los_Angeles)`
+(UTC, labelled, when the screen has no zone). Schedule tables are labelled with
+the screen timezone, and JSON output keeps RFC 3339 instants.
+`screen list --human` adds a `PLAYING` column when any listed screen is on a
+takeover or schedule entry. Switches land within about a minute of a boundary;
+Players need no update.
+
+```sh
+screenrig screen schedule show scr_CAFE
+screenrig screen schedule set scr_CAFE --file dayparts.json [--expect-rev REVISION]
+screenrig screen schedule set --tag Cafe --file dayparts.json
+screenrig screen schedule clear scr_CAFE [--expect-rev REVISION]
+screenrig screen schedule clear --tag Cafe
+screenrig screen takeover scr_LOBBY --playlist-id pl_DRILL --for 30m --reason "Fire drill"
+screenrig screen takeover --tag Lobby --playlist-id pl_LAUNCH --until 2026-10-01T18:00:00Z
+screenrig screen takeover scr_A scr_B --playlist-id pl_NOTICE --until none
+screenrig screen takeover clear --tag Lobby
+```
+
+A schedule file lists 1 to 32 entries in priority order; the first entry that
+matches wins. Each entry has 1 to 16 windows in the screen timezone. `days` uses
+`mon` to `sun`, and `start`/`end` are `HH:MM`. Omit both for the whole day. An
+`end` at or before `start` crosses midnight and belongs to the start day.
+Optional `from` (inclusive) and `until` (exclusive) are civil minutes such as
+`2026-12-24T18:00`, with no offset. An omitted `id` becomes `entry_N`. The CLI
+checks this shape before sending anything. It also accepts the JSON output of
+`screen schedule show` back unchanged. Breakfast, lunch, and dinner dayparts:
+
+```json
+{
+  "entries": [
+    { "id": "breakfast", "playlist_id": "pl_BREAKFAST",
+      "windows": [{ "days": ["mon", "tue", "wed", "thu", "fri"], "start": "06:00", "end": "11:00" },
+                  { "days": ["sat", "sun"], "start": "08:00", "end": "12:00" }] },
+    { "id": "lunch", "playlist_id": "pl_LUNCH",
+      "windows": [{ "days": ["mon", "tue", "wed", "thu", "fri"], "start": "11:00", "end": "15:00" }] },
+    { "id": "dinner", "playlist_id": "pl_DINNER",
+      "windows": [{ "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], "start": "17:00", "end": "22:00" }] }
+  ]
+}
+```
+
+Outside every window the assigned playlist plays. Schedule and takeover writes
+need an assigned default playlist, because the screen falls back to it. A screen
+without one gets `invalid_request` (exit 8), and `next` points at
+`screen assign ID --playlist-id PLAYLIST_ID`. A schedule also needs the screen
+timezone. Without one the write is `invalid_request` (exit 8), and `next` points
+at `screen set-timezone`. If a scheduled playlist later cannot be shown, its
+entries are skipped and `screen.playlist_unavailable` is recorded. A takeover
+whose playlist cannot be shown ends. These writes share per-minute limits:
+600 per project, 20 per screen, and 60 per IP (`rate_limited`, exit 7, with
+`retry_after_seconds`). Every playlist a schedule or takeover names is
+validated as an assignment. An archived screen answers `screen_archived`
+(exit 5, `next` is `screen unarchive`).
+
+A takeover shows one playlist ahead of the schedule and the assignment.
+`--until` takes an RFC 3339 instant with seconds and an offset, such as
+`2026-10-01T18:00:00Z` or `2026-10-01T11:00:00-07:00` (uppercase `T` and `Z`).
+It is sent normalized to UTC and must be strictly in the future and at most 7
+days ahead. `--for 30m|2h|3d` is converted to an `until` from this computer's
+clock. It accepts up to 7 days, at most `6d23h59m`, which leaves a minute for
+clock differences. If the server still refuses the result, `next` suggests a
+shorter `--for`. `--until none`, or neither flag, holds the takeover until
+`screen takeover clear`. `--reason` is trimmed, at most 120 characters, and may
+not contain control characters. A new takeover replaces the previous
+one. `screen takeover ID` is short for `screen takeover set ID`.
+
+With one screen id, `schedule set`, `schedule clear`, `takeover`, and
+`takeover clear` use the single-screen routes and return the updated screen.
+`--expect-rev` guards its revision (`revision_conflict`, exit 6). Several ids
+or `--tag` become one `POST /api/v1/screens/actions` request
+(`set_playlist_schedule`, `clear_playlist_schedule`, `takeover`,
+`takeover_clear`) with the fleet envelope and exit rules described above. Each
+screen fails alone; for example, a screen with no timezone or no default
+playlist fails with `invalid_request`. The whole fan-out is refused with
+`rate_limited` when it exceeds what remains of the project budget. A `--for` rerun after an ambiguous failure computes a new end and is
+sent as a new request.
+
+Deleting a playlist that a live screen can still show fails with
+`resource_conflict` (exit 5). A screen can still show it if the playlist is
+assigned, named by a schedule entry, held by a takeover, or effective. `next`
+points at `screen list`, and `screen show ID` shows the screen's reference. `events list` and
+`events follow` print `screen.playlist_switched` (`playlist_id`,
+`previous_playlist_id`, `source`, `entry_id`, `until`),
+`screen.takeover_started` (`playlist_id`, `until`, where `none` means held until
+cleared, and `reason`), and `screen.takeover_ended` (`reason`
+`expired|cleared|replaced|playlist_deleted|playlist_unavailable`), and the warning
+`screen.playlist_unavailable` (`playlist_id`, `entry_ids` comma-joined, and `code`
+`playlist_deleted|playlist_unavailable`).
+
 ## Webhooks
 
 A webhook POSTs this project's own durable events to an HTTPS endpoint you

@@ -2,7 +2,8 @@ import { addValueAlias } from "./aliases.js";
 import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes.js";
 import { positiveInteger, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenScreenshot, handleScreenTag } from "../commands.js";
+import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear } from "../commands.js";
+import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
 import { type Command, Option } from "commander";
 
 export function registerScreenCommands(root: Command, bind: CommandActionBinder): void {
@@ -118,6 +119,49 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
     .action(bind(handleScreenTag));
   requireOptionGroup(tag, "exactlyOne", ["--set", "--add", "--remove", "--clear"]);
+
+  const schedule = screen.command("schedule").description("Show, set, or clear a screen's server-evaluated playlist schedule");
+  schedule.command("show").description("Show a screen's playlist schedule and the playlist it currently selects")
+    .argument("<id>", "Screen identifier")
+    .action(bind(handleScreenScheduleShow));
+  schedule.command("set").description("Replace the playlist schedule on a screen or a fleet of screens")
+    .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
+    .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
+    .requiredOption("--file <FILE>", "Schedule JSON {\"entries\": [...]}, or - for stdin (required)")
+    .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+    .action(bind(handleScreenScheduleSet));
+  schedule.command("clear").description("Remove the playlist schedule from a screen or a fleet of screens")
+    .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
+    .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
+    .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+    .action(bind(handleScreenScheduleClear));
+
+  const takeover = screen.command("takeover").description("Put a playlist ahead of the schedule and assignment, or clear it");
+  takeover.command("set", { isDefault: true }).description("Take over a screen or a fleet with one playlist (default: screen takeover ID ...)")
+    .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
+    .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
+    .requiredOption("--playlist-id <ID>", "Playlist to show (required)")
+    .addOption(new Option("--until <TIME>", "End at this RFC 3339 instant (at most 7 days ahead), or none to hold until cleared").argParser(takeoverUntilOption).conflicts(["for"]))
+    .addOption(new Option("--for <DURATION>", "End after this duration, such as 30m, 2h, or 3d (at most 7d)").argParser(durationOption).conflicts(["until"]))
+    .option("--reason <TEXT>", "Operator note carried on the takeover and its events (at most 120 characters)", takeoverReason)
+    .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+    .action(bind(handleScreenTakeover));
+  takeover.command("clear").description("End the takeover on a screen or a fleet of screens")
+    .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
+    .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
+    .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+    .action(bind(handleScreenTakeoverClear));
+  addCommandExamples(schedule.commands.find((command) => command.name() === "show")!, "screenrig screen schedule show scr_LOBBY");
+  addCommandExamples(schedule.commands.find((command) => command.name() === "set")!,
+    "screenrig screen schedule set scr_LOBBY --file dayparts.json --expect-rev 4",
+    "screenrig screen schedule set --tag Cafe --file dayparts.json");
+  addCommandExamples(schedule.commands.find((command) => command.name() === "clear")!, "screenrig screen schedule clear scr_LOBBY", "screenrig screen schedule clear --tag Cafe");
+  addCommandExamples(takeover.commands.find((command) => command.name() === "set")!,
+    'screenrig screen takeover scr_LOBBY --playlist-id pl_DRILL --for 30m --reason "Fire drill"',
+    "screenrig screen takeover --tag Lobby --playlist-id pl_LAUNCH --until 2026-10-01T18:00:00Z",
+    "screenrig screen takeover scr_A scr_B --playlist-id pl_NOTICE --until none");
+  addCommandExamples(takeover.commands.find((command) => command.name() === "clear")!,
+    "screenrig screen takeover clear scr_LOBBY", "screenrig screen takeover clear --tag Lobby");
   for (const name of ["pair", "provision"]) addValueAlias(screen.commands.find(command => command.name() === name)!, "--name", "--label", "Set the screen name");
   requireOptionGroup(screen.commands.find(command => command.name() === "update")!, "atLeastOne", ["--name", "--playlist-id", "--timezone"]);
 }

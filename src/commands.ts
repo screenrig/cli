@@ -7,6 +7,7 @@ import { fleetHumanLines, fleetOutcome, rejectFleetRevision, screenActionResult,
 import { editablePlaylist, isAdSlotPage, playlistApiVersion, preparePlaylist, targetDimensions } from "./playlist-authoring.js";
 import { callVersionedPlaylist } from "./playlist-api.js";
 import { WriteRecovery } from "./write-recovery.js";
+import { instantInZone, playingLine, playlistInUseProblem, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "./screen-control.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
 import { createHash } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -62,6 +63,9 @@ import {
   type ScreenToastAccepted,
   type ScreenToastLevel,
   type ScreenToastWrite,
+  type ScreenPlaylistScheduleView,
+  type ScreenPlaylistScheduleWrite,
+  type ScreenTakeoverWrite,
   type Webhook,
   type WebhookDelivery,
   type WebhookDeliveryList,
@@ -3693,12 +3697,17 @@ export const handlePlaylistDelete = commandHandler(async (args, runtime, resolve
   const id = args.positionals[2];
   const ifMatch = flagString(args.flags, "if-match");
   if (!id) throw usageError("playlist delete requires <id>.");
-  const response = await callVersionedPlaylist(client, {
-    method: "DELETE",
-    id,
-    preferred: "v1",
-    ...(ifMatch ? { headers: { "if-match": quotedRevision(ifMatch) } } : {}),
-  });
+  let response;
+  try {
+    response = await callVersionedPlaylist(client, {
+      method: "DELETE",
+      id,
+      preferred: "v1",
+      ...(ifMatch ? { headers: { "if-match": quotedRevision(ifMatch) } } : {}),
+    });
+  } catch (error) {
+    throw playlistInUseProblem(error);
+  }
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted playlist ${id}` };
 }, true);
 
@@ -3791,15 +3800,18 @@ function screenTableLines(items: Screen[]): string[] {
   const withPlatform = items.some((screen) => typeof screen?.host?.platform === "string");
   const withReason = items.some((screen) => archiveReason(screen) !== undefined);
   const withTags = items.some((screen) => screenTags(screen).length > 0);
+  // Only when something overrides the assigned default, so plain fleets keep their table.
+  const withPlaying = items.some((screen) => screen?.effective_playlist && screen.effective_playlist.source !== "default");
   const rows = items.map((screen) => [
     screen?.id ?? "", screen?.label ?? "", screen?.state ?? "",
     ...(withPlatform ? [screen?.host?.platform ?? ""] : []),
     ...(withReason ? [archiveReason(screen) ?? ""] : []),
     ...(withTags ? [screenTags(screen).join(",")] : []),
+    ...(withPlaying ? [effectivePlaylistText(screen?.effective_playlist, screen?.takeover, screen?.timezone) ?? ""] : []),
     ...(screen?.recovery_pending?.expires_at ? [`recovery pending until ${screen.recovery_pending.expires_at}`] : []),
     ...(applicationsUnsupportedAt(screen) ? ["applications unsupported"] : []),
   ]);
-  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : []), ...(withReason ? ["REASON"] : []), ...(withTags ? ["TAGS"] : [])];
+  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : []), ...(withReason ? ["REASON"] : []), ...(withTags ? ["TAGS"] : []), ...(withPlaying ? ["PLAYING"] : [])];
   const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => (row[index] ?? "").length)));
   const render = (row: string[]) => row.map((cell, index) => index < widths.length ? cell.padEnd(widths[index]!) : cell).join("  ").trimEnd();
   return [render(header), ...rows.map(render)];
@@ -4080,6 +4092,10 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       "Screen",
       JSON.stringify(response.body, null, 2),
       ...(screenTags(screen).length ? [`Tags: ${screenTags(screen).join(", ")}`] : []),
+      ...playingLine(screen?.effective_playlist, screen?.takeover, screen?.timezone),
+      ...takeoverLine(screen?.takeover, screen?.timezone),
+      ...(screen?.playlist_schedule?.entries?.length
+        ? [`Playlist schedule: ${screen.playlist_schedule.entries.length} entr${screen.playlist_schedule.entries.length === 1 ? "y" : "ies"} (screen schedule show ${screen.id})`] : []),
       ...hostLines(screen?.host, screen?.host_updated_at),
       ...archivedLines(screen),
       ...applicationsUnsupportedLines(screen),
@@ -4411,11 +4427,11 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
  * including a partial failure, completes the write, so a later rerun is a new
  * request.
  */
-async function screenFleetAction(client: ApiClient, title: string, selector: ScreenActionSelector, action: ScreenAction): Promise<CommandResult> {
+async function screenFleetAction(client: ApiClient, title: string, selector: ScreenActionSelector, action: ScreenAction, recoverySupersede?: string): Promise<CommandResult> {
   const body: ScreenActionRequest = { selector, action };
   let response;
   try {
-    response = await client.call({ method: "POST", path: "/api/v1/screens/actions", idempotent: true, body });
+    response = await client.call({ method: "POST", path: "/api/v1/screens/actions", idempotent: true, body, ...(recoverySupersede ? { recoverySupersede } : {}) });
   } catch (error) {
     if (error instanceof CliError && !error.problem.next
       && ((error.problem.status === 404 && error.problem.code === "http_error") || error.problem.status === 405)) {
@@ -5164,7 +5180,18 @@ const CANNED_EVENT_MESSAGES = new Set([
   "Stream replay state is no longer retained",
   "Screen came online",
   "Screen went offline",
+  "Screen effective playlist switched",
+  "Screen takeover started",
+  "Screen takeover ended",
+  "A scheduled playlist cannot be shown; its entries were skipped",
 ]);
+
+/**
+ * Effective-playlist events carry null for "no playlist" (playlist_switched)
+ * and "until cleared" (takeover_started); render it as none rather than
+ * dropping the field.
+ */
+const NULL_AS_NONE_EVENT_TYPES = new Set(["screen.playlist_switched", "screen.takeover_started", "screen.takeover_ended", "screen.playlist_unavailable"]);
 
 const SILENT_EVENT_TYPES = new Set(["application.event", "runtime.reported"]);
 
@@ -5209,9 +5236,15 @@ export function formatEventLine(event: ProjectEvent): string | undefined {
     used.add(key);
     payload += 1;
   }
+  const nullAsNone = NULL_AS_NONE_EVENT_TYPES.has(event.type);
   for (const key of Object.keys(details).sort()) {
     if (used.has(key)) continue;
-    if (pushLogfmtField(parts, key, details[key])) payload += 1;
+    const raw = details[key];
+    // entry_ids and similar short id lists print comma-joined.
+    const value = nullAsNone && raw === null ? "none"
+      : nullAsNone && Array.isArray(raw) && raw.length > 0 && raw.every((item) => typeof item === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(item)) ? raw.join(",")
+      : raw;
+    if (pushLogfmtField(parts, key, value)) payload += 1;
   }
 
   const message = event.message ?? "";
@@ -5958,5 +5991,170 @@ export const handleWebhooksDeliveries = commandHandler(async (args, runtime, res
       ...deliveryTableLines(items),
       ...(next ? [`next: screenrig webhooks deliveries ${id} --before ${next}${limit ? ` --limit ${limit}` : ""}`] : []),
     ].join("\n"),
+  };
+});
+
+// Playlist schedules and takeover. One screen id uses the single-screen
+// routes (revision guard allowed); several ids or --tag use the fleet actions
+// route (set_playlist_schedule, takeover, takeover_clear).
+function nestedScreenTarget(args: ParsedArgs, command: string) {
+  // positionals are [screen, schedule|takeover, action, ...ids].
+  return screenTarget({ ...args, positionals: args.positionals.slice(1) }, command);
+}
+
+async function screenControlCall(client: ApiClient, id: string, request: Parameters<ApiClient["call"]>[0]) {
+  try {
+    return await client.call(request);
+  } catch (error) {
+    throw screenControlProblem(error, id);
+  }
+}
+
+function screenControlHuman(title: string, screen: Screen | undefined): string {
+  return [
+    title,
+    ...playingLine(screen?.effective_playlist, screen?.takeover, screen?.timezone),
+    ...takeoverLine(screen?.takeover, screen?.timezone),
+    ...(screen?.playlist_schedule ? scheduleTableLines(screen.playlist_schedule.entries, screen.timezone ?? null) : []),
+    ...(screen?.revision !== undefined ? [`revision: ${screen.revision}`] : []),
+  ].join("\n");
+}
+
+export const handleScreenScheduleShow = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("screen schedule show requires <id>.");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await screenControlCall(client, id, { method: "GET", path: `/api/v1/screens/${encodeURIComponent(id)}/playlist-schedule` });
+  const view = response.body as ScreenPlaylistScheduleView | undefined;
+  // The view carries no zone; human output reads it from the screen so civil
+  // windows and instants are labelled. JSON output makes no extra request.
+  let timezone: string | null | undefined;
+  if (flagBool(args.flags, "human")) {
+    try {
+      const screen = await client.call({ method: "GET", path: `/api/v1/screens/${encodeURIComponent(id)}` });
+      timezone = (screen.body as Screen | undefined)?.timezone ?? null;
+    } catch {
+      timezone = undefined;
+    }
+  }
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [
+      `Playlist schedule for ${id}`,
+      ...playingLine(view?.effective_playlist, undefined, timezone ?? undefined),
+      ...(view?.updated_at ? [`updated_at: ${view.updated_at}`] : []),
+      ...scheduleTableLines(view?.entries, timezone === undefined ? "unknown" : timezone),
+    ].join("\n"),
+  };
+});
+
+export const handleScreenScheduleSet = commandHandler(async (args, runtime, resolved) => {
+  const file = flagString(args.flags, "file");
+  if (!file) throw usageError("screen schedule set requires --file FILE (or --file - for stdin).");
+  const target = nestedScreenTarget(args, "screen schedule set");
+  if (target.kind === "fleet") rejectFleetRevision(args, "screen schedule set");
+  const entries = scheduleEntries(await readAuthoringJson(file, runtime));
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  if (target.kind === "fleet") {
+    // Entries are normalized once on the server so every screen stores the
+    // same ids; a screen without a timezone fails alone with invalid_request.
+    return screenFleetAction(client, "Fleet schedule set", target.selector, { type: "set_playlist_schedule", entries });
+  }
+  const id = target.id;
+  const body: ScreenPlaylistScheduleWrite = { entries };
+  const revision = flagString(args.flags, "if-match");
+  const response = await screenControlCall(client, id, {
+    method: "PUT", path: `/api/v1/screens/${encodeURIComponent(id)}/playlist-schedule`, idempotent: true, body,
+    ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+  });
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: screenControlHuman(`Set a ${entries.length}-entry playlist schedule on ${id}`, response.body as Screen | undefined),
+  };
+});
+
+export const handleScreenScheduleClear = commandHandler(async (args, runtime, resolved) => {
+  const target = nestedScreenTarget(args, "screen schedule clear");
+  if (target.kind === "fleet") rejectFleetRevision(args, "screen schedule clear");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  if (target.kind === "fleet") {
+    return screenFleetAction(client, "Fleet schedule clear", target.selector, { type: "clear_playlist_schedule" });
+  }
+  const id = target.id;
+  const revision = flagString(args.flags, "if-match");
+  const response = await screenControlCall(client, id, {
+    method: "DELETE", path: `/api/v1/screens/${encodeURIComponent(id)}/playlist-schedule`, idempotent: true,
+    ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+  });
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: screenControlHuman(`Cleared the playlist schedule on ${id}`, response.body as Screen | undefined),
+  };
+});
+
+export const handleScreenTakeover = commandHandler(async (args, runtime, resolved) => {
+  const playlistId = flagString(args.flags, "playlist-id");
+  if (!playlistId) throw usageError("screen takeover requires <id> or --tag TAG, and --playlist-id.");
+  const target = nestedScreenTarget(args, "screen takeover");
+  if (target.kind === "fleet") rejectFleetRevision(args, "screen takeover");
+  const forValue = flagString(args.flags, "for");
+  const until = takeoverUntil(flagString(args.flags, "until"), forValue, runtime.now());
+  const reason = flagString(args.flags, "reason");
+  const write: ScreenTakeoverWrite = {
+    playlist_id: playlistId,
+    ...(until !== undefined ? { until } : {}),
+    ...(reason !== undefined ? { reason: takeoverReason(reason) } : {}),
+  };
+  // --for derives until from the clock, so a rerun fingerprints differently;
+  // drop the obsolete saved key instead of leaving it behind.
+  const supersede = forValue !== undefined
+    ? JSON.stringify(["screen takeover --for", target.kind === "single" ? target.id : target.selector, playlistId]) : undefined;
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  if (target.kind === "fleet") {
+    try {
+      return await screenFleetAction(client, "Fleet takeover", target.selector, { type: "takeover", ...write }, supersede);
+    } catch (error) {
+      throw forValue !== undefined ? takeoverForProblem(error) : error;
+    }
+  }
+  const id = target.id;
+  const revision = flagString(args.flags, "if-match");
+  let response;
+  try {
+    response = await screenControlCall(client, id, {
+      method: "POST", path: `/api/v1/screens/${encodeURIComponent(id)}/takeover`, idempotent: true, body: write,
+      ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+      ...(supersede ? { recoverySupersede: supersede } : {}),
+    });
+  } catch (error) {
+    throw forValue !== undefined ? takeoverForProblem(error) : error;
+  }
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: screenControlHuman(`Took over ${id} with ${playlistId} ${typeof until === "string" ? `until ${instantInZone(until, (response.body as Screen | undefined)?.timezone)}` : "until cleared"}`, response.body as Screen | undefined),
+  };
+});
+
+export const handleScreenTakeoverClear = commandHandler(async (args, runtime, resolved) => {
+  const target = nestedScreenTarget(args, "screen takeover clear");
+  if (target.kind === "fleet") rejectFleetRevision(args, "screen takeover clear");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  if (target.kind === "fleet") {
+    return screenFleetAction(client, "Fleet takeover clear", target.selector, { type: "takeover_clear" });
+  }
+  const id = target.id;
+  const revision = flagString(args.flags, "if-match");
+  const response = await screenControlCall(client, id, {
+    method: "DELETE", path: `/api/v1/screens/${encodeURIComponent(id)}/takeover`, idempotent: true,
+    ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+  });
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: screenControlHuman(`Cleared the takeover on ${id}`, response.body as Screen | undefined),
   };
 });

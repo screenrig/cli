@@ -1393,7 +1393,24 @@ paths:
         effects or spending budget, and completes the rest; an exact
         retry of a completed request returns the recorded answer for
         twenty-four hours. The action object is discriminated by type;
-        new action types are additive.
+        new action types are additive. takeover is POST
+        /api/v1/screens/{id}/takeover (playlist_id, until, reason; until
+        is validated once against the request clock before fan-out),
+        takeover_clear is DELETE /api/v1/screens/{id}/takeover, and
+        set_playlist_schedule is PUT
+        /api/v1/screens/{id}/playlist-schedule with the entries
+        normalized once before fan-out (so every screen stores the same
+        entry ids), and clear_playlist_schedule is DELETE
+        /api/v1/screens/{id}/playlist-schedule. A takeover's until is
+        checked against the clock only when the Idempotency-Key has no
+        fleet record, so an exact retry replays after until has passed.
+        These four share the single-screen screen-control budgets the
+        way reload and toast share theirs: the fan-out is charged all at
+        once against screen-control-project (600 per minute per
+        project), refused whole with 429 rate_limited when larger than
+        what remains, and each screen spends its own screen-control-screen
+        unit (20 per minute), failing alone with rate_limited when over
+        it.
       security: [{ projectBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenActionRequest" } } } }
@@ -1528,6 +1545,143 @@ paths:
       responses:
         "202": { description: "Accepted. The reload is durable until expires_at. The ETag is the unchanged screen revision.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, ETag: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenReloadAccepted" } } } }
         "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/{id}/playlist-schedule:
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    get:
+      operationId: getScreenPlaylistSchedule
+      description: >-
+        Returns the screen's server-evaluated playlist schedule: entries in
+        priority order (empty when the screen has none), updated_at, and the
+        effective_playlist they currently produce. The ETag is the screen
+        revision. pairing_pending, active, and archived screens are
+        readable; another project's screen is not_found.
+      security: [{ projectBearer: [] }]
+      responses:
+        "200": { description: Playlist schedule., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenPlaylistScheduleView" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: setScreenPlaylistSchedule
+      x-rate-limit-policies: [{ name: screen-control-project, quota: 600, windowSeconds: 60 }, { name: screen-control-screen, quota: 20, windowSeconds: 60 }, { name: screen-control-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Replaces the screen's playlist schedule. The server evaluates it,
+        never the Player: the first entry whose rule matches the screen's
+        civil time (screenrig.schedule/v1 windows and from/until, in the
+        screen timezone, including daylight-saving transitions and windows
+        that cross midnight) is the effective playlist; when none matches,
+        the assigned playlist_id is. A takeover still wins over every
+        entry. The screen must have a timezone and an assigned default
+        playlist_id (invalid_request otherwise), so there is always
+        something to fall back to.
+        Every referenced playlist is validated against the screen exactly
+        as an assignment is (owned, ready references, page visibility needs
+        a timezone), so a playlist the screen would refuse is refused here;
+        the check writes the playlist document, so a concurrent playlist
+        delete conflicts instead of racing it. If a scheduled playlist
+        later cannot be shown (for example its content no longer
+        resolves), its entries are skipped at evaluation and
+        screen.playlist_unavailable (warning, details playlist_id,
+        entry_ids, code) is appended.
+        When the effective playlist changes the manifest is re-minted from
+        it and the Player is signalled with screen.manifest_changed, as for
+        an assignment, and screen.playlist_switched is appended. The screen
+        revision is bumped (If-Match guards it) and screen.updated is
+        appended with details.playlist_schedule_entries. An archived screen
+        answers screen_archived; its schedule, takeover, and default stay
+        referenced (they block playlist delete) and are re-resolved when it
+        is unarchived. Rate limits: screen-control-project 600,
+        screen-control-screen 20, and screen-control-ip 60 per minute,
+        shared with DELETE and the takeover routes.
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenPlaylistScheduleWrite" } } } }
+      responses:
+        "200": { description: Screen with the stored schedule and its effective_playlist. The ETag is the new revision., headers: { ETag: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: clearScreenPlaylistSchedule
+      x-rate-limit-policies: [{ name: screen-control-project, quota: 600, windowSeconds: 60 }, { name: screen-control-screen, quota: 20, windowSeconds: 60 }, { name: screen-control-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Removes the screen's playlist schedule; the takeover, else the
+        assigned playlist, becomes effective, with the same manifest
+        signalling as PUT. A screen without a schedule answers 200
+        unchanged (no revision bump, no event).
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      responses:
+        "200": { description: Screen without a playlist schedule., headers: { ETag: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/{id}/takeover:
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    post:
+      operationId: setScreenTakeover
+      x-rate-limit-policies: [{ name: screen-control-project, quota: 600, windowSeconds: 60 }, { name: screen-control-screen, quota: 20, windowSeconds: 60 }, { name: screen-control-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Takes over the screen with one playlist ahead of its playlist
+        schedule and assigned playlist, until until (RFC 3339, strictly in
+        the future and at most 7 days ahead) or, when until is null or
+        omitted, until the takeover is cleared. reason is optional, at
+        most 120 characters. The screen must have an assigned default
+        playlist_id (invalid_request otherwise). A takeover replaces an
+        earlier one (screen.takeover_ended with reason replaced, or
+        expired when the earlier one had already ended). The playlist is
+        validated as an assignment. A takeover whose playlist later cannot
+        be shown ends (screen.takeover_ended with reason playlist_deleted
+        or playlist_unavailable). Appends screen.takeover_started and,
+        when the effective playlist changes, screen.playlist_switched plus
+        the Player's screen.manifest_changed. When until passes, the
+        boundary worker ends the takeover within 60 seconds
+        (screen.takeover_ended with reason expired). The screen revision is
+        bumped (If-Match guards it). An archived screen answers
+        screen_archived; unarchive re-resolves first, so a takeover that
+        ended while archived ends then. The same screen-control rate
+        limits as the schedule routes apply.
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenTakeoverWrite" } } } }
+      responses:
+        "200": { description: Screen with the takeover and its effective_playlist. The ETag is the new revision., headers: { ETag: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: clearScreenTakeover
+      x-rate-limit-policies: [{ name: screen-control-project, quota: 600, windowSeconds: 60 }, { name: screen-control-screen, quota: 20, windowSeconds: 60 }, { name: screen-control-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Ends the takeover (screen.takeover_ended with reason cleared); the
+        schedule, else the assigned playlist, becomes effective with the
+        same manifest signalling. A screen without a takeover answers 200
+        unchanged (no revision bump, no event).
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      responses:
+        "200": { description: Screen without a takeover., headers: { ETag: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
@@ -6588,6 +6742,105 @@ components:
     PairScreen: { type: object, additionalProperties: false, required: [code], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, label: { type: string, minLength: 1, maxLength: 120 } } }
     ProvisionScreen: { type: object, additionalProperties: false, properties: { label: { type: string, minLength: 1, maxLength: 120 } } }
     ScreenProvisioning: { type: object, additionalProperties: false, required: [screen, public_url, provisioning_url, expires_at], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri }, provisioning_url: { type: string, pattern: "^https?://[^#]+/s/[^#]+#provision=[A-Za-z0-9_-]{43}$" }, expires_at: { type: string, format: date-time } } }
+    ScreenScheduleWindow:
+      type: object
+      additionalProperties: false
+      required: [days]
+      description: >-
+        One screenrig.schedule/v1 window in the screen timezone. days are
+        stored mon-to-sun. Omit start and end for the whole day. end <= start
+        crosses midnight and the start day owns it (fri 22:00-02:00 runs
+        into Saturday morning); equal edges run a full 24 hours.
+      properties:
+        days: { type: array, minItems: 1, maxItems: 7, uniqueItems: true, items: { type: string, enum: [mon, tue, wed, thu, fri, sat, sun] } }
+        start: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        end: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+    ScreenScheduleEntryWrite:
+      type: object
+      additionalProperties: false
+      required: [playlist_id, windows]
+      description: >-
+        One playlist schedule entry. id is optional (entry_N is assigned in
+        order when omitted) and unique in the schedule. from (inclusive)
+        and until (exclusive) are optional civil minute-precision bounds
+        with no offset, from before until.
+      properties:
+        id: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$" }
+        playlist_id: { type: string, minLength: 1 }
+        from: { type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        until: { type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        windows: { type: array, minItems: 1, maxItems: 16, items: { $ref: "#/components/schemas/ScreenScheduleWindow" } }
+    ScreenScheduleEntry:
+      type: object
+      additionalProperties: false
+      required: [id, playlist_id, windows]
+      properties:
+        id: { type: string }
+        playlist_id: { type: string }
+        from: { type: string }
+        until: { type: string }
+        windows: { type: array, items: { $ref: "#/components/schemas/ScreenScheduleWindow" } }
+    ScreenPlaylistScheduleWrite:
+      type: object
+      additionalProperties: false
+      required: [entries]
+      properties:
+        entries: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/ScreenScheduleEntryWrite" }, description: "Priority order: the first matching entry wins. DELETE clears the schedule." }
+    ScreenPlaylistSchedule:
+      type: object
+      additionalProperties: false
+      required: [entries, updated_at]
+      description: >-
+        Server-evaluated playlist schedule. It never reaches the runtime
+        manifest; the manifest is built from the effective playlist it
+        selects. Write it with PUT /api/v1/screens/{id}/playlist-schedule.
+      properties:
+        entries: { type: array, maxItems: 32, items: { $ref: "#/components/schemas/ScreenScheduleEntry" } }
+        updated_at: { type: string, format: date-time }
+    ScreenPlaylistScheduleView:
+      type: object
+      additionalProperties: false
+      required: [entries]
+      properties:
+        entries: { type: array, maxItems: 32, items: { $ref: "#/components/schemas/ScreenScheduleEntry" } }
+        updated_at: { type: string, format: date-time, description: Absent when the screen has no schedule. }
+        effective_playlist: { $ref: "#/components/schemas/ScreenEffectivePlaylist" }
+    ScreenTakeoverWrite:
+      type: object
+      additionalProperties: false
+      required: [playlist_id]
+      properties:
+        playlist_id: { type: string, minLength: 1 }
+        until: { anyOf: [{ type: string, format: date-time }, { type: "null" }], description: "Strictly in the future and at most 7 days ahead. null or omitted holds the takeover until it is cleared." }
+        reason: { type: string, maxLength: 120, description: Operator note carried on the takeover and its events. No control characters. }
+    ScreenTakeover:
+      type: object
+      additionalProperties: false
+      required: [playlist_id, until, set_at]
+      description: The playlist that wins over the schedule and the assignment until until, or until cleared when until is null.
+      properties:
+        playlist_id: { type: string }
+        until: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        reason: { type: string }
+        set_at: { type: string, format: date-time }
+    ScreenEffectivePlaylist:
+      type: object
+      additionalProperties: false
+      required: [id, source]
+      description: >-
+        The playlist the screen's runtime manifest is built from: the
+        takeover, else the first matching playlist schedule entry (entry_id),
+        else the assigned default. until is the next instant this is known
+        to change (takeover end or the next schedule boundary within eight
+        days), absent when nothing time-based changes it. The boundary
+        worker applies a change at most 60 seconds late. A takeover or entry
+        whose playlist cannot be shown is skipped. Absent when the screen
+        shows no playlist.
+      properties:
+        id: { type: string }
+        source: { type: string, enum: [takeover, schedule, default] }
+        entry_id: { type: string }
+        until: { type: string, format: date-time }
     Screen:
       type: object
       additionalProperties: false
@@ -6596,7 +6849,10 @@ components:
         id: { type: string }
         public_id: { type: string }
         label: { type: string }
-        playlist_id: { type: string }
+        playlist_id: { type: string, description: "Assigned default playlist, required before a playlist schedule or takeover can be set. A takeover or a matching playlist schedule entry takes precedence; effective_playlist names what is shown." }
+        playlist_schedule: { $ref: "#/components/schemas/ScreenPlaylistSchedule" }
+        takeover: { $ref: "#/components/schemas/ScreenTakeover" }
+        effective_playlist: { $ref: "#/components/schemas/ScreenEffectivePlaylist" }
         timezone: { type: string, description: "IANA time zone identifier. Absent until it is set. Page visibility rules are evaluated in this zone." }
         tags: { $ref: "#/components/schemas/ScreenTags" }
         observation: { $ref: "#/components/schemas/ScreenObservation" }
@@ -6809,6 +7065,10 @@ components:
         - { $ref: "#/components/schemas/ScreenActionSetTags" }
         - { $ref: "#/components/schemas/ScreenActionAddTags" }
         - { $ref: "#/components/schemas/ScreenActionRemoveTags" }
+        - { $ref: "#/components/schemas/ScreenActionTakeover" }
+        - { $ref: "#/components/schemas/ScreenActionTakeoverClear" }
+        - { $ref: "#/components/schemas/ScreenActionSetPlaylistSchedule" }
+        - { $ref: "#/components/schemas/ScreenActionClearPlaylistSchedule" }
       discriminator: { propertyName: type }
       description: >-
         One fleet action, discriminated by type. Each member carries only
@@ -6861,12 +7121,44 @@ components:
       properties:
         type: { type: string, enum: [remove_tags] }
         tags: { type: array, minItems: 1, maxItems: 16, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }
+    ScreenActionTakeover:
+      type: object
+      additionalProperties: false
+      required: [type, playlist_id]
+      description: Same rules as ScreenTakeoverWrite. until is checked against the request clock before fan-out when the Idempotency-Key has no fleet record, and again by each screen.
+      properties:
+        type: { type: string, enum: [takeover] }
+        playlist_id: { type: string, minLength: 1 }
+        until: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        reason: { type: string, maxLength: 120 }
+    ScreenActionTakeoverClear:
+      type: object
+      additionalProperties: false
+      required: [type]
+      description: Ends each screen's takeover; a screen without one is ok and unchanged.
+      properties:
+        type: { type: string, enum: [takeover_clear] }
+    ScreenActionSetPlaylistSchedule:
+      type: object
+      additionalProperties: false
+      required: [type, entries]
+      description: Replaces each screen's playlist schedule with the same entries (ScreenPlaylistScheduleWrite). Entry ids are assigned once before fan-out. A screen without a timezone or without a default playlist fails alone with invalid_request.
+      properties:
+        type: { type: string, enum: [set_playlist_schedule] }
+        entries: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/ScreenScheduleEntryWrite" } }
+    ScreenActionClearPlaylistSchedule:
+      type: object
+      additionalProperties: false
+      required: [type]
+      description: Removes each screen's playlist schedule; a screen without one is ok and unchanged.
+      properties:
+        type: { type: string, enum: [clear_playlist_schedule] }
     ScreenActionResult:
       type: object
       additionalProperties: false
       required: [action, matched, succeeded, failed, results]
       properties:
-        action: { type: string, enum: [assign, reload, toast, set_tags, add_tags, remove_tags] }
+        action: { type: string, enum: [assign, reload, toast, set_tags, add_tags, remove_tags, takeover, takeover_clear, set_playlist_schedule, clear_playlist_schedule] }
         matched: { type: integer, minimum: 0, maximum: 500 }
         succeeded: { type: integer, minimum: 0, maximum: 500 }
         failed: { type: integer, minimum: 0, maximum: 500 }
@@ -6877,8 +7169,10 @@ components:
       required: [screen_id, status]
       description: >-
         One screen's outcome. ok carries the result of the single-screen
-        path: revision (and tags for tag actions) for assign and tag
-        actions, reload for reload, toast for toast. failed carries the
+        path: revision (and tags for tag actions) for assign, tag,
+        takeover, takeover_clear, set_playlist_schedule, and
+        clear_playlist_schedule actions,
+        reload for reload, toast for toast. failed carries the
         problem that screen's own request would have answered.
       properties:
         screen_id: { type: string }

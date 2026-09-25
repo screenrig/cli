@@ -329,6 +329,27 @@ async function main(): Promise<void> {
     assert.equal((fleetReload.data as { matched?: number; succeeded?: number }).succeeded, 1);
     const fleetTag = await run("screen", "tag", "--tag", "Lobby", "--add", "Spring");
     assert.deepEqual((fleetTag.data as { results?: Array<{ tags?: string[] }> }).results?.[0]?.tags, ["Lobby", "Spring"]);
+    // Playlist schedules and takeover: the server picks the effective playlist.
+    const dayparts = path.join(temp, "dayparts.json");
+    await writeFile(dayparts, JSON.stringify({ entries: [
+      { id: "lunch", playlist_id: "pl_AAAAAAAAAAAAAAAAAAAAAAAA", windows: [{ days: ["mon", "tue", "wed", "thu", "fri"], start: "11:00", end: "15:00" }] },
+    ] }));
+    const scheduled = await run("screen", "schedule", "set", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--file", dayparts);
+    assert.equal((scheduled.data as { effective_playlist?: { source?: string } }).effective_playlist?.source, "schedule");
+    const scheduleView = await run("screen", "schedule", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA");
+    assert.equal(((scheduleView.data as { entries?: unknown[] }).entries ?? []).length, 1);
+    const fleetSchedule = await run("screen", "schedule", "set", "--tag", "Lobby", "--file", dayparts);
+    assert.equal((fleetSchedule.data as { succeeded?: number }).succeeded, 1);
+    const takenOver = await run("screen", "takeover", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--for", "30m", "--reason", "Smoke");
+    assert.equal((takenOver.data as { effective_playlist?: { source?: string } }).effective_playlist?.source, "takeover");
+    const inUse = await invoke(["playlist", "delete", "pl_AAAAAAAAAAAAAAAAAAAAAAAA"]);
+    assert.equal(inUse.code, 5, `a playlist a takeover holds must be in use: ${inUse.stdout}`);
+    await run("screen", "takeover", "--tag", "Lobby", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--until", "none");
+    await run("screen", "takeover", "clear", "--tag", "Lobby");
+    await run("screen", "takeover", "clear", "scr_PAIRINGAAAAAAAAAAAAAAAA");
+    const fleetClear = await run("screen", "schedule", "clear", "--tag", "Lobby");
+    assert.equal((fleetClear.data as { action?: string; succeeded?: number }).succeeded, 1);
+    await run("screen", "schedule", "clear", "scr_PAIRINGAAAAAAAAAAAAAAAA");
     const deleted = await invoke(["screen", "delete", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", "5"]);
     assert.equal(deleted.code, 5, `screen delete must surface screen_archive_required: ${deleted.stderr || deleted.stdout}`);
     assert.equal((JSON.parse(deleted.stdout) as { error?: { code?: string } }).error?.code, "screen_archive_required");

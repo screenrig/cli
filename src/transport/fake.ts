@@ -172,7 +172,9 @@ export class FakeTransport implements Transport {
   }
 }
 
-export function memoryBackend(): FakeTransport {
+/** `now` drives clock-dependent checks (takeover until); defaults to the real clock. */
+export function memoryBackend(options: { now?: () => Date } = {}): FakeTransport {
+  const clock = options.now ?? (() => new Date());
   const transport = new FakeTransport();
   const operations = new Map<string, Operation>();
   const events: ProjectEvent[] = [];
@@ -646,8 +648,15 @@ export function memoryBackend(): FakeTransport {
     playlists.set(id, item);
     return { status: 200, headers: {}, body: item };
   });
-  transport.on("DELETE", /^\/api\/v1\/playlists\/[^/]+$/, (req) => {
-    playlists.delete(req.path.split("/").pop() ?? "");
+  transport.on("DELETE", /^\/api\/v1\/playlists\/[^/]+$/, (req): TransportResponse => {
+    const playlistId = req.path.split("/").pop() ?? "";
+    // Only schedule and takeover references are modelled as "in use" here.
+    const inUse = [...screens.values()].some((screen) => screen.state !== "archived"
+      && (screen.takeover?.playlist_id === playlistId || (screen.playlist_schedule?.entries ?? []).some((entry) => entry.playlist_id === playlistId)));
+    if (inUse) {
+      return { status: 409, headers: { "content-type": "application/problem+json" }, body: { type: "https://screenrig.ai/problems/resource-conflict", title: "Resource state conflicts with the request", status: 409, code: "resource_conflict", detail: "playlist is assigned to a screen or referenced by a screen playlist schedule or takeover" } };
+    }
+    playlists.delete(playlistId);
     return { status: 204, headers: {}, body: undefined };
   });
 
@@ -753,10 +762,93 @@ export function memoryBackend(): FakeTransport {
     return { status: 204, headers: {}, body: undefined };
   });
 
+  // Playlist schedules and takeover, simplified: the first schedule entry is
+  // treated as matching now. Precedence is takeover, schedule, default.
+  type Control =
+    | { kind: "schedule"; entries: Array<Record<string, unknown>> }
+    | { kind: "schedule_clear" }
+    | { kind: "takeover"; playlist_id: string; until?: string | null; reason?: string }
+    | { kind: "takeover_clear" };
+  const controlProblem = (status: number, code: string, detail: string) => ({ type: `https://screenrig.ai/problems/${code.replaceAll("_", "-")}`, title: code, status, code, detail });
+  const resolveEffective = (screen: Screen): Screen => {
+    const { effective_playlist: _old, ...rest } = screen;
+    const takeover = screen.takeover;
+    const entry = screen.playlist_schedule?.entries?.[0];
+    const effective = takeover
+      ? { id: takeover.playlist_id, source: "takeover" as const, ...(takeover.until ? { until: takeover.until } : {}) }
+      : entry ? { id: entry.playlist_id, source: "schedule" as const, entry_id: entry.id }
+      : screen.playlist_id ? { id: screen.playlist_id, source: "default" as const } : undefined;
+    return effective ? { ...rest, effective_playlist: effective } : rest;
+  };
+  const applyControl = (screen: Screen, change: Control): { screen: Screen } | { problem: ReturnType<typeof controlProblem> } => {
+    if (screen.state === "archived") return { problem: controlProblem(409, "screen_archived", "screen is archived") };
+    // Server order: timezone (schedule only), then the default playlist, then until.
+    if (change.kind === "schedule" && !screen.timezone) {
+      return { problem: controlProblem(400, "invalid_request", "timezone: is required on a screen before a playlist schedule can be set") };
+    }
+    if ((change.kind === "schedule" || change.kind === "takeover") && !screen.playlist_id) {
+      return { problem: controlProblem(400, "invalid_request", `playlist_id: assign the screen a default playlist before setting a ${change.kind === "schedule" ? "playlist schedule" : "takeover"}`) };
+    }
+    if (change.kind === "takeover" && typeof change.until === "string") {
+      const ahead = Date.parse(change.until) - clock().getTime();
+      if (!(ahead > 0)) return { problem: controlProblem(400, "invalid_request", "until: must be in the future") };
+      if (ahead > 7 * 24 * 60 * 60 * 1000) return { problem: controlProblem(400, "invalid_request", "until: must be at most 7 days ahead; use null to hold until cleared") };
+    }
+    if (change.kind === "schedule") {
+      const entries = change.entries.map((entry, index) => ({ ...entry, id: (entry.id as string | undefined) ?? `entry_${index + 1}` })) as unknown as NonNullable<Screen["playlist_schedule"]>["entries"];
+      return { screen: resolveEffective({ ...screen, playlist_schedule: { entries, updated_at: "2026-08-14T17:00:00.000Z" }, revision: screen.revision + 1 }) };
+    }
+    if (change.kind === "schedule_clear") {
+      if (!screen.playlist_schedule) return { screen };
+      const { playlist_schedule: _gone, ...rest } = screen;
+      return { screen: resolveEffective({ ...rest, revision: screen.revision + 1 }) };
+    }
+    if (change.kind === "takeover") {
+      const takeover = { playlist_id: change.playlist_id, until: change.until ?? null, ...(change.reason ? { reason: change.reason } : {}), set_at: "2026-08-14T17:00:00.000Z" };
+      return { screen: resolveEffective({ ...screen, takeover, revision: screen.revision + 1 }) };
+    }
+    if (!screen.takeover) return { screen };
+    const { takeover: _ended, ...rest } = screen;
+    return { screen: resolveEffective({ ...rest, revision: screen.revision + 1 }) };
+  };
+  const controlRoute = (req: TransportRequest, change: Control): TransportResponse => {
+    const screen = screens.get(decodeURIComponent(req.path.split("/")[4] ?? ""));
+    if (!screen) return { status: 404, headers: { "content-type": "application/problem+json" }, body: controlProblem(404, "not_found", "Resource was not found.") };
+    const outcome = applyControl(screen, change);
+    if ("problem" in outcome) return { status: outcome.problem.status, headers: { "content-type": "application/problem+json" }, body: outcome.problem };
+    screens.set(screen.id, outcome.screen);
+    return { status: 200, headers: { etag: `"${outcome.screen.revision}"` }, body: outcome.screen };
+  };
+  transport.on("GET", /^\/api\/v1\/screens\/[^/]+\/playlist-schedule$/, (req): TransportResponse => {
+    const screen = screens.get(decodeURIComponent(req.path.split("/")[4] ?? ""));
+    if (!screen) return { status: 404, headers: { "content-type": "application/problem+json" }, body: controlProblem(404, "not_found", "Resource was not found.") };
+    const resolved = resolveEffective(screen);
+    return { status: 200, headers: {}, body: {
+      entries: screen.playlist_schedule?.entries ?? [],
+      ...(screen.playlist_schedule ? { updated_at: screen.playlist_schedule.updated_at } : {}),
+      ...(resolved.effective_playlist ? { effective_playlist: resolved.effective_playlist } : {}),
+    } };
+  });
+  transport.on("PUT", /^\/api\/v1\/screens\/[^/]+\/playlist-schedule$/, (req) => controlRoute(req, { kind: "schedule", entries: ((req.body ?? {}) as { entries?: Array<Record<string, unknown>> }).entries ?? [] }));
+  transport.on("DELETE", /^\/api\/v1\/screens\/[^/]+\/playlist-schedule$/, (req) => controlRoute(req, { kind: "schedule_clear" }));
+  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/takeover$/, (req) => {
+    const body = (req.body ?? {}) as { playlist_id: string; until?: string | null; reason?: string };
+    return controlRoute(req, { kind: "takeover", playlist_id: body.playlist_id, until: body.until, reason: body.reason });
+  });
+  transport.on("DELETE", /^\/api\/v1\/screens\/[^/]+\/takeover$/, (req) => controlRoute(req, { kind: "takeover_clear" }));
+
   // POST /api/v1/screens/actions: one result per selected screen, in selector
   // order; a missing screen fails with not_found, the rest succeed.
   transport.on("POST", "/api/v1/screens/actions", (req): TransportResponse => {
     const body = req.body as { selector: { by: "ids"; screen_ids: string[] } | { by: "tag"; tag: string }; action: { type: string; tags?: string[]; playlist_id?: string } };
+    // Like the server, a fleet takeover's until is checked once before fan-out.
+    const fleetUntil = (body.action as { until?: unknown }).until;
+    if (body.action.type === "takeover" && typeof fleetUntil === "string") {
+      const ahead = Date.parse(fleetUntil) - clock().getTime();
+      const detail = !(ahead > 0) ? "until: must be in the future"
+        : ahead > 7 * 24 * 60 * 60 * 1000 ? "until: must be at most 7 days ahead; use null to hold until cleared" : undefined;
+      if (detail) return { status: 400, headers: { "content-type": "application/problem+json" }, body: controlProblem(400, "invalid_request", detail) };
+    }
     const ids = body.selector.by === "ids"
       ? body.selector.screen_ids
       : [...screens.values()].filter((screen) => screen.state === "active" && (screen.tags ?? []).includes((body.selector as { tag: string }).tag)).map((screen) => screen.id);
@@ -768,6 +860,16 @@ export function memoryBackend(): FakeTransport {
       const action = body.action;
       if (action.type === "reload") return { screen_id: id, status: "ok", reload: { reload_id: "rld_FLEET0001", expires_at: "2026-08-14T17:10:00.000Z" } };
       if (action.type === "toast") return { screen_id: id, status: "ok", toast: { expires_at: "2026-08-14T17:00:10.000Z" } };
+      if (["takeover", "takeover_clear", "set_playlist_schedule", "clear_playlist_schedule"].includes(action.type)) {
+        const control = action as unknown as { type: string; playlist_id: string; until?: string | null; reason?: string; entries?: Array<Record<string, unknown>> };
+        const change: Control = control.type === "takeover" ? { kind: "takeover", playlist_id: control.playlist_id, until: control.until, reason: control.reason }
+          : control.type === "takeover_clear" ? { kind: "takeover_clear" }
+          : control.type === "clear_playlist_schedule" ? { kind: "schedule_clear" } : { kind: "schedule", entries: control.entries ?? [] };
+        const outcome = applyControl(screen, change);
+        if ("problem" in outcome) return { screen_id: id, status: "failed", problem: outcome.problem };
+        screens.set(id, outcome.screen);
+        return { screen_id: id, status: "ok", revision: outcome.screen.revision };
+      }
       const stored = screen.tags ?? [];
       const tags = action.type === "set_tags" ? action.tags ?? []
         : action.type === "add_tags" ? [...stored, ...(action.tags ?? []).filter((tag) => !stored.includes(tag))]
