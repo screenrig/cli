@@ -4515,7 +4515,7 @@ test("screen toast posts the closed write body and does not echo the text", asyn
 });
 
 test("screen toast defaults omitted --level to info", async () => {
-  assert.match(commandHelp(["screen", "toast"]).usage, /screen toast \[options\] <id>/);
+  assert.match(commandHelp(["screen", "toast"]).usage, /screen toast \[options\] \[id\.\.\.\]/);
   const transport = memoryBackend();
   const configDir = await testTemp("toast-default-level-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
@@ -6067,7 +6067,7 @@ test("screen reload explains a server that predates the route and encodes the id
 
 test("screen help describes reload, archive recovery, and archive reasons", () => {
   const reload = commandHelp(["screen", "reload"]).usage;
-  assert.match(reload, /screen reload \[options\] <id>/);
+  assert.match(reload, /screen reload \[options\] \[id\.\.\.\]/);
   assert.match(reload, /--expect-rev/);
   assert.match(reload, /reload_id/);
   assert.match(reload, /ten minutes/);

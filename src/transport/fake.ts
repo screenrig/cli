@@ -753,17 +753,55 @@ export function memoryBackend(): FakeTransport {
     return { status: 204, headers: {}, body: undefined };
   });
 
+  // POST /api/v1/screens/actions: one result per selected screen, in selector
+  // order; a missing screen fails with not_found, the rest succeed.
+  transport.on("POST", "/api/v1/screens/actions", (req): TransportResponse => {
+    const body = req.body as { selector: { by: "ids"; screen_ids: string[] } | { by: "tag"; tag: string }; action: { type: string; tags?: string[]; playlist_id?: string } };
+    const ids = body.selector.by === "ids"
+      ? body.selector.screen_ids
+      : [...screens.values()].filter((screen) => screen.state === "active" && (screen.tags ?? []).includes((body.selector as { tag: string }).tag)).map((screen) => screen.id);
+    const results = ids.map((id) => {
+      const screen = screens.get(id);
+      if (!screen) {
+        return { screen_id: id, status: "failed", problem: { type: "https://screenrig.ai/problems/not-found", title: "Not found", status: 404, code: "not_found", detail: "Screen not found." } };
+      }
+      const action = body.action;
+      if (action.type === "reload") return { screen_id: id, status: "ok", reload: { reload_id: "rld_FLEET0001", expires_at: "2026-08-14T17:10:00.000Z" } };
+      if (action.type === "toast") return { screen_id: id, status: "ok", toast: { expires_at: "2026-08-14T17:00:10.000Z" } };
+      const stored = screen.tags ?? [];
+      const tags = action.type === "set_tags" ? action.tags ?? []
+        : action.type === "add_tags" ? [...stored, ...(action.tags ?? []).filter((tag) => !stored.includes(tag))]
+        : action.type === "remove_tags" ? stored.filter((tag) => !(action.tags ?? []).includes(tag))
+        : stored;
+      const item: Screen = { ...screen, tags, ...(action.type === "assign" ? { playlist_id: action.playlist_id } : {}), revision: screen.revision + 1 };
+      screens.set(id, item);
+      return { screen_id: id, status: "ok", revision: item.revision, ...(action.type.endsWith("_tags") ? { tags } : {}) };
+    });
+    const failed = results.filter((result) => result.status === "failed").length;
+    return {
+      status: 200,
+      headers: { "cache-control": "no-store", "x-request-id": req.headers?.["x-request-id"] ?? "req_actions" },
+      body: { action: body.action.type, matched: results.length, succeeded: results.length - failed, failed, results },
+    };
+  });
   transport.on("GET", "/api/v1/screens", (req) => {
     const archivedOnly = req.query?.state === "archived";
+    const tag = typeof req.query?.tag === "string" ? req.query.tag : undefined;
     const items = [...screens.values()].filter((screen) => (
       archivedOnly ? screen.state === "archived" : screen.state !== "archived"
-    ));
+    ) && (tag === undefined || (screen.tags ?? []).includes(tag)));
     return { status: 200, headers: {}, body: { items } };
   });
   transport.on("GET", /^\/api\/v1\/screens\/[^/]+$/, (req) => ({ status: 200, headers: {}, body: screens.get(req.path.split("/").pop() ?? "") }));
-  transport.on("PATCH", /^\/api\/v1\/screens\/[^/]+$/, (req) => {
+  transport.on("PATCH", /^\/api\/v1\/screens\/[^/]+$/, (req): TransportResponse => {
     const id = req.path.split("/").pop() ?? "";
-    const body = req.body as { name?: string; playlist_id?: string; timezone?: string };
+    const body = req.body as { name?: string; playlist_id?: string; timezone?: string; tags?: string[] };
+    const ifMatch = req.headers?.["if-match"];
+    const existing = screens.get(id);
+    // Only tag writes model the revision guard; older fixtures reuse fixed revisions.
+    if (body.tags && ifMatch && existing && ifMatch !== `"${existing.revision}"`) {
+      return { status: 412, headers: { "content-type": "application/problem+json" }, body: { type: "https://screenrig.ai/problems/revision-conflict", title: "Revision conflict", status: 412, code: "revision_conflict", detail: "The screen revision changed.", current_revision: existing.revision } };
+    }
     const item = {
       ...(screens.get(id) ?? {
         id,
@@ -780,7 +818,8 @@ export function memoryBackend(): FakeTransport {
       ...(body.playlist_id ? { playlist_id: body.playlist_id } : {}),
       // A screen has no timezone until one is set, and a patch never clears it.
       ...(body.timezone ? { timezone: body.timezone } : {}),
-      revision: 2,
+      ...(body.tags ? { tags: body.tags } : {}),
+      revision: body.tags && existing ? existing.revision + 1 : 2,
     };
     screens.set(id, item);
     return { status: 200, headers: {}, body: item };

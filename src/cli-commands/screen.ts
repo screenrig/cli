@@ -1,8 +1,8 @@
 import { addValueAlias } from "./aliases.js";
 import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes.js";
-import { positiveInteger, revision, toastDuration } from "./options.js";
+import { positiveInteger, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenScreenshot } from "../commands.js";
+import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenScreenshot, handleScreenTag } from "../commands.js";
 import { type Command, Option } from "commander";
 
 export function registerScreenCommands(root: Command, bind: CommandActionBinder): void {
@@ -33,6 +33,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
 
   screen.command("list").description("List screens")
     .addOption(new Option("--state <STATE>", "List archived screens; omitted lists active screens").choices(["archived"]))
+    .option("--tag <TAG>", "List only screens carrying this exact tag", screenTagOption)
     .action(bind(handleScreenList));
 
   screen.command("show").description("Inspect a screen")
@@ -45,8 +46,9 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--playlist-rev <REVISION>", "Optionally require the playlist to be at this revision", positiveInteger("playlist-rev"))
     .action(bind(handleScreenStorageForecast));
 
-  screen.command("assign").description("Assign a playlist to a screen")
-    .argument("<id>", "Screen identifier")
+  screen.command("assign").description("Assign a playlist to a screen or a fleet of screens")
+    .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
+    .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .requiredOption("--playlist-id <ID>", "Select the playlist to assign (required)")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleScreenAssign));
@@ -84,23 +86,38 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   addCommandNotes(recover, "Recovery reconnects a display that lost its stored identity and now reports this screen's hardware identifiers while pairing. Nothing is rebound until this command confirms it: the screen keeps its label, playlist, timezone, schedules, and history; the display's new key replaces the previous one, which retires after a fifteen-minute grace window. screen show reports the offer as recovery_pending with its deadline and, when the server reports it, the platform, model, firmware, and manufacturer of the display asking to reconnect. Compare the reported model and firmware with the display you expect before confirming: a display's identifiers can be read by any application running on it, so the offer alone does not prove which display is asking. The service refuses offers while the screen's current player is still online and limits how many offers each screen receives. Recovery never crosses projects.");
   addCommandExamples(recover, "screenrig screen show scr_LOBBY", "screenrig screen recover scr_LOBBY");
 
-  screen.command("reload").description("Ask a screen's player to reload")
-    .argument("<id>", "Screen identifier")
+  screen.command("reload").description("Ask a screen's player, or a fleet's players, to reload")
+    .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
+    .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleScreenReload));
 
-  screen.command("toast").description("Show a temporary screen message")
-    .argument("<id>", "Screen identifier")
+  screen.command("toast").description("Show a temporary message on a screen or a fleet of screens")
+    .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
+    .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .requiredOption("--text <TEXT>", "Set the screen message (required)")
     .addOption(new Option("--level <LEVEL>", "Set toast level").choices(["error", "alert", "info"]).default("info"))
     .option("--duration-ms <MS>", "Show the message for 2000–60000 milliseconds", toastDuration)
     .action(bind(handleScreenToast));
 
-  screen.command("screenshot").description("Capture and download a screen screenshot")
-    .argument("<id>", "Screen identifier")
-    .option("--output <PATH>", "Write the screenshot to this file")
+  screen.command("screenshot").description("Capture and download screenshots from a screen or a fleet of screens")
+    .argument("[id...]", "Screen identifier; several ids capture each screen")
+    .option("--tag <TAG>", "Capture every active screen carrying this tag", screenTagOption)
+    .option("--output <PATH>", "Write the screenshot to this file; with several ids or --tag, a directory")
+    .option("--concurrency <N>", "Captures in flight at once with several ids or --tag (1-8, default 4)", positiveInteger("concurrency"))
     .option("--poll-ms <MS>", "Set the operation polling interval", positiveInteger("poll-ms"))
     .action(bind(handleScreenScreenshot));
+
+  const tag = screen.command("tag").description("Set, add, remove, or clear screen tags on a screen or a fleet of screens")
+    .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
+    .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
+    .option("--set <TAGS>", "Replace the tag set with these comma-separated tags", screenTagListOption("--set"))
+    .option("--add <TAGS>", "Add these comma-separated tags", screenTagListOption("--add"))
+    .option("--remove <TAGS>", "Remove these comma-separated tags", screenTagListOption("--remove"))
+    .option("--clear", "Remove every tag")
+    .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+    .action(bind(handleScreenTag));
+  requireOptionGroup(tag, "exactlyOne", ["--set", "--add", "--remove", "--clear"]);
   for (const name of ["pair", "provision"]) addValueAlias(screen.commands.find(command => command.name() === name)!, "--name", "--label", "Set the screen name");
   requireOptionGroup(screen.commands.find(command => command.name() === "update")!, "atLeastOne", ["--name", "--playlist-id", "--timezone"]);
 }

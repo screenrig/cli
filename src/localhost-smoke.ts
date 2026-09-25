@@ -301,6 +301,14 @@ async function main(): Promise<void> {
     await run("screen", "unarchive", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", "4");
     const reloaded = await run("screen", "reload", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", "5");
     assert.match(String((reloaded.data as { reload_id?: string }).reload_id ?? ""), /^[A-Za-z0-9_-]{8,64}$/);
+    const tagged = await run("screen", "tag", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--set", "Lobby", "--expect-rev", "5");
+    assert.deepEqual((tagged.data as { tags?: string[] }).tags, ["Lobby"]);
+    const byTag = await run("screen", "list", "--tag", "Lobby");
+    assert.equal(((byTag.data as { items?: unknown[] }).items ?? []).length, 1);
+    const fleetReload = await run("screen", "reload", "--tag", "Lobby");
+    assert.equal((fleetReload.data as { matched?: number; succeeded?: number }).succeeded, 1);
+    const fleetTag = await run("screen", "tag", "--tag", "Lobby", "--add", "Spring");
+    assert.deepEqual((fleetTag.data as { results?: Array<{ tags?: string[] }> }).results?.[0]?.tags, ["Lobby", "Spring"]);
     const deleted = await invoke(["screen", "delete", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", "5"]);
     assert.equal(deleted.code, 5, `screen delete must surface screen_archive_required: ${deleted.stderr || deleted.stdout}`);
     assert.equal((JSON.parse(deleted.stdout) as { error?: { code?: string } }).error?.code, "screen_archive_required");

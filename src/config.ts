@@ -64,7 +64,7 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
         request_hash: string;
       };
       /** Pending ordinary writes: hashes, keys, timestamps and command names; never payloads. */
-      pending_writes?: Record<string, { idempotency_key: string; created_at: string; command?: string }>;
+      pending_writes?: Record<string, { idempotency_key: string; created_at: string; command?: string; supersede?: string }>;
       updated_at?: string;
     }
 

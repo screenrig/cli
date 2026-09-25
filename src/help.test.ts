@@ -128,6 +128,7 @@ test("root help is compact and every command is discoverable through immediate c
     "screen reload",
     "screen toast",
     "screen screenshot",
+    "screen tag",
     "kv get",
     "kv set",
     "kv delete",
@@ -191,7 +192,7 @@ test("help paths, --help, and bare groups work before configuration or authentic
     if (flagged.data.kind === "group") assert.deepEqual(flagged, invoke(path));
   }
   const action = invoke(["screen", "assign", "--help"]).data;
-  assert.match(action.usage, /Usage: screenrig screen assign \[options\] <id>/);
+  assert.match(action.usage, /Usage: screenrig screen assign \[options\] \[id\.\.\.\]/);
   for (const name of ["--playlist-id", "--expect-rev"]) {
     const option = action.options.find((item) => item.name === name);
     assert.equal(option?.type, "value");

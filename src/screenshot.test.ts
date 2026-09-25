@@ -5,7 +5,6 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { parseArgv } from "./argv.js";
-import { CliError } from "./problems.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { run, type CliRuntime } from "./main.js";
@@ -131,8 +130,9 @@ function screenshotCalls(transport: FakeTransport): TransportRequest[] {
 }
 
 test("parseArgv keeps screen screenshot id and --output as a file path", () => {
-  assert.throws(() => parseArgv(["screen", "screenshot"]),
-    (error: unknown) => error instanceof CliError && error.problem.code === "usage_error");
+  // The target (<id>, several ids, or --tag) is optional at parse time; the
+  // handler refuses a missing one before any request (next test).
+  assert.deepEqual(parseArgv(["screen", "screenshot"]).positionals, ["screen", "screenshot"]);
 
   const defaults = parseArgv(["screen", "screenshot", SCREEN_ID]);
   assert.equal(defaults.positionals[2], SCREEN_ID);

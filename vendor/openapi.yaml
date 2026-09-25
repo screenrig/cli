@@ -1293,9 +1293,9 @@ paths:
   /api/v1/screens:
     get:
       operationId: listScreens
-      description: Default list returns pairing_pending and active screens. Pass state=archived to list archived screens only.
+      description: Default list returns pairing_pending and active screens. Pass state=archived to list archived screens only. Pass tag to list only screens whose tags contain that exact tag; untagged screens are omitted when the filter is present.
       security: [{ projectBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/ScreenListState" }]
+      parameters: [{ $ref: "#/components/parameters/ScreenListState" }, { $ref: "#/components/parameters/ScreenTagQuery" }]
       responses:
         "200": { description: Screens, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenList" } } } }
         default: { $ref: "#/components/responses/Problem" }
@@ -1355,6 +1355,56 @@ paths:
         "413": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         "500": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/actions:
+    post:
+      operationId: applyScreenActions
+      x-rate-limit-policies: [{ name: screen-actions-project, quota: 30, windowSeconds: 60 }, { name: screen-actions-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Applies one action to many screens in one request. The selector is
+        either by ids (1 to 500 unique screen ids, any state; each id is
+        resolved like its single-screen route) or by tag (every active
+        screen whose tags contain the exact tag, at most 500, else
+        invalid_request). Each screen runs the same code path as its
+        single-screen route, so revisions, events, and runtime signalling
+        are identical: assign is PATCH /api/v1/screens/{id} with
+        playlist_id, reload is POST /api/v1/screens/{id}/reload, toast is
+        POST /api/v1/screens/{id}/toast, and set_tags, add_tags, and
+        remove_tags edit Screen.tags (add then remove, applied against the
+        stored set inside the screen transaction). The answer is 200 with
+        one result per selected screen in selector order; a failed screen
+        carries the problem its single-screen request would have
+        answered, so partial success is normal and not an error. A
+        malformed selector or action fails the whole request before any
+        screen is touched. The request is one metered API request
+        regardless of fan-out. reload and toast share the single-screen
+        budgets: the fan-out is charged all at once against
+        reload-project or toast-project (600 per minute per project), and
+        a fan-out larger than what remains in the window is refused
+        whole with 429 rate_limited before any screen is touched; each
+        screen then spends its own reload-screen (6 per minute) or
+        toast-screen (20 per minute) unit, and a screen over it fails
+        alone with a per-screen rate_limited problem. Idempotency-Key is
+        optional. The resolved screen list is pinned under the key before
+        fan-out, so a retry after an interrupted request fans out to the
+        same screens even when a tag edit changed what the selector
+        matches, replays finished screens without repeating their side
+        effects or spending budget, and completes the rest; an exact
+        retry of a completed request returns the recorded answer for
+        twenty-four hours. The action object is discriminated by type;
+        new action types are additive.
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenActionRequest" } } } }
+      responses:
+        "200": { description: Per-screen results. Partial success is a normal answer., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenActionResult" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "402": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}:
     parameters: [{ $ref: "#/components/parameters/ResourceID" }]
@@ -1457,7 +1507,7 @@ paths:
   /api/v1/screens/{id}/reload:
     post:
       operationId: reloadScreen
-      x-rate-limit-policies: [{ name: reload-project, quota: 60, windowSeconds: 60 }, { name: reload-screen, quota: 6, windowSeconds: 60 }, { name: reload-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: reload-project, quota: 600, windowSeconds: 60 }, { name: reload-screen, quota: 6, windowSeconds: 60 }, { name: reload-ip, quota: 60, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Asks the Player of the named active or archived screen to reload
@@ -1487,7 +1537,7 @@ paths:
   /api/v1/screens/{id}/toast:
     post:
       operationId: postScreenToast
-      x-rate-limit-policies: [{ name: toast-project, quota: 60, windowSeconds: 60 }, { name: toast-screen, quota: 20, windowSeconds: 60 }, { name: toast-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: toast-project, quota: 600, windowSeconds: 60 }, { name: toast-screen, quota: 20, windowSeconds: 60 }, { name: toast-ip, quota: 60, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Posts one transient stage-chrome toast to the named screen. A toast is
@@ -2214,6 +2264,133 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/webhooks:
+    get:
+      operationId: listWebhooks
+      description: >-
+        Lists the project's webhooks, oldest first (at most 10). The signing
+        secret is never returned here.
+      security: [{ projectBearer: [] }]
+      responses:
+        "200": { description: The project's webhooks., content: { application/json: { schema: { $ref: "#/components/schemas/WebhookList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createWebhook
+      description: >-
+        Creates a webhook that receives the project's own durable events as
+        signed HTTPS POSTs. url must be https on a public Internet host: an
+        IP literal or every current DNS answer of the name must be public
+        (private, loopback, link-local, CGNAT, IPv6 outside 2000::/3,
+        documentation, and other reserved ranges are refused with
+        webhook_url_rejected). The port must be 443 (the default) or 8443,
+        else webhook_url_rejected. The host is resolved and checked again
+        before every delivery and the connection is dialed to exactly the
+        checked address, so a DNS answer that changes later cannot redirect
+        deliveries. event_types lists exact event types (screen.online) or
+        prefixes ending in .* (screen.*). A project has at most 10 webhooks
+        (webhook_limit_reached). The server generates the signing secret and
+        returns it only in this answer and in rotate-secret; store it. An
+        exact retry with the same Idempotency-Key returns this same answer,
+        secret included, for twenty-four hours. Delivery starts with the
+        first event after webhook.created.
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/WebhookWrite" } } } }
+      responses:
+        "201": { description: Created. secret is shown only here and on rotate-secret., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/WebhookWithSecret" } } } }
+        "400": { description: invalid_request or webhook_url_rejected., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: webhook_limit_reached or idempotency_mismatch., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/webhooks/{id}:
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    get:
+      operationId: getWebhook
+      security: [{ projectBearer: [] }]
+      responses:
+        "200": { description: One webhook., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Webhook" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    patch:
+      operationId: updateWebhook
+      description: >-
+        Changes any of url, event_types, enabled, and description (an empty
+        description clears it). A new url is checked like create. Setting
+        enabled true on a disabled webhook clears its failure state and
+        starts delivery at the event that records the change; events from
+        while it was disabled are not replayed, and deliveries still pending
+        from before the disable are failed with webhook_disabled. Setting
+        enabled false fails
+        its pending deliveries with webhook_disabled. Appends
+        webhook.updated. If-Match guards the revision.
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/WebhookPatch" } } } }
+      responses:
+        "200": { description: Updated webhook., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Webhook" } } } }
+        "400": { description: invalid_request or webhook_url_rejected., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: revision_conflict — If-Match is stale; Problem.current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteWebhook
+      description: >-
+        Deletes the webhook and appends webhook.deleted. Its pending
+        deliveries are failed with webhook_deleted; its delivery log is no
+        longer addressable and expires with event retention.
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      responses:
+        "204": { description: Deleted., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
+        "412": { description: revision_conflict — If-Match is stale; Problem.current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/webhooks/{id}/rotate-secret:
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    post:
+      operationId: rotateWebhookSecret
+      description: >-
+        Replaces the signing secret and returns the new one; the old secret
+        stops signing at once: every attempt that signs after this commits
+        uses the new secret, and at most one attempt per webhook already in
+        flight may still arrive signed with the old one, so accept both
+        briefly. Appends webhook.updated with
+        details.changed [secret]. An exact retry with the same
+        Idempotency-Key returns the same new secret for twenty-four hours.
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      responses:
+        "200": { description: The webhook and its new secret., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/WebhookWithSecret" } } } }
+        "412": { description: revision_conflict — If-Match is stale; Problem.current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/webhooks/{id}/test:
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    post:
+      operationId: testWebhook
+      x-rate-limit-policies: [{ name: webhook-test-project, quota: 20, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Appends a webhook.test project event and queues one delivery of it
+        to this webhook only (no other webhook receives webhook.test). It
+        works on a disabled webhook, is attempted once without retries, is
+        metered like any delivery, and never changes the webhook's failure
+        state. Poll the deliveries log for its outcome.
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      responses:
+        "202": { description: The queued test delivery., headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/WebhookDelivery" } } } }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/webhooks/{id}/deliveries:
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    get:
+      operationId: listWebhookDeliveries
+      description: >-
+        The webhook's delivery log, newest event first. One row per
+        (webhook, event); retries update the row. Rows are retained like
+        events (the plan's event retention, at least the 24-hour retry
+        window). Pass next_cursor back as before for the next page.
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/WebhookDeliveriesBefore" }, { $ref: "#/components/parameters/WebhookDeliveriesLimit" }]
+      responses:
+        "200": { description: One page of deliveries., content: { application/json: { schema: { $ref: "#/components/schemas/WebhookDeliveryList" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/pairing-sessions:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -3809,9 +3986,9 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
     get:
       operationId: listDashboardScreens
-      description: Default list returns pairing_pending and active screens of the session's project. Pass state=archived to list archived screens only.
+      description: Default list returns pairing_pending and active screens of the session's project. Pass state=archived to list archived screens only. Pass tag to list only screens whose tags contain that exact tag. Tags are read-only on the dashboard.
       security: [{ dashboardSession: [] }]
-      parameters: [{ $ref: "#/components/parameters/ScreenListState" }]
+      parameters: [{ $ref: "#/components/parameters/ScreenListState" }, { $ref: "#/components/parameters/ScreenTagQuery" }]
       responses:
         "200": { description: Screens, headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenList" } } } }
         "401": { $ref: "#/components/responses/Problem" }
@@ -3923,7 +4100,7 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
     post:
       operationId: reloadDashboardScreen
-      x-rate-limit-policies: [{ name: reload-project, quota: 60, windowSeconds: 60 }, { name: reload-screen, quota: 6, windowSeconds: 60 }, { name: reload-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: reload-project, quota: 600, windowSeconds: 60 }, { name: reload-screen, quota: 6, windowSeconds: 60 }, { name: reload-ip, quota: 60, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         The dashboard twin of POST /api/v1/screens/{id}/reload: same project
@@ -4224,6 +4401,51 @@ paths:
         "200": { description: "Replayable SSE stream. Arriving billable events debit 1 whole credit each under the same meter and exemption set as GET /api/v1/events/stream; heartbeats and the retry preamble never charge. An unpaid billable event is not written and closes the stream; GET /dashboard/v1/balance remains available at zero. No ScreenRig-Credits-* headers.", headers: { Cache-Control: { schema: { type: string, enum: ["no-cache, no-store, no-transform"] } }, X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
         "401": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/webhooks:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
+    get:
+      operationId: listDashboardWebhooks
+      description: Read-only list of the session project's webhooks. Creating, editing, testing, and rotating secrets are agent (project API) operations.
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: The project's webhooks., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/WebhookList" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/webhooks/{id}:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    get:
+      operationId: getDashboardWebhook
+      security: [{ dashboardSession: [] }]
+      responses:
+        "200": { description: One webhook., headers: { ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Webhook" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteDashboardWebhook
+      description: Deletes one of the session project's webhooks, exactly like DELETE /api/v1/webhooks/{id}. The durable webhook.deleted event carries the acting dashboard user as actor.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      responses:
+        "204": { description: Deleted., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/webhooks/{id}/deliveries:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    get:
+      operationId: listDashboardWebhookDeliveries
+      description: Read-only delivery log of one of the session project's webhooks, newest event first.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/WebhookDeliveriesBefore" }, { $ref: "#/components/parameters/WebhookDeliveriesLimit" }]
+      responses:
+        "200": { description: One page of deliveries., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/WebhookDeliveryList" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/playback:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
     get:
@@ -4275,6 +4497,8 @@ components:
     ApplicationID: { name: application_id, in: path, required: true, schema: { type: string } }
     IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 8, maxLength: 200 } }
     OptionalIdempotencyKey: { name: Idempotency-Key, in: header, required: false, schema: { type: string, minLength: 8, maxLength: 200 }, description: "Omit for a fresh operation. Supply and reuse a key to deduplicate retries; the CLI manages keys automatically." }
+    WebhookDeliveriesBefore: { name: before, in: query, required: false, schema: { type: string, pattern: "^whc1_[0-9a-z]{1,16}$" }, description: next_cursor of the previous deliveries page. }
+    WebhookDeliveriesLimit: { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
     ArchiveSHA256: { name: ScreenRig-Archive-SHA256, in: header, required: true, schema: { type: string, pattern: "^[0-9a-f]{64}$" } }
     ExpandedBytes: { name: ScreenRig-Expanded-Bytes, in: header, required: true, schema: { type: integer, minimum: 1, maximum: 262144000 } }
     FileCount: { name: ScreenRig-File-Count, in: header, required: true, schema: { type: integer, minimum: 1, maximum: 5000 } }
@@ -4312,6 +4536,7 @@ components:
     ScreenshotCaptureID: { name: capture_id, in: query, required: false, schema: { $ref: "#/components/schemas/ScreenshotCaptureID" } }
     ScreenshotCaptureIDHeader: { name: ScreenRig-Capture-Id, in: header, required: true, schema: { $ref: "#/components/schemas/ScreenshotCaptureID" } }
     ScreenListState: { name: state, in: query, required: false, schema: { type: string, enum: [archived] }, description: Omit for pairing_pending and active. Pass archived to list archived screens only. }
+    ScreenTagQuery: { name: tag, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, description: Exact screen tag. Untagged screens are omitted when this filter is present. }
     SecFetchSite: { name: Sec-Fetch-Site, in: header, required: false, schema: { type: string, enum: [same-origin, same-site, cross-site, none] } }
     SecFetchMode: { name: Sec-Fetch-Mode, in: header, required: false, schema: { type: string } }
     SecFetchDest: { name: Sec-Fetch-Dest, in: header, required: false, schema: { type: string } }
@@ -6346,7 +6571,20 @@ components:
             - { type: object, additionalProperties: true }
             - { type: "null" }
           description: "Opaque agent JSON object when set. Null when the target exists and comments are unset."
-    ScreenPatch: { type: object, additionalProperties: false, minProperties: 1, properties: { name: { type: string, minLength: 1, maxLength: 120 }, playlist_id: { type: string }, timezone: { type: string, minLength: 1, maxLength: 64, description: "IANA time zone identifier, for example America/Los_Angeles. It is the zone every page visibility rule on this screen is evaluated in. Changing it remints the manifest revision. A screen assigned a playlist that uses page visibility must have one." } } }
+    ScreenPatch: { type: object, additionalProperties: false, minProperties: 1, properties: { name: { type: string, minLength: 1, maxLength: 120 }, playlist_id: { type: string }, timezone: { type: string, minLength: 1, maxLength: 64, description: "IANA time zone identifier, for example America/Los_Angeles. It is the zone every page visibility rule on this screen is evaluated in. Changing it remints the manifest revision. A screen assigned a playlist that uses page visibility must have one." }, tags: { $ref: "#/components/schemas/ScreenTags" } } }
+    ScreenTags:
+      type: array
+      maxItems: 16
+      uniqueItems: true
+      items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }
+      description: >-
+        Fleet selector tags, 0 to 16 unique exact tags, each matching the
+        media tag grammar. On ScreenPatch the array replaces the whole set
+        and an empty array clears it; a duplicate or malformed tag is
+        invalid_request. Changing tags bumps the screen revision (If-Match
+        guards it) and appends screen.updated with details.tags; it never
+        changes the manifest revision. Tags are never on the runtime
+        manifest and never authorization.
     PairScreen: { type: object, additionalProperties: false, required: [code], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, label: { type: string, minLength: 1, maxLength: 120 } } }
     ProvisionScreen: { type: object, additionalProperties: false, properties: { label: { type: string, minLength: 1, maxLength: 120 } } }
     ScreenProvisioning: { type: object, additionalProperties: false, required: [screen, public_url, provisioning_url, expires_at], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri }, provisioning_url: { type: string, pattern: "^https?://[^#]+/s/[^#]+#provision=[A-Za-z0-9_-]{43}$" }, expires_at: { type: string, format: date-time } } }
@@ -6360,6 +6598,7 @@ components:
         label: { type: string }
         playlist_id: { type: string }
         timezone: { type: string, description: "IANA time zone identifier. Absent until it is set. Page visibility rules are evaluated in this zone." }
+        tags: { $ref: "#/components/schemas/ScreenTags" }
         observation: { $ref: "#/components/schemas/ScreenObservation" }
         last_page_failure: { $ref: "#/components/schemas/PageFailure" }
         comments: { type: object, additionalProperties: true, description: "Opaque agent JSON object, compact UTF-8 ≤ 1024 bytes. Absent when unset. ScreenRig never reads or uses it. ScreenPatch cannot write it. Not on the runtime manifest and never authorization." }
@@ -6419,7 +6658,14 @@ components:
             live presence. Derived from live paired traffic, not a player
             heartbeat or presence.write report. Read-only on the project API;
             ScreenPatch, pairing bodies, session bodies, and the runtime manifest
-            body cannot write it.
+            body cannot write it. Presence transitions are debounced project
+            events, not this flag: screen.offline is appended once the
+            presence lease has been expired for 60 seconds, and
+            screen.online when a paired events stream connects while the
+            last written transition is offline or none. A reconnect inside
+            those 60 seconds writes neither. Both carry
+            details.last_online_at, are project-only (never on the runtime
+            stream), and are exempt from the listen-stream event meter.
         last_online_at:
           type: string
           format: date-time
@@ -6528,6 +6774,120 @@ components:
         model: { type: string, minLength: 1, maxLength: 80 }
         firmware: { type: string, minLength: 1, maxLength: 80 }
         manufacturer: { type: string, minLength: 1, maxLength: 80 }
+    ScreenActionRequest:
+      type: object
+      additionalProperties: false
+      required: [selector, action]
+      properties:
+        selector: { $ref: "#/components/schemas/ScreenActionSelector" }
+        action: { $ref: "#/components/schemas/ScreenAction" }
+    ScreenActionSelector:
+      oneOf:
+        - { $ref: "#/components/schemas/ScreenActionSelectorIds" }
+        - { $ref: "#/components/schemas/ScreenActionSelectorTag" }
+      discriminator: { propertyName: by }
+    ScreenActionSelectorIds:
+      type: object
+      additionalProperties: false
+      required: [by, screen_ids]
+      properties:
+        by: { type: string, enum: [ids] }
+        screen_ids: { type: array, minItems: 1, maxItems: 500, uniqueItems: true, items: { type: string, minLength: 1, maxLength: 200 } }
+    ScreenActionSelectorTag:
+      type: object
+      additionalProperties: false
+      required: [by, tag]
+      description: Every active screen whose tags contain tag, in creation order. More than 500 matches is invalid_request.
+      properties:
+        by: { type: string, enum: [tag] }
+        tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }
+    ScreenAction:
+      oneOf:
+        - { $ref: "#/components/schemas/ScreenActionAssign" }
+        - { $ref: "#/components/schemas/ScreenActionReload" }
+        - { $ref: "#/components/schemas/ScreenActionToast" }
+        - { $ref: "#/components/schemas/ScreenActionSetTags" }
+        - { $ref: "#/components/schemas/ScreenActionAddTags" }
+        - { $ref: "#/components/schemas/ScreenActionRemoveTags" }
+      discriminator: { propertyName: type }
+      description: >-
+        One fleet action, discriminated by type. Each member carries only
+        its own parameters; a member of another type is an unknown field
+        and invalid_request.
+    ScreenActionAssign:
+      type: object
+      additionalProperties: false
+      required: [type, playlist_id]
+      properties:
+        type: { type: string, enum: [assign] }
+        playlist_id: { type: string, minLength: 1 }
+    ScreenActionReload:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: { type: string, enum: [reload] }
+    ScreenActionToast:
+      type: object
+      additionalProperties: false
+      required: [type, level, text]
+      description: Same level, text, and duration rules as ScreenToastWrite, validated once before fan-out.
+      properties:
+        type: { type: string, enum: [toast] }
+        level: { type: string, enum: [error, alert, info] }
+        text: { type: string, minLength: 1, maxLength: 120 }
+        duration_ms: { type: integer, minimum: 2000, maximum: 60000, default: 10000 }
+    ScreenActionSetTags:
+      type: object
+      additionalProperties: false
+      required: [type, tags]
+      description: Replaces each screen's tag set; an empty array clears it.
+      properties:
+        type: { type: string, enum: [set_tags] }
+        tags: { $ref: "#/components/schemas/ScreenTags" }
+    ScreenActionAddTags:
+      type: object
+      additionalProperties: false
+      required: [type, tags]
+      description: Adds tags a screen does not already carry. A screen that would exceed 16 tags fails with invalid_request.
+      properties:
+        type: { type: string, enum: [add_tags] }
+        tags: { type: array, minItems: 1, maxItems: 16, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }
+    ScreenActionRemoveTags:
+      type: object
+      additionalProperties: false
+      required: [type, tags]
+      description: Removes the listed tags; a tag the screen does not carry is ignored.
+      properties:
+        type: { type: string, enum: [remove_tags] }
+        tags: { type: array, minItems: 1, maxItems: 16, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }
+    ScreenActionResult:
+      type: object
+      additionalProperties: false
+      required: [action, matched, succeeded, failed, results]
+      properties:
+        action: { type: string, enum: [assign, reload, toast, set_tags, add_tags, remove_tags] }
+        matched: { type: integer, minimum: 0, maximum: 500 }
+        succeeded: { type: integer, minimum: 0, maximum: 500 }
+        failed: { type: integer, minimum: 0, maximum: 500 }
+        results: { type: array, maxItems: 500, items: { $ref: "#/components/schemas/ScreenActionScreenResult" } }
+    ScreenActionScreenResult:
+      type: object
+      additionalProperties: false
+      required: [screen_id, status]
+      description: >-
+        One screen's outcome. ok carries the result of the single-screen
+        path: revision (and tags for tag actions) for assign and tag
+        actions, reload for reload, toast for toast. failed carries the
+        problem that screen's own request would have answered.
+      properties:
+        screen_id: { type: string }
+        status: { type: string, enum: [ok, failed] }
+        revision: { type: integer, minimum: 1 }
+        tags: { type: array, maxItems: 16, items: { type: string } }
+        reload: { $ref: "#/components/schemas/ScreenReloadAccepted" }
+        toast: { $ref: "#/components/schemas/ScreenToastAccepted" }
+        problem: { $ref: "#/components/schemas/Problem" }
     ScreenRecoveryPending:
       type: object
       additionalProperties: false
@@ -7029,6 +7389,124 @@ components:
         cli_version: { type: string, maxLength: 64, pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]{1,40})?$", description: "Semantic version of the calling client." }
         command: { type: string, maxLength: 128, pattern: "^[a-z][a-z0-9-]{0,31}( [a-z][a-z0-9-]{0,31}){0,3}$", description: "Command path only, as up to four lowercase words. Option flags and argument values are rejected." }
         platform: { type: string, maxLength: 40, pattern: "^[a-z0-9]{1,16}/[a-z0-9_]{1,16}$", description: "Operating system and architecture, for example linux/x64." }
+    WebhookEventTypes:
+      type: array
+      minItems: 1
+      maxItems: 32
+      uniqueItems: true
+      items: { type: string, maxLength: 200, pattern: "^[a-z][a-z0-9_]{0,63}(\\.[a-z][a-z0-9_]{0,63})*(\\.\\*|\\.[a-z][a-z0-9_]{0,63})$" }
+      description: >-
+        Exact event types such as screen.online, or prefixes ending in .*
+        such as screen.* (every type starting with screen.). webhook.test is
+        never fanned out by a subscription; it is sent only by
+        POST /api/v1/webhooks/{id}/test.
+    WebhookWrite:
+      type: object
+      additionalProperties: false
+      required: [url, event_types]
+      properties:
+        url: { type: string, maxLength: 2048, format: uri, description: "https URL on a public Internet host, port 443 (the default) or 8443. No userinfo or fragment." }
+        event_types: { $ref: "#/components/schemas/WebhookEventTypes" }
+        enabled: { type: boolean, default: true }
+        description: { type: string, maxLength: 200 }
+    WebhookPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        url: { type: string, maxLength: 2048, format: uri }
+        event_types: { $ref: "#/components/schemas/WebhookEventTypes" }
+        enabled: { type: boolean }
+        description: { type: string, maxLength: 200, description: An empty string clears the description. }
+    Webhook:
+      type: object
+      additionalProperties: false
+      required: [id, url, event_types, enabled, revision, status, created_at, updated_at]
+      description: >-
+        A project webhook. Each matching project event is POSTed to url as the
+        same JSON object GET /api/v1/events returns, with headers
+        ScreenRig-Webhook-Id, ScreenRig-Event-Id (the event cursor, stable
+        across retries), User-Agent, and ScreenRig-Signature
+        t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with
+        the secret string>. A 2xx answer within 10 seconds succeeds; any other
+        status, a redirect (never followed), a timeout, or a connection or
+        TLS failure is retried with exponential backoff (30 seconds doubling
+        to one hour, jittered) for 24 hours and then failed. After three
+        consecutive timeouts the attempt timeout drops to 5 seconds until a
+        response arrives. A webhook has at most one attempt in flight and a
+        project at most two, across all servers. Delivery is at
+        least once and unordered; deduplicate on ScreenRig-Event-Id. Each
+        attempt is metered like a listen-stream event (1 credit after the
+        monthly 10,000 API/SSE allowance), and the same events that are free
+        on the listen stream are free here: screen.*, runtime.*,
+        application.event, playback.page_failed, and agent.command. An
+        attempt refused before anything is sent (url_rejected, dns_failed) is
+        not billed. payment_required and secret_unavailable back off but never
+        count toward failing or auto-disable. status is failing while no
+        delivery has succeeded since
+        failing_since; after 72 hours of continuous failure the webhook is
+        disabled (disabled_reason delivery_failures) and webhook.disabled is
+        appended.
+      properties:
+        id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?whk_[A-Za-z0-9_-]{16,24}$" }
+        url: { type: string }
+        event_types: { type: array, items: { type: string } }
+        enabled: { type: boolean }
+        description: { type: string }
+        revision: { type: integer, minimum: 1 }
+        status: { type: string, enum: [active, failing, disabled] }
+        disabled_reason: { type: string, enum: [delivery_failures] }
+        disabled_at: { type: string, format: date-time }
+        failing_since: { type: string, format: date-time }
+        last_success_at: { type: string, format: date-time }
+        last_failure_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    WebhookWithSecret:
+      type: object
+      additionalProperties: false
+      required: [id, url, event_types, enabled, revision, status, created_at, updated_at, secret]
+      description: A Webhook plus its signing secret. Returned only by create and rotate-secret.
+      properties:
+        id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?whk_[A-Za-z0-9_-]{16,24}$" }
+        url: { type: string }
+        event_types: { type: array, items: { type: string } }
+        enabled: { type: boolean }
+        description: { type: string }
+        revision: { type: integer, minimum: 1 }
+        status: { type: string, enum: [active, failing, disabled] }
+        disabled_reason: { type: string, enum: [delivery_failures] }
+        disabled_at: { type: string, format: date-time }
+        failing_since: { type: string, format: date-time }
+        last_success_at: { type: string, format: date-time }
+        last_failure_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        secret: { type: string, pattern: "^whsec_[A-Za-z0-9_-]{43}$", description: The signing secret. Store it; it is not shown again. }
+    WebhookList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 10, items: { $ref: "#/components/schemas/Webhook" } } } }
+    WebhookDelivery:
+      type: object
+      additionalProperties: false
+      required: [id, webhook_id, event_id, event_type, state, attempts, created_at]
+      properties:
+        id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?whd_[A-Za-z0-9_-]{16,24}$" }
+        webhook_id: { type: string }
+        event_id: { type: string, description: "The event cursor, sent as ScreenRig-Event-Id." }
+        event_type: { type: string }
+        test: { type: boolean, description: Present and true for a POST .../test delivery. }
+        state: { type: string, enum: [pending, succeeded, failed] }
+        attempts: { type: integer, minimum: 0 }
+        next_attempt_at: { type: string, format: date-time, description: Present while pending. }
+        last_attempt_at: { type: string, format: date-time }
+        last_status: { type: integer, description: HTTP status of the last attempt when one was received. }
+        last_error:
+          type: string
+          enum: [http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable]
+          description: Why the last attempt failed. url_rejected means the host no longer resolves only to public addresses.
+        last_duration_ms: { type: integer, minimum: 0 }
+        completed_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+    WebhookDeliveryList: { type: object, additionalProperties: false, required: [items, next_cursor], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/WebhookDelivery" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: Pass back as before for the next page; null at the end of the log. } } }
     FeedbackSubmission:
       type: object
       additionalProperties: false
@@ -7894,4 +8372,4 @@ components:
         errors: { type: array, items: { $ref: "#/components/schemas/ProblemField" } }
         next: { $ref: "#/components/schemas/NextAction" }
 x-problem-registry: ./problems.yaml
-x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, user_email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_project_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, server_draining, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk, recovery_ambiguous, recovery_expired, recovery_not_offered, invitation_limit_reached, version_required, price_change_pending, quote_stale, insufficient_credits, self_deal, invitation_invalid, invitation_expired, invitation_consumed, invitation_email_mismatch, reauthentication_required, member_limit_reached, last_credential, no_project, billing_unavailable, feature_unavailable, user_binding_stale, session_expired, credential_revoked, proof_clock_skew, key_retired, assignment_not_found, upgrade_required]
+x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, user_email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_project_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, server_draining, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk, recovery_ambiguous, recovery_expired, recovery_not_offered, invitation_limit_reached, version_required, price_change_pending, quote_stale, insufficient_credits, self_deal, invitation_invalid, invitation_expired, invitation_consumed, invitation_email_mismatch, reauthentication_required, member_limit_reached, last_credential, no_project, billing_unavailable, feature_unavailable, user_binding_stale, session_expired, credential_revoked, proof_clock_skew, key_retired, assignment_not_found, upgrade_required, webhook_limit_reached, webhook_url_rejected]

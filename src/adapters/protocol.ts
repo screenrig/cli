@@ -595,6 +595,12 @@ export interface Screen {
   revision: number;
   state: "pairing_pending" | "active" | "archived";
   /**
+   * Fleet selector tags: 0 to 16 unique exact tags matching ^[A-Za-z0-9]{1,32}$.
+   * Absent or empty when untagged. Never on the runtime manifest and never
+   * authorization.
+   */
+  tags?: ScreenTags;
+  /**
    * IANA time zone identifier. Absent until it is set. Page visibility rules
    * are civil, so they are evaluated in this zone.
    */
@@ -614,6 +620,51 @@ export interface ScreenPatch {
   name?: string;
   playlist_id?: string;
   timezone?: string;
+  /** Replaces the whole tag set; an empty array clears it. Bumps the screen revision. */
+  tags?: ScreenTags;
+}
+
+export type ScreenTags = string[];
+
+/** POST /api/v1/screens/actions selector: explicit ids (any state) or every active screen with a tag. */
+export type ScreenActionSelector =
+  | { by: "ids"; screen_ids: string[] }
+  | { by: "tag"; tag: string };
+
+/** One fleet action, discriminated by type. New action types are additive. */
+export type ScreenAction =
+  | { type: "assign"; playlist_id: string }
+  | { type: "reload" }
+  | ({ type: "toast" } & ScreenToastWrite)
+  | { type: "set_tags"; tags: ScreenTags }
+  | { type: "add_tags"; tags: string[] }
+  | { type: "remove_tags"; tags: string[] };
+
+export type ScreenActionType = ScreenAction["type"];
+
+export interface ScreenActionRequest {
+  selector: ScreenActionSelector;
+  action: ScreenAction;
+}
+
+/** One screen's outcome: ok carries the single-screen result, failed carries that screen's problem. */
+export interface ScreenActionScreenResult {
+  screen_id: string;
+  status: "ok" | "failed";
+  revision?: number;
+  tags?: string[];
+  reload?: ScreenReloadAccepted;
+  toast?: ScreenToastAccepted;
+  problem?: { type?: string; title?: string; status?: number; detail?: string; code?: string; [key: string]: unknown };
+}
+
+/** 200 answer of POST /api/v1/screens/actions. Partial success is a normal answer. */
+export interface ScreenActionResult {
+  action: ScreenActionType;
+  matched: number;
+  succeeded: number;
+  failed: number;
+  results: ScreenActionScreenResult[];
 }
 
 /** PUT /api/v1/comment/... body. Compact UTF-8 JSON of comments must be ≤ 1024 bytes. */

@@ -3,6 +3,7 @@ import { RESOURCE_ID_PATTERNS, isResourceID } from "./generated/resource-ids.js"
 import { replacePlaylistRelease } from "./playlist-release.js";
 import { readAuthoringJson, readAuthoringText, writeAuthoringJson } from "./authoring-input.js";
 import { publishScreen } from "./screen-publish.js";
+import { fleetHumanLines, fleetOutcome, rejectFleetRevision, screenActionResult, screenTag, screenTagList, screenTarget, SCREEN_TAGS_MAX, FLEET_SCREENS_MAX, type FleetItem } from "./screen-fleet.js";
 import { editablePlaylist, isAdSlotPage, playlistApiVersion, preparePlaylist, targetDimensions } from "./playlist-authoring.js";
 import { callVersionedPlaylist } from "./playlist-api.js";
 import { WriteRecovery } from "./write-recovery.js";
@@ -47,6 +48,9 @@ import {
   type HostContext,
   type ProvisionScreen,
   type Screen,
+  type ScreenAction,
+  type ScreenActionRequest,
+  type ScreenActionSelector,
   type ScreenPatch,
   type ScreenProvisioning,
   type ScreenReloadAccepted,
@@ -2586,6 +2590,24 @@ function mediaPrimitiveFromArgs(args: ParsedArgs): "image" | "video" | "audio" |
   return primitive;
 }
 
+function screenListQuery(args: ParsedArgs): Record<string, string> {
+  const state = screenListStateFromArgs(args);
+  const tag = screenListTagFromArgs(args);
+  return { ...(state ? { state } : {}), ...(tag ? { tag } : {}) };
+}
+
+function screenListTagFromArgs(args: ParsedArgs): string | undefined {
+  requireFlagValue(args, "tag", "Lobby");
+  const tag = flagString(args.flags, "tag");
+  return tag === undefined ? undefined : screenTag(tag);
+}
+
+/** Printable tags: only grammar-shaped values, so server text never reaches a table cell unchecked. */
+function screenTags(screen: Screen | undefined): string[] {
+  const tags = screen?.tags;
+  return Array.isArray(tags) ? tags.filter((tag): tag is string => typeof tag === "string" && /^[A-Za-z0-9]{1,32}$/.test(tag)) : [];
+}
+
 function screenListStateFromArgs(args: ParsedArgs): "archived" | undefined {
   requireFlagValue(args, "state", "archived");
   const state = flagString(args.flags, "state");
@@ -3730,7 +3752,7 @@ async function assertAssignedScreensHaveZone(client: ApiClient, playlistId: stri
 export const handleScreenList = commandHandler(async (args, runtime, resolved) => {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
-  const response = await client.call({ method: "GET", path: "/api/v1/screens", query: { state: screenListStateFromArgs(args) } });
+  const response = await client.call({ method: "GET", path: "/api/v1/screens", query: screenListQuery(args) });
   const items = (response.body as { items?: Screen[] } | undefined)?.items;
   return {
     envelope: jsonBody(response, client.requestId),
@@ -3742,21 +3764,24 @@ export const handleScreenList = commandHandler(async (args, runtime, resolved) =
 /**
  * One row per screen. The platform column appears only when at least one
  * screen reports a host, and the reason column only when at least one
- * archived screen reports why it was archived, so a fleet without either keeps
- * the table it had. The JSON body follows unchanged in both output modes.
+ * archived screen reports why it was archived, and the tags column only when
+ * at least one screen carries a tag, so a fleet without any keeps the table it
+ * had. The JSON body follows unchanged in both output modes.
  */
 function screenTableLines(items: Screen[]): string[] {
   if (!items.length) return [];
   const withPlatform = items.some((screen) => typeof screen?.host?.platform === "string");
   const withReason = items.some((screen) => archiveReason(screen) !== undefined);
+  const withTags = items.some((screen) => screenTags(screen).length > 0);
   const rows = items.map((screen) => [
     screen?.id ?? "", screen?.label ?? "", screen?.state ?? "",
     ...(withPlatform ? [screen?.host?.platform ?? ""] : []),
     ...(withReason ? [archiveReason(screen) ?? ""] : []),
+    ...(withTags ? [screenTags(screen).join(",")] : []),
     ...(screen?.recovery_pending?.expires_at ? [`recovery pending until ${screen.recovery_pending.expires_at}`] : []),
     ...(applicationsUnsupportedAt(screen) ? ["applications unsupported"] : []),
   ]);
-  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : []), ...(withReason ? ["REASON"] : [])];
+  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : []), ...(withReason ? ["REASON"] : []), ...(withTags ? ["TAGS"] : [])];
   const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => (row[index] ?? "").length)));
   const render = (row: string[]) => row.map((cell, index) => index < widths.length ? cell.padEnd(widths[index]!) : cell).join("  ").trimEnd();
   return [render(header), ...rows.map(render)];
@@ -4036,6 +4061,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
     human: [
       "Screen",
       JSON.stringify(response.body, null, 2),
+      ...(screenTags(screen).length ? [`Tags: ${screenTags(screen).join(", ")}`] : []),
       ...hostLines(screen?.host, screen?.host_updated_at),
       ...archivedLines(screen),
       ...applicationsUnsupportedLines(screen),
@@ -4127,10 +4153,17 @@ export const handleScreenAssign = commandHandler(async (args, runtime, resolved)
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
 
-  const id = args.positionals[2];
   const playlistId = flagString(args.flags, "playlist-id");
   const ifMatch = flagString(args.flags, "if-match");
-  if (!id || !playlistId) throw usageError("screen assign requires <id> --playlist-id.");
+  if (!playlistId) throw usageError("screen assign requires <id> --playlist-id.");
+  const target = screenTarget(args, "screen assign");
+  if (target.kind === "fleet") {
+    rejectFleetRevision(args, "screen assign");
+    // Each screen runs the single-screen PATCH on the server, including its
+    // timezone rule for scheduled playlists; a refusal is that screen's result.
+    return screenFleetAction(client, "Fleet assign", target.selector, { type: "assign", playlist_id: playlistId });
+  }
+  const id = target.id;
   const playlist = await assertScheduledPlaylistHasZone(client, id, playlistId);
   const body: ScreenPatch = { playlist_id: playlistId };
   const response = await client.call({
@@ -4295,8 +4328,12 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
 
-  const id = args.positionals[2];
-  if (!id) throw usageError("screen reload requires <id>.");
+  const target = screenTarget(args, "screen reload");
+  if (target.kind === "fleet") {
+    rejectFleetRevision(args, "screen reload");
+    return screenFleetAction(client, "Fleet reload", target.selector, { type: "reload" });
+  }
+  const id = target.id;
   const revision = flagString(args.flags, "if-match");
   let response;
   try {
@@ -4345,6 +4382,126 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
   };
 }, true);
 
+/**
+ * One POST /api/v1/screens/actions request for several screens: one metered
+ * request regardless of fan-out. The server answers 200 with a result per
+ * screen; partial success keeps `ok: true` and moves the exit code (see
+ * fleetOutcome). An Idempotency-Key is always sent. The command's write
+ * recovery keeps it only while the outcome is unknown: rerunning the
+ * identical command after an interrupted or ambiguous request replays
+ * finished screens without repeating their side effects. A returned answer,
+ * including a partial failure, completes the write, so a later rerun is a new
+ * request.
+ */
+async function screenFleetAction(client: ApiClient, title: string, selector: ScreenActionSelector, action: ScreenAction): Promise<CommandResult> {
+  const body: ScreenActionRequest = { selector, action };
+  let response;
+  try {
+    response = await client.call({ method: "POST", path: "/api/v1/screens/actions", idempotent: true, body });
+  } catch (error) {
+    if (error instanceof CliError && !error.problem.next
+      && ((error.problem.status === 404 && error.problem.code === "http_error") || error.problem.status === 405)) {
+      throw new CliError({
+        ...error.problem,
+        detail: "This API server does not offer fleet screen actions. No screen was changed.",
+        next: { command: "screenrig screen --help", reason: "Target one screen id at a time, or use a server that offers POST /api/v1/screens/actions." },
+      }, error.exitCode, error.warnings);
+    }
+    throw error;
+  }
+  const result = screenActionResult(response.body, action.type);
+  const outcome = fleetOutcome(result);
+  return {
+    envelope: jsonBody(response, client.requestId, undefined, outcome.warnings),
+    exitCode: outcome.exitCode,
+    human: [
+      fleetHumanLines(title, result, (item) => {
+        if (Array.isArray(item.tags)) return `tags ${item.tags.filter((tag) => /^[A-Za-z0-9]{1,32}$/.test(tag)).join(",") || "(none)"}`;
+        if (typeof item.revision === "number") return `revision ${item.revision}`;
+        if (item.reload && serverInstant(item.reload.expires_at)) return `reload expires ${item.reload.expires_at}`;
+        if (item.toast && serverInstant(item.toast.expires_at)) return `toast expires ${item.toast.expires_at}`;
+        return undefined;
+      }),
+      ...outcome.warnings.map((warning) => `warning: ${warning.message}`),
+    ].join("\n"),
+  };
+}
+
+/**
+ * `screen tag`: exactly one of --set, --add, --remove, --clear.
+ *
+ * One screen id uses PATCH /api/v1/screens/{id} with the whole tag set, the
+ * same revision semantics as every other single-screen write. --set and
+ * --clear send the set directly (If-Match only with --expect-rev). --add and
+ * --remove read the screen, compute the new set, and PATCH it guarded by
+ * --expect-rev or, when omitted, by the revision just read, so a concurrent
+ * change fails with revision_conflict instead of being overwritten.
+ *
+ * Several ids or --tag use the fleet actions route (set_tags, add_tags,
+ * remove_tags), which applies add/remove against each stored set atomically
+ * and takes no revision guard.
+ */
+export const handleScreenTag = commandHandler(async (args, runtime, resolved) => {
+  const token = requireToken(resolved.token);
+  const client = clientFor(runtime, args, resolved.apiUrl, token);
+  for (const flag of ["set", "add", "remove"]) requireFlagValue(args, flag, "Lobby");
+  const set = flagString(args.flags, "set");
+  const add = flagString(args.flags, "add");
+  const remove = flagString(args.flags, "remove");
+  const clear = flagBool(args.flags, "clear");
+  if ([set, add, remove].filter((value) => value !== undefined).length + (clear ? 1 : 0) !== 1) {
+    throw usageError("Provide exactly one of --set or --add or --remove or --clear.");
+  }
+  const tags = set !== undefined ? screenTagList(set, "--set")
+    : add !== undefined ? screenTagList(add, "--add")
+    : remove !== undefined ? screenTagList(remove, "--remove")
+    : [];
+  const target = screenTarget(args, "screen tag");
+  if (target.kind === "fleet") {
+    rejectFleetRevision(args, "screen tag");
+    const action: ScreenAction = add !== undefined ? { type: "add_tags", tags }
+      : remove !== undefined ? { type: "remove_tags", tags }
+      : { type: "set_tags", tags };
+    return screenFleetAction(client, "Fleet tag", target.selector, action);
+  }
+  const id = target.id;
+  let ifMatch = flagString(args.flags, "if-match");
+  let next = tags;
+  if (add !== undefined || remove !== undefined) {
+    const current = (await client.call({ method: "GET", path: `/api/v1/screens/${encodeURIComponent(id)}` })).body as Screen | undefined;
+    if (!current || current.id !== id || !Number.isSafeInteger(current.revision) || current.revision < 1) {
+      throw usageError("Screen response has invalid identity or revision.");
+    }
+    const stored = Array.isArray(current.tags) ? current.tags : [];
+    next = add !== undefined ? [...stored, ...tags.filter((tag) => !stored.includes(tag))] : stored.filter((tag) => !tags.includes(tag));
+    if (next.length > SCREEN_TAGS_MAX) {
+      throw usageError(`Screen ${id} would carry ${next.length} tags; a screen carries at most ${SCREEN_TAGS_MAX}. Remove tags first or use --set.`);
+    }
+    ifMatch ??= String(current.revision);
+  }
+  const body: ScreenPatch = { tags: next };
+  const derived = add !== undefined || remove !== undefined;
+  const response = await client.call({
+    method: "PATCH",
+    path: `/api/v1/screens/${encodeURIComponent(id)}`,
+    idempotent: true,
+    headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
+    body,
+    // The body and guard derive from the read, so a rerun after an ambiguous
+    // failure fingerprints differently; it supersedes the obsolete entry.
+    ...(derived ? { recoverySupersede: JSON.stringify(["screen tag", id, add !== undefined ? "add" : "remove", tags, flagString(args.flags, "if-match") ?? null]) } : {}),
+  });
+  const screen = response.body as Screen | undefined;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: humanLines(`Tagged screen ${id}`, [
+      ["tags", screenTags(screen).join(", ") || "(none)"],
+      ["revision", typeof screen?.revision === "number" ? String(screen.revision) : undefined],
+    ]),
+  };
+}, true);
+
 export const handleScreenToast = commandHandler(async (args, runtime, resolved) => {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
@@ -4362,7 +4519,32 @@ export const handleScreenScreenshot = commandHandler(async (args, runtime, resol
 }, true);
 
 async function screenToast(args: ParsedArgs, client: ApiClient): Promise<CommandResult> {
-  const id = args.positionals[2];
+  const body = toastWriteFromArgs(args);
+  const target = screenTarget(args, "screen toast");
+  if (target.kind === "fleet") {
+    return screenFleetAction(client, "Fleet toast", target.selector, { type: "toast", ...body });
+  }
+  const id = target.id;
+  const response = await client.call({
+    method: "POST",
+    path: `/api/v1/screens/${id}/toast`,
+    idempotent: true,
+    body,
+  });
+  const accepted = (response.body ?? {}) as ScreenToastAccepted;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: humanLines("Toast accepted", [
+      ["screen_id", id],
+      ["level", body.level],
+      ["expires_at", accepted.expires_at],
+    ]),
+  };
+}
+
+/** The validated toast write shared by the single-screen route and the fleet toast action. */
+function toastWriteFromArgs(args: ParsedArgs): ScreenToastWrite {
   if (args.flags.level === true) {
     throw usageError("--level requires a value, such as --level info.");
   }
@@ -4374,7 +4556,7 @@ async function screenToast(args: ParsedArgs, client: ApiClient): Promise<Command
   }
   const rawLevel = flagString(args.flags, "level");
   const rawText = flagString(args.flags, "text");
-  if (!id || rawText === undefined) {
+  if (rawText === undefined) {
     throw usageError("screen toast requires <id> and --text TEXT.");
   }
   const level = rawLevel ?? TOAST_DEFAULT_LEVEL;
@@ -4406,22 +4588,7 @@ async function screenToast(args: ParsedArgs, client: ApiClient): Promise<Command
     }
     body.duration_ms = durationMs;
   }
-  const response = await client.call({
-    method: "POST",
-    path: `/api/v1/screens/${id}/toast`,
-    idempotent: true,
-    body,
-  });
-  const accepted = (response.body ?? {}) as ScreenToastAccepted;
-  return {
-    envelope: jsonBody(response, client.requestId),
-    exitCode: ExitCode.Success,
-    human: humanLines("Toast accepted", [
-      ["screen_id", id],
-      ["level", level],
-      ["expires_at", accepted.expires_at],
-    ]),
-  };
+  return body;
 }
 
 function isScreenId(value: string): boolean {
@@ -4476,11 +4643,31 @@ async function resolveDownloadOutput(cwd: string, defaultRelative: string, flags
 }
 
 async function screenScreenshot(args: ParsedArgs, runtime: CliRuntime, client: ApiClient): Promise<CommandResult> {
-  const id = args.positionals[2];
-  if (!id || !isScreenId(id)) {
+  const target = screenTarget(args, "screen screenshot");
+  if (target.kind === "fleet") return screenScreenshotFleet(args, runtime, client, target.selector);
+  const id = target.id;
+  if (!isScreenId(id)) {
     throw usageError("screen screenshot requires <id>.");
   }
   const outputPath = await resolveScreenshotOutput(runtime.cwd(), id, args.flags);
+  const { timeoutMs, pollMs } = screenshotTiming(args);
+  const data = await captureScreenshot(runtime, client, id, outputPath, timeoutMs, pollMs);
+  return {
+    envelope: successEnvelope(data, { request_id: client.requestId }),
+    exitCode: ExitCode.Success,
+    human: humanLines("Screenshot saved", [
+      ["screen_id", data.screen_id],
+      ["capture_id", data.capture_id],
+      ["path", data.path],
+      ["bytes", String(data.bytes)],
+      ["sha256", data.sha256],
+      ["width", String(data.width)],
+      ["height", String(data.height)],
+    ]),
+  };
+}
+
+function screenshotTiming(args: ParsedArgs): { timeoutMs: number; pollMs: number } {
   const timeoutMs = flagNumber(args.flags, "timeout") ?? SCREENSHOT_DEFAULT_WAIT_MS;
   if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
     throw usageError("--timeout must be a non-negative number of milliseconds.");
@@ -4492,7 +4679,21 @@ async function screenScreenshot(args: ParsedArgs, runtime: CliRuntime, client: A
     }
   }
   const pollMs = flagNumber(args.flags, "poll-ms") ?? SCREENSHOT_DEFAULT_POLL_MS;
+  return { timeoutMs, pollMs };
+}
 
+interface ScreenshotSaved {
+  screen_id: string;
+  capture_id: string;
+  path: string;
+  bytes: number;
+  sha256: string;
+  width: number;
+  height: number;
+}
+
+/** Request, wait for, verify, and atomically write one screen's screenshot. */
+async function captureScreenshot(runtime: CliRuntime, client: ApiClient, id: string, outputPath: string, timeoutMs: number, pollMs: number): Promise<ScreenshotSaved> {
   const acceptedResponse = await client.call({
     method: "POST",
     path: `/api/v1/screens/${id}/screenshot`,
@@ -4594,7 +4795,7 @@ async function screenScreenshot(args: ParsedArgs, runtime: CliRuntime, client: A
     throw usageError("Cannot write screenshot to the output path.");
   }
 
-  const data = {
+  return {
     screen_id: id,
     capture_id: captureId,
     path: outputPath,
@@ -4603,18 +4804,125 @@ async function screenScreenshot(args: ParsedArgs, runtime: CliRuntime, client: A
     width: status.width,
     height: status.height,
   };
+}
+
+const SCREENSHOT_FLEET_DEFAULT_CONCURRENCY = 4;
+const SCREENSHOT_FLEET_MAX_CONCURRENCY = 8;
+
+type ScreenshotFleetItem = FleetItem & Partial<Omit<ScreenshotSaved, "screen_id">>;
+
+/**
+ * Client-side screenshot fan-out: screenshots are unbilled per screen, so
+ * there is no fleet screenshot action. --tag resolves through
+ * GET /api/v1/screens?tag=T and keeps active screens, matching the fleet
+ * actions selector (one metered list request; captures are unbilled). Each
+ * capture writes DIRECTORY/<screen_id>.webp; a failed capture is that
+ * screen's result, never a transport error. An unexpected (non-CliError)
+ * failure stops scheduling: the failing screen and every screen not yet
+ * started are reported as failed, and the exit code is Unexpected.
+ */
+async function screenScreenshotFleet(args: ParsedArgs, runtime: CliRuntime, client: ApiClient, selector: ScreenActionSelector): Promise<CommandResult> {
+  if (flagString(args.flags, "idempotency-key")) {
+    throw usageError("screen screenshot with several screens or --tag does not take --idempotency-key; each capture uses its own key.");
+  }
+  requireFlagValue(args, "concurrency", "4");
+  const concurrency = flagNumber(args.flags, "concurrency") ?? SCREENSHOT_FLEET_DEFAULT_CONCURRENCY;
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > SCREENSHOT_FLEET_MAX_CONCURRENCY) {
+    throw usageError(`--concurrency must be a whole number from 1 to ${SCREENSHOT_FLEET_MAX_CONCURRENCY}.`);
+  }
+  if (selector.by === "ids") {
+    const invalid = selector.screen_ids.find((id) => !isScreenId(id));
+    if (invalid !== undefined) throw usageError("screen screenshot takes screen ids (scr_...); nothing was captured.");
+  }
+  if (args.flags.output === true) throw usageError("--output requires a directory path.");
+  const directory = path.resolve(runtime.cwd(), flagString(args.flags, "output") ?? ".");
+  try {
+    if (!(await stat(directory)).isDirectory()) throw usageError("--output must be a directory with several screens or --tag.");
+  } catch (error) {
+    if (error instanceof CliError) throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw usageError("--output must be a directory with several screens or --tag.");
+  }
+  const { timeoutMs, pollMs } = screenshotTiming(args);
+
+  let ids: string[];
+  if (selector.by === "tag") {
+    const listed = await client.call({ method: "GET", path: "/api/v1/screens", query: { tag: selector.tag } });
+    const items = (listed.body as { items?: Screen[] } | undefined)?.items;
+    if (!Array.isArray(items)) throw usageError("Screen list response does not match the generated ScreenList contract.");
+    ids = items.filter((screen) => screen?.state === "active" && typeof screen.id === "string").map((screen) => screen.id);
+    if (ids.some((id) => !isScreenId(id))) throw usageError("Screen list response does not match the generated ScreenList contract.");
+    if (ids.length > FLEET_SCREENS_MAX) {
+      throw usageError(`--tag ${selector.tag} matches ${ids.length} active screens; screen screenshot captures at most ${FLEET_SCREENS_MAX}. Narrow the tag or pass screen ids.`);
+    }
+  } else {
+    ids = selector.screen_ids;
+  }
+  if (ids.length) {
+    try {
+      await mkdir(directory, { recursive: true });
+    } catch {
+      throw usageError("Cannot create the --output directory.");
+    }
+  }
+
+  const results: ScreenshotFleetItem[] = new Array(ids.length);
+  // The exit code each failed capture would have had on its own; never serialized.
+  const exitCodes = new Map<number, ExitCode>();
+  const failure = (id: string, problem: Record<string, unknown>): ScreenshotFleetItem => ({ screen_id: id, status: "failed", problem: problem as FleetItem["problem"] });
+  let next = 0;
+  let fatal = false;
+  const worker = async () => {
+    while (!fatal && next < ids.length) {
+      const index = next++;
+      const id = ids[index]!;
+      try {
+        const saved = await captureScreenshot(runtime, client, id, path.join(directory, `${id}.webp`), timeoutMs, pollMs);
+        results[index] = { ...saved, status: "ok" };
+      } catch (error) {
+        if (error instanceof CliError) {
+          exitCodes.set(index, error.exitCode);
+          results[index] = failure(id, {
+            code: error.problem.code,
+            status: error.problem.status,
+            title: error.problem.title,
+            detail: error.problem.detail,
+            ...(error.problem.request_id ? { request_id: error.problem.request_id } : {}),
+          });
+        } else {
+          fatal = true;
+          exitCodes.set(index, ExitCode.Unexpected);
+          results[index] = failure(id, { code: "unexpected_error", title: "Unexpected error", detail: "The capture failed unexpectedly; remaining captures were not started." });
+        }
+      }
+    }
+  };
+  await Promise.allSettled(Array.from({ length: Math.min(concurrency, ids.length) }, worker));
+  for (let index = 0; index < ids.length; index += 1) {
+    if (results[index] === undefined) {
+      exitCodes.set(index, ExitCode.Unexpected);
+      results[index] = failure(ids[index]!, { code: "not_attempted", title: "Not attempted", detail: "Not captured because an earlier capture failed unexpectedly." });
+    }
+  }
+
+  const failed = results.filter((item) => item.status === "failed").length;
+  const data = {
+    action: "screenshot" as const,
+    selector,
+    output: directory,
+    matched: results.length,
+    succeeded: results.length - failed,
+    failed,
+    results,
+  };
+  const outcome = fleetOutcome(data, (item) => exitCodes.get(results.indexOf(item as ScreenshotFleetItem)));
+  if (fatal) outcome.exitCode = ExitCode.Unexpected;
   return {
-    envelope: successEnvelope(data, { request_id: client.requestId }),
-    exitCode: ExitCode.Success,
-    human: humanLines("Screenshot saved", [
-      ["screen_id", data.screen_id],
-      ["capture_id", data.capture_id],
-      ["path", data.path],
-      ["bytes", String(data.bytes)],
-      ["sha256", data.sha256],
-      ["width", String(data.width)],
-      ["height", String(data.height)],
-    ]),
+    envelope: successEnvelope(data, { request_id: client.requestId, warnings: outcome.warnings }),
+    exitCode: outcome.exitCode,
+    human: [
+      fleetHumanLines("Fleet screenshot", data, (item) => item.path),
+      ...outcome.warnings.map((warning) => `warning: ${warning.message}`),
+    ].join("\n"),
   };
 }
 
@@ -4836,6 +5144,8 @@ const CANNED_EVENT_MESSAGES = new Set([
   "Screenshot failed",
   "Stream cursor advanced",
   "Stream replay state is no longer retained",
+  "Screen came online",
+  "Screen went offline",
 ]);
 
 const SILENT_EVENT_TYPES = new Set(["application.event", "runtime.reported"]);

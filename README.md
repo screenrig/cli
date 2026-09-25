@@ -228,6 +228,101 @@ its playlist, `screen show` reports `applications_unsupported` with the time
 the condition began, and `screen list` marks the row. The manifest is
 unchanged; the player skips those primitives.
 
+## Screen tags and fleet actions
+
+A screen carries 0 to 16 unique tags, each 1 to 32 letters or digits. Tags
+select fleets; they are never authorization and never reach the runtime
+manifest. Changing tags bumps the screen revision, not the manifest revision.
+`screen show` and `screen list` return `tags`; `screen list` adds a `TAGS`
+column when any listed screen has tags.
+
+```sh
+screenrig screen list --tag Lobby
+screenrig screen tag scr_LOBBY --set Lobby,Floor2 [--expect-rev REVISION]
+screenrig screen tag scr_LOBBY --add Spring
+screenrig screen tag scr_LOBBY --remove Floor2
+screenrig screen tag scr_LOBBY --clear
+screenrig screen tag --tag Lobby --add Spring
+screenrig screen assign --tag Lobby --playlist-id pl_PLAYLIST
+screenrig screen reload scr_LOBBY scr_ENTRANCE
+screenrig screen toast --tag Lobby --text "Closing in ten minutes"
+screenrig screen screenshot --tag Lobby --output lobby-shots [--concurrency 4]
+```
+
+`screen tag` takes exactly one of `--set`, `--add`, `--remove`, or `--clear`.
+With one screen id it uses `PATCH /api/v1/screens/{id}` with the whole tag set
+and returns the updated screen, like every other single-screen write. `--set`
+and `--clear` are guarded only by `--expect-rev`. `--add` and `--remove` read
+the screen first and send the new set guarded by `--expect-rev` or, when
+omitted, by the revision just read, so a concurrent change fails with
+`revision_conflict` (exit 6) instead of being overwritten.
+
+`screen assign`, `screen reload`, `screen toast`, and `screen tag` accept
+several screen ids or `--tag TAG` (not both) as one
+`POST /api/v1/screens/actions` request: one metered request for up to 500
+screens. `--tag` selects active screens only. One screen id keeps the
+single-screen route and its envelope. Fleet requests take no `--expect-rev`
+because revision guards are per screen. They always send an Idempotency-Key.
+After an interrupted or ambiguous request, rerunning the identical command
+reuses the saved key and replays finished screens without repeating their side
+effects. A returned answer, including a partial failure, completes the write,
+so a later rerun is a new request (pass the same `--idempotency-key` to replay
+an answered request deliberately within 24 hours). Fleet `--add`/`--remove`
+apply against each stored set atomically. A single-screen `--add`/`--remove`
+rerun that reads a newer revision replaces its obsolete saved key.
+
+A fleet answer keeps `ok: true`; partial success is a normal answer, not a
+transport error:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "action": "reload",
+    "matched": 3, "succeeded": 2, "failed": 1,
+    "results": [
+      { "screen_id": "scr_LOBBY", "status": "ok", "reload": { "reload_id": "…", "expires_at": "…" } },
+      { "screen_id": "scr_GONE", "status": "failed", "problem": { "code": "not_found", "status": 404, "…": "…" } },
+      { "screen_id": "scr_ENTRANCE", "status": "ok", "reload": { "reload_id": "…", "expires_at": "…" } }
+    ]
+  },
+  "warnings": [{ "code": "fleet_partial_failure", "message": "1 of 3 screens failed; 2 succeeded. …" }]
+}
+```
+
+An `ok` result carries the single-screen result: `revision` for `assign`,
+`revision` and `tags` for tag actions, `reload` for reload, and `toast` for
+toast. A `failed` result carries the problem that screen's own request would
+have returned. The exit code is 0 only when every matched screen succeeded.
+Otherwise it is the exit code of the first failed screen's problem (for
+example 4 for `not_found`, 6 for `revision_conflict`), with warning
+`fleet_partial_failure`. No match is exit 0 with warning `fleet_no_match`. A
+malformed selector or action fails the whole request before any screen changes.
+
+`screen screenshot` with several ids or `--tag` fans out on the client
+(screenshots are unbilled, so there is no fleet screenshot action). `--tag`
+resolves through `screen list --tag`, one billed list request, and keeps
+active screens, at most 500. Several ids must all be screen ids (`scr_…`).
+An unexpected local failure stops new captures; unstarted screens report
+`not_attempted` and the exit code is 1. `--output` is
+then a directory, the current directory by default, created if missing. Each
+capture writes `<screen_id>.webp`. `--concurrency` bounds captures in flight
+(1–8, default 4). The envelope has the same `matched`/`succeeded`/`failed`/`results`
+shape with `action: "screenshot"`, `selector`, and `output`. Each `ok` result
+carries `path`, `bytes`, `sha256`, `width`, and `height`. The exit code and
+warnings follow the same rule. `--idempotency-key` is refused in this form.
+
+`screen publish` stays single-screen, because its assignment readback and
+revision guard are per screen. For a fleet, create the playlist once with
+`playlist create`, then run `screen assign --tag TAG --playlist-id ID`.
+Each screen applies its own schedule timezone rule and fails individually.
+
+`events list` and `events follow` include the project-only presence events
+`screen.online` and `screen.offline` (with `details.last_online_at`, and
+`offline_at` on a return). `screen.offline` is written only after the
+presence lease has been expired for 60 seconds, so a brief reconnect writes
+neither.
+
 ## Storage report
 
 A native player reports its content-cache storage to the server, and

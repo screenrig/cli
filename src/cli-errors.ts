@@ -37,6 +37,11 @@ export function commandError(error: CommanderError, command: Command): never {
       if (path === "screen set-timezone") throw usageError("screen set-timezone requires <id> --timezone.");
       const required = command.options.filter((option) => option.mandatory && command.getOptionValue(option.attributeName()) === undefined);
       const positional = command.registeredArguments.filter((arg, index) => arg.required && index >= command.args.length).map((arg) => `<${arg.name()}>`);
+      // Fleet commands take `[id...]` or `--tag TAG`; name the missing target too.
+      const fleetTarget = command.registeredArguments.some((arg) => arg.variadic && !arg.required && arg.name() === "id")
+        && command.options.some((option) => option.long === "--tag")
+        && !command.args.length && command.getOptionValue("tag") === undefined;
+      if (fleetTarget) throw usageError(`${path} requires <id> or --tag TAG, and ${required.map((option) => option.long).join(" ")}.`);
       throw usageError(`${path} requires ${[...positional, ...required.map((option) => option.long)].join(" ")}.`);
     }
     case "commander.optionMissingArgument": {
