@@ -2,8 +2,9 @@ import { addValueAlias } from "./aliases.js";
 import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes.js";
 import { positiveInteger, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear } from "../commands.js";
+import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear } from "../commands.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
+import { untilOption } from "../screen-display.js";
 import { type Command, Option } from "commander";
 
 export function registerScreenCommands(root: Command, bind: CommandActionBinder): void {
@@ -162,6 +163,54 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     "screenrig screen takeover scr_A scr_B --playlist-id pl_NOTICE --until none");
   addCommandExamples(takeover.commands.find((command) => command.name() === "clear")!,
     "screenrig screen takeover clear scr_LOBBY", "screenrig screen takeover clear --tag Lobby");
+  const reboot = screen.command("reboot").description("Reboot a screen's device, or a fleet's devices")
+    .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
+    .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
+    .option("--yes", "Confirm a reboot of several screens or --tag (required for a fleet)")
+    .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+    .action(bind(handleScreenReboot));
+  addCommandNotes(reboot, "Reboot:\n  The Player reboots the device, not just itself. Only a Player that declares\n  the reboot capability in its host report receives it; any other screen is\n  refused with reboot_unsupported (exit 5) and nothing is sent. The request\n  expires after ten minutes, and each screen accepts at most 2 reboots per 10\n  minutes; a refused or failed request and an exact replay spend none. A\n  fleet (several ids or --tag) requires --yes: the CLI never prompts.");
+  addCommandExamples(reboot, "screenrig screen reboot scr_LOBBY", "screenrig screen reboot --tag Lobby --yes");
+
+  const displayGroup = screen.command("display").description("Turn a screen's display on or off now, or clear that override");
+  const display = displayGroup.command("set", { isDefault: true }).description("Turn a screen's display, or a fleet's displays, on or off now (default: screen display ID --power on|off)")
+    .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request; a trailing on|off sets the power")
+    .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
+    .addOption(new Option("--power <POWER>", "on or off").choices(["on", "off"]))
+    .addOption(new Option("--until <TIME>", "End at this RFC 3339 instant (strictly future, at most 7 days ahead)").argParser(untilOption).conflicts(["for"]))
+    .addOption(new Option("--for <DURATION>", "End after this duration, such as 30m, 2h, or 3d (at most 6d23h59m)").argParser(durationOption).conflicts(["until"]))
+    .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+    .action(bind(handleScreenDisplay));
+  addCommandNotes(display, "Display power:\n  A manual override of the display schedule. Without --until or --for it ends\n  at the display schedule's next boundary; a later display-schedule change or\n  timezone change moves that end to the new next boundary. With no schedule\n  boundary in the next eight days (no enabled schedule) it holds until\n  screen display clear or a replacement. The Player applies it at once and\n  reports what it achieved (screen show: Display reported). At most 10\n  display changes per screen per minute; refusals and replays spend none.");
+  addCommandExamples(display, "screenrig screen display scr_LOBBY --power off --for 2h", "screenrig screen display --tag Lobby --power on", "screenrig screen display scr_A scr_B --power off --until 2026-10-01T07:00:00Z");
+  const displayClear = displayGroup.command("clear").description("End the manual display override on a screen or a fleet; the schedule (else on) applies again")
+    .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
+    .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
+    .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+    .action(bind(handleScreenDisplayClear));
+  addCommandExamples(displayClear, "screenrig screen display clear scr_LOBBY", "screenrig screen display clear --tag Lobby");
+
+  const displaySchedule = screen.command("display-schedule").description("Show, set, or clear when a screen's display is on");
+  displaySchedule.command("show").description("Show a screen's display schedule and its display state")
+    .argument("<id>", "Screen identifier")
+    .action(bind(handleScreenDisplayScheduleShow));
+  displaySchedule.command("set").description("Replace the display schedule on a screen or a fleet of screens")
+    .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
+    .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
+    .requiredOption("--file <FILE>", "Display schedule JSON {\"enabled\": true, \"windows\": [...]}, or - for stdin (required)")
+    .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+    .action(bind(handleScreenDisplayScheduleSet));
+  displaySchedule.command("clear").description("Remove the display schedule from a screen or a fleet of screens")
+    .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
+    .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
+    .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+    .action(bind(handleScreenDisplayScheduleClear));
+  addCommandNotes(displaySchedule, "Display schedule:\n  1 to 16 windows when the display is ON, in the screen timezone (required):\n  {\"enabled\": true, \"windows\": [{\"days\": [\"mon\",\"tue\"], \"start\": \"07:00\", \"end\": \"19:00\"}]}.\n  end <= start crosses midnight; omit start and end for the whole day. Outside\n  every window the display goes to standby. enabled false keeps the windows and\n  leaves the display on. The device evaluates it offline.");
+  addCommandExamples(displaySchedule.commands.find((command) => command.name() === "show")!, "screenrig screen display-schedule show scr_LOBBY");
+  addCommandExamples(displaySchedule.commands.find((command) => command.name() === "set")!,
+    "screenrig screen display-schedule set scr_LOBBY --file hours.json", "screenrig screen display-schedule set --tag Cafe --file hours.json");
+  addCommandExamples(displaySchedule.commands.find((command) => command.name() === "clear")!,
+    "screenrig screen display-schedule clear scr_LOBBY", "screenrig screen display-schedule clear --tag Cafe");
   for (const name of ["pair", "provision"]) addValueAlias(screen.commands.find(command => command.name() === name)!, "--name", "--label", "Set the screen name");
   requireOptionGroup(screen.commands.find(command => command.name() === "update")!, "atLeastOne", ["--name", "--playlist-id", "--timezone"]);
 }

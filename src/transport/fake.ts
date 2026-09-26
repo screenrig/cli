@@ -67,6 +67,8 @@ export class FakeTransport implements Transport {
   afterStreamChunks?: (req: TransportRequest) => Promise<void>;
   /** Repeating stream hook. Takes precedence over the one-shot queue. */
   streamHandler?: (req: TransportRequest) => Promise<TransportStream>;
+  /** memoryBackend hook: seed or replace a stored screen (tests and the localhost smoke). */
+  putScreen?: (screen: Screen) => void;
   /** memoryBackend hook: remaining playback-export requests before 429. */
   setPlaybackExportBudget?: (value: number) => void;
   /** Test hook: merged onto every `request` response (not SSE stream frames). */
@@ -201,6 +203,7 @@ export function memoryBackend(options: { now?: () => Date } = {}): FakeTransport
   const applications = new Map<string, Record<string, unknown>>();
   const playlists = new Map<string, Record<string, unknown>>();
   const screens = new Map<string, Screen>();
+  transport.putScreen = (screen: Screen) => { screens.set(screen.id, screen); };
   const media = new Map<string, Record<string, unknown>>();
   const kv = new Map<string, KVEntry>();
   const currentAgent: Agent = {
@@ -950,6 +953,86 @@ export function memoryBackend(options: { now?: () => Date } = {}): FakeTransport
   });
   transport.on("DELETE", /^\/api\/v1\/screens\/[^/]+\/takeover$/, (req) => controlRoute(req, { kind: "takeover_clear" }));
 
+  // Reboot and display power, simplified: a schedule makes the display
+  // requested "on" (source schedule); an override wins until replaced.
+  type DisplayChange =
+    | { kind: "display"; power: "on" | "off"; until?: string | null }
+    | { kind: "display_schedule"; enabled: boolean; windows: Array<Record<string, unknown>> }
+    | { kind: "display_schedule_clear" }
+    | { kind: "display_clear" };
+  const resolveDisplay = (screen: Screen, schedule: NonNullable<Screen["display"]>["schedule"] | undefined, override: NonNullable<Screen["display"]>["override"] | undefined): Screen => {
+    const { display: _old, ...rest } = screen;
+    if (!schedule && !override) return rest;
+    const display: NonNullable<Screen["display"]> = override
+      ? { requested: override.power, source: "override", ...(override.ends_at ? { until: override.ends_at } : {}), ...(schedule ? { schedule } : {}), override }
+      : { requested: "on", source: schedule?.enabled ? "schedule" : "default", ...(schedule ? { schedule } : {}) };
+    return { ...rest, display };
+  };
+  const applyDisplay = (screen: Screen, change: DisplayChange): { screen: Screen } | { problem: ReturnType<typeof controlProblem> } => {
+    if (screen.state === "archived") return { problem: controlProblem(409, "screen_archived", "screen is archived") };
+    const current = screen.display;
+    if (change.kind === "display") {
+      if (screen.state !== "active") return { problem: controlProblem(409, "resource_conflict", "screen is not active") };
+      if (typeof change.until === "string") {
+        const ahead = Date.parse(change.until) - clock().getTime();
+        if (!(ahead > 0)) return { problem: controlProblem(400, "invalid_request", "until: must be in the future") };
+        if (ahead > 7 * 24 * 60 * 60 * 1000) return { problem: controlProblem(400, "invalid_request", "until: must be at most 7 days ahead") };
+      }
+      const override = { override_id: `dov_${screen.revision + 1}`, power: change.power, until: change.until ?? null, ends_at: change.until ?? null, set_at: "2026-08-14T17:00:00.000Z" };
+      return { screen: { ...resolveDisplay(screen, current?.schedule, override), revision: screen.revision + 1 } };
+    }
+    if (change.kind === "display_schedule") {
+      if (!screen.timezone) return { problem: controlProblem(400, "invalid_request", "timezone: is required on a screen before a display schedule can be set") };
+      const schedule = { enabled: change.enabled, windows: change.windows as unknown as NonNullable<NonNullable<Screen["display"]>["schedule"]>["windows"], updated_at: "2026-08-14T17:00:00.000Z" };
+      return { screen: { ...resolveDisplay(screen, schedule, current?.override), revision: screen.revision + 1 } };
+    }
+    if (change.kind === "display_clear") {
+      if (!current?.override) return { screen };
+      return { screen: { ...resolveDisplay(screen, current.schedule, undefined), revision: screen.revision + 1 } };
+    }
+    if (!current?.schedule) return { screen };
+    return { screen: { ...resolveDisplay(screen, undefined, current.override), revision: screen.revision + 1 } };
+  };
+  const rebootOutcome = (screen: Screen): { accepted: { reboot_id: string; expires_at: string } } | { problem: ReturnType<typeof controlProblem> } => {
+    if (screen.state === "archived") return { problem: controlProblem(409, "screen_archived", "screen is archived") };
+    if (screen.state !== "active") return { problem: controlProblem(409, "resource_conflict", "screen is not active") };
+    if (!(screen.host?.capabilities ?? []).includes("reboot")) {
+      return { problem: controlProblem(409, "reboot_unsupported", "The screen's Player does not declare the reboot capability.") };
+    }
+    return { accepted: { reboot_id: `rbt_${screen.id.slice(-10).padStart(10, "0")}`, expires_at: new Date(clock().getTime() + 600_000).toISOString() } };
+  };
+  const screenOf = (req: TransportRequest) => screens.get(decodeURIComponent(req.path.split("/")[4] ?? ""));
+  const displayRoute = (req: TransportRequest, change: DisplayChange): TransportResponse => {
+    const screen = screenOf(req);
+    if (!screen) return { status: 404, headers: { "content-type": "application/problem+json" }, body: controlProblem(404, "not_found", "Resource was not found.") };
+    const outcome = applyDisplay(screen, change);
+    if ("problem" in outcome) return { status: outcome.problem.status, headers: { "content-type": "application/problem+json" }, body: outcome.problem };
+    screens.set(screen.id, outcome.screen);
+    return { status: 200, headers: { etag: `"${outcome.screen.revision}"` }, body: outcome.screen };
+  };
+  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/reboot$/, (req): TransportResponse => {
+    const screen = screenOf(req);
+    if (!screen) return { status: 404, headers: { "content-type": "application/problem+json" }, body: controlProblem(404, "not_found", "Resource was not found.") };
+    const outcome = rebootOutcome(screen);
+    if ("problem" in outcome) return { status: outcome.problem.status, headers: { "content-type": "application/problem+json" }, body: outcome.problem };
+    return { status: 202, headers: { "cache-control": "no-store", etag: `"${screen.revision}"` }, body: outcome.accepted };
+  });
+  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/display$/, (req) => {
+    const body = (req.body ?? {}) as { power: "on" | "off"; until?: string | null };
+    return displayRoute(req, { kind: "display", power: body.power, until: body.until });
+  });
+  transport.on("DELETE", /^\/api\/v1\/screens\/[^/]+\/display$/, (req) => displayRoute(req, { kind: "display_clear" }));
+  transport.on("GET", /^\/api\/v1\/screens\/[^/]+\/display-schedule$/, (req): TransportResponse => {
+    const screen = screenOf(req);
+    if (!screen) return { status: 404, headers: { "content-type": "application/problem+json" }, body: controlProblem(404, "not_found", "Resource was not found.") };
+    return { status: 200, headers: { etag: `"${screen.revision}"` }, body: { display_schedule: screen.display?.schedule ?? null, ...(screen.display ? { display: screen.display } : {}) } };
+  });
+  transport.on("PUT", /^\/api\/v1\/screens\/[^/]+\/display-schedule$/, (req) => {
+    const body = (req.body ?? {}) as { enabled: boolean; windows: Array<Record<string, unknown>> };
+    return displayRoute(req, { kind: "display_schedule", enabled: body.enabled, windows: body.windows ?? [] });
+  });
+  transport.on("DELETE", /^\/api\/v1\/screens\/[^/]+\/display-schedule$/, (req) => displayRoute(req, { kind: "display_schedule_clear" }));
+
   // POST /api/v1/screens/actions: one result per selected screen, in selector
   // order; a missing screen fails with not_found, the rest succeed.
   transport.on("POST", "/api/v1/screens/actions", (req): TransportResponse => {
@@ -973,6 +1056,20 @@ export function memoryBackend(options: { now?: () => Date } = {}): FakeTransport
       const action = body.action;
       if (action.type === "reload") return { screen_id: id, status: "ok", reload: { reload_id: "rld_FLEET0001", expires_at: "2026-08-14T17:10:00.000Z" } };
       if (action.type === "toast") return { screen_id: id, status: "ok", toast: { expires_at: "2026-08-14T17:00:10.000Z" } };
+      if (action.type === "reboot") {
+        const outcome = rebootOutcome(screen);
+        return "problem" in outcome ? { screen_id: id, status: "failed", problem: outcome.problem } : { screen_id: id, status: "ok", reboot: outcome.accepted };
+      }
+      if (["display", "display_clear", "set_display_schedule", "clear_display_schedule"].includes(action.type)) {
+        const control = action as unknown as { type: string; power: "on" | "off"; until?: string | null; enabled: boolean; windows?: Array<Record<string, unknown>> };
+        const change: DisplayChange = control.type === "display" ? { kind: "display", power: control.power, until: control.until }
+          : control.type === "clear_display_schedule" ? { kind: "display_schedule_clear" }
+          : control.type === "display_clear" ? { kind: "display_clear" } : { kind: "display_schedule", enabled: control.enabled, windows: control.windows ?? [] };
+        const outcome = applyDisplay(screen, change);
+        if ("problem" in outcome) return { screen_id: id, status: "failed", problem: outcome.problem };
+        screens.set(id, outcome.screen);
+        return { screen_id: id, status: "ok", revision: outcome.screen.revision };
+      }
       if (["takeover", "takeover_clear", "set_playlist_schedule", "clear_playlist_schedule"].includes(action.type)) {
         const control = action as unknown as { type: string; playlist_id: string; until?: string | null; reason?: string; entries?: Array<Record<string, unknown>> };
         const change: Control = control.type === "takeover" ? { kind: "takeover", playlist_id: control.playlist_id, until: control.until, reason: control.reason }

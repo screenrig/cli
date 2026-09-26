@@ -422,6 +422,64 @@ cleared, and `reason`), and `screen.takeover_ended` (`reason`
 `screen.playlist_unavailable` (`playlist_id`, `entry_ids` comma-joined, and `code`
 `playlist_deleted|playlist_unavailable`).
 
+## Reboot and display power
+
+```sh
+screenrig screen reboot scr_LOBBY [--expect-rev REVISION]
+screenrig screen reboot scr_A scr_B --yes
+screenrig screen reboot --tag Lobby --yes
+screenrig screen display scr_LOBBY --power off [--until RFC3339 | --for 2h] [--expect-rev REVISION]
+screenrig screen display --tag Lobby --power on
+screenrig screen display clear scr_LOBBY [--expect-rev REVISION]
+screenrig screen display clear --tag Lobby
+screenrig screen display-schedule show scr_LOBBY
+screenrig screen display-schedule set scr_LOBBY --file hours.json [--expect-rev REVISION]
+screenrig screen display-schedule set --tag Cafe --file hours.json
+screenrig screen display-schedule clear scr_LOBBY
+```
+
+`screen reboot` asks the Player to reboot the device. Only a Player that
+declares the `reboot` capability in its host report receives it; `screen show`
+lists the host capabilities. Any other screen is refused with
+`reboot_unsupported` (exit 5) and nothing is sent; `screen reload` refreshes
+content without a device reboot. A reboot request expires after ten minutes,
+and each screen accepts at most 2 reboots per 10 minutes. A refused or failed
+request and an exact replay of the same request do not count. The CLI never
+prompts, so rebooting several ids or a `--tag` fleet requires `--yes`.
+
+`screen display` turns the display on or off now, as a manual override of the
+display schedule. `--power on|off` sets it (a trailing `on` or `off` after the
+ids is the same). `--until` takes a strict RFC 3339 instant, strictly in the
+future and at most 7 days ahead; `--for` takes a duration up to `6d23h59m`.
+Without either, the override ends at the display schedule's next boundary. A
+later display-schedule change or a timezone change moves that end to the new
+next boundary. With no schedule boundary in the next eight days (for example,
+no enabled schedule), the override holds until `screen display clear` or a
+replacement. `screen display clear` ends the override, so the display schedule
+applies again (without one, the display is on). The Player applies every change
+at once and reports what it achieved. A screen that is still waiting to pair
+answers `resource_conflict` (exit 5): it has no paired Player yet, though a
+display schedule can be set before pairing.
+
+A display schedule lists 1 to 16 windows when the display is ON, in the screen
+timezone (set one first with `screen set-timezone`). Outside every window the
+display goes to standby. The device evaluates it offline.
+
+```json
+{"enabled": true, "windows": [{"days": ["mon", "tue", "wed", "thu", "fri"], "start": "07:00", "end": "19:00"}, {"days": ["sat"]}]}
+```
+
+A window whose `end` is at or before its `start` crosses midnight; a window
+without `start` and `end` covers the whole day. `enabled: false` keeps the
+windows and leaves the display on. The saved output of `display-schedule show`
+can be edited and sent back with `set --file`.
+
+`screen show --human` prints `Display:` with the requested power, its source
+(manual override, display schedule, or default) and until when in the screen
+timezone, the schedule windows, and the power the Player reported, marked stale
+after 15 minutes without a report. `events list` prints
+`screen.reboot_requested` and `screen.display_changed`.
+
 ## Webhooks
 
 A webhook POSTs this project's own durable events to an HTTPS endpoint you

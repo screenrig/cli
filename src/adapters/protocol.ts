@@ -540,6 +540,40 @@ export interface ScreenHealth {
   renderer_restarts_24h?: number;
 }
 
+export interface ScreenDisplaySchedule {
+  enabled: boolean;
+  windows: ScreenScheduleWindow[];
+  updated_at: string;
+}
+
+export interface ScreenDisplayOverride {
+  override_id: string;
+  power: "on" | "off";
+  until: string | null;
+  ends_at: string | null;
+  set_at: string;
+}
+
+/** Screen.display: requested power now, why, until when, and the Player's reported power. */
+export interface ScreenDisplay {
+  requested: "on" | "off";
+  source: "override" | "schedule" | "default";
+  until?: string;
+  schedule?: ScreenDisplaySchedule;
+  override?: ScreenDisplayOverride;
+  reported?: { power?: "on" | "off" | "standby" | "unknown"; connected?: boolean; reported_at: string; stale: boolean };
+}
+
+export interface ScreenDisplayScheduleView {
+  display_schedule: ScreenDisplaySchedule | null;
+  display?: ScreenDisplay;
+}
+
+export interface ScreenRebootAccepted {
+  reboot_id: string;
+  expires_at: string;
+}
+
 export interface Screen {
   content_access_generation: number;
   created_at: string;
@@ -608,6 +642,7 @@ export interface Screen {
    */
   storage?: ScreenStorage;
   health?: ScreenHealth;
+  display?: ScreenDisplay;
   /**
    * Approximate steady-state target selection (no transition) from the last
    * reported capacity and the screen's desired manifest. Absent without a
@@ -669,7 +704,12 @@ export type ScreenAction =
   | { type: "takeover"; playlist_id: string; until?: string | null; reason?: string }
   | { type: "takeover_clear" }
   | { type: "set_playlist_schedule"; entries: ScreenScheduleEntryWrite[] }
-  | { type: "clear_playlist_schedule" };
+  | { type: "clear_playlist_schedule" }
+  | { type: "reboot" }
+  | { type: "display"; power: "on" | "off"; until?: string | null }
+  | { type: "display_clear" }
+  | { type: "set_display_schedule"; enabled: boolean; windows: ScreenScheduleWindow[] }
+  | { type: "clear_display_schedule" };
 
 export type ScreenActionType = ScreenAction["type"];
 
@@ -686,6 +726,7 @@ export interface ScreenActionScreenResult {
   tags?: string[];
   reload?: ScreenReloadAccepted;
   toast?: ScreenToastAccepted;
+  reboot?: ScreenRebootAccepted;
   problem?: { type?: string; title?: string; status?: number; detail?: string; code?: string; [key: string]: unknown };
 }
 

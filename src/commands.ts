@@ -9,6 +9,7 @@ import { callVersionedPlaylist } from "./playlist-api.js";
 import { WriteRecovery } from "./write-recovery.js";
 import { instantInZone, normalizeInstant, playingLine, playlistInUseProblem, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "./screen-control.js";
 import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLAYS_SETTLE_MS, unusedPath, PLAYS_ALL_MAX_PAGES, PLAYS_LIMIT_MAX, playbackExportBudget, playsCursor, playsLimit, playsRange, requireCsvResponse, writeCsvFile, writeCsvStdout } from "./playback-export.js";
+import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, rebootProblem } from "./screen-display.js";
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
 import { openTempFile, removeOnSignal, shellQuote, tempPathFor } from "./temp-file.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
@@ -70,6 +71,8 @@ import {
   type ScreenPlaylistScheduleWrite,
   type ScreenTakeoverWrite,
   type PlaybackPlay,
+  type ScreenDisplayScheduleView,
+  type ScreenRebootAccepted,
   type PlaybackPlayList,
   type Webhook,
   type WebhookDelivery,
@@ -4370,6 +4373,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...applicationsUnsupportedLines(screen),
       ...recoveryPendingLine(screen),
       ...storageLines(screen, runtime.now()),
+      ...displayLines(screen?.display, screen?.timezone),
       ...healthLines(screen?.health),
     ].join("\n"),
   };
@@ -5458,6 +5462,10 @@ const CANNED_EVENT_MESSAGES = new Set([
   "Screen takeover ended",
   "A scheduled playlist cannot be shown; its entries were skipped",
   "Screen health changed",
+  "Screen reboot requested",
+  "Screen display override set",
+  "Screen display schedule updated",
+  "Screen display schedule cleared",
 ]);
 
 /**
@@ -5465,7 +5473,7 @@ const CANNED_EVENT_MESSAGES = new Set([
  * and "until cleared" (takeover_started); render it as none rather than
  * dropping the field.
  */
-const NULL_AS_NONE_EVENT_TYPES = new Set(["screen.playlist_switched", "screen.takeover_started", "screen.takeover_ended", "screen.playlist_unavailable"]);
+const NULL_AS_NONE_EVENT_TYPES = new Set(["screen.display_changed", "screen.playlist_switched", "screen.takeover_started", "screen.takeover_ended", "screen.playlist_unavailable"]);
 
 const SILENT_EVENT_TYPES = new Set(["application.event", "runtime.reported"]);
 
@@ -6438,3 +6446,167 @@ export const handleScreenTakeoverClear = commandHandler(async (args, runtime, re
     human: screenControlHuman(`Cleared the takeover on ${id}`, response.body as Screen | undefined),
   };
 });
+
+// Reboot and display power. One screen id uses the single-screen routes
+// (revision guard allowed); several ids or --tag use the fleet actions route
+// (reboot, display, set_display_schedule, clear_display_schedule).
+export const handleScreenReboot = commandHandler(async (args, runtime, resolved) => {
+  const target = screenTarget(args, "screen reboot");
+  if (target.kind === "fleet") {
+    rejectFleetRevision(args, "screen reboot");
+    // Noninteractive: a fleet reboot is never a side effect of a typo.
+    if (!flagBool(args.flags, "yes")) {
+      throw usageError("screen reboot with several screens or --tag reboots every matching device; add --yes to confirm.", {
+        command: `screenrig screen reboot ${target.selector.by === "tag" ? `--tag ${target.selector.tag}` : target.selector.screen_ids.join(" ")} --yes`,
+        reason: "Check the matching screens with screen list first; each rebooted device is dark until it restarts.",
+      });
+    }
+  }
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  if (target.kind === "fleet") return screenFleetAction(client, "Fleet reboot", target.selector, { type: "reboot" });
+  const id = target.id;
+  const revision = flagString(args.flags, "if-match");
+  let response;
+  try {
+    response = await client.call({
+      method: "POST", path: `/api/v1/screens/${encodeURIComponent(id)}/reboot`, idempotent: true,
+      ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+    });
+  } catch (error) {
+    throw rebootProblem(error, id);
+  }
+  const accepted = (response.body ?? {}) as Partial<ScreenRebootAccepted>;
+  if (typeof accepted.reboot_id !== "string" || !/^rbt_[A-Za-z0-9_-]{8,64}$/.test(accepted.reboot_id) || serverInstant(accepted.expires_at) === undefined) {
+    throw usageError("Screen reboot response does not match the generated ScreenRebootAccepted contract.");
+  }
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [
+      humanLines("Reboot accepted", [["screen_id", id], ["reboot_id", accepted.reboot_id], ["expires_at", accepted.expires_at]]),
+      "The Player reboots the device when it receives this before expires_at. Confirm it came back with screen show (online, health uptime).",
+    ].join("\n"),
+  };
+}, true);
+
+function displayHuman(title: string, screen: Screen | undefined): string {
+  return [title, ...displayLines(screen?.display, screen?.timezone), ...(screen?.revision !== undefined ? [`revision: ${screen.revision}`] : [])].join("\n");
+}
+
+export const handleScreenDisplay = commandHandler(async (args, runtime, resolved) => {
+  // A trailing on|off positional is shorthand for --power.
+  // positionals are [screen, display, set, ...ids].
+  const last = args.positionals.at(-1);
+  const trailing = args.positionals.length > 3 && (last === "on" || last === "off") ? last : undefined;
+  const positionals = (trailing ? args.positionals.slice(0, -1) : args.positionals).slice(1);
+  const flagPower = flagString(args.flags, "power");
+  if (trailing && flagPower && trailing !== flagPower) throw usageError("screen display got two different powers; use --power on|off once.");
+  const power = displayPower(flagPower ?? trailing);
+  const target = screenTarget({ ...args, positionals }, "screen display");
+  if (target.kind === "fleet") rejectFleetRevision(args, "screen display");
+  const until = displayUntil(flagString(args.flags, "until"), flagString(args.flags, "for"), runtime.now());
+  const write = { power, ...(until !== undefined ? { until } : {}) };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  if (target.kind === "fleet") return screenFleetAction(client, `Fleet display ${power}`, target.selector, { type: "display", ...write });
+  const id = target.id;
+  const revision = flagString(args.flags, "if-match");
+  let response;
+  try {
+    response = await client.call({
+      method: "POST", path: `/api/v1/screens/${encodeURIComponent(id)}/display`, idempotent: true, body: write,
+      ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+    });
+  } catch (error) {
+    throw displayProblem(screenControlProblem(error, id), id);
+  }
+  const screen = response.body as Screen | undefined;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: displayHuman(`Display ${power} on ${id} ${until ? `until ${instantInZone(until, screen?.timezone)}` : "until the display schedule's next boundary, or until replaced"}`, screen),
+  };
+}, true);
+
+export const handleScreenDisplayScheduleShow = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("screen display-schedule show requires <id>.");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await screenControlCall(client, id, { method: "GET", path: `/api/v1/screens/${encodeURIComponent(id)}/display-schedule` });
+  const view = response.body as ScreenDisplayScheduleView | undefined;
+  let timezone: string | undefined;
+  if (flagBool(args.flags, "human")) {
+    try {
+      timezone = ((await client.call({ method: "GET", path: `/api/v1/screens/${encodeURIComponent(id)}` })).body as Screen | undefined)?.timezone;
+    } catch {
+      timezone = undefined;
+    }
+  }
+  const display = view?.display ?? (view?.display_schedule ? { requested: "on" as const, source: "default" as const, schedule: view.display_schedule } : undefined);
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Display schedule for ${id}`, ...(view?.display_schedule ? [] : ["No display schedule: the display stays on unless turned off."]), ...displayLines(display, timezone)].join("\n"),
+  };
+}, true);
+
+export const handleScreenDisplayScheduleSet = commandHandler(async (args, runtime, resolved) => {
+  const file = flagString(args.flags, "file");
+  if (!file) throw usageError("screen display-schedule set requires --file FILE (or --file - for stdin).");
+  const target = nestedScreenTarget(args, "screen display-schedule set");
+  if (target.kind === "fleet") rejectFleetRevision(args, "screen display-schedule set");
+  const write = displayScheduleWrite(await readAuthoringJson(file, runtime));
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  if (target.kind === "fleet") return screenFleetAction(client, "Fleet display schedule set", target.selector, { type: "set_display_schedule", ...write });
+  const id = target.id;
+  const revision = flagString(args.flags, "if-match");
+  const response = await screenControlCall(client, id, {
+    method: "PUT", path: `/api/v1/screens/${encodeURIComponent(id)}/display-schedule`, idempotent: true, body: write,
+    ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+  });
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: displayHuman(`Set a ${write.windows.length}-window display schedule on ${id}${write.enabled ? "" : " (disabled: the display stays on)"}`, response.body as Screen | undefined),
+  };
+}, true);
+
+export const handleScreenDisplayScheduleClear = commandHandler(async (args, runtime, resolved) => {
+  const target = nestedScreenTarget(args, "screen display-schedule clear");
+  if (target.kind === "fleet") rejectFleetRevision(args, "screen display-schedule clear");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  if (target.kind === "fleet") return screenFleetAction(client, "Fleet display schedule clear", target.selector, { type: "clear_display_schedule" });
+  const id = target.id;
+  const revision = flagString(args.flags, "if-match");
+  const response = await screenControlCall(client, id, {
+    method: "DELETE", path: `/api/v1/screens/${encodeURIComponent(id)}/display-schedule`, idempotent: true,
+    ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+  });
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: displayHuman(`Cleared the display schedule on ${id}`, response.body as Screen | undefined),
+  };
+}, true);
+
+export const handleScreenDisplayClear = commandHandler(async (args, runtime, resolved) => {
+  const target = nestedScreenTarget(args, "screen display clear");
+  if (target.kind === "fleet") rejectFleetRevision(args, "screen display clear");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  if (target.kind === "fleet") return screenFleetAction(client, "Fleet display clear", target.selector, { type: "display_clear" });
+  const id = target.id;
+  const revision = flagString(args.flags, "if-match");
+  let response;
+  try {
+    response = await client.call({
+      method: "DELETE", path: `/api/v1/screens/${encodeURIComponent(id)}/display`, idempotent: true,
+      ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+    });
+  } catch (error) {
+    throw displayProblem(screenControlProblem(error, id), id);
+  }
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: displayHuman(`Cleared the display override on ${id}`, response.body as Screen | undefined),
+  };
+}, true);

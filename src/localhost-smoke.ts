@@ -371,6 +371,33 @@ async function main(): Promise<void> {
     const fleetClear = await run("screen", "schedule", "clear", "--tag", "Lobby");
     assert.equal((fleetClear.data as { action?: string; succeeded?: number }).succeeded, 1);
     await run("screen", "schedule", "clear", "scr_PAIRINGAAAAAAAAAAAAAAAA");
+    // Reboot and display power on a seeded active screen whose Player declares reboot.
+    backend.putScreen!({
+      id: "scr_DISPLAYAAAAAAAAAAAAAAAA", public_id: "pub_display", label: "Display", state: "active", online: true, revision: 1,
+      manifest_revision: 1, content_access_generation: 1, timezone: "America/Los_Angeles", tags: ["Hall"],
+      host: { platform: "android", capabilities: ["reboot", "display_power.cec"] },
+      created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
+    } as unknown as Parameters<NonNullable<typeof backend.putScreen>>[0]);
+    const rebooted = await run("screen", "reboot", "scr_DISPLAYAAAAAAAAAAAAAAAA");
+    assert.match(String((rebooted.data as { reboot_id?: string }).reboot_id), /^rbt_/);
+    const unconfirmed = await invoke(["screen", "reboot", "--tag", "Hall"]);
+    assert.equal(unconfirmed.code, 2, "a fleet reboot needs --yes");
+    await run("screen", "reboot", "--tag", "Hall", "--yes");
+    const dark = await run("screen", "display", "scr_DISPLAYAAAAAAAAAAAAAAAA", "--power", "off", "--for", "1h");
+    assert.equal((dark.data as { display?: { requested?: string } }).display?.requested, "off");
+    await run("screen", "display", "--tag", "Hall", "--power", "on");
+    const undone = await run("screen", "display", "clear", "scr_DISPLAYAAAAAAAAAAAAAAAA");
+    assert.equal((undone.data as { display?: unknown }).display, undefined);
+    await run("screen", "display", "--tag", "Hall", "--power", "off");
+    await run("screen", "display", "clear", "--tag", "Hall");
+    const hours = path.join(temp, "hours.json");
+    await writeFile(hours, JSON.stringify({ enabled: true, windows: [{ days: ["mon", "tue", "wed", "thu", "fri"], start: "07:00", end: "19:00" }] }));
+    await run("screen", "display-schedule", "set", "scr_DISPLAYAAAAAAAAAAAAAAAA", "--file", hours);
+    const displayView = await run("screen", "display-schedule", "show", "scr_DISPLAYAAAAAAAAAAAAAAAA");
+    assert.equal((displayView.data as { display_schedule?: { windows?: unknown[] } }).display_schedule?.windows?.length, 1);
+    await run("screen", "display-schedule", "set", "--tag", "Hall", "--file", hours);
+    await run("screen", "display-schedule", "clear", "--tag", "Hall");
+    await run("screen", "display-schedule", "clear", "scr_DISPLAYAAAAAAAAAAAAAAAA");
     const deleted = await invoke(["screen", "delete", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", "5"]);
     assert.equal(deleted.code, 5, `screen delete must surface screen_archive_required: ${deleted.stderr || deleted.stdout}`);
     assert.equal((JSON.parse(deleted.stdout) as { error?: { code?: string } }).error?.code, "screen_archive_required");

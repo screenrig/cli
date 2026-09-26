@@ -1410,7 +1410,14 @@ paths:
         project), refused whole with 429 rate_limited when larger than
         what remains, and each screen spends its own screen-control-screen
         unit (20 per minute), failing alone with rate_limited when over
-        it.
+        it. reboot, display, display_clear, set_display_schedule, and
+        clear_display_schedule run DELETE /api/v1/screens/{id}/display for
+        display_clear and POST /api/v1/screens/{id}/reboot, POST
+        /api/v1/screens/{id}/display, and PUT and DELETE
+        /api/v1/screens/{id}/display-schedule, charging reboot-project
+        (600 per minute) with reboot-screen (2 per 10 minutes), or
+        display-project (600 per minute) with display-screen (10 per
+        minute), the same way.
       security: [{ projectBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenActionRequest" } } } }
@@ -1682,6 +1689,151 @@ paths:
       parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "200": { description: Screen without a takeover., headers: { ETag: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/{id}/reboot:
+    post:
+      operationId: rebootScreen
+      x-rate-limit-policies: [{ name: reboot-project, quota: 600, windowSeconds: 60 }, { name: reboot-screen, quota: 2, windowSeconds: 600 }, { name: reboot-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Asks the screen's Player to reboot the device (docs/player-compatibility.md
+        §6.5). Appends the per-screen runtime command player.reboot
+        (details reboot_id, reason project, at, expires_at ten minutes later;
+        never delivered after expires_at) and the project-only
+        screen.reboot_requested. The screen must be active; an archived
+        screen answers screen_archived and a pairing_pending one
+        resource_conflict. The screen's host hint must declare the reboot
+        capability, else 409 reboot_unsupported and nothing is sent. The
+        screen revision does not change. If-Match and Idempotency-Key are
+        optional; an exact retry returns the same reboot_id for twenty-four
+        hours. At most 2 per screen per 10 minutes; a refused request
+        (reboot_unsupported, not_found, a conflict), a failed one, and an
+        exact Idempotency-Key replay spend nothing.
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      responses:
+        "202": { description: "Accepted. The reboot is actionable until expires_at. The ETag is the unchanged screen revision.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, ETag: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenRebootAccepted" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/{id}/display:
+    post:
+      operationId: setScreenDisplay
+      x-rate-limit-policies: [{ name: display-project, quota: 600, windowSeconds: 60 }, { name: display-screen, quota: 10, windowSeconds: 60 }, { name: display-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Turns the display on or off now: a manual override of the display
+        schedule (docs/player-compatibility.md §6.5). power is on or off.
+        until (RFC 3339, strictly future, at most 7 days ahead) ends it;
+        without until it ends at the display schedule's next boundary when
+        a schedule is enabled, else it holds until replaced. Stores the
+        override (Screen.display.override), re-mints the manifest (its
+        display member carries the override so an offline Player keeps it),
+        appends the runtime command player.display (details override_id,
+        power, until, at, expires_at) and the project-only
+        screen.display_changed, and bumps the screen revision (If-Match
+        guards it). The screen must be active. What the Player achieved is
+        reported back in its health display.power (Screen.display.reported).
+        Without until and without a schedule boundary inside the next eight
+        days (no enabled schedule, or none that changes), the override holds
+        until DELETE /api/v1/screens/{id}/display or a replacement; a later
+        display-schedule PUT or DELETE, or a timezone change, re-bounds an
+        until-less override to the new next boundary. A refused or failed
+        request, and an exact Idempotency-Key replay, spend no budget.
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenDisplayWrite" } } } }
+      responses:
+        "200": { description: Screen with its display state., headers: { ETag: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: clearScreenDisplay
+      x-rate-limit-policies: [{ name: display-project, quota: 600, windowSeconds: 60 }, { name: display-screen, quota: 10, windowSeconds: 60 }, { name: display-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Ends the manual display override so the display schedule (else on)
+        applies again. Re-mints the manifest (its display member drops the
+        override; the Player follows screen.manifest_changed), appends
+        screen.display_changed with change override_cleared, and bumps the
+        revision. A screen without an active override answers 200 unchanged.
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      responses:
+        "200": { description: Screen with its display state., headers: { ETag: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/{id}/display-schedule:
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    get:
+      operationId: getScreenDisplaySchedule
+      description: Returns display_schedule (null when none) and the screen's display state. The ETag is the screen revision.
+      security: [{ projectBearer: [] }]
+      responses:
+        "200": { description: Display schedule., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenDisplayScheduleView" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: setScreenDisplaySchedule
+      x-rate-limit-policies: [{ name: display-project, quota: 600, windowSeconds: 60 }, { name: display-screen, quota: 10, windowSeconds: 60 }, { name: display-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        Replaces the display schedule: enabled and 1 to 16
+        screenrig.schedule/v1 windows (days, start/end HH:MM, end <= start
+        crosses midnight owned by the start day, whole day without edges)
+        when the display is ON; outside every window the Player puts the
+        display to standby. Evaluated on the device in the screen timezone
+        (required, invalid_request otherwise), so it keeps working offline:
+        the manifest's display member carries it. enabled false keeps the
+        windows and leaves the display on. Re-mints the manifest, appends
+        screen.display_changed, bumps the revision (If-Match guards it). The
+        screen must be pairing_pending or active. A screen with no manifest yet
+        (never minted, or no playlist) stores the schedule and its first
+        manifest carries it; a screen without a playlist applies it once a
+        playlist is assigned. An until-less override is re-bounded to the new
+        schedule's next boundary.
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenDisplayScheduleWrite" } } } }
+      responses:
+        "200": { description: Screen with its display state., headers: { ETag: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: clearScreenDisplaySchedule
+      x-rate-limit-policies: [{ name: display-project, quota: 600, windowSeconds: 60 }, { name: display-screen, quota: 10, windowSeconds: 60 }, { name: display-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: Removes the display schedule (the display stays on unless overridden). Clearing none answers 200 unchanged.
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      responses:
+        "200": { description: Screen with its display state., headers: { ETag: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
@@ -2927,7 +3079,7 @@ paths:
         - { $ref: "#/components/parameters/AfterCursor" }
         - { $ref: "#/components/parameters/LastEventID" }
       responses:
-        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.archived and screen.unarchived are runtime audience events; they do not wipe credentials. screen.deleted is a runtime audience event delivered when signed identity reset tombstones the screen. No runtime event authorizes clearing local identity. Only successful signed reset initiated by a confirmed local player action permits local identity rotation. project.suspended and project.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive. The runtime audience is an allowlist (docs/player-compatibility.md §7.1): screen.content_changed, screen.manifest_changed, screen.toast, screen.screenshot_requested, screen.archived, screen.unarchived, screen.deleted, screen.device_credential_revoked, project.suspended, project.resumed, and player.reload, which reaches every runtime session. Every other type stops at the scan, and stream.cursor advances the cursor past it. Players ignore unknown event types, including the default message type, and unknown field names, and advance the cursor from every id. The stream opens with retry: 3000; a draining host sends each stream its own retry between 1000 and 30000 ms. The in-band problem frame (event: problem) has no id; its data is {code, detail, action?}, where action is present when the registry defines one, and the stream then closes (payment_required sets retry: 60000). The fleet player.reload control frame has no id and never moves the cursor. No frame carries more than 64 KiB of data.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
+        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.archived and screen.unarchived are runtime audience events; they do not wipe credentials. screen.deleted is a runtime audience event delivered when signed identity reset tombstones the screen. No runtime event authorizes clearing local identity. Only successful signed reset initiated by a confirmed local player action permits local identity rotation. project.suspended and project.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive. The runtime audience is an allowlist (docs/player-compatibility.md §7.1): screen.content_changed, screen.manifest_changed, screen.toast, screen.screenshot_requested, screen.archived, screen.unarchived, screen.deleted, screen.device_credential_revoked, project.suspended, project.resumed, player.reload, which reaches every runtime session, and the per-screen commands player.reboot and player.display (docs/player-compatibility.md §6.5), never delivered past details.expires_at. Every other type stops at the scan, and stream.cursor advances the cursor past it. Players ignore unknown event types, including the default message type, and unknown field names, and advance the cursor from every id. The stream opens with retry: 3000; a draining host sends each stream its own retry between 1000 and 30000 ms. The in-band problem frame (event: problem) has no id; its data is {code, detail, action?}, where action is present when the registry defines one, and the stream then closes (payment_required sets retry: 60000). The fleet player.reload control frame has no id and never moves the cursor. No frame carries more than 64 KiB of data.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/reports:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -4365,6 +4517,65 @@ paths:
       parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "202": { description: "Accepted. The ETag is the unchanged screen revision.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, ETag: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenReloadAccepted" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/screens/{id}/reboot:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
+    post:
+      operationId: rebootDashboardScreen
+      x-rate-limit-policies: [{ name: reboot-project, quota: 600, windowSeconds: 60 }, { name: reboot-screen, quota: 2, windowSeconds: 600 }, { name: reboot-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        The dashboard twin of POST /api/v1/screens/{id}/reboot: same project
+        fence, player.reboot and screen.reboot_requested, reboot_unsupported
+        refusal, budgets, and 202 body.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      responses:
+        "202": { description: "Accepted. The ETag is the unchanged screen revision.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, ETag: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenRebootAccepted" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/screens/{id}/display:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
+    post:
+      operationId: setDashboardScreenDisplay
+      x-rate-limit-policies: [{ name: display-project, quota: 600, windowSeconds: 60 }, { name: display-screen, quota: 10, windowSeconds: 60 }, { name: display-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: >-
+        The dashboard twin of POST /api/v1/screens/{id}/display (display on or
+        off now, optional until): same rules, events, budgets, and Screen body.
+        The display schedule stays agent- and CLI-authored.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenDisplayWrite" } } } }
+      responses:
+        "200": { description: Screen with its display state., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, ETag: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: clearDashboardScreenDisplay
+      x-rate-limit-policies: [{ name: display-project, quota: 600, windowSeconds: 60 }, { name: display-screen, quota: 10, windowSeconds: 60 }, { name: display-ip, quota: 60, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      description: The dashboard twin of DELETE /api/v1/screens/{id}/display.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      responses:
+        "200": { description: Screen with its display state., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, ETag: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
@@ -6466,6 +6677,7 @@ components:
         timezone: { type: string, description: "IANA time zone of the screen. Emitted when the screen has one. Every page visibility rule in this manifest is evaluated in this zone (docs/player-compatibility.md §1.3)." }
         pages: { type: array, items: { type: object, additionalProperties: true } }
         audio: { $ref: "#/components/schemas/RuntimeAudio" }
+        display: { $ref: "#/components/schemas/RuntimeDisplay" }
         diagnostics: { type: array, items: { type: object, additionalProperties: true }, description: "Page- and primitive-level projection omissions. Emitted when non-empty. Compatibility rule 4: HTTP 200 with pages [] and diagnostics is a degraded projection. HTTP 200 with pages [] and no diagnostics is an authored empty assignment." }
     RuntimeAdslotCandidate:
       type: object
@@ -7002,6 +7214,7 @@ components:
         takeover: { $ref: "#/components/schemas/ScreenTakeover" }
         effective_playlist: { $ref: "#/components/schemas/ScreenEffectivePlaylist" }
         health: { $ref: "#/components/schemas/ScreenHealth" }
+        display: { $ref: "#/components/schemas/ScreenDisplay" }
         timezone: { type: string, description: "IANA time zone identifier. Absent until it is set. Page visibility rules are evaluated in this zone." }
         tags: { $ref: "#/components/schemas/ScreenTags" }
         observation: { $ref: "#/components/schemas/ScreenObservation" }
@@ -7137,7 +7350,7 @@ components:
         platform: { type: string, pattern: "^[a-z][a-z0-9-]{0,31}$", description: "Registered values: tizen, android, windows, qt, apple, chromeos, browser, brightsign. Another value matching the pattern is stored as the player reported it." }
         host_version: { type: string, minLength: 1, maxLength: 40, description: "Shell or container product version, CalVer or vendor form." }
         device: { $ref: "#/components/schemas/HostDevice" }
-        capabilities: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[a-z0-9_]{1,40}$" } }
+        capabilities: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40 }, description: "Host capability tokens, optionally dotted into a family. Documented values: reboot (the Player reboots the device on player.reboot), display_power.cec, display_power.ddc, display_power.backlight, display_power.scrim (display power methods the Player can use, docs/player-compatibility.md §6.5). Legacy cec_power_on reads as display_power.cec; reboot_daily and other values are stored as reported." }
     HostDevice:
       type: object
       additionalProperties: false
@@ -7167,7 +7380,7 @@ components:
         platform: { type: string, pattern: "^[a-z][a-z0-9-]{0,31}$", description: "Registered values: tizen, android, windows, qt, apple, chromeos, browser, brightsign." }
         host_version: { type: string, minLength: 1, maxLength: 40 }
         device: { $ref: "#/components/schemas/RuntimeHostHintDevice" }
-        capabilities: { type: array, items: { type: string, pattern: "^[a-z0-9_]{1,40}$" } }
+        capabilities: { type: array, items: { type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40 }, description: "Declare reboot and each display_power.* method the device supports (docs/player-compatibility.md §6.5). A backend before dotted values drops a dotted entry on its own; it never refuses the request." }
     RuntimeHostHintDevice:
       type: object
       additionalProperties: true
@@ -7218,6 +7431,11 @@ components:
         - { $ref: "#/components/schemas/ScreenActionTakeoverClear" }
         - { $ref: "#/components/schemas/ScreenActionSetPlaylistSchedule" }
         - { $ref: "#/components/schemas/ScreenActionClearPlaylistSchedule" }
+        - { $ref: "#/components/schemas/ScreenActionReboot" }
+        - { $ref: "#/components/schemas/ScreenActionDisplay" }
+        - { $ref: "#/components/schemas/ScreenActionDisplayClear" }
+        - { $ref: "#/components/schemas/ScreenActionSetDisplaySchedule" }
+        - { $ref: "#/components/schemas/ScreenActionClearDisplaySchedule" }
       discriminator: { propertyName: type }
       description: >-
         One fleet action, discriminated by type. Each member carries only
@@ -7302,12 +7520,51 @@ components:
       description: Removes each screen's playlist schedule; a screen without one is ok and unchanged.
       properties:
         type: { type: string, enum: [clear_playlist_schedule] }
+    ScreenActionReboot:
+      type: object
+      additionalProperties: false
+      required: [type]
+      description: POST /api/v1/screens/{id}/reboot per screen; a screen whose host did not declare reboot fails alone with reboot_unsupported.
+      properties:
+        type: { type: string, enum: [reboot] }
+    ScreenActionDisplay:
+      type: object
+      additionalProperties: false
+      required: [type, power]
+      description: Same rules as ScreenDisplayWrite. until is checked against the request clock when the Idempotency-Key has no fleet record, and again by each screen.
+      properties:
+        type: { type: string, enum: [display] }
+        power: { type: string, enum: [on, off] }
+        until: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+    ScreenActionDisplayClear:
+      type: object
+      additionalProperties: false
+      required: [type]
+      description: Ends each screen's manual display override (DELETE /api/v1/screens/{id}/display); a screen without one is ok and unchanged.
+      properties:
+        type: { type: string, enum: [display_clear] }
+    ScreenActionSetDisplaySchedule:
+      type: object
+      additionalProperties: false
+      required: [type, enabled, windows]
+      description: Replaces each screen's display schedule (ScreenDisplayScheduleWrite), normalized once before fan-out. A screen without a timezone fails alone with invalid_request.
+      properties:
+        type: { type: string, enum: [set_display_schedule] }
+        enabled: { type: boolean }
+        windows: { type: array, minItems: 1, maxItems: 16, items: { $ref: "#/components/schemas/DisplayWindow" } }
+    ScreenActionClearDisplaySchedule:
+      type: object
+      additionalProperties: false
+      required: [type]
+      description: Removes each screen's display schedule; a screen without one is ok and unchanged.
+      properties:
+        type: { type: string, enum: [clear_display_schedule] }
     ScreenActionResult:
       type: object
       additionalProperties: false
       required: [action, matched, succeeded, failed, results]
       properties:
-        action: { type: string, enum: [assign, reload, toast, set_tags, add_tags, remove_tags, takeover, takeover_clear, set_playlist_schedule, clear_playlist_schedule] }
+        action: { type: string, enum: [assign, reload, toast, set_tags, add_tags, remove_tags, takeover, takeover_clear, set_playlist_schedule, clear_playlist_schedule, reboot, display, display_clear, set_display_schedule, clear_display_schedule] }
         matched: { type: integer, minimum: 0, maximum: 500 }
         succeeded: { type: integer, minimum: 0, maximum: 500 }
         failed: { type: integer, minimum: 0, maximum: 500 }
@@ -7330,6 +7587,7 @@ components:
         tags: { type: array, maxItems: 16, items: { type: string } }
         reload: { $ref: "#/components/schemas/ScreenReloadAccepted" }
         toast: { $ref: "#/components/schemas/ScreenToastAccepted" }
+        reboot: { $ref: "#/components/schemas/ScreenRebootAccepted" }
         problem: { $ref: "#/components/schemas/Problem" }
     ScreenRecoveryPending:
       type: object
@@ -8309,6 +8567,7 @@ components:
         timezone: { type: string, description: "IANA time zone identifier of the screen. Every page visibility rule in this manifest is evaluated in this zone. Emitted when the screen has one (docs/player-compatibility.md §1.3)." }
         pages: { type: array, items: { $ref: "#/components/schemas/RuntimePage" } }
         audio: { $ref: "#/components/schemas/RuntimeAudio" }
+        display: { $ref: "#/components/schemas/RuntimeDisplay" }
         diagnostics: { type: array, items: { $ref: "#/components/schemas/RuntimeManifestDiagnostic" }, description: "Page- and primitive-level projection omissions. Emitted when projection dropped a field, primitive, or page; a healthy manifest omits this key. Compatibility rule 4: HTTP 200 with pages [] and a non-empty diagnostics array is a degraded projection — the player keeps last-known-good, shows the offline chip, and does not persist. HTTP 200 with pages [] and no diagnostics is an authored empty assignment — the player replaces last-known-good and shows no-content." }
     RuntimeManifestDiagnostic:
       type: object
@@ -8808,6 +9067,112 @@ components:
         network: { type: object, additionalProperties: false, properties: { kind: { type: string, enum: [ethernet, wifi, cellular, unknown] }, wifi_rssi_dbm: { type: integer } } }
         crashes_24h: { type: integer, minimum: 0 }
         renderer_restarts_24h: { type: integer, minimum: 0 }
+    ScreenRebootAccepted:
+      type: object
+      additionalProperties: false
+      required: [reboot_id, expires_at]
+      properties:
+        reboot_id: { type: string, pattern: "^rbt_[A-Za-z0-9_-]{8,64}$", description: details.reboot_id of the player.reboot event. A Player acts on one reboot_id at most once. }
+        expires_at: { type: string, format: date-time, description: Instant after which runtime scan does not deliver the reboot and a Player ignores it. }
+    ScreenDisplayWrite:
+      type: object
+      additionalProperties: false
+      required: [power]
+      properties:
+        power: { type: string, enum: [on, off] }
+        until: { anyOf: [{ type: string, format: date-time }, { type: "null" }], description: "Strictly future, at most 7 days ahead. Omitted or null: until the display schedule's next boundary, else until replaced." }
+    DisplayWindow:
+      type: object
+      additionalProperties: false
+      required: [days]
+      properties:
+        days: { type: array, minItems: 1, maxItems: 7, uniqueItems: true, items: { type: string, enum: [mon, tue, wed, thu, fri, sat, sun] } }
+        start: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        end: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+    ScreenDisplayScheduleWrite:
+      type: object
+      additionalProperties: false
+      required: [enabled, windows]
+      properties:
+        enabled: { type: boolean }
+        windows: { type: array, minItems: 1, maxItems: 16, items: { $ref: "#/components/schemas/DisplayWindow" }, description: ON windows. }
+    ScreenDisplaySchedule:
+      type: object
+      additionalProperties: false
+      required: [enabled, windows, updated_at]
+      properties:
+        enabled: { type: boolean }
+        windows: { type: array, maxItems: 16, items: { $ref: "#/components/schemas/DisplayWindow" } }
+        updated_at: { type: string, format: date-time }
+    ScreenDisplayOverride:
+      type: object
+      additionalProperties: false
+      required: [override_id, power, until, ends_at, set_at]
+      properties:
+        override_id: { type: string }
+        power: { type: string, enum: [on, off] }
+        until: { anyOf: [{ type: string, format: date-time }, { type: "null" }], description: "The until the caller sent, or null." }
+        ends_at: { anyOf: [{ type: string, format: date-time }, { type: "null" }], description: "When the override stops winning (until, else the schedule boundary at the time it was set); null holds until replaced." }
+        set_at: { type: string, format: date-time }
+    ScreenDisplay:
+      type: object
+      additionalProperties: false
+      required: [requested, source]
+      description: >-
+        Display power state. requested is what the screen should show now:
+        the active override, else the enabled display schedule evaluated in
+        the screen timezone, else on (source override, schedule, or default);
+        until is when that next changes, when known. reported is the Player's
+        latest health display (power, connected, reported_at, stale after 15
+        minutes). Absent when the screen has no schedule, no override, and no
+        reported display.
+      properties:
+        requested: { type: string, enum: [on, off] }
+        source: { type: string, enum: [override, schedule, default] }
+        until: { type: string, format: date-time }
+        schedule: { $ref: "#/components/schemas/ScreenDisplaySchedule" }
+        override: { $ref: "#/components/schemas/ScreenDisplayOverride" }
+        reported:
+          type: object
+          additionalProperties: false
+          required: [reported_at, stale]
+          properties:
+            power: { type: string, enum: [on, off, standby, unknown] }
+            connected: { type: boolean }
+            reported_at: { type: string, format: date-time }
+            stale: { type: boolean }
+    ScreenDisplayScheduleView:
+      type: object
+      additionalProperties: false
+      required: [display_schedule]
+      properties:
+        display_schedule: { anyOf: [{ $ref: "#/components/schemas/ScreenDisplaySchedule" }, { type: "null" }] }
+        display: { $ref: "#/components/schemas/ScreenDisplay" }
+    RuntimeDisplay:
+      type: object
+      additionalProperties: true
+      description: >-
+        The screen's display power control, evaluated on the device
+        (docs/player-compatibility.md §6.5). Omitted when the screen has none;
+        then the display stays on. Unknown members are ignored.
+      properties:
+        schedule:
+          type: object
+          additionalProperties: true
+          required: [enabled, windows]
+          description: "ON windows in screenrig.schedule/v1 window semantics, read in the manifest timezone. Outside every window the display is in standby. enabled false: the display stays on."
+          properties:
+            enabled: { type: boolean }
+            windows: { type: array, items: { type: object, additionalProperties: true, properties: { days: { type: array, items: { type: string } }, start: { type: string }, end: { type: string } } } }
+        override:
+          type: object
+          additionalProperties: true
+          required: [overrideId, power]
+          description: An active manual override that beats the schedule until until (absent means until replaced). It matches the latest player.display.
+          properties:
+            overrideId: { type: string }
+            power: { type: string, enum: [on, off] }
+            until: { type: string, format: date-time }
     DashboardProject:
       type: object
       additionalProperties: false
@@ -8946,4 +9311,4 @@ components:
         errors: { type: array, items: { $ref: "#/components/schemas/ProblemField" } }
         next: { $ref: "#/components/schemas/NextAction" }
 x-problem-registry: ./problems.yaml
-x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, user_email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_project_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, server_draining, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk, recovery_ambiguous, recovery_expired, recovery_not_offered, invitation_limit_reached, version_required, price_change_pending, quote_stale, insufficient_credits, self_deal, invitation_invalid, invitation_expired, invitation_consumed, invitation_email_mismatch, reauthentication_required, member_limit_reached, last_credential, no_project, billing_unavailable, feature_unavailable, user_binding_stale, session_expired, credential_revoked, proof_clock_skew, key_retired, assignment_not_found, upgrade_required, webhook_limit_reached, webhook_url_rejected]
+x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, user_email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_project_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, server_draining, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk, recovery_ambiguous, recovery_expired, recovery_not_offered, invitation_limit_reached, version_required, price_change_pending, quote_stale, insufficient_credits, self_deal, invitation_invalid, invitation_expired, invitation_consumed, invitation_email_mismatch, reauthentication_required, member_limit_reached, last_credential, no_project, billing_unavailable, feature_unavailable, user_binding_stale, session_expired, credential_revoked, proof_clock_skew, key_retired, assignment_not_found, upgrade_required, webhook_limit_reached, webhook_url_rejected, reboot_unsupported]

@@ -39,10 +39,13 @@ function onlyKeys(value: Record<string, unknown>, allowed: string[], path: strin
   if (extra !== undefined) throw scheduleError(path, `has unknown field ${JSON.stringify(extra).slice(0, 80)}; allowed: ${allowed.join(", ")}.`);
 }
 
-function window(value: unknown, path: string): ScreenScheduleWindow {
+/** One screenrig.schedule/v1 window; `fail` names the file kind in the error. */
+export function scheduleWindow(value: unknown, path: string, fail: (path: string, message: string) => CliError = scheduleError): ScreenScheduleWindow {
+  const scheduleError = fail;
   const item = record(value);
   if (!item) throw scheduleError(path, "must be an object with days and optional start and end.");
-  onlyKeys(item, ["days", "start", "end"], path);
+  const extra = Object.keys(item).find((key) => !["days", "start", "end"].includes(key));
+  if (extra !== undefined) throw scheduleError(path, `has unknown field ${JSON.stringify(extra).slice(0, 80)}; allowed: days, start, end.`);
   const days = item.days;
   if (!Array.isArray(days) || days.length < 1 || days.length > 7) throw scheduleError(`${path}.days`, "must list 1 to 7 days.");
   days.forEach((day, index) => {
@@ -82,7 +85,7 @@ function entry(value: unknown, path: string): ScreenScheduleEntryWrite {
   if (!Array.isArray(windows) || windows.length < 1 || windows.length > SCHEDULE_WINDOWS_MAX) {
     throw scheduleError(`${path}.windows`, `must list 1 to ${SCHEDULE_WINDOWS_MAX} windows.`);
   }
-  windows.forEach((item, index) => window(item, `${path}.windows[${index}]`));
+  windows.forEach((item, index) => scheduleWindow(item, `${path}.windows[${index}]`));
   return item as unknown as ScreenScheduleEntryWrite;
 }
 
