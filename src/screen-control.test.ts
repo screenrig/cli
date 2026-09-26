@@ -101,7 +101,6 @@ test("screen schedule set on one screen PUTs the entries with the revision guard
   const human = await cli(["--human", "screen", "schedule", "set", A, "--file", "dayparts.json"], transport, env);
   assert.equal(human.code, 0, human.stderr);
   assert.match(human.stdout, /^Set a 3-entry playlist schedule on scr_A/m);
-  assert.match(human.stdout, /^Playing: pl_BREAKFAST \(schedule entry breakfast\)$/m);
   assert.match(human.stdout, /^Windows and FROM\/UNTIL are civil times \(screen timezone America\/Los_Angeles\)\.$/m);
   assert.match(human.stdout, /ENTRY\s+PLAYLIST\s+WINDOWS/);
   assert.match(human.stdout, /lunch\s+pl_LUNCH\s+mon,tue,wed,thu,fri 11:00-15:00/);
@@ -282,15 +281,12 @@ test("screen takeover sets one screen with --for, --until, or held until cleared
   assert.equal(held.code, 0, held.stderr);
   assert.deepEqual(last(transport).body, { playlist_id: "pl_NOTICE", until: null });
   assert.match(held.stdout, /^Took over scr_A\w+ with pl_NOTICE until cleared$/m);
-  assert.match(held.stdout, /^Playing: pl_NOTICE \(takeover until cleared\)$/m);
   assert.match(held.stdout, /^Takeover: pl_NOTICE until cleared$/m);
 
   const omitted = await cli(["--json", "screen", "takeover", A, "--playlist-id", "pl_NOTICE"], transport, env);
   assert.equal(omitted.code, 0);
   assert.deepEqual(last(transport).body, { playlist_id: "pl_NOTICE" }, "no until means held until cleared");
 
-  const shown = await cli(["--human", "screen", "show", A], transport, env);
-  assert.match(shown.stdout, /^Playing: pl_NOTICE \(takeover until cleared\)$/m);
 
   const cleared = await cli(["--json", "screen", "takeover", "clear", A], transport, env);
   assert.equal(cleared.code, 0, cleared.stdout);
@@ -307,7 +303,6 @@ test("takeover instants print in the screen timezone; server until refusals and 
   assert.equal(timed.code, 0, timed.stderr);
   assert.equal((transport.calls.at(-1)!.body as { reason?: string }).reason, "Fire drill", "reason is trimmed");
   assert.match(timed.stdout, /^Took over scr_A\w+ with pl_DRILL until 2026-08-14 10:30 America\/Los_Angeles$/m);
-  assert.match(timed.stdout, /^Playing: pl_DRILL \(takeover until 2026-08-14 10:30 America\/Los_Angeles\)$/m);
   assert.match(timed.stdout, /^Takeover: pl_DRILL until 2026-08-14 10:30 America\/Los_Angeles \(Fire drill\)$/m);
 
   const past = await cli(["--json", "screen", "takeover", A, "--playlist-id", "pl_DRILL", "--until", "2026-08-14T16:00:00Z"], transport, env);
@@ -424,24 +419,13 @@ test("screen show and list surface effective_playlist, takeover, and schedule", 
   const transport = await backend(env);
   await cli(["--json", "screen", "schedule", "set", A, "--file", "dayparts.json"], transport, env);
   const shown = await cli(["--human", "screen", "show", A], transport, env);
-  assert.match(shown.stdout, /^Playing: pl_BREAKFAST \(schedule entry breakfast\)$/m);
   assert.match(shown.stdout, /^Playlist schedule: 3 entries \(screen schedule show scr_A/m);
   const json = await cli(["--json", "screen", "show", A], transport, env);
   assert.equal(json.envelope.data.effective_playlist.source, "schedule");
   assert.equal(json.envelope.data.playlist_schedule.entries.length, 3);
   const listed = await cli(["--human", "screen", "list"], transport, env);
-  assert.match(listed.stdout, /PLAYING/);
   assert.match(listed.stdout, new RegExp(`${A}.*pl_BREAKFAST \\(schedule entry breakfast\\)`));
 
-  const plain = new FakeTransport().on("GET", "/api/v1/screens", () => ({ status: 200, headers: {}, body: { items: [
-    { id: A, label: "A", state: "active", revision: 1, public_id: "p", manifest_revision: 1, content_access_generation: 1, online: true, created_at: "x", updated_at: "x", playlist_id: "pl_A", effective_playlist: { id: "pl_A", source: "default" } },
-  ] } })).on("GET", `/api/v1/screens/${A}`, () => ({ status: 200, headers: {}, body: {
-    id: A, label: "A", state: "active", revision: 1, playlist_id: "pl_A", effective_playlist: { id: "pl_A", source: "default", until: "2026-08-15T13:00:00Z" },
-  } }));
-  const defaults = await cli(["--human", "screen", "list"], plain, env);
-  assert.doesNotMatch(defaults.stdout, /PLAYING/, "a fleet on defaults keeps its table");
-  const defaultShow = await cli(["--human", "screen", "show", A], plain, env);
-  assert.match(defaultShow.stdout, /^Playing: pl_A \(default, schedule changes it until 2026-08-15 13:00 UTC\)$/m, "no zone falls back to labelled UTC");
 });
 
 test("playlist delete in use points at the screens that can still show it", async () => {

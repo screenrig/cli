@@ -620,6 +620,30 @@ paths:
                 $ref: '#/components/schemas/DashboardMe'
         default:
           $ref: '#/components/responses/Problem'
+    delete:
+      operationId: deleteDashboardMe
+      description: >-
+        Tombstones the signed-in person. Proof-protected: the body carries
+        a fresh sign-in proof verified against a reauthentication bound to
+        this session with kind account_delete and subject_id equal to the
+        signed-in person's user id (start it with
+        POST /dashboard/v1/me/reauthentications). Without a current
+        reauthentication the answer is reauthentication_required. On
+        success the response is 204 and the dashboard session cookie is
+        cleared.
+      security:
+      - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardProofRequest'
+      responses:
+        '204':
+          description: Person deleted and dashboard session cookie cleared.
+        default:
+          $ref: '#/components/responses/Problem'
   /dashboard/v1/me/reauthentications:
     servers:
     - url: https://dashboard.screenrig.ai
@@ -1449,11 +1473,25 @@ paths:
         default: { $ref: "#/components/responses/Problem" }
     delete:
       operationId: deleteScreen
-      description: Project delete is not a de-associate. Archive the screen instead. Returns screen_archive_required.
+      description: >-
+        Soft-deletes the screen. The project bearer is authoritative; an
+        unknown or other-project id is not_found. If-Match guards the
+        screen revision (a stale value is revision_conflict) and an
+        Idempotency-Key replays the same result. The screen leaves the
+        project immediately — reads answer not_found, no manifest or
+        grant is served, sessions die with the content-access
+        generation — and its stored row, including the device binding,
+        is retained for the deletion retention window (90 days) and then
+        reaped, so a re-pair of the same device cannot resurrect a
+        removed screen's authority. This is the operator's break-glass
+        path for a bound device (docs/player-compatibility.md §5.7);
+        archive is the routine de-associate and never deletes.
       security: [{ projectBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
-        "409": { $ref: "#/components/responses/Problem" }
+        "204": { description: Screen deleted; its row, device binding included, is retained for the deletion window and then reaped. }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { description: revision_conflict — If-Match is stale; Problem.current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/public-id/rotate:
     post:
@@ -2347,7 +2385,9 @@ paths:
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Per-play records: one row per accepted playback.media_started (or
-        legacy playback.video_started) of the calling project, oldest first
+        legacy playback.video_started) and one row per accepted
+        playback.application_started (release_id set, media fields empty)
+        of the calling project, oldest first
         by received_at, ties by insertion. from (inclusive) and to
         (exclusive) bound received_at; to defaults to now, from to 24 hours
         before to, and the range is at most 31 days (invalid_request
@@ -3090,7 +3130,7 @@ paths:
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeReport" } } } }
       responses:
-        "202": { description: Accepted. manifest.activated is committed before this response and is idempotent for the current active revision. playback.media_started upserts the daily aggregate for an image or video start and stores one per-play record (GET /api/v1/playback/plays) in the same transaction before this response; playback.video_started reports a video start using the same aggregation and play record. playback.page_failed replaces the screen's latest page-failure slot and appends a project-only durable event in the same transaction without changing screen or manifest revision. application.event appends a durable project event before this response., headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
+        "202": { description: Accepted. manifest.activated is committed before this response and is idempotent for the current active revision. playback.media_started upserts the daily aggregate for an image or video start and stores one per-play record (GET /api/v1/playback/plays) in the same transaction before this response; playback.video_started reports a video start using the same aggregation and play record. playback.application_started verifies the reported page, primitive, and release as the exact application primitive of the session screen's current grant at the reported manifest revision, stores one per-play record (GET /api/v1/playback/plays) for the application start, and advances the release's last_used_at in the same transaction. playback.page_failed replaces the screen's latest page-failure slot and appends a project-only durable event in the same transaction without changing screen or manifest revision. manifest.upgrade stores the screen's one latest-wins manifest-upgrade slot behind its revision fences and appends a project-only durable event in the same transaction only when the derived state changes; a stale, superseded, or post-activation pre-activation report is accepted with no change, and no report ever promotes a grant. application.event appends a durable project event before this response., headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/screenshot:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -4410,15 +4450,31 @@ paths:
         Returns one pairing_pending, active, or archived screen. Authority is
         the session's project owning the screen; the identifier is not
         authorization. A screen of any other project is not_found. Deleted
-        screens are not found. There is no dashboard screen create, patch, or
-        delete: the dashboard is a read, list, and delete surface, screens
-        archive rather than delete, and authoring stays in the agent
-        conversation and the CLI.
+        screens are not found. There is no dashboard screen create or patch;
+        the dashboard reads, lists, and deletes screens. Authoring stays in
+        the agent conversation and the CLI.
       security: [{ dashboardSession: [] }]
       responses:
         "200": { description: Screen, headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deleteDashboardScreen
+      description: >-
+        The dashboard twin of DELETE /api/v1/screens/{id} for the
+        session's project: the same soft deletion with the same retained
+        device binding and deletion window, the same If-Match and
+        idempotency fences, and not_found for any other project's
+        screen. The durable project event carries the acting dashboard
+        user as actor. Archive stays the routine de-associate.
+      security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "204": { description: Screen deleted; its row, device binding included, is retained for the deletion window and then reaped., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/screens/{id}/screenshot:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
@@ -5221,6 +5277,10 @@ components:
         created_at:
           type: string
           format: date-time
+        updated_at:
+          type: string
+          format: date-time
+          description: Server-maintained instant of the person's last profile or credential change. Absent when never mutated after creation. Read-only.
     DashboardProjectSwitch:
       type: object
       additionalProperties: false
@@ -5286,9 +5346,11 @@ components:
           - passkey_add
           - passkey_delete
           - invitation_accept
+          - account_delete
         subject_id:
           type: string
           minLength: 1
+          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id."
     DashboardReauthentication:
       type: object
       additionalProperties: false
@@ -6086,6 +6148,10 @@ components:
           format: date-time
         name:
           $ref: '#/components/schemas/ProjectName'
+        last_used_at:
+          type: string
+          format: date-time
+          description: Server-maintained instant of the project's most recent durable activity touch (authenticated Player contact). Absent until the first touch. Read-only; never authorization.
 
     RuntimeChrome:
       type: object
@@ -6169,6 +6235,7 @@ components:
         connected_at: { type: string, format: date-time }
         last_used_at: { type: string, format: date-time }
         revoked_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time, description: "Server-maintained instant of the agent's last lifecycle or profile mutation. Absent when the agent was never mutated after creation. Read-only." }
     AgentList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Agent" } } } }
     AgentSelfStatus: { type: object, additionalProperties: false, required: [agent, connection_ready], properties: { agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, description: True when at least one project member has a passkey or password and can authorize another agent. } } }
     X25519PublicJWK: { type: object, additionalProperties: false, required: [kty, crv, x], properties: { kty: { type: string, enum: [OKP] }, crv: { type: string, enum: [X25519] }, x: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
@@ -6178,7 +6245,7 @@ components:
     AgentCredentialEnvelope: { type: object, additionalProperties: false, required: [algorithm, ephemeral_public_key, nonce, ciphertext], properties: { algorithm: { type: string, enum: [X25519-HKDF-SHA256-A256GCM] }, ephemeral_public_key: { $ref: "#/components/schemas/X25519PublicJWK" }, nonce: { type: string, description: Unpadded base64url AES-GCM nonce. }, ciphertext: { type: string, description: Unpadded base64url ciphertext and authentication tag. Decrypt with AAD screenrig/agent-credential-envelope/aad/v1 NUL connection_id NUL agent_id. } } }
     AgentCredentialCollection: { type: object, additionalProperties: false, required: [agent, credential_envelope, issuance_expires_at], properties: { agent: { $ref: "#/components/schemas/Agent" }, credential_envelope: { $ref: "#/components/schemas/AgentCredentialEnvelope" }, issuance_expires_at: { type: string, format: date-time } } }
     AgentDisconnectRequest: { type: object, additionalProperties: false, properties: { allow_last_agent: { type: boolean, default: false, description: Explicitly accept loss of the last active agent bearer. A registered dashboard passkey remains independent administrative authority. } } }
-    Application: { type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: { id: { type: string }, name: { type: string }, revision: { type: integer }, latest_ready_release: { type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    Application: { type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: { id: { type: string }, name: { type: string }, revision: { type: integer }, latest_ready_release: { type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the application's releases were last used on glass (playback.application_started). Absent until first use. Read-only." } } }
     ApplicationList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Application" } } } }
     OperationAccepted: { type: object, additionalProperties: false, required: [id, release_id, operation_id], properties: { id: { type: string, description: Application identifier the upload was attributed to. }, release_id: { type: string, description: "Release identifier created by this upload. Poll the operation and pin this release into a playlist once the operation succeeds." }, operation_id: { type: string } } }
     Operation: { type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: { id: { type: string }, kind: { type: string }, state: { type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the bounded upload body is still being durably staged. Terminal values are succeeded, failed, and cancelled." }, request_id: { type: string }, created_at: { type: string }, updated_at: { type: string }, result: { type: object, additionalProperties: true }, error: { type: object, additionalProperties: true } } }
@@ -7204,7 +7271,7 @@ components:
     Screen:
       type: object
       additionalProperties: false
-      required: [id, public_id, label, revision, manifest_revision, content_access_generation, state, online, created_at, updated_at]
+      required: [id, public_id, label, revision, manifest_revision, manifest_upgrade, content_access_generation, state, online, created_at, updated_at]
       properties:
         id: { type: string }
         public_id: { type: string }
@@ -7219,6 +7286,7 @@ components:
         tags: { $ref: "#/components/schemas/ScreenTags" }
         observation: { $ref: "#/components/schemas/ScreenObservation" }
         last_page_failure: { $ref: "#/components/schemas/PageFailure" }
+        manifest_upgrade: { $ref: "#/components/schemas/ScreenManifestUpgrade" }
         comments: { type: object, additionalProperties: true, description: "Opaque agent JSON object, compact UTF-8 ≤ 1024 bytes. Absent when unset. ScreenRig never reads or uses it. ScreenPatch cannot write it. Not on the runtime manifest and never authorization." }
         ads_unsupported:
           type: object
@@ -7334,6 +7402,7 @@ components:
           description: Present only while state is archived and archive_reason is present. Instant the screen was archived. Read-only.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time, description: "Server-maintained instant of the screen's most recent authenticated Player contact (session authentication, session mint, release-grant use, or device package fetch). Absent until first contact. Read-only; never authorization." }
     HostContext:
       type: object
       additionalProperties: false
@@ -7623,6 +7692,55 @@ components:
         firmware: { type: string, minLength: 1, maxLength: 80 }
         manufacturer: { type: string, minLength: 1, maxLength: 80 }
     ScreenList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Screen" } } } }
+    ScreenManifestUpgrade:
+      type: object
+      additionalProperties: false
+      required: [desired_revision, active_revision, desired_playlist, active_playlist, state, code, attempt, retry_at, missing_page_count, state_since, reported_at]
+      description: >-
+        Always-present computed manifest-upgrade state for this screen, derived
+        at read time from the screen's desired manifest revision, its last
+        server-acknowledged active manifest revision (manifest.activated), and
+        the latest accepted manifest.upgrade report slot. Read-only project
+        state: no body can write it, and no report ever promotes a grant.
+        active_revision is the last acknowledged activation, not proof that
+        every simultaneous session already shows it. Being offline never
+        produces failure, and an overdue retry_at on a retrying state is client
+        presentation, never a server judgment. desired_revision null is none.
+        state pending names a desired revision with no matching report;
+        activating names a target already on glass whose acknowledgement is
+        still pending; a report slot whose revision stopped matching
+        desired_revision is ignored until a new report matches, so a new
+        desired manifest derives pending without clearing anything. The nested
+        playlist objects are hydrated from the exact matching durable grants.
+      properties:
+        desired_revision: { oneOf: [{ type: string, pattern: "^man_" }, { type: "null" }] }
+        active_revision: { oneOf: [{ type: string, pattern: "^man_" }, { type: "null" }] }
+        desired_playlist: { oneOf: [{ $ref: "#/components/schemas/ManifestUpgradePlaylist" }, { type: "null" }] }
+        active_playlist: { oneOf: [{ $ref: "#/components/schemas/ManifestUpgradePlaylist" }, { type: "null" }] }
+        state: { type: string, enum: [none, pending, downloading, preparing, activating, retrying, failed, blocked, partial, current] }
+        code: { oneOf: [{ type: string, pattern: "^[a-z0-9_]{1,40}$" }, { type: "null" }] }
+        attempt: { oneOf: [{ type: integer, minimum: 1, maximum: 1000 }, { type: "null" }] }
+        retry_at: { oneOf: [{ type: string, format: date-time }, { type: "null" }] }
+        missing_page_count: { oneOf: [{ type: integer, minimum: 0, maximum: 10000 }, { type: "null" }] }
+        state_since: { oneOf: [{ type: string, format: date-time }, { type: "null" }] }
+        reported_at: { oneOf: [{ type: string, format: date-time }, { type: "null" }] }
+    ManifestUpgradePlaylist:
+      type: object
+      additionalProperties: false
+      required: [id, name, revision]
+      description: >-
+        The playlist identity behind a manifest revision, read from the exact
+        matching durable grant: the desired grant for desired_playlist and the
+        acknowledged (active) grant for active_playlist, never the screen's
+        current assignment. id plus revision are the playlist version an
+        operator reads as Target v42 / Playing v41; name is the playlist's
+        display name, null when the playlist no longer exists or cannot be
+        resolved. A missing historical grant is null, never a fabricated
+        revision.
+      properties:
+        id: { type: string, minLength: 1 }
+        name: { oneOf: [{ type: string, minLength: 1 }, { type: "null" }] }
+        revision: { type: integer, minimum: 1 }
     PageFailure:
       type: object
       additionalProperties: false
@@ -8116,7 +8234,7 @@ components:
     MediaTagPatch: { type: object, additionalProperties: false, required: [tag], properties: { tag: { oneOf: [{ type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, { type: "null" }], description: "Replacement tag or null to clear it." } } }
     MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], description: "Declares only what the server can re-verify against the stored object byte for byte. Codec identity is not declared here: the server derives it from the container during asynchronous verification, so a client cannot assert a codec that drives player behaviour.", properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
     MediaUploadSession: { type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: { id: { type: string }, operation: { $ref: "#/components/schemas/Operation" }, upload_url: { type: string, format: uri }, method: { type: string, enum: [PUT] }, headers: { type: object, additionalProperties: { type: string }, description: Exact signed request headers; clients must send every field verbatim. }, expires_at: { type: string, format: date-time } } }
-    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Caller's original file name as declared at upload. Absent when the upload declared none and for generated stills. This is the human handle for filename-to-id lookups." }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable intrinsic width in pixels. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 14400000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Caller's original file name as declared at upload. Absent when the upload declared none and for generated stills. This is the human handle for filename-to-id lookups." }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable intrinsic width in pixels. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 14400000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
     MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Media" } } } }
     FeedbackWrite:
       type: object
@@ -8831,15 +8949,21 @@ components:
         - { $ref: "#/components/schemas/ManifestActivatedReport" }
         - { $ref: "#/components/schemas/PlaybackMediaStartedReport" }
         - { $ref: "#/components/schemas/PlaybackVideoStartedReport" }
+        - { $ref: "#/components/schemas/PlaybackApplicationStartedReport" }
         - { $ref: "#/components/schemas/PlaybackPageFailedReport" }
         - { $ref: "#/components/schemas/ApplicationEventReport" }
+        - { $ref: "#/components/schemas/ManifestUpgradeReport" }
         - { $ref: "#/components/schemas/RuntimeConditionReport" }
     ManifestActivatedReport: { type: object, additionalProperties: true, required: [severity, code, context], properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [manifest.activated] }, context: { $ref: "#/components/schemas/ManifestActivatedContext" } } }
     ManifestActivatedContext: { type: object, additionalProperties: true, required: [manifest_revision], properties: { manifest_revision: { type: string, pattern: "^man_" } } }
+    ManifestUpgradeReport: { type: object, additionalProperties: true, required: [severity, code, context], description: "One latest-wins manifest-upgrade lifecycle snapshot for the session screen. The server stores one slot per screen and derives the project read model Screen.manifest_upgrade from it; a stale, superseded, or post-activation pre-activation report is accepted with no change (202), never refused as a conflict, and no report ever promotes a grant. severity is envelope-only: the derived project event severity comes from state.", properties: { severity: { type: string, enum: [info, warning, error] }, code: { type: string, enum: [manifest.upgrade] }, context: { $ref: "#/components/schemas/ManifestUpgradeContext" } } }
+    ManifestUpgradeContext: { type: object, additionalProperties: true, required: [manifest_revision, state], properties: { manifest_revision: { type: string, pattern: "^man_" }, state: { type: string, enum: [downloading, preparing, activating, retrying, failed, blocked, partial, current] }, code: { type: string, pattern: "^[a-z0-9_]{1,40}$", description: "Safe static code. Required for retrying, failed, blocked and partial; absent for downloading, preparing and activating; an optional warning such as persist_failed on current. Unknown syntax-valid codes are accepted and shown generically; raw exception strings, URLs, and private object keys are never sent." }, attempt: { type: integer, minimum: 1, maximum: 1000, description: "Optional process-local display counter, increased on actual retry preparation. The player clamps what it displays locally; the server refuses out-of-range values." }, retry_in_ms: { type: integer, minimum: 1000, maximum: 86400000, description: "Required only for retrying and forbidden otherwise: the actually scheduled candidate retry. Failed means no scheduled retry." }, missing_page_count: { type: integer, minimum: 0, maximum: 10000, description: "Only for partial: the count of excluded whole pages when measurable. Zero is valid; a partial can lose primitives or audio without losing a whole page." } } }
     PlaybackMediaStartedReport: { type: object, additionalProperties: true, required: [severity, code, context], description: "One visible start of an image or video primitive on a page. Players send this once per page appearance of the media, for images exactly as for videos; loops inside one appearance are not restarts. The media must be on the session screen's grant at the reported manifest revision, and context.primitive must match the ready media's primitive or the report is rejected. Upserts the daily PlaybackAggregate for the screen, media, and UTC day.", properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [playback.media_started] }, context: { $ref: "#/components/schemas/PlaybackMediaStartedContext" } } }
     PlaybackMediaStartedContext: { type: object, additionalProperties: true, required: [media_id, manifest_revision, page_id, primitive], properties: { media_id: { type: string, pattern: "^med_" }, manifest_revision: { type: string, pattern: "^man_" }, page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [image, video], description: The primitive kind of the media that started. Must match the ready media. }, primitive_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$", description: "Optional. The page primitive that started, stored on the play record. A malformed value is ignored, not refused." }, started_at: { type: string, format: date-time, description: "Optional. Player-clock instant the media became visible, stored on the play record clamped to [received_at - 24h, received_at + 5m]. A malformed value is ignored, not refused." }, play_id: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$", description: "Optional idempotency key for this start (a UUID or ULID). A repeated (screen, play_id) is accepted with 202 and stores and counts nothing, so a retried report never double-counts. Reports without it are never deduplicated. A malformed value is ignored, not refused." } } }
     PlaybackVideoStartedReport: { type: object, additionalProperties: true, required: [severity, code, context], description: "Report one visible video start. This uses the same daily aggregation as playback.media_started with primitive video. Send one report per start; sending both event types counts the start twice. Use playback.media_started when reporting both images and videos.", properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [playback.video_started] }, context: { $ref: "#/components/schemas/PlaybackVideoStartedContext" } } }
     PlaybackVideoStartedContext: { type: object, additionalProperties: true, required: [media_id, manifest_revision, page_id], properties: { media_id: { type: string, pattern: "^med_" }, manifest_revision: { type: string, pattern: "^man_" }, page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" } } }
+    PlaybackApplicationStartedReport: { type: object, additionalProperties: true, required: [severity, code, context], description: "One visible start of an application primitive on a page: the application became visible on glass, reported once per page appearance by the Player controller — the application content never reports its own visibility, and a package download is never a start. The reported page, primitive, and release must be the exact application primitive of the session screen's current grant at the reported manifest revision, and the release must still be a ready release of the calling project, or the report is rejected. Stores one per-play record (GET /api/v1/playback/plays) carrying the release identity and advances the release's last_used_at in the same transaction. There is no daily aggregate row for application starts; the play records are the evidence.", properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [playback.application_started] }, context: { $ref: "#/components/schemas/PlaybackApplicationStartedContext" } } }
+    PlaybackApplicationStartedContext: { type: object, additionalProperties: true, required: [manifest_revision, page_id, primitive_id, release_id], properties: { manifest_revision: { type: string, pattern: "^man_" }, page_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, release_id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?rel_" }, play_id: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$", description: "Optional. The Player's idempotency key for this start; it rides retries unchanged so the start is stored once. A malformed value is ignored, not refused." }, started_at: { type: string, format: date-time, description: "Optional. Player-clock instant the application became visible, clamped to the server receipt window on storage. A malformed value is ignored, not refused." } } }
     PlaybackPageFailedReport:
       type: object
       additionalProperties: true
@@ -8862,7 +8986,7 @@ components:
         code: { type: string, pattern: "^[a-z0-9._-]{1,80}$" }
     ApplicationEventReport: { type: object, additionalProperties: true, required: [severity, code, context], properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [application.event] }, context: { $ref: "#/components/schemas/ApplicationEventContext" } } }
     ApplicationEventContext: { type: object, additionalProperties: true, required: [primitive_id, code], properties: { primitive_id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, code: { type: string, pattern: "^[A-Za-z0-9._-]{1,64}$" } } }
-    RuntimeConditionReport: { type: object, additionalProperties: true, required: [severity, code, context], properties: { severity: { type: string, enum: [info, warning, error] }, code: { type: string, pattern: "^[a-z0-9._-]{1,80}$", not: { enum: [manifest.activated, playback.media_started, playback.video_started, playback.page_failed, application.event] } }, context: { type: object, additionalProperties: true } } }
+    RuntimeConditionReport: { type: object, additionalProperties: true, required: [severity, code, context], properties: { severity: { type: string, enum: [info, warning, error] }, code: { type: string, pattern: "^[a-z0-9._-]{1,80}$", not: { enum: [manifest.activated, playback.media_started, playback.video_started, playback.page_failed, playback.application_started, application.event] } }, context: { type: object, additionalProperties: true } } }
     ReleaseLaunch: { type: object, additionalProperties: false, required: [launch_url, expires_at], properties: { launch_url: { type: string }, expires_at: { type: string } } }
     DashboardDisplayName:
       type: string

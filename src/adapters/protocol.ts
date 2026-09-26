@@ -574,6 +574,43 @@ export interface ScreenRebootAccepted {
   expires_at: string;
 }
 
+/**
+ * Nested playlist identity for the manifest upgrade read model. `name` is
+ * resolved by playlist id; null when unknown. revision is >= 1 and is the
+ * user-facing version (Target v42 / Playing v41); the man_ revision strings
+ * stay machine identity and diagnostics.
+ */
+export interface ScreenManifestUpgradePlaylist {
+  id: string;
+  name: string | null;
+  revision: number;
+}
+
+/**
+ * The screen's manifest upgrade read model, computed by the server on every
+ * screen response. `desired_playlist` is the playlist identity and revision
+ * the screen is moving to; `active_playlist` is the LAST SERVER-ACKNOWLEDGED
+ * activation. The player's latest upgrade report drives
+ * `state` (none when the screen has no desired manifest, pending before any
+ * report); `code` is a safe static failure token, `retry_at` the actually
+ * scheduled retry for `retrying` (failed never schedules one), and
+ * `missing_page_count` counts whole excluded pages while `partial`. Offline is
+ * never inferred as failure. Read-only.
+ */
+export interface ScreenManifestUpgrade {
+  desired_revision: string | null;
+  active_revision: string | null;
+  desired_playlist: ScreenManifestUpgradePlaylist | null;
+  active_playlist: ScreenManifestUpgradePlaylist | null;
+  state: "none" | "pending" | "downloading" | "preparing" | "activating" | "retrying" | "failed" | "blocked" | "partial" | "current";
+  code: string | null;
+  attempt: number | null;
+  retry_at: string | null;
+  missing_page_count: number | null;
+  state_since: string | null;
+  reported_at: string | null;
+}
+
 export interface Screen {
   content_access_generation: number;
   created_at: string;
@@ -596,6 +633,13 @@ export interface Screen {
   last_page_failure?: PageFailure;
   manifest_revision: number;
   observation?: ScreenObservation;
+  /**
+   * Manifest upgrade read model. Always present on screen responses once the
+   * backend ships the feature; older backends omit it and readers render
+   * defensively. `desired_revision` is the manifest the screen is moving to
+   * and `active_revision` the last server-acknowledged activation. Read-only.
+   */
+  manifest_upgrade?: ScreenManifestUpgrade;
   /**
    * True while at least one paired runtime events stream is connected,
    * including a short reconnect window. Always present; false until first

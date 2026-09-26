@@ -231,9 +231,9 @@ export function effectivePlaylistText(effective: ScreenEffectivePlaylist | undef
   return `${effective.id} (default${until ? `, schedule changes it${until}` : ""})`;
 }
 
-export function playingLine(effective: ScreenEffectivePlaylist | undefined, takeover?: ScreenTakeover, timezone?: string): string[] {
+export function assignmentLine(effective: ScreenEffectivePlaylist | undefined, takeover?: ScreenTakeover, timezone?: string): string[] {
   const text = effectivePlaylistText(effective, takeover, timezone);
-  return text ? [`Playing: ${text}`] : [];
+  return text ? [`Assigned: ${text}`] : [];
 }
 
 export function takeoverLine(takeover: ScreenTakeover | undefined, timezone?: string): string[] {

@@ -332,12 +332,14 @@ and the write commands below return `effective_playlist`
 (`{id, source: takeover|schedule|default, entry_id?, until?}`), `takeover`,
 and `playlist_schedule`. `until` is the next moment the choice is known to
 change. `screen show --human` prints it in the screen's timezone, as in
-`Playing: pl_LUNCH (schedule entry lunch until 2026-08-14 15:00 America/Los_Angeles)`
+`Assigned: pl_LUNCH (schedule entry lunch until 2026-08-14 15:00 America/Los_Angeles)`
 (UTC, labelled, when the screen has no zone). Schedule tables are labelled with
 the screen timezone, and JSON output keeps RFC 3339 instants.
-`screen list --human` adds a `PLAYING` column when any listed screen is on a
+`screen list --human` adds an `ASSIGNED` column when any listed screen is on a
 takeover or schedule entry. Switches land within about a minute of a boundary;
 Players need no update.
+Assignment describes the server's effective choice; the separate upgrade
+`Playing` version describes the last acknowledged activation, which can lag it.
 
 ```sh
 screenrig screen schedule show scr_CAFE
@@ -658,6 +660,60 @@ crashes in 24 hours), or `stale`. Transitions arrive as `screen.health_changed`
 events, which `events list` and `events follow` print with a compact
 `changes=` value such as
 `display_disconnected,temperature_high temperature_c=82`.
+
+## Manifest upgrades
+
+When a screen's playlist materializes a new manifest revision, the server
+tracks the upgrade from the Player's own lifecycle reports and exposes it as
+`data.manifest_upgrade` on every screen response (`screen show` and `screen
+list`; the JSON body keeps the full backend object unchanged). The
+user-facing presentation is playlist versions: `Target v42` is the playlist
+revision the screen is moving to and `Playing v41` is the revision of the
+last server-acknowledged activation. Versions are playlist revisions scoped
+by playlist identity — not per-screen serials — so when the two differ in
+playlist they are printed with their playlist names (the playlist id is the
+fallback for an unknown name), which keeps incomparable numbers readable.
+Acknowledged means the server confirmed that activation, not that every
+connected session already shows it; while the two differ the display may
+still be playing the acknowledged version. An unknowable version prints
+`Target: unknown version` and is never fabricated from the manifest hash;
+the full `man_` revision strings stay in the JSON body and appear once on a
+`diagnostics:` line in the human block as machine identity.
+
+`state` follows the Player's last report: `pending` (target set, no report
+yet), `downloading`, `preparing`, `activating`, `retrying` (an attempt failed
+and a real retry is scheduled at `retry_at`), `failed` (no retry is
+scheduled), `blocked` (storage cannot stage the candidate; the acknowledged
+revision keeps playing), `partial` (the target is on the display but not all
+authored content is eligible — `missing_page_count` counts whole excluded
+pages when measurable), and `current` (target acknowledged and complete).
+`code` is a safe static reason such as `download_failed`, `hash_mismatch`,
+`storage_full`, or `manifest_invalid`; unknown but syntax-valid codes are
+printed as they are. `attempt` is the player's display-only retry count, and
+`state_since`/`reported_at` are server timestamps. A retry time in the past
+is labeled `(overdue)`; lateness is not failure, and a screen that is simply
+offline is never reported as failed.
+
+With `--human`, `screen show` prints this as a `Manifest upgrade` block —
+the Target/Playing version detail, the playlist name when one playlist is
+upgrading, the diagnostics hashes, state, reason, attempt, retry and report
+times, and missing pages — with a hint line for the mismatch, partial,
+failed, retrying, and blocked cases. `screen list` adds an `UPGRADE` column
+when any listed screen has a story: state, the Target/Playing versions
+(names when the playlists differ), the code, attempt, page count, and times.
+
+Progress arrives as `screen.manifest_upgrade` events on the existing project
+stream, alongside `screen.manifest_changed` and `screen.manifest_activated`;
+`events list` and `events follow` deliver and print them with no new protocol
+(details carry the `man_` manifest revision, `state`, and, when present,
+`code` and `attempt`; `failed` is error severity,
+`retrying`/`blocked`/`partial` are warnings — the stream keeps machine
+identity, the human screens carry the versions). For troubleshooting: a
+`failed` screen needs the cause fixed and then `screen reload <id>` or a
+reassignment; a `retrying` screen reports again after its retry time; a
+`partial` screen plays what fits and repairs the rest; a screen stuck
+`pending` or with an overdue retry is usually offline — check `screen show`
+online/health, not a failure timeout.
 
 ## Application command results
 

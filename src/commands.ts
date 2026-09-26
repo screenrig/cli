@@ -7,10 +7,11 @@ import { fleetHumanLines, fleetOutcome, rejectFleetRevision, screenActionResult,
 import { editablePlaylist, isAdSlotPage, playlistApiVersion, preparePlaylist, targetDimensions } from "./playlist-authoring.js";
 import { callVersionedPlaylist } from "./playlist-api.js";
 import { WriteRecovery } from "./write-recovery.js";
-import { instantInZone, normalizeInstant, playingLine, playlistInUseProblem, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "./screen-control.js";
+import { instantInZone, normalizeInstant, assignmentLine, playlistInUseProblem, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "./screen-control.js";
 import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLAYS_SETTLE_MS, unusedPath, PLAYS_ALL_MAX_PAGES, PLAYS_LIMIT_MAX, playbackExportBudget, playsCursor, playsLimit, playsRange, requireCsvResponse, writeCsvFile, writeCsvStdout } from "./playback-export.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, rebootProblem } from "./screen-display.js";
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
+import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "./screen-manifest-upgrade.js";
 import { openTempFile, removeOnSignal, shellQuote, tempPathFor } from "./temp-file.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
 import { createHash } from "node:crypto";
@@ -4053,7 +4054,7 @@ export const handleScreenList = commandHandler(async (args, runtime, resolved) =
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
-    human: ["Screens", ...screenTableLines(Array.isArray(items) ? items : []), JSON.stringify(response.body, null, 2)].join("\n"),
+    human: ["Screens", ...screenTableLines(Array.isArray(items) ? items : [], runtime.now()), JSON.stringify(response.body, null, 2)].join("\n"),
   };
 }, true);
 
@@ -4061,16 +4062,20 @@ export const handleScreenList = commandHandler(async (args, runtime, resolved) =
  * One row per screen. The platform column appears only when at least one
  * screen reports a host, and the reason column only when at least one
  * archived screen reports why it was archived, and the tags column only when
- * at least one screen carries a tag, so a fleet without any keeps the table it
- * had. The JSON body follows unchanged in both output modes.
+ * at least one screen carries a tag, and the upgrade column only when at
+ * least one screen has a manifest upgrade story, so a fleet without any
+ * keeps the table it had. The JSON body follows unchanged in both output modes.
  */
-function screenTableLines(items: Screen[]): string[] {
+function screenTableLines(items: Screen[], now: Date): string[] {
   if (!items.length) return [];
   const withPlatform = items.some((screen) => typeof screen?.host?.platform === "string");
   const withReason = items.some((screen) => archiveReason(screen) !== undefined);
   const withTags = items.some((screen) => screenTags(screen).length > 0);
   // Only when something overrides the assigned default, so plain fleets keep their table.
-  const withPlaying = items.some((screen) => screen?.effective_playlist && screen.effective_playlist.source !== "default");
+  const withAssignment = items.some((screen) => screen?.effective_playlist && screen.effective_playlist.source !== "default");
+  // Only when a listed screen has a manifest upgrade story: a target versus
+  // acknowledged mismatch, a failed/retrying/partial report, or an overdue retry.
+  const withUpgrade = anyManifestUpgrade(items, now);
   // Only when a listed screen needs attention: display disconnected, hot, crashing, or a stale report.
   const withHealth = items.some((screen) => screenHealthIssues(screen).length > 0);
   const rows = items.map((screen) => [
@@ -4078,12 +4083,13 @@ function screenTableLines(items: Screen[]): string[] {
     ...(withPlatform ? [screen?.host?.platform ?? ""] : []),
     ...(withReason ? [archiveReason(screen) ?? ""] : []),
     ...(withTags ? [screenTags(screen).join(",")] : []),
-    ...(withPlaying ? [effectivePlaylistText(screen?.effective_playlist, screen?.takeover, screen?.timezone) ?? ""] : []),
+    ...(withAssignment ? [effectivePlaylistText(screen?.effective_playlist, screen?.takeover, screen?.timezone) ?? ""] : []),
     ...(withHealth ? [screenHealthIssues(screen).join(", ") || (screen?.health ? "ok" : "")] : []),
+    ...(withUpgrade ? [manifestUpgradeCell(screen, now) ?? ""] : []),
     ...(screen?.recovery_pending?.expires_at ? [`recovery pending until ${screen.recovery_pending.expires_at}`] : []),
     ...(applicationsUnsupportedAt(screen) ? ["applications unsupported"] : []),
   ]);
-  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : []), ...(withReason ? ["REASON"] : []), ...(withTags ? ["TAGS"] : []), ...(withPlaying ? ["PLAYING"] : []), ...(withHealth ? ["HEALTH"] : [])];
+  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : []), ...(withReason ? ["REASON"] : []), ...(withTags ? ["TAGS"] : []), ...(withAssignment ? ["ASSIGNED"] : []), ...(withHealth ? ["HEALTH"] : []), ...(withUpgrade ? ["UPGRADE"] : [])];
   const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => (row[index] ?? "").length)));
   const render = (row: string[]) => row.map((cell, index) => index < widths.length ? cell.padEnd(widths[index]!) : cell).join("  ").trimEnd();
   return [render(header), ...rows.map(render)];
@@ -4364,7 +4370,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       "Screen",
       JSON.stringify(response.body, null, 2),
       ...(screenTags(screen).length ? [`Tags: ${screenTags(screen).join(", ")}`] : []),
-      ...playingLine(screen?.effective_playlist, screen?.takeover, screen?.timezone),
+      ...assignmentLine(screen?.effective_playlist, screen?.takeover, screen?.timezone),
       ...takeoverLine(screen?.takeover, screen?.timezone),
       ...(screen?.playlist_schedule?.entries?.length
         ? [`Playlist schedule: ${screen.playlist_schedule.entries.length} entr${screen.playlist_schedule.entries.length === 1 ? "y" : "ies"} (screen schedule show ${screen.id})`] : []),
@@ -4373,6 +4379,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...applicationsUnsupportedLines(screen),
       ...recoveryPendingLine(screen),
       ...storageLines(screen, runtime.now()),
+      ...manifestUpgradeLines(screen, runtime.now()),
       ...displayLines(screen?.display, screen?.timezone),
       ...healthLines(screen?.health),
     ].join("\n"),
@@ -6301,7 +6308,7 @@ async function screenControlCall(client: ApiClient, id: string, request: Paramet
 function screenControlHuman(title: string, screen: Screen | undefined): string {
   return [
     title,
-    ...playingLine(screen?.effective_playlist, screen?.takeover, screen?.timezone),
+    ...assignmentLine(screen?.effective_playlist, screen?.takeover, screen?.timezone),
     ...takeoverLine(screen?.takeover, screen?.timezone),
     ...(screen?.playlist_schedule ? scheduleTableLines(screen.playlist_schedule.entries, screen.timezone ?? null) : []),
     ...(screen?.revision !== undefined ? [`revision: ${screen.revision}`] : []),
@@ -6330,7 +6337,7 @@ export const handleScreenScheduleShow = commandHandler(async (args, runtime, res
     exitCode: ExitCode.Success,
     human: [
       `Playlist schedule for ${id}`,
-      ...playingLine(view?.effective_playlist, undefined, timezone ?? undefined),
+      ...assignmentLine(view?.effective_playlist, undefined, timezone ?? undefined),
       ...(view?.updated_at ? [`updated_at: ${view.updated_at}`] : []),
       ...scheduleTableLines(view?.entries, timezone === undefined ? "unknown" : timezone),
     ].join("\n"),
