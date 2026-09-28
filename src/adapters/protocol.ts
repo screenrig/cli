@@ -129,9 +129,13 @@ export interface CLIEnrollmentRequest {
   version?: string;
 }
 
+export const AGENT_CAPABILITIES = ["screens", "content", "playlists", "advertising", "reports", "project"] as const;
+export type AgentCapability = typeof AGENT_CAPABILITIES[number];
+
 export interface Agent {
   agent_type: string;
   authenticated_requests: number;
+  capabilities: AgentCapability[];
   connected_at?: string;
   created_at: string;
   id: string;
@@ -158,6 +162,7 @@ export interface X25519PublicJWK {
 
 export interface AgentConnectionRequest {
   agent_type?: string;
+  capabilities?: AgentCapability[];
   name?: string;
   platform?: string;
   recipient_public_key: X25519PublicJWK;
@@ -173,6 +178,7 @@ export interface AgentConnectionStart {
 
 export interface AgentConnection {
   agent_type: string;
+  capabilities: AgentCapability[];
   connection_id: string;
   created_at: string;
   expires_at: string;

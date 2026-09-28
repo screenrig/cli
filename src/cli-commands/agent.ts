@@ -2,6 +2,8 @@ import type { CommandActionBinder } from "./types.js";
 import { handleAgentEnroll, handleAgentConnect, handleAgentStatus, handleAgentDisconnect } from "../commands.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes } from "./notes.js";
+import { AGENT_CAPABILITIES } from "../adapters/protocol.js";
+import { usageError } from "../problems.js";
 
 export function registerAgentCommands(root: Command, bind: CommandActionBinder): void {
   const agent = root.command("agent").description("Enroll, connect, and manage this agent");
@@ -16,6 +18,16 @@ export function registerAgentCommands(root: Command, bind: CommandActionBinder):
 
   addCommandNotes(agent.command("connect").description("Reconnect this installation to an existing project")
     .option("--name <NAME>", "Set this agent installation name")
+    .addOption(new Option("--capability <NAME>", "Request a capability (repeatable; default: all six)")
+      .choices([...AGENT_CAPABILITIES])
+      .argParser((value: string, previous?: string) => {
+        if (!AGENT_CAPABILITIES.some((name) => name === value)) {
+          throw usageError(`Unknown capability ${value}. Choose from: ${AGENT_CAPABILITIES.join(", ")}.`);
+        }
+        const requested = previous ? previous.split(",") : [];
+        if (requested.includes(value)) throw usageError(`Capability ${value} was supplied more than once.`);
+        return [...requested, value].join(",");
+      }))
     .option("--print-url", "Return the browser handoff URL")
     .option("--wait", "Wait for dashboard approval (30000 ms default; bounded by --timeout)")
     .option("--no-wait", "Read a status snapshot for at most 1000 ms (default)")

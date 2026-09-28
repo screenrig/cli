@@ -759,6 +759,39 @@ Without `--wait`, `--timeout` can shorten but never extend the one-second
 snapshot budget. Approval requests expire after 24 hours. Terminal denial,
 cancellation, and expiry remain errors.
 
+### Agent credential capabilities
+
+`agent enroll` grants its first agent all six capabilities. For an existing
+project, request only what this installation needs:
+
+```sh
+screenrig agent connect --capability advertising --print-url
+screenrig agent connect --capability content --capability playlists --capability screens --print-url
+screenrig agent status
+```
+
+`--capability` is repeatable. Valid names, in canonical order, are `screens`,
+`content`, `playlists`, `advertising`, `reports`, and `project`. Omit the flag to
+request all six; unknown, empty, or duplicate names fail locally. The dashboard
+approver can grant a non-empty subset of the requested set. Resume without
+changing capabilities; `agent status` and enrollment/connection results show
+the granted `agent.capabilities`.
+
+The area capabilities permit their area's reads and writes. `content` covers
+media, applications and operation cancellation; `project` covers project
+changes, browser-link claims, webhooks, invitations and billing. `reports`
+permits area reads and is required for events and playback reports. Basic
+project, current-agent and operation-status reads remain available to any
+active credential. These permissions are distinct from project feature
+entitlements (`project capabilities`); both must allow an operation.
+
+Capabilities cannot be changed on a credential. A capability refusal is HTTP
+403 `forbidden`, with `This agent credential lacks the <name> capability.`
+Follow the CLI's `error.next` guidance: connect a new agent with the needed
+capabilities using a separate private `--config` path, obtain dashboard
+approval, verify it with `agent status`, then disconnect the old agent. Do not
+retry the denied write unchanged or broaden permissions without authorization.
+
 ### Recovering writes
 
 Ordinary application uploads/updates, playlist creates/updates/deletes, screen

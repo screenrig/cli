@@ -16,6 +16,7 @@ import { CliError, makeProblem, networkError } from "./problems.js";
 import type { ConfigFs } from "./config.js";
 import { isWorldOrGroupReadable, writeConfigAtomic, readConfigFile } from "./config.js";
 import type { Operation } from "./adapters/protocol.js";
+import { AGENT_CAPABILITIES } from "./adapters/protocol.js";
 import { SDK_PROTOCOL_VERSION } from "./adapters/sdk-injection.js";
 import { testTemp } from "./test-temp.js";
 import { resetFfmpegToolchainCache } from "./media/ffmpeg.js";
@@ -26,6 +27,7 @@ const TEST_AGENT = {
   id: "agt_AAAAAAAAAAAAAAAAAAAAAAAA",
   name: "ScreenRig CLI",
   agent_type: "cli",
+  capabilities: [...AGENT_CAPABILITIES],
   state: "active",
   authenticated_requests: 1,
   metered_credits: 0,
@@ -369,6 +371,7 @@ test("agent enroll --force discards an unwanted pending connection before enroll
     project_id: "prj_PENDINGAAAAAAAAAAAAAAAA",
     agent_id: "agt_PENDINGAAAAAAAAAAAAAAAA",
     agent_connection: {
+      capabilities: [...AGENT_CAPABILITIES],
       private_jwk: { kty: "OKP", crv: "X25519", x: "pending-public", d: "pending-private" },
       connection_id: "acn_UNWANTED",
       connection_token: "private-connection-token",
@@ -437,6 +440,7 @@ test("revoked agent history without a pending reconnect directs authenticated co
       id: TEST_AGENT.id,
       name: TEST_AGENT.name,
       agent_type: TEST_AGENT.agent_type,
+      capabilities: [...AGENT_CAPABILITIES],
       state: "revoked",
       revoked_at: "2026-09-21T00:00:00.000Z",
     },
@@ -516,6 +520,7 @@ function agentConnectionEnvelope(recipient: { kty: "OKP"; crv: "X25519"; x: stri
     id: agentId,
     name: "Office Codex",
     agent_type: "cli",
+    capabilities: [...AGENT_CAPABILITIES],
     platform: `${process.platform}/${process.arch}`,
     version: "0.1.0",
     state: "pending" as const,
@@ -540,6 +545,76 @@ function agentConnectionEnvelope(recipient: { kty: "OKP"; crv: "X25519"; x: stri
     },
   };
 }
+
+test("agent connect validates capability flags before network access", async () => {
+  for (const flags of [["--capability", "unknown"], ["--capability", ""], ["--capability"], ["--capability", "screens", "--capability", "screens"]]) {
+    const transport = new FakeTransport();
+    const result = await withRuntime(["agent", "connect", ...flags], transport);
+    assert.equal(result.code, ExitCode.Usage, result.stdout);
+    assert.equal(transport.calls.length, 0);
+    await rm(result.configDir, { recursive: true, force: true });
+  }
+});
+
+test("agent connect requests canonical capabilities and preserves them across resume", async () => {
+  for (const flags of [[], ["--capability", "advertising", "--capability", "content"]]) {
+    const expected = flags.length ? ["content", "advertising"] : [...AGENT_CAPABILITIES];
+    const transport = new FakeTransport().on("POST", "/api/v1/agent-connections", () => ({
+      status: 201,
+      headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
+      body: {
+        connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA",
+        connection_token: `sac_${"C".repeat(43)}`,
+        approval_url: "https://dashboard.screenrig.ai/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA",
+        expires_at: "2026-08-15T17:00:00.000Z",
+      },
+    }));
+    const snapshot = `event: agent.connection\ndata: ${JSON.stringify({
+      connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Buyer", agent_type: "cli",
+      capabilities: expected, status: "pending", expires_at: "2026-08-15T17:00:00.000Z", created_at: "2026-08-14T17:00:00.000Z",
+    })}\n\n`;
+    transport.queueStream({ chunks: [snapshot] });
+    const result = await withRuntime(["agent", "connect", "--print-url", ...flags], transport);
+    assert.equal(result.code, ExitCode.Success, result.stdout);
+    const body = transport.calls[0]?.body;
+    assert.ok(body && typeof body === "object" && "capabilities" in body);
+    assert.deepEqual(body.capabilities, expected);
+    const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir, env: { XDG_CONFIG_HOME: result.configDir } };
+    const stored = await readConfigFile(path.join(result.configDir, "screenrig", "config.json"), fsLike);
+    assert.deepEqual(stored?.agent_connection?.capabilities, expected);
+    const changed = await withRuntime(["agent", "connect", "--capability", "reports"], transport, { fs: fsLike });
+    assert.equal(changed.code, ExitCode.Usage, changed.stdout);
+    transport.queueStream({ chunks: [snapshot] });
+    const resumed = await withRuntime(["agent", "connect", "--print-url"], transport, { fs: fsLike });
+    assert.equal(resumed.code, ExitCode.Success, resumed.stdout);
+    assert.equal(transport.calls.filter((call) => call.method === "POST").length, 1);
+    await rm(result.configDir, { recursive: true, force: true });
+  }
+});
+
+test("agent status reports granted capabilities and capability denials give replacement guidance", async () => {
+  const transport = new FakeTransport().on("GET", "/api/v1/agents/self", () => ({
+    status: 200, headers: { "cache-control": "private, no-store" },
+    body: { agent: { ...TEST_AGENT, capabilities: ["advertising"] }, connection_ready: true },
+  }));
+  const status = await withAuthenticatedRuntime(["agent", "status"], transport);
+  assert.equal(status.code, ExitCode.Success, status.stdout);
+  assert.deepEqual(JSON.parse(status.stdout).data.agent.capabilities, ["advertising"]);
+  const human = await withAuthenticatedRuntime(["agent", "status", "--human"], transport);
+  assert.match(human.stdout, /capabilities: advertising/);
+  transport.on("GET", "/api/v1/screens", () => ({
+    status: 403, headers: { "content-type": "application/problem+json" },
+    body: { code: "forbidden", title: "Forbidden", status: 403, detail: "This agent credential lacks the screens capability." },
+  }));
+  const denied = await withAuthenticatedRuntime(["screen", "list"], transport);
+  assert.equal(denied.code, ExitCode.Auth, denied.stdout);
+  const problem = JSON.parse(denied.stdout).error;
+  assert.equal(problem.code, "forbidden");
+  assert.equal(problem.detail, "This agent credential lacks the screens capability.");
+  assert.match(problem.next.command, /agent connect --capability screens/);
+  assert.match(problem.next.reason, /Connect a new agent/);
+  for (const result of [status, human, denied]) await rm(result.configDir, { recursive: true, force: true });
+});
 
 test("agent connect rejects waits beyond one day before network access", async () => {
   const result = await withRuntime(["--json", "agent", "connect", "--timeout", "86400001"], new FakeTransport());
@@ -603,6 +678,7 @@ test("agent connect resumes after its cached approval expiry when approved while
     connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA",
     name: "Office Codex",
     agent_type: "cli",
+    capabilities: [...AGENT_CAPABILITIES],
     status: "approved",
     expires_at: "2026-08-15T17:00:00.000Z",
     created_at: "2026-08-14T17:00:00.000Z",
@@ -672,6 +748,7 @@ test("agent connect defaults to a snapshot, returns a pending handoff and resume
     connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA",
     name: "Office Codex",
     agent_type: "cli",
+    capabilities: [...AGENT_CAPABILITIES],
     status: "approved",
     expires_at: "2026-08-15T17:00:00.000Z",
     created_at: "2026-08-14T17:00:00.000Z",
@@ -691,6 +768,7 @@ test("agent connect defaults to a snapshot, returns a pending handoff and resume
   }));
   transport.queueStream({ chunks: [`event: agent.connection\ndata: ${JSON.stringify({
     connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Office Codex", agent_type: "cli",
+    capabilities: [...AGENT_CAPABILITIES],
     status: "pending", expires_at: "2026-08-15T17:00:00.000Z", created_at: "2026-08-14T17:00:00.000Z",
   })}\n\n`] });
   const interrupted = await withRuntime(["agent", "connect", "--print-url"], transport, { openUrl: async () => { throw new Error("print-url must not open browser"); } });
@@ -872,6 +950,7 @@ test("agent connect resumes activation after the pending bearer was durably stor
     token,
     agent_id: active.id,
     agent_connection: {
+      capabilities: [...AGENT_CAPABILITIES],
       private_jwk: generateAgentConnectionKey(),
       connection_id: "acn_RESUMEAAAAAAAAAAAAAAAA",
       connection_token: `sac_${"S".repeat(43)}`,
@@ -913,6 +992,7 @@ for (const waitFlags of [[], ["--no-wait"]]) test(`agent connect ${waitFlags.joi
     connection_id: connectionId,
     name: "Cancelled agent",
     agent_type: "cli",
+    capabilities: [...AGENT_CAPABILITIES],
     status: "cancelled",
     expires_at: "2026-08-14T17:10:00.000Z",
     created_at: "2026-08-14T17:00:00.000Z",
@@ -947,6 +1027,7 @@ test("agent connect clears private state when credential collection reports canc
     connection_id: connectionId,
     name: "Cancelled after approval",
     agent_type: "cli",
+    capabilities: [...AGENT_CAPABILITIES],
     status: "approved",
     expires_at: "2026-08-14T17:10:00.000Z",
     created_at: "2026-08-14T17:00:00.000Z",
@@ -1010,6 +1091,7 @@ async function writePendingActivationConfig(
     token,
     agent_id: active.id,
     agent_connection: {
+      capabilities: [...AGENT_CAPABILITIES],
       private_jwk: generateAgentConnectionKey(),
       connection_id: "acn_HARDENAAAAAAAAAAAAAAAA",
       connection_token: `sac_${"H".repeat(43)}`,
@@ -2806,6 +2888,7 @@ test("doctor points a pending agent connection at agent connect instead of enrol
     {
       api_url: "https://api.screenrig.ai",
       agent_connection: {
+        capabilities: [...AGENT_CAPABILITIES],
         private_jwk: { kty: "OKP", crv: "X25519", x: "x", d: "d" },
         connection_id: "acn_PENDING",
         expires_at: "2099-01-01T00:00:00Z",
@@ -2837,6 +2920,7 @@ test("doctor treats revoked agent history without a pending reconnect as first-r
       id: TEST_AGENT.id,
       name: TEST_AGENT.name,
       agent_type: TEST_AGENT.agent_type,
+      capabilities: [...AGENT_CAPABILITIES],
       state: "revoked",
     },
   }, fsLike);

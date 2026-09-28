@@ -1474,23 +1474,19 @@ paths:
     delete:
       operationId: deleteScreen
       description: >-
-        Soft-deletes the screen. The project bearer is authoritative; an
-        unknown or other-project id is not_found. If-Match guards the
-        screen revision (a stale value is revision_conflict) and an
-        Idempotency-Key replays the same result. The screen leaves the
-        project immediately — reads answer not_found, no manifest or
-        grant is served, sessions die with the content-access
-        generation — and its stored row, including the device binding,
-        is retained for the deletion retention window (90 days) and then
-        reaped, so a re-pair of the same device cannot resurrect a
-        removed screen's authority. This is the operator's break-glass
-        path for a bound device (docs/player-compatibility.md §5.7);
-        archive is the routine de-associate and never deletes.
+        Soft-deletes an eligible screen and immediately revokes its cookie
+        credentials and runtime grants. Ordinary reads then return not_found;
+        the tombstoned row is retained for at least 90 days before cleanup.
+        If-Match guards the revision and Idempotency-Key replays the result.
+        A native identity-bound screen returns screen_archive_required: use
+        archive to retain that binding. This route does not grant administrative
+        break-glass permission to release native enrollment.
       security: [{ projectBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
-        "204": { description: Screen deleted; its row, device binding included, is retained for the deletion window and then reaped. }
+        "204": { description: "Screen soft-deleted; its tombstone is retained for at least 90 days." }
         "404": { $ref: "#/components/responses/Problem" }
+        "409": { description: "screen_archive_required for a native identity-bound screen.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: revision_conflict — If-Match is stale; Problem.current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/public-id/rotate:
@@ -3130,7 +3126,7 @@ paths:
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeReport" } } } }
       responses:
-        "202": { description: Accepted. manifest.activated is committed before this response and is idempotent for the current active revision. playback.media_started upserts the daily aggregate for an image or video start and stores one per-play record (GET /api/v1/playback/plays) in the same transaction before this response; playback.video_started reports a video start using the same aggregation and play record. playback.application_started verifies the reported page, primitive, and release as the exact application primitive of the session screen's current grant at the reported manifest revision, stores one per-play record (GET /api/v1/playback/plays) for the application start, and advances the release's last_used_at in the same transaction. playback.page_failed replaces the screen's latest page-failure slot and appends a project-only durable event in the same transaction without changing screen or manifest revision. manifest.upgrade stores the screen's one latest-wins manifest-upgrade slot behind its revision fences and appends a project-only durable event in the same transaction only when the derived state changes; a stale, superseded, or post-activation pre-activation report is accepted with no change, and no report ever promotes a grant. application.event appends a durable project event before this response., headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
+        "202": { description: "Accepted. manifest.activated is committed before this response and is idempotent for the current active revision. playback.media_started upserts the daily aggregate for an image or video start and stores one per-play record (GET /api/v1/playback/plays) in the same transaction before this response; playback.video_started reports a video start using the same aggregation and play record. playback.application_started verifies the reported page, primitive, and release as the exact application primitive of the session screen's current grant at the reported manifest revision, stores one per-play record (GET /api/v1/playback/plays) for the application start, and advances the release's last_used_at in the same transaction. playback.page_failed replaces the screen's latest page-failure slot and appends a project-only durable event in the same transaction without changing screen or manifest revision. manifest.upgrade stores the screen's one latest-wins manifest-upgrade slot behind its revision fences and appends a project-only durable event in the same transaction only when the derived state changes; a stale, superseded, or post-activation pre-activation report is accepted with no change, and no report ever promotes a grant. application.event appends a durable project event before this response.", headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/screenshot:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -4463,17 +4459,18 @@ paths:
       operationId: deleteDashboardScreen
       description: >-
         The dashboard twin of DELETE /api/v1/screens/{id} for the
-        session's project: the same soft deletion with the same retained
-        device binding and deletion window, the same If-Match and
-        idempotency fences, and not_found for any other project's
-        screen. The durable project event carries the acting dashboard
-        user as actor. Archive stays the routine de-associate.
+        session's project. The same revision and idempotency fences apply.
+        Cookie credentials and grants are revoked immediately; the
+        tombstoned row remains for at least 90 days. Native identity-bound
+        screens return screen_archive_required and must be archived instead.
+        An unknown or other-project screen is not_found.
       security: [{ dashboardSession: [] }]
-      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
-        "204": { description: Screen deleted; its row, device binding included, is retained for the deletion window and then reaped., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
+        "204": { description: "Screen soft-deleted; its tombstone is retained for at least 90 days.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/screens/{id}/screenshot:
@@ -5122,7 +5119,7 @@ components:
       description: Temporary `ScreenRig-Agent-Connect <credential>` authority returned only by connection creation. It is never accepted as a project bearer, dashboard cookie, URL parameter, or runtime credential.
     pendingAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Pending agent bearer accepted only for its own activation, plus the same active bearer for exact acknowledgement replay." }
     revocableAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active agent bearer, or the same cryptographically verified revoked bearer for an idempotent self-disconnect replay." }
-    projectBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: Active agent bearer for its project. Use revocableAgentBearer for self-disconnect retries after revocation. }
+    projectBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active agent bearer for its project. Use revocableAgentBearer for self-disconnect retries after revocation. Every bearer route requires its area AgentCapability; GET reads in an area also accept reports, and the project reads, agents/self, operations reads, and feedback routes accept any active credential. A credential lacking the route capability is refused 403 forbidden with detail 'This agent credential lacks the <name> capability.' after the command is recorded and before any credit is metered, so refusals are attributed and never billed." }
     nativePairingAuthorization:
       type: http
       scheme: ScreenRig-Pairing
@@ -5446,6 +5443,17 @@ components:
           minLength: 1
         proof:
           $ref: '#/components/schemas/DashboardProof'
+        capabilities:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/AgentCapability'
+          description: >-
+            Optional on agent connection approval only. Omitted approves the
+            full requested set; a non-empty subset of the connection's
+            capabilities narrows the granted credential; anything else is
+            invalid_request.
     InvitationKind:
       type: string
       enum:
@@ -6217,10 +6225,18 @@ components:
           $ref: '#/components/schemas/EnrollmentInvitation'
 
     AgentInput: { type: object, additionalProperties: false, properties: { name: { type: string, minLength: 1, maxLength: 80, default: "ScreenRig CLI" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
+    AgentCapability:
+      type: string
+      enum: [screens, content, playlists, advertising, reports, project]
+      description: >-
+        One agent-credential capability area. Capabilities are fixed when the
+        credential is minted; to change them, connect a new agent and disconnect
+        the old one. Canonical order is this enum order; capability lists never
+        contain duplicates.
     Agent:
       type: object
       additionalProperties: false
-      required: [id, name, agent_type, state, authenticated_requests, metered_credits, created_at]
+      required: [id, name, agent_type, capabilities, state, authenticated_requests, metered_credits, created_at]
       properties:
         id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?agt_" }
         name: { type: string, minLength: 1, maxLength: 80 }
@@ -6228,6 +6244,7 @@ components:
         platform: { type: string, maxLength: 80 }
         version: { type: string, maxLength: 40 }
         state: { type: string, enum: [pending, active, revoked, cancelled, expired] }
+        capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, minItems: 1, uniqueItems: true, description: "Capability areas this credential may call. Reads in an area also accept the reports capability. Fixed at mint." }
         public_key_kid: { type: string, description: RFC 7638-style thumbprint of the X25519 recipient public JWK. Public key bytes are not returned. }
         authenticated_requests: { type: integer, minimum: 0, description: "Best-effort diagnostic count of successful bearer verifications directly attributable to this agent installation. Authentication success is not coupled to this counter write, so a temporarily unavailable metadata update is intentionally omitted rather than failing the authenticated request." }
         metered_credits: { type: integer, minimum: 0, description: Whole credits directly attributable to requests carrying this agent principal. }
@@ -6239,9 +6256,9 @@ components:
     AgentList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Agent" } } } }
     AgentSelfStatus: { type: object, additionalProperties: false, required: [agent, connection_ready], properties: { agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, description: True when at least one project member has a passkey or password and can authorize another agent. } } }
     X25519PublicJWK: { type: object, additionalProperties: false, required: [kty, crv, x], properties: { kty: { type: string, enum: [OKP] }, crv: { type: string, enum: [X25519] }, x: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
-    AgentConnectionRequest: { type: object, additionalProperties: false, required: [recipient_public_key], properties: { name: { type: string, minLength: 1, maxLength: 80 }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$" }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 }, recipient_public_key: { $ref: "#/components/schemas/X25519PublicJWK" } } }
+    AgentConnectionRequest: { type: object, additionalProperties: false, required: [recipient_public_key], properties: { name: { type: string, minLength: 1, maxLength: 80 }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$" }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 }, capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, minItems: 1, uniqueItems: true, description: "The installation's requested capability areas. Omitted requests all six. Unknown, duplicate, or empty lists are invalid_request." }, recipient_public_key: { $ref: "#/components/schemas/X25519PublicJWK" } } }
     AgentConnectionStart: { type: object, additionalProperties: false, required: [connection_id, connection_token, approval_url, expires_at], properties: { connection_id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?acn_" }, connection_token: { type: string, pattern: "^sac_[A-Za-z0-9_-]{43}$", description: Temporary header credential. Never place in a URL or log. }, approval_url: { type: string, format: uri, description: Safe URL containing only the non-authority connection id. }, expires_at: { type: string, format: date-time } } }
-    AgentConnection: { type: object, additionalProperties: false, required: [connection_id, name, agent_type, status, expires_at, created_at], properties: { connection_id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?acn_" }, name: { type: string }, agent_type: { type: string }, platform: { type: string }, version: { type: string }, status: { type: string, enum: [pending, approved, connected, denied, expired, cancelled] }, expires_at: { type: string, format: date-time }, created_at: { type: string, format: date-time } } }
+    AgentConnection: { type: object, additionalProperties: false, required: [connection_id, name, agent_type, status, capabilities, expires_at, created_at], properties: { connection_id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?acn_" }, name: { type: string }, agent_type: { type: string }, platform: { type: string }, version: { type: string }, status: { type: string, enum: [pending, approved, connected, denied, expired, cancelled] }, capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, minItems: 1, uniqueItems: true, description: "Capability areas the installation requested at connection start. A reviewer may approve a subset of these." }, expires_at: { type: string, format: date-time }, created_at: { type: string, format: date-time } } }
     AgentCredentialEnvelope: { type: object, additionalProperties: false, required: [algorithm, ephemeral_public_key, nonce, ciphertext], properties: { algorithm: { type: string, enum: [X25519-HKDF-SHA256-A256GCM] }, ephemeral_public_key: { $ref: "#/components/schemas/X25519PublicJWK" }, nonce: { type: string, description: Unpadded base64url AES-GCM nonce. }, ciphertext: { type: string, description: Unpadded base64url ciphertext and authentication tag. Decrypt with AAD screenrig/agent-credential-envelope/aad/v1 NUL connection_id NUL agent_id. } } }
     AgentCredentialCollection: { type: object, additionalProperties: false, required: [agent, credential_envelope, issuance_expires_at], properties: { agent: { $ref: "#/components/schemas/Agent" }, credential_envelope: { $ref: "#/components/schemas/AgentCredentialEnvelope" }, issuance_expires_at: { type: string, format: date-time } } }
     AgentDisconnectRequest: { type: object, additionalProperties: false, properties: { allow_last_agent: { type: boolean, default: false, description: Explicitly accept loss of the last active agent bearer. A registered dashboard passkey remains independent administrative authority. } } }
@@ -6477,6 +6494,20 @@ components:
         max_image_duration_ms: { type: integer, minimum: 5000, maximum: 30000 }
         max_video_duration_ms: { type: integer, minimum: 1000, maximum: 120000 }
         rate_override_mcr_per_15s: { anyOf: [{ $ref: "#/components/schemas/McrString" }, { type: "null" }] }
+        vast_tag_url:
+          description: >-
+            The seller's own VAST 2-4 ad tag, tried when no invited campaign
+            fills this slot on the seller's own screens. HTTPS on port 443 or
+            8443 to a public host only. The backend fetches it, follows up to
+            five Wrappers, ingests the chosen progressive MP4 or WebM MediaFile
+            into the project's media, and fires Impression, creativeView and
+            start on an accepted start, complete on an accepted completion, and
+            Error on failure. Quartile trackers are not fired. Macros
+            [CACHEBUSTING], [TIMESTAMP], [SCREENRIG_SCREEN_ID],
+            [SCREENRIG_SLOT_ID] and [SCREENRIG_PAGE_ID] are expanded. The slot
+            must accept video. Null, absent, or empty clears the tag. Buyers
+            never see it.
+          anyOf: [{ type: string, maxLength: 2048 }, { type: "null" }]
     AdvertisingSlot:
       type: object
       additionalProperties: false
@@ -6494,6 +6525,7 @@ components:
         rate_revision: { type: integer }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        vast_tag_url: { type: string, description: "The seller's own VAST tag. Present only on the owning seller's slot reads." }
     AdvertisingSlotList: { type: object, additionalProperties: false, required: [slots], properties: { slots: { type: array, items: { $ref: "#/components/schemas/AdvertisingSlot" } } } }
 
 

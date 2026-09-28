@@ -50,7 +50,7 @@ export function registerGuidance(root: Command): void {
       "--force --email operator@example.com",
       "--intent advertising --email operator@example.com",
     ],
-    "agent connect": ["--print-url", "--wait --timeout 10000"],
+    "agent connect": ["--print-url", "--capability advertising --print-url", "--capability screens --capability content --capability playlists --print-url", "--wait --timeout 10000"],
     "agent status": [""],
     "agent disconnect": ["--yes"],
     "dashboard": [""],
@@ -118,6 +118,8 @@ export function registerGuidance(root: Command): void {
   const notes: Record<string, string> = {
     "invitations create": "Invites people to this project or buyers to its advertising network. Email delivery does not prove receipt. Email invitations expire after seven days; member links expire after 24 hours. At most 50 invitations may be outstanding per project. --link prints one URL once instead of emailing; --email identifies the intended recipient for the operator, but a link is not email-bound. Deliver it privately and never store or log it. Retry unchanged input after an ambiguous failure to reuse its saved Idempotency-Key.",
     "dashboard reset-sign-in": "Unauthenticated: never enrolls, sends a stored token, or changes stored credentials. The acknowledgment is identical for known and unknown addresses. Instructions expire after one hour. An unresolved request retains only its retry key and fingerprint in the local write ledger.",
+    "agent connect": "Repeat --capability to request only the named areas; omitted requests all six. Dashboard approval can grant a non-empty subset. Capabilities cannot change on an existing request or credential: resume without changing flags and inspect the grant with agent status. To change permissions, connect a new agent in a separate private --config, approve and verify it, then disconnect the old agent.",
+    "agent status": "Shows this credential's granted capabilities, distinct from project feature entitlements. A forbidden capability refusal requires a newly connected and approved agent with that capability; retrying the same credential cannot expand its permissions.",
     "agent enroll": "Creates a new project and first agent, even when the contact email belongs to another project. Ask for the contact email and supply --email. --project-name sets its display name; --name names this installation. A member invitation is emailed to the contact address. An already enrolled installation reuses its project. --force discards pending enrollment or connection state; intentional existing-project reconnects use agent connect. --intent advertising enables advertiser=true/screens=false without changing billing-plan assignment. A pending enrollment keeps its original email, name, and purpose.",
     "project capabilities": "Read this project's plan id, independent advertiser/screens feature flags, feature revision, and the server's effective capability set. Never infer permission from a quota, plan name, or command inventory. A route denial still wins over previously read capabilities.",
     "dashboard": "Opens the dashboard origin without minting credentials. If the browser opener fails, the origin is printed. Sign in with a retained person credential.",

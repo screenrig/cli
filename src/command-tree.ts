@@ -39,7 +39,8 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
     });
   }
   command.on(`option:${option.name()}`, () => {
-    if (seen.has(handlerOptionName(option))) throw usageError(`--${name} may be supplied only once.`);
+    const repeatable = name === "capability" && command.name() === "connect" && command.parent?.name() === "agent";
+    if (seen.has(handlerOptionName(option)) && !repeatable) throw usageError(`--${name} may be supplied only once.`);
     seen.add(handlerOptionName(option));
   });
 }

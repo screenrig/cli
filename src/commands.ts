@@ -27,6 +27,7 @@ import {
   type Agent,
   type AgentConnection,
   type AgentConnectionRequest,
+  AGENT_CAPABILITIES,
   type AgentCredentialCollection,
   type AgentDisconnectRequest,
   type Capabilities,
@@ -680,6 +681,7 @@ function safeAgentSummary(agent: Agent) {
     name: agent.name,
     agent_type: agent.agent_type,
     state: agent.state,
+    capabilities: agent.capabilities,
     ...(agent.platform ? { platform: agent.platform } : {}),
     ...(agent.version ? { version: agent.version } : {}),
     ...(agent.connected_at ? { connected_at: agent.connected_at } : {}),
@@ -704,6 +706,7 @@ async function agentStatus(
       phase: resolved.token && connection.pending_agent_id ? "activating" : connection.connection_id ? "approval" : "starting",
       ...(connection.connection_id ? { connection_id: connection.connection_id } : {}),
       ...(connection.expires_at ? { expires_at: connection.expires_at } : {}),
+      capabilities: connection.capabilities,
     };
     return {
       envelope: successEnvelope(data),
@@ -713,6 +716,7 @@ async function agentStatus(
         ["phase", data.phase],
         ["connection_id", connection.connection_id],
         ["expires_at", connection.expires_at],
+        ["capabilities", connection.capabilities.join(", ")],
       ]),
     };
   }
@@ -726,6 +730,7 @@ async function agentStatus(
         ["status", status],
         ["id", local?.id],
         ["name", local?.name],
+        ["capabilities", local?.capabilities.join(", ")],
       ]),
     };
   }
@@ -745,6 +750,7 @@ async function agentStatus(
         ["id", agent.id],
         ["name", agent.name],
         ["agent_type", agent.agent_type],
+        ["capabilities", agent.capabilities.join(", ")],
         ["platform", agent.platform],
         ["version", agent.version],
         ["connection_ready", self.connection_ready ? "true" : "false"],
@@ -831,6 +837,7 @@ async function agentEnroll(
       ["status", "active"],
       ["id", agent.id],
       ["name", agent.name],
+      ["capabilities", agent.capabilities.join(", ")],
       ["connection_ready", self.connection_ready ? "true" : "false"],
       ["project_id", project.id],
       ["project_name", project.name],
@@ -859,6 +866,7 @@ async function startOrResumeAgentConnection(
   runtime: CliRuntime,
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
   requestedName: string | undefined,
+  requestedCapabilities: Agent["capabilities"] | undefined,
 ): Promise<AgentConnectionConfig> {
   const fsLike = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
   return withConfigLock(
@@ -879,8 +887,11 @@ async function startOrResumeAgentConnection(
       if (pending?.name && requestedName && pending.name !== requestedName) {
         throw usageError("The pending agent connection has a different --name. Resume it without changing the name.");
       }
+      if (pending && requestedCapabilities && JSON.stringify(pending.capabilities) !== JSON.stringify(requestedCapabilities)) {
+        throw usageError("The pending connection has different capabilities. Resume without --capability; capabilities cannot change on an existing request.");
+      }
       if (!pending) {
-        pending = { private_jwk: generateAgentConnectionKey(), ...(requestedName ? { name: requestedName } : {}) };
+        pending = { private_jwk: generateAgentConnectionKey(), capabilities: requestedCapabilities ?? [...AGENT_CAPABILITIES], ...(requestedName ? { name: requestedName } : {}) };
         await writeConfigAtomic(resolved.configPath, {
           ...(current ?? {}),
           api_url: resolved.apiUrl,
@@ -903,6 +914,7 @@ async function startOrResumeAgentConnection(
       const request: AgentConnectionRequest = {
         ...(pending.name ? { name: pending.name } : {}),
         agent_type: "cli",
+        capabilities: pending.capabilities,
         platform: agentPlatform(),
         version: CLI_VERSION,
         recipient_public_key: publicAgentConnectionKey(pending.private_jwk),
@@ -1149,6 +1161,9 @@ async function agentConnect(
   requireFlagValue(args, "timeout", "86400000");
   const name = flagString(args.flags, "name");
   if (name && name.length > 80) throw usageError("agent connect --name is at most 80 characters.");
+  const capabilityFlag = flagString(args.flags, "capability");
+  const requestedCapabilities = capabilityFlag === undefined ? undefined
+    : AGENT_CAPABILITIES.filter((name) => capabilityFlag.split(",").includes(name));
   const requestedTimeout = flagNumber(args.flags, "timeout");
   if (flagString(args.flags, "timeout") !== undefined && requestedTimeout === undefined) {
     throw usageError("agent connect --timeout must be an integer from 1 to 86400000 milliseconds.");
@@ -1160,6 +1175,9 @@ async function agentConnect(
   let connection: AgentConnectionConfig;
   if (current?.token && current.agent_connection?.pending_agent_id) {
     const pending = current.agent_connection;
+    if (requestedCapabilities && JSON.stringify(pending.capabilities) !== JSON.stringify(requestedCapabilities)) {
+      throw usageError("The pending connection has different capabilities. Resume without --capability; capabilities cannot change on an existing request.");
+    }
     publicAgentConnectionKey(pending.private_jwk);
     if (!pending.connection_id || !pending.connection_token || !pending.approval_url || !pending.expires_at) {
       throw configError("Persisted pending agent activation state is incomplete.");
@@ -1172,7 +1190,7 @@ async function agentConnect(
     }, resolved.apiUrl);
     connection = { ...pending, approval_url: checked.approval_url };
   } else {
-    connection = await startOrResumeAgentConnection(args, runtime, resolved, name);
+    connection = await startOrResumeAgentConnection(args, runtime, resolved, name, requestedCapabilities);
     current = await currentAgentConnectionConfig(resolved, runtime);
   }
   let pendingToken = current?.token;
@@ -1318,6 +1336,7 @@ async function agentConnect(
       ["status", "active"],
       ["id", agent.id],
       ["name", agent.name],
+      ["capabilities", agent.capabilities.join(", ")],
       ["opened", opened ? "true" : "false"],
       ["approval_url_printed", printed ? "true" : "false"],
     ]),
@@ -1340,6 +1359,7 @@ async function removeLocalAgentCredential(
       id: agent.id,
       name: agent.name,
       agent_type: agent.agent_type,
+      capabilities: agent.capabilities,
       state: "revoked" as const,
       revoked_at: runtime.now().toISOString(),
     } : current.last_agent;

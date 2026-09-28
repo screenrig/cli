@@ -210,6 +210,7 @@ export function memoryBackend(options: { now?: () => Date } = {}): FakeTransport
     id: "agt_AAAAAAAAAAAAAAAAAAAAAAAA",
     name: "ScreenRig CLI",
     agent_type: "cli",
+    capabilities: ["screens", "content", "playlists", "advertising", "reports", "project"],
     platform: "test/mock",
     version: "0.1.0",
     state: "active",

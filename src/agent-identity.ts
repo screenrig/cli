@@ -28,6 +28,7 @@ const CONNECTION_FIELDS = new Set([
   "connection_id",
   "name",
   "agent_type",
+  "capabilities",
   "platform",
   "version",
   "status",
@@ -93,6 +94,8 @@ export function validateAgent(value: unknown, expectedState?: Agent["state"]): A
     || typeof agent.agent_type !== "string" || agent.agent_type.length === 0
     || !["pending", "active", "revoked", "cancelled", "expired"].includes(agent.state ?? "")
     || typeof agent.authenticated_requests !== "number" || typeof agent.metered_credits !== "number"
+    || !Array.isArray(agent.capabilities) || agent.capabilities.length === 0
+    || agent.capabilities.some((name) => typeof name !== "string")
     || !isDateTime(agent.created_at) || (expectedState !== undefined && agent.state !== expectedState)) {
     throw usageError("Agent response does not match the generated Agent contract.");
   }
@@ -158,6 +161,8 @@ export function validateAgentConnectionEvent(value: unknown, connectionId: strin
   if (event.connection_id !== connectionId || typeof event.name !== "string" || event.name.length === 0
     || typeof event.agent_type !== "string" || event.agent_type.length === 0
     || !["pending", "approved", "connected", "denied", "expired", "cancelled"].includes(event.status ?? "")
+    || !Array.isArray(event.capabilities) || event.capabilities.length === 0
+    || event.capabilities.some((name) => typeof name !== "string")
     || !isDateTime(event.expires_at) || !isDateTime(event.created_at)) {
     throw configError("Agent connection SSE did not match the generated status contract.");
   }

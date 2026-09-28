@@ -86,6 +86,9 @@ export function normalizeProblem(
     asString(rec?.detail) ??
     (fallback.bodyText ? redactText(fallback.bodyText).slice(0, 300) : title);
   const errors = Array.isArray(rec?.errors) ? rec.errors : [];
+  const missingCapability = status === 403 && code === "forbidden"
+    ? /^This agent credential lacks the (screens|content|playlists|advertising|reports|project) capability\.$/.exec(detail)?.[1]
+    : undefined;
   return {
     type: asString(rec?.type) ?? problemType(code),
     title,
@@ -97,7 +100,10 @@ export function normalizeProblem(
     operation_id: asString(rec?.operation_id),
     current_revision: asNumber(rec?.current_revision),
     errors,
-    next: asNext(rec?.next),
+    next: missingCapability ? {
+      command: `screenrig agent connect --capability ${missingCapability} --config NEW_PRIVATE_CONFIG`,
+      reason: `Connect a new agent with the ${missingCapability} capability and approve it in the dashboard. Repeat --capability for every permission needed. Capabilities are immutable; use a separate private config, then disconnect the old agent after verifying the new one.`,
+    } : asNext(rec?.next),
   };
 }
 

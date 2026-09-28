@@ -9,6 +9,7 @@ import {
 } from "node:crypto";
 import { test } from "node:test";
 import type { AgentCredentialCollection, X25519PublicJWK } from "./adapters/protocol.js";
+import { AGENT_CAPABILITIES } from "./adapters/protocol.js";
 import {
   decryptAgentCredential,
   generateAgentConnectionKey,
@@ -36,6 +37,7 @@ function sealForTest(recipient: X25519PublicJWK, connectionId: string, agentId: 
       id: agentId,
       name: "Test agent",
       agent_type: "cli",
+      capabilities: [...AGENT_CAPABILITIES],
       state: "pending",
       authenticated_requests: 0,
       metered_credits: 0,
@@ -55,6 +57,7 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) test(`agent credenti
   const privateJwk = generateAgentConnectionKey();
   const connection = {
     private_jwk: privateJwk,
+    capabilities: [...AGENT_CAPABILITIES],
     connection_id: `${prefix}acn_AAAAAAAAAAAAAAAAAAAAAAAA`,
   };
   const token = `sr_live_test_${"T".repeat(43)}`;
@@ -87,6 +90,7 @@ test("agent approval URLs and SSE events stay on their closed status-only surfac
     connection_id: id,
     name: "Test agent",
     agent_type: "cli",
+    capabilities: [...AGENT_CAPABILITIES],
     status: "approved",
     expires_at: "2026-08-22T17:10:00.000Z",
     created_at: "2026-08-22T17:00:00.000Z",
@@ -95,6 +99,7 @@ test("agent approval URLs and SSE events stay on their closed status-only surfac
     connection_id: id,
     name: "Test agent",
     agent_type: "cli",
+    capabilities: [...AGENT_CAPABILITIES],
     status: "cancelled",
     expires_at: "2026-08-22T17:10:00.000Z",
     created_at: "2026-08-22T17:00:00.000Z",
@@ -103,6 +108,7 @@ test("agent approval URLs and SSE events stay on their closed status-only surfac
     connection_id: id,
     name: "Test agent",
     agent_type: "cli",
+    capabilities: [...AGENT_CAPABILITIES],
     status: "approved",
     expires_at: "2026-08-22T17:10:00.000Z",
     created_at: "2026-08-22T17:00:00.000Z",
