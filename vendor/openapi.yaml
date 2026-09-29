@@ -1538,7 +1538,7 @@ paths:
   /api/v1/screens/{id}/archive:
     post:
       operationId: archiveScreen
-      description: Hides the screen from the default list and darkens the live glass. Does not unbind the player public key. Releases screen_count quota.
+      description: Hides the screen from the default list and clears the live glass to the "Screen archived" status. Does not unbind the player public key. Releases screen_count quota.
       security: [{ projectBearer: [] }]
       parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
@@ -4641,7 +4641,8 @@ paths:
     post:
       operationId: archiveDashboardScreen
       description: >-
-        Hides the screen from the default list and darkens the live glass. It
+        Hides the screen from the default list and clears the live glass to the
+        "Screen archived" status. It
         does not unbind the player public key, and it releases screen_count
         quota. Archive is the only screen removal the dashboard offers: hard
         screen delete stays blocked by player identity, so DELETE is absent
