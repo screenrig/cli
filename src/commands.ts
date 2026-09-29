@@ -107,7 +107,7 @@ import {
 } from "./credits.js";
 import { successEnvelope, type ProblemNext, type Warning } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
-import { CliError, configError, makeProblem, networkError, notEnrolledError, timeoutError, usageError } from "./problems.js";
+import { CliError, configError, makeProblem, networkError, notEnrolledError, timeoutError, unexpectedResponseError, usageError } from "./problems.js";
 import type { Transport } from "./transport/types.js";
 import { packDirectory } from "./pack/index.js";
 import type { CliRuntime } from "./runtime.js";
@@ -993,7 +993,7 @@ async function waitForAgentConnectionApproval(
   } catch (err) {
     if ((err as Error).name === "AbortError") {
       if (controller.signal.aborted || returnPending) return latest;
-      throw timeoutError("Timed out waiting for dashboard approval. Retry agent connect to resume the same request.");
+      throw timeoutError("Timed out waiting for dashboard approval. Retry agent connect to resume the same request.", undefined, "Ask the user to approve the connection in the dashboard, then run the same screenrig agent connect command again; it resumes the pending request instead of starting a new one.");
     }
     throw err;
   } finally {
@@ -1001,7 +1001,7 @@ async function waitForAgentConnectionApproval(
   }
   if (latest?.status === "pending" || !latest) {
     if (returnPending || latest || controller.signal.aborted) return latest;
-    throw timeoutError("Agent connection stream ended before approval. Retry agent connect to resume the same request.");
+    throw timeoutError("Agent connection stream ended before approval. Retry agent connect to resume the same request.", undefined, "Ask the user to approve the connection in the dashboard, then run the same screenrig agent connect command again; it resumes the pending request instead of starting a new one.");
   }
   return latest;
 }
@@ -2778,28 +2778,28 @@ function isGenerateQuality(value: string): value is MediaGenerationQuality {
 
 function mediaGenerationFromBody(body: unknown): MediaGeneration {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
-    throw usageError("Media generation response does not match the MediaGeneration contract.");
+    throw unexpectedResponseError("Media generation response does not match the MediaGeneration contract.");
   }
   const rec = body as Record<string, unknown>;
   const media = rec.media;
   const usage = rec.usage;
   if (!media || typeof media !== "object" || Array.isArray(media)) {
-    throw usageError("Media generation response does not match the MediaGeneration contract.");
+    throw unexpectedResponseError("Media generation response does not match the MediaGeneration contract.");
   }
   const id = (media as { id?: unknown }).id;
   if (typeof id !== "string" || !isResourceID(id, "media")) {
-    throw usageError("Media generation response is missing a med_… media id.");
+    throw unexpectedResponseError("Media generation response is missing a med_… media id.");
   }
   if (!usage || typeof usage !== "object" || Array.isArray(usage)) {
-    throw usageError("Media generation response does not match the MediaGeneration contract.");
+    throw unexpectedResponseError("Media generation response does not match the MediaGeneration contract.");
   }
   const credits = (usage as { credits?: unknown }).credits;
   const usd = (usage as { usd?: unknown }).usd;
   if (typeof credits !== "number" || !Number.isInteger(credits) || credits < 1) {
-    throw usageError("Media generation response does not match the MediaGeneration contract.");
+    throw unexpectedResponseError("Media generation response does not match the MediaGeneration contract.");
   }
   if (typeof usd !== "string" || usd.length < 1) {
-    throw usageError("Media generation response does not match the MediaGeneration contract.");
+    throw unexpectedResponseError("Media generation response does not match the MediaGeneration contract.");
   }
   return {
     media: media as MediaGeneration["media"],
@@ -2813,6 +2813,21 @@ function mediaGenerationFromBody(body: unknown): MediaGeneration {
  * re-run replays under the stored key, and the listing shows what the project
  * actually holds.
  */
+/**
+ * A generation answer the CLI cannot use (empty, not JSON, wrong status, not a
+ * MediaGeneration) leaves the outcome unknown. Say how to check before an
+ * agent generates, and pays for, a second still.
+ */
+function unusableGenerateAnswer(error: unknown, tag?: string): unknown {
+  if (!(error instanceof CliError) || error.problem.code !== "unexpected_response") return error;
+  const listCommand = tag ? `screenrig media list --tag ${tag}` : "screenrig media list --primitive image";
+  return new CliError({
+    ...error.problem,
+    hint: `The server's answer did not describe a generated still, so it is unknown whether one was created. Check ${listCommand} before generating again; if no new still is there, create the image with your own tools and add it with screenrig media upload, and report the request_id with screenrig feedback bug.`,
+    next: { command: listCommand, reason: "Lists this project's stills, newest first, so you can see whether the generation produced one." },
+  }, error.exitCode, error.warnings);
+}
+
 function ambiguousGenerateError(error: unknown, options: { elapsedMs: number; tag?: string }): unknown {
   if (!(error instanceof CliError)) return error;
   if (error.problem.code !== "timeout" && error.problem.code !== "transport_error") return error;
@@ -2829,6 +2844,7 @@ function ambiguousGenerateError(error: unknown, options: { elapsedMs: number; ta
         "Re-run the identical media generate command: it retries with the same idempotency key, so a still that was created is returned instead of generating and billing a second one.",
       {
         request_id: error.problem.request_id,
+        hint: "Run the identical media generate command again, unchanged: a still that was already created is returned and not billed twice. Changing the prompt or options starts a new, separately billed generation.",
         next: {
           command: listCommand,
           reason: "Lists this project's stills, newest first, so you can see whether the generation completed before you re-run it.",
@@ -2920,13 +2936,25 @@ async function mediaGenerate(
       // The server answered, so there is nothing for a replay to recover.
       await clearGenerateRetryState(resolved, runtime, retry.state.idempotency_key);
     }
-    throw ambiguous;
+    throw unusableGenerateAnswer(ambiguous, tag);
   }
   const elapsedMs = runtime.now().getTime() - startedAt;
   if (response.status !== 201) {
-    throw usageError("media generate does not poll; the server must return 201 MediaGeneration.");
+    await clearGenerateRetryState(resolved, runtime, retry.state.idempotency_key);
+    throw unusableGenerateAnswer(unexpectedResponseError(
+      `media generate expected HTTP 201 with a MediaGeneration document and got HTTP ${response.status}.`,
+      response.headers["x-request-id"] ?? client.requestId,
+    ), tag);
   }
-  const generated = mediaGenerationFromBody(response.body);
+  let generated: MediaGeneration;
+  try {
+    generated = mediaGenerationFromBody(response.body);
+  } catch (error) {
+    await clearGenerateRetryState(resolved, runtime, retry.state.idempotency_key);
+    throw unusableGenerateAnswer(error instanceof CliError
+      ? unexpectedResponseError(error.problem.detail, response.headers["x-request-id"] ?? client.requestId)
+      : error, tag);
+  }
   const mediaId = generated.media.id;
   // The generation resolved, so the stored key has nothing left to replay.
   await clearGenerateRetryState(resolved, runtime, retry.state.idempotency_key);
@@ -3359,7 +3387,14 @@ async function playbackCsvExport(
       ? resume(error, await unusedPath(`${outputPath!.replace(/\.csv$/i, "")}-rest.csv`, ".csv"))
       : rerun(outputPath!);
     throw new CliError(
-      { ...error.problem, detail: `The ${spec.what} CSV stream failed after the export started: ${error.problem.detail}${kept}`, next },
+      {
+        ...error.problem,
+        detail: `The ${spec.what} CSV stream failed after the export started: ${error.problem.detail}${kept}`,
+        hint: error.partialPath
+          ? "Run the next command to export the rows that were not received; the complete rows already received stay in the partial file."
+          : "Run the next command to start the export again.",
+        next,
+      },
       error.exitCode,
       error.warnings,
     );

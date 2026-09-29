@@ -255,3 +255,16 @@ test("idle_timeout_ms fails a stalled download but not a slow one that keeps mak
   await assert.rejects(reading, (error: unknown) => error instanceof CliError && /Playback export timed out/.test(error.message));
   assert.deepEqual(received, [1, 1, 1]);
 });
+
+test("a connection failure names its cause instead of a bare 'fetch failed'", async () => {
+  const failing = (async () => {
+    throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:8080"), { code: "ECONNREFUSED" }) });
+  }) as unknown as typeof fetch;
+  const transport = new FetchTransport("http://127.0.0.1:8080", undefined, failing);
+  await assert.rejects(transport.request({ method: "GET", path: "/api/v1/project" }), (error: unknown) => {
+    assert.ok(error instanceof CliError);
+    assert.equal(error.problem.code, "transport_error");
+    assert.match(error.problem.detail, /^fetch failed \(ECONNREFUSED: connect ECONNREFUSED 127\.0\.0\.1:8080\)$/);
+    return true;
+  });
+});

@@ -1,4 +1,5 @@
 import { CliError, networkError, normalizeProblem, timeoutError } from "../problems.js";
+import { redactText } from "../redact.js";
 import type {
   Transport,
   TransportByteStream,
@@ -7,6 +8,20 @@ import type {
   TransportResponse,
   TransportStream,
 } from "./types.js";
+
+/**
+ * Node's fetch reports every connection failure as "fetch failed"; the cause
+ * (ECONNREFUSED, ENOTFOUND, a TLS error) is what tells the caller what to fix.
+ */
+function fetchFailure(err: unknown, fallback: string): string {
+  if (!(err instanceof Error)) return fallback;
+  const cause = (err as Error & { cause?: unknown }).cause;
+  const code = cause && typeof cause === "object" ? (cause as { code?: unknown }).code : undefined;
+  const causeMessage = cause instanceof Error ? cause.message : undefined;
+  const detail = [typeof code === "string" ? code : undefined, causeMessage && causeMessage !== code ? causeMessage : undefined]
+    .filter(Boolean).join(": ");
+  return redactText(detail && !err.message.includes(detail) ? `${err.message} (${detail})` : err.message || fallback);
+}
 
 function headerMap(headers: Headers): Record<string, string> {
   const out: Record<string, string> = {};
@@ -103,10 +118,7 @@ export class FetchTransport implements Transport {
       if (signal.aborted || (err as Error).name === "AbortError") {
         throw timeoutError("API request timed out", req.headers?.["x-request-id"]);
       }
-      throw networkError(
-        err instanceof Error ? err.message : "API request failed",
-        req.headers?.["x-request-id"],
-      );
+      throw networkError(fetchFailure(err, "API request failed"), req.headers?.["x-request-id"]);
     } finally {
       if (timer) {
         clearTimeout(timer);
@@ -129,7 +141,7 @@ export class FetchTransport implements Transport {
       if ((err as Error).name === "AbortError") {
         throw timeoutError("SSE connection timed out", req.headers?.["x-request-id"]);
       }
-      throw networkError(err instanceof Error ? err.message : "SSE connection failed", req.headers?.["x-request-id"]);
+      throw networkError(fetchFailure(err, "SSE connection failed"), req.headers?.["x-request-id"]);
     }
     if (!response.ok || !response.body) {
       const text = await response.text();
@@ -201,7 +213,7 @@ export class FetchTransport implements Transport {
       if (signal.aborted || (err as Error).name === "AbortError") {
         throw timeoutError(`${what} timed out`, req.headers?.["x-request-id"]);
       }
-      throw networkError(err instanceof Error ? err.message : `${what} failed`, req.headers?.["x-request-id"]);
+      throw networkError(fetchFailure(err, `${what} failed`), req.headers?.["x-request-id"]);
     }
 
     touch();

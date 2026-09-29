@@ -3,7 +3,7 @@ import { applyCreditsLowToSuccess, observedCreditsRemaining } from "./credits.js
 import { errorEnvelope, type Warning } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
 import { LOG_SINK_DEGRADED_CODE, logSinkDegradedWarning } from "./log/logger.js";
-import { CliError, makeProblem, renderProblem } from "./problems.js";
+import { CliError, makeProblem, renderProblem, withDefaultHint } from "./problems.js";
 import { redactText } from "./redact.js";
 import type { CliRuntime } from "./runtime.js";
 import { processRuntime } from "./runtime.js";
@@ -85,7 +85,7 @@ export async function run(runtime: CliRuntime = processRuntime()): Promise<numbe
     return result.exitCode;
   } catch (err) {
     runtime.logger?.endRun(err);
-    const problem =
+    const problem = withDefaultHint(
       err instanceof CliError
         ? err.problem
         : makeProblem(
@@ -93,7 +93,8 @@ export async function run(runtime: CliRuntime = processRuntime()): Promise<numbe
             "Unexpected error",
             500,
             redactText(err instanceof Error ? err.message : "unknown error"),
-          );
+          ),
+    );
     const exitCode = err instanceof CliError ? err.exitCode : ExitCode.Unexpected;
     const warnings = appendLogSinkWarning(err instanceof CliError ? err.warnings : [], runtime.logger?.droppedLines() ?? 0);
     if (json) {

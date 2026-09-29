@@ -16,6 +16,37 @@ export function findCommand(root: Command, path: readonly string[]): Command | u
   return command;
 }
 
+/**
+ * The deepest command an argv names, skipping options and their values. Used
+ * to point a usage error at the right help even when Commander failed before
+ * it selected a command.
+ */
+export function commandFromArgv(root: Command, argv: readonly string[]): Command {
+  const end = argv.indexOf("--");
+  const tokens = end < 0 ? argv : argv.slice(0, end);
+  let command = root;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (token.startsWith("-")) {
+      if (token.includes("=")) continue;
+      let takesValue = false;
+      for (let current: Command | null = command; current; current = current.parent) {
+        const option = current.options.find((candidate) => candidate.long === token || candidate.short === token);
+        if (option) {
+          takesValue = option.required || option.optional;
+          break;
+        }
+      }
+      if (takesValue) index += 1;
+      continue;
+    }
+    const child = command.commands.find((candidate) => candidate.name() === token || candidate.aliases().includes(token));
+    if (!child) break;
+    command = child;
+  }
+  return command;
+}
+
 /** Read explicit CLI options only; Commander defaults must not become write flags. */
 export function invocationFlags(command: Command): Record<string, string | boolean> {
   const flags = Object.create(null) as Record<string, string | boolean>;

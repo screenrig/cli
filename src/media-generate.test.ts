@@ -258,9 +258,11 @@ test("media generate rejects a 201 without usage.usd", async () => {
       transport,
       { configDir, fs: fsLike },
     );
-    assert.equal(result.code, ExitCode.Usage, result.stdout);
-    const envelope = JSON.parse(result.stdout) as { error: { code: string } };
-    assert.equal(envelope.error.code, "usage_error");
+    assert.equal(result.code, ExitCode.Unexpected, result.stdout);
+    const envelope = JSON.parse(result.stdout) as { error: { code: string; hint?: string; next?: { command: string } } };
+    assert.equal(envelope.error.code, "unexpected_response");
+    assert.match(envelope.error.hint ?? "", /media list/);
+    assert.equal(envelope.error.next?.command, "screenrig media list --primitive image");
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
@@ -283,9 +285,11 @@ test("media generate rejects a 201 without usage.credits", async () => {
       transport,
       { configDir, fs: fsLike },
     );
-    assert.equal(result.code, ExitCode.Usage, result.stdout);
-    const envelope = JSON.parse(result.stdout) as { error: { code: string } };
-    assert.equal(envelope.error.code, "usage_error");
+    assert.equal(result.code, ExitCode.Unexpected, result.stdout);
+    const envelope = JSON.parse(result.stdout) as { error: { code: string; hint?: string; next?: { command: string } } };
+    assert.equal(envelope.error.code, "unexpected_response");
+    assert.match(envelope.error.hint ?? "", /media list/);
+    assert.equal(envelope.error.next?.command, "screenrig media list --primitive image");
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
@@ -368,10 +372,11 @@ test("media generate does not poll a 202", async () => {
       transport,
       { configDir, fs: fsLike },
     );
-    assert.equal(result.code, ExitCode.Usage, result.stdout);
-    const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string } };
-    assert.equal(envelope.error.code, "usage_error");
-    assert.match(envelope.error.detail, /does not poll/);
+    assert.equal(result.code, ExitCode.Unexpected, result.stdout);
+    const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string; hint?: string } };
+    assert.equal(envelope.error.code, "unexpected_response");
+    assert.match(envelope.error.detail, /expected HTTP 201 .* got HTTP 202/);
+    assert.match(envelope.error.hint ?? "", /unknown whether one was created/);
     assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/v1/operations")).length, 0);
   } finally {
     await rm(configDir, { recursive: true, force: true });
@@ -605,6 +610,72 @@ test("a server answer releases the stored key: a 402 does not make the next run 
       refusedKey,
       "a request the server answered is not ambiguous, so its key is released rather than replayed",
     );
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("media generate fails clearly on an empty 200 instead of reporting success", async () => {
+  const transport = new FakeTransport().on("POST", "/api/v1/media/generations", () => ({
+    status: 200,
+    headers: { "x-request-id": "req_EMPTYEMPTYEMPTYEMPTY" },
+    body: undefined,
+    rawText: "",
+  }));
+  const configDir = await testTemp("media-generate-empty-");
+  const fsLike = await enrolled(configDir);
+  try {
+    const result = await withRuntime(
+      ["--json", "media", "generate", "--prompt", PROMPT, "--tag", "lobby"],
+      transport,
+      { configDir, fs: fsLike },
+    );
+    assert.equal(result.code, ExitCode.Unexpected, result.stdout);
+    const envelope = JSON.parse(result.stdout) as { ok: boolean; error: { code: string; detail: string; hint?: string; request_id?: string; next?: { command: string } } };
+    assert.equal(envelope.ok, false);
+    assert.equal(envelope.error.code, "unexpected_response");
+    assert.match(envelope.error.detail, /HTTP 200 with an empty body/);
+    assert.equal(envelope.error.request_id, "req_EMPTYEMPTYEMPTYEMPTY");
+    assert.match(envelope.error.hint ?? "", /media upload/);
+    assert.equal(envelope.error.next?.command, "screenrig media list --tag lobby");
+    assert.doesNotMatch(result.stdout, new RegExp(PROMPT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("media generate 402 tells the agent to stop and use its own image tools, keeping a server hint", async () => {
+  const problem = (extra: Record<string, unknown>) => new FakeTransport().on("POST", "/api/v1/media/generations", () => ({
+    status: 402,
+    headers: { "content-type": "application/problem+json" },
+    body: {
+      type: "https://screenrig.ai/problems/payment-required",
+      title: "Prepaid credit is required",
+      status: 402,
+      detail: "Prepaid credit remaining is below the generation debit.",
+      code: "payment_required",
+      ...extra,
+    },
+  }));
+  const configDir = await testTemp("media-generate-402-hint-");
+  const fsLike = await enrolled(configDir);
+  try {
+    const local = await withRuntime(["--json", "media", "generate", "--prompt", PROMPT], problem({}), { configDir, fs: fsLike });
+    const localError = (JSON.parse(local.stdout) as { error: { hint?: string; next?: { command: string } } }).error;
+    assert.match(localError.hint ?? "", /Stop retrying/);
+    assert.match(localError.hint ?? "", /media upload/);
+    assert.doesNotMatch(localError.hint ?? "", /buy|purchase|top.?up|stripe|x402/i);
+    assert.equal(localError.next?.command, "screenrig billing balance");
+
+    const served = await withRuntime(
+      ["--json", "media", "generate", "--prompt", PROMPT],
+      problem({ hint: "Server says: make the image yourself.", next: { command: "screenrig media upload FILE", reason: "Upload your own image.", argv: ["media", "upload", "FILE"] } }),
+      { configDir, fs: fsLike },
+    );
+    const servedError = (JSON.parse(served.stdout) as { error: { hint?: string; next?: { command: string; argv?: string[] } } }).error;
+    assert.equal(servedError.hint, "Server says: make the image yourself.");
+    assert.equal(servedError.next?.command, "screenrig media upload FILE");
+    assert.deepEqual(servedError.next?.argv, ["media", "upload", "FILE"]);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }

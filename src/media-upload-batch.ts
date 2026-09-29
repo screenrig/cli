@@ -19,7 +19,8 @@ import {
 } from "./media-upload.js";
 import { silentProgressReporter, type ProgressReporter } from "./media/progress.js";
 import type { TranscodeOptions } from "./media/transcode.js";
-import { CliError, usageError } from "./problems.js";
+import { CliError, usageError, withDefaultHint } from "./problems.js";
+import type { ProblemNext } from "./envelope.js";
 import type { CliRuntime } from "./runtime.js";
 
 export const UPLOAD_BATCH_MIN_ITEMS = 1;
@@ -67,7 +68,10 @@ export interface UploadBatchFailedItem {
     status: number;
     title: string;
     detail: string;
+    hint?: string;
+    request_id?: string;
     retry_after_seconds?: number;
+    next?: ProblemNext;
   };
 }
 
@@ -164,11 +168,15 @@ function isRetryableUploadError(error: unknown): error is CliError {
 }
 
 function compactProblem(error: CliError): UploadBatchFailedItem["problem"] {
+  const problem = withDefaultHint(error.problem);
   return {
-    code: error.problem.code,
-    status: error.problem.status,
-    title: error.problem.title,
-    detail: error.problem.detail,
+    code: problem.code,
+    status: problem.status,
+    title: problem.title,
+    detail: problem.detail,
+    ...(problem.hint ? { hint: problem.hint } : {}),
+    ...(problem.request_id ? { request_id: problem.request_id } : {}),
+    ...(problem.next ? { next: problem.next } : {}),
     ...(typeof error.problem.retry_after_seconds === "number"
       ? { retry_after_seconds: error.problem.retry_after_seconds }
       : {}),

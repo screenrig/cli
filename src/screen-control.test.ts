@@ -73,6 +73,8 @@ const DAYPARTS = {
 
 async function backend(env: Env): Promise<FakeTransport> {
   const transport = memoryBackend({ now: () => NOW });
+  // The default playlist every assignment below names; an unknown id is a 404.
+  await transport.request({ method: "PUT", path: "/api/v1/playlists/pl_DEFAULT", body: { name: "Default", pages: [] } });
   // The memory PATCH creates screens it does not know. A and B have a zone and
   // a default playlist, C has a default but no zone, D a zone but no default.
   for (const id of [A, B, D]) assert.equal((await cli(["--json", "screen", "set-timezone", id, "--timezone", "America/Los_Angeles"], transport, env)).code, 0);
@@ -312,6 +314,7 @@ test("takeover instants print in the screen timezone; server until refusals and 
 
   // This computer's clock runs two minutes ahead of the server's.
   const skewed = memoryBackend({ now: () => new Date(NOW.getTime() - 2 * 60_000) });
+  await skewed.request({ method: "PUT", path: "/api/v1/playlists/pl_DEFAULT", body: { name: "Default", pages: [] } });
   for (const id of [A]) {
     await cli(["--json", "screen", "set-timezone", id, "--timezone", "America/Los_Angeles"], skewed, env);
     await cli(["--json", "screen", "update", id, "--playlist-id", "pl_DEFAULT"], skewed, env);

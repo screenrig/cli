@@ -4115,8 +4115,8 @@ test("a payment_required rejection points at remaining prepaid credit", async ()
     };
     assert.equal(envelope.error.code, "payment_required");
     assert.equal(envelope.error.status, 402);
-    assert.match(String(envelope.error.next?.command), /project show/);
-    assert.match(String(envelope.error.next?.reason), /credit_remaining/);
+    assert.equal(envelope.error.next?.command, "screenrig billing balance");
+    assert.match(String((envelope.error as { hint?: string }).hint), /Stop retrying/);
     assert.doesNotMatch(String(envelope.error.next?.reason), /mcr|millicredit/);
     assert.equal(envelope.warnings?.some((item) => item.code === "credits_low") ?? false, false, result.stdout);
     assert.doesNotMatch(result.stdout, /stripe|x402|pay |kCr|mcr|millicredit|\$/i);
@@ -4165,7 +4165,7 @@ test("a 402 with remaining header 0 includes payment_required and credits_low", 
     assert.equal(envelope.ok, false);
     assert.equal(envelope.error.code, "payment_required");
     assert.equal(envelope.error.status, 402);
-    assert.match(String(envelope.error.next?.command), /project show/);
+    assert.equal(envelope.error.next?.command, "screenrig billing balance");
     const warning = envelope.warnings?.find((item) => item.code === "credits_low");
     assert.ok(warning, result.stdout);
     assert.match(warning.message, /\b0\b/);
@@ -7108,4 +7108,32 @@ test("membership update carries the stored policy and scope when rows are readab
   assert.equal(missing.code, ExitCode.Usage, missing.stdout);
   assert.match(missing.stdout, /review policy cannot be carried over/);
   assert.equal(transport.calls.some(call => call.method === "POST" && call.path.endsWith("/memberships/mem_TEST") === true && (call.body as object | undefined) !== undefined), false);
+});
+
+test("every error envelope carries a hint; usage errors point at the invoked command's help", async () => {
+  const transport = new FakeTransport();
+  // Handler-level validation, after Commander selected the command.
+  const generate = await withRuntime(["--json", "--config", "/nonexistent/cfg.json", "media", "generate", "--prompt", "x", "--quality", "auto"], transport);
+  const generateError = JSON.parse(generate.stdout).error as { code: string; hint?: string; next?: { command: string; argv?: string[] } };
+  assert.equal(generateError.code, "usage_error");
+  assert.match(String(generateError.hint), /screenrig media generate --help/);
+  assert.deepEqual(generateError.next?.argv, ["media", "generate", "--help"]);
+  // Option parsing fails before Commander selects a command; argv still names it.
+  const parse = await withRuntime(["--json", "screen", "update", "scr_1", "--name", "--timezone"], transport);
+  const parseError = JSON.parse(parse.stdout).error as { code: string; hint?: string; next?: { command: string } };
+  assert.equal(parseError.code, "usage_error");
+  assert.equal(parseError.next?.command, "screenrig screen update --help");
+  // A usage error that already names its own next keeps it.
+  const unknown = await withRuntime(["--json", "screen", "no-such-command"], transport);
+  const unknownError = JSON.parse(unknown.stdout).error as { hint?: string; next?: { command: string } };
+  assert.ok(unknownError.hint);
+  // Not enrolled: a hint plus the enrollment next.
+  const notEnrolled = await withRuntime(["--json", "screen", "list"], transport);
+  const notEnrolledError = JSON.parse(notEnrolled.stdout).error as { code: string; hint?: string; next?: { command: string } };
+  assert.equal(notEnrolledError.code, "not_enrolled");
+  assert.match(String(notEnrolledError.hint), /Run the next command/);
+  assert.match(String(notEnrolledError.next?.command), /agent enroll/);
+  // Human output shows the same hint.
+  const human = await withRuntime(["--human", "screen", "list"], transport);
+  assert.match(human.stderr, /^hint: .*Run the next command/m);
 });

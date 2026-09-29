@@ -8,7 +8,7 @@ import { registerCommands } from "./cli-commands/index.js";
 import { usageError } from "./problems.js";
 import { CLI_VERSION } from "./version.js";
 
-export { commandPath, findCommand, invocationFlags } from "./command-path.js";
+export { commandFromArgv, commandPath, findCommand, invocationFlags } from "./command-path.js";
 
 export interface CommandTree {
   root: Command;

@@ -36,6 +36,16 @@ Output format never changes based on terminal detection. Progress goes to stderr
 `events follow` writes NDJSON (one envelope per line) without a trailing summary.
 An empty follow session returns one envelope with `data.items: []`.
 
+An error envelope is `{"ok": false, "error": {...}}`. `error.code`, `error.status`
+and `error.detail` say what failed. `error.hint` says what to do about it, in one
+or two plain sentences; every error carries one. `error.next`, when present, is a
+command to run next (`next.argv` is the same command as an argument list).
+`error.errors[]` names the fields a request got wrong, and `error.request_id`
+identifies the request when you report a problem. Rate-limited answers add
+`retry_after_seconds`, revision conflicts add `current_revision`, and server
+failures add `retryable`. Human output prints the same members, with the hint on a
+`hint:` line.
+
 Help, including bare command groups, stays human-readable by default; use
 `--json --help` for structured discovery. Authoring files remain JSON.
 

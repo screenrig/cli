@@ -87,7 +87,7 @@ function missingToolError(binary: string, result: RunProcessResult): never {
   throw usageError(`Cannot run ${binary}: ${reason}. ${INSTALL_HINT}`, {
     command: "screenrig doctor",
     reason: "Report which part of the required ffmpeg toolchain is missing or unusable.",
-  });
+  }, `${INSTALL_HINT} If you cannot install software, a file already in a format screenRIG accepts can be uploaded unchanged with --no-transcode.`);
 }
 
 function parseVersion(output: string): string {

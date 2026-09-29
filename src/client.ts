@@ -5,9 +5,11 @@ import { isValidIdempotencyKey, isValidRequestId, newIdempotencyKey, newRequestI
 import {
   CliError,
   makeProblem,
+  bodySnippet,
   normalizeProblem,
   parseRetryAfter,
   timeoutError,
+  unexpectedResponseError,
   usageError,
   withPaymentGuidance,
   withQuotaGuidance,
@@ -30,6 +32,41 @@ function privateBodies(method: string, path: string): boolean {
 
 /** 409 codes that are a definite refusal rather than possibly in-progress work. */
 const DEFINITE_CONFLICT_CODES = new Set(["webhook_limit_reached"]);
+
+/** The error body as text, for a response that is not a problem document. Transports without raw text get the decoded body. */
+function errorBodyText(rawText: string | undefined, body: unknown): string {
+  if (typeof rawText === "string") return rawText;
+  if (body === undefined || body === null) return "";
+  if (typeof body === "string") return body;
+  if (body instanceof Uint8Array) return new TextDecoder().decode(body);
+  try {
+    return JSON.stringify(body);
+  } catch {
+    return "";
+  }
+}
+
+const READ_METHODS = new Set(["GET", "HEAD"]);
+
+/**
+ * A transport failure says what went wrong but not what the caller may do
+ * about it. Whether rerunning is safe depends on the method and on whether the
+ * write kept a saved idempotency key for replay.
+ */
+function withTransportHint(err: unknown, method: string, keyed: boolean): unknown {
+  if (!(err instanceof CliError) || err.problem.hint) return err;
+  if (err.problem.code !== "timeout" && err.problem.code !== "transport_error") return err;
+  const timeout = err.problem.code === "timeout";
+  const reach = timeout
+    ? "The API did not answer before --timeout."
+    : "The CLI could not reach the API; check network connectivity and the configured API origin (screenrig doctor shows it).";
+  const hint = READ_METHODS.has(method)
+    ? `${reach} This was a read, so it is safe to run the same command again${timeout ? ", optionally with a larger --timeout" : ""}.`
+    : keyed
+      ? `${reach} The write may already have happened. Run the identical command again: it reuses the saved idempotency key, so work that already happened is returned, not repeated. screenrig recovery list shows writes still unresolved.`
+      : `${reach} The write may already have happened. Inspect the resource with its show or list command before running the command again.`;
+  return new CliError({ ...err.problem, hint }, err.exitCode, err.warnings);
+}
 
 function problemCode(body: unknown): string | undefined {
   const code = body && typeof body === "object" ? (body as { code?: unknown }).code : undefined;
@@ -122,7 +159,7 @@ export class ApiClient {
       });
     } catch (err) {
       span.error(err);
-      throw err;
+      throw withTransportHint(err, req.method, Boolean(pending));
     }
     // Definite refusals need reconciliation, not automatic replay of a stale key.
     // Keep ambiguous timeouts and conflicts (which can mean work is in progress).
@@ -136,7 +173,7 @@ export class ApiClient {
       const problem = normalizeProblem(response.body, {
         status: response.status,
         request_id: requestId,
-        bodyText: typeof response.rawText === "string" ? response.rawText : undefined,
+        bodyText: errorBodyText(response.rawText, response.body),
       });
       const wrapped = new CliError(
         withPaymentGuidance(
@@ -156,6 +193,23 @@ export class ApiClient {
           : responseSummary(req.binary ? undefined : response.body, req.binary === true, response.headers["content-type"])),
       });
       throw wrapped;
+    }
+    if (expectsJsonBody(req, response.status) && (response.body === undefined || typeof response.body === "string")) {
+      // A 2xx where the contract names a JSON document must not pass as
+      // success with nothing in it: an empty or non-JSON body means the work's
+      // outcome is unknown.
+      const snippet = typeof response.body === "string" ? bodySnippet(response.body) : undefined;
+      const err = unexpectedResponseError(
+        snippet
+          ? `${req.method} ${req.path} answered HTTP ${response.status} with a body that is not JSON: ${snippet}`
+          : `${req.method} ${req.path} answered HTTP ${response.status} with an empty body where a JSON document was expected.`,
+        requestId,
+        READ_METHODS.has(req.method)
+          ? "The answer was empty or not JSON, so nothing can be read from it. Run the same command again; if it keeps happening, report the request_id with screenrig feedback bug."
+          : "The server accepted the request but returned nothing usable, so it is unknown whether the change happened. Inspect the resource with its show or list command before retrying, and report the request_id with screenrig feedback bug.",
+      );
+      span.error(err, { status: response.status, request_id: requestId, content_type: response.headers["content-type"] });
+      throw err;
     }
     span.response(response.status, {
       request_id: requestId,
@@ -200,7 +254,7 @@ export class ApiClient {
       const problem = normalizeProblem(response.problem, {
         status: response.status,
         request_id: requestId,
-        bodyText: response.rawText,
+        bodyText: errorBodyText(response.rawText, response.problem),
       });
       const wrapped = new CliError(
         withPaymentGuidance(
@@ -243,7 +297,10 @@ export class ApiClient {
       const remaining = () => {
         const budget = deadline - Date.now();
         if (budget <= 0) {
-          const err = timeoutError(`Timed out waiting for operation ${id}`, this.requestId);
+          const err = timeoutError(`Timed out waiting for operation ${id}`, this.requestId,
+            `The operation keeps running on the server; only this wait stopped. Run screenrig operations wait ${id} to keep waiting (add --timeout for longer), or screenrig operations show ${id} to check it once.`);
+          err.problem.operation_id = id;
+          err.problem.next = { command: `screenrig operations wait ${id}`, argv: ["operations", "wait", id], reason: "Resume waiting for the same operation without starting it again." };
           span.error(err);
           throw err;
         }
@@ -259,6 +316,9 @@ export class ApiClient {
               status: 500,
               request_id: operation.request_id ?? this.requestId,
             });
+            if (operation.error === undefined || operation.error === null) {
+              problem.detail = `Operation ${operation.id} ended ${operation.state} without an error report.`;
+            }
             const err = new CliError(
               {
                 ...problem,
@@ -278,6 +338,12 @@ export class ApiClient {
       }
     });
   }
+}
+
+/** 2xx answers that must carry a JSON document: not 204/205, not HEAD, not bytes, not an explicit non-JSON read. */
+function expectsJsonBody(req: TransportRequest | Omit<TransportRequest, "headers">, status: number): boolean {
+  return status >= 200 && status < 300 && status !== 204 && status !== 205
+    && req.method !== "HEAD" && req.binary !== true && req.json !== false;
 }
 
 export function requireToken(token: string | undefined): string {

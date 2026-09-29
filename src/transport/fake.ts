@@ -758,7 +758,12 @@ export function memoryBackend(options: { now?: () => Date } = {}): FakeTransport
     return { status: 201, headers: {}, body: item };
   });
   transport.on("GET", "/api/v1/playlists", () => ({ status: 200, headers: {}, body: { items: [...playlists.values()] } }));
-  transport.on("GET", /^\/api\/v1\/playlists\/[^/]+$/, (req) => ({ status: 200, headers: {}, body: playlists.get(req.path.split("/").pop() ?? "") }));
+  transport.on("GET", /^\/api\/v1\/playlists\/[^/]+$/, (req): TransportResponse => {
+    const item = playlists.get(req.path.split("/").pop() ?? "");
+    return item
+      ? { status: 200, headers: {}, body: item }
+      : { status: 404, headers: { "content-type": "application/problem+json" }, body: { type: "https://screenrig.ai/problems/not-found", title: "Resource was not found", status: 404, code: "not_found", detail: "Playlist was not found." } };
+  });
   transport.on("PUT", /^\/api\/v1\/playlists\/[^/]+$/, (req) => {
     const id = req.path.split("/").pop() ?? "";
     const item = { ...(req.body as object), id, revision: 2 };

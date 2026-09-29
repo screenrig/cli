@@ -12,11 +12,17 @@ export interface NormalizedProblem {
   title: string;
   status: number;
   detail: string;
+  /** One or two plain sentences telling the caller what to do next. */
+  hint?: string;
   instance?: string;
   code: string;
   request_id?: string;
+  /** Server trace correlation, when the server sent one. */
+  trace_id?: string;
   operation_id?: string;
   current_revision?: number;
+  /** Server 5xx only: whether retrying the unchanged request may succeed. */
+  retryable?: boolean;
   /** Present only on 429, taken from the server's Retry-After header. */
   retry_after_seconds?: number;
   errors: unknown[];
