@@ -106,8 +106,11 @@ screenrig project rename NAME
 
 `--project-name` names the project; `--name` names this agent. Enrollment reports
 the project ID and name and confirms that a member invitation was requested,
-without exposing a credential or invitation URL. Other authenticated commands
-never enroll automatically.
+without exposing a credential or invitation URL. The invitation is the human's
+dashboard login; nothing waits on it, and the agent can pair screens and publish
+right away. Other authenticated commands never enroll automatically. If the
+server rejects the stored credential, `agent disconnect --yes` clears it locally
+before a new enrollment.
 
 ## Invitations
 
@@ -123,7 +126,8 @@ screenrig invitations revoke ID
 
 Member invitations are the default. Email delivery reports invitation status,
 not proof that a message reached the inbox. `--link` requests a member invitation
-link instead of email delivery. Its URL appears once in the selected output
+link instead of email delivery, for a person who never used their emailed
+invitation and later asks for dashboard access; it is not a setup step. Its URL appears once in the selected output
 format and is never saved to configuration, write-recovery state, or logs.
 Share it only with the intended person. Advertising invitations use email
 delivery and the selected screen, slot, and approval policy.
