@@ -1,5 +1,3 @@
-# Managed by cmd/screenrig-openapi-writer from api/openapi.publication.yaml. DO NOT EDIT.
-# Run make openapi after changing the publication input; make generate only consumes this file.
 openapi: 3.1.0
 info:
   title: ScreenRig API
@@ -9467,5 +9465,6 @@ components:
         current_revision: { type: integer }
         errors: { type: array, items: { $ref: "#/components/schemas/ProblemField" } }
         next: { $ref: "#/components/schemas/NextAction" }
+        hint: { type: string, description: "What the caller should do next to fix or work around this problem, in one or two plain sentences. The server sends the problem registry's default for the code (api/problems.yaml) unless the handler has a more specific one for this case. Advisory text for agents; Players ignore it." }
 x-problem-registry: ./problems.yaml
 x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, user_email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_project_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, server_draining, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk, recovery_ambiguous, recovery_expired, recovery_not_offered, invitation_limit_reached, version_required, price_change_pending, quote_stale, insufficient_credits, self_deal, invitation_invalid, invitation_expired, invitation_consumed, invitation_email_mismatch, reauthentication_required, member_limit_reached, last_credential, no_project, billing_unavailable, feature_unavailable, user_binding_stale, session_expired, credential_revoked, proof_clock_skew, key_retired, assignment_not_found, upgrade_required, webhook_limit_reached, webhook_url_rejected, reboot_unsupported]
