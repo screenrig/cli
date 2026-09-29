@@ -86,7 +86,7 @@ import {
 } from "./adapters/protocol.js";
 import { SDK_PROTOCOL_VERSION } from "./adapters/sdk-injection.js";
 import { flagBool, flagNumber, flagString, type ParsedArgs } from "./command-input.js";
-import { ApiClient, requireToken } from "./client.js";
+import { ApiClient, RequestIds, requireToken } from "./client.js";
 import {
   preserveLogSocket,
   resolveConfig,
@@ -405,11 +405,23 @@ function transportFor(runtime: CliRuntime, apiUrl: string, token?: string): Tran
 
 const writeRecoveries = new WeakMap<CliRuntime, WriteRecovery>();
 
+const invocationRequestIds = new WeakMap<CliRuntime, RequestIds>();
+
+/** One RequestIds per invocation, so `--request-id` reaches only the first HTTP request however many clients a command builds. */
+function requestIdsFor(runtime: CliRuntime, args: ParsedArgs): RequestIds {
+  let ids = invocationRequestIds.get(runtime);
+  if (!ids) {
+    ids = new RequestIds(flagString(args.flags, "request-id"));
+    invocationRequestIds.set(runtime, ids);
+  }
+  return ids;
+}
+
 function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?: string, recovery?: WriteRecovery): ApiClient {
   return new ApiClient({
     transport: transportFor(runtime, apiUrl, token),
     token,
-    requestId: flagString(args.flags, "request-id"),
+    requestIds: requestIdsFor(runtime, args),
     idempotencyKey: flagString(args.flags, "idempotency-key"),
     timeoutMs: flagNumber(args.flags, "timeout"),
     writeRecovery: recovery ?? (token ? writeRecoveries.get(runtime) : undefined),
@@ -511,6 +523,7 @@ function commandHandler(
       throw error;
     } finally {
       writeRecoveries.delete(runtime);
+      invocationRequestIds.delete(runtime);
     }
   };
 }
@@ -964,7 +977,7 @@ async function waitForAgentConnectionApproval(
       path: `/api/v1/agent-connections/${connection.connection_id}/events`,
       headers: {
         authorization: `ScreenRig-Agent-Connect ${connection.connection_token}`,
-        "x-request-id": clientFor(runtime, args, resolved.apiUrl).requestId,
+        "x-request-id": requestIdsFor(runtime, args).next(),
       },
       signal: controller.signal,
     });
@@ -5720,7 +5733,7 @@ async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awa
           method: "GET",
           path: "/api/v1/events/stream",
           query: { after },
-          headers: { "x-request-id": client.requestId, authorization: `Bearer ${token}` },
+          headers: { "x-request-id": client.nextRequestId(), authorization: `Bearer ${token}` },
           signal: controller.signal,
         });
         connected = true;

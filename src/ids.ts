@@ -20,8 +20,13 @@ export function newIdempotencyKey(): string {
   return randomUrlSafe128();
 }
 
+/** Characters after `req_`; the API replaces any X-Request-ID outside this range. */
+export const REQUEST_ID_MIN = 16;
+export const REQUEST_ID_MAX = 64;
+const REQUEST_ID_PATTERN = new RegExp(`^req_[A-Za-z0-9_-]{${REQUEST_ID_MIN},${REQUEST_ID_MAX}}$`);
+
 export function isValidRequestId(value: string): boolean {
-  return /^req_[A-Za-z0-9_-]{16,128}$/.test(value);
+  return REQUEST_ID_PATTERN.test(value);
 }
 
 export function isValidIdempotencyKey(value: string): boolean {

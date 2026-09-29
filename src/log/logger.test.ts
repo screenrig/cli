@@ -157,6 +157,8 @@ test("HTTP request and response share correlation_id with distinct event_id", as
   assert.equal(response.status, 200);
   assert.equal(request.op, "GET /api/v1/screens");
   assert.equal(response.request_id, "req_AAAAAAAAAAAAAAAA");
+  assert.equal(request.request_id, "req_AAAAAAAAAAAAAAAA");
+  assert.equal(request.invocation_id, "req_AAAAAAAAAAAAAAAA");
   const serialized = events.map((event) => JSON.stringify(event)).join("\n");
   assert.doesNotMatch(serialized, /sr_live_tokidAAAAAAAAAAAAAAAA_AAAA/);
   assert.doesNotMatch(serialized, /authorization/i);

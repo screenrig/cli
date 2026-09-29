@@ -1,7 +1,7 @@
 import type { WriteRecovery } from "./write-recovery.js";
 import { creditsLowWarnings, observeCreditsRemaining, parseCreditsRemainingHeader } from "./credits.js";
 import { ExitCode } from "./exit-codes.js";
-import { isValidIdempotencyKey, isValidRequestId, newIdempotencyKey, newRequestId } from "./ids.js";
+import { REQUEST_ID_MAX, REQUEST_ID_MIN, isValidIdempotencyKey, isValidRequestId, newIdempotencyKey, newRequestId } from "./ids.js";
 import {
   CliError,
   makeProblem,
@@ -76,7 +76,10 @@ function problemCode(body: unknown): string | undefined {
 export interface ApiClientOptions {
   transport: Transport;
   token?: string;
+  /** `--request-id`: the X-Request-ID of the invocation's first HTTP request, and its invocation_id. */
   requestId?: string;
+  /** Shares request-id state across every client of one invocation; overrides `requestId`. */
+  requestIds?: RequestIds;
   idempotencyKey?: string;
   timeoutMs?: number;
   /** When set, authenticated remaining credits are observed for the envelope warning. */
@@ -85,8 +88,42 @@ export interface ApiClientOptions {
   writeRecovery?: WriteRecovery;
 }
 
+/**
+ * Request ids for one CLI invocation. Every HTTP request gets its own
+ * X-Request-ID so server logs never merge requests. A `--request-id` is sent
+ * on the first request only and doubles as the invocation id; without one,
+ * the invocation id is a fresh id that no request carries. The invocation id
+ * appears in the operation log as `invocation_id`.
+ */
+export class RequestIds {
+  readonly invocationId: string;
+  private pending?: string;
+  private lastId?: string;
+
+  constructor(requested?: string) {
+    if (requested !== undefined && !isValidRequestId(requested)) {
+      throw usageError(`Invalid --request-id; expected req_ plus ${REQUEST_ID_MIN}-${REQUEST_ID_MAX} letters, digits, _ or -.`);
+    }
+    this.invocationId = requested ?? newRequestId();
+    this.pending = requested;
+  }
+
+  /** The id for the next HTTP request. */
+  next(): string {
+    const id = this.pending ?? newRequestId();
+    this.pending = undefined;
+    this.lastId = id;
+    return id;
+  }
+
+  /** The id of the most recent HTTP request, or the invocation id before any request. */
+  get last(): string {
+    return this.lastId ?? this.invocationId;
+  }
+}
+
 export class ApiClient {
-  readonly requestId: string;
+  readonly requestIds: RequestIds;
   readonly idempotencyKey: string;
   private readonly token?: string;
   private readonly transport: Transport;
@@ -104,19 +141,30 @@ export class ApiClient {
     this.timeoutMs = options.timeoutMs ?? 30_000;
     this.creditsOwner = options.creditsOwner;
     this.logger = options.logger ?? loggerOf({});
-    if (options.requestId && !isValidRequestId(options.requestId)) {
-      throw usageError("Invalid --request-id; expected req_ plus 16+ URL-safe characters.");
-    }
     if (options.idempotencyKey && !isValidIdempotencyKey(options.idempotencyKey)) {
       throw usageError("Invalid --idempotency-key.");
     }
-    this.requestId = options.requestId ?? newRequestId();
+    this.requestIds = options.requestIds ?? new RequestIds(options.requestId);
     this.idempotencyKey = options.idempotencyKey ?? newIdempotencyKey();
+  }
+
+  /** The id of the most recent HTTP request; success envelopes report it. */
+  get requestId(): string {
+    return this.requestIds.last;
+  }
+
+  get invocationId(): string {
+    return this.requestIds.invocationId;
+  }
+
+  /** A fresh X-Request-ID for a request this client does not send itself (SSE). */
+  nextRequestId(): string {
+    return this.requestIds.next();
   }
 
   private headers(idempotent: boolean, extra?: Record<string, string>, idempotencyKey?: string): Record<string, string> {
     const headers: Record<string, string> = {
-      "x-request-id": this.requestId,
+      "x-request-id": this.requestIds.next(),
       ...extra,
     };
     if (this.token) {
@@ -145,7 +193,8 @@ export class ApiClient {
       method: req.method,
       path: req.path,
       query_keys: keys,
-      request_id: headers["x-request-id"] ?? this.requestId,
+      request_id: headers["x-request-id"],
+      invocation_id: this.invocationId,
       content_type: summary.content_type,
       byte_length: summary.byte_length,
       request: summary.request,
@@ -168,7 +217,7 @@ export class ApiClient {
       await recovery!.clear(pending);
     }
     const remaining = this.token ? parseCreditsRemainingHeader(response.headers) : undefined;
-    const requestId = response.headers["x-request-id"] ?? this.requestId;
+    const requestId = response.headers["x-request-id"] ?? headers["x-request-id"];
     if (response.status >= 400) {
       const problem = normalizeProblem(response.body, {
         status: response.status,
@@ -232,7 +281,8 @@ export class ApiClient {
       method: req.method,
       path: req.path,
       query_keys: keys,
-      request_id: headers["x-request-id"] ?? this.requestId,
+      request_id: headers["x-request-id"],
+      invocation_id: this.invocationId,
     });
     let response: TransportDownloadResponse;
     try {
@@ -246,7 +296,7 @@ export class ApiClient {
       throw err;
     }
     const remaining = this.token ? parseCreditsRemainingHeader(response.headers) : undefined;
-    const requestId = response.headers["x-request-id"] ?? this.requestId;
+    const requestId = response.headers["x-request-id"] ?? headers["x-request-id"];
     const lengthHeader = response.headers["content-length"];
     const parsedLength = lengthHeader !== undefined ? Number(lengthHeader) : undefined;
     const byteLength = parsedLength !== undefined && Number.isFinite(parsedLength) ? parsedLength : undefined;

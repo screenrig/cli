@@ -29,7 +29,10 @@ export interface LogEvent {
   path?: string;
   query_keys?: string[];
   status?: number;
+  /** X-Request-ID of this one HTTP request; unique per request. */
   request_id?: string;
+  /** Request event only: `--request-id` when given, else a per-invocation id no request carries. */
+  invocation_id?: string;
   content_type?: string;
   byte_length?: number;
   request?: unknown;
@@ -64,6 +67,7 @@ export interface StartHttpInit {
   message?: string;
   query_keys?: string[];
   request_id?: string;
+  invocation_id?: string;
   content_type?: string;
   byte_length?: number;
   request?: unknown;

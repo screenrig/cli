@@ -115,6 +115,21 @@ async function withAuthenticatedRuntime(
   return { ...result, configDir };
 }
 
+test("--request-id goes on the first HTTP request of the invocation and every request gets its own id", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("request-id-per-request-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const requested = "req_CALLERCORRELATION01";
+  const enrolled = await withRuntime(["--json", "--request-id", requested, "agent", "enroll", "--email", "Owner@example.com"], transport, { fs: fsLike });
+  assert.equal(enrolled.code, 0, enrolled.stdout);
+  const sent = transport.calls.map((call) => call.headers?.["x-request-id"]);
+  assert.ok(sent.length > 1, JSON.stringify(sent));
+  assert.equal(sent[0], requested);
+  assert.equal(new Set(sent).size, sent.length);
+  const tooLong = await withRuntime(["--json", "--request-id", `req_${"a".repeat(65)}`, "screen", "pair", "abc234", "--label", "Lobby"], transport, { fs: fsLike });
+  assert.equal((JSON.parse(tooLong.stdout) as { error: { code: string } }).error.code, "usage_error");
+});
+
 test("pairing requires explicit enrollment and then preserves the original pairing behavior", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("explicit-enrollment-pair-");

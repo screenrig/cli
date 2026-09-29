@@ -146,3 +146,35 @@ test("a server hint, next.argv, errors, and current_revision survive the client"
   assert.deepEqual(problem.next?.argv, ["playlist", "show", "pl_1", "--editable"]);
   assert.deepEqual(problem.errors, [{ field: "revision", code: "stale", detail: "is 7, current is 8" }]);
 });
+
+test("every HTTP request gets its own X-Request-ID and --request-id goes on the first only", async () => {
+  const transport = new FakeTransport()
+    .on("GET", "/api/v1/project", (req) => ({ status: 200, headers: { "x-request-id": req.headers?.["x-request-id"] ?? "" }, body: {} }))
+    .on("GET", "/api/v1/screens", (req) => ({ status: 500, headers: { "x-request-id": req.headers?.["x-request-id"] ?? "" }, body: { code: "internal_error" } }));
+  const requested = "req_CALLERCORRELATION01";
+  const client = new ApiClient({ transport, requestId: requested });
+  await client.call({ method: "GET", path: "/api/v1/project" });
+  await client.call({ method: "GET", path: "/api/v1/project" });
+  const failed = await problemOf(client.call({ method: "GET", path: "/api/v1/screens" }));
+  const sent = transport.calls.map((call) => call.headers?.["x-request-id"]);
+  assert.equal(sent[0], requested);
+  assert.equal(new Set(sent).size, 3);
+  for (const id of sent) assert.match(id ?? "", /^req_[A-Za-z0-9_-]{16,64}$/);
+  assert.equal(failed.request_id, sent[2]);
+  assert.equal(client.requestId, sent[2]);
+  assert.equal(client.invocationId, requested);
+
+  const plain = new ApiClient({ transport });
+  await plain.call({ method: "GET", path: "/api/v1/project" });
+  await plain.call({ method: "GET", path: "/api/v1/project" });
+  const [a, b] = transport.calls.slice(3).map((call) => call.headers?.["x-request-id"]);
+  assert.notEqual(a, b);
+  assert.notEqual(plain.invocationId, a);
+});
+
+test("--request-id is limited to what the API accepts", () => {
+  assert.doesNotThrow(() => new ApiClient({ transport: new FakeTransport(), requestId: `req_${"a".repeat(64)}` }));
+  for (const bad of [`req_${"a".repeat(65)}`, `req_${"a".repeat(15)}`, "req_has.a.dot.aaaaaaaaaaa", "abc_aaaaaaaaaaaaaaaaaaaa"]) {
+    assert.throws(() => new ApiClient({ transport: new FakeTransport(), requestId: bad }), (error: unknown) => error instanceof CliError && error.problem.code === "usage_error", bad);
+  }
+});

@@ -285,6 +285,7 @@ class BaseLogger implements OperationLogger {
       path: init.path,
       ...(init.query_keys && init.query_keys.length > 0 ? { query_keys: init.query_keys } : {}),
       ...(init.request_id ? { request_id: init.request_id } : {}),
+      ...(init.invocation_id ? { invocation_id: init.invocation_id } : {}),
       ...(init.content_type ? { content_type: init.content_type } : {}),
       ...(init.byte_length !== undefined ? { byte_length: init.byte_length } : {}),
       ...(init.request !== undefined ? { request: init.request } : {}),

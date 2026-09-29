@@ -41,7 +41,10 @@ and `error.detail` say what failed. `error.hint` says what to do about it, in on
 or two plain sentences; every error carries one. `error.next`, when present, is a
 command to run next (`next.argv` is the same command as an argument list).
 `error.errors[]` names the fields a request got wrong, and `error.request_id`
-identifies the request when you report a problem. Rate-limited answers add
+identifies the failing HTTP request when you report a problem. Every HTTP
+request carries its own `X-Request-ID`. `--request-id req_…` (16-64 letters,
+digits, `_` or `-` after `req_`) is sent on the invocation's first request only,
+and is recorded as `invocation_id` in the operation log. Rate-limited answers add
 `retry_after_seconds`, revision conflicts add `current_revision`, and server
 failures add `retryable`. Human output prints the same members, with the hint on a
 `hint:` line.
