@@ -661,7 +661,7 @@ export const handleAppUpdate = commandHandler(async (args, runtime, resolved) =>
 }, true);
 
 export const handleAppList = commandHandler(async (args, runtime, resolved) => {
-  return simpleGet(args, runtime, resolved, "/api/v1/applications", "Applications");
+  return simpleList(args, runtime, resolved, "/api/v1/applications", "Applications");
 }, true);
 
 export const handleAppShow = commandHandler(async (args, runtime, resolved) => {
@@ -2610,15 +2610,30 @@ async function simpleGet(
   pathName: string,
   title: string,
   query?: Record<string, string | undefined>,
+  paged = false,
 ): Promise<CommandResult> {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
-  const response = await client.call({ method: "GET", path: pathName, query });
+  const response = paged
+    ? await client.listAll(pathName, query)
+    : await client.call({ method: "GET", path: pathName, query });
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
     human: `${title}\n${JSON.stringify(response.body, null, 2)}`,
   };
+}
+
+/** simpleGet for a cursor-paged list: every page is read, and data holds all the items with next_cursor null. */
+function simpleList(
+  args: ParsedArgs,
+  runtime: CliRuntime,
+  resolved: ResolvedCommandConfig,
+  pathName: string,
+  title: string,
+  query?: Record<string, string | undefined>,
+): Promise<CommandResult> {
+  return simpleGet(args, runtime, resolved, pathName, title, query, true);
 }
 
 const MEDIA_TAG_PATTERN = /^[A-Za-z0-9]{1,32}$/;
@@ -2689,7 +2704,7 @@ export const handleMediaList = commandHandler(async (args, runtime, resolved) =>
   if (Object.hasOwn(args.flags, "kind")) {
     throw usageError("media list uses --primitive image|video|audio, not --kind.");
   }
-  return simpleGet(args, runtime, resolved, "/api/v1/media", "Media", {
+  return simpleList(args, runtime, resolved, "/api/v1/media", "Media", {
     tag: mediaTagFromArgs(args),
     primitive: mediaPrimitiveFromArgs(args),
   });
@@ -3866,7 +3881,7 @@ async function playlistPreviewCommand(
 
 export const handlePlaylistList = commandHandler(async (args, runtime, resolved) => {
 
-  return simpleGet(args, runtime, resolved, "/api/v1/playlists", "Playlists");
+  return simpleList(args, runtime, resolved, "/api/v1/playlists", "Playlists");
 }, true);
 
 export const handlePlaylistShow = commandHandler(async (args, runtime, resolved) => {
@@ -4105,7 +4120,7 @@ async function assertAssignedScreensHaveZone(client: ApiClient, playlistId: stri
   if (!usesPageVisibility({ pages })) {
     return;
   }
-  const response = await client.call({ method: "GET", path: "/api/v1/screens" });
+  const response = await client.listAll("/api/v1/screens");
   const items = (response.body as { items?: Screen[] } | undefined)?.items;
   if (!Array.isArray(items)) {
     return;
@@ -4119,7 +4134,7 @@ async function assertAssignedScreensHaveZone(client: ApiClient, playlistId: stri
 export const handleScreenList = commandHandler(async (args, runtime, resolved) => {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
-  const response = await client.call({ method: "GET", path: "/api/v1/screens", query: screenListQuery(args) });
+  const response = await client.listAll("/api/v1/screens", screenListQuery(args));
   const items = (response.body as { items?: Screen[] } | undefined)?.items;
   return {
     envelope: jsonBody(response, client.requestId),
@@ -5202,7 +5217,7 @@ type ScreenshotFleetItem = FleetItem & Partial<Omit<ScreenshotSaved, "screen_id"
  * Client-side screenshot fan-out: screenshots are unbilled per screen, so
  * there is no fleet screenshot action. --tag resolves through
  * GET /api/v1/screens?tag=T and keeps active screens, matching the fleet
- * actions selector (one metered list request; captures are unbilled). Each
+ * actions selector (one metered list request per page; captures are unbilled). Each
  * capture writes DIRECTORY/<screen_id>.webp; a failed capture is that
  * screen's result, never a transport error. An unexpected (non-CliError)
  * failure stops scheduling: the failing screen and every screen not yet
@@ -5233,7 +5248,7 @@ async function screenScreenshotFleet(args: ParsedArgs, runtime: CliRuntime, clie
 
   let ids: string[];
   if (selector.by === "tag") {
-    const listed = await client.call({ method: "GET", path: "/api/v1/screens", query: { tag: selector.tag } });
+    const listed = await client.listAll("/api/v1/screens", { tag: selector.tag });
     const items = (listed.body as { items?: Screen[] } | undefined)?.items;
     if (!Array.isArray(items)) throw usageError("Screen list response does not match the generated ScreenList contract.");
     ids = items.filter((screen) => screen?.state === "active" && typeof screen.id === "string").map((screen) => screen.id);
@@ -5318,7 +5333,7 @@ export const handleKvList = commandHandler(async (args, runtime, resolved) => {
   if (!applicationId) throw usageError("kv commands require --app-id.");
   const key = args.positionals[2];
 
-  return simpleGet(args, runtime, resolved, `/api/v1/applications/${applicationId}/kv`, "K/V");
+  return simpleList(args, runtime, resolved, `/api/v1/applications/${applicationId}/kv`, "K/V");
 }, true);
 
 export const handleKvGet = commandHandler(async (args, runtime, resolved) => {

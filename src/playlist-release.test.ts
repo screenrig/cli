@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ApiClient } from "./client.js";
-import { FakeTransport } from "./transport/fake.js";
+import { FakeTransport, listPage } from "./transport/fake.js";
 import { preparePlaylist } from "./playlist-authoring.js";
 import { replacePlaylistRelease } from "./playlist-release.js";
 import { parseArgv } from "./argv.js";
 
 const response = (body: unknown) => ({ status: 200, headers: {}, body });
-function fixture() {
+/** `pageSize` serves the screen lists that many rows per page, with next_cursor; without it each list is one page. */
+function fixture(pageSize?: number) {
   const document = preparePlaylist({ name: "Board", content: [{ primitive: "application", release_id: "rel_OLD" }, { primitive: "application", release_id: "rel_OLD" }], width: 1920, height: 1080, durationMs: 8000, fit: "fill" });
   document.pages[0].primitives[0].application_id = "app_BOARD";
   document.pages[0].visibility = { enabled: true, from: "2026-09-10T09:00" };
@@ -17,7 +18,10 @@ function fixture() {
   const screens = [ { id: "scr_A", label: "Lobby", state: "active", revision: 3, playlist_id: "pl_BOARD" }, { id: "scr_B", label: "Stored", state: "archived", revision: 7, playlist_id: "pl_BOARD" }, { id: "scr_C", label: "Other", state: "active", revision: 2, playlist_id: "pl_OTHER" } ];
   const transport = new FakeTransport()
     .on("GET", "/api/v1/playlists/pl_BOARD", () => response({ ...document, id: "pl_BOARD", revision }))
-    .on("GET", "/api/v1/screens", req => response(malformed ? {} : { items: screens.filter(s => (s.state === "archived") === (req.query?.state === "archived")) }))
+    .on("GET", "/api/v1/screens", req => {
+      const listed = screens.filter(s => (s.state === "archived") === (req.query?.state === "archived"));
+      return malformed ? response({}) : pageSize === undefined ? response({ items: listed }) : listPage(req, listed, pageSize);
+    })
     .on("PUT", "/api/v1/playlists/pl_BOARD", req => failure ? { status: 409, headers: {}, body: { code: "revision_conflict", title: "Conflict", status: 409, detail: "Playlist changed", current_revision: 5 } } : response({ ...(req.body as object), id: "pl_BOARD", revision: 5 }));
   const options = { client: new ApiClient({ transport }), apiUrl: "https://api.screenrig.ai", playlistId: "pl_BOARD", pageId: "page_1", primitiveId: "content", releaseId: "rel_NEW", apply: false };
   return { document, transport, options, screens, changeRevision: () => revision++, failWrite: () => failure = true, malformedList: () => malformed = true };
@@ -51,6 +55,20 @@ for (const change of ["revision", "assignment", "release", "page", "malformed"] 
   await assert.rejects(() => replacePlaylistRelease({ ...f.options, apply: true, revision: "4", impact: preview.impact,
     ...(change === "release" ? { releaseId: "rel_DIFFERENT" } : {}), ...(change === "page" ? { pageId: "page_2" } : {}) }));
   assert.ok(f.transport.calls.every(c => c.method === "GET"));
+});
+
+test("the impact review reads every page of both screen lists", async () => {
+  const late = { id: "scr_D", label: "Late", state: "active", revision: 1, playlist_id: "pl_BOARD" };
+  const whole = fixture(); whole.screens.push(late);
+  const paged = fixture(1); paged.screens.push(late);
+  const expected = await replacePlaylistRelease(whole.options);
+  const preview = await replacePlaylistRelease(paged.options);
+  assert.deepEqual(preview.affected_screens!.map(s => s.id), ["scr_A", "scr_B", "scr_D"]);
+  assert.equal(preview.impact, expected.impact, "the impact token does not depend on the page size");
+  assert.deepEqual(
+    paged.transport.calls.filter(c => c.path === "/api/v1/screens").map(c => c.query),
+    [undefined, { after: "pg_1" }, { after: "pg_2" }, { state: "archived" }],
+  );
 });
 
 test("server revision race is surfaced without a retry", async () => {

@@ -48,6 +48,9 @@ function errorBodyText(rawText: string | undefined, body: unknown): string {
 
 const READ_METHODS = new Set(["GET", "HEAD"]);
 
+/** A cursor-paged list is read for at most this many pages (each one billed request). */
+export const LIST_MAX_PAGES = 50;
+
 /**
  * A transport failure says what went wrong but not what the caller may do
  * about it. Whether rerunning is safe depends on the method and on whether the
@@ -331,6 +334,46 @@ export class ApiClient {
     });
     if (this.creditsOwner) observeCreditsRemaining(this.creditsOwner, remaining);
     return response;
+  }
+
+  /**
+   * GET a cursor-paged list (screens, media, playlists, applications) whole.
+   * Each further page repeats the query with `after` set to the previous
+   * page's next_cursor; null or an absent next_cursor ends the list. The answer
+   * is the last page's status and headers with every page's items in order and
+   * next_cursor null. A first answer that is not a list document comes back
+   * unchanged for the caller to judge, as before paging. A later page that is
+   * not a list, or a list still offering pages after LIST_MAX_PAGES, is an
+   * error: the caller never receives a truncated list.
+   */
+  async listAll(path: string, query?: Record<string, string | undefined>): Promise<TransportResponse> {
+    const items: unknown[] = [];
+    let after: string | undefined;
+    for (let page = 1; ; page += 1) {
+      const response = await this.call({ method: "GET", path, query: after === undefined ? query : { ...query, after } });
+      const body = response.body as { items?: unknown; next_cursor?: unknown } | undefined;
+      if (!body || !Array.isArray(body.items)) {
+        if (page === 1) return response;
+        throw unexpectedResponseError(
+          `GET ${path} answered page ${page} without an items array, so the list was not read completely.`,
+          this.requestId,
+          "Run the same command again; if it keeps happening, report the request_id with screenrig feedback bug.",
+        );
+      }
+      items.push(...body.items);
+      const next = body.next_cursor;
+      if (typeof next !== "string" || next === "") {
+        return { status: response.status, headers: response.headers, body: { ...body, items, next_cursor: null } };
+      }
+      if (page >= LIST_MAX_PAGES) {
+        throw unexpectedResponseError(
+          `GET ${path} still offered another page after ${LIST_MAX_PAGES} pages (${items.length} rows), so the list was not read completely.`,
+          this.requestId,
+          "Narrow the list with a filter where the command has one, or report the request_id with screenrig feedback bug.",
+        );
+      }
+      after = next;
+    }
   }
 
   async getOperation(id: string, timeoutMs?: number): Promise<Operation> {

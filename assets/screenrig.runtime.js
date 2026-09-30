@@ -2323,16 +2323,21 @@
         return;
       }
       this.advanced = true;
-      await this.post(
-        {
-          protocol: PROTOCOL,
-          message_id: this.idFactory(),
-          kind: "page.advance",
-          primitive_id: context.primitive_id,
-          payload: { generation: context.generation, nonce: context.nonce }
-        },
-        true
-      );
+      try {
+        await this.post(
+          {
+            protocol: PROTOCOL,
+            message_id: this.idFactory(),
+            kind: "page.advance",
+            primitive_id: context.primitive_id,
+            payload: { generation: context.generation, nonce: context.nonce }
+          },
+          true
+        );
+      } catch (err) {
+        this.advanced = false;
+        throw err;
+      }
     }
     requireKey(key) {
       const bytes = new TextEncoder().encode(key);

@@ -24,7 +24,7 @@ import {
 import { silentProgressReporter } from "./media/progress.js";
 import { DEFAULT_CODEC, DEFAULT_MAX_FPS, DEFAULT_WEBP_QUALITY, MAX_EDGE } from "./media/transcode.js";
 import { testTemp } from "./test-temp.js";
-import { FakeTransport } from "./transport/fake.js";
+import { FakeTransport, listPage } from "./transport/fake.js";
 import type { TransportRequest, TransportResponse } from "./transport/types.js";
 
 const PROJECT_ID = "prj_AAAAAAAAAAAAAAAAAAAAAAAA";
@@ -689,7 +689,8 @@ test("operation log emits batch and per-item local pairs without signed material
   }
 });
 
-test("409 resource_conflict on a terminal operation recovers the media id from the list", async () => {
+// One row per page puts the matching media on the second page of the list.
+for (const pageSize of [undefined, 1]) test(`409 resource_conflict on a terminal operation recovers the media id from the list${pageSize === undefined ? "" : " across pages"}`, async () => {
   const configDir = await testTemp("batch-409-recover-cfg-");
   const cwdDir = await testTemp("batch-409-recover-cwd-");
   const fsLike = await enrolled(configDir);
@@ -713,29 +714,25 @@ test("409 resource_conflict on a terminal operation recovers the media id from t
       },
     };
   });
-  transport.on("GET", "/api/v1/media", () => ({
-    status: 200,
-    headers: {},
-    body: {
-      items: [
-        {
-          id: "med_RECOVEREDAAAAAAAAAAAAAAAA",
-          filename: "still.png",
-          primitive: "image",
-          content_type: "image/png",
-          operation_id: "op_RECOVERED",
-          sha256: digest,
-          bytes: bytes.length,
-          width: 1,
-          height: 1,
-          revision: 3,
-          state: "ready",
-          created_at: "2026-08-14T17:00:00.000Z",
-          updated_at: "2026-08-14T17:00:01.000Z",
-        },
-      ],
-    },
-  }));
+  const recovered = {
+    id: "med_RECOVEREDAAAAAAAAAAAAAAAA",
+    filename: "still.png",
+    primitive: "image",
+    content_type: "image/png",
+    operation_id: "op_RECOVERED",
+    sha256: digest,
+    bytes: bytes.length,
+    width: 1,
+    height: 1,
+    revision: 3,
+    state: "ready",
+    created_at: "2026-08-14T17:00:00.000Z",
+    updated_at: "2026-08-14T17:00:01.000Z",
+  };
+  const listed = [{ ...recovered, id: "med_OTHERAAAAAAAAAAAAAAAAAAAA", sha256: "0".repeat(64) }, recovered];
+  transport.on("GET", "/api/v1/media", (req) => pageSize === undefined
+    ? { status: 200, headers: {}, body: { items: listed } }
+    : listPage(req, listed, pageSize));
   try {
     const result = await withRuntime(
       ["--json", "media", "upload-batch", manifest, "--state", statePath, "--no-transcode", "--no-progress", "--concurrency", "1"],

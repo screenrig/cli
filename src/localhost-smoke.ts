@@ -10,7 +10,8 @@ import type { HttpMethod } from "./transport/types.js";
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 
 async function main(): Promise<void> {
-  const backend = memoryBackend().pushStream(
+  // One row per page, so a list of two or more rows is read across requests.
+  const backend = memoryBackend({ listPageSize: 1 }).pushStream(
     'id: ev1_1\nevent: message\ndata: {"cursor":"ev1_1","type":"smoke.ready","severity":"info","message":"localhost stream","at":"2026-08-14T17:00:00.000Z"}\n\n',
   );
   let apiUrl = "";
@@ -378,6 +379,10 @@ async function main(): Promise<void> {
       host: { platform: "android", capabilities: ["reboot", "display_power.cec"] },
       created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
     } as unknown as Parameters<NonNullable<typeof backend.putScreen>>[0]);
+    const bothScreens = await run("screen", "list");
+    const bothData = bothScreens.data as { items?: Array<{ id?: string }>; next_cursor?: string | null };
+    assert.deepEqual((bothData.items ?? []).map((item) => item.id).sort(), ["scr_DISPLAYAAAAAAAAAAAAAAAA", "scr_PAIRINGAAAAAAAAAAAAAAAA"]);
+    assert.equal(bothData.next_cursor, null);
     const rebooted = await run("screen", "reboot", "scr_DISPLAYAAAAAAAAAAAAAAAA");
     assert.match(String((rebooted.data as { reboot_id?: string }).reboot_id), /^rbt_/);
     const unconfirmed = await invoke(["screen", "reboot", "--tag", "Hall"]);

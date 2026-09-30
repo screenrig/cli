@@ -6,16 +6,20 @@ info:
     Agent-operated digital signage control and runtime API.
 
     Public remaining is whole credits, never millicredits. Authenticated /api/v1
-    JSON and problem responses include ScreenRig-Credits-Remaining,
-    ScreenRig-Credits-Reset, and ScreenRig-Credits-Included. SSE, runtime,
-    content, and unauthenticated responses omit them. The ledger unit remains
+    and /api/v2/playlists JSON and problem responses, and the JSON and problem
+    responses of a paired Player's runtime session (including
+    /runtime/v2/manifest), include ScreenRig-Credits-Remaining,
+    ScreenRig-Credits-Reset, and ScreenRig-Credits-Included. SSE, content,
+    unauthenticated, and anonymous public-screen runtime responses omit them.
+    The ledger unit remains
     millicredits (1000 mcr = 1 credit); published remaining is floored.
 
-    Authenticated user or agent /api/v1 requests cost 1 credit, debited
+    Authenticated user or agent /api/v1 and /api/v2/playlists requests cost 1
+    credit, debited
     immediately against this server request id, after the first 10,000 API or
     billed listen-stream taxes in the UTC month. Remaining below the intro
     floor of negative 1,000,000 credits (zero from 2027-01-01) is
-    payment_required. GET /api/v1/project and POST
+    payment_required; that includes the /api/v2/playlists routes. GET /api/v1/project and POST
     /api/v1/agents/self/disconnect do not debit, so a zero-remaining project
     can recover. Screen messages are exempt from this meter:
     POST /api/v1/screens/{id}/toast, POST /api/v1/screens/{id}/screenshot,
@@ -1039,7 +1043,9 @@ paths:
   /api/v1/applications:
     get:
       operationId: listApplications
+      description: Lists applications newest first, at most 500 per page. Names are labels and need not be unique; address an application by id. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
       security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ListAfter" }]
       responses:
         "200": { description: Applications, content: { application/json: { schema: { $ref: "#/components/schemas/ApplicationList" } } } }
         default: { $ref: "#/components/responses/Problem" }
@@ -1128,8 +1134,9 @@ paths:
   /api/v2/playlists:
     get:
       operationId: listPlaylistsV2
-      description: Versioned playlist list that may expose adslot pages. The v1 list refuses an ad-bearing document with version_required instead of filtering it.
+      description: Versioned playlist list that may expose adslot pages. The v1 list refuses a page holding an ad-bearing document with version_required instead of filtering it. Pages like listPlaylists, newest first, at most 200 per page and fewer once a page holds 8 MiB of stored playlists. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
       security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ListAfter" }]
       responses:
         "200": { description: Playlists with the adslot page union., content: { application/json: { schema: { $ref: "#/components/schemas/PlaylistV2List" } } } }
         default: { $ref: "#/components/responses/Problem" }
@@ -1169,8 +1176,9 @@ paths:
   /api/v1/playlists:
     get:
       operationId: listPlaylists
-      description: Lists playlists. Authenticated /api/v1 control-plane read; costs 1 credit.
+      description: Lists playlists newest first, at most 200 per page and fewer once a page holds 8 MiB of stored playlists (a page always holds at least one). next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page. Authenticated /api/v1 control-plane read; costs 1 credit per page.
       security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ListAfter" }]
       responses:
         "200":
           description: Playlists
@@ -1315,9 +1323,9 @@ paths:
   /api/v1/screens:
     get:
       operationId: listScreens
-      description: Default list returns pairing_pending and active screens. Pass state=archived to list archived screens only. Pass tag to list only screens whose tags contain that exact tag; untagged screens are omitted when the filter is present.
+      description: Default list returns pairing_pending and active screens. Pass state=archived to list archived screens only. Pass tag to list only screens whose tags contain that exact tag; untagged screens are omitted when the filter is present. Screens are newest first, at most 500 per page. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
       security: [{ projectBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/ScreenListState" }, { $ref: "#/components/parameters/ScreenTagQuery" }]
+      parameters: [{ $ref: "#/components/parameters/ScreenListState" }, { $ref: "#/components/parameters/ScreenTagQuery" }, { $ref: "#/components/parameters/ListAfter" }]
       responses:
         "200": { description: Screens, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenList" } } } }
         default: { $ref: "#/components/responses/Problem" }
@@ -2336,7 +2344,7 @@ paths:
   /api/v1/advertising/reports/delivery:
     get:
       operationId: getAdvertisingDelivery
-      description: Seller-scoped gross, serving fee and net for one window, with its own delivery evidence. It never exposes the buyer's wallet or other networks. Only authorized completed-play evidence establishes billable delivery.
+      description: Seller-scoped gross, serving fee and net for one window, with its own delivery evidence. It never exposes the buyer's wallet or other networks. Only authorized completed-play evidence establishes billable delivery. The window is at most 92 days; a wider window is invalid_request. When it holds more than 5000 settlements the response sets truncated, totals and counts still cover all of them and rows lists only the earliest 5000.
       security: [{ projectBearer: [] }]
       parameters:
         - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
@@ -2423,8 +2431,13 @@ paths:
   /api/v1/applications/{application_id}/kv:
     get:
       operationId: listKV
+      description: >-
+        Returns at most 200 entries in ascending key order. next_cursor is the last returned key; pass it back as
+        after to fetch the next page. next_cursor is null when there are no more entries.
       security: [{ projectBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/ApplicationID" }]
+      parameters:
+        - { $ref: "#/components/parameters/ApplicationID" }
+        - { name: after, in: query, required: false, schema: { type: string } }
       responses:
         "200": { description: KV entries, content: { application/json: { schema: { $ref: "#/components/schemas/KVList" } } } }
         default: { $ref: "#/components/responses/Problem" }
@@ -2454,8 +2467,9 @@ paths:
   /api/v1/media:
     get:
       operationId: listMedia
+      description: Lists ready media newest first, at most 1000 per page. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
       security: [{ projectBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/MediaTagQuery" }, { $ref: "#/components/parameters/MediaPrimitiveQuery" }]
+      parameters: [{ $ref: "#/components/parameters/MediaTagQuery" }, { $ref: "#/components/parameters/MediaPrimitiveQuery" }, { $ref: "#/components/parameters/ListAfter" }]
       responses:
         "200": { description: Media, content: { application/json: { schema: { $ref: "#/components/schemas/MediaList" } } } }
   /api/v1/media/generations:
@@ -2488,8 +2502,8 @@ paths:
         vendor cost of the still, rounded up to whole credits, after the intro
         floor (negative 1,000,000 credits until 2027-01-01, then zero) returns
         payment_required, except SCREENRIG__ENVIRONMENT=development. Admission
-        before the vendor call requires remaining above that floor by at least 1
-        credit. Empty selected-vendor configuration returns not_ready. Project bearer only.
+        before the vendor call requires remaining above that floor by the per-quality
+        minimum: 200 credits for low, 800 for medium, 2000 for high. Empty selected-vendor configuration returns not_ready. Project bearer only.
         One in-flight generation per project; further parallelism is rate_limited.
       x-rate-limit-policies: [{ name: media-generate-admission, quota: 6, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
@@ -2557,22 +2571,25 @@ paths:
         authenticated API request credit, and completed response bytes are recorded as project_media_export egress. The media
         identifier is never authority: another project's identifier returns not_found. The API streams from private storage and
         never publishes an object key, storage URL, or signed GET. The attachment filename is the media identifier plus the
-        canonical extension for the verified content type.
+        canonical extension for the verified content type. Remaining at or below the intro floor (negative 1,000,000 credits
+        until 2027-01-01, then zero) returns payment_required before the media is read or any byte is transferred.
       security: [{ projectBearer: [] }]
       responses:
         "200": { description: Complete original rendition., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Length: { schema: { type: integer } }, Content-Type: { schema: { type: string } }, Content-Disposition: { schema: { type: string, pattern: '^attachment; filename="med_[A-Za-z0-9_-]+\.(png|jpg|webp|gif|mp4|webm|mp3)"$' } }, ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } } }, content: { image/png: { schema: { type: string, format: binary } }, image/jpeg: { schema: { type: string, format: binary } }, image/webp: { schema: { type: string, format: binary } }, image/gif: { schema: { type: string, format: binary } }, video/mp4: { schema: { type: string, format: binary } }, video/webm: { schema: { type: string, format: binary } }, audio/mpeg: { schema: { type: string, format: binary } } } }
         "206": { description: One standards-correct byte range., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } }, Content-Length: { schema: { type: integer } }, Content-Type: { schema: { type: string } }, Content-Disposition: { schema: { type: string } }, ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } } }, content: { image/png: { schema: { type: string, format: binary } }, image/jpeg: { schema: { type: string, format: binary } }, image/webp: { schema: { type: string, format: binary } }, image/gif: { schema: { type: string, format: binary } }, video/mp4: { schema: { type: string, format: binary } }, video/webm: { schema: { type: string, format: binary } }, audio/mpeg: { schema: { type: string, format: binary } } } }
         "304": { description: The exact immutable media ETag matches If-None-Match. No body or egress increment is produced., headers: { ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } } }
+        "402": { $ref: "#/components/responses/Problem" }
         "416": { description: Unsatisfiable or malformed range., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
     head:
       operationId: headMediaContent
-      description: Applies the same project ownership, conditional, range, and private-storage rules as exportMediaContent without opening or transferring the stored rendition.
+      description: Applies the same prepaid, project ownership, conditional, range, and private-storage rules as exportMediaContent without opening or transferring the stored rendition.
       security: [{ projectBearer: [] }]
       responses:
         "200": { description: Complete-rendition metadata with no body., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Length: { schema: { type: integer } }, Content-Type: { schema: { type: string } }, Content-Disposition: { schema: { type: string } }, ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } } } }
         "206": { description: Byte-range metadata with no body., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } }, Content-Length: { schema: { type: integer } }, Content-Type: { schema: { type: string } }, Content-Disposition: { schema: { type: string } }, ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } } } }
         "304": { description: The exact immutable media ETag matches If-None-Match. No body is produced., headers: { ETag: { schema: { type: string } }, Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } } }
+        "402": { description: Prepaid remaining is below the floor. A HEAD response carries no problem body. }
         "416": { description: Unsatisfiable or malformed range., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/reviews/{id}:
@@ -2673,7 +2690,9 @@ paths:
       operationId: listWebhooks
       description: >-
         Lists the project's webhooks, oldest first (at most 10). The signing
-        secret is never returned here.
+        secret is never returned here. Requires the project capability; a
+        reports-only credential is refused 403 forbidden, because the response
+        includes receiver URLs.
       security: [{ projectBearer: [] }]
       responses:
         "200": { description: The project's webhooks., content: { application/json: { schema: { $ref: "#/components/schemas/WebhookList" } } } }
@@ -2709,6 +2728,7 @@ paths:
     parameters: [{ $ref: "#/components/parameters/ResourceID" }]
     get:
       operationId: getWebhook
+      description: Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs.
       security: [{ projectBearer: [] }]
       responses:
         "200": { description: One webhook., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Webhook" } } } }
@@ -3159,15 +3179,23 @@ paths:
       operationId: getRuntimeManifestV2
       description: Versioned runtime manifest that may carry adslot pages. Requires the declared adslot-v1 capability. schemaVersion is 3. The root keys stay camelCase; adslot page keys stay id, type, adslot_id and optional snake_case visibility.
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
-      parameters: [{ name: manifest_revision, in: query, required: false, schema: { type: string } }]
+      parameters:
+        - name: stream_transports
+          in: query
+          description: "Comma-separated supported stream transports (hls,udp-mpegts). Omission projects streams to fallback images. Rendering negotiation only, never authorization. Advertise udp-mpegts only when locally enabled."
+          schema: { type: string, maxLength: 64 }
       responses:
         "200": { description: Resolved player manifest., content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeManifestV2" } } } }
+        "304": { description: Manifest unchanged }
+        "409": { $ref: "#/components/responses/Problem" }
         "403": { description: "forbidden - the session lacks the adslot capability.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/adslots/resolve:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: resolveAdslots
+      x-rate-limit-policies: [{ name: runtime-adslot-resolve, quota: 60, windowSeconds: 60 }, { name: runtime-adslot-resolve-ip, quota: 600, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Resolves up to 16 server-verified page occurrences. A fresh candidate is atomically priced, budget-checked and reserved against the campaign-wide pricing fence. No eligible or affordable campaign is a successful empty result with no content and no debit; it is never a payment challenge. A lease renewal reuses the same reservation and does not advance rotation, and is denied while the campaign requires price reacceptance.
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeAdslotResolveRequest" } } } }
@@ -3175,21 +3203,27 @@ paths:
         "200": { description: Per-candidate filled or empty results in request order., headers: { Cache-Control: { schema: { type: string, enum: ["no-store"] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeAdslotResolveResponse" } } } }
         "400": { description: "invalid_request - batch size, duplicate keys, or forecast window is invalid.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "409": { description: "resource_conflict - a candidate was reused with a different request hash.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/adslots/events:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: reportAdslotEvents
+      x-rate-limit-policies: [{ name: runtime-adslot-events, quota: 120, windowSeconds: 60 }, { name: runtime-adslot-events-ip, quota: 1200, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Authenticated playback evidence. Events dedupe on screen and event ID. A valid completion consumes its held reservation once at the reserved price and fee, credits the seller gross and debits the serving fee in one transaction. A confirmed non-play terminal event releases the hold once. Completion received after release is unbillable and never debits fresh credits. Completion before start is held pending reconciliation.
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeAdslotEventBatch" } } } }
       responses:
-        "200": { description: Per-event outcomes., headers: { Cache-Control: { schema: { type: string, enum: ["no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeAdslotEventResponse" } } } }
+        "200": { description: Per-event outcomes., headers: { Cache-Control: { schema: { type: string, enum: ["no-store"] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeAdslotEventResponse" } } } }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/observation:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     put:
       operationId: putRuntimeObservation
+      x-rate-limit-policies: [{ name: runtime-observation, quota: 12, windowSeconds: 60 }, { name: runtime-observation-ip, quota: 120, windowSeconds: 60 }]
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Reports the playback surface the paired player used for the last
         resolveLayout. Path does not name screen_id; the paired runtime session
@@ -3204,14 +3238,19 @@ paths:
         public sessions are forbidden. Native cookies are rejected; browser
         must not adopt header profiles. Prepaid remaining credit is not a
         gate. Observation is absent from GET /api/v1/screens until the first
-        accepted report. ScreenPatch cannot write it.
+        accepted report. ScreenPatch cannot write it. An archived screen
+        answers 409 screen_archived. At most 12 reports per minute per
+        paired session (runtime-observation): a 429 means retry no sooner
+        than Retry-After.
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeObservationWrite" } } } }
       responses:
-        "204": { description: Observation stored as the current surfaces array., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
+        "204": { description: Observation stored as the current surfaces array., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/health:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -3511,6 +3550,8 @@ paths:
     get:
       operationId: listRuntimeKV
       description: >-
+        Returns at most 200 entries in ascending key order and does not page; a namespace with more keys is only
+        partly listed.
         Lists metadata for the application primitive named by the current manifest. Requires the HttpOnly runtime
         session and the parent-only ScreenRig-Primitive-Capability handle issued on the application primitive.
         Handles expire after five minutes and are refreshed by fetching the current runtime manifest; uploaded frames
@@ -4352,6 +4393,7 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
     get:
       operationId: getDashboardAdvertisingDelivery
+      description: "Seller-scoped delivery report for the dashboard session. The window is at most 92 days; a wider window is invalid_request. When it holds more than 5000 settlements the response sets truncated, totals and counts still cover all of them and rows lists only the earliest 5000."
       security: [{ dashboardSession: [] }]
       parameters:
         - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
@@ -4429,9 +4471,9 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
     get:
       operationId: listDashboardScreens
-      description: Default list returns pairing_pending and active screens of the session's project. Pass state=archived to list archived screens only. Pass tag to list only screens whose tags contain that exact tag. Tags are read-only on the dashboard.
+      description: Default list returns pairing_pending and active screens of the session's project. Pass state=archived to list archived screens only. Pass tag to list only screens whose tags contain that exact tag. Tags are read-only on the dashboard. Pages like listScreens.
       security: [{ dashboardSession: [] }]
-      parameters: [{ $ref: "#/components/parameters/ScreenListState" }, { $ref: "#/components/parameters/ScreenTagQuery" }]
+      parameters: [{ $ref: "#/components/parameters/ScreenListState" }, { $ref: "#/components/parameters/ScreenTagQuery" }, { $ref: "#/components/parameters/ListAfter" }]
       responses:
         "200": { description: Screens, headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenList" } } } }
         "401": { $ref: "#/components/responses/Problem" }
@@ -4708,9 +4750,9 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
     get:
       operationId: listDashboardMedia
-      description: Lists ready media of the session's project. The backend holds one rendition per object and publishes no thumbnail.
+      description: Lists ready media of the session's project. The backend holds one rendition per object and publishes no thumbnail. Pages like listMedia.
       security: [{ dashboardSession: [] }]
-      parameters: [{ $ref: "#/components/parameters/MediaTagQuery" }, { $ref: "#/components/parameters/MediaPrimitiveQuery" }]
+      parameters: [{ $ref: "#/components/parameters/MediaTagQuery" }, { $ref: "#/components/parameters/MediaPrimitiveQuery" }, { $ref: "#/components/parameters/ListAfter" }]
       responses:
         "200": { description: Media, headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/MediaList" } } } }
         "401": { $ref: "#/components/responses/Problem" }
@@ -4797,7 +4839,9 @@ paths:
         dashboard shows what a screen is playing and never authors it, so there
         is no create, update, or delete here and there must not be. Authoring
         stays in the agent conversation and the CLI. (User ruling 2026-08-22.)
+        Pages like listPlaylists.
       security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ListAfter" }]
       responses:
         "200": { description: Playlists, headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/PlaylistList" } } } }
         "401": { $ref: "#/components/responses/Problem" }
@@ -4823,8 +4867,9 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
     get:
       operationId: listDashboardApplications
-      description: Lists applications of the session's project. The interface calls them web apps; the contract name stays applications.
+      description: Lists applications of the session's project. The interface calls them web apps; the contract name stays applications. Pages like listApplications.
       security: [{ dashboardSession: [] }]
+      parameters: [{ $ref: "#/components/parameters/ListAfter" }]
       responses:
         "200": { description: Applications, headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ApplicationList" } } } }
         "401": { $ref: "#/components/responses/Problem" }
@@ -5083,6 +5128,7 @@ components:
     IfMatch: { name: If-Match, in: header, required: false, schema: { type: string }, description: "Optional positive resource revision. Omit to write the current resource; a supplied stale revision is revision_conflict." }
     OptionalIfMatch: { name: If-Match, in: header, required: false, schema: { type: string }, description: "Optional positive resource revision. Omit to create or overwrite a key; a supplied stale revision is revision_conflict." }
     AfterCursor: { name: after, in: query, required: false, schema: { type: string } }
+    ListAfter: { name: after, in: query, required: false, schema: { type: string, maxLength: 256 }, description: "next_cursor of the previous page of the same list, with the same filters. Omitted starts at the newest row. A value that is not such a cursor is invalid_request." }
     EventListLimit: { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 }, description: "Page size. A value outside 1-200 is refused with invalid_request and an errors[] member whose field is limit." }
     PlaybackScreenID: { name: screen_id, in: query, required: false, schema: { type: string, pattern: "^(?:(?:stage|qa|development)_)?scr_" } }
     PlaybackMediaID: { name: media_id, in: query, required: false, schema: { type: string, pattern: "^med_" } }
@@ -5119,7 +5165,7 @@ components:
       description: Temporary `ScreenRig-Agent-Connect <credential>` authority returned only by connection creation. It is never accepted as a project bearer, dashboard cookie, URL parameter, or runtime credential.
     pendingAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Pending agent bearer accepted only for its own activation, plus the same active bearer for exact acknowledgement replay." }
     revocableAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active agent bearer, or the same cryptographically verified revoked bearer for an idempotent self-disconnect replay." }
-    projectBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active agent bearer for its project. Use revocableAgentBearer for self-disconnect retries after revocation. Every bearer route requires its area AgentCapability; GET reads in an area also accept reports, and the project reads, agents/self, operations reads, and feedback routes accept any active credential. A credential lacking the route capability is refused 403 forbidden with detail 'This agent credential lacks the <name> capability.' after the command is recorded and before any credit is metered, so refusals are attributed and never billed." }
+    projectBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active agent bearer for its project. Use revocableAgentBearer for self-disconnect retries after revocation. Every bearer route requires its area AgentCapability; GET reads in an area also accept reports, except the webhook list and get reads (GET /api/v1/webhooks, GET /api/v1/webhooks/{id}), which need the project capability because they return receiver URLs, and the project reads, agents/self, operations reads, and feedback routes accept any active credential. A credential lacking the route capability is refused 403 forbidden with detail 'This agent credential lacks the <name> capability.' after the command is recorded and before any credit is metered, so refusals are attributed and never billed." }
     nativePairingAuthorization:
       type: http
       scheme: ScreenRig-Pairing
@@ -6244,7 +6290,7 @@ components:
         platform: { type: string, maxLength: 80 }
         version: { type: string, maxLength: 40 }
         state: { type: string, enum: [pending, active, revoked, cancelled, expired] }
-        capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, minItems: 1, uniqueItems: true, description: "Capability areas this credential may call. Reads in an area also accept the reports capability. Fixed at mint." }
+        capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, minItems: 1, uniqueItems: true, description: "Capability areas this credential may call. Reads in an area also accept the reports capability, except webhook reads, which need the project capability. Fixed at mint." }
         public_key_kid: { type: string, description: RFC 7638-style thumbprint of the X25519 recipient public JWK. Public key bytes are not returned. }
         authenticated_requests: { type: integer, minimum: 0, description: "Best-effort diagnostic count of successful bearer verifications directly attributable to this agent installation. Authentication success is not coupled to this counter write, so a temporarily unavailable metadata update is intentionally omitted rather than failing the authenticated request." }
         metered_credits: { type: integer, minimum: 0, description: Whole credits directly attributable to requests carrying this agent principal. }
@@ -6263,7 +6309,7 @@ components:
     AgentCredentialCollection: { type: object, additionalProperties: false, required: [agent, credential_envelope, issuance_expires_at], properties: { agent: { $ref: "#/components/schemas/Agent" }, credential_envelope: { $ref: "#/components/schemas/AgentCredentialEnvelope" }, issuance_expires_at: { type: string, format: date-time } } }
     AgentDisconnectRequest: { type: object, additionalProperties: false, properties: { allow_last_agent: { type: boolean, default: false, description: Explicitly accept loss of the last active agent bearer. A registered dashboard passkey remains independent administrative authority. } } }
     Application: { type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: { id: { type: string }, name: { type: string }, revision: { type: integer }, latest_ready_release: { type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the application's releases were last used on glass (playback.application_started). Absent until first use. Read-only." } } }
-    ApplicationList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Application" } } } }
+    ApplicationList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 500, items: { $ref: "#/components/schemas/Application" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     OperationAccepted: { type: object, additionalProperties: false, required: [id, release_id, operation_id], properties: { id: { type: string, description: Application identifier the upload was attributed to. }, release_id: { type: string, description: "Release identifier created by this upload. Poll the operation and pin this release into a playlist once the operation succeeds." }, operation_id: { type: string } } }
     Operation: { type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: { id: { type: string }, kind: { type: string }, state: { type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the bounded upload body is still being durably staged. Terminal values are succeeded, failed, and cancelled." }, request_id: { type: string }, created_at: { type: string }, updated_at: { type: string }, result: { type: object, additionalProperties: true }, error: { type: object, additionalProperties: true } } }
     PlaylistWrite:
@@ -6272,7 +6318,7 @@ components:
       required: [name, pages]
       properties:
         name: { type: string, minLength: 1, maxLength: 120 }
-        pages: { type: array, minItems: 1, maxItems: 100, items: { $ref: "#/components/schemas/PlaylistPageWrite" } }
+        pages: { type: array, minItems: 1, maxItems: 100, description: "The pages of one playlist may resolve to at most 1024 media references in total. A by:ids selector counts its length; a by:all or by:tag selector counts as 32 (the per-selector maximum); more than 1024 in total is 422 invalid at path pages.", items: { $ref: "#/components/schemas/PlaylistPageWrite" } }
         audio: { $ref: "#/components/schemas/PlaylistAudioWrite" }
     Playlist:
       type: object
@@ -6317,7 +6363,7 @@ components:
       required: [name, pages]
       properties:
         name: { type: string, minLength: 1, maxLength: 120 }
-        pages: { type: array, minItems: 1, maxItems: 100, items: { $ref: "#/components/schemas/PlaylistPageWriteV2" } }
+        pages: { type: array, minItems: 1, maxItems: 100, description: "The pages of one playlist may resolve to at most 1024 media references in total. A by:ids selector counts its length; a by:all or by:tag selector counts as 32 (the per-selector maximum); more than 1024 in total is 422 invalid at path pages.", items: { $ref: "#/components/schemas/PlaylistPageWriteV2" } }
         audio: { $ref: "#/components/schemas/PlaylistAudioWrite" }
     PlaylistPage:
       type: object
@@ -6610,6 +6656,7 @@ components:
         state: { type: string, enum: [pending, approved, rejected] }
         created_at: { type: string, format: date-time }
         decided_at: { type: string, format: date-time }
+        reason: { type: string, maxLength: 500 }
     AdvertisingReviewList: { type: object, additionalProperties: false, required: [reviews], properties: { reviews: { type: array, items: { $ref: "#/components/schemas/AdvertisingReview" } } } }
     AdvertisingDaypart:
       type: object
@@ -6758,6 +6805,7 @@ components:
         interrupted: { type: integer }
         unbillable: { type: integer }
         rows: { type: array, items: { $ref: "#/components/schemas/AdvertisingDeliveryRow" } }
+        truncated: { type: boolean, description: "Set when the window holds more than 5000 settlements. Totals and counts still cover every settlement; rows lists only the earliest 5000." }
     RuntimeManifestV2:
       type: object
       additionalProperties: true
@@ -6929,7 +6977,7 @@ components:
         revision: { type: integer }
         pages: { type: array, minItems: 1, maxItems: 100, items: { $ref: "#/components/schemas/PlaylistPageV2" } }
         audio: { $ref: "#/components/schemas/PlaylistAudio" }
-    PlaylistV2List: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/PlaylistV2" } } } }
+    PlaylistV2List: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/PlaylistV2" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     PlaylistAudioWrite:
       type: object
       additionalProperties: false
@@ -7008,8 +7056,8 @@ components:
       additionalProperties: false
       required: [width, height, background]
       properties:
-        width: { type: number, exclusiveMinimum: 0 }
-        height: { type: number, exclusiveMinimum: 0 }
+        width: { type: number, minimum: 1, maximum: 1000000 }
+        height: { type: number, minimum: 1, maximum: 1000000 }
         viewport_fit: { type: string, enum: [contain, cover, fill], default: contain }
         background: { $ref: "#/components/schemas/CanvasBackground" }
     PlaylistRect:
@@ -7017,10 +7065,10 @@ components:
       additionalProperties: false
       required: [x, y, width, height]
       properties:
-        x: { type: number }
-        y: { type: number }
-        width: { type: number, exclusiveMinimum: 0 }
-        height: { type: number, exclusiveMinimum: 0 }
+        x: { type: number, minimum: -1000000, maximum: 1000000 }
+        y: { type: number, minimum: -1000000, maximum: 1000000 }
+        width: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+        height: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
     PlaylistTransition:
       type: object
       additionalProperties: false
@@ -7167,7 +7215,7 @@ components:
         - { $ref: "#/components/schemas/LinearGradientBackground" }
       description: "Solid canonical uppercase #RRGGBBAA, or a top-to-bottom linear gradient."
     PlaylistIntrinsicSize: { type: object, additionalProperties: false, required: [width, height], properties: { width: { type: number, exclusiveMinimum: 0 }, height: { type: number, exclusiveMinimum: 0 } } }
-    PlaylistList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Playlist" } } } }
+    PlaylistList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/Playlist" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     CommentsWrite:
       type: object
       additionalProperties: false
@@ -7723,7 +7771,7 @@ components:
         model: { type: string, minLength: 1, maxLength: 80 }
         firmware: { type: string, minLength: 1, maxLength: 80 }
         manufacturer: { type: string, minLength: 1, maxLength: 80 }
-    ScreenList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Screen" } } } }
+    ScreenList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 500, items: { $ref: "#/components/schemas/Screen" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     ScreenManifestUpgrade:
       type: object
       additionalProperties: false
@@ -8209,7 +8257,7 @@ components:
     KVWrite: { type: object, additionalProperties: false, required: [value_base64], properties: { value_base64: { type: string, contentEncoding: base64, maxLength: 1398104 }, content_type: { type: string, minLength: 1, maxLength: 127, default: application/octet-stream } } }
     KVEntry: { type: object, additionalProperties: false, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, value_base64: { type: string, contentEncoding: base64 }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer } } }
     KVSummary: { type: object, additionalProperties: false, required: [application_id, key, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string }, updated_at: { type: string } } }
-    KVList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/KVSummary" } } } }
+    KVList: { type: object, additionalProperties: false, required: [items, next_cursor], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/KVSummary" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }] } } }
     RuntimeKVWrite: { type: object, additionalProperties: true, required: [value_base64], properties: { value_base64: { type: string, contentEncoding: base64, maxLength: 1398104 }, content_type: { type: string, minLength: 1, maxLength: 127, default: application/octet-stream } } }
     RuntimeKVEntry: { type: object, additionalProperties: true, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, value_base64: { type: string, contentEncoding: base64 }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer } } }
     RuntimeKVSummary: { type: object, additionalProperties: true, required: [application_id, key, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string }, updated_at: { type: string } } }
@@ -8223,7 +8271,9 @@ components:
         logged, or published on project SSE. aspect_ratio defaults to 16:9. quality
         is low, medium, or high and defaults to medium. tag is stored on the ready
         media object like an upload tag. Optional references are inline base64 or
-        a project media_id; HTTP URLs are rejected. Remaining that cannot cover
+        a project media_id; HTTP URLs are rejected. The summed size of all
+        references of one request, inline and media_id alike, must not exceed
+        25165824 bytes (24 MiB); a request over the bound is refused. Remaining that cannot cover
         twice the vendor cost of the still, rounded up to whole credits, after the
         intro floor (negative 1,000,000 credits until 2027-01-01, then zero)
         returns payment_required, except development.
@@ -8269,7 +8319,7 @@ components:
     MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], description: "Declares only what the server can re-verify against the stored object byte for byte. Codec identity is not declared here: the server derives it from the container during asynchronous verification, so a client cannot assert a codec that drives player behaviour.", properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
     MediaUploadSession: { type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: { id: { type: string }, operation: { $ref: "#/components/schemas/Operation" }, upload_url: { type: string, format: uri }, method: { type: string, enum: [PUT] }, headers: { type: object, additionalProperties: { type: string }, description: Exact signed request headers; clients must send every field verbatim. }, expires_at: { type: string, format: date-time } } }
     Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Caller's original file name as declared at upload. Absent when the upload declared none and for generated stills. This is the human handle for filename-to-id lookups." }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable intrinsic width in pixels. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 14400000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
-    MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Media" } } } }
+    MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/Media" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     FeedbackWrite:
       type: object
       additionalProperties: false
@@ -8844,7 +8894,7 @@ components:
     StreamSource: {"oneOf": [{"$ref": "#/components/schemas/HLSStreamSource"}, {"$ref": "#/components/schemas/UDPStreamSource"}], "discriminator": {"propertyName": "protocol"}}
     HLSStreamSource: {"type": "object", "additionalProperties": false, "required": ["protocol", "url"], "properties": {"protocol": {"type": "string", "enum": ["hls"]}, "url": {"type": "string", "format": "uri", "maxLength": 2048, "pattern": "^https://"}}}
     UDPStreamSource: {"type": "object", "additionalProperties": false, "required": ["protocol", "group", "port"], "properties": {"protocol": {"type": "string", "enum": ["udp-mpegts"]}, "group": {"type": "string", "description": "IPv4 ASM group within 239.0.0.0/8. Raw MPEG-TS over UDP, not RTP."}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}}}
-    PlaylistStreamPrimitiveWrite: {"type": "object", "additionalProperties": false, "required": ["id", "primitive", "sources", "fallback_media_id", "rect", "layer", "content_fit"], "properties": {"id": {"type": "string"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSource"}}, "muted": {"type": "boolean", "default": true}, "rect": {"$ref": "#/components/schemas/PlaylistRect"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "content_fit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "fallback_media_id": {"type": "string", "pattern": "^med_"}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistStreamPrimitiveWrite: {"type": "object", "additionalProperties": false, "required": ["id", "primitive", "sources", "fallback_media_id", "rect", "layer", "content_fit"], "properties": {"id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSource"}}, "muted": {"type": "boolean", "default": true}, "rect": {"$ref": "#/components/schemas/PlaylistRect"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "content_fit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "fallback_media_id": {"type": "string", "pattern": "^med_"}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}}}
     PlaylistStreamPrimitive: {"type": "object", "additionalProperties": false, "required": ["id", "primitive", "sources", "fallback_media_id", "rect", "layer", "content_fit", "muted", "controller", "resolved_media"], "properties": {"id": {"type": "string"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSource"}}, "muted": {"type": "boolean", "default": true}, "rect": {"$ref": "#/components/schemas/PlaylistRect"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "content_fit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "fallback_media_id": {"type": "string", "pattern": "^med_"}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}, "controller": {"type": "boolean", "enum": [false]}, "resolved_media": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"$ref": "#/components/schemas/PlaylistResolvedMedia"}}}}
     RuntimeStreamPrimitive: {"type": "object", "required": ["id", "primitive", "sources", "muted", "fallback", "grantId", "rect", "layer", "contentFit"], "properties": {"id": {"type": "string"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSource"}}, "muted": {"type": "boolean"}, "fallback": {"$ref": "#/components/schemas/RuntimeImageResolvedMedia"}, "grantId": {"type": "string"}, "rect": {"$ref": "#/components/schemas/RuntimeRect"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "contentFit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}}}
     RuntimeIframePrimitive:
@@ -9461,7 +9511,7 @@ components:
         trace_id: { type: string }
         retryable: { type: boolean, description: "Present on every 5xx problem response and absent below 500. True when retrying the same operation may succeed without changing the request; false when the unchanged request is not retryable." }
         action: { type: string, description: "Player action class from the problem registry (docs/player-compatibility.md §5): retry_backoff, hold_lkg, remint, repair, clear_lkg, or upgrade_required. Present when the registry defines one. A reader applies the status default to a class it does not know." }
-        server_time: { type: string, format: date-time, description: "Present on proof_clock_skew: the server clock when the proof was rejected. A Player re-signs with its clock offset from this value." }
+        server_time: { type: string, format: date-time, description: "Present on every Player-facing problem response: the server clock (RFC 3339 UTC) when the response was produced. A Player measures its clock offset from this value; on proof_clock_skew it re-signs with that offset." }
         player_kind: { type: string, description: "Present on upgrade_required: the version floor that failed, a player kind such as web or shell:<kind> such as shell:tizen (docs/player-compatibility.md §6.1)." }
         min_supported: { type: string, description: "Present on upgrade_required for a version floor: the minimum supported YY.MM.N version for player_kind." }
         required_compat: { type: array, items: { type: string }, description: "Present on upgrade_required for the required-token floor (SCREENRIG__RUNTIME__COMPAT_REQUIRED, docs/player-compatibility.md §14): the required compat tokens this mint would not be granted. player_kind is the mint's player kind when a player was sent." }

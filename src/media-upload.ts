@@ -468,7 +468,7 @@ async function existingUpload(
 ): Promise<{ mediaId: string; operation: Operation; filename?: string; source_filename?: string } | undefined> {
   try {
     const primitive = declaration.content_type.split("/")[0];
-    const response = await client.call({ method: "GET", path: "/api/v1/media", query: { primitive } });
+    const response = await client.listAll("/api/v1/media", { primitive });
     const items = asRecord(response.body)?.items;
     if (!Array.isArray(items)) return undefined;
     const match = items.map(asRecord).find((item) =>

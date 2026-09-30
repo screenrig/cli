@@ -537,7 +537,7 @@ async function recoverMediaId(
   }
   if (options.sha256) {
     try {
-      const response = await client.call({ method: "GET", path: "/api/v1/media" });
+      const response = await client.listAll("/api/v1/media");
       return mediaMatchFromList(response.body, options.sha256);
     } catch {
       return undefined;

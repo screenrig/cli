@@ -34,7 +34,7 @@ import {
 } from "./playlist-bundle.js";
 import { CliError } from "./problems.js";
 import { testTemp } from "./test-temp.js";
-import { FakeTransport } from "./transport/fake.js";
+import { FakeTransport, listPage } from "./transport/fake.js";
 import { FetchTransport } from "./transport/http.js";
 import type { TransportRequest, TransportResponse } from "./transport/types.js";
 
@@ -472,12 +472,16 @@ function importTransport(
   options: {
     declarationResponse?: (index: number, request: TransportRequest) => TransportResponse | undefined;
     playlistResponse?: (request: TransportRequest) => TransportResponse | undefined;
+    /** Serve the media list this many rows per page, with next_cursor; without it the list is one page with no next_cursor. */
+    pageSize?: number;
   } = {},
 ) {
   const transport = new FakeTransport();
   let declaration = 0;
   const operations = new Map<string, string>();
-  transport.on("GET", "/api/v1/media", () => ({ status: 200, headers: {}, body: { items: existing } }));
+  transport.on("GET", "/api/v1/media", (req) => options.pageSize === undefined
+    ? { status: 200, headers: {}, body: { items: existing } }
+    : listPage(req, existing, options.pageSize));
   transport.on("GET", /^\/api\/v1\/playlists\/pl_/, (req) => ({
     status: 200,
     headers: { etag: '"8"' },
@@ -600,6 +604,30 @@ test("import dedupes exact media injectively, rewrites selectors, and performs n
   assert.match(text, /med_A_FIRST/);
   assert.doesNotMatch(text, /med_Z_LAST/);
   assert.equal(transport.calls.some((call) => call.method === "DELETE"), false);
+  assert.equal(transport.calls.some((call) => call.path === "/api/v1/media/uploads"), false);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("import reuses media that a later page of the media list holds", async () => {
+  const dir = await testTemp("bundle-paged-");
+  const bytes = Uint8Array.from([7, 8, 9]);
+  await writeBundle(dir, [{ id: "med_SOURCE_A", filename: "hero.png", bytes }]);
+  const existing = [
+    remoteMedia("med_OTHER_1", Uint8Array.from([1])),
+    remoteMedia("med_OTHER_2", Uint8Array.from([2])),
+    remoteMedia("med_SOURCE_A", bytes),
+  ];
+  const transport = importTransport(existing, [], { pageSize: 1 });
+  const result = await importPlaylistBundle({
+    directory: dir,
+    client: new ApiClient({ transport, token: "token", idempotencyKey: "bundle-base-key" }),
+    runtime: runtimeForImport([]),
+  });
+  assert.deepEqual(result.media, { total: 1, reused: 1, uploaded: 0 });
+  assert.deepEqual(
+    transport.calls.filter((call) => call.path === "/api/v1/media").map((call) => call.query?.after),
+    [undefined, "pg_1", "pg_2"],
+  );
   assert.equal(transport.calls.some((call) => call.path === "/api/v1/media/uploads"), false);
   await rm(dir, { recursive: true, force: true });
 });

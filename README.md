@@ -97,6 +97,11 @@ Use `--after` for an event cursor (`--cursor` remains an alias). `--output` sele
 an output path; each command states whether it expects a file or directory.
 Durations use milliseconds as stated by `--duration-ms`, `--poll-ms`, and `--timeout`.
 
+`screen list`, `media list`, `app list`, `playlist list`, and `kv list` read every page of the
+collection: `data.items` holds all rows and `data.next_cursor` is `null`. Each
+page is one billed request. A list still offering pages after 50 fails with
+`unexpected_response` instead of returning part of it.
+
 Legacy option spellings share the same value and validation as their canonical
 option; supplying both is an error. JSON help exposes compatibility spellings in
 `options[].aliases`. Response fields and backend contracts are unchanged.
@@ -319,7 +324,7 @@ malformed selector or action fails the whole request before any screen changes.
 
 `screen screenshot` with several ids or `--tag` fans out on the client
 (screenshots are unbilled, so there is no fleet screenshot action). `--tag`
-resolves through `screen list --tag`, one billed list request, and keeps
+resolves through `screen list --tag`, one billed request per page, and keeps
 active screens, at most 500. Several ids must all be screen ids (`scr_…`).
 An unexpected local failure stops new captures; unstarted screens report
 `not_attempted` and the exit code is 1. `--output` is

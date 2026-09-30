@@ -176,9 +176,40 @@ export class FakeTransport implements Transport {
   }
 }
 
-/** `now` drives clock-dependent checks (takeover until); defaults to the real clock. */
-export function memoryBackend(options: { now?: () => Date } = {}): FakeTransport {
+/**
+ * One page of a cursor-paged list, as the server serves it: `after` is the
+ * previous page's next_cursor, and next_cursor is null on the last page. Rows
+ * page in the order given. A value that is not a cursor of this list is
+ * invalid_request.
+ */
+export function listPage(
+  req: TransportRequest,
+  rows: readonly unknown[],
+  size: number,
+  headers: Record<string, string> = {},
+): TransportResponse {
+  const after = req.query?.after;
+  if (after !== undefined && !/^pg_\d+$/.test(after)) {
+    return {
+      status: 400,
+      headers: { "content-type": "application/problem+json" },
+      body: { status: 400, code: "invalid_request", title: "Request refused", detail: "after is not a next_cursor of this list." },
+    };
+  }
+  const start = after === undefined ? 0 : Number(after.slice(3));
+  const items = rows.slice(start, start + size);
+  const end = start + items.length;
+  return { status: 200, headers, body: { items, next_cursor: end < rows.length ? `pg_${end}` : null } };
+}
+
+/**
+ * `now` drives clock-dependent checks (takeover until); defaults to the real clock.
+ * `listPageSize` sets the rows per page of the screens, media, playlists, and
+ * applications lists; it defaults to the server's page size for each.
+ */
+export function memoryBackend(options: { now?: () => Date; listPageSize?: number } = {}): FakeTransport {
   const clock = options.now ?? (() => new Date());
+  const pageSize = (serverSize: number) => options.listPageSize ?? serverSize;
   const transport = new FakeTransport();
   const operations = new Map<string, Operation>();
   const events: ProjectEvent[] = [];
@@ -734,11 +765,9 @@ export function memoryBackend(options: { now?: () => Date } = {}): FakeTransport
     };
   });
 
-  transport.on("GET", "/api/v1/applications", (req) => ({
-    status: 200,
-    headers: { "x-request-id": req.headers?.["x-request-id"] ?? "req_apps" },
-    body: { items: [...applications.values()] },
-  }));
+  transport.on("GET", "/api/v1/applications", (req) => listPage(
+    req, [...applications.values()], pageSize(500), { "x-request-id": req.headers?.["x-request-id"] ?? "req_apps" },
+  ));
 
   transport.on("GET", /^\/api\/v1\/applications\/[^/]+$/, (req) => ({
     status: 200,
@@ -757,7 +786,7 @@ export function memoryBackend(options: { now?: () => Date } = {}): FakeTransport
     playlists.set(String(item.id), item);
     return { status: 201, headers: {}, body: item };
   });
-  transport.on("GET", "/api/v1/playlists", () => ({ status: 200, headers: {}, body: { items: [...playlists.values()] } }));
+  transport.on("GET", "/api/v1/playlists", (req) => listPage(req, [...playlists.values()], pageSize(200)));
   transport.on("GET", /^\/api\/v1\/playlists\/[^/]+$/, (req): TransportResponse => {
     const item = playlists.get(req.path.split("/").pop() ?? "");
     return item
@@ -1108,7 +1137,7 @@ export function memoryBackend(options: { now?: () => Date } = {}): FakeTransport
     const items = [...screens.values()].filter((screen) => (
       archivedOnly ? screen.state === "archived" : screen.state !== "archived"
     ) && (tag === undefined || (screen.tags ?? []).includes(tag)));
-    return { status: 200, headers: {}, body: { items } };
+    return listPage(req, items, pageSize(500));
   });
   transport.on("GET", /^\/api\/v1\/screens\/[^/]+$/, (req) => ({ status: 200, headers: {}, body: screens.get(req.path.split("/").pop() ?? "") }));
   transport.on("PATCH", /^\/api\/v1\/screens\/[^/]+$/, (req): TransportResponse => {
@@ -1299,7 +1328,7 @@ export function memoryBackend(options: { now?: () => Date } = {}): FakeTransport
       if (primitive && record.primitive !== primitive) return false;
       return true;
     });
-    return { status: 200, headers: {}, body: { items } };
+    return listPage(req, items, pageSize(1000));
   });
   transport.on("POST", "/api/v1/media/uploads", (req) => {
     const declaration = req.body as MediaUploadDeclaration;

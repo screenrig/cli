@@ -959,7 +959,7 @@ export async function importPlaylistBundle(options: {
       }
     }
     await options.beforePlaylistWrite?.(bundle.playlist, options.updateId);
-    const list = await options.client.call({ method: "GET", path: "/api/v1/media" });
+    const list = await options.client.listAll("/api/v1/media");
     const existing = existingMediaList(list.body);
     for (const source of bundle.manifest.media) {
       const reusable = existing
