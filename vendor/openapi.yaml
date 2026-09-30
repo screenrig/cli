@@ -3199,7 +3199,7 @@ paths:
         encoded screenshot size. They are range-checked only and are never
         proven hardware or authorization. Last write wins and replaces the
         whole surfaces array. An identical surfaces tuple (id, width, height,
-        pixel_ratio, presentation) does not emit screen.surface_changed; a
+        pixel_ratio, presentation, rotation) does not emit screen.surface_changed; a
         later observed_at on the same tuple is ignored. Unpaired and anonymous
         public sessions are forbidden. Native cookies are rejected; browser
         must not adopt header profiles. Prepaid remaining credit is not a
@@ -3221,7 +3221,8 @@ paths:
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Reports device health for the paired session's screen. Send one on
-        session start and every five minutes. Every member is optional and
+        session start and every fifteen minutes, and one at once when the
+        display connection or power changes. Every member is optional and
         the body is read tolerantly (docs/player-compatibility.md §1.1):
         unknown members are ignored, a value out of range is dropped, and
         an unknown display.power or network.kind reads as unknown; only a
@@ -7805,7 +7806,8 @@ components:
         width: { type: integer, minimum: 1, maximum: 100000, description: "Device-independent pixels of the playback surface used for the last resolveLayout. Not canvas author size and not encoded screenshot size. Maximum is 100000." }
         height: { type: integer, minimum: 1, maximum: 100000, description: "Device-independent pixels of the playback surface used for the last resolveLayout. Not canvas author size and not encoded screenshot size. Maximum is 100000." }
         pixel_ratio: { type: number, exclusiveMinimum: 0, maximum: 32, description: "Device pixel ratio next to the layout surface. Finite. Range-checked only; not proven hardware." }
-        presentation: { type: string, enum: [output, windowed] }
+        presentation: { type: string, enum: [output, windowed], description: "output is the whole display; width and height are then the display. windowed is a window; width and height are then the window." }
+        rotation: { type: integer, enum: [0, 90, 180, 270], description: "Clockwise degrees the output is rotated from the display's natural orientation. Absent when the player cannot read it. width and height are already the rotated surface." }
     ScreenSurfaceChangedDetails:
       type: object
       additionalProperties: false
@@ -7835,6 +7837,7 @@ components:
         height: { type: integer, minimum: 1, maximum: 100000 }
         pixel_ratio: { type: number, exclusiveMinimum: 0, maximum: 32 }
         presentation: { type: string, minLength: 1, description: "output or windowed. Another value is recorded as output, because the project ScreenObservation knows only those two." }
+        rotation: { type: integer, description: "0, 90, 180, or 270. Omit when the platform does not report display rotation. Another value is dropped on its own; the observation is still stored." }
     RuntimeStorageWrite:
       type: object
       additionalProperties: true
@@ -9148,13 +9151,13 @@ components:
         Active screens with a health report, counted by condition; a screen
         can count in several. display_disconnected, hot, and crashing count
         only online screens whose latest report is current (not stale);
-        stale counts online screens whose report is older than 15 minutes
+        stale counts online screens whose report is older than 35 minutes
         and nothing else.
       properties:
         display_disconnected: { type: integer, minimum: 0, description: Latest report says display.connected false. }
         hot: { type: integer, minimum: 0, description: "Temperature reached 80 °C and has not yet fallen below 75 °C." }
         crashing: { type: integer, minimum: 0, description: "Absolute: the latest current report has crashes_24h of at least 3, however it got there (not the crash_spike transition)." }
-        stale: { type: integer, minimum: 0, description: Online screens whose latest report is older than 15 minutes. }
+        stale: { type: integer, minimum: 0, description: Online screens whose latest report is older than 35 minutes. }
     RuntimeHealthWrite:
       type: object
       additionalProperties: true
@@ -9200,7 +9203,7 @@ components:
       description: >-
         The latest device health report (PUT /runtime/v1/health), sanitized,
         with server reported_at. A member the Player did not send is absent.
-        stale is true when reported_at is more than 15 minutes old; stale
+        stale is true when reported_at is more than 35 minutes old; stale
         health is still shown, never deleted; archive and screen recovery
         clear it. Transitions append the
         project-only screen.health_changed with details.changes, a list of
@@ -9278,7 +9281,7 @@ components:
         the active override, else the enabled display schedule evaluated in
         the screen timezone, else on (source override, schedule, or default);
         until is when that next changes, when known. reported is the Player's
-        latest health display (power, connected, reported_at, stale after 15
+        latest health display (power, connected, reported_at, stale after 35
         minutes). Absent when the screen has no schedule, no override, and no
         reported display.
       properties:
