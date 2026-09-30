@@ -36,7 +36,7 @@ export function screenHealthIssues(screen: Screen | undefined): string[] {
 /** The compact `Health` block of `screen show --human`; nothing when the Player never reported. */
 export function healthLines(health: ScreenHealth | undefined): string[] {
   if (!health || typeof health !== "object" || typeof health.reported_at !== "string") return [];
-  const lines = [health.stale ? "Health (stale: no report for over 15 minutes)" : "Health"];
+  const lines = [health.stale ? "Health (stale: no report for over 35 minutes)" : "Health"];
   const add = (key: string, value: string | undefined) => { if (value) lines.push(`${key}: ${value}`); };
   add("reported_at", health.reported_at);
   const uptime = [

@@ -496,7 +496,7 @@ can be edited and sent back with `set --file`.
 `screen show --human` prints `Display:` with the requested power, its source
 (manual override, display schedule, or default) and until when in the screen
 timezone, the schedule windows, and the power the Player reported, marked stale
-after 15 minutes without a report. `events list` prints
+after 35 minutes without a report. `events list` prints
 `screen.reboot_requested` and `screen.display_changed`.
 
 ## Webhooks
@@ -663,10 +663,11 @@ returns the server response as `data` unchanged.
 
 ## Device health
 
-Every paired Player reports device health on session start and every five
-minutes. `screen show` returns it as `data.health` with the server's
-`reported_at`; `stale` turns true after 15 minutes without a report, and the
-last report stays visible. With `--human` it prints a `Health` block: report
+Every paired Player reports device health on session start, every fifteen
+minutes, and at once when its display connection or power changes.
+`screen show` returns it as `data.health` with the server's `reported_at`;
+`stale` turns true after 35 minutes without a report, and the last report
+stays visible. With `--human` it prints a `Health` block: report
 time, device and Player uptime, memory in use, CPU load and cores,
 temperature, display connection and power, network kind and Wi-Fi signal, and
 crashes and renderer restarts in the last 24 hours.

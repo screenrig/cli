@@ -529,7 +529,7 @@ export interface ScreenStorageShortfall {
 
 /**
  * Screen.health: the latest PUT /runtime/v1/health report, sanitized, with
- * server reported_at. stale is true after 15 minutes without a report. A
+ * server reported_at. stale is true after 35 minutes without a report. A
  * member the Player did not send is absent.
  */
 export interface ScreenHealth {

@@ -65,7 +65,7 @@ test("healthLines prints a compact block and marks a stale report", () => {
     "last 24h: 0 crashes, 1 renderer restarts",
   ]);
   const troubled = healthLines({ reported_at: "2026-09-25T09:00:00Z", stale: true, temperature_c: 83, display: { connected: false }, crashes_24h: 4 });
-  assert.equal(troubled[0], "Health (stale: no report for over 15 minutes)");
+  assert.equal(troubled[0], "Health (stale: no report for over 35 minutes)");
   assert.ok(troubled.includes("temperature: 83.0 °C (hot)"));
   assert.ok(troubled.includes("attention: display disconnected, hot 83°C, crashing 4/24h"));
   assert.deepEqual(healthLines(undefined), []);

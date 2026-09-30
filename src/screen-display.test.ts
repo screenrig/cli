@@ -178,7 +178,7 @@ test("Display lines show requested, source, until in the screen zone, schedule, 
     "Display: off (display schedule until 2026-08-15 07:00 America/Los_Angeles)",
     "Display schedule: enabled, 1 window in America/Los_Angeles",
     "  mon 07:00-19:00",
-    "Display reported: power standby, connected at 2026-08-14T16:00:00Z (stale: no report for over 15 minutes)",
+    "Display reported: power standby, connected at 2026-08-14T16:00:00Z (stale: no report for over 35 minutes)",
   ]);
   assert.deepEqual(displayLines(undefined, undefined), []);
 });

@@ -104,7 +104,7 @@ export function displayLines(display: ScreenDisplay | undefined, timezone: strin
       reported.power ? `power ${reported.power}` : undefined,
       reported.connected === true ? "connected" : reported.connected === false ? "disconnected" : undefined,
     ].filter(Boolean).join(", ");
-    lines.push(`Display reported: ${parts || "no power state"} at ${reported.reported_at}${reported.stale ? " (stale: no report for over 15 minutes)" : ""}`);
+    lines.push(`Display reported: ${parts || "no power state"} at ${reported.reported_at}${reported.stale ? " (stale: no report for over 35 minutes)" : ""}`);
   }
   return lines;
 }
