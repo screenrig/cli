@@ -689,7 +689,8 @@ test("agent connect resumes after its cached approval expiry when approved while
       },
     };
   });
-  transport.pushStream(`event: agent.connection\ndata: ${JSON.stringify({
+  // A newer server's extra event type and field must not stop approval.
+  transport.pushStream(`event: agent.connection.future\ndata: {}\n\nevent: agent.connection\ndata: ${JSON.stringify({
     connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA",
     name: "Office Codex",
     agent_type: "cli",
@@ -697,6 +698,7 @@ test("agent connect resumes after its cached approval expiry when approved while
     status: "approved",
     expires_at: "2026-08-15T17:00:00.000Z",
     created_at: "2026-08-14T17:00:00.000Z",
+    field_from_a_newer_server: true,
   })}\n\n`);
   transport.on("POST", /\/api\/v1\/agent-connections\/acn_.*\/credential/, (req) => {
     assert.equal(req.headers?.authorization, `ScreenRig-Agent-Connect ${connectionToken}`);
@@ -1615,6 +1617,19 @@ test("removed identity commands and dashboard credential switches fail before ne
     const result = await withRuntime(["--json", ...args], transport);
     assert.equal(result.code, ExitCode.Usage);
     assert.equal(transport.calls.length, 0);
+    await rm(result.configDir, { recursive: true, force: true });
+  }
+  for (const [args, replacement] of [
+    [["account", "show"], "project show"],
+    [["account", "capabilities"], "project capabilities"],
+    [["account", "invite", "--email", "guest@example.com"], "invitations create"],
+    [["account", "recover", "--email", "owner@example.com"], "dashboard reset-sign-in"],
+    [["account", "constructor"], "project"],
+  ] as const) {
+    const result = await withRuntime(["--json", ...args], new FakeTransport());
+    const error = JSON.parse(result.stdout).error;
+    assert.equal(error.detail, `account commands are retired. Use screenrig ${replacement}.`);
+    assert.equal(error.next.command, `screenrig ${replacement} --help`);
     await rm(result.configDir, { recursive: true, force: true });
   }
 });

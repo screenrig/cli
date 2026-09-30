@@ -104,14 +104,22 @@ test("agent approval URLs and SSE events stay on their closed status-only surfac
     expires_at: "2026-08-22T17:10:00.000Z",
     created_at: "2026-08-22T17:00:00.000Z",
   }, id).status, "cancelled");
-  assert.throws(() => validateAgentConnectionEvent({
+  const status = {
     connection_id: id,
     name: "Test agent",
     agent_type: "cli",
+    platform: "linux/x64",
+    version: "26.09.1",
     capabilities: [...AGENT_CAPABILITIES],
     status: "approved",
     expires_at: "2026-08-22T17:10:00.000Z",
     created_at: "2026-08-22T17:00:00.000Z",
-    credential_envelope: "forbidden",
-  }, id), /outside the status-only contract/);
+  };
+  assert.deepEqual(validateAgentConnectionEvent({
+    ...status,
+    credential_envelope: "never returned",
+    field_from_a_newer_server: true,
+  }, id), status);
+  assert.throws(() => validateAgentConnectionEvent({ ...status, status: undefined }, id), /generated status contract/);
+  assert.throws(() => validateAgentConnectionEvent([status], id), /generated status contract/);
 });

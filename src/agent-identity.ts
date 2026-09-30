@@ -153,11 +153,7 @@ export function validateAgentConnectionStart(value: unknown, apiUrl: string): Ag
 }
 
 export function validateAgentConnectionEvent(value: unknown, connectionId: string): AgentConnection {
-  if (!value || typeof value !== "object" || Array.isArray(value)
-    || Object.keys(value as Record<string, unknown>).some((key) => !CONNECTION_FIELDS.has(key))) {
-    throw configError("Agent connection SSE contained fields outside the status-only contract.");
-  }
-  const event = value as Partial<AgentConnection>;
+  const event = (value && typeof value === "object" && !Array.isArray(value) ? value : {}) as Partial<AgentConnection>;
   if (event.connection_id !== connectionId || typeof event.name !== "string" || event.name.length === 0
     || typeof event.agent_type !== "string" || event.agent_type.length === 0
     || !["pending", "approved", "connected", "denied", "expired", "cancelled"].includes(event.status ?? "")
@@ -166,7 +162,8 @@ export function validateAgentConnectionEvent(value: unknown, connectionId: strin
     || !isDateTime(event.expires_at) || !isDateTime(event.created_at)) {
     throw configError("Agent connection SSE did not match the generated status contract.");
   }
-  return event as AgentConnection;
+  // Fields a newer server adds are dropped, not refused, so an additive change never breaks a shipped CLI.
+  return Object.fromEntries(Object.entries(event).filter(([key]) => CONNECTION_FIELDS.has(key))) as unknown as AgentConnection;
 }
 
 export function decryptAgentCredential(

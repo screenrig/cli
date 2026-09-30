@@ -2,12 +2,23 @@ import type { Command, CommanderError } from "commander";
 import { commandPath } from "./command-path.js";
 import { usageError } from "./problems.js";
 
+const RETIRED_ACCOUNT_COMMANDS = new Map([
+  ["show", "project show"],
+  ["capabilities", "project capabilities"],
+  ["invite", "invitations create"],
+  ["recover", "dashboard reset-sign-in"],
+]);
+
 /** Commander diagnostics can contain raw option names/values. Never expose them. */
 export function commandError(error: CommanderError, command: Command): never {
   const path = commandPath(command).join(" ");
   // Preserve actionable migration hints using only known command/flag names.
   const has = (flag: string) => command.args.some((arg) => arg === `--${flag}` || arg.startsWith(`--${flag}=`));
   if (path === "screen" && command.args[0] === "revoke-credential") throw usageError("screen revoke-credential is retired. Archive the screen instead.", { command: "screenrig screen archive <id> --expect-rev REVISION", reason: "Archive hides the screen; it does not unbind the player." });
+  if (!path && command.args[0] === "account") {
+    const replacement = RETIRED_ACCOUNT_COMMANDS.get(command.args[1] ?? "") ?? "project";
+    throw usageError(`account commands are retired. Use screenrig ${replacement}.`, { command: `screenrig ${replacement} --help`, reason: "Shows the replacement's arguments and a working example." });
+  }
   if (path.startsWith("comment ")) {
     if (command.commands.length) throw usageError("comment commands require screen <id> or playlist <id>.");
     if (has("expect-rev")) throw usageError("comment commands do not take --expect-rev; last write wins and does not bump revision.");

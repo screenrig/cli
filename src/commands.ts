@@ -990,10 +990,8 @@ async function waitForAgentConnectionApproval(
       const parsed = parseSse(buffer);
       buffer = parsed.rest;
       for (const event of parsed.events) {
-        if (event.event !== "agent.connection" || !event.data) {
-          if (event.event || event.data) throw configError("Agent connection SSE emitted an unexpected event.");
-          continue;
-        }
+        // Skip event types a newer server adds; only agent.connection carries status.
+        if (event.event !== "agent.connection" || !event.data) continue;
         let decoded: unknown;
         try {
           decoded = JSON.parse(event.data) as unknown;
