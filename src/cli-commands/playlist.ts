@@ -24,7 +24,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .action(bind(handlePlaylistInit));
   addValueAlias(init, "--screen-id", "--screen", "Use this screen’s identity, revision, and reported dimensions");
   requireOptionGroup(init, "together", ["--target-width", "--target-height"]);
-  addCommandNotes(init, "Provide --screen-id for target identity, revision, and reported dimensions, or both target dimensions. Files upload and wait for readiness. Release IDs are pinned; preview/server validation checks availability. Audio inputs become the playlist soundtrack (tracks in input order) instead of pages. Inspect the document and preview before publishing.");
+  addCommandNotes(init, "Provide --screen-id for target identity, revision, and reported dimensions, or both target dimensions. Files upload up to four at a time and wait for readiness; data.uploads reports each file's media_id, reused and per-stage timing. Nothing is written until every upload is ready, so an interrupted run leaves no output; rerun the same command and files already uploaded return their existing media IDs. Release IDs are pinned; preview/server validation checks availability. Audio inputs become the playlist soundtrack (tracks in input order) instead of pages. Inspect the document and preview before publishing.");
   addCommandExamples(init, 'screenrig playlist init med_IMAGE --name Lobby --screen-id scr_SCREEN --output lobby.json',
     'screenrig playlist init med_IMAGE med_VIDEO --name Lobby --target-width 1920 --target-height 1080 --output lobby.json');
 

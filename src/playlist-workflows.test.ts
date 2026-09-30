@@ -42,6 +42,9 @@ test("editable projection preserves dynamic selectors, schedules, motion and app
  resolved.pages[1].primitives[0].resolved_media=[];
  resolved.pages[1].primitives[0].selector.one_at_a_time=false;
  resolved.pages[1].advance.max_ms=12000;
+ // The server reads back controller on every primitive and page comments.
+ for (const page of resolved.pages) for (const primitive of page.primitives) primitive.controller ??= false;
+ resolved.pages[0].comments={ note:"page note" };
  assert.deepEqual(editablePlaylist(resolved), authored);
  assert.equal(resolved.pages[1].advance.max_ms,12000);
  resolved.pages[0].unknown="unexpected";
@@ -88,10 +91,16 @@ test("stdin validation and editable output need no jq or metadata stripping", as
  }
  assert.equal((await invoke(['playlist','validate','-'])).code,0);
  assert.equal((await invoke(['playlist','validate','-'],undefined,'secret invalid JSON')).code,2);
- const transport=new FakeTransport().on('GET','/api/v1/playlists/pl_TEST',()=>response({...document(),id:'pl_TEST',revision:4}));
+ // Shaped like the server's read: resolved media and controller on every primitive.
+ const read=document();
+ for (const page of read.pages) for (const primitive of page.primitives) Object.assign(primitive,{controller:false,resolved_media:[{media_id:primitive.selector.media_id,intrinsic_size:{width:1080,height:1920}}]});
+ const transport=new FakeTransport().on('GET','/api/v1/playlists/pl_TEST',()=>response({...read,id:'pl_TEST',revision:4}));
+ // An empty file left by an interrupted run does not block the retry.
+ await writeFile(dir+'/editable.json','');
  const result=await invoke(['playlist','show','pl_TEST','--output','editable.json'],transport);
  assert.equal(result.code,0); assert.equal(result.body.data.revision,4);
  assert.deepEqual(JSON.parse(await readFile(dir+'/editable.json','utf8')),document());
+ assert.equal((await invoke(['playlist','validate','editable.json'])).code,0);
  assert.equal((await invoke(['playlist','show','pl_TEST','--output','editable.json'],transport)).code,2);
  assert.throws(()=>parseArgv(['media','generate','--prompt','a','--prompt-file','b']));
 });
@@ -125,6 +134,63 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) for (const revision 
  assert.equal(createKeys.length,failure==='create'?2:1);
  assert.equal(assignKeys.length,failure==='assign'?2:1);
  assert.ok(created&&assigned);
+});
+
+{
+ const upgrade=(state:string,active:string|null,extra:Record<string,unknown>={})=>({desired_revision:'man_NEW',active_revision:active==='pl_TEST'?'man_NEW':active?'man_OLD':null,
+  desired_playlist:{id:'pl_TEST',name:'Lobby',revision:1},active_playlist:active?{id:active,name:'Lobby',revision:1}:null,
+  state,code:null,attempt:null,retry_at:null,missing_page_count:null,state_since:null,reported_at:null,...extra});
+ const screen=(manifest_upgrade:unknown,extra:Record<string,unknown>={})=>({id:'scr_TEST',revision:8,playlist_id:'pl_TEST',online:true,
+  effective_playlist:{id:'pl_TEST',source:'default'},manifest_upgrade,...extra});
+ const cases:[string,unknown[],Record<string,unknown>][]=[
+  ['plays once the Player acknowledges it',[screen(upgrade('pending','pl_OLD')),screen(upgrade('downloading','pl_OLD')),screen(upgrade('current','pl_TEST'))],{playing:true,state:'current',reads:3}],
+  ['plays with missing pages when only part fits',[screen(upgrade('partial','pl_TEST',{missing_page_count:2}))],{playing:true,state:'partial',missing_page_count:2,reads:1}],
+  ['stops at once for an offline screen',[screen(upgrade('pending','pl_OLD'),{online:false})],{playing:false,reason:'screen_offline',reads:1}],
+  ['stops at once while a takeover shows another playlist',[screen(upgrade('current','pl_OLD'),{effective_playlist:{id:'pl_TAKEOVER',source:'takeover'}})],{playing:false,reason:'playlist_not_effective',effective_playlist_id:'pl_TAKEOVER',reads:1}],
+  ['stops when the upgrade failed',[screen(upgrade('pending','pl_OLD')),screen(upgrade('failed','pl_OLD',{code:'storage_full'}))],{playing:false,reason:'playback_failed',code:'storage_full',reads:2}],
+  ['reports the last state when the wait runs out',[screen(upgrade('downloading','pl_OLD'))],{playing:false,reason:'playback_pending',state:'downloading',waited_ms:10000}],
+ ];
+ for (const [name,reads,expected] of cases) test(`publish wait ${name}`,async t=>{
+  const dir=await mkdtemp('/tmp/publish-wait-'); t.after(()=>rm(dir,{recursive:true,force:true}));
+  let read=0,assigned=false,clock=0; const stages:string[]=[];
+  const transport=new FakeTransport()
+   .on('GET','/api/v1/project',()=>response({id:'prj_TEST'}))
+   .on('GET','/api/v1/screens/scr_TEST',()=>response(assigned?reads[Math.min(read++,reads.length-1)]:{id:'scr_TEST',revision:7}))
+   .on('POST','/api/v1/playlists',()=>response({id:'pl_TEST',revision:1}))
+   .on('PATCH','/api/v1/screens/scr_TEST',()=>{assigned=true;return response({id:'scr_TEST',revision:8,playlist_id:'pl_TEST'});});
+  const runtime={...processRuntime(),now:()=>new Date(clock),sleep:async(ms:number)=>{clock+=ms;}};
+  const result=await publishScreen({client:new ApiClient({transport,token:'test-token'}),runtime,configPath:dir+'/config.json',apiUrl:'https://api.screenrig.ai',screenId:'scr_TEST',document:document(),
+   wait:{timeoutMs:10000,pollMs:2000},progress:(stage,state)=>stages.push(`${stage}${state?`:${state}`:''}`)});
+  const {reads:expectedReads,playing,...playback}=expected;
+  assert.equal(result.stage,playing?'playing':'assigned'); assert.equal(result.playback_verified,playing);
+  for (const [key,value] of Object.entries(playback)) assert.deepEqual((result.playback as any)[key],value,key);
+  if (expectedReads!==undefined) assert.equal(read,expectedReads);
+  assert.equal(stages.at(-1)?.startsWith(playing?'playing':'assigned'),true,stages.join());
+ });
+}
+
+test("publish --no-wait returns after assignment and a wait warning explains the next step",async t=>{
+ const dir=await mkdtemp('/tmp/publish-cli-'); t.after(()=>rm(dir,{recursive:true,force:true}));
+ const config=dir+'/config.json'; await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',token:'test-token'}),{mode:0o600});
+ await writeFile(dir+'/lobby.json',JSON.stringify(document()));
+ let assigned=false;
+ const transport=new FakeTransport()
+  .on('GET','/api/v1/project',()=>response({id:'prj_TEST'}))
+  .on('GET','/api/v1/screens/scr_TEST',()=>response(assigned?{id:'scr_TEST',revision:8,playlist_id:'pl_TEST',online:false}:{id:'scr_TEST',revision:7}))
+  .on('POST','/api/v1/playlists',()=>response({id:'pl_TEST',revision:1}))
+  .on('PATCH','/api/v1/screens/scr_TEST',()=>{assigned=true;return response({id:'scr_TEST',revision:8,playlist_id:'pl_TEST'});});
+ async function invoke(...extra:string[]) {
+  let out='',err='';const code=await run({...processRuntime(),argv:['--config',config,'screen','publish','scr_TEST','lobby.json',...extra],env:{XDG_CONFIG_HOME:dir},cwd:()=>dir,transport,sleep:async()=>{},
+   stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){err+=c;d();}})});
+  return {code,body:JSON.parse(out),err};
+ }
+ const offline=await invoke();
+ assert.equal(offline.code,0); assert.equal(offline.body.data.stage,'assigned');
+ assert.deepEqual(offline.body.warnings.map((w:any)=>w.code),['screen_offline']);
+ assert.match(offline.body.warnings[0].message,/Rerun the identical publish command/);
+ assert.match(offline.err,/"event":"publish_stage","stage":"assigned"/);
+ const unwaited=await invoke('--no-wait','--no-progress');
+ assert.equal(unwaited.body.data.playback.reason,'not_waited'); assert.deepEqual(unwaited.body.warnings,[]); assert.equal(unwaited.err,'');
 });
 
 test("publish checks the expected screen revision before creating a playlist",async t=>{
@@ -267,6 +333,28 @@ test("file preparation uses upload readiness and protects existing output before
  await assert.rejects(readFile(dir+'/prepared.json'));
 });
 
+test("file preparation recovers from an interrupted run: empty output is replaced and uploaded media is reused", async t => {
+ const dir=await mkdtemp('/tmp/prepare-resume-'); t.after(()=>rm(dir,{recursive:true,force:true}));
+ const config=dir+'/config.json'; await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',token:'test-token'}),{mode:0o600});
+ await writeFile(dir+'/poster.mp4',Buffer.from([0,0,0,24,102,116,121,112]));
+ // What an interrupted run of an earlier version left behind.
+ await writeFile(dir+'/prepared.json','');
+ const transport=memoryBackend();
+ let puts=0;
+ async function invoke(...extra:string[]) {
+  let out='';const code=await run({...processRuntime(),argv:['--config',config,'playlist','init','./poster.mp4','rel_TEST','--name','Lobby','--output','prepared.json','--target-width','1920','--target-height','1080','--no-transcode','--no-progress',...extra],env:{},cwd:()=>dir,transport,sleep:async()=>{},signedRawPut:async()=>{puts++;return {status:200};},
+   stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
+  return {code,body:JSON.parse(out)};
+ }
+ const first=await invoke(); assert.equal(first.code,0,JSON.stringify(first.body));
+ assert.deepEqual(first.body.data.uploads.map((u:any)=>[u.source,u.media_id,u.reused]),[['./poster.mp4','med_AAAAAAAAAAAAAAAAAAAAAAAA',false]]);
+ assert.equal(typeof first.body.data.uploads[0].timing.processing_ms,'number');
+ const second=await invoke('--overwrite'); assert.equal(second.code,0,JSON.stringify(second.body));
+ assert.equal(second.body.data.uploads[0].reused,true); assert.equal(puts,1);
+ const doc=JSON.parse(await readFile(dir+'/prepared.json','utf8'));
+ assert.equal(doc.pages[0].primitives[0].selector.media_id,'med_AAAAAAAAAAAAAAAAAAAAAAAA');
+});
+
 for (const sameFile of [false, true]) for (const explicitKey of [false, true]) {
  test(`file preparation isolates ${sameFile ? 'identical' : 'different'} declarations with ${explicitKey ? 'retry-stable explicit' : 'generated'} keys`, async t => {
   const dir = await mkdtemp('/tmp/prepare-idempotency-');
@@ -328,14 +416,20 @@ for (const sameFile of [false, true]) for (const explicitKey of [false, true]) {
   const result = await invoke(); assert.equal(result.code, 0, JSON.stringify(result.body));
   assert.equal(declarations.size, 2); assert.equal(commits.size, 2);
   assert.equal(new Set([...declarations.keys(), ...commits.keys()]).size, 4);
+  // Files upload concurrently, so arrival order does not decide media IDs;
+  // each page must still carry the media declared from its own file.
+  const declaredBytes = new Map([...declarations.values()].map(({ body, response }) =>
+   [`med_${(response.body as { id: string }).id.slice('upload_'.length)}`, JSON.parse(body).bytes]));
   const doc = JSON.parse(await readFile(dir + '/prepared.json', 'utf8'));
-  assert.deepEqual(doc.pages.map((p: any) => p.primitives[0].selector.media_id), ['med_1', 'med_2']);
+  assert.deepEqual(doc.pages.map((p: any) => declaredBytes.get(p.primitives[0].selector.media_id)), [8, sameFile ? 8 : 9]);
+  assert.deepEqual(doc.pages.map((p: any) => p.primitives[0].selector.media_id).sort(), ['med_1', 'med_2']);
   const keys = transport.calls.filter(c => c.path === '/api/v1/media/uploads').map(c => c.headers!['idempotency-key']);
   assert.equal(keys.length, explicitKey ? 4 : 2);
   if (explicitKey) {
-   assert.deepEqual(keys.slice(0, 2), keys.slice(2));
+   assert.deepEqual(keys.slice(0, 2).sort(), keys.slice(2).sort());
+   // The upload that committed before the interruption replays its commit.
    const commitKeys = transport.calls.filter(c => c.path.endsWith('/commit')).map(c => c.headers!['idempotency-key']);
-   assert.equal(commitKeys[0], commitKeys[1]);
+   assert.equal(commitKeys.length, 3); assert.equal(new Set(commitKeys).size, 2);
   }
  });
 }

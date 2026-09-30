@@ -8,6 +8,7 @@ import { newIdempotencyKey } from "./ids.js";
 import { quotedRevision } from "./if-match.js";
 import { playlistApiVersion } from "./playlist-authoring.js";
 import { CliError, makeProblem, usageError } from "./problems.js";
+import { manifestUpgradeOf } from "./screen-manifest-upgrade.js";
 import type { CliRuntime } from "./runtime.js";
 
 type Resource = { id: string; revision: number; playlist_id?: string; timezone?: string };
@@ -22,10 +23,70 @@ function conflict(detail: string, revision?: number): never {
   throw new CliError(makeProblem("revision_conflict", "Publish needs reconciliation", 409, detail, { current_revision: revision }));
 }
 
+type PlaybackReason = "not_waited" | "screen_offline" | "playlist_not_effective" | "playback_failed" | "playback_pending";
+export interface PlaybackResult {
+  /** The Player acknowledged this playlist revision as the one on glass. */
+  playing: boolean;
+  reason?: PlaybackReason;
+  online: boolean;
+  /** Manifest upgrade state from the screen read model. */
+  state?: string;
+  code?: string;
+  missing_page_count?: number;
+  effective_playlist_id?: string;
+  waited_ms: number;
+}
+
+/**
+ * Where playback stands for one freshly assigned playlist. It is playing once
+ * the Player acknowledges the desired manifest and that manifest is this
+ * playlist. Offline screens, another effective playlist (takeover or schedule)
+ * and a failed upgrade cannot change within a short wait, so they end it.
+ */
+function playbackOf(screen: any, playlist: Resource): Omit<PlaybackResult, "waited_ms"> & { final: boolean } {
+  const upgrade = manifestUpgradeOf(screen);
+  const online = screen?.online === true;
+  const effective = typeof screen?.effective_playlist?.id === "string" ? screen.effective_playlist.id as string : undefined;
+  const detail = {
+    online,
+    ...(upgrade ? { state: upgrade.state } : {}),
+    ...(typeof upgrade?.code === "string" ? { code: upgrade.code } : {}),
+    ...(typeof upgrade?.missing_page_count === "number" ? { missing_page_count: upgrade.missing_page_count } : {}),
+    ...(effective ? { effective_playlist_id: effective } : {}),
+  };
+  const active = upgrade?.active_playlist;
+  if (upgrade?.desired_revision && upgrade.active_revision === upgrade.desired_revision
+    && active?.id === playlist.id && active.revision >= playlist.revision) return { playing: true, final: true, ...detail };
+  if (effective && effective !== playlist.id) return { playing: false, final: true, reason: "playlist_not_effective", ...detail };
+  if (!online) return { playing: false, final: true, reason: "screen_offline", ...detail };
+  if (upgrade?.state === "failed") return { playing: false, final: true, reason: "playback_failed", ...detail };
+  return { playing: false, final: false, reason: "playback_pending", ...detail };
+}
+
+async function awaitPlayback(options: {
+  client: ApiClient; runtime: CliRuntime; screenId: string; playlist: Resource; screen: unknown;
+  wait: { timeoutMs: number; pollMs: number }; progress?: (stage: string, state?: string) => void;
+}): Promise<PlaybackResult> {
+  const started = options.runtime.now().getTime();
+  let screen = options.screen;
+  let reported: string | undefined | null = null;
+  for (;;) {
+    const { final, ...playback } = playbackOf(screen, options.playlist);
+    const waited_ms = options.runtime.now().getTime() - started;
+    if (!playback.playing && playback.state !== reported) options.progress?.("assigned", reported = playback.state);
+    if (final || waited_ms + options.wait.pollMs > options.wait.timeoutMs) return { ...playback, waited_ms };
+    await options.runtime.sleep(options.wait.pollMs);
+    screen = (await options.client.call({ method: "GET", path: `/api/v1/screens/${options.screenId}` })).body;
+  }
+}
+
 /** Multi-request publishing is resumable, not atomic. The journal contains no authored content. */
 export async function publishScreen(options: {
   client: ApiClient; runtime: CliRuntime; configPath: string; apiUrl: string;
   screenId: string; revision?: string; document: any; requestedKey?: string;
+  /** Wait for the Player to show the playlist; omit to return after assignment. */
+  wait?: { timeoutMs: number; pollMs: number };
+  progress?: (stage: string, state?: string) => void;
 }) {
   const { client, screenId, document } = options;
   const expected = options.revision === undefined ? undefined : Number(options.revision.replaceAll('"', ''));
@@ -106,7 +167,12 @@ export async function publishScreen(options: {
     }
     const screen = resource((await client.call({ method: "GET", path: `/api/v1/screens/${screenId}` })).body, "screen");
     if (screen.id !== screenId || screen.playlist_id !== state.playlist.id) conflict("The screen no longer has this playlist assigned. Inspect it before making another change.", screen.revision);
-    return { playlist_id: state.playlist.id, playlist_revision: state.playlist.revision, screen_id: screenId, screen_revision: screen.revision, assignment_verified: true, playback_verified: false, journal: journalPath };
+    const playback: PlaybackResult = options.wait
+      ? await awaitPlayback({ client, runtime: options.runtime, screenId, playlist: state.playlist, screen, wait: options.wait, progress: options.progress })
+      : { playing: false, reason: "not_waited", online: (screen as { online?: unknown }).online === true, waited_ms: 0 };
+    if (playback.playing) options.progress?.("playing", playback.state);
+    return { playlist_id: state.playlist.id, playlist_revision: state.playlist.revision, screen_id: screenId, screen_revision: screen.revision,
+      stage: playback.playing ? "playing" : "assigned", assignment_verified: true, playback_verified: playback.playing, playback, journal: journalPath };
   } catch (error) {
     if (error instanceof CliError) {
       error.problem.errors.push({ stage: state?.assigned ? "verify" : state?.playlist ? "assign" : "create", playlist_id: state?.playlist?.id, journal: journalPath });

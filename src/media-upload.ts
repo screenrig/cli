@@ -230,9 +230,25 @@ export interface MediaFileUploadInput {
   onDeclared?: (session: ValidatedMediaUploadSession) => Promise<void>;
 }
 
+/**
+ * Wall-clock milliseconds per upload stage, so a slow upload shows where the
+ * time went. processing_ms runs from the commit response to the ready media
+ * and is only as fine as the polling interval; absent with --no-wait.
+ */
+export interface MediaUploadTiming {
+  prepare_ms: number;
+  declare_ms?: number;
+  transfer_ms?: number;
+  commit_ms?: number;
+  processing_ms?: number;
+}
+
 export interface MediaFileUploadResult {
   mediaId?: string;
   operation: Operation;
+  /** True when ready media with identical bytes, name and tag already existed, so nothing uploaded. */
+  reused: boolean;
+  timing: MediaUploadTiming;
   upload: {
     /**
      * The stored name. Read back from the ready media object, because the
@@ -368,10 +384,12 @@ function uploadWarnings(prepared: PreparedMediaUpload, transcode: TranscodeResul
 export async function submitPreparedMedia(
   input: MediaFileUploadInput,
   preparedFile: PreparedMediaFile,
-): Promise<Pick<MediaFileUploadResult, "mediaId" | "operation">> {
+): Promise<Pick<MediaFileUploadResult, "mediaId" | "operation"> & { timing: Omit<MediaUploadTiming, "prepare_ms"> }> {
   const { runtime, client } = input;
   const { prepared } = preparedFile;
   const declareKey = input.idempotencyKey ?? client.idempotencyKey;
+  let mark = runtime.now().getTime();
+  const lap = () => { const now = runtime.now().getTime(); const elapsed = now - mark; mark = now; return elapsed; };
   const declarationResponse = await client.call({
     method: "POST",
     path: "/api/v1/media/uploads",
@@ -383,10 +401,13 @@ export async function submitPreparedMedia(
     throw usageError("Media upload declaration did not return the required private, no-store cache policy.");
   }
   const session = validateMediaUploadSession(declarationResponse.body as MediaUploadSession, runtime.now().getTime());
+  const declare_ms = lap();
   if (input.onDeclared) {
     await input.onDeclared(session);
   }
+  lap();
   await performSignedMediaPut(prepared, session, runtime.signedRawPut ?? fetchSignedRawPut());
+  const transfer_ms = lap();
   const commitResponse = await client.call({
     method: "POST",
     path: `/api/v1/media/uploads/${session.id}/commit`,
@@ -395,14 +416,16 @@ export async function submitPreparedMedia(
     body: prepared.commit,
   });
   let operation = commitResponse.body as Operation;
+  const timing: Omit<MediaUploadTiming, "prepare_ms"> = { declare_ms, transfer_ms, commit_ms: lap() };
   if (!input.noWait) {
     operation = await client.waitForOperation(operation.id, {
       timeoutMs: input.timeoutMs ?? 120_000,
       pollMs: input.pollMs ?? 1000,
       sleep: runtime.sleep,
     });
+    timing.processing_ms = lap();
   }
-  return { mediaId: readyMediaId(operation), operation };
+  return { mediaId: readyMediaId(operation), operation, timing };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -434,11 +457,49 @@ async function storedMediaFilename(
   }
 }
 
-export async function uploadMediaFile(input: MediaFileUploadInput): Promise<MediaFileUploadResult> {
-  const preparedFile = await prepareMediaFileForUpload(input);
+/**
+ * Ready media this exact upload already produced: the same bytes, declared
+ * name and tag. Rerunning an interrupted upload then returns that media ID
+ * instead of storing a second copy. Best effort: any failure means upload.
+ */
+async function existingUpload(
+  client: ApiClient,
+  declaration: MediaUploadDeclaration,
+): Promise<{ mediaId: string; operation: Operation; filename?: string; source_filename?: string } | undefined> {
   try {
-    const submitted = await submitPreparedMedia(input, preparedFile);
-    const stored = submitted.mediaId ? await storedMediaFilename(input.client, submitted.mediaId) : {};
+    const primitive = declaration.content_type.split("/")[0];
+    const response = await client.call({ method: "GET", path: "/api/v1/media", query: { primitive } });
+    const items = asRecord(response.body)?.items;
+    if (!Array.isArray(items)) return undefined;
+    const match = items.map(asRecord).find((item) =>
+      item?.state === "ready" && typeof item.id === "string" && typeof item.operation_id === "string" &&
+      item.sha256 === declaration.sha256 && item.bytes === declaration.bytes &&
+      item.content_type === declaration.content_type &&
+      item.source_filename === declaration.source_filename && item.tag === declaration.tag);
+    if (!match) return undefined;
+    const operation = await client.getOperation(match.operation_id as string);
+    if (operation.state !== "succeeded" || readyMediaId(operation) !== match.id) return undefined;
+    return {
+      mediaId: match.id as string,
+      operation,
+      ...(typeof match.filename === "string" ? { filename: match.filename } : {}),
+      ...(typeof match.source_filename === "string" ? { source_filename: match.source_filename } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export async function uploadMediaFile(input: MediaFileUploadInput): Promise<MediaFileUploadResult> {
+  const started = input.runtime.now().getTime();
+  const preparedFile = await prepareMediaFileForUpload(input);
+  const prepare_ms = input.runtime.now().getTime() - started;
+  try {
+    const existing = await existingUpload(input.client, preparedFile.prepared.declaration);
+    const submitted = existing
+      ? { mediaId: existing.mediaId, operation: existing.operation, reused: true, timing: { prepare_ms } }
+      : await submitPreparedMedia(input, preparedFile).then(({ timing, ...rest }) => ({ ...rest, reused: false, timing: { prepare_ms, ...timing } }));
+    const stored = existing ?? (submitted.mediaId ? await storedMediaFilename(input.client, submitted.mediaId) : {});
     return {
       ...submitted,
       upload: {

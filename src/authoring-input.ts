@@ -1,4 +1,4 @@
-import { open, mkdir, rename, rm } from "node:fs/promises";
+import { open, mkdir, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { CliRuntime } from "./runtime.js";
 import { usageError } from "./problems.js";
@@ -33,16 +33,41 @@ export async function readAuthoringJson(file: string, runtime: CliRuntime): Prom
   const text = await readAuthoringText(file, runtime);
   try { return JSON.parse(text); } catch { throw usageError("Input is not valid JSON."); }
 }
-/** Exclusive creation keeps a prepared document safe from accidental replacement. */
+const OUTPUT_EXISTS = "Output file already exists; choose a new file or use --overwrite to replace it.";
+
+/** An empty file is what an interrupted earlier run leaves behind, never a prepared document. */
+async function holdsContent(output: string): Promise<boolean> {
+  try { return (await stat(output)).size > 0; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
+}
+
+/** Refuse a prepared document up front, before any slow or billed work. */
+export async function assertOutputAvailable(output: string, overwrite: boolean): Promise<void> {
+  if (!overwrite && await holdsContent(output)) throw usageError(OUTPUT_EXISTS);
+}
+
+/**
+ * Write the whole file beside the target, then move it into place, so an
+ * interrupt never leaves a partial or empty output behind.
+ */
+export async function writeOutputFile(output: string, text: string, overwrite: boolean): Promise<void> {
+  await mkdir(path.dirname(output), { recursive: true });
+  await assertOutputAvailable(output, overwrite);
+  const temporary = `${output}.${crypto.randomUUID()}.tmp`;
+  try {
+    const handle = await open(temporary, "wx", 0o600);
+    try { await handle.writeFile(text); } finally { await handle.close(); }
+    await rename(temporary, output);
+  } catch {
+    throw usageError("Cannot create output; check that the directory is writable.");
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
 export async function writeAuthoringJson(file: string, document: unknown, runtime: CliRuntime, overwrite = false): Promise<string> {
   const output = path.resolve(runtime.cwd(), file);
-  await mkdir(path.dirname(output), { recursive: true });
-  const destination = overwrite ? `${output}.${crypto.randomUUID()}.tmp` : output;
-  try {
-    const handle = await open(destination, "wx", 0o600);
-    try { await handle.writeFile(JSON.stringify(document, null, 2) + "\n"); } finally { await handle.close(); }
-    if (overwrite) await rename(destination, output);
-  } catch { if (overwrite) await rm(destination, { force: true }); throw usageError("Cannot create output; use --overwrite to replace an existing file."); }
+  await writeOutputFile(output, JSON.stringify(document, null, 2) + "\n", overwrite);
   return output;
 }
 

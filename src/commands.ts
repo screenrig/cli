@@ -1,9 +1,10 @@
 import { requireCapability, validateProjectCapabilities } from "./project-capabilities.js";
 import { RESOURCE_ID_PATTERNS, isResourceID } from "./generated/resource-ids.js";
 import { replacePlaylistRelease } from "./playlist-release.js";
-import { readAuthoringJson, readAuthoringText, writeAuthoringJson } from "./authoring-input.js";
+import { assertOutputAvailable, readAuthoringJson, readAuthoringText, writeAuthoringJson, writeOutputFile } from "./authoring-input.js";
 import { publishScreen } from "./screen-publish.js";
 import { fleetHumanLines, fleetOutcome, rejectFleetRevision, screenActionResult, screenTag, screenTagList, screenTarget, SCREEN_TAGS_MAX, FLEET_SCREENS_MAX, type FleetItem } from "./screen-fleet.js";
+import { canonicalPairingCode } from "./pairing-code.js";
 import { editablePlaylist, isAdSlotPage, playlistApiVersion, preparePlaylist, targetDimensions } from "./playlist-authoring.js";
 import { callVersionedPlaylist } from "./playlist-api.js";
 import { WriteRecovery } from "./write-recovery.js";
@@ -127,7 +128,7 @@ import {
   viewingOf,
 } from "./compose/lint.js";
 import { LOOK_AT_THE_CONTACT_SHEET, PREVIEW_VIEWPORT, previewPlaylist } from "./playlist-preview.js";
-import { uploadMediaFile } from "./media-upload.js";
+import { uploadMediaFile, type MediaUploadTiming } from "./media-upload.js";
 import { runMediaUploadBatch, UPLOAD_BATCH_DEFAULT_CONCURRENCY, UPLOAD_BATCH_MAX_CONCURRENCY, UPLOAD_BATCH_MIN_CONCURRENCY } from "./media-upload-batch.js";
 import { clearProvisionRetryState, provisionRetryState } from "./provisioning-state.js";
 import { clearGenerateRetryState, generateRequestHash, generateRetryState } from "./media-generate-retry.js";
@@ -1475,7 +1476,7 @@ async function agentDisconnect(
     human: humanLines("Agent disconnected", [
       ["local_credential", "removed"],
       ["project_screens_and_other_agents", "preserved"],
-      ["reconnect", "run screenrig agent connect and approve with an existing dashboard passkey"],
+      ["next", "screenrig agent enroll --email ADDRESS creates a new project; screenrig agent connect joins an existing one only when the user asks"],
     ]),
   };
 }
@@ -3521,8 +3522,10 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
   const data = {
     ...(mediaId ? { media_id: mediaId, id: mediaId } : {}),
     operation: uploaded.operation,
+    reused: uploaded.reused,
     upload: uploaded.upload,
     transcode: uploaded.transcode,
+    timing: uploaded.timing,
   };
   return {
     envelope: successEnvelope(data, {
@@ -3531,7 +3534,7 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
       warnings: uploaded.warnings,
     }),
     exitCode: ExitCode.Success,
-    human: humanLines(flagBool(args.flags, "no-wait") ? "Media upload committed" : "Media uploaded", [
+    human: humanLines(uploaded.reused ? "Media already uploaded" : flagBool(args.flags, "no-wait") ? "Media upload committed" : "Media uploaded", [
       ["media_id", mediaId],
       ["operation_id", uploaded.operation.id],
       ["state", uploaded.operation.state],
@@ -3541,6 +3544,7 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
       ["tag", uploaded.upload.tag],
       ["transcode", typeof uploaded.transcode.duration_ms === "number" ? `${uploaded.transcode.reason} in ${uploaded.transcode.duration_ms} ms` : "skipped"],
       ["sha256", uploaded.upload.sha256],
+      ["timing", Object.entries(uploaded.timing).map(([stage, ms]) => `${stage.replace(/_ms$/, "")} ${ms} ms`).join(", ")],
       ...uploaded.warnings.map((warning): [string, string] => ["warning", warning.message]),
     ]),
   };
@@ -4392,12 +4396,11 @@ export const handleScreenPair = commandHandler(async (args, runtime, resolved) =
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
 
-  const rawCode = args.positionals[2];
+  // The Player shows the code grouped ("ABC 234"), so an unquoted code
+  // arrives as two arguments.
+  const rawCode = args.positionals.slice(2).join(" ");
   if (!rawCode) throw usageError("screen pair requires CODE.");
-  const code = rawCode.toUpperCase();
-  if (!/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/.test(code)) {
-    throw usageError("screen pair CODE must be six characters from 23456789ABCDEFGHJKMNPQRSTUVWXYZ.");
-  }
+  const code = canonicalPairingCode(rawCode, "screen pair CODE");
   const label = flagString(args.flags, "label");
   const request: PairScreen = { code, ...(label ? { label } : {}) };
   const response = await client.call({
@@ -6079,6 +6082,8 @@ function sanitizedPreparationApiUrl(value: string): string {
   return url.toString().replace(/\/$/, "");
 }
 
+const PLAYLIST_INIT_UPLOAD_CONCURRENCY = 4;
+
 export const handlePlaylistInit = commandHandler(async (args, runtime, resolved) => {
   let existingClient: ApiClient | undefined;
   const remote = () => existingClient ??= clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
@@ -6117,17 +6122,17 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
     }
   }
   const options = { name: flagString(args.flags, "name")!, content, ...dimensions, durationMs: flagNumber(args.flags, "duration-ms") ?? 8000, fit: flagString(args.flags, "fit") ?? "contain" };
-  // Validate the entire authoring shape and reserve the output before uploading.
+  // Validate the entire authoring shape and check the output before uploading.
   preparePlaylist(options);
   const output = path.resolve(runtime.cwd(), flagString(args.flags, "output")!);
-  await mkdir(path.dirname(output), { recursive: true });
   const overwrite = flagBool(args.flags, "overwrite");
-  const destination = overwrite ? `${output}.${crypto.randomUUID()}.tmp` : output;
-  let handle;
-  try { handle = await open(destination, "wx", 0o600); }
-  catch { throw usageError("Cannot create output; choose a new file or use --overwrite."); }
-  try {
-    for (const [index, sourcePath] of files) {
+  await assertOutputAvailable(output, overwrite);
+  // Upload a few files at once; each one's content slot keeps page order.
+  const queue = [...files];
+  const uploads: { index: number; media_id: string; reused: boolean; timing: MediaUploadTiming }[] = [];
+  const uploadNext = async (): Promise<void> => {
+    for (let next = queue.shift(); next; next = queue.shift()) {
+      const [index, sourcePath] = next;
       // Scope each occurrence to the invocation key, including repeated files.
       // An identical retry with --idempotency-key reproduces both declare and commit keys.
       const idempotencyKey = createHash("sha256")
@@ -6142,16 +6147,18 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
       const record = (await remote().call({ method: "GET", path: `/api/v1/media/${encodeURIComponent(uploaded.mediaId)}` })).body as Record<string, any>;
       if (record?.id !== uploaded.mediaId) throw usageError("Media response identity did not match.");
       content[index] = record;
+      uploads.push({ index, media_id: uploaded.mediaId, reused: uploaded.reused, timing: uploaded.timing });
     }
-    await handle.writeFile(JSON.stringify(preparePlaylist(options), null, 2) + "\n");
-  } catch (error) {
-    await handle.close(); await rm(destination, { force: true }); throw error;
-  }
-  await handle.close();
-  if (overwrite) await rename(destination, output);
+  };
+  const workers = await Promise.allSettled(Array.from({ length: Math.min(PLAYLIST_INIT_UPLOAD_CONCURRENCY, files.size) }, () =>
+    uploadNext().catch((error) => { queue.length = 0; throw error; })));
+  const failure = workers.find((worker) => worker.status === "rejected");
+  if (failure) throw failure.reason;
+  await writeOutputFile(output, JSON.stringify(preparePlaylist(options), null, 2) + "\n", overwrite);
   const context = ["--config", resolved.configPath, "--api-url", sanitizedPreparationApiUrl(resolved.apiUrl)];
   const trackCount = content.filter((item) => item.primitive === "audio").length;
   return { envelope: successEnvelope({ output, ...dimensions, page_count: content.length - trackCount, ...(trackCount > 0 ? { soundtrack_tracks: trackCount } : {}),
+    ...(uploads.length > 0 ? { uploads: uploads.sort((a, b) => a.index - b.index).map(({ index, ...upload }) => ({ source: args.positionals[2 + index], ...upload })) } : {}),
     ...(target ? { screen_id: target.id, screen_revision: target.revision } : {}),
     preview: { argv: ["playlist", "preview", output, "--output", `${output}.preview`, "--contact-sheet", ...context] },
     ...(target ? { publish: { argv: ["screen", "publish", target.id, output, ...context], reason: "Inspect the prepared document and preview before publishing." } } : {}),
@@ -6163,9 +6170,45 @@ export const handleScreenPublish = commandHandler(async (args, runtime, resolved
   const document = parsed && typeof parsed === "object" && Array.isArray(parsed.pages) ? { ...parsed, pages: expandPlaylistPages(parsed.pages) } : parsed;
   assertPlaylistValid(document);
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const result = await publishScreen({ client, runtime, configPath: resolved.configPath, apiUrl: resolved.apiUrl, screenId: args.positionals[2]!, revision: flagString(args.flags, "if-match")!, document, requestedKey: flagString(args.flags, "idempotency-key") });
-  return { envelope: successEnvelope(result, { request_id: client.requestId }), exitCode: ExitCode.Success, human: `Assigned ${result.playlist_id} to ${result.screen_id}; assignment read back. Playback still needs verification.` };
+  const json = !flagBool(args.flags, "human");
+  const progress = flagBool(args.flags, "no-progress") ? undefined : (stage: string, state?: string) =>
+    runtime.stderr.write(json ? `${JSON.stringify({ event: "publish_stage", stage, ...(state ? { state } : {}) })}\n` : `screenrig: ${stage}${state ? ` (${state})` : ""}\n`);
+  const result = await publishScreen({ client, runtime, configPath: resolved.configPath, apiUrl: resolved.apiUrl, screenId: args.positionals[2]!, revision: flagString(args.flags, "if-match")!, document, requestedKey: flagString(args.flags, "idempotency-key"),
+    wait: flagBool(args.flags, "no-wait") ? undefined : { timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000, pollMs: flagNumber(args.flags, "poll-ms") ?? 2000 },
+    progress });
+  const warning = publishPlaybackWarning(result);
+  return {
+    envelope: successEnvelope(result, { request_id: client.requestId, warnings: warning ? [warning] : [] }),
+    exitCode: ExitCode.Success,
+    human: humanLines(result.playback_verified ? "Published and playing" : "Published and assigned", [
+      ["playlist_id", result.playlist_id],
+      ["screen_id", result.screen_id],
+      ["stage", result.stage],
+      ["waited", `${result.playback.waited_ms} ms`],
+      ...(warning ? [["warning", warning.message] as [string, string]] : []),
+    ]),
+  };
 });
+
+/** Why a publish is not visibly playing yet, and what to do about it. */
+function publishPlaybackWarning(result: Awaited<ReturnType<typeof publishScreen>>): Warning | undefined {
+  const { playback, screen_id: screen } = result;
+  const rerun = "Rerun the identical publish command to wait again; it does not create another playlist.";
+  switch (playback.reason) {
+    case "screen_offline":
+      return { code: "screen_offline", message: `The screen is offline, so its Player has not picked up the playlist. It plays when the Player reconnects. ${rerun}` };
+    case "playlist_not_effective":
+      return { code: "playlist_not_effective", message: `A takeover or playlist schedule shows ${playback.effective_playlist_id} on this screen. The published playlist is its default and plays when that ends; screen show ${screen} reports effective_playlist.` };
+    case "playback_failed":
+      return { code: "playback_failed", message: `The Player could not switch to the playlist${playback.code ? ` (${playback.code})` : ""}. screen show ${screen} reports the reason; fix it, then screen reload ${screen}.` };
+    case "playback_pending":
+      return { code: "playback_pending", message: `The Player had not shown the playlist after ${Math.round(playback.waited_ms / 1000)} s (state ${playback.state ?? "unknown"}). Large videos take longer to download. ${rerun}` };
+  }
+  if (playback.playing && playback.state === "partial") {
+    return { code: "playback_partial", message: `The Player shows the playlist without ${playback.missing_page_count ?? "some"} page(s) that do not fit its storage. screen storage-forecast ${screen} --playlist-id ${result.playlist_id} explains the fit.` };
+  }
+  return undefined;
+}
 
 // Customer webhooks: /api/v1/webhooks. The signing secret is printed once in
 // data.secret (create, rotate-secret) and never reaches config, logs, or the

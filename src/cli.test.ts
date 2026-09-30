@@ -1433,6 +1433,15 @@ test("screen pair normalizes safe lowercase input and reports canonical uppercas
   assert.deepEqual(transport.calls.at(-1)?.body, { code: "ABC234", label: "Lobby" });
 });
 
+test("screen pair accepts the code as the Player groups it", async () => {
+  for (const code of [["ABC 234"], ["ABC", "234"], ["abc-234"], [" abc\t234 "]]) {
+    const transport = memoryBackend();
+    const result = await withAuthenticatedRuntime(["--json", "screen", "pair", ...code], transport);
+    assert.equal(result.code, 0, result.stdout);
+    assert.deepEqual(transport.calls.at(-1)?.body, { code: "ABC234" });
+  }
+});
+
 test("screen pair rejects ambiguous or malformed codes before claiming", async () => {
   const transport = memoryBackend();
   const result = await withAuthenticatedRuntime(["--json", "screen", "pair", "ABCI01"], transport);
@@ -4255,6 +4264,41 @@ test("media upload warns on a low-information filename without blocking the uplo
     assert.ok(warning, result.stdout);
     assert.match(warning.message, /video\.mp4/);
     assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 1);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("media upload rerun returns the existing media instead of uploading again, and reports stage timing", async () => {
+  const transport = memoryBackend();
+  const configDir = await testTemp("media-reuse-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    fsLike,
+  );
+  const file = path.join(configDir, "lobby-loop.mp4");
+  await writeFile(file, Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
+  const upload = async (...extra: string[]) => {
+    const result = await withRuntime(["--json", "media", "upload", file, "--no-transcode", ...extra], transport, { fs: fsLike, signedRawPut: async () => ({ status: 200 }) });
+    assert.equal(result.code, 0, result.stdout);
+    return JSON.parse(result.stdout).data as { media_id: string; reused: boolean; operation: { state: string }; timing: Record<string, number> };
+  };
+  const declares = () => transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length;
+  try {
+    const first = await upload();
+    assert.equal(first.reused, false);
+    assert.deepEqual(Object.keys(first.timing), ["prepare_ms", "declare_ms", "transfer_ms", "commit_ms", "processing_ms"]);
+    const second = await upload();
+    assert.equal(second.reused, true);
+    assert.equal(second.media_id, first.media_id);
+    assert.equal(second.operation.state, "succeeded");
+    assert.deepEqual(Object.keys(second.timing), ["prepare_ms"]);
+    assert.equal(declares(), 1);
+    // A different tag is a different upload.
+    assert.equal((await upload("--tag", "Lobby")).reused, false);
+    assert.equal(declares(), 2);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }

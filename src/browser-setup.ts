@@ -1,9 +1,8 @@
 import { readConfigFile, withConfigLock, writeConfigAtomic, type ResolvedConfig } from "./config.js";
 import type { EnrollmentRuntime } from "./enrollment.js";
 import { isValidIdempotencyKey, newIdempotencyKey } from "./ids.js";
+import { canonicalPairingCode } from "./pairing-code.js";
 import { usageError } from "./problems.js";
-
-const CODE_PATTERN = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/;
 
 export interface BrowserSetupCode {
   canonical: string;
@@ -11,11 +10,7 @@ export interface BrowserSetupCode {
 }
 
 export function normalizeBrowserSetupCode(input: string): BrowserSetupCode {
-  const upper = input.toUpperCase();
-  const canonical = upper.length === 7 && upper[3] === "-" ? `${upper.slice(0, 3)}${upper.slice(4)}` : upper;
-  if (!CODE_PATTERN.test(canonical)) {
-    throw usageError("browser setup --code must be six characters from 23456789ABCDEFGHJKMNPQRSTUVWXYZ, with an optional middle dash.");
-  }
+  const canonical = canonicalPairingCode(input, "browser setup --code");
   return { canonical, display: `${canonical.slice(0, 3)}-${canonical.slice(3)}` };
 }
 

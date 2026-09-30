@@ -14,10 +14,13 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("<id>", "Screen identifier")
     .argument("<file>", "Prepared playlist file, or - for stdin")
     .option("--expect-rev <REVISION>", "Expected screen revision", revision)
+    .option("--no-wait", "Return after assignment without waiting for the Player to show the playlist")
+    .option("--poll-ms <MS>", "Set the screen polling interval while waiting", positiveInteger("poll-ms"))
+    .option("--no-progress", "Suppress stderr progress")
     .action(bind(handleScreenPublish));
 
   screen.command("pair").description("Claim a Player pairing code")
-    .argument("<code>", "Player pairing code")
+    .argument("<code...>", "Player pairing code as shown; spaces and dashes are ignored")
     .action(bind(handleScreenPair));
 
   screen.command("provision").description("Create a screen and browser handoff")

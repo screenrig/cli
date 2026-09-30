@@ -167,8 +167,9 @@ The response is neutral whether or not the address is known: if this address can
 receive sign-in instructions, check its inbox. Delivery is not confirmed.
 Rerunning an ambiguous request reuses its saved Idempotency-Key.
 
-To attach an existing project to this installation, run `screenrig agent connect`
-and approve the connection request in that project's dashboard.
+First setup is `agent enroll`. Only to attach a project that already exists to
+this installation, run `screenrig agent connect` and approve the connection
+request in that project's dashboard.
 
 ## Screen host and recovery
 
@@ -900,18 +901,21 @@ HTTPS iframe URLs, including mixed inputs:
 screenrig playlist init ./poster.png med_VIDEO rel_APP https://example.com --name Lobby --screen-id scr_LOBBY --output lobby.json
 ```
 
-Files use the normal media upload/transcode path and wait for readiness; ffmpeg
-and ffprobe are required unless `--no-transcode` is used. Preparation uploads
-files but does not create a remote playlist or assign a screen. Existing media
-must be ready. Release availability and iframe embedding support still need
-preview/server and Player verification. Preparation does not fetch iframe URLs.
-Each file occurrence has a distinct upload key derived from the invocation's
-idempotency key and its input position. For retryable preparation, supply
-`--idempotency-key` from the first attempt and reuse it with identical inputs in
-the same order, within the server's replay window. Declarations and commits then
-reuse their respective per-file keys. Without an explicit key, a new invocation
-gets new upload keys. If preparation fails after an upload, that media remains in
-the project; inspect `media list` and reuse its ID instead of uploading it again.
+Files use the normal media upload/transcode path, up to four at a time, and wait
+for readiness; ffmpeg and ffprobe are required unless `--no-transcode` is used.
+`data.uploads` lists each file's `media_id`, `reused`, and per-stage `timing`.
+Preparation uploads files but does not create a remote playlist or assign a
+screen. Existing media must be ready. Release availability and iframe embedding
+support still need preview/server and Player verification. Preparation does not
+fetch iframe URLs.
+
+Nothing is written until every upload is ready, so an interrupted preparation
+leaves no output file. Rerun the same command: a file whose upload already
+finished returns its existing media ID (`reused: true`) instead of uploading
+again. Each file occurrence also has a distinct upload key derived from the
+invocation's idempotency key and its input position; supply `--idempotency-key`
+from the first attempt and reuse it with identical inputs to resume a
+declaration or commit that was in flight.
 
 The canonical document contains one full-screen page per input, a black background,
 and a 200 ms crossfade. Images use `--fit contain|cover|fill` (default `contain`);
@@ -954,13 +958,31 @@ returns `preview.argv`. These arrays preserve the selected config/API and paths
 with spaces; execute preview, inspect it, then use the publish arguments. Add `--expect-rev` explicitly to guard against later screen changes. Target metadata stays outside
 the playlist file. Override canvas dimensions with both `--target-width` and
 `--target-height`; these also work without `--screen-id` (no publish arguments).
-Unknown or multiple reported surfaces require explicit dimensions. Output files are exclusive by default; use `--overwrite` to replace an existing authoring file atomically. Parent directories are created automatically. URL and release-ID inputs with explicit dimensions work without login.
+Unknown or multiple reported surfaces require explicit dimensions. Output files are exclusive by default; use `--overwrite` to replace an existing authoring file atomically. An empty file, as an interrupted run of an older CLI could leave, does not count as existing. Parent directories are created automatically. URL and release-ID inputs with explicit dimensions work without login.
 
-`screen publish <screen-id> <file>` creates a new playlist, assigns it with an optional **screen** revision guard, and reads back the assignment. It does not update an
+`screen publish <screen-id> <file>` creates a new playlist, assigns it with an optional **screen** revision guard, reads back the assignment, and waits for the Player to show it. It does not update an
 existing playlist by name. Display names may repeat; use the playlist ID for an explicit `playlist update`. Its JSON result reports `playlist_id`,
-`playlist_revision`, `screen_id`, `screen_revision`, `assignment_verified`, and
-`playback_verified`. Assignment verification does not prove playback; request and
-inspect a screenshot and relevant playback evidence separately.
+`playlist_revision`, `screen_id`, `screen_revision`, `stage`,
+`assignment_verified`, `playback_verified`, and `playback`.
+
+The wait is bounded by `--timeout` (default 120000 ms) and polls the screen every
+`--poll-ms` (default 2000). It ends as soon as the Player acknowledges this
+playlist on glass: `stage` becomes `playing` and `playback_verified` is `true`.
+Otherwise `stage` stays `assigned` and `playback.reason` says why, with a
+warning of the same code:
+
+| `playback.reason` | Meaning |
+|---|---|
+| `screen_offline` | No Player is connected; it picks the playlist up when it reconnects. |
+| `playlist_not_effective` | A takeover or schedule shows `playback.effective_playlist_id`; the published default plays when that ends. |
+| `playback_failed` | The Player reported a failed upgrade; `playback.code` names the cause. |
+| `playback_pending` | The wait ran out; `playback.state` is the last upgrade state. |
+
+A `partial` state plays with `playback.missing_page_count` pages left out and
+warns `playback_partial`. Rerunning the identical command waits again without
+creating another playlist. `--no-wait` returns after assignment with
+`playback.reason` `not_waited`. Stage changes go to stderr (`--no-progress`
+silences them). A screenshot shows the content itself.
 
 Publishing saves a private local journal automatically. After an ambiguous failure,
 repeat the identical command and input with the same config to resume. If playlist
@@ -984,8 +1006,10 @@ screenrig playlist update pl_EXISTING lobby.json
 
 `playlist show --output` writes the editable `{name, pages}` document and returns
 its path, `playlist_id`, and source `revision` on stdout. Optionally pass that revision with `--expect-rev` to guard the update. It preserves dynamic selectors, schedules, motion, and pinned
-application releases, removing server-derived media and timing fields. Comments
-remain separate. Plain `playlist show` is an inspection response; `--editable`
+application releases, removing server-derived media and timing fields and the
+read-only `controller` flag (kept only as `true` on a controlling application),
+so the file validates and updates as written. Comments remain separate; page
+comments carry over by page ID. Plain `playlist show` is an inspection response; `--editable`
 without `--output` returns `data.document`, `data.playlist_id`, and `data.revision`.
 Updating a playlist affects every screen assigned to it.
 

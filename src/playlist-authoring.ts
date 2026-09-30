@@ -23,10 +23,15 @@ export function editablePlaylist(value: unknown): RecordValue {
     // An adslot page is a whole-page reference: id, type, adslot_id, visibility.
     // It carries no canvas or primitives, so nothing is stripped or rewrapped.
     if (page.type === "adslot") continue;
+    // Page comments are read-only here; updates carry them over by page id.
+    delete page.comments;
     if (page.advance?.mode === "media_end") delete page.advance.max_ms;
     if (!Array.isArray(page.primitives)) throw usageError("Playlist primitives are missing.");
     for (const primitive of page.primitives) {
       object(primitive);
+      // Reads report controller on every primitive; writes accept it only as
+      // true on an application.
+      if (primitive.primitive !== "application" || primitive.controller !== true) delete primitive.controller;
       if (["image", "video", "stream"].includes(primitive.primitive)) {
         delete primitive.resolved_media;
         // Omit the server-inserted false default without changing selector behavior.

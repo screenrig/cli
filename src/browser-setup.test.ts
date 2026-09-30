@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { browserHandoffUrl, normalizeBrowserSetupCode } from "./browser-setup.js";
 
-test("browser setup code accepts dashed or undashed lowercase and displays canonical XXX-XXX", () => {
-  assert.deepEqual(normalizeBrowserSetupCode("abc234"), { canonical: "ABC234", display: "ABC-234" });
-  assert.deepEqual(normalizeBrowserSetupCode("abc-234"), { canonical: "ABC234", display: "ABC-234" });
+test("browser setup code accepts grouped or ungrouped lowercase and displays canonical XXX-XXX", () => {
+  for (const input of ["abc234", "abc-234", "ABC 234", " abc - 234 "]) {
+    assert.deepEqual(normalizeBrowserSetupCode(input), { canonical: "ABC234", display: "ABC-234" });
+  }
 });
 
-test("browser setup code rejects ambiguous, misplaced, and extra punctuation", () => {
-  for (const input of ["ABC-23", "AB-C234", "ABC_234", "ABC10I", "ABC-10I"]) {
+test("browser setup code rejects ambiguous characters, wrong lengths, and other punctuation", () => {
+  for (const input of ["ABC-23", "ABC_234", "ABC.234", "ABC10I", "ABC-10I", "ABC-2345"]) {
     assert.throws(() => normalizeBrowserSetupCode(input), /six characters/);
   }
 });
