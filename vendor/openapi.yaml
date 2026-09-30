@@ -2863,6 +2863,7 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeSessionRequest" } } } }
       responses:
         "201": { description: Read-only runtime session cookie, headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeSession" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/device-sessions:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
