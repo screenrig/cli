@@ -550,7 +550,7 @@ paths:
       description: Backend-owned project dashboard origin
     put:
       operationId: switchDashboardProject
-      description: Switches to one of the person’s projects and updates its last-used time. A project outside the person’s memberships returns not_found.
+      description: Switches to one of the person’s projects and updates its last-used time. A staff member may also switch to a project they shadow (GET /dashboard/v1/staff/shadows); that session reports shadow true, is read-only, and updates no last-used time. Any other project returns not_found.
       security:
       - dashboardSession: []
       requestBody:
@@ -602,6 +602,215 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DashboardMemberList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /dashboard/v1/staff/users:
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: listDashboardStaffUsers
+      description: "Staff only: the session's person must carry the screenrig_staff flag, reread on every request; any other session answers 403 forbidden. Lists every person, newest first, with login email, credential counts, last activity, and their live projects."
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Every person with their live projects.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffUserList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /dashboard/v1/staff/users/{id}:
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: getDashboardStaffUser
+      description: "Staff only: the session's person must carry the screenrig_staff flag, reread on every request; any other session answers 403 forbidden. Returns one person with their live projects, credential counts, and live dashboard session count."
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: One person.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffUserDetail'
+        default:
+          $ref: '#/components/responses/Problem'
+  /dashboard/v1/staff/projects:
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: listDashboardStaffProjects
+      description: "Staff only: the session's person must carry the screenrig_staff flag, reread on every request; any other session answers 403 forbidden. Lists every live project, newest first, with plan, usage, public credit remaining, and members."
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Every live project with its members.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffProjectList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /dashboard/v1/staff/projects/{id}:
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: getDashboardStaffProject
+      description: "Staff only: the session's person must carry the screenrig_staff flag, reread on every request; any other session answers 403 forbidden. Returns one live project with plan, usage, screen, media, application, and agent counts, and members."
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: One live project.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffProjectDetail'
+        default:
+          $ref: '#/components/responses/Problem'
+  /dashboard/v1/staff/members:
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: listDashboardStaffMembers
+      description: "Staff only: the session's person must carry the screenrig_staff flag, reread on every request; any other session answers 403 forbidden. Lists every staff member."
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Every staff member.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffMemberList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: grantDashboardStaffMember
+      description: >-
+        Staff only: the session's person must carry the screenrig_staff flag, reread on every request; any other session answers 403 forbidden. Adds the person whose verified login is email as staff.
+        Proof-protected: the body carries a fresh passkey proof from a
+        staff_grant reauthentication whose subject_id is that email. A password
+        proof answers 401 reauthentication_required, except on a development
+        server, which registers no passkeys. Granting is idempotent, and it
+        makes a passkey mandatory for the added person
+        (passkey_enrollment_required on their session until they add one). An address with no verified
+        person answers 404 not_found. Staff removal is operator-only
+        (screenrig-server local staff revoke).
+      security:
+      - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardStaffGrantRequest'
+      responses:
+        '200':
+          description: The person is staff.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffMember'
+        default:
+          $ref: '#/components/responses/Problem'
+  /dashboard/v1/staff/shadows:
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: listDashboardStaffShadows
+      description: "Staff only: the session's person must carry the screenrig_staff flag, reread on every request; any other session answers 403 forbidden. Lists the live projects the reader shadows, by name. PUT /dashboard/v1/session/project switches to one read-only, without a membership: the session reports shadow true, every current-project mutation answers 403 forbidden, and the reader records no project activity, bills nothing, and does not appear among the project's members."
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: The reader's shadowed projects.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffShadowList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /dashboard/v1/staff/projects/{id}/shadow:
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    put:
+      operationId: shadowDashboardStaffProject
+      description: "Staff only: the session's person must carry the screenrig_staff flag, reread on every request; any other session answers 403 forbidden. Adds a live project to the reader's shadow list. Idempotent. An unknown or deleted project answers 404 not_found; a list already holding 200 projects answers 409 resource_conflict."
+      security:
+      - dashboardSession: []
+      responses:
+        '204':
+          description: The reader shadows the project.
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: unshadowDashboardStaffProject
+      description: "Staff only: the session's person must carry the screenrig_staff flag, reread on every request; any other session answers 403 forbidden. Removes a project from the reader's shadow list. Idempotent. A session shadowing it loses the project on its next request."
+      security:
+      - dashboardSession: []
+      responses:
+        '204':
+          description: The reader no longer shadows the project.
         default:
           $ref: '#/components/responses/Problem'
   /dashboard/v1/me:
@@ -785,7 +994,7 @@ paths:
           $ref: '#/components/responses/Problem'
     delete:
       operationId: deleteDashboardPasskey
-      description: Deletes a passkey after fresh proof and sends a sign-in changed notice. Removing the last sign-in method returns last_credential.
+      description: Deletes a passkey after fresh proof and sends a sign-in changed notice. Removing the last sign-in method returns last_credential. A person whose account requires a passkey (every staff member) cannot remove their last passkey; that returns 409 resource_conflict.
       security:
       - dashboardSession: []
       parameters:
@@ -5291,6 +5500,380 @@ components:
           items:
             $ref: '#/components/schemas/DashboardMember'
           maxItems: 200
+    DashboardStaffMember:
+      type: object
+      additionalProperties: false
+      description: A person carrying the screenrig_staff flag.
+      required:
+      - user_id
+      - display_name
+      - email
+      - created_at
+      properties:
+        user_id:
+          type: string
+        display_name:
+          $ref: '#/components/schemas/DashboardDisplayName'
+        email:
+          type: string
+          format: email
+          minLength: 3
+          maxLength: 254
+        created_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+    DashboardStaffMemberList:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardStaffMember'
+    DashboardStaffGrantRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - email
+      - proof
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 3
+          maxLength: 254
+        proof:
+          $ref: '#/components/schemas/DashboardProof'
+    DashboardStaffUserProject:
+      type: object
+      additionalProperties: false
+      description: A live project the person belongs to.
+      required:
+      - id
+      - name
+      - status
+      - screen_count
+      - joined_at
+      - last_used_at
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        screen_count:
+          type: integer
+          minimum: 0
+        joined_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+    DashboardStaffUser:
+      type: object
+      additionalProperties: false
+      required:
+      - user_id
+      - display_name
+      - email
+      - email_verified
+      - staff
+      - password
+      - passkeys
+      - created_at
+      - projects
+      properties:
+        user_id:
+          type: string
+        display_name:
+          $ref: '#/components/schemas/DashboardDisplayName'
+        email:
+          type: string
+          minLength: 3
+          maxLength: 254
+        email_verified:
+          type: boolean
+        staff:
+          type: boolean
+        password:
+          type: boolean
+        passkeys:
+          type: integer
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardStaffUserProject'
+    DashboardStaffUserList:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardStaffUser'
+    DashboardStaffUserDetail:
+      type: object
+      additionalProperties: false
+      required:
+      - user_id
+      - display_name
+      - email
+      - email_verified
+      - staff
+      - password
+      - passkeys
+      - created_at
+      - projects
+      - active_sessions
+      properties:
+        user_id:
+          type: string
+        display_name:
+          $ref: '#/components/schemas/DashboardDisplayName'
+        email:
+          type: string
+          minLength: 3
+          maxLength: 254
+        email_verified:
+          type: boolean
+        staff:
+          type: boolean
+        password:
+          type: boolean
+        passkeys:
+          type: integer
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        active_sessions:
+          type: integer
+          minimum: 0
+          description: Unexpired dashboard sessions.
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardStaffUserProject'
+    DashboardStaffProjectMember:
+      type: object
+      additionalProperties: false
+      required:
+      - user_id
+      - display_name
+      - email
+      - joined_at
+      - last_used_at
+      properties:
+        user_id:
+          type: string
+        display_name:
+          $ref: '#/components/schemas/DashboardDisplayName'
+        email:
+          type: string
+          minLength: 3
+          maxLength: 254
+        joined_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+    DashboardStaffPlan:
+      type: string
+      description: The project's plan identifier, visible to staff only.
+      enum:
+      - standard
+      - premium
+      - enterprise
+      - staff
+      - promo
+    DashboardStaffProject:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - name
+      - status
+      - plan
+      - email
+      - screen_count
+      - screen_limit
+      - used_bytes
+      - content_limit_bytes
+      - credit_remaining
+      - created_at
+      - members
+      - shadowed
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        plan:
+          $ref: '#/components/schemas/DashboardStaffPlan'
+        email:
+          type: string
+          description: Project contact address. Contact metadata, never a login.
+        screen_count:
+          type: integer
+          minimum: 0
+        screen_limit:
+          type: integer
+          minimum: 0
+          description: Screens the plan admits; 0 means no cap.
+        used_bytes:
+          type: integer
+          minimum: 0
+        content_limit_bytes:
+          type: integer
+          minimum: 0
+          description: Storage the plan admits; 0 means no cap.
+        credit_remaining:
+          type: integer
+          minimum: 0
+          description: Public whole credits remaining, floored and never negative.
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+          description: Latest admitted external use. Absent means unknown.
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardStaffProjectMember'
+        shadowed:
+          type: boolean
+          description: The reader shadows this project.
+    DashboardStaffShadowList:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/DashboardProjectReference'
+    DashboardStaffProjectList:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardStaffProject'
+    DashboardStaffProjectDetail:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - name
+      - status
+      - plan
+      - email
+      - email_verified
+      - screen_count
+      - screen_limit
+      - used_bytes
+      - reserved_bytes
+      - content_limit_bytes
+      - credit_remaining
+      - created_at
+      - members
+      - screens
+      - media
+      - applications
+      - agents
+      - shadowed
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        plan:
+          $ref: '#/components/schemas/DashboardStaffPlan'
+        email:
+          type: string
+          description: Project contact address. Contact metadata, never a login.
+        email_verified:
+          type: boolean
+        screen_count:
+          type: integer
+          minimum: 0
+        screen_limit:
+          type: integer
+          minimum: 0
+          description: Screens the plan admits; 0 means no cap.
+        used_bytes:
+          type: integer
+          minimum: 0
+        reserved_bytes:
+          type: integer
+          minimum: 0
+        content_limit_bytes:
+          type: integer
+          minimum: 0
+          description: Storage the plan admits; 0 means no cap.
+        credit_remaining:
+          type: integer
+          minimum: 0
+          description: Public whole credits remaining, floored and never negative.
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+          description: Latest admitted external use. Absent means unknown.
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardStaffProjectMember'
+        shadowed:
+          type: boolean
+          description: The reader shadows this project.
+        screens:
+          $ref: '#/components/schemas/DashboardScreenSummary'
+        media:
+          $ref: '#/components/schemas/DashboardMediaSummary'
+        applications:
+          type: integer
+          minimum: 0
+        agents:
+          type: integer
+          minimum: 0
+          description: Active agent connections.
     DashboardMe:
       type: object
       additionalProperties: false
@@ -5391,10 +5974,11 @@ components:
           - passkey_delete
           - invitation_accept
           - account_delete
+          - staff_grant
         subject_id:
           type: string
           minLength: 1
-          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id."
+          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id. kind staff_grant is staff only and requires the added person's email address."
     DashboardReauthentication:
       type: object
       additionalProperties: false
@@ -9156,6 +9740,9 @@ components:
       - authenticated_at
       - expires_at
       - dev_auth
+      - staff
+      - shadow
+      - passkey_enrollment_required
       properties:
         user_id:
           type: string
@@ -9183,6 +9770,15 @@ components:
           format: date-time
         dev_auth:
           type: boolean
+        staff:
+          type: boolean
+          description: The person carries the screenrig_staff operator flag and may use /dashboard/v1/staff. Set only by the operator CLI or another staff member.
+        shadow:
+          type: boolean
+          description: The current project is one the staff member shadows, not a membership. It is read-only; every current-project mutation answers 403 forbidden.
+        passkey_enrollment_required:
+          type: boolean
+          description: The person's account requires a passkey (every staff member's does) and has none. Until one is added, this session may only read GET /dashboard/v1/session and /me, list and add passkeys (/me/passkeys, /me/passkeys/options, /me/passkeys/complete) and sign out; every other dashboard route answers 403 forbidden. Always false on a development server, which registers no passkeys.
       description: 'Person session. Identifiers are descriptive; the session cookie establishes authority. A person with no projects has project: null.'
 
     DashboardSummary:
