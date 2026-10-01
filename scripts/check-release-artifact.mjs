@@ -1,13 +1,26 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isProductVersion } from "./calver.mjs";
-import { isRendererPlatformPackage, loadRuntimeDependencyLock, RUNTIME_LOCK_FILE } from "./runtime-dependencies.mjs";
+import { isRendererPlatformPackage, loadRuntimeDependencyLock, NOTICES_FILE, RUNTIME_LOCK_FILE } from "./runtime-dependencies.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+// The whole release: one bundled executable and the files that travel with it.
+const INVENTORY = [
+  "package",
+  "package/LICENSE",
+  "package/README.md",
+  "package/SECURITY.md",
+  `package/${NOTICES_FILE}`,
+  "package/dist",
+  "package/dist/bin.js",
+  "package/package.json",
+  `package/${RUNTIME_LOCK_FILE}`,
+].sort();
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: "utf8", ...options });
@@ -49,15 +62,13 @@ async function main() {
     ) {
       throw new Error("release archive has an unsafe or empty inventory");
     }
+    const inventory = names.map((name) => name.replace(/\/$/, "")).sort();
+    if (JSON.stringify(inventory) !== JSON.stringify(INVENTORY)) {
+      throw new Error(`release archive must hold exactly ${INVENTORY.join(", ")}; it holds ${inventory.join(", ")}`);
+    }
     run("tar", ["-xzf", artifact, "-C", temporary]);
     const packageRoot = path.join(temporary, "package");
-    let readme;
-    try {
-      readme = await readFile(path.join(packageRoot, "README.md"), "utf8");
-      await readFile(path.join(packageRoot, "SECURITY.md"), "utf8");
-    } catch {
-      throw new Error("release archive is missing README.md or SECURITY.md");
-    }
+    const readme = await readFile(path.join(packageRoot, "README.md"), "utf8");
     if (!readme.includes("[security policy](SECURITY.md)")) {
       throw new Error("release archive README does not link its bundled SECURITY.md");
     }
@@ -69,20 +80,13 @@ async function main() {
       throw new Error(`release archive is missing a valid ${RUNTIME_LOCK_FILE}`);
     }
     if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error("runtime dependency manifest differs from package-lock.json");
-    for (const dependency of expected.packages) {
-      if (isRendererPlatformPackage(dependency)) {
-        const bundled = await stat(path.join(packageRoot, dependency.path)).then(() => true, () => false);
-        if (bundled) throw new Error(`${dependency.path}: renderer platform packages are fetched on first render, not bundled`);
-        continue;
-      }
-      let metadata;
-      try {
-        metadata = JSON.parse(await readFile(path.join(packageRoot, dependency.path, "package.json"), "utf8"));
-      } catch {
-        throw new Error(`${dependency.path}: bundled runtime dependency is missing or invalid`);
-      }
-      if (metadata.name !== dependency.name || metadata.version !== dependency.version) {
-        throw new Error(`${dependency.path}: bundled package metadata differs from the runtime dependency manifest`);
+    // Every package inside dist/bin.js is a locked runtime dependency, and every declared one is inside it.
+    const notices = await readFile(path.join(packageRoot, NOTICES_FILE), "utf8");
+    const noticed = [...notices.matchAll(/^(\S+)@(\d\S*) \(/gm)].map((match) => `${match[1]}@${match[2]}`);
+    const locked = expected.packages.filter((dependency) => !isRendererPlatformPackage(dependency));
+    for (const entry of noticed) {
+      if (!locked.some((dependency) => `${dependency.name}@${dependency.version}` === entry)) {
+        throw new Error(`${NOTICES_FILE} names ${entry}, which is not a locked runtime dependency`);
       }
     }
     let packaged;
@@ -90,6 +94,12 @@ async function main() {
       packaged = JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8"));
     } catch {
       throw new Error("release archive is missing package.json");
+    }
+    for (const name of Object.keys(packaged.dependencies ?? {})) {
+      const dependency = locked.find((item) => item.name === name);
+      if (!dependency || !noticed.includes(`${name}@${dependency.version}`)) {
+        throw new Error(`${name} is a declared dependency without a ${NOTICES_FILE} entry`);
+      }
     }
     if (!isProductVersion(packaged.version)) {
       throw new Error(`release archive package.json version must be YY.MM.N or YY.MM.0-dev; received ${packaged.version}`);
@@ -115,6 +125,10 @@ async function main() {
   const playlistFile = path.join(temporary, "playlist.json");
   await writeFile(playlistFile, JSON.stringify({ name: "Offline validation", pages: [{ id: "page", canvas: { width: 1920, height: 1080, background: "#000000FF" }, transition: { type: "crossfade", duration_ms: 200 }, advance: { mode: "application", max_ms: 60000 }, primitives: [{ id: "app", primitive: "application", release_id: "rel_EXAMPLE", controller: true, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "fill" }] }] }));
     successfulEnvelope(packageRoot, ["playlist", "validate", playlistFile], environment);
+    // The bundle carries the pinned browser runtime inline; it must be the same bytes.
+    const packed = successfulEnvelope(packageRoot, ["app", "pack", path.join(root, "fixtures", "pack", "ok-app"), "--output", path.join(temporary, "app.tgz")], environment);
+    const runtime = createHash("sha256").update(await readFile(path.join(root, "assets", "screenrig.runtime.js"))).digest("hex");
+    if (packed.data?.sdk_injection?.asset_sha256 !== runtime) throw new Error("bundled browser runtime differs from assets/screenrig.runtime.js");
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }

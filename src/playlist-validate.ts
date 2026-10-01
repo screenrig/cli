@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
+import { readAsset } from "./assets.js";
 import { validatePlaylistWriteSemantics } from "./generated/playlist-write-semantics.js";
 import { lintPlaylistPages, type LintFinding } from "./compose/lint.js";
 import { ExitCode } from "./exit-codes.js";
@@ -14,10 +14,10 @@ const validators = new Map<"v1" | "v2", ReturnType<typeof buildValidators>>();
  * an adslot page uses the v2 union. Neither schema is reimplemented here.
  */
 function buildValidators(version: "v1" | "v2") {
-  const asset = version === "v2" ? "../assets/playlist-write-v2.schema.json" : "../assets/playlist-write.schema.json";
+  const asset = version === "v2" ? "playlist-write-v2.schema.json" : "playlist-write.schema.json";
 const ajv = new Ajv2020({ allErrors: true, strict: true });
 addFormats.default(ajv);
-const schema = JSON.parse(readFileSync(new URL(asset, import.meta.url), "utf8"));
+const schema = JSON.parse(readAsset(asset).toString("utf8"));
 const validate = ajv.compile(schema);
 // Route diagnostics to the selected tagged branch. This changes only error
 // presentation: the unmodified canonical validator above decides validity.

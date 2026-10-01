@@ -120,7 +120,7 @@ def check_public_tree(errors: list[str]) -> None:
     else:
         release = release_path.read_text(encoding="utf-8")
         for fact in (
-            "scripts/vendor-runtime-dependencies.mjs",
+            "scripts/bundle-release.mjs",
             "scripts/check-release-artifact.mjs",
             "scripts/calver.mjs",
             "SCREENRIG_VERSION",

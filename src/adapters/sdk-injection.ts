@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { readAsset } from "../assets.js";
 import { packError } from "../pack/limits.js";
 import type { ArchiveEntry } from "../pack/types.js";
 
@@ -92,14 +92,13 @@ export class ArchiveSdkInjector implements SdkInjector {
 
 class ReleaseLocalSdkInjector implements SdkInjector {
   async inject(entries: ArchiveEntry[], request?: SdkInjectionRequest): Promise<SdkInjectionResult> {
-    const packageRoot = fileURLToPath(new URL("../..", import.meta.url));
     const configured = process.env.SCREENRIG_SDK_RUNTIME;
-    const runtimePath = configured ? path.resolve(configured) : path.join(packageRoot, "assets", "screenrig.runtime.js");
     let runtime: Buffer;
     try {
-      runtime = await readFile(runtimePath);
+      runtime = configured ? await readFile(path.resolve(configured)) : readAsset("screenrig.runtime.js");
     } catch {
-      throw packError("sdk_runtime_missing", `Pinned SDK runtime is missing at ${runtimePath}; reinstall the ScreenRig CLI from a verified release`);
+      const where = configured ? path.resolve(configured) : "assets/screenrig.runtime.js";
+      throw packError("sdk_runtime_missing", `Pinned SDK runtime is missing at ${where}; reinstall the ScreenRig CLI from a verified release`);
     }
     return new ArchiveSdkInjector(runtime).inject(entries, request);
   }

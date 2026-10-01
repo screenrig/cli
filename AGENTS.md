@@ -39,12 +39,20 @@ does not require that file for standalone contribution.
 - `npm run vendor:check` is the cheap vendor gate (tamper check, plus drift
   against `../backend` when that sibling exists). Public GitHub Actions does
   not clone backend.
-- The release artifact must include every non-development package recorded in
-  `package-lock.json` except the `@napi-rs/canvas-*` platform packages. Its
-  `runtime-dependencies.lock.json` still records all of them. The first render
-  fetches the package for its machine from that lock, verifies the sha512
-  integrity and caches the binary per user. Everything that does not draw runs
-  offline.
+- The release artifact is one minified ESM `dist/bin.js` that esbuild (the
+  only build-only bundler) makes from `npm run build` output. It carries every
+  non-development package recorded in `package-lock.json` except the
+  `@napi-rs/canvas-*` platform packages, and the `assets/` files inline. Beside
+  it ship only `package.json`, `runtime-dependencies.lock.json`,
+  `THIRD_PARTY_NOTICES` (each bundled package's license), `LICENSE`,
+  `README.md` and `SECURITY.md`: no source maps, type declarations or
+  `node_modules`. The plugin ships the first four.
+- `runtime-dependencies.lock.json` records every runtime package. The first
+  render fetches the renderer package for its machine from that lock, verifies
+  the sha512 integrity and caches the binary per user. Everything that does not
+  draw runs offline.
+- Read `assets/` only through `src/assets.ts`, which the bundle replaces with
+  inline copies.
 - Load `@napi-rs/canvas` only through `src/canvas.ts`. Commands that do not draw
   never load it.
 - Preserve unrelated work. Do not commit, push, tag, or publish unless asked.

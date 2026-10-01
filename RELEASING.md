@@ -64,7 +64,9 @@ npm versions are immutable. Never move a release tag, replace an existing npm
 version, or use a mutable `latest` install in release verification.
 
 The GitHub archive is the deterministic artifact used by the ScreenRig plugin.
-It bundles every runtime dependency except the renderer's platform packages; the
+Its executable is one minified `dist/bin.js` that bundles every runtime
+dependency except the renderer's platform packages, next to its `package.json`,
+runtime lock, `THIRD_PARTY_NOTICES`, license, README and security policy. The
 first render on a machine downloads that machine's package from npm and checks it
 against the archive's runtime lock. The normal npm package is smaller and resolves
 its declared dependencies, including the renderer for its platform, from npm. Homebrew can be evaluated only after this stable release exists. ScreenRig

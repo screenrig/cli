@@ -4,6 +4,8 @@ import path from "node:path";
 
 export const RUNTIME_LOCK_FILE = "runtime-dependencies.lock.json";
 export const RUNTIME_LOCK_SCHEMA = "screenrig.cli-runtime-dependencies/v1";
+/** License notices of every package the release bundle carries. */
+export const NOTICES_FILE = "THIRD_PARTY_NOTICES";
 
 function packageName(lockPath) {
   const parts = lockPath.split("/");

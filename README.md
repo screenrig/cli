@@ -888,6 +888,8 @@ npm run smoke:mock
 ```
 
 Execute this checkout with `node ./dist/bin.js` after `npm run build`.
+`npm run pack:release` then builds the archive the plugin bundles: one minified
+`dist/bin.js` with every dependency inside, made with esbuild.
 
 Development profiles are described in [CONTRIBUTING.md](https://github.com/screenrig/cli/blob/main/CONTRIBUTING.md).
 
