@@ -1,4 +1,4 @@
-import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { createCanvas, loadCanvas, loadImage } from "../canvas.js";
 import type { Box, ComposeQuality } from "./compose.js";
 import { VIEWING_DISTANCES, VIEWING_XHEIGHT_RATIO, XHEIGHT_FALLBACK, parseViewing, type ViewingDistance } from "./type.js";
 import { cssFont } from "./fonts.js";
@@ -78,6 +78,7 @@ export function sortLint(findings: LintFinding[], pageOrder: string[]): LintFind
 }
 
 export async function pixelsFromPng(png: Buffer): Promise<PixelBuffer> {
+  await loadCanvas();
   const image = await loadImage(png);
   const canvas = createCanvas(image.width, image.height);
   const ctx = canvas.getContext("2d");

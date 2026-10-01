@@ -40,7 +40,13 @@ does not require that file for standalone contribution.
   against `../backend` when that sibling exists). Public GitHub Actions does
   not clone backend.
 - The release artifact must include every non-development package recorded in
-  `package-lock.json`, including optional native targets, and must run offline.
+  `package-lock.json` except the `@napi-rs/canvas-*` platform packages. Its
+  `runtime-dependencies.lock.json` still records all of them. The first render
+  fetches the package for its machine from that lock, verifies the sha512
+  integrity and caches the binary per user. Everything that does not draw runs
+  offline.
+- Load `@napi-rs/canvas` only through `src/canvas.ts`. Commands that do not draw
+  never load it.
 - Preserve unrelated work. Do not commit, push, tag, or publish unless asked.
   Do not publish npm from a laptop.
 

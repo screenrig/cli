@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { createCanvas, loadCanvas, loadImage } from "../canvas.js";
 import { composeAndWrite, type ComposeQuality, type ComposeWarning } from "./compose.js";
 import { parseComposeSpec } from "./parse.js";
 import {
@@ -124,6 +124,7 @@ export async function composeBatch(
   }
   const ids = document.pages.map((page) => page.id);
   if (options.only && !ids.includes(options.only)) invalid("--only must name an id present in the deck.");
+  await loadCanvas();
   await mkdir(directory, { recursive: true });
   const previewPath = path.join(directory, options.only ? `preview-${options.only}.png` : "preview.png");
   const manifestPath = path.join(directory, options.only ? `compose-batch-${options.only}.json` : "compose-batch.json");

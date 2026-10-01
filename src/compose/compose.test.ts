@@ -11,6 +11,9 @@ import { defaultCardFill, parseComposeSpec } from "./parse.js";
 import { SCALE_MIN, wishOf } from "./type.js";
 import { REGIONS } from "./types.js";
 import { testTemp } from "../test-temp.js";
+import { loadCanvas } from "../canvas.js";
+
+await loadCanvas();
 
 const PNG_HEADER = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -66,8 +69,8 @@ function assertExampleFontsInstalled(label: string, spec: unknown): void {
   }
 }
 
-test("catalog lists regions, not Frame or recipes", () => {
-  const catalog = composeCatalog();
+test("catalog lists regions, not Frame or recipes", async () => {
+  const catalog = await composeCatalog();
   assert.deepEqual(catalog.regions, [...REGIONS]);
   assert.equal(catalog.rules.fontSize, false);
   assert.equal(catalog.rules.xy, false);

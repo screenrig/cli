@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -56,8 +57,15 @@ try {
   );
 
   let spec = requestedSpec;
-  const environment = { ...process.env, NPM_CONFIG_CACHE: cache };
+  // npm installs this machine's renderer package, so a render must not fetch one.
+  const userCache = path.join(temporary, "user-cache");
+  const environment = { ...process.env, NPM_CONFIG_CACHE: cache, XDG_CACHE_HOME: userCache, LOCALAPPDATA: userCache };
+  if (process.platform === "darwin") environment.HOME = path.join(temporary, "home");
+  const rendererCache = process.platform === "darwin"
+    ? path.join(environment.HOME, "Library", "Caches", "screenrig")
+    : path.join(userCache, "screenrig");
   delete environment.SCREENRIG_VERSION;
+  delete environment.NAPI_RS_NATIVE_LIBRARY_PATH;
   if (!spec) {
     const packed = run(["pack", "--json", "--pack-destination", temporary], { cwd: root, env: environment });
     const inventory = JSON.parse(packed.stdout);
@@ -78,6 +86,7 @@ try {
     throw new Error(`installed CLI returned version ${version.data?.version}; expected ${expectedVersion}`);
   }
   successfulEnvelope(["compose", "catalog"], consumer, environment);
+  if (existsSync(rendererCache)) throw new Error("an npm install must render with its installed platform package, not a fetched renderer");
   const playlistFile = path.join(temporary, "playlist.json");
   await writeFile(playlistFile, JSON.stringify({ name: "Offline validation", pages: [{ id: "page", canvas: { width: 1920, height: 1080, background: "#000000FF" }, transition: { type: "crossfade", duration_ms: 200 }, advance: { mode: "application", max_ms: 60000 }, primitives: [{ id: "app", primitive: "application", release_id: "rel_EXAMPLE", controller: true, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "fill" }] }] }));
   successfulEnvelope(["playlist", "validate", playlistFile], consumer, environment);

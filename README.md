@@ -8,6 +8,12 @@ The supported customer distribution is the CLI bundled by
 `screenrig/cli` `main`. Agent workflows must keep using that plugin-relative
 launcher.
 
+Drawing commands (`compose` and `playlist preview`) use a native renderer. The
+plugin bundle does not carry it: the first render on a machine downloads the
+renderer for that platform from the npm registry once, checks it against the
+integrity recorded in the bundle, and caches it in the user cache directory.
+Commands that do not draw never load it. An npm install already includes it.
+
 ## Official npm installation for developer shells
 
 The public npm package is `screenrig`. Install an exact published CalVer

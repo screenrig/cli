@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadRuntimeDependencyLock, RUNTIME_LOCK_FILE, verifyIntegrity } from "./runtime-dependencies.mjs";
+import { isRendererPlatformPackage, loadRuntimeDependencyLock, RUNTIME_LOCK_FILE, verifyIntegrity } from "./runtime-dependencies.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -36,14 +36,15 @@ async function main() {
   }
   const destination = path.resolve(process.argv[destinationFlag + 1]);
   const runtimeLock = await loadRuntimeDependencyLock(root);
+  const bundled = runtimeLock.packages.filter((dependency) => !isRendererPlatformPackage(dependency));
   const temporary = await mkdtemp(path.join(process.env.TMPDIR || os.tmpdir(), "screenrig-runtime-deps."));
   try {
-    for (const dependency of runtimeLock.packages) {
+    for (const dependency of bundled) {
       const response = await fetch(dependency.resolved, { redirect: "error", signal: AbortSignal.timeout(120_000) });
       if (!response.ok) throw new Error(`${dependency.name}: registry returned HTTP ${response.status}`);
       const bytes = Buffer.from(await response.arrayBuffer());
       verifyIntegrity(bytes, dependency.integrity, dependency.name);
-      const archive = path.join(temporary, `${runtimeLock.packages.indexOf(dependency)}.tgz`);
+      const archive = path.join(temporary, `${bundled.indexOf(dependency)}.tgz`);
       await writeFile(archive, bytes, { flag: "wx", mode: 0o600 });
       inspectPackageArchive(archive, dependency.name);
       const target = path.join(destination, dependency.path);
@@ -58,7 +59,8 @@ async function main() {
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
-  process.stdout.write(`vendored ${runtimeLock.packages.length} exact runtime dependencies\n`);
+  const fetched = runtimeLock.packages.length - bundled.length;
+  process.stdout.write(`vendored ${bundled.length} exact runtime dependencies; ${fetched} renderer platform packages are fetched on first render\n`);
 }
 
 main().catch((error) => {

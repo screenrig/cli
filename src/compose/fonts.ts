@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { createHash } from "node:crypto";
-import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
+import { createCanvas, globalFonts } from "../canvas.js";
 
 export const FONT_FALLBACKS = ["Helvetica Neue", "Helvetica", "Arial", "DejaVu Sans", "Liberation Sans"] as const;
 function usage(message: string): Error { return Object.assign(new Error(message), { code: "usage_error" }); }
@@ -13,7 +13,7 @@ export function loadUserFonts(): void {
   if (!userFontsLoaded && process.platform === "linux" && !process.env.DISABLE_SYSTEM_FONTS_LOAD) {
     const dataHome = process.env.XDG_DATA_HOME;
     const userDataDir = dataHome && isAbsolute(dataHome) ? dataHome : join(homedir(), ".local", "share");
-    GlobalFonts.loadFontsFromDir(join(userDataDir, "fonts"));
+    globalFonts().loadFontsFromDir(join(userDataDir, "fonts"));
     userFontsLoaded = true;
   }
 }
@@ -21,14 +21,14 @@ export function loadUserFonts(): void {
 export function resolveFontFamily(name: string | undefined): string {
   loadUserFonts();
   if (name != null && name !== "") {
-    if (!GlobalFonts.has(name)) {
-      const related = GlobalFonts.families.map((family) => family.family).filter((family) => family.toLowerCase().includes(name.toLowerCase())).slice(0, 5);
+    if (!globalFonts().has(name)) {
+      const related = globalFonts().families.map((family) => family.family).filter((family) => family.toLowerCase().includes(name.toLowerCase())).slice(0, 5);
       throw usage(`font family not installed: ${name}. ${related.length ? `Installed matches: ${related.join(", ")}.` : "Run compose catalog to choose an installed font family."}`);
     }
     return name;
   }
   for (const family of FONT_FALLBACKS) {
-    if (GlobalFonts.has(family)) {
+    if (globalFonts().has(family)) {
       return family;
     }
   }
@@ -44,7 +44,7 @@ export function cssFont(weight: string, size: number, family: string, italic = f
 
 export function familyHasFace(family: string, weight: number, italic: boolean): boolean {
   loadUserFonts();
-  const entry = GlobalFonts.families.find((item) => item.family === family);
+  const entry = globalFonts().families.find((item) => item.family === family);
   if (!entry) return false;
   return entry.styles.some((style) => {
     const isItalic = /italic|oblique/i.test(style.style);
@@ -75,7 +75,7 @@ function glyphSignature(character: string, family: string, weight: string): stri
 }
 export function familyRendersText(family: string, text: string, weight: string): boolean {
   loadUserFonts();
-  if (!GlobalFonts.has(family)) return false;
+  if (!globalFonts().has(family)) return false;
   return missingCharacters(text, family, weight).length === 0;
 }
 
@@ -93,7 +93,7 @@ export function resolveTextFont(text: string, family: string, weight: string): T
   const missing = missingCharacters(text, family, weight);
   if (!missing.length) return { family, missing_codepoints: [] };
   const codepoints = missing.map((character) => `U+${character.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`);
-  const candidates = [...FONT_FALLBACKS, ...GlobalFonts.families.map((entry) => entry.family).filter((name) => /noto|symbol|emoji/i.test(name)).sort()].filter((name) => name !== family && GlobalFonts.has(name));
+  const candidates = [...FONT_FALLBACKS, ...globalFonts().families.map((entry) => entry.family).filter((name) => /noto|symbol|emoji/i.test(name)).sort()].filter((name) => name !== family && globalFonts().has(name));
   for (const candidate of [...new Set(candidates)].slice(0, 16)) {
     if (!missingCharacters(text, candidate, weight).length) return { family: candidate, fallback_from: family, missing_codepoints: codepoints };
   }

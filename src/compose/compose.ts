@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
-import { createCanvas, loadImage, type Image, type SKRSContext2D } from "@napi-rs/canvas";
+import type { Image, SKRSContext2D } from "@napi-rs/canvas";
+import { createCanvas, loadCanvas, loadImage } from "../canvas.js";
 import { resolveFontFamily, resolveTextFont } from "./fonts.js";
 import {
   measureMarkdown,
@@ -1256,6 +1257,7 @@ export async function composeDocument(
   if (options.target && ![options.target.width, options.target.height].every((n) => Number.isSafeInteger(n) && n > 0)) {
     throw usage("physical target width and height must be positive integers");
   }
+  await loadCanvas();
   const pages: ComposePageResult[] = [];
   for (const page of document.pages) {
     const warnings: ComposeWarning[] = [];

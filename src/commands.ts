@@ -118,6 +118,7 @@ import { kvWriteFromArgs } from "./kv-write.js";
 import { commentsWriteFromArgs } from "./comments-write.js";
 import { quotedRevision } from "./if-match.js";
 import { applicationNameHeaders } from "./application-name.js";
+import { loadCanvas } from "./canvas.js";
 import { composeBatch } from "./compose/batch.js";
 import { assertPlaylistValid, PLAYLIST_SERVER_CHECKS, playlistLint } from "./playlist-validate.js";
 import {
@@ -259,6 +260,11 @@ function enrollmentPurpose(value: string | undefined): EnrollmentIntent | undefi
   return intent;
 }
 
+/** Drawing commands load the native renderer here, so a failed first download names this command to rerun. */
+async function loadRenderer(runtime: CliRuntime): Promise<void> {
+  await loadCanvas({ env: runtime.env, homedir: runtime.homedir, argv: runtime.argv });
+}
+
 function rethrowCompose(err: unknown): never {
   if (err instanceof CliError) {
     throw err;
@@ -318,6 +324,7 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
   } catch (err) {
     throw usageError(`Cannot read compose spec: ${err instanceof Error ? err.message : "invalid JSON"}`);
   }
+  await loadRenderer(runtime);
   const logger = loggerOf(runtime);
   let written;
   try {
@@ -539,9 +546,9 @@ export const handleVersion: CommandHandler = async () => {
 };
 
 export const handleComposeCatalog = commandHandler(async (args, runtime, resolved) => {
-
+  await loadRenderer(runtime);
   return loggerOf(runtime).withLocal({ op: "compose.catalog", message: "compose catalog" }, async () => {
-    const catalog = composeCatalog();
+    const catalog = await composeCatalog();
     return {
       envelope: successEnvelope(catalog),
       exitCode: ExitCode.Success,
@@ -584,6 +591,7 @@ export const handleComposeBatch = commandHandler(async (args, runtime, resolved)
   const tw = flagString(args.flags, "target-width"), th = flagString(args.flags, "target-height");
   if ((tw === undefined) !== (th === undefined)) throw usageError("Provide both target dimensions.");
   const target = tw !== undefined && th !== undefined ? { width: Number(tw), height: Number(th) } : undefined;
+  await loadRenderer(runtime);
   let result;
   try {
     result = await composeBatch(path.resolve(runtime.cwd(), file), path.resolve(runtime.cwd(), output), {
@@ -3856,6 +3864,7 @@ async function playlistPreviewCommand(
     playlist = response.body;
     searchDirs = [runtime.cwd(), outputDir];
   }
+  await loadRenderer(runtime);
   const result = await previewPlaylist({
     playlist,
     outputDirectory: outputDir,

@@ -3,6 +3,9 @@ import { test } from "node:test";
 import { createCanvas } from "@napi-rs/canvas";
 import { parseMarkdown, stripMarkdown, wrapMarkdown } from "./markdown.js";
 import { resolveFontFamily } from "./fonts.js";
+import { loadCanvas } from "../canvas.js";
+
+await loadCanvas();
 
 test("markdown parses bold, italic, underline, and nested bold italic", () => {
   assert.deepEqual(parseMarkdown("**bold**"), [{ text: "bold", bold: true, italic: false, underline: false }]);

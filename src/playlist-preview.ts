@@ -1,7 +1,8 @@
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createCanvas, loadImage, type Image, type SKRSContext2D } from "@napi-rs/canvas";
+import type { Image, SKRSContext2D } from "@napi-rs/canvas";
+import { createCanvas, loadCanvas, loadImage } from "./canvas.js";
 import type { ApiClient } from "./client.js";
 import {
   LOOK_AT_THE_CONTACT_SHEET,
@@ -128,6 +129,7 @@ export async function previewPlaylist(options: {
   }
   const body = normalizePlaylist(options.playlist);
   assertPlaylistValid(body);
+  await loadCanvas();
   const pages = await preparePages(body.pages, viewport, options);
   const restPixels = new Map<string, PixelBuffer>();
   const pageResults: PreviewPageResult[] = [];

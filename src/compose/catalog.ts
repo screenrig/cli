@@ -1,4 +1,4 @@
-import { GlobalFonts } from "@napi-rs/canvas";
+import { globalFonts, loadCanvas } from "../canvas.js";
 import { FONT_FALLBACKS, loadUserFonts } from "./fonts.js";
 import { LOOK_AT_THE_CONTACT_SHEET, lintCodesList } from "./lint.js";
 import { viewingGuidance } from "./type.js";
@@ -74,7 +74,8 @@ const REGION_FIELDS = [
   "enter", "stagger", "motion", "align", "valign", "fill", "color", "z", "shadow", "outline",
 ];
 
-export function composeCatalog(): ComposeCatalog {
+export async function composeCatalog(): Promise<ComposeCatalog> {
+  await loadCanvas();
   loadUserFonts();
   return {
     page_keys: PAGE_KEYS,
@@ -94,7 +95,7 @@ export function composeCatalog(): ComposeCatalog {
     align: [...ALIGN],
     valign: [...VALIGN],
     viewing: [...VIEWING_DISTANCES],
-    installed_fonts: GlobalFonts.families.map((family) => family.family).sort(),
+    installed_fonts: globalFonts().families.map((family) => family.family).sort(),
     examples: {
       slide: {
         width: 1920,
