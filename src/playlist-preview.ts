@@ -103,6 +103,14 @@ export interface PreviewSoundtrack {
   volume: number;
 }
 
+/** A media primitive drawn as a labelled box because its pixels were not available. */
+export interface PreviewPlaceholder {
+  page_id: string;
+  primitive_id: string;
+  primitive: string;
+  media_id?: string;
+}
+
 export interface PlaylistPreviewResult {
   output: string;
   viewport: Size;
@@ -110,6 +118,8 @@ export interface PlaylistPreviewResult {
   pages: PreviewPageResult[];
   contact_sheet?: string;
   lint: LintFinding[];
+  /** Media primitives drawn as placeholders; empty when every image and video frame was drawn. */
+  placeholders: PreviewPlaceholder[];
 }
 
 export async function previewPlaylist(options: {
@@ -130,7 +140,8 @@ export async function previewPlaylist(options: {
   const body = normalizePlaylist(options.playlist);
   assertPlaylistValid(body);
   await loadCanvas();
-  const pages = await preparePages(body.pages, viewport, options);
+  const placeholders: PreviewPlaceholder[] = [];
+  const pages = await preparePages(body.pages, viewport, options, placeholders);
   const restPixels = new Map<string, PixelBuffer>();
   const pageResults: PreviewPageResult[] = [];
   if (!options.lintOnly) await mkdir(options.outputDirectory, { recursive: true });
@@ -164,6 +175,7 @@ export async function previewPlaylist(options: {
     pages: pageResults,
     ...(contact_sheet ? { contact_sheet } : {}),
     lint,
+    placeholders,
   };
 }
 
@@ -213,6 +225,7 @@ async function preparePages(
     client?: ApiClient;
     runtime?: CliRuntime;
   },
+  placeholders: PreviewPlaceholder[],
 ): Promise<PreviewPage[]> {
   const prepared: PreviewPage[] = [];
   for (const value of pages) {
@@ -263,8 +276,13 @@ async function preparePages(
       const media = kind === "image" || kind === "video" || kind === "stream"
         ? await loadMedia(selector, kind === "stream" ? "image" : kind, options)
         : undefined;
+      const primitiveId = typeof primitive.id === "string" ? primitive.id : `p${sourceIndex}`;
+      if (media && !media.image) {
+        const mediaId = mediaIdOf(selector);
+        placeholders.push({ page_id: id, primitive_id: primitiveId, primitive: kind, ...(mediaId ? { media_id: mediaId } : {}) });
+      }
       primitives.push({
-        id: typeof primitive.id === "string" ? primitive.id : `p${sourceIndex}`,
+        id: primitiveId,
         kind,
         sourceIndex,
         layer: numberOf(primitive.layer, 0),

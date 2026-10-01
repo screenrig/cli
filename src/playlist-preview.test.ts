@@ -7,7 +7,7 @@ import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { commandHelp } from "./help.js";
 import { ExitCode } from "./exit-codes.js";
 import { run, type CliRuntime } from "./main.js";
-import type { ConfigFs } from "./config.js";
+import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import {
   CONTACT_SHEET_COLUMNS,
   CONTACT_SHEET_LABEL_HEIGHT,
@@ -186,4 +186,82 @@ test("stream preview paints the cached fallback exactly like an ordinary image",
     outputs.push(await readFile(result.pages[0]!.files.rest));
   }
   assert.deepEqual(outputs[0], outputs[1]);
+});
+
+function redPng(): Buffer {
+  const canvas = createCanvas(32, 24);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#cc3300";
+  context.fillRect(0, 0, 32, 24);
+  return canvas.toBuffer("image/png");
+}
+
+function imagePlaylist(mediaId: string): Record<string, unknown> {
+  return {
+    name: "Menu",
+    pages: [{
+      ...iframePage("page_1"),
+      primitives: [{
+        id: "content",
+        primitive: "image",
+        selector: { by: "id", media_id: mediaId },
+        rect: { x: 0, y: 0, width: 1920, height: 1080 },
+        layer: 0,
+        content_fit: "contain",
+      }],
+    }],
+  };
+}
+
+async function centerPixel(file: string): Promise<number[]> {
+  const image = await loadImage(await readFile(file));
+  const canvas = createCanvas(image.width, image.height);
+  const context = canvas.getContext("2d");
+  context.drawImage(image, 0, 0);
+  return Array.from(context.getImageData(960, 540, 1, 1).data);
+}
+
+test("file preview fetches uploaded media from the project when logged in", async () => {
+  const cwdDir = await testTemp("preview-fetch-");
+  const fsLike: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => cwdDir, env: { XDG_CONFIG_HOME: cwdDir } };
+  await writeConfigAtomic(path.join(cwdDir, "screenrig", "config.json"), { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" }, fsLike);
+  const file = path.join(cwdDir, "menu-playlist.json");
+  await writeFile(file, JSON.stringify(imagePlaylist("med_MENU")));
+  const png = redPng();
+  const transport = new FakeTransport()
+    .on("GET", "/api/v1/media/med_MENU", () => ({ status: 200, headers: {}, body: { id: "med_MENU", content_type: "image/png" } }))
+    .onDownload("GET", "/api/v1/media/med_MENU/content", () => ({
+      status: 200,
+      headers: { "content-type": "image/png" },
+      body: { async *[Symbol.asyncIterator]() { yield png; } },
+    }));
+  const { code, stdout } = await withRuntime(["--json", "playlist", "preview", file, "--output", path.join(cwdDir, "out")], { cwdDir, fs: fsLike, transport });
+  assert.equal(code, ExitCode.Success, stdout);
+  const envelope = JSON.parse(stdout) as { data: { pages: Array<{ files: Record<string, string> }>; placeholders: unknown[] }; warnings: unknown[] };
+  assert.deepEqual(envelope.data.placeholders, []);
+  assert.deepEqual(envelope.warnings, []);
+  assert.deepEqual(await centerPixel(envelope.data.pages[0]!.files.rest!), [0xcc, 0x33, 0x00, 255]);
+  await rm(cwdDir, { recursive: true, force: true });
+});
+
+test("file preview without local media or login names every placeholder", async () => {
+  const cwdDir = await testTemp("preview-placeholder-");
+  const file = path.join(cwdDir, "menu-playlist.json");
+  await writeFile(file, JSON.stringify(imagePlaylist("med_MENU")));
+  const transport = new FakeTransport();
+  const { code, stdout } = await withRuntime(["--json", "playlist", "preview", file, "--output", path.join(cwdDir, "out")], { cwdDir, transport });
+  assert.equal(code, ExitCode.Success, stdout);
+  const envelope = JSON.parse(stdout) as { data: { placeholders: unknown[] }; warnings: Array<{ code: string; message: string }> };
+  assert.deepEqual(envelope.data.placeholders, [{ page_id: "page_1", primitive_id: "content", primitive: "image", media_id: "med_MENU" }]);
+  assert.equal(envelope.warnings[0]?.code, "preview_media_placeholder");
+  assert.match(envelope.warnings[0]!.message, /med_MENU/);
+  assert.equal(transport.calls.length, 0);
+
+  await writeFile(path.join(cwdDir, "med_MENU.png"), redPng());
+  const local = await withRuntime(["--json", "playlist", "preview", file, "--output", path.join(cwdDir, "local")], { cwdDir, transport });
+  const localEnvelope = JSON.parse(local.stdout) as { data: { pages: Array<{ files: Record<string, string> }>; placeholders: unknown[] }; warnings: unknown[] };
+  assert.deepEqual(localEnvelope.data.placeholders, []);
+  assert.deepEqual(localEnvelope.warnings, []);
+  assert.deepEqual(await centerPixel(localEnvelope.data.pages[0]!.files.rest!), [0xcc, 0x33, 0x00, 255]);
+  await rm(cwdDir, { recursive: true, force: true });
 });

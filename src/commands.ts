@@ -128,7 +128,7 @@ import {
   sortLint,
   viewingOf,
 } from "./compose/lint.js";
-import { LOOK_AT_THE_CONTACT_SHEET, PREVIEW_VIEWPORT, previewPlaylist } from "./playlist-preview.js";
+import { LOOK_AT_THE_CONTACT_SHEET, PREVIEW_VIEWPORT, previewPlaylist, type PreviewPlaceholder } from "./playlist-preview.js";
 import { uploadMediaFile, type MediaUploadTiming } from "./media-upload.js";
 import { runMediaUploadBatch, UPLOAD_BATCH_DEFAULT_CONCURRENCY, UPLOAD_BATCH_MAX_CONCURRENCY, UPLOAD_BATCH_MIN_CONCURRENCY } from "./media-upload-batch.js";
 import { clearProvisionRetryState, provisionRetryState } from "./provisioning-state.js";
@@ -3914,6 +3914,18 @@ async function feedbackList(args: ParsedArgs, client: ApiClient): Promise<Comman
   };
 }
 
+function previewPlaceholderWarning(placeholders: PreviewPlaceholder[], online: boolean): Warning {
+  const ids = [...new Set(placeholders.map((item) => item.media_id).filter((id): id is string => Boolean(id)))];
+  const what = ids.length > 0 ? ` (${ids.slice(0, 5).join(", ")}${ids.length > 5 ? ", ..." : ""})` : "";
+  const fix = online
+    ? "The project could not supply those pixels; check the media IDs with media show."
+    : "Log in (agent enroll or agent connect) to fetch project media, or save each file beside the playlist as <media_id>.png, .jpg, .webp, .gif, .mp4 or .webm.";
+  return {
+    code: "preview_media_placeholder",
+    message: `${placeholders.length} media primitive(s) were drawn as labelled placeholder boxes, not their real pixels${what}. ${fix}`,
+  };
+}
+
 async function playlistPreviewCommand(
   args: ParsedArgs,
   runtime: CliRuntime,
@@ -3946,6 +3958,11 @@ async function playlistPreviewCommand(
   } catch {
     fromFile = false;
   }
+  if (fromFile && resolved.token) {
+    // Media that is not beside the file is fetched from the project when a
+    // credential exists; without one the preview stays local and offline.
+    client = clientFor(runtime, args, resolved.apiUrl, resolved.token);
+  }
   if (!fromFile) {
     if (!RESOURCE_ID_PATTERNS.playlist.test(target)) {
       throw usageError("Cannot read playlist JSON.");
@@ -3968,11 +3985,13 @@ async function playlistPreviewCommand(
     client,
     runtime,
   });
+  const warnings = result.placeholders.length > 0 ? [previewPlaceholderWarning(result.placeholders, Boolean(client))] : [];
   return {
-    envelope: successEnvelope(result, { request_id: client?.requestId }),
+    envelope: successEnvelope(result, { request_id: client?.requestId, warnings }),
     exitCode: ExitCode.Success,
     human: [
       `Previewed ${result.pages.length} page(s). Output: ${result.output}.`,
+      ...warnings.map((warning) => `warning: ${warning.message}`),
       ...(result.contact_sheet ? [`contact_sheet: ${result.contact_sheet}`] : []),
       ...result.lint.map((item) => `lint: ${item.page_id} ${item.code} ${item.id}`),
       LOOK_AT_THE_CONTACT_SHEET,

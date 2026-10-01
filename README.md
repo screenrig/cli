@@ -941,6 +941,12 @@ screenrig playlist preview lobby.json --output preview --contact-sheet
 screenrig screen publish scr_LOBBY lobby.json
 ```
 
+Preview draws each image and video from a local `<media_id>.png` (or `.jpg`,
+`.webp`, `.gif`, `.mp4`, `.webm`) beside the playlist, in the working directory
+or in `--output`, and otherwise fetches it from the project when the CLI is
+logged in. A grey box labelled with a media ID is a placeholder, not the page:
+`data.placeholders` and the `preview_media_placeholder` warning name each one.
+
 Inspect the document and preview before publishing. `playlist init` accepts ordered
 local image/video/audio files, ready `med_` IDs, pinned `rel_` application releases, and
 HTTPS iframe URLs, including mixed inputs:
