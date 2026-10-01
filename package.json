@@ -54,7 +54,7 @@
     "!dist/transport/fake.d.ts.map"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.11"
   },
   "packageManager": "npm@10.9.4",
   "scripts": {

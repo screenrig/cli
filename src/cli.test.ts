@@ -2604,6 +2604,35 @@ test("events follow --timeout exits during backoff without hanging", async () =>
   await rm(configDir, { recursive: true, force: true });
 });
 
+test("doctor requires Node.js 22.11 or newer", async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(process.versions, "node")!;
+  try {
+    for (const [version, status] of [
+      ["20.19.0", "fail"],
+      ["22.0.0", "fail"],
+      ["22.10.0", "fail"],
+      ["22.11.0", "pass"],
+      ["22.11.1", "pass"],
+      ["22.12.0", "pass"],
+      ["23.0.0", "pass"],
+      ["24.0.0", "pass"],
+    ]) {
+      Object.defineProperty(process.versions, "node", { ...descriptor, value: version });
+      resetFfmpegToolchainCache();
+      const { code, stdout, configDir } = await withRuntime(["--json", "doctor"], memoryBackend(), { runProcess: fullToolchainProbe() });
+      try {
+        const envelope = JSON.parse(stdout) as { data: { checks: Array<{ name: string; status: string }> } };
+        assert.equal(envelope.data.checks.find((check) => check.name === "node")?.status, status, version);
+        assert.equal(code === ExitCode.Success, status === "pass", version);
+      } finally {
+        await rm(configDir, { recursive: true, force: true });
+      }
+    }
+  } finally {
+    Object.defineProperty(process.versions, "node", descriptor);
+  }
+});
+
 test("doctor reports checks over the published foundation routes", async () => {
   resetFfmpegToolchainCache();
   const transport = memoryBackend();

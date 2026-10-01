@@ -9,12 +9,18 @@ import { PLACEHOLDER_VERSION, isReleaseVersion, resolvePackVersion, versionFromT
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+// Windows command shims cannot be spawned without a shell. Invoke npm's JS
+// entry point with this Node runtime so paths and arguments need no shell quoting.
+const npm = process.platform === "win32" ? process.execPath : "npm";
+const npmArgs = process.platform === "win32"
+  ? [process.env.npm_execpath || path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")]
+  : [];
 
 function run(args, options = {}) {
-  const result = spawnSync(npm, args, { encoding: "utf8", ...options });
+  const result = spawnSync(npm, [...npmArgs, ...args], { encoding: "utf8", ...options });
+  if (result.error) throw result.error;
   if (result.status !== 0) {
-    throw new Error(`${npm} ${args.join(" ")}: ${result.stderr.trim() || result.stdout.trim()}`);
+    throw new Error(`npm ${args.join(" ")}: ${result.stderr?.trim() || result.stdout?.trim() || `exit ${result.status}`}`);
   }
   return result;
 }

@@ -5985,10 +5985,10 @@ async function doctor(
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<CommandResult> {
   const checks: DoctorCheck[] = [];
-  const nodeMajor = Number(process.versions.node.split(".")[0]);
+  const [nodeMajor = 0, nodeMinor = 0] = process.versions.node.split(".").map(Number);
   checks.push({
     name: "node",
-    status: nodeMajor >= 22 ? "pass" : "fail",
+    status: nodeMajor > 22 || (nodeMajor === 22 && nodeMinor >= 11) ? "pass" : "fail",
     detail: `node ${process.versions.node}`,
   });
   checks.push({

@@ -107,7 +107,7 @@ jobs:
           --redact --no-banner --config .gitleaks.toml .
 
   npm-install:
-    name: npm install (${{ matrix.os }}, Node 22.0.0)
+    name: npm install (${{ matrix.os }}, Node 22.11.0)
     strategy:
       fail-fast: false
       matrix:
@@ -118,7 +118,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22.0.0"
+          node-version: "22.11.0"
           cache: npm
       - run: npm ci
       - run: npm run build
