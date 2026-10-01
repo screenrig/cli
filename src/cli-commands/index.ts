@@ -23,6 +23,7 @@ import { registerFeedbackCommands } from "./feedback.js";
 import { registerWebhooksCommands } from "./webhooks.js";
 import { registerDoctorCommands } from "./doctor.js";
 import { registerVersionCommands } from "./version.js";
+import { registerStatusCommands } from "./status.js";
 import { registerRecoveryCommands } from "./recovery.js";
 
 export function registerCommands(root: Command, bind: CommandActionBinder): void {
@@ -48,6 +49,7 @@ export function registerCommands(root: Command, bind: CommandActionBinder): void
   registerFeedbackCommands(root, bind);
   registerDoctorCommands(root, bind);
   registerVersionCommands(root, bind);
+  registerStatusCommands(root, bind);
   registerRecoveryCommands(root, bind);
   registerGuidance(root);
 }

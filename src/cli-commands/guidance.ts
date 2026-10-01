@@ -107,7 +107,7 @@ export function registerGuidance(root: Command): void {
     "webhooks update": ["whk_WEBHOOKAAAAAAAAAAAA --event-types screen.* --expect-rev 2", "whk_WEBHOOKAAAAAAAAAAAA --enable"],
     "webhooks delete": ["whk_WEBHOOKAAAAAAAAAAAA --expect-rev 3"], "webhooks rotate-secret": ["whk_WEBHOOKAAAAAAAAAAAA"],
     "webhooks test": ["whk_WEBHOOKAAAAAAAAAAAA"], "webhooks deliveries": ["whk_WEBHOOKAAAAAAAAAAAA --limit 20", "whk_WEBHOOKAAAAAAAAAAAA --before whc1_2k9"],
-    "doctor": [""], "version": [""], "recovery list": [""],
+    "doctor": [""], "version": [""], "status": ["", "--environment stage"], "recovery list": [""],
     "recovery show": ["RECOVERY_ID"], "recovery reconcile": ["RECOVERY_ID"],
   };
   for (const [path, suffixes] of Object.entries(examples)) {

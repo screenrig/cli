@@ -35,6 +35,11 @@ agent install. Do not substitute it for the plugin launcher.
 
 ## What it does
 
+`screenrig status` queries production availability directly from the independent
+service monitor, without enrollment or credentials. Use `--environment stage`
+to inspect stage. Its response includes freshness, component health, deployment
+windows and backend version mismatches.
+
 Operational commands return JSON envelopes by default, including errors with
 nonzero exit codes. `--json` remains accepted for compatibility. Use `--human`
 for explicit human-readable output; it cannot be combined with `--json`.
