@@ -49,6 +49,7 @@ def check_metadata(errors: list[str]) -> None:
         "version": PLACEHOLDER_VERSION,
         "private": False,
         "license": "Apache-2.0",
+        "engines": {"node": ">=22.11"},
     }
     for field, value in expected.items():
         if package.get(field) != value:
@@ -81,7 +82,7 @@ def check_metadata(errors: list[str]) -> None:
             errors.append("commands.ts must not freeze CLI_VERSION to the committed placeholder")
 
     root_lock = (lock.get("packages") or {}).get("") or {}
-    for field in ("name", "version", "license"):
+    for field in ("name", "version", "license", "engines"):
         if root_lock.get(field) != package.get(field):
             errors.append(f"package-lock.json root {field!r} drifts from package.json")
 
@@ -101,7 +102,8 @@ def check_public_tree(errors: list[str]) -> None:
             "npm run check",
             "npm audit --audit-level=high --package-lock-only",
             "name: screenrig-cli",
-            "name: npm install (${{ matrix.os }}, Node 22.0.0)",
+            "name: npm install (${{ matrix.os }}, Node 22.11.0)",
+            'node-version: "22.11.0"',
             "os: [ubuntu-24.04, macos-14, windows-2022]",
             "npm run check:npm-install",
             "gitleaks\" git",
@@ -144,6 +146,7 @@ def check_public_tree(errors: list[str]) -> None:
             "npm publish --access public",
             "screenrig@${{ needs.publish.outputs.version }}",
             "ubuntu-24.04, macos-14, windows-2022",
+            'node-version: "22.11.0"',
             "gh release upload",
         ):
             if fact not in npm_release:

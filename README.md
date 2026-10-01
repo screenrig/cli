@@ -26,7 +26,7 @@ npm install --global screenrig@<YY.MM.SERIAL>
 screenrig version
 ```
 
-Node.js 22 or newer is required. `media upload` additionally requires ffmpeg
+Node.js 22.11 or newer is required. `media upload` additionally requires ffmpeg
 and ffprobe, as do batch uploads and playlist preparation from local media files. Run `screenrig doctor` to inspect
 the optional media toolchain before an upload.
 
