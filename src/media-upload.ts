@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { constants, createReadStream } from "node:fs";
 import { open, rm } from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { MediaCommit, MediaUploadDeclaration, MediaUploadSession, Operation } from "./adapters/protocol.js";
 import type { ApiClient } from "./client.js";
 import { isValidIdempotencyKey } from "./ids.js";
@@ -172,25 +173,31 @@ async function performSignedMediaBodyPut(
   session: ValidatedMediaUploadSession,
   signedRawPut: SignedRawPut,
 ): Promise<void> {
-  let response;
-  try {
-    response = await signedRawPut({
-      url: session.uploadUrl,
-      method: "PUT",
-      headers: session.headers,
-      body,
-      credentials: "omit",
-      redirect: "error",
-      expiresAt: session.expiresAt,
-    });
-  } catch {
-    throw networkError(MEDIA_PUT_NOT_READY);
-  }
-  if (response.status < 200 || response.status >= 300) {
-    if (response.status === 503) {
+  // A signed PUT of the same buffered bytes is safe to replay. One-shot
+  // streams cannot be replayed; their existing recovery path remains in charge.
+  const maxAttempts = body instanceof Uint8Array ? 4 : 1;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (Date.now() >= session.expiresAt) throw networkError(MEDIA_PUT_NOT_READY);
+    let response;
+    try {
+      response = await signedRawPut({
+        url: session.uploadUrl,
+        method: "PUT",
+        headers: session.headers,
+        body,
+        credentials: "omit",
+        redirect: "error",
+        expiresAt: session.expiresAt,
+      });
+    } catch {
       throw networkError(MEDIA_PUT_NOT_READY);
     }
-    throw networkError(`Private media upload returned HTTP ${response.status}.`);
+    if (response.status >= 200 && response.status < 300) return;
+    if (response.status !== 503) throw networkError(`Private media upload returned HTTP ${response.status}.`);
+    if (attempt + 1 >= maxAttempts) throw networkError(MEDIA_PUT_NOT_READY);
+    const waitMs = Math.ceil(1000 * 2 ** attempt * (0.5 + Math.random() * 0.5));
+    if (Date.now() + waitMs >= session.expiresAt) throw networkError(MEDIA_PUT_NOT_READY);
+    await sleep(waitMs);
   }
 }
 

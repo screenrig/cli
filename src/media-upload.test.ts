@@ -8,6 +8,7 @@ import { isValidIdempotencyKey } from "./ids.js";
 import {
   deriveCommitIdempotencyKey,
   performSignedMediaPut,
+  performSignedMediaStreamPut,
   prepareMediaUpload,
   validateMediaUploadSession,
 } from "./media-upload.js";
@@ -189,6 +190,69 @@ test("commit idempotency key is deterministic, distinct, valid, and honored per 
   const client = new ApiClient({ transport, idempotencyKey: base });
   await client.call({ method: "POST", path: "/commit", idempotent: true, idempotencyKey: derived });
   assert.equal(transport.calls[0]?.headers?.["idempotency-key"], derived);
+});
+
+test("buffered signed PUT retries transient 503s with the exact binding and stops at success", async () => {
+  const bytes = Buffer.from([0, 255, 3, 4]);
+  const prepared = {
+    bytes,
+    declaration: { filename: "x.png", content_type: "image/png" as const, bytes: bytes.length, sha256: "a".repeat(64) },
+    commit: { content_type: "image/png" as const, bytes: bytes.length, sha256: "a".repeat(64) },
+  };
+  const validated = validateMediaUploadSession(session());
+  let attempts = 0;
+  await performSignedMediaPut(prepared, validated, async (request) => {
+    attempts += 1;
+    assert.equal(request.body, bytes);
+    assert.equal(request.url, validated.uploadUrl);
+    assert.deepEqual(request.headers, validated.headers);
+    assert.equal(request.credentials, "omit");
+    assert.equal(request.redirect, "error");
+    assert.equal(request.expiresAt, validated.expiresAt);
+    return { status: attempts < 3 ? 503 : 204 };
+  });
+  assert.equal(attempts, 3);
+  attempts = 0;
+  await assert.rejects(performSignedMediaPut(prepared, validated, async () => {
+    attempts += 1;
+    return { status: 503 };
+  }), /not ready/);
+  assert.equal(attempts, 4, "persistent failures still fail after a bounded number of real PUTs");
+  attempts = 0;
+  await assert.rejects(performSignedMediaPut(prepared, validated, async () => {
+    attempts += 1;
+    return { status: 403 };
+  }), /HTTP 403/);
+  assert.equal(attempts, 1, "authorization failures are never retried");
+});
+
+test("signed PUT never retries a one-shot stream or beyond session expiry", async () => {
+  const validated = validateMediaUploadSession(session());
+  const stream = (async function* () { yield Buffer.from([1]); })();
+  let attempts = 0;
+  await assert.rejects(performSignedMediaStreamPut(stream, validated, async () => {
+    attempts += 1;
+    return { status: 503 };
+  }), /not ready/);
+  assert.equal(attempts, 1);
+  const prepared = {
+    bytes: Buffer.from([1]),
+    declaration: { filename: "x.png", content_type: "image/png" as const, bytes: 1, sha256: "a".repeat(64) },
+    commit: { content_type: "image/png" as const, bytes: 1, sha256: "a".repeat(64) },
+  };
+  const expiring = { ...validated, expiresAt: Date.now() + 100 };
+  attempts = 0;
+  await assert.rejects(performSignedMediaPut(prepared, expiring, async () => {
+    attempts += 1;
+    return { status: 503 };
+  }), /not ready/);
+  assert.equal(attempts, 1, "a retry wait cannot outlive the signed session");
+  attempts = 0;
+  await assert.rejects(performSignedMediaPut(prepared, { ...validated, expiresAt: 0 }, async () => {
+    attempts += 1;
+    return { status: 204 };
+  }), /not ready/);
+  assert.equal(attempts, 0);
 });
 
 
