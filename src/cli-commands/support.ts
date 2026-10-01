@@ -1,7 +1,7 @@
 import { type Command, Option } from "commander";
 import { requireOptionGroup } from "./notes.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleSupportStatus, handleSupportSubmit, handleSupportHistory, handleSupportFollow, handleSupportRead } from "../commands.js";
+import { handleSupportStatus, handleSupportSubmit, handleSupportHistory, handleSupportFollow, handleSupportRead, handleSupportClose } from "../commands.js";
 
 export function registerSupportCommands(root: Command, bind: CommandActionBinder): void {
   const support = root.command("support").description("Premium and Enterprise support conversations");
@@ -22,6 +22,9 @@ export function registerSupportCommands(root: Command, bind: CommandActionBinder
     .option("--conversation-id <ID>", "Print only this conversation; still advance the project cursor")
     .option("--after <SEQUENCE>", "Resume after this support sequence; default replays history")
     .action(bind(handleSupportFollow));
+  support.command("close").description("End a conversation and preserve its history")
+    .requiredOption("--conversation-id <ID>", "Conversation to end")
+    .action(bind(handleSupportClose));
   support.command("read").description("Acknowledge staff replies through a message sequence")
     .requiredOption("--conversation-id <ID>", "Conversation being read")
     .requiredOption("--sequence <SEQUENCE>", "Last message you have read")

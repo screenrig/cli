@@ -104,6 +104,7 @@ export function registerGuidance(root: Command): void {
     "support submit": ['--body "My lobby screen is offline"', '--conversation-id sc_ID --body "Please escalate to a human" --human-requested'],
     "support history": ["--conversation-id sc_ID --after 0"],
     "support follow": ["--after 0 --timeout 60000"],
+    "support close": ["--conversation-id sc_ID"],
     "support read": ["--conversation-id sc_ID --sequence 12"],
     "feedback bug": ['"Preview failed" --body-file report.md'],
     "feedback feature": ['"New workflow" --body-file request.md'], "feedback list": ["--kind bug"],

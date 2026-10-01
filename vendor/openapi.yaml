@@ -812,6 +812,31 @@ paths:
                 $ref: '#/components/schemas/DashboardStaffShadowList'
         default:
           $ref: '#/components/responses/Problem'
+  /dashboard/v1/staff/projects/{id}/support/conversations:
+    servers: [{ url: https://dashboard.screenrig.ai }]
+    get:
+      operationId: listStaffProjectSupportConversations
+      security: [{ dashboardSession: [] }]
+      description: "Staff-only project communication history, newest first, at most 100. Available across project plans; does not mark customer messages read."
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: before, in: query, schema: { type: string } }
+      responses:
+        "200": { description: Project support conversations., content: { application/json: { schema: { $ref: "#/components/schemas/SupportConversationList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/staff/projects/{id}/support/conversations/{conversation}/messages:
+    servers: [{ url: https://dashboard.screenrig.ai }]
+    get:
+      operationId: listStaffProjectSupportMessages
+      security: [{ dashboardSession: [] }]
+      description: "Staff-only messages in this project's conversation, ascending sequence, at most 100. Does not alter customer read receipts."
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: conversation, in: path, required: true, schema: { type: string } }
+        - { name: after, in: query, schema: { type: string, pattern: '^[0-9]+$' } }
+      responses:
+        "200": { description: Conversation messages., content: { application/json: { schema: { $ref: "#/components/schemas/SupportMessageList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/staff/projects/{id}/shadow:
     servers:
     - url: https://dashboard.screenrig.ai
@@ -5364,6 +5389,15 @@ paths:
       responses:
         "200": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportRead" } } } }
         default: { $ref: "#/components/responses/Problem" }
+  /api/v1/support/conversations/{id}/close:
+    post:
+      operationId: closeSupportConversation
+      security: [{ projectBearer: [] }]
+      description: "End this project conversation and cancel pending AI replies. Repeatable; preserves history. Staff can reopen it in Slack."
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^sc_[A-Za-z0-9_-]+$"}}]
+      responses:
+        "200": { description: Closed conversation., content: { application/json: { schema: { $ref: "#/components/schemas/SupportConversation" } } } }
+        default: { $ref: "#/components/responses/Problem" }
   /api/v1/support/events/stream:
     get:
       operationId: streamSupportMessages
@@ -5435,6 +5469,16 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SupportRead" } } } }
       responses:
         "200": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportRead" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/support/conversations/{id}/close:
+    servers: [{ url: https://dashboard.screenrig.ai }]
+    post:
+      operationId: closeSupportConversationDashboard
+      security: [{ dashboardSession: [] }]
+      description: "End this project conversation and cancel pending AI replies. Repeatable; preserves history. Staff can reopen it in Slack."
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^sc_[A-Za-z0-9_-]+$"}}]
+      responses:
+        "200": { description: Closed conversation., content: { application/json: { schema: { $ref: "#/components/schemas/SupportConversation" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/support/events/stream:
     servers: [{ url: https://dashboard.screenrig.ai }]
@@ -9104,8 +9148,8 @@ components:
     SupportHours: {"type": "object", "additionalProperties": false, "required": ["timezone", "start", "end", "weekdays", "excludes_bc_holidays"], "properties": {"timezone": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "weekdays": {"type": "array", "items": {"type": "string"}}, "excludes_bc_holidays": {"type": "boolean"}}}
     SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean"}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0}, "docs_url": {"type": "string"}}}
     SupportWrite: {"type": "object", "additionalProperties": false, "required": ["body"], "properties": {"body": {"type": "string", "minLength": 1, "maxLength": 4000}, "human_requested": {"type": "boolean", "default": false, "description": "Pause Luna and wait for a human for this conversation."}}}
-    SupportConversation: {"type": "object", "additionalProperties": false, "required": ["id", "subject", "created_at", "updated_at", "last_sequence", "human_requested", "unread_staff"], "properties": {"id": {"type": "string"}, "subject": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}, "last_sequence": {"type": "integer", "minimum": 0}, "human_requested": {"type": "boolean"}, "unread_staff": {"type": "integer", "minimum": 0}}}
-    SupportMessage: {"type": "object", "additionalProperties": false, "required": ["id", "conversation_id", "sequence", "role", "author", "body", "created_at"], "properties": {"id": {"type": "string"}, "conversation_id": {"type": "string"}, "sequence": {"type": "integer", "minimum": 0}, "role": {"type": "string", "enum": ["customer", "staff", "ai"]}, "author": {"type": "string"}, "body": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}}}
+    SupportConversation: {"type": "object", "additionalProperties": false, "required": ["id", "subject", "created_at", "updated_at", "last_sequence", "human_requested", "unread_staff", "closed"], "properties": {"id": {"type": "string"}, "subject": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}, "last_sequence": {"type": "integer", "minimum": 0}, "human_requested": {"type": "boolean"}, "unread_staff": {"type": "integer", "minimum": 0}, "closed": {"type": "boolean", "description": "Ended by the customer or resolved by staff. History remains readable; staff can reopen."}}}
+    SupportMessage: {"type": "object", "additionalProperties": false, "required": ["id", "conversation_id", "sequence", "role", "author", "body", "created_at"], "properties": {"id": {"type": "string"}, "conversation_id": {"type": "string"}, "sequence": {"type": "integer", "minimum": 0}, "role": {"type": "string", "enum": ["customer", "staff", "ai", "system"]}, "author": {"type": "string"}, "body": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}}}
     SupportSubmission: {"type": "object", "additionalProperties": false, "required": ["conversation", "message"], "properties": {"conversation": {"$ref": "#/components/schemas/SupportConversation"}, "message": {"$ref": "#/components/schemas/SupportMessage"}}}
     SupportConversationList:
       type: object
@@ -10338,4 +10382,4 @@ components:
         next: { $ref: "#/components/schemas/NextAction" }
         hint: { type: string, description: "What the caller should do next to fix or work around this problem, in one or two plain sentences. The server sends the problem registry's default for the code (api/problems.yaml) unless the handler has a more specific one for this case. Advisory text for agents; Players ignore it." }
 x-problem-registry: ./problems.yaml
-x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, user_email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_project_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, server_draining, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk, recovery_ambiguous, recovery_expired, recovery_not_offered, invitation_limit_reached, version_required, price_change_pending, quote_stale, insufficient_credits, self_deal, invitation_invalid, invitation_expired, invitation_consumed, invitation_email_mismatch, reauthentication_required, member_limit_reached, last_credential, no_project, billing_unavailable, feature_unavailable, user_binding_stale, session_expired, credential_revoked, proof_clock_skew, key_retired, assignment_not_found, upgrade_required, webhook_limit_reached, webhook_url_rejected, reboot_unsupported]
+x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, user_email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_project_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, server_draining, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk, recovery_ambiguous, recovery_expired, recovery_not_offered, invitation_limit_reached, version_required, price_change_pending, quote_stale, insufficient_credits, self_deal, invitation_invalid, invitation_expired, invitation_consumed, invitation_email_mismatch, reauthentication_required, member_limit_reached, last_credential, no_project, billing_unavailable, feature_unavailable, user_binding_stale, session_expired, credential_revoked, proof_clock_skew, key_retired, assignment_not_found, upgrade_required, webhook_limit_reached, webhook_url_rejected, reboot_unsupported, support_conversation_closed]

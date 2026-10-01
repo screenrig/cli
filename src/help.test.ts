@@ -150,6 +150,7 @@ test("root help is compact and every command is discoverable through immediate c
     "support status",
     "support submit",
     "support history",
+    "support close",
     "support follow",
     "support read",
     "feedback bug",
