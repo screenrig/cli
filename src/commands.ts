@@ -3772,6 +3772,12 @@ export const handleSupportHistory = commandHandler(async (args, runtime, resolve
   const response = await client.call({ method: "GET", path: id ? `/api/v1/support/conversations/${id}/messages` : "/api/v1/support/conversations", query: { after, before } });
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: JSON.stringify(response.body, null, 2) };
 });
+export const handleSupportClose = commandHandler(async (args, runtime, resolved) => {
+  const id = supportConversation(args, true)!;
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "POST", path: `/api/v1/support/conversations/${id}/close`, body: {} });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: "Support conversation ended. Its history is saved." };
+});
 export const handleSupportRead = commandHandler(async (args, runtime, resolved) => {
   const id = supportConversation(args, true)!;
   const sequence = supportSequence(flagString(args.flags, "sequence"));

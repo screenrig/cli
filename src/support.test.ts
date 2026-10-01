@@ -41,3 +41,9 @@ test("support read uses a monotonic receipt request",async()=>{
  const transport=new FakeTransport().on("PUT","/api/v1/support/conversations/sc_SYNTHETIC/read",()=>ok({sequence:5}));
  const result=await invoke(["support","read","--conversation-id","sc_SYNTHETIC","--sequence","5"],transport);assert.equal(result.code,0,result.stdout);assert.deepEqual(transport.calls[0]?.body,{sequence:5});
 });
+
+test("support close ends only the selected conversation and returns retained state",async()=>{
+ const transport=new FakeTransport().on("POST","/api/v1/support/conversations/sc_SYNTHETIC/close",()=>ok({id:"sc_SYNTHETIC",closed:true}));
+ const result=await invoke(["support","close","--conversation-id","sc_SYNTHETIC"],transport);
+ assert.equal(result.code,0,result.stdout);assert.deepEqual(transport.calls[0]?.body,{});assert.equal(JSON.parse(result.stdout).data.closed,true);
+});
