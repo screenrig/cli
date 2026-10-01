@@ -41,10 +41,7 @@ jobs:
       - name: Run complete public package gates
         run: |
           npm run check:public
-          npm run vendor:check
-          npm run typecheck
-          npm run lint
-          npm test
+          npm run check
           npm run smoke:mock
           npm run pack:dry
       - name: Stamp CalVer onto the npm package
