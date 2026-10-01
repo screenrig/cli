@@ -4,7 +4,7 @@ import type { CommandActionBinder } from "./types.js";
 import { handleSupportStatus, handleSupportSubmit, handleSupportHistory, handleSupportFollow, handleSupportRead, handleSupportClose } from "../commands.js";
 
 export function registerSupportCommands(root: Command, bind: CommandActionBinder): void {
-  const support = root.command("support").description("Premium and Enterprise support conversations");
+  const support = root.command("support").description("Project support conversations on every plan");
   support.command("status").description("Show support availability and staffed hours").action(bind(handleSupportStatus));
   const submit = support.command("submit").description("Start a conversation or send a follow-up")
     .option("--conversation-id <ID>", "Reply in this conversation; omit to start a new one")

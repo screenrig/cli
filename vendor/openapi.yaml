@@ -5334,7 +5334,7 @@ paths:
     get:
       operationId: supportStatus
       security: [{ projectBearer: [] }]
-      description: "Availability and hours for any active project. chat_allowed is true only for Premium and Enterprise."
+      description: "Availability and hours for any active project. chat_allowed is true for every active project, including Standard."
       responses:
         "200": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportStatus" } } } }
         default: { $ref: "#/components/responses/Problem" }
@@ -5356,7 +5356,7 @@ paths:
     post:
       operationId: createSupportConversation
       security: [{ projectBearer: [] }]
-      description: "Premium and Enterprise only. Screened by Jev before storage or Slack. Rejected text is not retained or sent to Luna. A new conversation starts one Slack thread; follow-ups stay in it. Requests with the same key replay for 24 hours."
+      description: "Available on every plan. Screened by Jev before storage or Slack. Rejected text is not retained or sent to Luna. A new conversation starts one Slack thread; follow-ups stay in it. Requests with the same key replay for 24 hours."
       parameters: [{"$ref": "#/components/parameters/IdempotencyKey"}]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SupportWrite" } } } }
       responses:
@@ -5403,7 +5403,7 @@ paths:
       operationId: streamSupportMessages
       security: [{ projectBearer: [] }]
       parameters: [{"name": "after", "in": "query", "schema": {"type": "string", "pattern": "^[0-9]+$"}, "description": "Project support message sequence; resumes strictly after this position."}, {"name": "Last-Event-ID", "in": "header", "schema": {"type": "string", "pattern": "^[0-9]+$"}}]
-      description: "Premium and Enterprise project support messages as resumable SSE. event is support.message; id is the project support sequence, data is SupportMessage. after takes precedence over Last-Event-ID. Cursor 0 replays history. Staff, customer and AI messages are distinguished by role. Streams revalidate credentials and plan. No screenshot or credential data is sent."
+      description: "Project support messages on every plan as resumable SSE. event is support.message; id is the project support sequence, data is SupportMessage. after takes precedence over Last-Event-ID. Cursor 0 replays history. Staff, customer and AI messages are distinguished by role. Streams revalidate credentials and active project access. No screenshot or credential data is sent."
       responses:
         "200": { description: Support message SSE., content: { text/event-stream: { schema: { type: string } } } }
         default: { $ref: "#/components/responses/Problem" }
@@ -5412,7 +5412,7 @@ paths:
     get:
       operationId: supportStatusDashboard
       security: [{ dashboardSession: [] }]
-      description: "Availability and hours for any active project. chat_allowed is true only for Premium and Enterprise."
+      description: "Availability and hours for any active project. chat_allowed is true for every active project, including Standard."
       responses:
         "200": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportStatus" } } } }
         default: { $ref: "#/components/responses/Problem" }
@@ -5435,7 +5435,7 @@ paths:
     post:
       operationId: createSupportConversationDashboard
       security: [{ dashboardSession: [] }]
-      description: "Premium and Enterprise only. Screened by Jev before storage or Slack. Rejected text is not retained or sent to Luna. A new conversation starts one Slack thread; follow-ups stay in it. Requests with the same key replay for 24 hours."
+      description: "Available on every plan. Screened by Jev before storage or Slack. Rejected text is not retained or sent to Luna. A new conversation starts one Slack thread; follow-ups stay in it. Requests with the same key replay for 24 hours."
       parameters: [{"$ref": "#/components/parameters/IdempotencyKey"}]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SupportWrite" } } } }
       responses:
@@ -5486,7 +5486,7 @@ paths:
       operationId: streamSupportMessagesDashboard
       security: [{ dashboardSession: [] }]
       parameters: [{"name": "after", "in": "query", "schema": {"type": "string", "pattern": "^[0-9]+$"}, "description": "Project support message sequence; resumes strictly after this position."}, {"name": "Last-Event-ID", "in": "header", "schema": {"type": "string", "pattern": "^[0-9]+$"}}]
-      description: "Premium and Enterprise project support messages as resumable SSE. event is support.message; id is the project support sequence, data is SupportMessage. after takes precedence over Last-Event-ID. Cursor 0 replays history. Staff, customer and AI messages are distinguished by role. Streams revalidate credentials and plan. No screenshot or credential data is sent."
+      description: "Project support messages on every plan as resumable SSE. event is support.message; id is the project support sequence, data is SupportMessage. after takes precedence over Last-Event-ID. Cursor 0 replays history. Staff, customer and AI messages are distinguished by role. Streams revalidate credentials and active project access. No screenshot or credential data is sent."
       responses:
         "200": { description: Support message SSE., content: { text/event-stream: { schema: { type: string } } } }
         default: { $ref: "#/components/responses/Problem" }
@@ -9149,7 +9149,7 @@ components:
     SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean"}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0}, "docs_url": {"type": "string"}}}
     SupportWrite: {"type": "object", "additionalProperties": false, "required": ["body"], "properties": {"body": {"type": "string", "minLength": 1, "maxLength": 4000}, "human_requested": {"type": "boolean", "default": false, "description": "Pause Luna and wait for a human for this conversation."}}}
     SupportConversation: {"type": "object", "additionalProperties": false, "required": ["id", "subject", "created_at", "updated_at", "last_sequence", "human_requested", "unread_staff", "closed"], "properties": {"id": {"type": "string"}, "subject": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}, "last_sequence": {"type": "integer", "minimum": 0}, "human_requested": {"type": "boolean"}, "unread_staff": {"type": "integer", "minimum": 0}, "closed": {"type": "boolean", "description": "Ended by the customer or resolved by staff. History remains readable; staff can reopen."}}}
-    SupportMessage: {"type": "object", "additionalProperties": false, "required": ["id", "conversation_id", "sequence", "role", "author", "body", "created_at"], "properties": {"id": {"type": "string"}, "conversation_id": {"type": "string"}, "sequence": {"type": "integer", "minimum": 0}, "role": {"type": "string", "enum": ["customer", "staff", "ai", "system"]}, "author": {"type": "string"}, "body": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}}}
+    SupportMessage: {"type": "object", "additionalProperties": false, "required": ["id", "conversation_id", "sequence", "role", "author", "body", "created_at"], "properties": {"id": {"type": "string"}, "conversation_id": {"type": "string"}, "sequence": {"type": "integer", "minimum": 0}, "role": {"type": "string", "enum": ["customer", "staff", "ai", "system"]}, "author": {"type": "string"}, "avatar_url": {"type": "string", "format": "uri", "description": "Optional trusted Slack avatar for a staff reply. Use the screenRIG logo when absent."}, "body": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}}}
     SupportSubmission: {"type": "object", "additionalProperties": false, "required": ["conversation", "message"], "properties": {"conversation": {"$ref": "#/components/schemas/SupportConversation"}, "message": {"$ref": "#/components/schemas/SupportMessage"}}}
     SupportConversationList:
       type: object
