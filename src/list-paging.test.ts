@@ -261,3 +261,29 @@ test("media upload reuses its earlier upload from a later page of the media list
   const lists = transport.calls.filter((call) => call.path === "/api/v1/media");
   assert.deepEqual(lists.map((call) => call.query), [{ primitive: "video" }, { primitive: "video", after: "pg_1" }]);
 });
+
+test("media upload reuses normalized media by its original upload identity", async (t) => {
+  const env = await enrolled(t);
+  const bytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+  const file = path.join(env.cwd, "oriented-photo.jpg");
+  await writeFile(file, bytes);
+  const row = (id: string, sha256: string) => ({
+    id, filename: "oriented-photo.jpg", source_filename: "oriented-photo.jpg", primitive: "image", content_type: "image/webp",
+    operation_id: "op_EARLIER", sha256: "f".repeat(64), bytes: 80, upload_source: { filename: "oriented-photo.jpg", source_filename: "oriented-photo.jpg", content_type: "image/jpeg", sha256, bytes: bytes.length }, revision: 1, state: "ready",
+    created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:01.000Z",
+  });
+  const earlier = row("med_EARLIERAAAAAAAAAAAAAAAAA", createHash("sha256").update(bytes).digest("hex"));
+  const transport = new FakeTransport()
+    .on("GET", "/api/v1/media", (req) => listPage(req, [row("med_OTHERAAAAAAAAAAAAAAAAAAA", "0".repeat(64)), earlier], 1))
+    .on("GET", "/api/v1/operations/op_EARLIER", () => ({
+      status: 200, headers: {},
+      body: { id: "op_EARLIER", kind: "media.upload", state: "succeeded", created_at: earlier.created_at, updated_at: earlier.updated_at, result: { media_id: earlier.id } },
+    }));
+  const result = await cli(["--json", "media", "upload", file, "--no-transcode"], transport, env);
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  assert.equal(result.envelope.data.reused, true);
+  assert.equal(result.envelope.data.media_id, earlier.id);
+  assert.equal(transport.calls.some((call) => call.path === "/api/v1/media/uploads"), false, "nothing was uploaded again");
+  const lists = transport.calls.filter((call) => call.path === "/api/v1/media");
+  assert.deepEqual(lists.map((call) => call.query), [{ primitive: "image" }, { primitive: "image", after: "pg_1" }]);
+});

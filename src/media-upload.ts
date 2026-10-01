@@ -471,11 +471,13 @@ async function existingUpload(
     const response = await client.listAll("/api/v1/media", { primitive });
     const items = asRecord(response.body)?.items;
     if (!Array.isArray(items)) return undefined;
-    const match = items.map(asRecord).find((item) =>
-      item?.state === "ready" && typeof item.id === "string" && typeof item.operation_id === "string" &&
-      item.sha256 === declaration.sha256 && item.bytes === declaration.bytes &&
-      item.content_type === declaration.content_type &&
-      item.source_filename === declaration.source_filename && item.tag === declaration.tag);
+    const match = items.map(asRecord).find((item) => {
+      if (!item || item.state !== "ready" || typeof item.id !== "string" || typeof item.operation_id !== "string") return false;
+      const source = asRecord(item.upload_source) ?? item;
+      return source.sha256 === declaration.sha256 && source.bytes === declaration.bytes &&
+        source.content_type === declaration.content_type &&
+        source.source_filename === declaration.source_filename && item.tag === declaration.tag;
+    });
     if (!match) return undefined;
     const operation = await client.getOperation(match.operation_id as string);
     if (operation.state !== "succeeded" || readyMediaId(operation) !== match.id) return undefined;
