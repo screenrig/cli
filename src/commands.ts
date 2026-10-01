@@ -5988,7 +5988,7 @@ async function doctor(
   const nodeMajor = Number(process.versions.node.split(".")[0]);
   checks.push({
     name: "node",
-    status: nodeMajor >= 20 ? "pass" : "fail",
+    status: nodeMajor >= 22 ? "pass" : "fail",
     detail: `node ${process.versions.node}`,
   });
   checks.push({

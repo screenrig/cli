@@ -26,7 +26,7 @@ npm install --global screenrig@<YY.MM.SERIAL>
 screenrig version
 ```
 
-Node.js 20.11 or newer is required. `media upload` additionally requires ffmpeg
+Node.js 22 or newer is required. `media upload` additionally requires ffmpeg
 and ffprobe, as do batch uploads and playlist preparation from local media files. Run `screenrig doctor` to inspect
 the optional media toolchain before an upload.
 
@@ -902,7 +902,7 @@ command.
 
 ## Develop
 
-Commander 14 supports Node 20.11 and owns parsing, command selection, and help.
+Commander 14 owns parsing, command selection, and help.
 Add commands in `src/cli-commands/`: each group registers native Commander commands
 with their arguments, options, descriptions, validation hooks, and bound handlers.
 There is no separate command schema or path-based dispatcher. Shared option

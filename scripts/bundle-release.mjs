@@ -63,7 +63,7 @@ async function main() {
     minify: true,
     format: "esm",
     platform: "node",
-    target: "node20.11",
+    target: "node22",
     legalComments: "none",
     metafile: true,
     logLevel: "warning",

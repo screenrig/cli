@@ -85,7 +85,7 @@ notes and examples live in `src/cli-commands/guidance.ts`.
 
 ## Product and security boundaries
 
-- Package metadata requires Node.js 20.11+.
+- Package metadata requires Node.js 22 or newer.
 - `agent enroll --email ADDRESS` is the explicit first-agent step. Other
   authenticated commands do not enroll as a side effect; they fail with
   `not_enrolled` (exit 3). Keep that code stable.

@@ -55,7 +55,7 @@ fetch.
    and attach the offline archive. It rejects a tag that is not `vYY.MM.N`.
 5. Require all Linux, macOS, and Windows clean-install jobs to pass. Each installs
    the exact registry version and runs `screenrig --json version` plus
-   `screenrig --json compose catalog` on Node 20.11.1.
+   `screenrig --json compose catalog` on Node 22.0.0.
 6. Confirm the workflow attached `screenrig-cli.tgz` and its SHA-256 file to the
    same GitHub release.
 7. Verify the npm package page shows provenance before announcing availability.

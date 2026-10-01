@@ -101,7 +101,7 @@ def check_public_tree(errors: list[str]) -> None:
             "npm run check",
             "npm audit --audit-level=high --package-lock-only",
             "name: screenrig-cli",
-            "name: npm install (${{ matrix.os }}, Node 20.11.1)",
+            "name: npm install (${{ matrix.os }}, Node 22.0.0)",
             "os: [ubuntu-24.04, macos-14, windows-2022]",
             "npm run check:npm-install",
             "gitleaks\" git",
