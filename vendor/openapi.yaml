@@ -604,6 +604,35 @@ paths:
                 $ref: '#/components/schemas/DashboardMemberList'
         default:
           $ref: '#/components/responses/Problem'
+  /dashboard/v1/staff/feedback:
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: listDashboardStaffFeedback
+      description: >-
+        Staff-cookie only; the staff flag is reread for each request. Lists bugs and
+        feature requests across projects, newest first by created_at then id.
+        Text is plain text, never trusted HTML. Pass next_cursor as before for older entries.
+      security:
+      - dashboardSession: []
+      parameters:
+      - name: before
+        in: query
+        schema: { type: string, maxLength: 256 }
+        description: Opaque cursor from the previous page.
+      responses:
+        '200':
+          description: At most 100 feedback submissions, newest first.
+          headers:
+            Cache-Control:
+              schema: { type: string, enum: [private, no-store] }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffFeedbackList'
+        default:
+          $ref: '#/components/responses/Problem'
   /dashboard/v1/staff/users:
     servers:
     - url: https://dashboard.screenrig.ai
@@ -5276,6 +5305,147 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
+  /api/v1/support/status:
+    get:
+      operationId: supportStatus
+      security: [{ projectBearer: [] }]
+      description: "Availability and hours for any active project. chat_allowed is true only for Premium and Enterprise."
+      responses:
+        "200": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportStatus" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/support/conversations:
+    get:
+      operationId: listSupportConversations
+      security: [{ projectBearer: [] }]
+      description: "Project conversations, newest first, at most 100. Staff unread counts are per authenticated person or agent."
+      parameters:
+        - in: query
+          name: before
+          schema:
+            type: string
+            pattern: '^sc_[A-Za-z0-9_-]+$'
+          description: Conversation ID from the preceding page's next cursor.
+      responses:
+        "200": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportConversationList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createSupportConversation
+      security: [{ projectBearer: [] }]
+      description: "Premium and Enterprise only. Screened by Jev before storage or Slack. Rejected text is not retained or sent to Luna. A new conversation starts one Slack thread; follow-ups stay in it. Requests with the same key replay for 24 hours."
+      parameters: [{"$ref": "#/components/parameters/IdempotencyKey"}]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SupportWrite" } } } }
+      responses:
+        "201": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportSubmission" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/support/conversations/{id}/messages:
+    get:
+      operationId: listSupportMessages
+      security: [{ projectBearer: [] }]
+      description: "Messages in project conversation, ascending sequence, at most 100. Continue after the last message sequence for older conversation pagination. Reading does not acknowledge staff unread state."
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^sc_[A-Za-z0-9_-]+$"}}, {"name": "after", "in": "query", "schema": {"type": "string", "pattern": "^[0-9]+$"}, "description": "Project support message sequence; resumes strictly after this position."}]
+      responses:
+        "200": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportMessageList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: replySupportConversation
+      security: [{ projectBearer: [] }]
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^sc_[A-Za-z0-9_-]+$"}}, {"$ref": "#/components/parameters/IdempotencyKey"}]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SupportWrite" } } } }
+      responses:
+        "201": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportSubmission" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/support/conversations/{id}/read:
+    put:
+      operationId: readSupportConversation
+      security: [{ projectBearer: [] }]
+      description: "Monotonically acknowledge messages through sequence for this reader. Cannot acknowledge beyond the conversation last_sequence."
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^sc_[A-Za-z0-9_-]+$"}}]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SupportRead" } } } }
+      responses:
+        "200": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportRead" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/support/events/stream:
+    get:
+      operationId: streamSupportMessages
+      security: [{ projectBearer: [] }]
+      parameters: [{"name": "after", "in": "query", "schema": {"type": "string", "pattern": "^[0-9]+$"}, "description": "Project support message sequence; resumes strictly after this position."}, {"name": "Last-Event-ID", "in": "header", "schema": {"type": "string", "pattern": "^[0-9]+$"}}]
+      description: "Premium and Enterprise project support messages as resumable SSE. event is support.message; id is the project support sequence, data is SupportMessage. after takes precedence over Last-Event-ID. Cursor 0 replays history. Staff, customer and AI messages are distinguished by role. Streams revalidate credentials and plan. No screenshot or credential data is sent."
+      responses:
+        "200": { description: Support message SSE., content: { text/event-stream: { schema: { type: string } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/support/status:
+    servers: [{ url: https://dashboard.screenrig.ai }]
+    get:
+      operationId: supportStatusDashboard
+      security: [{ dashboardSession: [] }]
+      description: "Availability and hours for any active project. chat_allowed is true only for Premium and Enterprise."
+      responses:
+        "200": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportStatus" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/support/conversations:
+    servers: [{ url: https://dashboard.screenrig.ai }]
+    get:
+      operationId: listSupportConversationsDashboard
+      security: [{ dashboardSession: [] }]
+      description: "Project conversations, newest first, at most 100. Staff unread counts are per authenticated person or agent."
+      parameters:
+        - in: query
+          name: before
+          schema:
+            type: string
+            pattern: '^sc_[A-Za-z0-9_-]+$'
+          description: Conversation ID from the preceding page's next cursor.
+      responses:
+        "200": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportConversationList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createSupportConversationDashboard
+      security: [{ dashboardSession: [] }]
+      description: "Premium and Enterprise only. Screened by Jev before storage or Slack. Rejected text is not retained or sent to Luna. A new conversation starts one Slack thread; follow-ups stay in it. Requests with the same key replay for 24 hours."
+      parameters: [{"$ref": "#/components/parameters/IdempotencyKey"}]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SupportWrite" } } } }
+      responses:
+        "201": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportSubmission" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/support/conversations/{id}/messages:
+    servers: [{ url: https://dashboard.screenrig.ai }]
+    get:
+      operationId: listSupportMessagesDashboard
+      security: [{ dashboardSession: [] }]
+      description: "Messages in project conversation, ascending sequence, at most 100. Continue after the last message sequence for older conversation pagination. Reading does not acknowledge staff unread state."
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^sc_[A-Za-z0-9_-]+$"}}, {"name": "after", "in": "query", "schema": {"type": "string", "pattern": "^[0-9]+$"}, "description": "Project support message sequence; resumes strictly after this position."}]
+      responses:
+        "200": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportMessageList" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: replySupportConversationDashboard
+      security: [{ dashboardSession: [] }]
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^sc_[A-Za-z0-9_-]+$"}}, {"$ref": "#/components/parameters/IdempotencyKey"}]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SupportWrite" } } } }
+      responses:
+        "201": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportSubmission" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/support/conversations/{id}/read:
+    servers: [{ url: https://dashboard.screenrig.ai }]
+    put:
+      operationId: readSupportConversationDashboard
+      security: [{ dashboardSession: [] }]
+      description: "Monotonically acknowledge messages through sequence for this reader. Cannot acknowledge beyond the conversation last_sequence."
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^sc_[A-Za-z0-9_-]+$"}}]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/SupportRead" } } } }
+      responses:
+        "200": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportRead" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/support/events/stream:
+    servers: [{ url: https://dashboard.screenrig.ai }]
+    get:
+      operationId: streamSupportMessagesDashboard
+      security: [{ dashboardSession: [] }]
+      parameters: [{"name": "after", "in": "query", "schema": {"type": "string", "pattern": "^[0-9]+$"}, "description": "Project support message sequence; resumes strictly after this position."}, {"name": "Last-Event-ID", "in": "header", "schema": {"type": "string", "pattern": "^[0-9]+$"}}]
+      description: "Premium and Enterprise project support messages as resumable SSE. event is support.message; id is the project support sequence, data is SupportMessage. after takes precedence over Last-Event-ID. Cursor 0 replays history. Staff, customer and AI messages are distinguished by role. Streams revalidate credentials and plan. No screenshot or credential data is sent."
+      responses:
+        "200": { description: Support message SSE., content: { text/event-stream: { schema: { type: string } } } }
+        default: { $ref: "#/components/responses/Problem" }
 components:
   headers:
     RateLimitPolicy:
@@ -5375,7 +5545,7 @@ components:
       description: Temporary `ScreenRig-Agent-Connect <credential>` authority returned only by connection creation. It is never accepted as a project bearer, dashboard cookie, URL parameter, or runtime credential.
     pendingAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Pending agent bearer accepted only for its own activation, plus the same active bearer for exact acknowledgement replay." }
     revocableAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active agent bearer, or the same cryptographically verified revoked bearer for an idempotent self-disconnect replay." }
-    projectBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active agent bearer for its project. Use revocableAgentBearer for self-disconnect retries after revocation. Every bearer route requires its area AgentCapability; GET reads in an area also accept reports, except the webhook list and get reads (GET /api/v1/webhooks, GET /api/v1/webhooks/{id}), which need the project capability because they return receiver URLs, and the project reads, agents/self, operations reads, and feedback routes accept any active credential. A credential lacking the route capability is refused 403 forbidden with detail 'This agent credential lacks the <name> capability.' after the command is recorded and before any credit is metered, so refusals are attributed and never billed." }
+    projectBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active agent bearer for its project. Use revocableAgentBearer for self-disconnect retries after revocation. Every bearer route requires its area AgentCapability; GET reads in an area also accept reports, except the webhook list and get reads (GET /api/v1/webhooks, GET /api/v1/webhooks/{id}), which need the project capability because they return receiver URLs, and the project reads, agents/self, operations reads, feedback routes, and support routes accept any active credential. A credential lacking the route capability is refused 403 forbidden with detail 'This agent credential lacks the <name> capability.' after the command is recorded and before any credit is metered, so refusals are attributed and never billed." }
     nativePairingAuthorization:
       type: http
       scheme: ScreenRig-Pairing
@@ -5781,6 +5951,31 @@ components:
           maxItems: 200
           items:
             $ref: '#/components/schemas/DashboardProjectReference'
+    DashboardStaffFeedback:
+      type: object
+      additionalProperties: false
+      required: [id, project_id, kind, title, body, created_at]
+      description: Staff-only feedback with plain text fields. Escape for the display context, including historical submissions.
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        kind: { type: string, enum: [bug, feature] }
+        title: { type: string, maxLength: 120 }
+        body: { type: string, maxLength: 4000 }
+        context: { $ref: '#/components/schemas/FeedbackContext' }
+        created_at: { type: string, format: date-time }
+    DashboardStaffFeedbackList:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/DashboardStaffFeedback' }
+        next_cursor:
+          anyOf: [{ type: string }, { type: 'null' }]
+          description: Pass as before for the next page; null at the end.
     DashboardStaffProjectList:
       type: object
       additionalProperties: false
@@ -8906,6 +9101,31 @@ components:
     MediaUploadSource: { type: object, additionalProperties: false, required: [filename, content_type, sha256, bytes], description: "Verified original upload identity when ingest normalized EXIF orientation. Read-only; use it to recognize retries. The ready media digest, size and type describe the normalized delivery bytes.", properties: { filename: { type: string }, source_filename: { type: string }, content_type: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer, minimum: 1 } } }
     Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 14400000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
     MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/Media" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
+    SupportHours: {"type": "object", "additionalProperties": false, "required": ["timezone", "start", "end", "weekdays", "excludes_bc_holidays"], "properties": {"timezone": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "weekdays": {"type": "array", "items": {"type": "string"}}, "excludes_bc_holidays": {"type": "boolean"}}}
+    SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean"}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0}, "docs_url": {"type": "string"}}}
+    SupportWrite: {"type": "object", "additionalProperties": false, "required": ["body"], "properties": {"body": {"type": "string", "minLength": 1, "maxLength": 4000}, "human_requested": {"type": "boolean", "default": false, "description": "Pause Luna and wait for a human for this conversation."}}}
+    SupportConversation: {"type": "object", "additionalProperties": false, "required": ["id", "subject", "created_at", "updated_at", "last_sequence", "human_requested", "unread_staff"], "properties": {"id": {"type": "string"}, "subject": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}, "last_sequence": {"type": "integer", "minimum": 0}, "human_requested": {"type": "boolean"}, "unread_staff": {"type": "integer", "minimum": 0}}}
+    SupportMessage: {"type": "object", "additionalProperties": false, "required": ["id", "conversation_id", "sequence", "role", "author", "body", "created_at"], "properties": {"id": {"type": "string"}, "conversation_id": {"type": "string"}, "sequence": {"type": "integer", "minimum": 0}, "role": {"type": "string", "enum": ["customer", "staff", "ai"]}, "author": {"type": "string"}, "body": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}}}
+    SupportSubmission: {"type": "object", "additionalProperties": false, "required": ["conversation", "message"], "properties": {"conversation": {"$ref": "#/components/schemas/SupportConversation"}, "message": {"$ref": "#/components/schemas/SupportMessage"}}}
+    SupportConversationList:
+      type: object
+      additionalProperties: false
+      required: [items, next, unread_staff_total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SupportConversation'
+        next:
+          anyOf: [{ type: string }, { type: 'null' }]
+          description: Pass this conversation ID as before to read an older page.
+        unread_staff_total:
+          type: integer
+          minimum: 0
+          description: Unread staff messages across every conversation for this reader.
+
+    SupportMessageList: {"type": "object", "additionalProperties": false, "required": ["items"], "properties": {"items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/SupportMessage"}}}}
+    SupportRead: {"type": "object", "additionalProperties": false, "required": ["sequence"], "properties": {"sequence": {"type": "integer", "minimum": 0}}}
     FeedbackWrite:
       type: object
       additionalProperties: false

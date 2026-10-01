@@ -20,6 +20,7 @@ import { registerOperationsCommands } from "./operations.js";
 import { registerEventsCommands } from "./events.js";
 import { registerPlaybackCommands } from "./playback.js";
 import { registerFeedbackCommands } from "./feedback.js";
+import { registerSupportCommands } from "./support.js";
 import { registerWebhooksCommands } from "./webhooks.js";
 import { registerDoctorCommands } from "./doctor.js";
 import { registerVersionCommands } from "./version.js";
@@ -47,6 +48,7 @@ export function registerCommands(root: Command, bind: CommandActionBinder): void
   registerPlaybackCommands(root, bind);
   registerWebhooksCommands(root, bind);
   registerFeedbackCommands(root, bind);
+  registerSupportCommands(root, bind);
   registerDoctorCommands(root, bind);
   registerVersionCommands(root, bind);
   registerStatusCommands(root, bind);

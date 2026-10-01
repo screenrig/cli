@@ -765,6 +765,36 @@ or release readiness. Use `operations show <operation_id>` or
 accepted fields (`data.id`, `data.release_id`, `data.operation_id`) and
 `data.sha256` remain available as compatibility aliases in both modes.
 
+## Support conversations
+
+Standard (free) projects resolve issues through the documentation and their
+operating agent, with `feedback bug` and `feedback feature` for reports.
+Premium and Enterprise include persistent support conversations:
+
+```bash
+screenrig support status
+screenrig support submit --body "Help with a playlist; these are the checks I ran."
+screenrig support history
+screenrig support history --conversation-id sc_CONVERSATION --after 0
+screenrig support submit --conversation-id sc_CONVERSATION --body "Follow-up detail."
+screenrig support follow --conversation-id sc_CONVERSATION --after 0 --timeout 60000
+screenrig support read --conversation-id sc_CONVERSATION --sequence 12
+screenrig support submit --conversation-id sc_CONVERSATION --body "Please ask a human." --human-requested
+```
+
+Use the returned `data.conversation.id` for follow-ups. `--body-file` reads a
+prepared message of 1–4000 characters. History pages hold 100 rows: pass a
+conversation page's `data.next` as `--before`, or a message page's last sequence
+as `--after`. SSE resumes at the project sequence and suppresses replay, emitting
+one JSON envelope per message. Staff and AI responses are identified. Keep the
+same idempotency key for an ambiguous retry, and keep credentials out of chat.
+
+Staff hours default to 09:00–17:00 Monday–Friday in Vancouver, excluding B.C.
+statutory holidays. Luna attempts an AI answer outside hours or after 30 minutes
+without a staff answer. Asking for a human pauses AI in that conversation.
+The [documentation](https://screenrig.ai/docs/) is the agent's first source for
+diagnosis and safe fixes.
+
 ## Configuration
 
 ### Nonblocking agent connection
@@ -831,7 +861,7 @@ retry the denied write unchanged or broaden permissions without authorization.
 
 Ordinary application uploads/updates, playlist creates/updates/deletes, screen
 mutations other than provisioning, media tag updates/deletes, K/V and comment
-writes, webhook writes, feedback submissions, and operation cancellation persist
+writes, webhook writes, feedback and support submissions, and operation cancellation persist
 an idempotency key before sending the request. After an ambiguous network failure or server
 error, rerun the same command with unchanged input. The CLI reuses the saved key;
 it does not automatically send another request within the failed invocation.

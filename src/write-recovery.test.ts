@@ -192,3 +192,13 @@ test("recovery rejects malformed state and identifiers without clearing anything
   assert.deepEqual((await f.read()).pending_writes, { broken: {} });
   assert.equal(transport.calls.length, 0);
 });
+
+test("support retry retains one key and exposes safe recovery metadata without chat contents", async(t)=>{
+ const args=["support","submit","--body","Private support question"];
+ const f=await fixture(t);
+ const first=new FakeTransport().on("POST","/api/v1/support/conversations",()=>{throw networkError("Response lost")});
+ assert.notEqual((await f.invoke(first,args)).code,0);
+ const pending=JSON.stringify((await f.read()).pending_writes);assert.doesNotMatch(pending,/Private support question/);assert.match(pending,/support submit/);
+ const second=new FakeTransport().on("POST","/api/v1/support/conversations",()=>({status:201,headers:{},body:{conversation:{id:"sc_TEST"},message:{sequence:1}}}));
+ assert.equal((await f.invoke(second,args)).code,0);assert.equal(key(second),key(first));assert.equal((await f.read()).pending_writes,undefined);
+});

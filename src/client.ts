@@ -24,10 +24,10 @@ import type { OperationLogger } from "./log/types.js";
  * Bodies that must not reach the operation log even after redaction: an
  * invitation create can carry a one-time credential URL, a webhook answer can
  * carry its signing secret, and a webhook URL path may itself embed a
- * receiver token.
+ * receiver token. Support history is private customer correspondence.
  */
 function privateBodies(method: string, path: string): boolean {
-  return (method === "POST" && path === "/api/v1/invitations") || /^\/api\/v1\/webhooks(?:\/|$)/.test(path);
+  return (method === "POST" && path === "/api/v1/invitations") || /^\/api\/v1\/(?:webhooks|support)(?:\/|$)/.test(path);
 }
 
 /** 409 codes that are a definite refusal rather than possibly in-progress work. */
