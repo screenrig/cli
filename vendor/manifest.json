@@ -12,13 +12,13 @@
       "path": "assets/playlist-write.schema.json",
       "source": "packages/protocol/schema/playlist-write.schema.json",
       "bytes": 28622,
-      "sha256": "c5d038cdd439f441aa0138bec1a2152398b679d2decad92b84313ed25aed5e71"
+      "sha256": "6352da042b185db7dc9f60706d97eb6ed0d57c559e989a46f40120b17aee8a0a"
     },
     {
       "path": "assets/playlist-write-v2.schema.json",
       "source": "packages/protocol/schema/playlist-write-v2.schema.json",
       "bytes": 29664,
-      "sha256": "59feb1e680a33f5bf813ab601693faf6824e890f92cf93dd430c535f8e47a2d8"
+      "sha256": "a52f2fd7e5c64c83840b3fbf89a398d2eb4fa980bb280c0829abcc7d530e6c2f"
     },
     {
       "path": "src/generated/playlist-write-semantics.ts",
@@ -30,13 +30,13 @@
       "path": "vendor/protocol/openapi.gen.ts",
       "source": "packages/protocol/src/openapi.gen.ts",
       "bytes": 100548,
-      "sha256": "2f36fb5c39cec16cd5c1d7233d50115ce079106682086bf76d56c35ea3a6fa25"
+      "sha256": "315845c6e4161f374408a95468b902b9123976073e4b8cde7bbacdb15997bbac"
     },
     {
       "path": "vendor/openapi.yaml",
       "source": "api/openapi.yaml",
-      "bytes": 674023,
-      "sha256": "44b83ef9c5fe52f83f0e3845668796413857650f0f8bf5f46a34763d3e7c27b2"
+      "bytes": 674134,
+      "sha256": "cd18e21e48ebbe274ce6694dbe994037d83b96052edabc28eb805ddbb93057b2"
     },
     {
       "path": "assets/screenrig.runtime.js",

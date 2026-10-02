@@ -4456,7 +4456,7 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
     post:
       operationId: createDashboardTopup
-      description: Unavailable. Card checkout, tax collection and cash movement are not shipped; the route answers billing_unavailable rather than quoting a payment.
+      description: Answers billing_unavailable when payment and payout rails are not configured, rather than quoting a payment.
       security: [{ dashboardSession: [] }]
       responses:
         "404": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
@@ -4465,7 +4465,7 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
     post:
       operationId: checkoutDashboardTopup
-      description: Unavailable. No payment attempt is created.
+      description: Answers billing_unavailable when payment rails are not configured; no payment attempt is created.
       security: [{ dashboardSession: [] }]
       parameters: [{ $ref: "#/components/parameters/ResourceID" }]
       responses:
@@ -4475,7 +4475,7 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
     post:
       operationId: createDashboardWithdrawalQuote
-      description: Unavailable. Cash withdrawal is not shipped.
+      description: Answers billing_unavailable when payout rails are not configured.
       security: [{ dashboardSession: [] }]
       responses:
         "404": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
@@ -4484,7 +4484,7 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
     post:
       operationId: createDashboardWithdrawal
-      description: Unavailable. Cash withdrawal is not shipped; the project bearer never authorizes a cash-out.
+      description: Answers billing_unavailable when payout rails are not configured; the project bearer never authorizes a cash-out.
       security: [{ dashboardSession: [] }]
       responses:
         "404": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
@@ -4493,7 +4493,7 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
     post:
       operationId: startDashboardPayoutOnboarding
-      description: Unavailable. No hosted payout onboarding is created.
+      description: Answers billing_unavailable when payout rails are not configured; no hosted payout onboarding is created.
       security: [{ dashboardSession: [] }]
       responses:
         "404": { description: "billing_unavailable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
