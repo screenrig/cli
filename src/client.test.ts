@@ -62,6 +62,20 @@ const problemOf = async (promise: Promise<unknown>) => {
   assert.fail("expected a CliError");
 };
 
+test("failed upload operations preserve the server's client-error status and detail", async () => {
+  const detail = "The staged media object did not match its declared size, checksum, or type.";
+  const transport = new FakeTransport().on("GET", "/api/v1/operations/op_test", () => ({
+    status: 200, headers: {}, body: { ...operation("failed"), error: { code: "invalid_request", status: 400, detail } },
+  }));
+  const problem = await problemOf(new ApiClient({ transport }).waitForOperation("op_test", {
+    timeoutMs: 1000, pollMs: 1, sleep: async () => { assert.fail("terminal operation must not poll again"); },
+  }));
+  assert.equal(problem.status, 400);
+  assert.equal(problem.code, "invalid_request");
+  assert.equal(problem.detail, detail);
+  assert.equal(problem.operation_id, "op_test");
+});
+
 test("an empty 2xx where JSON is expected is unexpected_response, not success", async () => {
   const transport = new FakeTransport()
     .on("GET", "/api/v1/screens", () => ({ status: 200, headers: { "x-request-id": "req_emptyread" }, body: undefined, rawText: "" }))

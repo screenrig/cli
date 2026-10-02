@@ -65,7 +65,7 @@ info:
     response headers in x-rate-limit-admitted-response-headers.
 x-api-lifecycle:
   documentVersionMeaning: Contract-document version; not a URL or product API major.
-  urlMajorFamilies: [/api/v1, /api/v2, /runtime/v1, /runtime/v2, /content/v1, /dashboard/v1]
+  urlMajorFamilies: [/api/v1, /api/v2, /runtime/v1, /runtime/v2, /content/v1, /dashboard/v1, /website/v1]
   compatibleWithinMajor:
     - Additive endpoints and methods.
     - Optional request members.
@@ -97,6 +97,104 @@ servers:
     description: Control-plane origin
 security: []
 paths:
+  /website/v1/demo-requests:
+    servers: [{ url: "https://screenrig.ai" }]
+    post:
+      operationId: submitWebsiteDemoRequest
+      security: []
+      description: >-
+        Same-origin anonymous website intake. Saves the request and independent
+        delivery jobs before classification. Idempotency-Key is an independently
+        random private retry UUID, retained only in browser memory. It is not the
+        public flow_id. Matching retries set the same HttpOnly screenrig_demo
+        cookie and return the saved request without another submission. Requests
+        and responses are excluded from payload logging. Country does not select
+        a timezone. No project or dashboard login is created.
+      parameters:
+        - { name: Origin, in: header, required: true, schema: { type: string, format: uri }, example: "https://screenrig.ai", description: "Same-origin browser request; configured stage origin is accepted on stage." }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, pattern: "^[A-Za-z0-9_-]{20,128}$" } }
+        - { name: f, in: query, schema: { type: string, pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" }, description: "Nonsecret funnel attempt ID, identical to body flow_id." }
+        - { name: src, in: query, schema: { $ref: "#/components/schemas/DemoSource" }, description: "Allowlisted source, identical to body source." }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/DemoRequestInput" } } } }
+      responses:
+        "201": { description: "Request durably saved. Sets private demo session cookie.", content: { application/json: { schema: { $ref: "#/components/schemas/DemoResult" } } } }
+        "200": { description: "Matching idempotent replay of the saved request.", content: { application/json: { schema: { $ref: "#/components/schemas/DemoResult" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /website/v1/demo-request:
+    servers: [{ url: "https://screenrig.ai" }]
+    get:
+      operationId: getWebsiteDemoRequest
+      security: [{ demoSession: [] }]
+      description: Cookie-bound saved request. A request ID or public flow ID does not grant access. No-store.
+      responses:
+        "200": { description: "Saved demo request and booking state.", content: { application/json: { schema: { $ref: "#/components/schemas/DemoResult" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /website/v1/demo-slots:
+    servers: [{ url: "https://screenrig.ai" }]
+    get:
+      operationId: getWebsiteDemoSlots
+      security: [{ demoSession: [] }]
+      description: >-
+        Up to four real available 30-minute slots, varied across dates and times
+        when possible, in the visitor's editable IANA timezone. Private slot IDs
+        are returned in the JSON body and never sent in URL queries. Unconfigured
+        calendar or no reasonable timezone overlap returns an empty list.
+      parameters:
+        - { name: timezone, in: query, required: true, schema: { type: string, maxLength: 100 } }
+        - { name: refresh, in: query, schema: { type: string, enum: ["1"] }, description: "Offer alternatives to the previous cookie-bound batch." }
+      responses:
+        "200": { description: "Real available slots or an empty list.", content: { application/json: { schema: { $ref: "#/components/schemas/DemoSlots" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /website/v1/demo-bookings:
+    servers: [{ url: "https://screenrig.ai" }]
+    post:
+      operationId: bookWebsiteDemo
+      security: [{ demoSession: [] }]
+      description: >-
+        Rechecks a cookie-bound slot, atomically reserves host buffer cells and
+        creates a stable Google Calendar event. Confirmation requires the real
+        event and saved booking. Ambiguous provider failures remain pending for
+        durable reconciliation, without a second event or false booked page.
+      parameters:
+        - { name: Origin, in: header, required: true, schema: { type: string, format: uri }, example: "https://screenrig.ai", description: "Same-origin browser request; configured stage origin is accepted on stage." }
+        - { name: f, in: query, schema: { type: string, pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" }, description: "Nonsecret funnel attempt ID, identical to the saved flow_id." }
+        - { name: src, in: query, schema: { $ref: "#/components/schemas/DemoSource" }, description: "Saved allowlisted source." }
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [slot_id, timezone], properties: { slot_id: { type: string, pattern: "^([A-Za-z0-9_-]{20,128})?$", description: "Empty only for replay of an already confirmed cookie-bound booking." }, timezone: { type: string, maxLength: 100 } } } } } }
+      responses:
+        "201": { description: "Calendar event and booking confirmed and saved.", content: { application/json: { schema: { $ref: "#/components/schemas/DemoResult" } } } }
+        "200": { description: "Already confirmed booking replay.", content: { application/json: { schema: { $ref: "#/components/schemas/DemoResult" } } } }
+        "202": { description: "Booking pending provider reconciliation; excluded from confirmed booking analytics.", content: { application/json: { schema: { $ref: "#/components/schemas/DemoResult" } } } }
+        "409": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /website/v1/demo-review:
+    servers: [{ url: "https://screenrig.ai" }]
+    post:
+      operationId: requestWebsiteDemoReview
+      parameters:
+        - { name: Origin, in: header, required: true, schema: { type: string, format: uri }, example: "https://screenrig.ai", description: "Same-origin browser request; configured stage origin is accepted on stage." }
+      security: [{ demoSession: [] }]
+      description: Flags the existing on-demand request for team review without another questionnaire. Late classifier replies cannot reverse this choice.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false } } } }
+      responses:
+        "200": { description: "Current saved request with review requested.", content: { application/json: { schema: { $ref: "#/components/schemas/DemoResult" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /website/v1/demo-session:
+    servers: [{ url: "https://screenrig.ai" }]
+    post:
+      operationId: exchangeWebsiteDemoInvitation
+      parameters:
+        - { name: Origin, in: header, required: true, schema: { type: string, format: uri }, example: "https://screenrig.ai", description: "Same-origin browser request; configured stage origin is accepted on stage." }
+      security: []
+      description: >-
+        Exchanges an emailed seven-day booking invitation for a browser-only
+        HttpOnly demo session. The website removes its invite fragment before
+        any request and sends the token only in this private POST body, never
+        in a URL, redirect, analytics marker or log. Multiple browser sessions
+        may access the same invitation-bound request.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [token], properties: { token: { type: string, pattern: "^[A-Za-z0-9_-]{20,128}$" } } } } } }
+      responses:
+        "200": { description: "Cookie set and saved demo request returned.", content: { application/json: { schema: { $ref: "#/components/schemas/DemoResult" } } } }
+        default: { $ref: "#/components/responses/Problem" }
   /api/v1/invitations:
     post:
       operationId: createInvitations
@@ -5491,6 +5589,7 @@ paths:
         "200": { description: Support message SSE., content: { text/event-stream: { schema: { type: string } } } }
         default: { $ref: "#/components/responses/Problem" }
 components:
+  # Anonymous demos have their own cookie, independent of project/dashboard auth.
   headers:
     RateLimitPolicy:
       description: >-
@@ -5577,6 +5676,7 @@ components:
     SecFetchMode: { name: Sec-Fetch-Mode, in: header, required: false, schema: { type: string } }
     SecFetchDest: { name: Sec-Fetch-Dest, in: header, required: false, schema: { type: string } }
   securitySchemes:
+    demoSession: { type: apiKey, in: cookie, name: screenrig_demo, description: "Short-lived anonymous demo browser session. Secure, HttpOnly, SameSite=Lax, path /website/v1; request and flow IDs are never authorization." }
     invitationSignup:
       type: apiKey
       in: cookie
@@ -5632,6 +5732,57 @@ components:
         RateLimit: { $ref: "#/components/headers/RateLimit" }
       content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
   schemas:
+    DemoSource: { type: string, enum: [home_hero, home_paid_plans, pricing_premium, pricing_enterprise, direct] }
+    DemoRequestInput:
+      type: object
+      additionalProperties: false
+      required: [email, country, screen_range, organization, budget, timezone, source, flow_id]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        country: { type: string, pattern: "^[A-Z]{2}$", description: "ISO 3166-1 country code; retained separately from timezone." }
+        screen_range: { type: string, enum: ["1_10", "11_100", "101_500", "501_plus", unknown] }
+        organization: { type: string, enum: [small_mid, large_corporation, agency_network] }
+        budget: { type: string, enum: [under_2995, "2995_19994", "19995_plus", unknown], description: "Self-reported annual signage budget in USD." }
+        timezone: { type: string, maxLength: 100, description: "IANA timezone, or empty when browser detection is unavailable; scheduling requires explicit timezone." }
+        source: { $ref: "#/components/schemas/DemoSource" }
+        flow_id: { type: string, pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", description: "Random nonsecret analytics attempt ID, never authorization." }
+    DemoResult:
+      type: object
+      required: [route, booking, review_requested, video_url, email, country, timezone, flow_id, source]
+      properties:
+        booking_notice: { type: string, enum: [cancelled, rescheduled] }
+        route: { type: string, enum: [human, automated, awaiting_review] }
+        booking:
+          type: object
+          required: [state]
+          properties:
+            state: { type: string, enum: [not_booked, pending, booked] }
+            start: { type: string, format: date-time }
+            end: { type: string, format: date-time }
+            timezone: { type: string }
+            meeting_url: { type: string, format: uri, description: "Present only for a real saved meeting." }
+        review_requested: { type: boolean }
+        video_url: { type: string }
+        email: { type: string, format: email }
+        country: { type: string }
+        timezone: { type: string }
+        flow_id: { type: string }
+        source: { $ref: "#/components/schemas/DemoSource" }
+    DemoSlots:
+      type: object
+      required: [slots, timezone]
+      properties:
+        timezone: { type: string }
+        slots:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            required: [id, start, end]
+            properties:
+              id: { type: string, description: "Private cookie-bound slot offer; send only in booking POST body." }
+              start: { type: string, format: date-time }
+              end: { type: string, format: date-time }
     ProjectName:
       type: string
       minLength: 1
@@ -10382,4 +10533,4 @@ components:
         next: { $ref: "#/components/schemas/NextAction" }
         hint: { type: string, description: "What the caller should do next to fix or work around this problem, in one or two plain sentences. The server sends the problem registry's default for the code (api/problems.yaml) unless the handler has a more specific one for this case. Advisory text for agents; Players ignore it." }
 x-problem-registry: ./problems.yaml
-x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, user_email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_project_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, server_draining, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk, recovery_ambiguous, recovery_expired, recovery_not_offered, invitation_limit_reached, version_required, price_change_pending, quote_stale, insufficient_credits, self_deal, invitation_invalid, invitation_expired, invitation_consumed, invitation_email_mismatch, reauthentication_required, member_limit_reached, last_credential, no_project, billing_unavailable, feature_unavailable, user_binding_stale, session_expired, credential_revoked, proof_clock_skew, key_retired, assignment_not_found, upgrade_required, webhook_limit_reached, webhook_url_rejected, reboot_unsupported, support_conversation_closed]
+x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, user_email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_project_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, server_draining, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk, recovery_ambiguous, recovery_expired, recovery_not_offered, invitation_limit_reached, version_required, price_change_pending, quote_stale, insufficient_credits, self_deal, invitation_invalid, invitation_expired, invitation_consumed, invitation_email_mismatch, reauthentication_required, member_limit_reached, last_credential, no_project, billing_unavailable, feature_unavailable, user_binding_stale, session_expired, credential_revoked, proof_clock_skew, key_retired, assignment_not_found, upgrade_required, webhook_limit_reached, webhook_url_rejected, reboot_unsupported, support_conversation_closed, demo_slot_unavailable]

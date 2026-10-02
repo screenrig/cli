@@ -6,6 +6,17 @@ type ObjectValue = Record<string, unknown>;
 const object = (value: unknown): ObjectValue => value !== null && typeof value === "object" && !Array.isArray(value) ? value as ObjectValue : {};
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 
+function httpsWithoutCredentials(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    // WHATWG URL removes empty userinfo (https://@host), which the server
+    // rejects too. Inspect the authored authority as well as parsed userinfo.
+    return url.protocol === "https:" && url.hostname !== "" && !url.username && !url.password
+      && !/^https:\/\/[^/?#]*@/i.test(value);
+  } catch { return false; }
+}
+
 function validCivil(value: string): boolean {
   const parts = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
   if (!parts) return false;
@@ -56,6 +67,9 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
       if (ids.has(primitive.id)) fail(`${itemPath}/id`, "must be unique within the page");
       ids.add(primitive.id);
       if (primitive.primitive === "application" || primitive.primitive === "iframe") web++;
+      if (primitive.primitive === "iframe" && !httpsWithoutCredentials(primitive.src)) {
+        fail(`${itemPath}/src`, "must be a valid HTTPS URL without credentials");
+      }
       if (primitive.primitive === "stream") {
         streams++;
         if (mode !== "duration") fail(`${itemPath}`, "streams require duration advance");
@@ -66,10 +80,7 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
           protocols.add(source.protocol);
           if (source.protocol === "udp-mpegts" && (typeof source.group !== "string" || !/^239\.(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2})$/.test(source.group) || source.group.split(".").some(part => Number(part) > 255))) fail(`${sourcePath}/group`, "must be an IPv4 multicast address in 239.0.0.0/8");
           if (source.protocol === "hls") {
-            try {
-              const url = new URL(String(source.url));
-              if (url.protocol !== "https:" || url.username || url.password) fail(`${sourcePath}/url`, "must be HTTPS without credentials");
-            } catch { fail(`${sourcePath}/url`, "must be a valid HTTPS URL"); }
+            if (!httpsWithoutCredentials(source.url)) fail(`${sourcePath}/url`, "must be a valid HTTPS URL without credentials");
           }
         }
       }

@@ -53,6 +53,24 @@ test("local canonical validation rejects spin on an iframe", () => {
   assert.ok(issues.some((issue) => issue.path === "/pages/0/primitives/0/motion" && issue.message.includes("spin")));
 });
 
+test("local canonical validation rejects iframe userinfo without rejecting path at-signs", () => {
+  for (const src of ["https://user:pass@example.com/page", "https://user@example.com/", "https://%75ser:%70ass@example.com/", "https://@example.com/"]) {
+    const value = playlist();
+    value.pages[0]!.primitives = [{ id: "web", primitive: "iframe", src, title: "Example", rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "fill" }] as any;
+    assert.deepEqual(playlistIssues(value).map((issue) => issue.path), ["/pages/0/primitives/0/src"], src);
+  }
+  const value = playlist();
+  value.pages[0]!.primitives = [{ id: "web", primitive: "iframe", src: "https://example.com/@user", title: "Example", rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "fill" }] as any;
+  assert.deepEqual(playlistIssues(value), []);
+});
+
+test("off-canvas bleed rectangles remain valid under the canvas clipping contract", () => {
+  const value = playlist({ rect: { x: -500, y: -500, width: 5000, height: 5000 } });
+  value.pages[0]!.canvas.width = 384;
+  value.pages[0]!.canvas.height = 823;
+  assert.deepEqual(playlistIssues(value), []);
+});
+
 test("local canonical validation rejects a path with 65 points", () => {
   const page = structuredClone(PANNING_BACKGROUND_EXAMPLE_PAGE);
   page.primitives[0]!.motion.points = Array.from({ length: 65 }, (_, index) => ({ x: index, y: 0 }));
