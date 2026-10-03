@@ -95,7 +95,7 @@ test("unauthenticated native mutation actions reject before local preparation or
       assert.equal(await run(fixture.runtime), ExitCode.Auth, fixture.output());
       const envelope = JSON.parse(fixture.output());
       assert.equal(envelope.error.code, "not_enrolled");
-      assert.equal(envelope.error.next.command, "screenrig agent --help");
+      assert.equal(envelope.error.next.command, "screenrig agent enroll --email ADDRESS");
       assert.equal(transport.calls.length, 0);
       assert.deepEqual(await readdir(fixture.configDir), [], "authentication failure must not create retry or enrollment state");
     } finally {

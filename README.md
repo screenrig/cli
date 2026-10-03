@@ -122,16 +122,6 @@ rules validate invocations before configuration or network access.
 
 ## Projects and enrollment
 
-Before writing with an existing credential, run `screenrig project show` and
-confirm the project name and ID. The contact email alone does not identify the
-intended project: one person may belong to several projects.
-
-On a fresh or disconnected installation, ask whether the user wants to connect
-to an existing project or create a new one. `screenrig agent connect` requests
-dashboard approval for an existing project; after approval, verify the selected
-project with `project show`. Only use `agent enroll` after the user chooses a
-new project. The CLI does not discover memberships from an email address.
-
 An explicit enrollment creates a project, attaches this agent, and emails a
 member invitation to the contact address. The same person can belong to more
 than one project.
@@ -146,12 +136,10 @@ screenrig project rename NAME
 `--project-name` names the project; `--name` names this agent. Enrollment reports
 the project ID and name and confirms that a member invitation was requested,
 without exposing a credential or invitation URL. The invitation is the human's
-project membership; a matching email or existing dashboard login does not accept
-it. The person must accept the invitation before the new project appears in
-their dashboard. Nothing waits on that step, and the agent can pair screens and
-publish right away. Other authenticated commands never enroll automatically.
-If the server rejects the stored credential, resolve the intended project
-before disconnecting or enrolling again.
+dashboard login; nothing waits on it, and the agent can pair screens and publish
+right away. Other authenticated commands never enroll automatically. If the
+server rejects the stored credential, `agent disconnect --yes` clears it locally
+before a new enrollment.
 
 ## Invitations
 
@@ -195,8 +183,9 @@ The response is neutral whether or not the address is known: if this address can
 receive sign-in instructions, check its inbox. Delivery is not confirmed.
 Rerunning an ambiguous request reuses its saved Idempotency-Key.
 
-To attach a project that already exists to this installation, run `screenrig
-agent connect` and approve the connection request in that project's dashboard.
+First setup is `agent enroll`. Only to attach a project that already exists to
+this installation, run `screenrig agent connect` and approve the connection
+request in that project's dashboard.
 
 ## Screen host and recovery
 

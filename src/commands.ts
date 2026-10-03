@@ -468,11 +468,6 @@ function humanLines(title: string, fields: Array<[string, string | undefined]>):
 export type CommandHandler = (args: ParsedArgs, runtime: CliRuntime) => Promise<CommandResult>;
 type ResolvedCommandConfig = Awaited<ReturnType<typeof resolveConfig>>;
 
-const chooseProjectNext = {
-  command: "screenrig agent --help",
-  reason: "Ask whether to connect to an existing project or create a new one. Use agent connect for existing projects; enroll only after choosing a new project.",
-};
-
 /** Prepare configuration, logging and credential guidance once for a bound leaf. */
 function commandHandler(
   handler: (args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig) => Promise<CommandResult>,
@@ -491,15 +486,17 @@ function commandHandler(
       }
       if (resolved.lastAgent) {
         throw notEnrolledError("This installation is disconnected and cannot run project commands.", {
-          ...(resolved.enrollment?.email
-            ? { command: "screenrig agent enroll", reason: "Resume the exact pending enrollment before running another project command." }
-            : chooseProjectNext),
+          command: "screenrig agent enroll --email ADDRESS",
+          reason: "Ask the user for their contact email, then create a new project agent. Use agent connect only for an intentional existing-project reconnect.",
         });
       }
       throw notEnrolledError("This installation is not enrolled. Enrollment is an explicit step and is never a side effect of another command.", {
-        ...(resolved.enrollment?.email
-          ? { command: "screenrig agent enroll", reason: "Resume the exact pending enrollment before running pairing or another project command." }
-          : chooseProjectNext),
+        command: resolved.enrollment?.email
+          ? "screenrig agent enroll"
+          : "screenrig agent enroll --email ADDRESS",
+        reason: resolved.enrollment?.email
+          ? "Resume the exact pending enrollment before running pairing or another project command."
+          : "Create the first agent with unverified contact metadata, then retry the original command.",
       });
     }
     // Specialized enrollment, generation, upload/bundle, and handoff flows own
@@ -767,7 +764,7 @@ async function agentStatus(
     const local = resolved.lastAgent;
     const status = local ? "disconnected" : "not_enrolled";
     return {
-      envelope: successEnvelope({ status, path: resolved.enrollment?.email ? "first_run_enroll" : "choose_project", ...(local ? { agent: local } : {}) }),
+      envelope: successEnvelope({ status, path: "first_run_enroll", ...(local ? { agent: local } : {}) }),
       exitCode: ExitCode.Success,
       human: humanLines("Agent", [
         ["status", status],
@@ -1503,7 +1500,7 @@ async function agentDisconnect(
     human: humanLines("Agent disconnected", [
       ["local_credential", "removed"],
       ["project_screens_and_other_agents", "preserved"],
-      ["next", "Ask whether to connect to an existing project or create a new one; use agent connect for existing, or agent enroll only after choosing new"],
+      ["next", "screenrig agent enroll --email ADDRESS creates a new project; screenrig agent connect joins an existing one only when the user asks"],
     ]),
   };
 }
@@ -5957,7 +5954,7 @@ interface DoctorCheck {
   name: string;
   status: DoctorStatus;
   detail: string;
-  path?: "choose_project" | "first_run_enroll" | "reconnect_existing";
+  path?: "first_run_enroll" | "reconnect_existing";
   /** The command that clears a `warn` or `fail` row, when one exists. */
   next?: ProblemNext;
 }
@@ -5991,20 +5988,24 @@ function credentialCheck(resolved: Awaited<ReturnType<typeof resolveConfig>>): D
       name: "token",
       status: "warn",
       detail: `${detail}; this installation was disconnected`,
-      path: resolved.enrollment?.email ? "first_run_enroll" : "choose_project",
-      next: resolved.enrollment?.email
-        ? { command: "screenrig agent enroll", reason: "Resume the exact pending enrollment, then rerun doctor." }
-        : chooseProjectNext,
+      path: "first_run_enroll",
+      next: {
+        command: "screenrig agent enroll --email ADDRESS",
+        reason: "Ask the user for their contact email, enroll a new project agent, then rerun doctor. Use agent connect only for an intentional existing-project reconnect.",
+      },
     };
   }
   return {
     name: "token",
     status: "warn",
     detail: `${detail}; this installation is not enrolled`,
-    path: resolved.enrollment?.email ? "first_run_enroll" : "choose_project",
-    next: resolved.enrollment?.email
-      ? { command: "screenrig agent enroll", reason: "Resume the exact pending enrollment, then rerun doctor." }
-      : chooseProjectNext,
+    path: "first_run_enroll",
+    next: {
+      command: resolved.enrollment?.email ? "screenrig agent enroll" : "screenrig agent enroll --email ADDRESS",
+      reason: resolved.enrollment?.email
+        ? "Resume the exact pending enrollment, then rerun doctor."
+        : "Create the first agent with unverified contact metadata, then rerun doctor. Every authenticated command fails with not_enrolled until then.",
+    },
   };
 }
 
