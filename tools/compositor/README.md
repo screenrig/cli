@@ -41,13 +41,12 @@ The preview plays layered output: region PNGs stacked by `z`/`rect`, `<video>` f
 
 ## Language
 
-JSON. The page sets the rails. Every region inherits `font`, `background`, `brand`, and `text`. Muted copy is derived from `text` mixed toward `background`. Unknown keys fail. Copy fields accept a string or an array of lines.
+JSON. The page sets the rails. Every region inherits `font`, `background`, `brand`, and `text`. Omit `font` to use an installed fallback; set it to an installed family when a particular typeface matters. Run `compose catalog` to see installed families. Muted copy is derived from `text` mixed toward `background`. Unknown keys fail. Copy fields accept a string or an array of lines.
 
 ```json
 {
   "width": 1920,
   "height": 1080,
-  "font": "Liberation Serif",
   "background": "#1C1410",
   "brand": "#C9A227",
   "text": "#F3E6D0",
