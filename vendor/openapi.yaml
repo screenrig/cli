@@ -129,6 +129,15 @@ paths:
       responses:
         "200": { description: "Saved demo request and booking state.", content: { application/json: { schema: { $ref: "#/components/schemas/DemoResult" } } } }
         default: { $ref: "#/components/responses/Problem" }
+  /website/v1/demo-calendar:
+    servers: [{ url: "https://screenrig.ai" }]
+    get:
+      operationId: getWebsiteDemoCalendar
+      security: [{ demoSession: [] }]
+      description: Private calendar download for this browser's confirmed booking. Rechecks the saved event; no request ID or public flow ID grants access. No-store.
+      responses:
+        "200": { description: "Importable calendar event with stable identity and confirmed times.", content: { text/calendar: { schema: { type: string } } } }
+        default: { $ref: "#/components/responses/Problem" }
   /website/v1/demo-slots:
     servers: [{ url: "https://screenrig.ai" }]
     get:
@@ -152,7 +161,7 @@ paths:
       security: [{ demoSession: [] }]
       description: >-
         Rechecks a cookie-bound slot, atomically reserves host buffer cells and
-        creates a stable Google Calendar event. Confirmation requires the real
+        creates a stable event in the configured local or Google calendar. Confirmation requires the real
         event and saved booking. Ambiguous provider failures remain pending for
         durable reconciliation, without a second event or false booked page.
       parameters:
@@ -2366,6 +2375,8 @@ paths:
             Content-Type: { schema: { type: string, enum: [image/webp] } }
             Content-Length: { schema: { type: integer } }
             ETag: { schema: { type: string } }
+            X-ScreenRig-Capture-ID: { schema: { $ref: "#/components/schemas/ScreenshotCaptureID" } }
+            X-ScreenRig-Captured-At: { schema: { type: string, format: date-time } }
             Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
             Content-Disposition: { schema: { type: string } }
           content: { image/webp: { schema: { type: string, format: binary } } }
@@ -3455,8 +3466,10 @@ paths:
       x-rate-limit-policies: [{ name: native-identity-reset-ip, quota: 60, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
-        The on-player reset, invoked by an explicit confirmed operator action
-        on the device. Verifies an EdDSA compact JWS (op=identity.reset). The
+        The on-player reset, invoked only by an explicit confirmed operator
+        action on the device. Failed pairing, session minting, or network access
+        never automatically invokes this operation or clears the Player's local
+        key. The endpoint verifies an EdDSA compact JWS (op=identity.reset). The
         screen bound to this key is archived with archive_reason device_reset
         (already archived: unchanged), and the key stays bound to it: a device
         that still holds the key mints an archived session (dark glass) and
@@ -3465,13 +3478,16 @@ paths:
         key are withdrawn. A key that never bound a screen, or a key already
         retired by screen recovery, becomes terminal instead: it cannot pair
         or mint sessions again, and resetting a retired key never touches the
-        screen its successor owns. A fresh signed reset safely retries a lost
-        response. No project bearer. Cookies are neither accepted nor set. A
-        missing local key or network error is not a reset
-        (docs/player-compatibility.md §5.1).
+        screen its successor owns. If the enrolled project has been deleted,
+        signed reset makes the orphaned key terminal without archiving another
+        screen, so the device can pair anew. After a lost response, the Player
+        keeps its local key and can retry with a new challenge and fresh signed
+        proof. A network error alone does not confirm a reset or authorize
+        clearing that key (docs/player-compatibility.md §5.1). No project
+        bearer. Cookies are neither accepted nor set.
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityProof" } } } }
       responses:
-        "204": { description: "Reset recorded: the bound screen archived with the key kept, or the unbound or retired key made terminal, or an unknown key answered as an idempotent no-op that archives nothing; an authenticated retry of any of these; no Set-Cookie.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
+        "204": { description: "Reset recorded: a live-project bound screen archived with the key kept; a deleted-project, unbound, or retired key made terminal; or an unknown key answered as an idempotent no-op that archives nothing. An authenticated retry of any of these also succeeds. No Set-Cookie.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }

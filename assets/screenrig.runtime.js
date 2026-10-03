@@ -1590,6 +1590,20 @@
       clearTimeout(timer);
     }
   }
+  async function drawBlobImage(url, budget) {
+    if (!url.startsWith("blob:")) return false;
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    const pixels = image.naturalWidth * image.naturalHeight;
+    if (pixels < 1) throw new CaptureUnavailable("capture_failed");
+    const scale = Math.min(1, Math.sqrt(budget / pixels));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL();
+  }
   function captureMarker() {
     const bytes = new Uint8Array(16);
     crypto.getRandomValues(bytes);
@@ -1670,6 +1684,7 @@
         timeout: 2e3,
         debug: false,
         font: { cssText: fontCSS },
+        fetchFn: (url) => drawBlobImage(url, width * height),
         features: { restoreScrollPosition: true },
         filter: (node) => !videos.has(node) && (!(node instanceof Element) || node.hasAttribute(marker) || visible(node)),
         onCloneNode: (clone) => {
