@@ -2,7 +2,6 @@
   "name": "Signage showcase v2",
   "width": 1920,
   "height": 1080,
-  "font": "Liberation Serif",
   "pages": [
     {
       "id": "fire-at-the-table",
@@ -84,7 +83,6 @@
     },
     {
       "id": "ashline-circuit",
-      "font": "Liberation Sans",
       "background": "#0B1220",
       "brand": "#E8EEF6",
       "text": "#F4F7FB",
@@ -409,7 +407,6 @@
     },
     {
       "id": "casa-velluto",
-      "font": "Liberation Serif",
       "background": "#EDE4D4",
       "brand": "#6B2B1A",
       "text": "#2C1810",
@@ -616,7 +613,6 @@
     },
     {
       "id": "today-on-campus",
-      "font": "Liberation Sans",
       "image": "media/today-on-campus-poster.png",
       "background": "#EEF1F4",
       "brand": "#1B3654",
@@ -679,7 +675,6 @@
     },
     {
       "id": "maker-labs",
-      "font": "Liberation Sans",
       "image": "media/maker-labs-poster.png",
       "background": "#E8E4DC",
       "brand": "#1A1A1A",

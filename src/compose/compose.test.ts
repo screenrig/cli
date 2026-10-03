@@ -742,7 +742,6 @@ test("an ink-fit card hugs every measured line and reports no overflow", async (
   const result = await composeDocument({
     width: 1920,
     height: 1080,
-    font: "Liberation Sans",
     background: "#00000000",
     brand: "#FFD166",
     text: "#FFFFFF",
@@ -797,7 +796,6 @@ test("regions in one row share a type scale and title baseline regardless of bod
   const spec = {
     width: 1920,
     height: 1080,
-    font: "Liberation Sans",
     background: "#1B1B1F",
     brand: "#E9C46A",
     text: "#F1FAEE",
