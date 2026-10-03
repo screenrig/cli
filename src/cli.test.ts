@@ -6412,6 +6412,46 @@ test("app upload reports the release id an application primitive needs", async (
   await rm(configDir, { recursive: true, force: true });
 });
 
+test("app rename changes metadata without packing or publishing a release", async () => {
+  for (const expectedRevision of [undefined, "7"]) {
+    const transport = memoryBackend();
+    transport.on("PATCH", "/api/v1/applications/app_EXISTING", (request) => {
+      assert.equal(request.headers?.["if-match"], expectedRevision ? '"7"' : undefined);
+      assert.ok(request.headers?.["idempotency-key"]);
+      assert.deepEqual(request.body, { name: "Lobby 🚀" });
+      return { status: 200, headers: { etag: '"8"' }, body: { id: "app_EXISTING", name: "Lobby 🚀", revision: 8, latest_ready_release: "rel_KEEP" } };
+    });
+    const result = await withAuthenticatedRuntime(["--json", "app", "rename", "app_EXISTING", "--name", "  Lobby 🚀  ", ...(expectedRevision ? ["--expect-rev", expectedRevision] : [])], transport);
+    assert.equal(result.code, ExitCode.Success, result.stdout);
+    assert.deepEqual(JSON.parse(result.stdout).data, { id: "app_EXISTING", name: "Lobby 🚀", revision: 8, latest_ready_release: "rel_KEEP" });
+    assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), ["PATCH /api/v1/applications/app_EXISTING"]);
+    await rm(result.configDir, { recursive: true, force: true });
+  }
+});
+
+test("app rename rejects invalid names and revisions before making requests", async () => {
+  for (const flags of [[], ["--name", " "], ["--name", "a\n"], ["--name", "🚀".repeat(121)], ["--name", "ok", "--expect-rev", "0"]]) {
+    const transport = memoryBackend();
+    const result = await withAuthenticatedRuntime(["--json", "app", "rename", "app_EXISTING", ...flags], transport);
+    assert.equal(result.code, ExitCode.Usage, result.stdout);
+    assert.equal(transport.calls.length, 0);
+    await rm(result.configDir, { recursive: true, force: true });
+  }
+});
+
+test("app rename preserves a server revision conflict in the error envelope", async () => {
+  const transport = memoryBackend();
+  transport.on("PATCH", "/api/v1/applications/app_EXISTING", () => ({
+    status: 412, headers: { "content-type": "application/problem+json" },
+    body: makeProblem("revision_conflict", "Revision conflict", 412, "The application changed.", { current_revision: 8 }),
+  }));
+  const result = await withAuthenticatedRuntime(["--json", "app", "rename", "app_EXISTING", "--name", "Lobby", "--expect-rev", "7"], transport);
+  assert.notEqual(result.code, ExitCode.Success);
+  assert.equal(JSON.parse(result.stdout).error.code, "revision_conflict");
+  assert.equal(JSON.parse(result.stdout).error.current_revision, 8);
+  await rm(result.configDir, { recursive: true, force: true });
+});
+
 test("app update publishes to the existing application with revision and release output", async () => {
   const transport = memoryBackend();
   transport.on("POST", "/api/v1/applications/app_EXISTING/releases", (request) => {

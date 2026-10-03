@@ -1,8 +1,7 @@
 import { usageError } from "./problems.js";
 
 /** ApplicationName is limited after trimming, in Unicode scalar values. */
-export function applicationNameHeaders(value: string | undefined): Record<string, string> {
-  if (value === undefined) return {};
+export function normalizeApplicationName(value: string): string {
   const name = value.trim();
   const scalars = [...name];
   if (scalars.length > 120 || /\p{Cc}/u.test(value) || scalars.some((char) => {
@@ -11,6 +10,12 @@ export function applicationNameHeaders(value: string | undefined): Record<string
   })) {
     throw usageError("--name must be at most 120 Unicode characters and must not contain control characters or invalid Unicode.");
   }
+  return name;
+}
+
+export function applicationNameHeaders(value: string | undefined): Record<string, string> {
+  if (value === undefined) return {};
+  const name = normalizeApplicationName(value);
   if (!name) return {};
   if (/^[\x20-\x7e]+$/.test(name)) return { "screenrig-application-name": name };
   // RFC 8187 ext-value: HTTP header values stay ASCII; the server decodes UTF-8.

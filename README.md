@@ -752,6 +752,15 @@ online/health, not a failure timeout.
 
 ## Application command results
 
+Change an existing application's display name with
+`screenrig app rename app_APP --name "Lobby welcome"`. Names contain 1 to 120
+Unicode characters after trimming and no control characters. This changes
+metadata only: the application ID, releases, K/V data, and playlist references
+keep their identities. No directory or upload is required. The response contains
+the application metadata in `data`, including `id`, `name`, and `revision`.
+Pass `--expect-rev REVISION` to guard against concurrent changes. Renaming to the
+current name leaves the revision unchanged.
+
 `app upload` and `app update` return the same JSON data paths with or without
 `--no-wait`: `data.application` contains the accepted application `id`,
 `release_id`, and `operation_id`; `data.pack` contains `sha256` and `file_count`.

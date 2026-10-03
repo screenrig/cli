@@ -1461,6 +1461,23 @@ paths:
       responses:
         "200": { description: Application, content: { application/json: { schema: { $ref: "#/components/schemas/Application" } } } }
         default: { $ref: "#/components/responses/Problem" }
+    patch:
+      operationId: renameApplication
+      description: >-
+        Changes the display name of an application owned by the authenticated
+        project. Names are trimmed, contain 1 to 120 Unicode characters with no
+        controls, and may repeat within a project. Application identity, releases,
+        K/V data, and playlist release pins are preserved. A changed name advances
+        the application revision and emits application.updated; the same name is
+        a no-op. If-Match optionally guards the revision. An identical idempotent
+        retry returns the original response after subsequent metadata changes.
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ApplicationRename" } } } }
+      responses:
+        "200": { description: Renamed application., headers: { ETag: { description: Quoted application revision., schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Application" } } } }
+        "412": { description: revision_conflict — If-Match is stale; Problem.current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
     delete:
       operationId: deleteApplication
       description: >-
@@ -7283,6 +7300,7 @@ components:
     AgentCredentialEnvelope: { type: object, additionalProperties: false, required: [algorithm, ephemeral_public_key, nonce, ciphertext], properties: { algorithm: { type: string, enum: [X25519-HKDF-SHA256-A256GCM] }, ephemeral_public_key: { $ref: "#/components/schemas/X25519PublicJWK" }, nonce: { type: string, description: Unpadded base64url AES-GCM nonce. }, ciphertext: { type: string, description: Unpadded base64url ciphertext and authentication tag. Decrypt with AAD screenrig/agent-credential-envelope/aad/v1 NUL connection_id NUL agent_id. } } }
     AgentCredentialCollection: { type: object, additionalProperties: false, required: [agent, credential_envelope, issuance_expires_at], properties: { agent: { $ref: "#/components/schemas/Agent" }, credential_envelope: { $ref: "#/components/schemas/AgentCredentialEnvelope" }, issuance_expires_at: { type: string, format: date-time } } }
     AgentDisconnectRequest: { type: object, additionalProperties: false, properties: { allow_last_agent: { type: boolean, default: false, description: Explicitly accept loss of the last active agent bearer. A registered dashboard passkey remains independent administrative authority. } } }
+    ApplicationRename: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string, minLength: 1, maxLength: 120, description: "Display name after trimming; controls and empty names are rejected." } } }
     Application: { type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: { id: { type: string }, name: { type: string }, revision: { type: integer }, latest_ready_release: { type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the application's releases were last used on glass (playback.application_started). Absent until first use. Read-only." } } }
     ApplicationList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 500, items: { $ref: "#/components/schemas/Application" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     OperationAccepted: { type: object, additionalProperties: false, required: [id, release_id, operation_id], properties: { id: { type: string, description: Application identifier the upload was attributed to. }, release_id: { type: string, description: "Release identifier created by this upload. Poll the operation and pin this release into a playlist once the operation succeeds." }, operation_id: { type: string } } }

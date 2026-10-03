@@ -1,10 +1,10 @@
 import { positiveInteger, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleAppPack, handleAppUpload, handleAppUpdate, handleAppList, handleAppShow } from "../commands.js";
+import { handleAppPack, handleAppUpload, handleAppUpdate, handleAppList, handleAppShow, handleAppRename } from "../commands.js";
 import type { Command } from "commander";
 
 export function registerAppCommands(root: Command, bind: CommandActionBinder): void {
-  const app = root.command("app").description("Pack, upload, and inspect applications");
+  const app = root.command("app").description("Pack, upload, rename, and inspect applications");
 
   app.command("pack").description("Pack a local application directory")
     .argument("<directory>", "Local directory")
@@ -18,7 +18,7 @@ export function registerAppCommands(root: Command, bind: CommandActionBinder): v
     .option("--poll-ms <MS>", "Set the operation polling interval", positiveInteger("poll-ms"))
     .action(bind(handleAppUpload));
 
-  app.command("update").description("Update an application")
+  app.command("update").description("Publish a new application release")
     .argument("<id>", "Application identifier")
     .argument("<directory>", "Local directory")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
@@ -28,6 +28,12 @@ export function registerAppCommands(root: Command, bind: CommandActionBinder): v
 
   app.command("list").description("List applications")
     .action(bind(handleAppList));
+
+  app.command("rename").description("Change an application's display name")
+    .argument("<id>", "Application identifier")
+    .requiredOption("--name <NAME>", "New application name")
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .action(bind(handleAppRename));
 
   app.command("show").description("Inspect an application")
     .argument("<id>", "Application identifier")

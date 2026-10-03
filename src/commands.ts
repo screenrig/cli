@@ -117,7 +117,7 @@ import { parseSse } from "./sse.js";
 import { kvWriteFromArgs } from "./kv-write.js";
 import { commentsWriteFromArgs } from "./comments-write.js";
 import { quotedRevision } from "./if-match.js";
-import { applicationNameHeaders } from "./application-name.js";
+import { applicationNameHeaders, normalizeApplicationName } from "./application-name.js";
 import { loadCanvas } from "./canvas.js";
 import { composeBatch } from "./compose/batch.js";
 import { assertPlaylistValid, PLAYLIST_SERVER_CHECKS, playlistLint } from "./playlist-validate.js";
@@ -676,6 +676,24 @@ export const handleAppShow = commandHandler(async (args, runtime, resolved) => {
   const id = args.positionals[2];
   if (!id) throw usageError("app show requires an application id.");
   return simpleGet(args, runtime, resolved, `/api/v1/applications/${id}`, "Application");
+}, true);
+
+export const handleAppRename = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[2];
+  const name = normalizeApplicationName(flagString(args.flags, "name") ?? "");
+  if (!id || !name) throw usageError("app rename requires <id> and a nonempty --name.");
+  const revision = flagString(args.flags, "if-match");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({
+    method: "PATCH", path: `/api/v1/applications/${encodeURIComponent(id)}`,
+    body: { name }, idempotent: true,
+    headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
+  });
+  const application = response.body as { id: string; name: string; revision: number };
+  return {
+    envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success,
+    human: humanLines("Application renamed", [["id", application.id], ["name", application.name], ["revision", String(application.revision)]]),
+  };
 }, true);
 
 export const handleBrowserSetup = commandHandler(browserSetupCommand);
@@ -2551,7 +2569,7 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
   if (!dir || (update && !id)) {
     throw usageError(update ? "app update requires <id> <directory>." : "app upload requires one directory.");
   }
-  if (update && args.flags.name !== undefined) throw usageError("app update preserves the application name; omit --name.");
+  if (update && args.flags.name !== undefined) throw usageError("app update preserves the application name; use app rename <id> --name NAME to rename it.");
   const ifMatch = update && revision ? quotedRevision(revision) : undefined;
   requireFlagValue(args, "name", "Lobby board");
   const nameHeaders = applicationNameHeaders(flagString(args.flags, "name"));

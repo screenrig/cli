@@ -86,6 +86,7 @@ test("root help is compact and every command is discoverable through immediate c
     "app pack",
     "app upload",
     "app update",
+    "app rename",
     "app list",
     "app show",
     "media generate",
