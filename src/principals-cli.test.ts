@@ -27,7 +27,7 @@ function seal(recipient: X25519PublicJWK, binding: string, token: string): Agent
 }
 
 const A = "prj_AAAAAAAAAAAAAAAAAAAAAAAA", B = "prj_BBBBBBBBBBBBBBBBBBBBBBBB", C = "prj_CCCCCCCCCCCCCCCCCCCCCCCC";
-const IDENTITY = "sr_live_idt_example_" + "I".repeat(43);
+const IDENTITY = "sr_live_idt_" + "a".repeat(24) + "_" + "b".repeat(64);
 const TOKEN_A = "sr_live_projectA_" + "A".repeat(43), TOKEN_C = "sr_live_projectC_" + "C".repeat(43);
 const AGENT = { id: "agt_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Agent", agent_type: "cli", capabilities: [...AGENT_CAPABILITIES], state: "active" as const, authenticated_requests: 0, metered_credits: 0, created_at: "2026-10-04T12:00:00Z" };
 function context(id: string, name: string, organizationName = "Acme"): ProjectContext {

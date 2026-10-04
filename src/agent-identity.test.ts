@@ -80,7 +80,7 @@ test("identity delivery has its own connection binding and cannot replace a proj
   const privateJwk = generateAgentConnectionKey();
   const connection = { private_jwk: privateJwk, capabilities: [...AGENT_CAPABILITIES], connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA" };
   const project = sealForTest(publicAgentConnectionKey(privateJwk), connection.connection_id, "agt_AAAAAAAAAAAAAAAAAAAAAAAA", "sr_live_project_" + "P".repeat(43));
-  const identityToken = "sr_live_idt_example_" + "I".repeat(43);
+  const identityToken = "sr_live_idt_" + "a".repeat(24) + "_" + "b".repeat(64);
   const identity = sealForTest(publicAgentConnectionKey(privateJwk), connection.connection_id + ":identity", project.agent.id, identityToken);
   assert.equal(decryptAgentCredential({ ...project, identity_credential_envelope: identity.credential_envelope }, connection).identityToken, identityToken);
   assert.throws(() => decryptAgentCredential({ ...project, identity_credential_envelope: project.credential_envelope }, connection), /could not be authenticated/);

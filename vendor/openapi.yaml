@@ -105,6 +105,11 @@ security: []
 paths:
   /dashboard/v1/project/deletion-preview:
     get:
+      parameters:
+      - name: project_id
+        in: query
+        description: Expected project ID; a changed selection is refused.
+        schema: { type: string, minLength: 1, maxLength: 200 }
       operationId: previewProjectDeletionDashboard
       description: Returns current confirmation details, deletion blockers and archived devices that will be disconnected.
       security:
@@ -171,6 +176,11 @@ paths:
       description: Backend-owned project dashboard origin
   /dashboard/v1/project/moves:
     get:
+      parameters:
+      - name: project_id
+        in: query
+        description: Expected project ID; a changed selection is refused.
+        schema: { type: string, minLength: 1, maxLength: 200 }
       operationId: allowedProjectMovesDashboard
       description: Lists destinations the owner administers or whose verified domain matches their verified email.
       security:
@@ -230,6 +240,11 @@ paths:
     - $ref: '#/components/parameters/ProjectTarget'
   /api/v1/project/deletion-preview:
     get:
+      parameters:
+      - name: project_id
+        in: query
+        description: Expected project ID; a changed selection is refused.
+        schema: { type: string, minLength: 1, maxLength: 200 }
       operationId: previewProjectDeletionAgent
       description: Returns current confirmation details, deletion blockers and archived devices that will be disconnected.
       security:
@@ -293,6 +308,11 @@ paths:
     - $ref: '#/components/parameters/ProjectTarget'
   /api/v1/project/moves:
     get:
+      parameters:
+      - name: project_id
+        in: query
+        description: Expected project ID; a changed selection is refused.
+        schema: { type: string, minLength: 1, maxLength: 200 }
       operationId: allowedProjectMovesAgent
       description: Lists destinations the owner administers or whose verified domain matches their verified email.
       security:
@@ -6792,6 +6812,11 @@ components:
       - name
       - revision
       properties:
+        project_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Expected project ID. The server refuses the action if the current credential or cookie session targets another project; browser clients send the page's project ID.
         empty_only:
           type: boolean
           description: Require an empty Screens project in the deletion transaction, including content, other agents or members, work and correspondence. The CLI additionally requires its saved enrollment provenance before using this cleanup guard. Omission keeps explicit member deletion.
@@ -6806,6 +6831,11 @@ components:
       required:
       - user_id
       properties:
+        project_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Expected project ID. The server refuses the action if the current credential or cookie session targets another project; browser clients send the page's project ID.
         user_id:
           type: string
           minLength: 1
@@ -6816,6 +6846,11 @@ components:
       required:
       - organization_id
       properties:
+        project_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Expected project ID. The server refuses the action if the current credential or cookie session targets another project; browser clients send the page's project ID.
         organization_id:
           type: string
           minLength: 1
@@ -7100,6 +7135,11 @@ components:
       required:
       - name
       properties:
+        project_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Expected project ID. The server refuses the action if the current credential or cookie session targets another project; browser clients send the page's project ID.
         name:
           $ref: '#/components/schemas/ProjectName'
     DashboardProjectReference:

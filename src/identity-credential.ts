@@ -8,7 +8,7 @@ import { configError } from "./problems.js";
 import { projectConfigFor, assertProjectCredential } from "./project-state.js";
 
 export function validateIdentityToken(value: unknown): string {
-  if (typeof value !== "string" || !/^sr_live_idt_[A-Za-z0-9_-]+_[A-Za-z0-9_-]{43}$/.test(value)) {
+  if (typeof value !== "string" || !/^sr_live_idt_[A-Za-z0-9_-]+_[0-9a-fA-F]{64}$/.test(value)) {
     throw configError("The identity credential does not match the backend contract.");
   }
   return value;

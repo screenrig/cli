@@ -9,7 +9,7 @@ import { testTemp } from "./test-temp.js";
 const A = "prj_AAAAAAAAAAAAAAAAAAAAAAAA";
 const B = "prj_BBBBBBBBBBBBBBBBBBBBBBBB";
 const AGENT = "agt_AAAAAAAAAAAAAAAAAAAAAAAA";
-const IDENTITY = `sr_live_idt_${"A".repeat(24)}_${"S".repeat(43)}`;
+const IDENTITY = `sr_live_idt_${"A".repeat(24)}_${"a".repeat(64)}`;
 
 async function fixture(t: { after(action: () => Promise<void>): void }) {
   const home = await testTemp("identity-exchange-");
@@ -85,4 +85,13 @@ test("identity validation refuses project tokens without repeating secret input"
   const secret = `sr_live_tok_${"A".repeat(24)}_${"S".repeat(43)}`;
   assert.throws(() => validateIdentityToken(secret), error => error instanceof Error && !error.message.includes(secret));
   assert.equal(validateIdentityToken(IDENTITY), IDENTITY);
+});
+
+// IssueIdentity uses a 12-byte hex token ID and a 32-byte hex secret.
+test("identity validation accepts issued hex credentials and refuses obsolete or malformed secrets", () => {
+  const prefix = `sr_live_idt_${"a".repeat(24)}_`;
+  assert.equal(validateIdentityToken(prefix + "0123456789abcdef".repeat(4)), prefix + "0123456789abcdef".repeat(4));
+  for (const secret of ["a".repeat(43), "a".repeat(63), "a".repeat(65), "g".repeat(64)]) {
+    assert.throws(() => validateIdentityToken(prefix + secret), /backend contract/);
+  }
 });
