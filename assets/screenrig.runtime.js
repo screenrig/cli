@@ -2440,6 +2440,7 @@
 
   // src/trusted-origin.ts
   var LOCAL_PLAYER_ORIGIN = "http://play.screenrig.localhost:8088";
+  var STAGE_PLAYER_ORIGIN = "https://play.stage.screenrig.ai";
   var LOCAL_RELEASE_HOSTNAME = /^r-[a-f0-9]{40}\.apps\.screenrig\.localhost$/;
   var NATIVE_PACKAGE_HOSTNAME = /^p-[a-f0-9]{32}\.[a-f0-9]{32}\.offline\.screenrig\.invalid$/;
   function isLocalReleaseDocument(location) {
@@ -2456,7 +2457,7 @@
       return [LOCAL_PLAYER_ORIGIN];
     }
     if (isNativePackageDocument(location)) {
-      return [DEFAULT_PLAYER_ORIGIN, LOCAL_PLAYER_ORIGIN];
+      return [DEFAULT_PLAYER_ORIGIN, LOCAL_PLAYER_ORIGIN, STAGE_PLAYER_ORIGIN];
     }
     return [DEFAULT_PLAYER_ORIGIN];
   }
