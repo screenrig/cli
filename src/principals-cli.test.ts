@@ -54,6 +54,27 @@ function initial(): ScreenRigConfig {
   return { api_url: "https://api.screenrig.ai", token: TOKEN_A, identity_token: IDENTITY, agent_id: AGENT.id, project_id: A, project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Acme" };
 }
 
+test("remote playlist preparation resolves token-only project context before screen access", async t => {
+  const f = await fixture(t, { api_url: "https://api.screenrig.ai", token: TOKEN_A });
+  const screenId = "scr_AAAAAAAAAAAAAAAAAAAAAAAA";
+  let projectReads = 0;
+  f.transport.on("GET", "/api/v1/project", req => {
+    assert.equal(req.headers?.authorization, "Bearer " + TOKEN_A);
+    projectReads++;
+    return { status: 200, headers: {}, body: context(A, "Screens").project };
+  });
+  f.transport.on("GET", `/api/v1/screens/${screenId}`, () => {
+    assert.equal(projectReads, 1);
+    return { status: 200, headers: {}, body: { id: screenId, revision: 1, surface: { width: 1920, height: 1080 } } };
+  });
+  const output = path.join(path.dirname(f.configPath), "prepared.json");
+  const result = await f.invoke("playlist", "init", "https://example.com", "--screen-id", screenId, "--name", "Lobby", "--output", output, "--target-width", "1920", "--target-height", "1080");
+  assert.equal(result.code, 0, result.out);
+  assert.deepEqual(result.result.context, { project: { id: A, name: "Screens" }, organization: context(A, "Screens").organization });
+  assert.equal((await f.saved())?.project_id, A);
+  assert.doesNotMatch(result.out + result.err, /sr_live_/);
+});
+
 test("organization administration uses explicit IDs and preserves concurrent project selection", async t => {
   const f = await fixture(t, initial());
   const id = context(A, "Screens").organization.id;

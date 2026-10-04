@@ -6541,10 +6541,24 @@ const PLAYLIST_INIT_UPLOAD_CONCURRENCY = 4;
 
 export const handlePlaylistInit = commandHandler(async (args, runtime, resolved) => {
   let existingClient: ApiClient | undefined;
-  const remote = () => existingClient ??= clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  let preparedClient: Promise<ApiClient> | undefined;
+  const remote = () => preparedClient ??= (async () => {
+    const client = existingClient ??= clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+    // Purely local preparation remains offline. Once this invocation reads
+    // a screen/media or uploads a file, bind legacy token-only configs to
+    // their authenticated project before performing that remote work.
+    if (!resolved.projectId || !resolved.projectName || !resolved.organizationName) {
+      const response = await client.call({ method: "GET", path: "/api/v1/project" });
+      const context = contextFromProject(response.body as Project);
+      if (resolved.projectId && context.project.id !== resolved.projectId) throw configError("Project credential resolved to a different project.");
+      resolved = await cacheProjectContexts(runtime, resolved, [context], { credential: resolved.token });
+      invocationTargets.set(runtime, resolved);
+    }
+    return client;
+  })();
   const screenId = flagString(args.flags, "screen");
   const width = flagNumber(args.flags, "target-width"), height = flagNumber(args.flags, "target-height");
-  const screen = screenId ? (await remote().call({ method: "GET", path: `/api/v1/screens/${encodeURIComponent(screenId)}` })).body : undefined;
+  const screen = screenId ? (await (await remote()).call({ method: "GET", path: `/api/v1/screens/${encodeURIComponent(screenId)}` })).body : undefined;
   const dimensions = targetDimensions(screen, width, height);
   const target = screen as { id: string; revision: number } | undefined;
   if (screenId && (!target || target.id !== screenId || !Number.isSafeInteger(target.revision) || target.revision < 1)) {
@@ -6555,7 +6569,7 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
   const warnings: Warning[] = [];
   for (const input of args.positionals.slice(2)) {
     if (RESOURCE_ID_PATTERNS.media.test(input)) {
-      const record = (await remote().call({ method: "GET", path: `/api/v1/media/${input}` })).body as Record<string, any>;
+      const record = (await (await remote()).call({ method: "GET", path: `/api/v1/media/${input}` })).body as Record<string, any>;
       if (record?.id !== input) throw usageError("Media response identity did not match.");
       content.push(record);
     } else if (RESOURCE_ID_PATTERNS.release.test(input)) {
@@ -6591,15 +6605,16 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
       // Scope each occurrence to the invocation key, including repeated files.
       // An identical retry with --idempotency-key reproduces both declare and commit keys.
       const idempotencyKey = createHash("sha256")
-        .update(JSON.stringify(["screenrig.playlist.init.upload", remote().idempotencyKey, index]))
+        .update(JSON.stringify(["screenrig.playlist.init.upload", (await remote()).idempotencyKey, index]))
         .digest("base64url");
-      const uploaded = await loggerOf(runtime).withLocal({ op: "media.upload", message: "media upload" }, () => uploadMediaFile({ runtime, client: remote(), sourcePath, idempotencyKey,
+      const client = await remote();
+      const uploaded = await loggerOf(runtime).withLocal({ op: "media.upload", message: "media upload" }, () => uploadMediaFile({ runtime, client, sourcePath, idempotencyKey,
         transcodeOptions: transcodeOptionsFromArgs(args), noTranscode: flagBool(args.flags, "no-transcode"),
         reporter: progressReporterFor(args, runtime), noWait: false,
         timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000, pollMs: flagNumber(args.flags, "poll-ms") ?? 1000 }));
       warnings.push(...uploaded.warnings);
       if (!uploaded.mediaId) throw usageError("Upload completed without a media identifier.");
-      const record = (await remote().call({ method: "GET", path: `/api/v1/media/${encodeURIComponent(uploaded.mediaId)}` })).body as Record<string, any>;
+      const record = (await (await remote()).call({ method: "GET", path: `/api/v1/media/${encodeURIComponent(uploaded.mediaId)}` })).body as Record<string, any>;
       if (record?.id !== uploaded.mediaId) throw usageError("Media response identity did not match.");
       content[index] = record;
       uploads.push({ index, media_id: uploaded.mediaId, reused: uploaded.reused, timing: uploaded.timing });
