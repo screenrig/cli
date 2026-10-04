@@ -19,6 +19,7 @@ import type {
 } from "./adapters/protocol.js";
 import type { ScreenRigConfig } from "./config.js";
 import { configError, usageError } from "./problems.js";
+import { validateIdentityToken } from "./identity-credential.js";
 
 const CONNECTION_ID = RESOURCE_ID_PATTERNS.connection;
 const AGENT_ID = RESOURCE_ID_PATTERNS.agent;
@@ -41,6 +42,7 @@ export type AgentConnectionConfig = NonNullable<ScreenRigConfig["agent_connectio
 export interface DecryptedAgentCredential {
   token: string;
   agentId: string;
+  identityToken?: string;
 }
 
 function isDateTime(value: unknown): value is string {
@@ -174,7 +176,20 @@ export function decryptAgentCredential(
     throw configError("Pending agent connection identifier is invalid.");
   }
   const agent = validateAgent(collection.agent, "pending");
-  const envelope = collection.credential_envelope;
+  const token = openCredentialEnvelope(collection.credential_envelope, connection, connection.connection_id, agent.id);
+  if (/^sr_live_idt_/.test(token)) throw configError("A project credential envelope delivered an identity credential.");
+  const identityToken = collection.identity_credential_envelope
+    ? validateIdentityToken(openCredentialEnvelope(collection.identity_credential_envelope, connection, connection.connection_id + ":identity", agent.id))
+    : undefined;
+  return { token, agentId: agent.id, ...(identityToken ? { identityToken } : {}) };
+}
+
+function openCredentialEnvelope(
+  envelope: AgentCredentialCollection["credential_envelope"],
+  connection: AgentConnectionConfig,
+  binding: string,
+  agentId: string,
+): string {
   if (!envelope || envelope.algorithm !== "X25519-HKDF-SHA256-A256GCM") {
     throw configError("Agent credential envelope uses an unsupported algorithm.");
   }
@@ -191,7 +206,7 @@ export function decryptAgentCredential(
     const ephemeralKey = createPublicKey({ key: envelope.ephemeral_public_key as unknown as JsonWebKey, format: "jwk" });
     const shared = diffieHellman({ privateKey, publicKey: ephemeralKey });
     const salt = createHash("sha256")
-      .update(`screenrig/agent-credential-envelope/salt/v1\0${connection.connection_id}`)
+      .update(`screenrig/agent-credential-envelope/salt/v1\0${binding}`)
       .digest();
     const key = Buffer.from(hkdfSync(
       "sha256",
@@ -203,7 +218,7 @@ export function decryptAgentCredential(
     const ciphertext = sealed.subarray(0, sealed.length - 16);
     const tag = sealed.subarray(sealed.length - 16);
     const decipher = createDecipheriv("aes-256-gcm", key, nonce);
-    decipher.setAAD(Buffer.from(`screenrig/agent-credential-envelope/aad/v1\0${connection.connection_id}\0${agent.id}`));
+    decipher.setAAD(Buffer.from(`screenrig/agent-credential-envelope/aad/v1\0${binding}\0${agentId}`));
     decipher.setAuthTag(tag);
     plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   } catch {
@@ -221,9 +236,9 @@ export function decryptAgentCredential(
   }
   const record = decoded as Record<string, unknown>;
   if (Object.keys(record).sort().join(",") !== "agent_id,connection_id,token"
-    || record.agent_id !== agent.id || record.connection_id !== connection.connection_id
+    || record.agent_id !== agentId || record.connection_id !== binding
     || typeof record.token !== "string" || !/^sr_live_[A-Za-z0-9_-]+_[A-Za-z0-9_-]+$/.test(record.token)) {
     throw configError("Agent credential envelope is not bound to this connection and agent.");
   }
-  return { token: record.token, agentId: agent.id };
+  return record.token;
 }

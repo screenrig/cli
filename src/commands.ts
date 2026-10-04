@@ -8,6 +8,9 @@ import { canonicalPairingCode } from "./pairing-code.js";
 import { editablePlaylist, isAdSlotPage, playlistApiVersion, preparePlaylist, targetDimensions } from "./playlist-authoring.js";
 import { callVersionedPlaylist } from "./playlist-api.js";
 import { WriteRecovery } from "./write-recovery.js";
+import { ensureIdentityCredential, validateIdentityToken } from "./identity-credential.js";
+import { cacheProjectContexts, contextFromProject, formatResultContext, projectName as validateDisplayName, resultContext, setResultContext, validateProjectContext } from "./project-context.js";
+import { projectConfigFor, withProjectConfig, assertProjectCredential } from "./project-state.js";
 import { instantInZone, normalizeInstant, assignmentLine, playlistInUseProblem, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "./screen-control.js";
 import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLAYS_SETTLE_MS, unusedPath, PLAYS_ALL_MAX_PAGES, PLAYS_LIMIT_MAX, playbackExportBudget, playsCursor, playsLimit, playsRange, requireCsvResponse, writeCsvFile, writeCsvStdout } from "./playback-export.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, rebootProblem } from "./screen-display.js";
@@ -34,6 +37,10 @@ import {
   type Capabilities,
   type CLIEnrollment,
   type CLIEnrollmentRequest,
+  type AgentIdentityCredential,
+  type ProjectContextList,
+  type ProjectCreate,
+  type CreatedProject,
   type EventPage,
   type MediaRecord,
   type FeedbackContext,
@@ -100,6 +107,7 @@ import {
 } from "./config.js";
 import { attachOperationLogger, loggerOf, loggingTransport } from "./log/index.js";
 import { ensureCredential } from "./enrollment.js";
+import { cleanupEnrollmentProject, type EnrollmentCleanupResult } from "./enrollment-cleanup.js";
 import {
   headerValue,
   CREDITS_REMAINING_HEADER,
@@ -109,7 +117,7 @@ import {
 import { successEnvelope, type ProblemNext, type Warning } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
 import { CliError, configError, makeProblem, networkError, notEnrolledError, timeoutError, unexpectedResponseError, usageError } from "./problems.js";
-import type { Transport } from "./transport/types.js";
+import type { HttpMethod, Transport } from "./transport/types.js";
 import { packDirectory } from "./pack/index.js";
 import type { CliRuntime } from "./runtime.js";
 import { FetchTransport } from "./transport/http.js";
@@ -414,6 +422,7 @@ function transportFor(runtime: CliRuntime, apiUrl: string, token?: string): Tran
 const writeRecoveries = new WeakMap<CliRuntime, WriteRecovery>();
 
 const invocationRequestIds = new WeakMap<CliRuntime, RequestIds>();
+const invocationTargets = new WeakMap<CliRuntime, ResolvedCommandConfig>();
 
 /** One RequestIds per invocation, so `--request-id` reaches only the first HTTP request however many clients a command builds. */
 function requestIdsFor(runtime: CliRuntime, args: ParsedArgs): RequestIds {
@@ -429,6 +438,7 @@ function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?
   return new ApiClient({
     transport: transportFor(runtime, apiUrl, token),
     token,
+    projectId: token && token === invocationTargets.get(runtime)?.token ? invocationTargets.get(runtime)?.projectId : undefined,
     requestIds: requestIdsFor(runtime, args),
     idempotencyKey: flagString(args.flags, "idempotency-key"),
     timeoutMs: flagNumber(args.flags, "timeout"),
@@ -465,6 +475,11 @@ function humanLines(title: string, fields: Array<[string, string | undefined]>):
   return lines.join("\n");
 }
 
+function streamEnvelope(runtime: CliRuntime, data: unknown, requestId: string) {
+  const context = resultContext(runtime);
+  return { ...successEnvelope(data, { request_id: requestId }), ...(context ? { context } : {}) };
+}
+
 export type CommandHandler = (args: ParsedArgs, runtime: CliRuntime) => Promise<CommandResult>;
 type ResolvedCommandConfig = Awaited<ReturnType<typeof resolveConfig>>;
 
@@ -475,8 +490,17 @@ function commandHandler(
 ): CommandHandler {
   return async (args, runtime) => {
     const repair = flagBool(args.flags, "repair-config");
-    const resolved = await resolveConfig({ flags: args.flags, fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }, repair });
+    let resolved = await resolveConfig({ flags: args.flags, fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }, repair });
+    if (args.command[0] === "project" && args.command[1] === "create" && resolved.identityToken && !flagString(args.flags, "project-id")) {
+      const current = await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir });
+      if (!resolved.projectId || Object.keys(current?.identity_writes ?? {}).length) {
+        resolved = { ...resolved, token: resolved.identityToken, projectId: undefined, projectName: undefined,
+          organizationId: undefined, organizationName: undefined, identityWriteScope: true };
+      }
+    }
     await attachOperationLogger(runtime, args, resolved);
+    invocationTargets.set(runtime, resolved);
+    setResultContext(runtime, resolved);
     if (authenticated && !resolved.token) {
       if (resolved.agentConnection) {
         throw notEnrolledError("This installation has a pending agent connection and no active credential.", {
@@ -486,14 +510,14 @@ function commandHandler(
       }
       if (resolved.lastAgent) {
         throw notEnrolledError("This installation is disconnected and cannot run project commands.", {
-          command: "screenrig agent enroll --email ADDRESS",
+          command: "screenrig agent enroll --email ADDRESS --organization NAME",
           reason: "Ask the user for their contact email, then create a new project agent. Use agent connect only for an intentional existing-project reconnect.",
         });
       }
       throw notEnrolledError("This installation is not enrolled. Enrollment is an explicit step and is never a side effect of another command.", {
         command: resolved.enrollment?.email
           ? "screenrig agent enroll"
-          : "screenrig agent enroll --email ADDRESS",
+          : "screenrig agent enroll --email ADDRESS --organization NAME",
         reason: resolved.enrollment?.email
           ? "Resume the exact pending enrollment before running pairing or another project command."
           : "Create the first agent with unverified contact metadata, then retry the original command.",
@@ -510,17 +534,31 @@ function commandHandler(
         (group === "playlist" && ["create", "update", "delete"].includes(action ?? "")) ||
         (group === "media" && ["update", "delete"].includes(action ?? "")) ||
         (group === "screen" && !["provision", "publish"].includes(action ?? "")) ||
-        group === "invitations" || group === "webhooks" || (group === "project" && action === "rename")
+        group === "invitations" || group === "webhooks" || (group === "project" && ["rename", "create"].includes(action ?? ""))
       ));
-    const recovery = ordinary ? new WriteRecovery(resolved, runtime, args.command.slice(0, 2).join(" ")) : undefined;
-    if (recovery) writeRecoveries.set(runtime, recovery);
+    let recovery: WriteRecovery | undefined;
     try {
+      if (authenticated && resolved.token && args.command[0] !== "agent"
+        && !(args.command[0] === "project" && ["list", "create", "use"].includes(args.command[1] ?? ""))
+        && (!resolved.projectName || !resolved.organizationName)) {
+        const contextClient = clientFor(runtime, args, resolved.apiUrl, resolved.token);
+        const contextResponse = await contextClient.call({ method: "GET", path: "/api/v1/project" });
+        const context = contextFromProject(contextResponse.body as Project);
+        if (resolved.projectId && context.project.id !== resolved.projectId) throw configError("Project credential resolved to a different project.");
+        resolved = await cacheProjectContexts(runtime, resolved, [context], { credential: resolved.token });
+        invocationTargets.set(runtime, resolved);
+      }
+      recovery = ordinary ? new WriteRecovery(resolved, runtime, args.command.slice(0, 2).join(" ")) : undefined;
+      if (recovery) writeRecoveries.set(runtime, recovery);
       const result = await handler(args, runtime, resolved);
+      const context = resultContext(runtime);
+      const contextual = context ? { ...result, envelope: { ...result.envelope, context }, human: result.output === "stream" ? result.human : `${formatResultContext(runtime)}${result.human ? "\n" + result.human : ""}` } : result;
       if (recovery && result.keepRecoveryUntilOutput) {
-        return { ...result, afterOutput: () => recovery.finish() };
+        const retainedRecovery = recovery;
+        return { ...contextual, afterOutput: () => retainedRecovery.finish() };
       }
       await recovery?.finish();
-      return result;
+      return contextual;
     } catch (error) {
       if (recovery?.hasPending && error instanceof CliError) {
         throw new CliError(error.problem, error.exitCode, [...error.warnings, {
@@ -532,6 +570,7 @@ function commandHandler(
     } finally {
       writeRecoveries.delete(runtime);
       invocationRequestIds.delete(runtime);
+      invocationTargets.delete(runtime);
     }
   };
 }
@@ -646,12 +685,43 @@ export const handleAgentEnroll = commandHandler(async (args, runtime, resolved) 
 }, false);
 
 export const handleAgentDisconnect = commandHandler(agentDisconnect, false);
+export const handleAgentRevokeIdentity = commandHandler(agentRevokeIdentity, false);
 
 export const handleProjectShow = commandHandler(projectShow);
+export const handleProjectList = commandHandler(projectList, false);
+export const handleProjectCreate = commandHandler(projectCreate);
+export const handleProjectUse = commandHandler(projectUse, false);
+export const handleProjectMoves = commandHandler(projectMoves);
+export const handleProjectMove = commandHandler(projectMove);
+export const handleProjectOwnerTransfer = commandHandler(projectOwnerTransfer);
+export const handleProjectDeletionPreview = commandHandler(projectDeletionPreview);
+export const handleProjectDelete = commandHandler(projectDelete);
 
 export const handleProjectCapabilities = commandHandler(projectCapabilities);
 
 export const handleProjectRename = commandHandler(projectRename);
+export const handleOrganizationList = commandHandler(async (args, runtime, resolved) => {
+  const identity = await identityForCommand(args, runtime, resolved);
+  const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
+  const response = await client.call({ method: "GET", path: "/api/v1/organizations" });
+  const body = response.body as { organizations?: Array<{ id: string; name: string; admin: boolean }> };
+  if (!Array.isArray(body?.organizations) || body.organizations.some(org => !org || !/^(?:(?:stage|qa|development)_)?org_[A-Za-z0-9_-]+$/.test(org.id) || typeof org.name !== "string" || typeof org.admin !== "boolean")) throw configError("Organization list does not match the contract.");
+  return { envelope: successEnvelope(body, { request_id: client.requestId }), exitCode: ExitCode.Success,
+    human: body.organizations.map(org => `${validateDisplayName(org.name, "Organization name")}: ${org.id}${org.admin ? " (admin)" : ""}`).join("\n") || "No visible organizations." };
+}, false);
+export const handleOrganizationRename = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[2];
+  if (!id || !/^(?:(?:stage|qa|development)_)?org_[A-Za-z0-9_-]+$/.test(id)) throw usageError("organization rename requires an organization ID.");
+  const name = validateDisplayName(args.positionals[3], "Organization name");
+  const identity = await identityForCommand(args, runtime, resolved);
+  const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
+  const response = await client.call({ method: "PATCH", path: `/api/v1/organizations/${encodeURIComponent(id)}`, body: { name } });
+  const organization = response.body as { id: string; name: string };
+  if (organization?.id !== id || validateDisplayName(organization.name, "Organization name") !== name) throw configError("Organization rename response does not match this request.");
+  const listed = await accessibleProjects(args, runtime, identity);
+  await cacheProjectContexts(runtime, identity, listed.projects, { identityToken: identity.identityToken });
+  return { envelope: successEnvelope({ organization }, { request_id: client.requestId }), exitCode: ExitCode.Success, human: `Organization renamed: ${name} (${id})` };
+}, false);
 export const handleSignInReset = commandHandler(signInReset, false);
 
 export const handleDashboard = commandHandler(dashboardCommand, false);
@@ -743,7 +813,7 @@ async function agentStatus(
     const data = {
       status: "connecting",
       path: "reconnect_existing",
-      phase: resolved.token && connection.pending_agent_id ? "activating" : connection.connection_id ? "approval" : "starting",
+      phase: (connection.pending_token || resolved.token) && connection.pending_agent_id ? "activating" : connection.connection_id ? "approval" : "starting",
       ...(connection.connection_id ? { connection_id: connection.connection_id } : {}),
       ...(connection.expires_at ? { expires_at: connection.expires_at } : {}),
       capabilities: connection.capabilities,
@@ -852,6 +922,7 @@ async function agentEnroll(
     explicit: true,
   });
   const token = requireToken(enrolled.token);
+  setResultContext(runtime, enrolled);
   const client = clientFor(runtime, args, enrolled.apiUrl, token);
   const response = await client.call({ method: "GET", path: "/api/v1/agents/self" });
   requirePrivateNoStore(response.headers, "Agent enrollment verification response");
@@ -915,15 +986,15 @@ async function startOrResumeAgentConnection(
     { sleep: runtime.sleep, now: () => runtime.now().getTime() },
     async () => {
       let current = await readConfigFile(resolved.configPath, fsLike);
-      if (current?.token && !current.agent_connection) {
-        throw usageError("This config already contains an agent credential.", {
-          command: "screenrig agent status",
-          reason: "Use another private config path to connect a separate installation.",
-        });
-      }
+      if (current?.identity_token !== resolved.identityToken) throw configError("Identity changed before starting the connection request.");
+      const requestedProject = flagString(args.flags, "target-project-id");
+      if (requestedProject !== undefined && !isResourceID(requestedProject, "project")) throw usageError("--target-project-id must be a project ID.");
       // Approval can extend expiry while this installation is offline. Keep the
       // recipient key until the server confirms this connection is terminal.
       let pending = current?.agent_connection;
+      if (pending && requestedProject !== undefined && pending.project_id !== requestedProject) throw usageError("The pending request is bound to a different project. Resume without changing --target-project-id.");
+      const identityHash = resolved.identityToken ? createHash("sha256").update(resolved.identityToken).digest("hex") : undefined;
+      if (pending && pending.identity_hash !== identityHash) throw configError("The pending connection's identity credential changed.");
       if (pending?.name && requestedName && pending.name !== requestedName) {
         throw usageError("The pending agent connection has a different --name. Resume it without changing the name.");
       }
@@ -931,7 +1002,8 @@ async function startOrResumeAgentConnection(
         throw usageError("The pending connection has different capabilities. Resume without --capability; capabilities cannot change on an existing request.");
       }
       if (!pending) {
-        pending = { private_jwk: generateAgentConnectionKey(), capabilities: requestedCapabilities ?? [...AGENT_CAPABILITIES], ...(requestedName ? { name: requestedName } : {}) };
+        pending = { private_jwk: generateAgentConnectionKey(), capabilities: requestedCapabilities ?? [...AGENT_CAPABILITIES], ...(requestedName ? { name: requestedName } : {}),
+          ...(requestedProject ? { project_id: requestedProject } : {}), ...(identityHash ? { identity_hash: identityHash } : {}) };
         await writeConfigAtomic(resolved.configPath, {
           ...(current ?? {}),
           api_url: resolved.apiUrl,
@@ -950,7 +1022,7 @@ async function startOrResumeAgentConnection(
         return { ...pending, approval_url: checked.approval_url };
       }
 
-      const client = clientFor(runtime, args, resolved.apiUrl);
+      const client = clientFor(runtime, args, resolved.apiUrl, resolved.identityToken);
       const request: AgentConnectionRequest = {
         ...(pending.name ? { name: pending.name } : {}),
         agent_type: "cli",
@@ -958,6 +1030,7 @@ async function startOrResumeAgentConnection(
         platform: agentPlatform(),
         version: CLI_VERSION,
         recipient_public_key: publicAgentConnectionKey(pending.private_jwk),
+        ...(pending.project_id ? { project_id: pending.project_id } : {}),
       };
       const response = await client.call({ method: "POST", path: "/api/v1/agent-connections", body: request });
       requirePrivateNoStore(response.headers, "Agent connection start response");
@@ -1055,7 +1128,7 @@ async function clearAgentConnection(
     const current = await readConfigFile(resolved.configPath, fsLike);
     if (current?.agent_connection?.connection_id !== connectionId) return;
     const { agent_connection: _connection, ...rest } = current;
-    if (clearPendingToken && current.agent_connection.pending_agent_id) {
+    if (clearPendingToken && current.agent_connection.pending_agent_id && !current.agent_connection.pending_token) {
       const { token: _token, agent_id: _agent, ...withoutPending } = rest;
       await writeConfigAtomic(resolved.configPath, { ...withoutPending, updated_at: runtime.now().toISOString() }, fsLike);
       return;
@@ -1074,7 +1147,7 @@ async function clearPendingStateForEnrollment(
     if (!current?.agent_connection && !current?.enrollment) return;
     const { agent_connection: connection, enrollment, ...rest } = current;
     let cleaned = rest;
-    if (connection?.pending_agent_id || enrollment) {
+    if ((connection?.pending_agent_id && !connection.pending_token) || enrollment) {
       const { token: _token, project_id: _project, project_name: _projectName, agent_id: _agent, ...withoutPendingCredential } = rest;
       cleaned = withoutPendingCredential;
     }
@@ -1121,6 +1194,12 @@ async function activateCollectedAgent(
     if (verified.id !== agentId) throw configError("Persisted agent credential did not verify against its agent.");
     return verified;
   };
+  const persistActiveProject = async (): Promise<void> => {
+    const projectResponse = await client.call({ method: "GET", path: "/api/v1/project" });
+    const context = contextFromProject(projectResponse.body as Project);
+    if (connection.project_id && context.project.id !== connection.project_id) throw configError("Connection activated a different project from its approved request.");
+    await cacheProjectContexts(runtime, resolved, [context], { select: context.project.id, token: pendingToken, agentId, connectionId: connection.connection_id });
+  };
 
   let activation;
   try {
@@ -1130,7 +1209,7 @@ async function activateCollectedAgent(
     if (err.problem.code === "agent_connection_invalid") {
       try {
         const verified = await verifyActiveAgent();
-        await clearAgentConnection(runtime, resolved, connection.connection_id, false);
+        await persistActiveProject();
         return { agent: verified, requestId: client.requestId };
       } catch (verificationError) {
         if (verificationError instanceof CliError && verificationError.problem.code === "unauthorized") {
@@ -1185,7 +1264,7 @@ async function activateCollectedAgent(
     }
     throw err;
   }
-  await clearAgentConnection(runtime, resolved, connection.connection_id, false);
+  await persistActiveProject();
   return { agent: verified, requestId: client.requestId };
 }
 
@@ -1209,10 +1288,32 @@ async function agentConnect(
   if (requestedTimeout !== undefined && (!Number.isInteger(requestedTimeout) || requestedTimeout <= 0 || requestedTimeout > 86_400_000)) {
     throw usageError("agent connect --timeout must be an integer from 1 to 86400000 milliseconds.");
   }
+  const saved = await currentAgentConnectionConfig(resolved, runtime);
+  if (saved?.enrollment_cleanup && !saved.agent_connection) {
+    const cleanup = await finishEnrollmentCleanup(args, runtime, resolved);
+    if (cleanup && (!flagString(args.flags, "target-project-id") || flagString(args.flags, "target-project-id") === cleanup.destination_project_id)) {
+      const updated = await currentAgentConnectionConfig(resolved, runtime);
+      if (!updated) throw configError("Stored identity disappeared during cleanup.");
+      const target = projectConfigFor(updated, { ...resolved, projectId: cleanup.destination_project_id });
+      const token = target.token ?? updated.identity_token;
+      const client = fixedProjectClient(runtime, args, resolved.apiUrl, requireToken(token), cleanup.destination_project_id);
+      const verification = await client.call({ method: "GET", path: "/api/v1/agents/self" });
+      requirePrivateNoStore(verification.headers, "Agent verification response");
+      const agent = validateAgentSelfStatus(verification.body, "active").agent;
+      if (agent.id !== updated.agent_id) throw configError("Cleanup destination credential belongs to a different identity.");
+      setResultContext(runtime, { ...resolved, projectId: cleanup.destination_project_id, projectName: target.project_name, organizationId: target.organization_id, organizationName: target.organization_name });
+      return { envelope: successEnvelope({ status: "active", request_submitted: true, connection_complete: true, agent: safeAgentSummary(agent), connection_id: cleanup.connection_id, enrollment_cleanup: cleanup }, { request_id: client.requestId, warnings: cleanupWarnings(cleanup) }),
+        exitCode: ExitCode.Success, human: "Agent connected; enrollment cleanup " + cleanup.status };
+    }
+  }
+  if (resolved.token && !resolved.agentConnection) resolved = await identityForCommand(args, runtime, resolved);
   let current = await currentAgentConnectionConfig(resolved, runtime);
   let connection: AgentConnectionConfig;
-  if (current?.token && current.agent_connection?.pending_agent_id) {
+  if ((current?.agent_connection?.pending_token || current?.token) && current?.agent_connection?.pending_agent_id) {
     const pending = current.agent_connection;
+    const requestedProject = flagString(args.flags, "target-project-id");
+    if (requestedProject !== undefined && requestedProject !== pending.project_id) throw usageError("The pending request is bound to a different project. Resume without changing --target-project-id.");
+    if (pending.identity_hash && pending.identity_hash !== createHash("sha256").update(current.identity_token ?? "").digest("hex")) throw configError("The pending connection's identity credential changed.");
     if (requestedCapabilities && JSON.stringify(pending.capabilities) !== JSON.stringify(requestedCapabilities)) {
       throw usageError("The pending connection has different capabilities. Resume without --capability; capabilities cannot change on an existing request.");
     }
@@ -1231,7 +1332,7 @@ async function agentConnect(
     connection = await startOrResumeAgentConnection(args, runtime, resolved, name, requestedCapabilities);
     current = await currentAgentConnectionConfig(resolved, runtime);
   }
-  let pendingToken = current?.token;
+  let pendingToken = connection.pending_token ?? (connection.pending_agent_id ? current?.token : undefined);
   let pendingAgentId = connection.pending_agent_id;
 
   const noWait = !flagBool(args.flags, "wait");
@@ -1335,6 +1436,7 @@ async function agentConnect(
     requirePrivateNoStore(collectedResponse.headers, "Agent credential collection response");
     const collected = collectedResponse.body as AgentCredentialCollection;
     const decrypted = decryptAgentCredential(collected, connection);
+    if (resolved.agentId && decrypted.agentId !== resolved.agentId) throw configError("Connection delivered a different identity from the requesting agent.");
     pendingToken = decrypted.token;
     pendingAgentId = decrypted.agentId;
     const fsLike = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
@@ -1343,12 +1445,12 @@ async function agentConnect(
       if (!current?.agent_connection || current.agent_connection.connection_id !== connection.connection_id) {
         throw configError("Pending agent connection changed before credential persistence.");
       }
-      connection = { ...current.agent_connection, pending_agent_id: decrypted.agentId };
+      if (current.agent_id && current.agent_id !== decrypted.agentId) throw configError("Stored agent identity changed before connection credential persistence.");
+      connection = { ...current.agent_connection, pending_agent_id: decrypted.agentId, pending_token: decrypted.token };
       await writeConfigAtomic(resolved.configPath, {
         ...current,
         api_url: current.api_url || resolved.apiUrl,
-        token: decrypted.token,
-        agent_id: decrypted.agentId,
+        ...(decrypted.identityToken ? { identity_token: decrypted.identityToken, agent_id: decrypted.agentId } : {}),
         agent_connection: connection,
         updated_at: runtime.now().toISOString(),
       }, fsLike);
@@ -1359,6 +1461,7 @@ async function agentConnect(
   let activated: { agent: Agent; requestId: string };
   activated = await activateCollectedAgent(args, runtime, resolved, connection, pendingToken, pendingAgentId);
   const agent = activated.agent;
+  const cleanup = await finishEnrollmentCleanup(args, runtime, resolved);
   return {
     envelope: successEnvelope({
       status: "active",
@@ -1368,7 +1471,8 @@ async function agentConnect(
       connection_id: connection.connection_id,
       opened,
       approval_url_printed: printed,
-    }, { request_id: activated.requestId }),
+      ...(cleanup ? { enrollment_cleanup: cleanup } : {}),
+    }, { request_id: activated.requestId, warnings: cleanupWarnings(cleanup) }),
     exitCode: ExitCode.Success,
     human: humanLines("Agent connected", [
       ["status", "active"],
@@ -1381,6 +1485,22 @@ async function agentConnect(
   };
 }
 
+function fixedProjectClient(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token: string, projectId: string): ApiClient {
+  return new ApiClient({ transport: transportFor(runtime, apiUrl, token), token, projectId,
+    requestIds: requestIdsFor(runtime, args), timeoutMs: flagNumber(args.flags, "timeout"),
+    creditsOwner: runtime, logger: loggerOf(runtime) });
+}
+
+function finishEnrollmentCleanup(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig) {
+  return cleanupEnrollmentProject(runtime, resolved, (token, projectId) => fixedProjectClient(runtime, args, resolved.apiUrl, token, projectId));
+}
+
+function cleanupWarnings(cleanup: EnrollmentCleanupResult | undefined): Warning[] {
+  if (cleanup?.status === "pending") return [{ code: "enrollment_cleanup_pending", message: "Connection completed. The enrollment project cleanup is saved; rerun agent connect to inspect and resume it without another approval." }];
+  if (cleanup?.status === "retained") return [{ code: "enrollment_project_retained", message: "Connection completed. Its original enrollment project was retained because automatic cleanup could not confirm an eligible empty project." }];
+  return [];
+}
+
 async function removeLocalAgentCredential(
   runtime: CliRuntime,
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
@@ -1390,8 +1510,15 @@ async function removeLocalAgentCredential(
   const fsLike = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
   await withConfigLock(resolved.configPath, fsLike, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
     const current = await readConfigFile(resolved.configPath, fsLike);
-    if (!current?.token || current.token !== token) {
+    if (!current) {
       throw configError("The stored agent credential changed before local disconnect cleanup.");
+    }
+    const scoped = projectConfigFor(current, resolved);
+    assertProjectCredential(scoped, { ...resolved, token });
+    if (current.identity_token || current.projects) {
+      const { token: _token, screen_provision: _provision, browser_setup: _browser, media_generate: _generate, pending_writes: _writes, ...withoutCredential } = scoped;
+      await writeConfigAtomic(resolved.configPath, withProjectConfig(current, resolved, { ...withoutCredential, updated_at: runtime.now().toISOString() }), fsLike);
+      return;
     }
     const lastAgent = agent ? {
       id: agent.id,
@@ -1500,9 +1627,39 @@ async function agentDisconnect(
     human: humanLines("Agent disconnected", [
       ["local_credential", "removed"],
       ["project_screens_and_other_agents", "preserved"],
-      ["next", "screenrig agent enroll --email ADDRESS creates a new project; screenrig agent connect joins an existing one only when the user asks"],
+      ["next", "screenrig agent enroll --email ADDRESS --organization NAME creates a new project; screenrig agent connect joins an existing one only when the user asks"],
     ]),
   };
+}
+
+async function agentRevokeIdentity(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
+  if (!flagBool(args.flags, "yes")) throw usageError("agent revoke-identity requires --yes. It revokes this identity and all of its project memberships.");
+  const identity = await identityForCommand(args, runtime, resolved);
+  const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
+  let alreadyRejected = false;
+  try {
+    const response = await client.call({ method: "POST", path: "/api/v1/agent-identity/revoke" });
+    if (response.status !== 204 || response.body !== undefined) throw configError("Identity revocation did not return an empty 204; local credentials were retained.");
+    requirePrivateNoStore(response.headers, "Identity revocation response");
+  } catch (error) {
+    if (!(error instanceof CliError) || error.problem.code !== "unauthorized") throw error;
+    alreadyRejected = true;
+  }
+  const fs = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
+  await withConfigLock(resolved.configPath, fs, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
+    const current = await readConfigFile(resolved.configPath, fs);
+    if (!current || current.identity_token !== identity.identityToken) throw configError("Identity changed before revocation cleanup. Local credentials were retained.");
+    const scrub = (value: ScreenRigConfig): ScreenRigConfig => {
+      const { token: _token, screen_provision: _provision, browser_setup: _browser, media_generate: _generate, pending_writes: _writes, ...rest } = value;
+      return rest;
+    };
+    const { identity_token: _identity, identity_exchange: _exchange, identity_writes: _writes, enrollment_project: _source, enrollment_cleanup: _cleanup, agent_connection: _connection, enrollment: _enrollment, ...rest } = scrub(current);
+    const projects = current.projects ? Object.fromEntries(Object.entries(current.projects).map(([id, value]) => [id, scrub({ api_url: current.api_url, ...value })])) : undefined;
+    if (projects) for (const slot of Object.values(projects)) delete (slot as Partial<ScreenRigConfig>).api_url;
+    await writeConfigAtomic(resolved.configPath, { ...rest, ...(projects ? { projects } : {}), updated_at: runtime.now().toISOString() }, fs);
+  });
+  return { envelope: successEnvelope({ status: "revoked", all_memberships_revoked: true, local_credentials_removed: true, ...(alreadyRejected ? { credential_accepted: false } : {}) }, { request_id: client.requestId }),
+    exitCode: ExitCode.Success, human: "Agent identity and all project memberships revoked." };
 }
 
 async function browserSetupCommand(
@@ -1620,15 +1777,22 @@ async function enrollForCommand(
   const email = resolved.token && !resolved.enrollment
     ? undefined
     : persistedEmail ?? enrollmentEmail(suppliedEmail);
-    requireFlagValue(args, "project-name", "My project");
+    requireFlagValue(args, "project-name", "Screens");
     const projectName = flagString(args.flags, "project-name")?.trim();
     if (projectName !== undefined && (!projectName || [...projectName].length > 60 || /[\p{Cc}\p{Cf}]/u.test(projectName))) {
       throw usageError("agent enroll --project-name must contain 1–60 characters.");
     }
+    if (!resolved.token && !resolved.enrollment && projectName !== undefined && projectName !== "Screens") {
+      throw usageError("Enrollment creates Screens. Use project create NAME for another named project.");
+    }
+    const organizationFlag = flagString(args.flags, "organization");
+    const organization = organizationFlag !== undefined ? validateDisplayName(organizationFlag, "Organization name") : resolved.enrollment?.organization;
+    if (!resolved.token && !resolved.enrollment && !organization) throw usageError("agent enroll requires --organization NAME.");
     return await ensureCredential({
       resolved,
       enrollmentEmail: email,
-      ...(projectName !== undefined ? { enrollmentProjectName: projectName } : {}),
+      ...(projectName !== undefined && resolved.enrollment ? { enrollmentProjectName: projectName } : {}),
+      ...(organization !== undefined ? { enrollmentOrganization: organization } : {}),
       ...(options.intent ? { enrollmentIntent: options.intent } : {}),
       runtime: {
         fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir },
@@ -1642,6 +1806,7 @@ async function enrollForCommand(
           client_id: state.clientId,
           email: state.email,
           ...(state.projectName !== undefined ? { project_name: state.projectName } : {}),
+          ...(state.organization !== undefined ? { organization: state.organization } : {}),
           ...(betaKey !== undefined ? { beta_key: betaKey } : {}),
           ...(state.intent ? { intent: state.intent } : {}),
           ...(options.name ? { name: options.name } : {}),
@@ -1687,6 +1852,9 @@ async function enrollForCommand(
           projectId: enrollment.project.id,
           projectName: enrollment.project.name,
           agentId: agent.id,
+          ...(enrollment.identity_token ? { identityToken: validateIdentityToken(enrollment.identity_token) } : {}),
+          organizationId: enrollment.project.organization_id,
+          organizationName: enrollment.project.organization_name,
         };
       },
       verify: async (token, projectId) => {
@@ -1708,6 +1876,9 @@ async function projectShow(args: ParsedArgs, runtime: CliRuntime, resolved: Awai
   // token, so no part of the stored value is reported on stdout.
   const envelope = jsonBody(response, client.requestId, { token_present: hasToken(token) });
   const project = response.body as Project;
+  const context = contextFromProject(project);
+  if (resolved.projectId && context.project.id !== resolved.projectId) throw configError("Project response changed the command's target.");
+  await cacheProjectContexts(runtime, resolved, [context], { credential: resolved.token });
   if (headerValue(response.headers, CREDITS_REMAINING_HEADER) === undefined) {
     observeCreditsRemaining(runtime, parseCreditsInteger(project.credit_remaining));
   }
@@ -1723,6 +1894,127 @@ async function projectShow(args: ParsedArgs, runtime: CliRuntime, resolved: Awai
       ["request_id", client.requestId],
     ]),
   };
+}
+
+async function identityForCommand(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<ResolvedCommandConfig> {
+  return ensureIdentityCredential({ resolved,
+    runtime: { fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }, now: runtime.now, sleep: runtime.sleep },
+    exchange: async (key) => {
+      const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+      const response = await client.call({ method: "POST", path: "/api/v1/agent-identity/exchange", idempotent: true, idempotencyKey: key });
+      requirePrivateNoStore(response.headers, "Identity credential response");
+      return response.body as AgentIdentityCredential;
+    },
+  });
+}
+
+async function accessibleProjects(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<{ resolved: ResolvedCommandConfig; projects: ProjectContextList["projects"]; requestId: string }> {
+  const identity = await identityForCommand(args, runtime, resolved);
+  const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
+  const response = await client.call({ method: "GET", path: "/api/v1/projects" });
+  const body = response.body as ProjectContextList;
+  if (!Array.isArray(body?.projects)) throw configError("Project list does not match the generated contract.");
+  const projects = body.projects.map(validateProjectContext);
+  if (new Set(projects.map(item => item.project.id)).size !== projects.length) throw configError("Project list contains duplicate project IDs.");
+  return { resolved: identity, projects, requestId: client.requestId };
+}
+
+async function projectList(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
+  const listed = await accessibleProjects(args, runtime, resolved);
+  await cacheProjectContexts(runtime, listed.resolved, listed.projects, { identityToken: listed.resolved.identityToken });
+  return { envelope: successEnvelope({ projects: listed.projects }, { request_id: listed.requestId }), exitCode: ExitCode.Success,
+    human: listed.projects.map(item => `${item.organization.name} / ${item.project.name}: ${item.project.id}`).join("\n") || "No accessible projects." };
+}
+
+async function projectUse(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
+  const id = args.positionals[2];
+  if (!isResourceID(id, "project")) throw usageError("project use requires a project ID from project list.");
+  const listed = await accessibleProjects(args, runtime, resolved);
+  const selected = listed.projects.find(item => item.project.id === id);
+  if (!selected) throw usageError("This identity has no active membership in the requested project. Request approval with agent connect first.");
+  await cacheProjectContexts(runtime, listed.resolved, [selected], { identityToken: listed.resolved.identityToken, select: id });
+  return { envelope: successEnvelope(selected, { request_id: listed.requestId }), exitCode: ExitCode.Success,
+    human: `Selected ${selected.organization.name} / ${selected.project.name} (${id})` };
+}
+
+async function projectCreate(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
+  const name = validateDisplayName(args.positionals[2]);
+  const organizationId = flagString(args.flags, "organization-id");
+  const organizationName = flagString(args.flags, "organization");
+  if (organizationId && organizationName) throw usageError("Use one of --organization-id or --organization.");
+  if (resolved.identityWriteScope && !organizationId && !organizationName) throw usageError("Creating without a current project requires --organization-id or --organization.");
+  const identity = await identityForCommand(args, runtime, resolved);
+  const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
+  const body: ProjectCreate = { name, ...(organizationId ? { organization_id: organizationId } : {}),
+    ...(organizationName !== undefined ? { organization_name: validateDisplayName(organizationName, "Organization name") } : {}) };
+  const response = await client.call({ method: "POST", path: "/api/v1/projects", body, idempotent: true,
+    ...(resolved.projectId ? { headers: { "screenrig-project": resolved.projectId } } : {}) });
+  if (!(headerValue(response.headers, "cache-control") ?? "").split(",").map(value => value.trim().toLowerCase()).includes("no-store")) {
+    throw configError("Project credential delivery response did not prohibit storage.");
+  }
+  const created = response.body as CreatedProject;
+  const context = validateProjectContext(created);
+  if (typeof created.token !== "string" || !/^sr_live_(?!idt_)[A-Za-z0-9_-]+_[A-Za-z0-9_-]+$/.test(created.token)
+    || !created.issuance_expires_at || !Number.isFinite(Date.parse(created.issuance_expires_at))) {
+    throw configError("The new project did not deliver its membership credential. Local selection was retained; retry the exact create request.");
+  }
+  await cacheProjectContexts(runtime, identity, [context], { identityToken: identity.identityToken, select: context.project.id, token: created.token });
+  // The private credential is stored before returning the public result.
+  return { envelope: successEnvelope({ project: context.project, organization: context.organization, ...(context.owner_user_id ? { owner_user_id: context.owner_user_id } : {}) }, { request_id: client.requestId }),
+    exitCode: ExitCode.Success, human: `Created ${context.organization.name} / ${context.project.name} (${context.project.id})` };
+}
+
+async function projectMoves(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: "/api/v1/project/moves" });
+  const organizations = (response.body as { organizations?: { id: string; name: string }[] }).organizations;
+  if (!Array.isArray(organizations)) throw configError("Project move destinations do not match the contract.");
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success,
+    human: organizations.map(item => `${item.name}: ${item.id}`).join("\n") || "No allowed destinations." };
+}
+
+async function projectLifecycleWrite(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig, method: HttpMethod, path: string, body: object): Promise<CommandResult> {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method, path, body });
+  const context = validateProjectContext(response.body);
+  if (context.project.id !== resolved.projectId) throw configError("Project lifecycle response changed the command's target.");
+  await cacheProjectContexts(runtime, resolved, [context], { credential: resolved.token });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success,
+    human: `${context.organization.name} / ${context.project.name} (${context.project.id})` };
+}
+
+async function projectMove(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
+  const id = flagString(args.flags, "organization-id");
+  if (!id) throw usageError("project move requires --organization-id from project moves.");
+  return projectLifecycleWrite(args, runtime, resolved, "POST", "/api/v1/project/move", { organization_id: id });
+}
+
+async function projectOwnerTransfer(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
+  const id = flagString(args.flags, "user-id");
+  if (!id) throw usageError("project transfer-owner requires --user-id for an existing verified project member.");
+  return projectLifecycleWrite(args, runtime, resolved, "PUT", "/api/v1/project/owner", { user_id: id });
+}
+
+async function projectDeletionPreview(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: "/api/v1/project/deletion-preview" });
+  const context = validateProjectContext(response.body);
+  const preview = response.body as { allowed?: boolean; reason?: string; devices?: unknown[] };
+  if (typeof preview.allowed !== "boolean" || !Array.isArray(preview.devices)) throw configError("Project deletion preview does not match the contract.");
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success,
+    human: humanLines("Project deletion preview", [["name", context.project.name], ["revision", String(context.project.revision)], ["allowed", String(preview.allowed)], ["reason", preview.reason]]) };
+}
+
+async function projectDelete(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
+  const name = validateDisplayName(flagString(args.flags, "name"));
+  const revision = flagNumber(args.flags, "revision");
+  if (!flagBool(args.flags, "yes") || !Number.isInteger(revision) || !revision || revision < 1) {
+    throw usageError("project delete requires --yes --name NAME --revision N matching project deletion-preview.");
+  }
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "DELETE", path: "/api/v1/project", body: { name, revision } });
+  if ((response.body as { id?: string })?.id !== resolved.projectId) throw configError("Project deletion response changed the command's target.");
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: "Deleted project " + resolved.projectName + " (" + resolved.projectId + ")" };
 }
 
 /**
@@ -1757,6 +2049,9 @@ async function projectRename(args: ParsedArgs, runtime: CliRuntime, resolved: Re
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await client.call({ method: "PATCH", path: "/api/v1/project", body: { name }, idempotent: true });
   const project = response.body as Project;
+  const context = contextFromProject(project);
+  if (context.project.id !== resolved.projectId) throw configError("Rename response changed the command's target.");
+  await cacheProjectContexts(runtime, resolved, [context], { credential: resolved.token });
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success,
     human: humanLines("Project renamed", [["id", project.id], ["name", project.name]]) };
 }
@@ -3414,6 +3709,7 @@ async function playbackCsvExport(
   };
   if (toStdout) {
     try {
+      if (formatResultContext(runtime)) runtime.stderr.write(`${formatResultContext(runtime)}\n`);
       await writeCsvStdout(response.body, runtime.stdout, spec.what, client.requestId);
     } catch (error) {
       // CSV bytes may already be on stdout; the error goes to stderr instead of an envelope.
@@ -3813,11 +4109,12 @@ export const handleSupportFollow = commandHandler(async (args, runtime, resolved
   const timeout = flagNumber(args.flags, "timeout");
   const timer = timeout && timeout > 0 ? setTimeout(() => controller.abort(), timeout) : undefined;
   let delay = EVENT_STREAM_BACKOFF_MS;
+  let printedContext = false;
   try {
     while (!controller.signal.aborted) {
       let buffer = "";
       try {
-        const stream = await transport.stream({ method: "GET", path: "/api/v1/support/events/stream", query: { after }, headers: { authorization: `Bearer ${token}`, "x-request-id": client.nextRequestId() }, signal: controller.signal });
+        const stream = await transport.stream({ method: "GET", path: "/api/v1/support/events/stream", query: { after }, headers: { authorization: `Bearer ${token}`, "x-request-id": client.nextRequestId(), ...(resolved.projectId ? { "screenrig-project": resolved.projectId } : {}) }, signal: controller.signal });
         for await (const chunk of stream) {
           buffer += chunk;
           const parsed = parseSse(buffer); buffer = parsed.rest;
@@ -3831,7 +4128,11 @@ export const handleSupportFollow = commandHandler(async (args, runtime, resolved
             if (BigInt(frame.id) <= BigInt(after)) continue;
             after = frame.id;
             if (selected && message.conversation_id !== selected) continue;
-            runtime.stdout.write(flagBool(args.flags, "human") ? `${message.author}: ${redactText(message.body)}\n` : `${JSON.stringify(successEnvelope(redactEvent(message), { request_id: client.requestId }))}\n`);
+            if (flagBool(args.flags, "human") && !printedContext) {
+              if (formatResultContext(runtime)) runtime.stdout.write(`${formatResultContext(runtime)}\n`);
+              printedContext = true;
+            }
+            runtime.stdout.write(flagBool(args.flags, "human") ? `${message.author}: ${redactText(message.body)}\n` : `${JSON.stringify(streamEnvelope(runtime, redactEvent(message), client.requestId))}\n`);
           }
           delay = EVENT_STREAM_BACKOFF_MS;
           if (controller.signal.aborted) break;
@@ -5870,11 +6171,14 @@ async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awa
   const emit = (event: ProjectEvent): void => {
     if (json) {
       printed += 1;
-      runtime.stdout.write(`${JSON.stringify(successEnvelope(redactEvent(event), { request_id: client.requestId }))}\n`);
+      runtime.stdout.write(`${JSON.stringify(streamEnvelope(runtime, redactEvent(event), client.requestId))}\n`);
       return;
     }
     const line = formatEventLine(event);
     if (!line) return;
+    if (printed === 0) {
+      if (formatResultContext(runtime)) runtime.stdout.write(`${formatResultContext(runtime)}\n`);
+    }
     printed += 1;
     runtime.stdout.write(`${line}\n`);
   };
@@ -5887,7 +6191,7 @@ async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awa
           method: "GET",
           path: "/api/v1/events/stream",
           query: { after },
-          headers: { "x-request-id": client.nextRequestId(), authorization: `Bearer ${token}` },
+          headers: { "x-request-id": client.nextRequestId(), authorization: `Bearer ${token}`, ...(resolved.projectId ? { "screenrig-project": resolved.projectId } : {}) },
           signal: controller.signal,
         });
         connected = true;
@@ -5933,7 +6237,7 @@ async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awa
     if (timer) clearTimeout(timer);
   }
   if (printed === 0 && json) {
-    runtime.stdout.write(`${JSON.stringify(successEnvelope({ items: [] }, { request_id: client.requestId }))}\n`);
+    runtime.stdout.write(`${JSON.stringify(streamEnvelope(runtime, { items: [] }, client.requestId))}\n`);
   }
   return {
     envelope: successEnvelope({ items: [] }, { request_id: client.requestId }),
@@ -5990,7 +6294,7 @@ function credentialCheck(resolved: Awaited<ReturnType<typeof resolveConfig>>): D
       detail: `${detail}; this installation was disconnected`,
       path: "first_run_enroll",
       next: {
-        command: "screenrig agent enroll --email ADDRESS",
+        command: "screenrig agent enroll --email ADDRESS --organization NAME",
         reason: "Ask the user for their contact email, enroll a new project agent, then rerun doctor. Use agent connect only for an intentional existing-project reconnect.",
       },
     };
@@ -6001,7 +6305,7 @@ function credentialCheck(resolved: Awaited<ReturnType<typeof resolveConfig>>): D
     detail: `${detail}; this installation is not enrolled`,
     path: "first_run_enroll",
     next: {
-      command: resolved.enrollment?.email ? "screenrig agent enroll" : "screenrig agent enroll --email ADDRESS",
+      command: resolved.enrollment?.email ? "screenrig agent enroll" : "screenrig agent enroll --email ADDRESS --organization NAME",
       reason: resolved.enrollment?.email
         ? "Resume the exact pending enrollment, then rerun doctor."
         : "Create the first agent with unverified contact metadata, then rerun doctor. Every authenticated command fails with not_enrolled until then.",

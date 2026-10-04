@@ -11,7 +11,7 @@ import { FakeTransport } from "./transport/fake.js";
 async function invoke(argv: string[], transport: FakeTransport) {
  const dir = await testTemp("support-cfg-");
  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: { XDG_CONFIG_HOME: dir } };
- await writeConfigAtomic(path.join(dir,"screenrig","config.json"), {api_url:"https://api.screenrig.ai", token:"sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr"}, fs);
+ await writeConfigAtomic(path.join(dir,"screenrig","config.json"), {api_url:"https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token:"sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr"}, fs);
  const stdout = new PassThrough(); const stderr = new PassThrough(); const chunks: Buffer[] = [];
  stdout.on("data", (chunk) => chunks.push(Buffer.from(chunk)));stderr.resume();
  const runtime: CliRuntime = {argv,env:fs.env,stdout,stderr,now:()=>new Date("2026-10-01T17:00:00Z"),sleep:async()=>undefined,homedir:fs.homedir,cwd:()=>dir,fs,transport};
@@ -40,6 +40,15 @@ test("support SSE resumes project sequence while filtering conversations and sup
 test("support read uses a monotonic receipt request",async()=>{
  const transport=new FakeTransport().on("PUT","/api/v1/support/conversations/sc_SYNTHETIC/read",()=>ok({sequence:5}));
  const result=await invoke(["support","read","--conversation-id","sc_SYNTHETIC","--sequence","5"],transport);assert.equal(result.code,0,result.stdout);assert.deepEqual(transport.calls[0]?.body,{sequence:5});
+});
+
+test("human support streams name their fixed project once without changing message framing",async()=>{
+ const frame=`id: 1\nevent: support.message\ndata: ${JSON.stringify({sequence:1,conversation_id:"sc_SELECTED",author:"Staff",body:"Reply"})}\n\n`;
+ const transport=new FakeTransport().queueStream({chunks:[frame]});
+ transport.afterStreamChunks=async(req)=>{await new Promise<void>((resolve)=>{if(req.signal?.aborted)resolve();else req.signal?.addEventListener("abort",()=>resolve(),{once:true})})};
+ const result=await invoke(["support","follow","--human","--timeout","40"],transport);
+ assert.equal(result.code,0,result.stdout);
+ assert.equal(result.stdout,"organization: Example organization\nproject: Screens (prj_AAAAAAAAAAAAAAAAAAAAAAAA)\nStaff: Reply\n");
 });
 
 test("support close ends only the selected conversation and returns retained state",async()=>{

@@ -1,5 +1,5 @@
 import type { CommandActionBinder } from "./types.js";
-import { handleAgentEnroll, handleAgentConnect, handleAgentStatus, handleAgentDisconnect } from "../commands.js";
+import { handleAgentEnroll, handleAgentConnect, handleAgentStatus, handleAgentDisconnect, handleAgentRevokeIdentity } from "../commands.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes } from "./notes.js";
 import { AGENT_CAPABILITIES } from "../adapters/protocol.js";
@@ -10,13 +10,15 @@ export function registerAgentCommands(root: Command, bind: CommandActionBinder):
 
   agent.command("enroll").description("Create a new project and its first agent")
     .option("--email <ADDRESS>", "Set the project contact email")
-    .option("--project-name <NAME>", "Set the project display name")
+    .option("--organization <NAME>", "Create the organization containing Screens")
+    .addOption(new Option("--project-name <NAME>", "Resume a retained enrollment's exact project name").hideHelp())
     .addOption(new Option("--intent <INTENT>", "Choose the project's purpose: signage (default) or advertising").choices(["signage", "advertising"]))
     .option("--name <NAME>", "Set this agent installation name")
     .option("--force", "Discard pending enrollment or connection state before enrolling")
     .action(bind(handleAgentEnroll));
 
   addCommandNotes(agent.command("connect").description("Reconnect this installation to an existing project")
+    .option("--target-project-id <ID>", "Request approval for this specific existing project")
     .option("--name <NAME>", "Set this agent installation name")
     .addOption(new Option("--capability <NAME>", "Request a capability (repeatable; default: all six)")
       .choices([...AGENT_CAPABILITIES])
@@ -36,8 +38,10 @@ export function registerAgentCommands(root: Command, bind: CommandActionBinder):
   agent.command("status").description("Inspect this agent's connection")
     .action(bind(handleAgentStatus));
 
-  agent.command("disconnect").description("Disconnect this agent")
-    .option("--yes", "Confirm this agent's disconnection")
+  agent.command("disconnect").description("Revoke this agent's membership in the current project")
+    .option("--yes", "Confirm this project's membership revocation")
     .option("--allow-lockout", "Allow disconnecting the last agent")
     .action(bind(handleAgentDisconnect));
+  agent.command("revoke-identity").description("Revoke this identity and all its project memberships")
+    .option("--yes", "Confirm revocation across every project").action(bind(handleAgentRevokeIdentity));
 }

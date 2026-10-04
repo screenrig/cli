@@ -127,19 +127,57 @@ member invitation to the contact address. The same person can belong to more
 than one project.
 
 ```sh
-screenrig agent enroll --email ADDRESS [--project-name NAME] [--name NAME] [--intent signage|advertising] [--force]
+screenrig agent enroll --email ADDRESS --organization NAME [--name NAME] [--intent signage|advertising] [--force]
+screenrig project list
+screenrig project use ID
+screenrig project create NAME [--organization-id ID | --organization NAME]
 screenrig project show
 screenrig project capabilities
 screenrig project rename NAME
+screenrig project moves
+screenrig project move --organization-id ID
+screenrig project transfer-owner --user-id ID
+screenrig project deletion-preview
+screenrig project delete --name NAME --revision N --yes
+screenrig organization list
+screenrig organization rename ID NAME
 ```
 
-`--project-name` names the project; `--name` names this agent. Enrollment reports
-the project ID and name and confirms that a member invitation was requested,
+Enrollment creates an organization with the requested name and a project named
+`Screens`; `--name` names this agent. It reports the organization and project
+and confirms that a member invitation was requested,
 without exposing a credential or invitation URL. The invitation is the human's
 dashboard login; nothing waits on it, and the agent can pair screens and publish
 right away. Other authenticated commands never enroll automatically. If the
 server rejects the stored credential, `agent disconnect --yes` clears it locally
-before a new enrollment.
+for that project. `agent revoke-identity --yes` separately revokes the global
+identity and all its project memberships. Both retain local credentials after
+an ambiguous server failure so the original operation can be reconciled.
+
+`project create` defaults to the current organization. Names are unique within
+an organization; an agent's responsible person becomes owner. The server
+enforces the ten-free-Standard-project creation cap and payer coverage. With no
+current project, specify an organization. A successful create selects the new
+project and stores its credential privately.
+
+The current project is the last selected or created project. `--project-id ID`
+targets a cached project for one command without changing that selection.
+Every command keeps its target while it runs, and generation, provisioning,
+browser setup and ordinary-write retries are stored separately per project.
+JSON results include organization and project context; human output names both.
+Projects reached through the identity credential still require membership.
+
+`organization list` shows organizations visible to this identity. Organization
+names can repeat; use the ID when renaming an organization you administer.
+Renaming an organization updates cached project labels without selecting a
+different project.
+
+Only the owner can move a project to a destination returned by `project moves`,
+or transfer ownership to an existing verified member. Moves carry its screens
+and check the destination payer's limit. Charges remain with their original
+payer. Deletion requires the exact current name and revision from its preview,
+the project's own Standard plan, no active screens, no wallet obligations and
+no live advertising. It emails members and uses the retained tombstone.
 
 ## Invitations
 
@@ -181,11 +219,18 @@ A sign-in reset is unauthenticated: it never enrolls, sends a stored credential,
 or changes the stored project or enrollment. It works on a fresh installation.
 The response is neutral whether or not the address is known: if this address can
 receive sign-in instructions, check its inbox. Delivery is not confirmed.
+Eligible pending invitations are refreshed in place, keeping their IDs so
+revocation continues to work; a refreshed invitation is sent at most once an hour.
 Rerunning an ambiguous request reuses its saved Idempotency-Key.
 
-First setup is `agent enroll`. Only to attach a project that already exists to
-this installation, run `screenrig agent connect` and approve the connection
-request in that project's dashboard.
+First setup is `agent enroll --email ADDRESS --organization NAME`. To connect
+to an existing project, run `screenrig agent connect --target-project-id ID`
+and approve that specific request in its dashboard. This adds a membership to
+the same identity. After activation, the CLI removes its original enrollment
+`Screens` project only when saved enrollment provenance and the server's
+transactional emptiness check allow it. Content, other members, other agents or
+paid coverage retain the project. Interrupted cleanup resumes on `agent connect`
+without starting another approval request.
 
 ## Screen host and recovery
 

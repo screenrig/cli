@@ -16,6 +16,9 @@ export interface EnrollmentCredential {
   projectId?: string;
   projectName?: string;
   agentId?: string;
+  identityToken?: string;
+  organizationId?: string;
+  organizationName?: string;
 }
 
 export interface EnrollmentState {
@@ -23,6 +26,7 @@ export interface EnrollmentState {
   idempotencyKey: string;
   email: string;
   projectName?: string;
+  organization?: string;
   /** Enrollment purpose, fixed for the lifetime of one pending enrollment. */
   intent?: EnrollmentIntent;
 }
@@ -46,6 +50,7 @@ export async function ensureCredential(options: {
   enrollmentEmail?: string;
   /** Project name fixed for the lifetime of one pending enrollment. */
   enrollmentProjectName?: string;
+  enrollmentOrganization?: string;
   /**
    * Enrollment purpose for a new enrollment; a pending enrollment keeps the
    * intent it was created with, and a changed one is rejected rather than
@@ -71,6 +76,9 @@ export async function ensureCredential(options: {
           token: current.token,
           projectId: current.project_id,
           projectName: current.project_name,
+          organizationId: current.organization_id,
+          organizationName: current.organization_name,
+          identityToken: current.identity_token,
           agentId: current.agent_id,
           enrollment: current.enrollment,
           agentConnection: current.agent_connection,
@@ -93,11 +101,15 @@ export async function ensureCredential(options: {
         throw configError("Pending enrollment is bound to a different project name. Resume it without changing --project-name, or discard it with agent enroll --force.");
       }
       const email = existingEnrollment?.email ?? options.enrollmentEmail;
+      if (existingEnrollment && options.enrollmentOrganization !== undefined && existingEnrollment.organization !== options.enrollmentOrganization) {
+        throw configError("Pending enrollment is bound to a different organization. Resume without changing --organization.");
+      }
       if (!email) {
-        throw configError("Enrollment requires a contact email. Run screenrig agent enroll --email ADDRESS.");
+        throw configError("Enrollment requires a contact email. Run screenrig agent enroll --email ADDRESS --organization NAME.");
       }
       const intent = existingEnrollment?.intent ?? options.enrollmentIntent;
       const projectName = existingEnrollment ? existingEnrollment.project_name : options.enrollmentProjectName;
+      const organization = existingEnrollment ? existingEnrollment.organization : options.enrollmentOrganization;
       const enrollment = {
         ...(existingEnrollment ?? {
           client_id: (options.generateClientId ?? (() => randomPrefixedId("cli", 32)))(),
@@ -105,6 +117,7 @@ export async function ensureCredential(options: {
         }),
         email,
         ...(projectName !== undefined ? { project_name: projectName } : {}),
+        ...(organization !== undefined ? { organization } : {}),
         ...(intent ? { intent } : {}),
       };
       if (!/^cli_[A-Za-z0-9_-]{43}$/.test(enrollment.client_id)) {
@@ -124,6 +137,7 @@ export async function ensureCredential(options: {
         idempotencyKey: enrollment.idempotency_key,
         email: enrollment.email,
         ...(enrollment.project_name !== undefined ? { projectName: enrollment.project_name } : {}),
+        ...(enrollment.organization !== undefined ? { organization: enrollment.organization } : {}),
         ...(enrollment.intent ? { intent: enrollment.intent } : {}),
       });
       if (!credential.token || credential.token.trim() !== credential.token) {
@@ -135,6 +149,11 @@ export async function ensureCredential(options: {
         ...(credential.projectId ? { project_id: credential.projectId } : {}),
         ...(credential.projectName ? { project_name: credential.projectName } : {}),
         ...(credential.agentId ? { agent_id: credential.agentId } : {}),
+        ...(credential.identityToken ? { identity_token: credential.identityToken } : {}),
+        ...(credential.organizationId ? { organization_id: credential.organizationId } : {}),
+        ...(credential.organizationName ? { organization_name: credential.organizationName } : {}),
+        ...(credential.projectId && credential.projectName === "Screens" && credential.agentId
+          ? { enrollment_project: { project_id: credential.projectId, agent_id: credential.agentId } } : {}),
         enrollment,
         updated_at: runtime.now().toISOString(),
       });
@@ -145,6 +164,9 @@ export async function ensureCredential(options: {
         projectId: credential.projectId,
         projectName: credential.projectName,
         agentId: credential.agentId,
+        identityToken: credential.identityToken,
+        organizationId: credential.organizationId,
+        organizationName: credential.organizationName,
         enrollment,
         source: { ...resolved.source, token: "config" as const },
       };
@@ -163,6 +185,9 @@ export async function ensureCredential(options: {
       const current = await readConfigFile(enrolled.configPath, runtime.fs);
       if (!current?.token || !current.enrollment) {
         return enrolled;
+      }
+      if (current.token !== enrolled.token || current.enrollment.idempotency_key !== enrolled.enrollment?.idempotency_key) {
+        throw configError("Enrollment state changed before verification cleanup.");
       }
       const { enrollment: _verified, ...verified } = current;
       await writeConfigAtomic(enrolled.configPath, verified, runtime.fs);

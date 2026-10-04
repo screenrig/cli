@@ -77,7 +77,7 @@ async function enrolled(configDir: string): Promise<ConfigFs> {
   const fsLike = realFs(configDir);
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: API_URL, token: TOKEN },
+    { api_url: API_URL, token: TOKEN, project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization" },
     fsLike,
   );
   return fsLike;

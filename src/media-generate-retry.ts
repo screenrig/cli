@@ -1,3 +1,4 @@
+import { projectConfigFor, withProjectConfig, assertProjectCredential } from "./project-state.js";
 import { createHash } from "node:crypto";
 import { readConfigFile, withConfigLock, writeConfigAtomic, type ResolvedConfig } from "./config.js";
 import { isValidIdempotencyKey, newIdempotencyKey } from "./ids.js";
@@ -49,7 +50,9 @@ export async function generateRetryState(options: {
     options.runtime.fs,
     { sleep: options.runtime.sleep, now: () => options.runtime.now().getTime() },
     async () => {
-      const current = await readConfigFile(options.resolved.configPath, options.runtime.fs);
+      const stored = await readConfigFile(options.resolved.configPath, options.runtime.fs);
+      const current = stored ? projectConfigFor(stored, options.resolved) : undefined;
+      if (current) assertProjectCredential(current, options.resolved);
       const pending = current?.media_generate;
       const reused =
         pending !== undefined &&
@@ -65,11 +68,11 @@ export async function generateRetryState(options: {
       if (!reused || pending.idempotency_key !== idempotencyKey) {
         await writeConfigAtomic(
           options.resolved.configPath,
-          {
+          withProjectConfig(stored ?? { api_url: options.resolved.apiUrl }, options.resolved, {
             ...(current ?? { api_url: options.resolved.apiUrl }),
             media_generate: state,
             updated_at: options.runtime.now().toISOString(),
-          },
+          }),
           options.runtime.fs,
         );
       }
@@ -88,10 +91,12 @@ export async function clearGenerateRetryState(
     runtime.fs,
     { sleep: runtime.sleep, now: () => runtime.now().getTime() },
     async () => {
-      const current = await readConfigFile(resolved.configPath, runtime.fs);
+      const stored = await readConfigFile(resolved.configPath, runtime.fs);
+      const current = stored ? projectConfigFor(stored, resolved) : undefined;
+      if (current) assertProjectCredential(current, resolved);
       if (!current || current.media_generate?.idempotency_key !== idempotencyKey) return;
       const { media_generate: _resolvedGeneration, ...rest } = current;
-      await writeConfigAtomic(resolved.configPath, rest, runtime.fs);
+      await writeConfigAtomic(resolved.configPath, withProjectConfig(stored!, resolved, rest), runtime.fs);
     },
   );
 }

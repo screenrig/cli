@@ -50,7 +50,7 @@ function collect(stream: PassThrough): Promise<string> {
 async function cli(argv: string[], transport: FakeTransport): Promise<{ code: number; stdout: string }> {
   const configDir = await testTemp("upgrade-cfg-");
   const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
-  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" }, fs);
+  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" }, fs);
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   const out = collect(stdout);
@@ -316,7 +316,8 @@ test("events follow delivers and renders manifest upgrade and activation events"
 
   const human = await cli(["--human", "events", "follow", "--timeout", "50"], transport);
   assert.equal(human.code, 0, human.stdout);
-  const lines = human.stdout.split("\n").filter((line) => line.length > 0);
+  assert.match(human.stdout, /^organization: Example organization\nproject: Screens \(prj_AAAAAAAAAAAAAAAAAAAAAAAA\)\n/);
+  const lines = human.stdout.split("\n").slice(2).filter((line) => line.length > 0);
   assert.equal(lines.length, 2, human.stdout);
   assert.match(lines[0]!, /^at=2026-09-25T10:00:00Z type=screen\.manifest_upgrade severity=warning resource_type=screen resource_id=scr_LOBBY code=download_failed /);
   assert.match(lines[0]!, /manifest_revision=man_abcdef123456 /);

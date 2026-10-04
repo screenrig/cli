@@ -13,7 +13,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   const directory = await mkdtemp(path.join(tmpdir(), "screenrig-write-recovery-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const config = `${directory}/config.json`;
-  await writeFile(config, JSON.stringify({ api_url: "https://api.screenrig.ai", token: "test-only-credential" }), { mode: 0o600 });
+  await writeFile(config, JSON.stringify({ api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "test-only-credential" }), { mode: 0o600 });
   const read = async () => JSON.parse(await readFile(config, "utf8"));
   async function invoke(transport: FakeTransport, args = command, now = "2026-09-10T12:00:00Z") {
     let stdout = "", stderr = "";

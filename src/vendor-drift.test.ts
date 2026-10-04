@@ -55,9 +55,19 @@ test("plain --check always tampers-checks the manifest and drifts against siblin
     assert.match(result.stdout, /pass --source-root to check for backend drift/);
     return;
   }
-  assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /verified against/);
-  assert.match(result.stdout, /backend/);
+  const manifest = JSON.parse(await readFile(path.join(ROOT, "vendor", "manifest.json"), "utf8")) as { files: Array<{ path: string; source: string }> };
+  const equality = await Promise.all(manifest.files.map(async file => {
+    const [vendored, canonical] = await Promise.all([readFile(path.join(ROOT, file.path)), readFile(path.resolve(ROOT, "../backend", file.source))]);
+    return vendored.equals(canonical);
+  }));
+  if (equality.every(Boolean)) {
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /verified against/);
+    assert.match(result.stdout, /backend/);
+  } else {
+    assert.equal(result.code, 1, "a locally divergent sibling must fail the default drift gate");
+    assert.match(result.stderr, /does not match the backend checkout/);
+  }
 });
 
 test("--check --source-root passes when the vendored snapshot matches the backend", async () => {

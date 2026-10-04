@@ -223,6 +223,8 @@ export function memoryBackend(options: { now?: () => Date; listPageSize?: number
     features: { advertiser: false, screens: true },
     id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
     name: "Amber Acorn",
+    organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA",
+    organization_name: "Example organization",
     reserved_bytes: 0,
     revision: 1,
     screen_count: 0,
@@ -335,7 +337,9 @@ export function memoryBackend(options: { now?: () => Date; listPageSize?: number
     project = {
       ...project,
       id: projectSequence === 1 ? "prj_AAAAAAAAAAAAAAAAAAAAAAAA" : `prj_${String(projectSequence).padStart(24, "0")}`,
-      name: input?.project_name ?? `Amber Acorn ${projectSequence}`,
+      name: input?.project_name ?? "Screens",
+      organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA",
+      organization_name: input?.organization ?? "Example organization",
       email,
       features: input?.intent === "advertising"
         ? { advertiser: true, screens: false } : { advertiser: false, screens: true },

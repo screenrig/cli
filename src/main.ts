@@ -1,4 +1,5 @@
 import { executeCommand } from "./program.js";
+import { clearResultContext, formatResultContext, resultContext } from "./project-context.js";
 import { applyCreditsLowToSuccess, observedCreditsRemaining } from "./credits.js";
 import { errorEnvelope, type Warning } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
@@ -46,6 +47,7 @@ function confirmedWrite(stream: NodeJS.WritableStream, text: string): Promise<vo
 }
 
 export async function run(runtime: CliRuntime = processRuntime()): Promise<number> {
+  clearResultContext(runtime);
   // Only switches before the end-of-options marker select presentation.
   const end = runtime.argv.indexOf("--");
   const options = end < 0 ? runtime.argv : runtime.argv.slice(0, end);
@@ -98,8 +100,9 @@ export async function run(runtime: CliRuntime = processRuntime()): Promise<numbe
     const exitCode = err instanceof CliError ? err.exitCode : ExitCode.Unexpected;
     const warnings = appendLogSinkWarning(err instanceof CliError ? err.warnings : [], runtime.logger?.droppedLines() ?? 0);
     if (json) {
-      runtime.stdout.write(`${JSON.stringify(errorEnvelope(problem, { warnings }))}\n`);
+      runtime.stdout.write(`${JSON.stringify({ ...errorEnvelope(problem, { warnings }), ...(resultContext(runtime) ? { context: resultContext(runtime) } : {}) })}\n`);
     } else {
+      if (formatResultContext(runtime)) runtime.stderr.write(`${formatResultContext(runtime)}\n`);
       runtime.stderr.write(`${renderProblem(problem)}\n`);
       for (const warning of warnings) {
         runtime.stderr.write(`warning: ${warning.message}\n`);
@@ -107,6 +110,7 @@ export async function run(runtime: CliRuntime = processRuntime()): Promise<numbe
     }
     return exitCode;
   } finally {
+    clearResultContext(runtime);
     const logger = runtime.logger;
     if (logger) {
       try {

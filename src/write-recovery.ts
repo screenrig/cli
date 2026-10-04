@@ -1,3 +1,4 @@
+import { assertProjectCredential, projectConfigFor, withProjectConfig } from "./project-state.js";
 import { createHash } from "node:crypto";
 import { readConfigFile, withConfigLock, writeConfigAtomic, type ResolvedConfig, type ScreenRigConfig } from "./config.js";
 import { isValidIdempotencyKey, newIdempotencyKey } from "./ids.js";
@@ -38,15 +39,24 @@ export class WriteRecovery {
     const fs = { ...this.runtime.fs, env: this.runtime.env, homedir: this.runtime.homedir };
     return withConfigLock(this.resolved.configPath, fs,
       { sleep: this.runtime.sleep, now: () => this.runtime.now().getTime() }, async () => {
-        const config = await readConfigFile(this.resolved.configPath, fs);
-        if (!config || config.token !== this.resolved.token) {
+        const stored = await readConfigFile(this.resolved.configPath, fs);
+        const config = stored ? this.resolved.identityWriteScope
+          ? { ...stored, token: stored.identity_token, pending_writes: stored.identity_writes }
+          : projectConfigFor(stored, this.resolved) : undefined;
+        if (!config) {
           throw configError("Agent credential changed during write recovery; retry with the current installation.");
         }
+        assertProjectCredential(config, this.resolved);
         const pending = ledger(config);
         const result = work(config, pending);
         const { pending_writes: _old, ...rest } = config;
-        await writeConfigAtomic(this.resolved.configPath,
-          { ...rest, ...(Object.keys(pending).length ? { pending_writes: pending } : {}) }, fs);
+        if (this.resolved.identityWriteScope) {
+          const { identity_writes: _old, ...global } = stored!;
+          await writeConfigAtomic(this.resolved.configPath, { ...global, ...(Object.keys(pending).length ? { identity_writes: pending } : {}) }, fs);
+        } else {
+          await writeConfigAtomic(this.resolved.configPath,
+            withProjectConfig(stored!, this.resolved, { ...rest, ...(Object.keys(pending).length ? { pending_writes: pending } : {}) }), fs);
+        }
         return result;
       });
   }
@@ -125,6 +135,7 @@ function recoveryId(fingerprint: string, entry: Ledger[string]): string {
 }
 
 export interface RecoveryEntry {
+  scope?: "identity";
   id: string;
   command: string | null;
   created_at: string;
@@ -153,19 +164,29 @@ export async function manageWriteRecovery(
   const fs = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
   return withConfigLock(resolved.configPath, fs,
     { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
-      const config = await readConfigFile(resolved.configPath, fs);
+      const stored = await readConfigFile(resolved.configPath, fs);
+      const config = stored ? projectConfigFor(stored, resolved) : undefined;
       const pending = ledger(config ?? { api_url: resolved.apiUrl });
+      const globalPending = ledger({ api_url: resolved.apiUrl, pending_writes: stored?.identity_writes });
       const entries = Object.entries(pending).map(([fingerprint, entry]) => describeEntry(fingerprint, entry, runtime.now().getTime()));
+      entries.push(...Object.entries(globalPending).map(([fingerprint, entry]) => ({ ...describeEntry(fingerprint, entry, runtime.now().getTime()), scope: "identity" as const })));
       entries.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
       if (action === "list") return entries;
       const entry = entries.find(entry => entry.id === id);
       if (!entry) throw usageError("Recovery entry is no longer pending. Run screenrig recovery list for current IDs; nothing was changed.");
       if (action === "reconcile") {
+        const globalFingerprint = Object.keys(globalPending).find(hash => recoveryId(hash, globalPending[hash]!) === id);
+        if (globalFingerprint) {
+          delete globalPending[globalFingerprint];
+          const { identity_writes: _old, ...rest } = stored!;
+          await writeConfigAtomic(resolved.configPath, { ...rest, ...(Object.keys(globalPending).length ? { identity_writes: globalPending } : {}) }, fs);
+          return [entry];
+        }
         const fingerprint = Object.keys(pending).find(hash => recoveryId(hash, pending[hash]!) === id)!;
         delete pending[fingerprint];
         const { pending_writes: _old, ...rest } = config!;
         await writeConfigAtomic(resolved.configPath,
-          { ...rest, ...(Object.keys(pending).length ? { pending_writes: pending } : {}) }, fs);
+          withProjectConfig(stored!, resolved, { ...rest, ...(Object.keys(pending).length ? { pending_writes: pending } : {}) }), fs);
       }
       return [entry];
     });

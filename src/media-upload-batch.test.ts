@@ -85,7 +85,7 @@ async function enrolled(configDir: string, projectId = PROJECT_ID): Promise<Conf
   const fsLike = realFs(configDir);
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: API_URL, token: TOKEN, project_id: projectId },
+    { api_url: API_URL, token: TOKEN, project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", project_id: projectId },
     fsLike,
   );
   return fsLike;
@@ -554,7 +554,7 @@ test("state file is 0600 and replaced atomically", async () => {
   };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: API_URL, token: TOKEN, project_id: PROJECT_ID },
+    { api_url: API_URL, token: TOKEN, project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", project_id: PROJECT_ID },
     fsLike,
   );
   await writePng(cwdDir, "still.png", "mode-bytes");

@@ -79,6 +79,8 @@ function problemCode(body: unknown): string | undefined {
 export interface ApiClientOptions {
   transport: Transport;
   token?: string;
+  /** Fixed for this client; identity credentials require an explicit target. */
+  projectId?: string;
   /** `--request-id`: the X-Request-ID of the invocation's first HTTP request, and its invocation_id. */
   requestId?: string;
   /** Shares request-id state across every client of one invocation; overrides `requestId`. */
@@ -129,6 +131,7 @@ export class ApiClient {
   readonly requestIds: RequestIds;
   readonly idempotencyKey: string;
   private readonly token?: string;
+  private readonly projectId?: string;
   private readonly transport: Transport;
   private readonly timeoutMs: number;
   private readonly creditsOwner?: object;
@@ -141,6 +144,7 @@ export class ApiClient {
     this.writeRecovery = options.writeRecovery;
     this.requestedKey = options.idempotencyKey;
     this.token = options.token;
+    this.projectId = options.projectId;
     this.timeoutMs = options.timeoutMs ?? 30_000;
     this.creditsOwner = options.creditsOwner;
     this.logger = options.logger ?? loggerOf({});
@@ -172,6 +176,7 @@ export class ApiClient {
     };
     if (this.token) {
       headers.authorization = `Bearer ${this.token}`;
+      if (this.projectId) headers["screenrig-project"] = this.projectId;
     }
     if (idempotent) {
       headers["idempotency-key"] = idempotencyKey ?? this.idempotencyKey;
@@ -444,7 +449,7 @@ export function requireToken(token: string | undefined): string {
     throw new CliError(
       makeProblem("unauthenticated", "Credential unavailable", 401, "This installation has no durable agent credential.", {
         next: {
-          command: "screenrig agent enroll --email ADDRESS",
+          command: "screenrig agent enroll --email ADDRESS --organization NAME",
           reason: "Enrollment is explicit. Create the first agent, then retry the original command.",
         },
       }),

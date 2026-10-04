@@ -3,6 +3,7 @@ import { registerGlobalOptions } from "./globals.js";
 import type { CommandActionBinder } from "./types.js";
 import type { Command } from "commander";
 import { registerProjectCommands } from "./project.js";
+import { registerOrganizationCommands } from "./organization.js";
 import { registerInvitationCommands } from "./invitations.js";
 import { registerAdsCommands } from "./ads.js";
 import { registerBillingCommands } from "./billing.js";
@@ -30,6 +31,7 @@ import { registerRecoveryCommands } from "./recovery.js";
 export function registerCommands(root: Command, bind: CommandActionBinder): void {
   registerGlobalOptions(root);
   registerProjectCommands(root, bind);
+  registerOrganizationCommands(root, bind);
   registerInvitationCommands(root, bind);
   registerAdsCommands(root, bind);
   registerBillingCommands(root, bind);

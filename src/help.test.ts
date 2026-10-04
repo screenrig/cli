@@ -17,7 +17,7 @@ test("root help is compact and every command is discoverable through immediate c
   const root = commandHelp();
   const commanderHelp = root.usage.split(/\n\nAll commands:\n/)[0]!;
   // Service status and support add two immediate root groups.
-  assert.ok(commanderHelp.split("\n").length <= 42);
+  assert.ok(commanderHelp.split("\n").length <= 47);
   assert.doesNotMatch(root.usage, /localhost|log_socket|--token/);
   const discovered: string[] = [];
   function visit(path: string[]): void {
@@ -38,6 +38,16 @@ test("root help is compact and every command is discoverable through immediate c
     "recovery list",
     "recovery show",
     "recovery reconcile",
+    "project list",
+    "organization list",
+    "organization rename",
+    "project create",
+    "project use",
+    "project moves",
+    "project move",
+    "project transfer-owner",
+    "project deletion-preview",
+    "project delete",
     "project show",
     "project capabilities",
     "project rename",
@@ -81,6 +91,7 @@ test("root help is compact and every command is discoverable through immediate c
     "agent connect",
     "agent status",
     "agent disconnect",
+    "agent revoke-identity",
     "dashboard open",
     "dashboard reset-sign-in",
     "app pack",

@@ -1,5 +1,6 @@
 import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
 import type { AgentCapability } from "./adapters/protocol.js";
+import { isResourceID } from "./generated/resource-ids.js";
     import path from "node:path";
     import type { OperationLogger } from "./log/types.js";
     import { configError } from "./problems.js";
@@ -7,6 +8,19 @@ import type { AgentCapability } from "./adapters/protocol.js";
     export interface ScreenRigConfig {
       api_url: string;
       token?: string;
+      /** Global identity; never used as an implicit project credential. */
+      identity_token?: string;
+      identity_exchange?: { idempotency_key: string; project_id?: string; credential_hash: string; started_at: string };
+      /** Identity-scoped creates made without a current project. */
+      identity_writes?: ScreenRigConfig["pending_writes"];
+      /** Enrollment provenance, saved only from a successful Screens delivery. */
+      enrollment_project?: { project_id: string; agent_id: string };
+      /** Cleanup is independent of a completed connection and can be resumed. */
+      enrollment_cleanup?: { project_id: string; destination_project_id: string; agent_id: string; connection_id: string };
+      /** Credentials and retry state scoped by verified project ID. */
+      projects?: Record<string, StoredProjectState>;
+      organization_id?: string;
+      organization_name?: string;
       /** Path to an already-listening AF_UNIX socket for NDJSON operation logs. */
       log_socket?: string;
       project_id?: string;
@@ -21,6 +35,10 @@ import type { AgentCapability } from "./adapters/protocol.js";
         revoked_at?: string;
       };
       agent_connection?: {
+        /** Exact requested project and identity, fixed until this request ends. */
+        project_id?: string;
+        identity_hash?: string;
+        pending_token?: string;
         private_jwk: {
           kty: "OKP";
           crv: "X25519";
@@ -42,6 +60,7 @@ import type { AgentCapability } from "./adapters/protocol.js";
         email?: string;
         /** Exact project-name input bound to this enrollment's idempotency key. */
         project_name?: string;
+        organization?: string;
         /**
          * Enrollment purpose chosen once. A resumed enrollment reuses it so the
          * same idempotency key cannot change intent into a conflicting request.
@@ -70,6 +89,10 @@ import type { AgentCapability } from "./adapters/protocol.js";
       pending_writes?: Record<string, { idempotency_key: string; created_at: string; command?: string; supersede?: string }>;
       updated_at?: string;
     }
+
+    export type StoredProjectState = Pick<ScreenRigConfig,
+      "token" | "project_name" | "organization_id" | "organization_name" |
+      "screen_provision" | "browser_setup" | "media_generate" | "pending_writes">;
 
     export const DEFAULT_API_URL = "https://api.screenrig.ai";
     export const LOCAL_DEV_API_URL = "http://api.screenrig.localhost:8088";
@@ -351,6 +374,11 @@ import type { AgentCapability } from "./adapters/protocol.js";
       token?: string;
       projectId?: string;
       projectName?: string;
+      organizationId?: string;
+      organizationName?: string;
+      identityToken?: string;
+      /** Invocation-only scope; never persisted as project authority. */
+      identityWriteScope?: boolean;
       agentId?: string;
       enrollment?: ScreenRigConfig["enrollment"];
       agentConnection?: ScreenRigConfig["agent_connection"];
@@ -429,16 +457,23 @@ import type { AgentCapability } from "./adapters/protocol.js";
 
       let token: string | undefined;
       let tokenSource: ResolvedConfig["source"]["token"] = "none";
-      if (file?.token) {
-        token = file.token;
+      const selectedId = typeof options.flags["project-id"] === "string" ? options.flags["project-id"] : file?.project_id;
+      if (options.flags["project-id"] !== undefined && !isResourceID(selectedId, "project")) throw configError("--project-id must be a project ID from project list.");
+      const selected = selectedId && selectedId !== file?.project_id ? file?.projects?.[selectedId] : file;
+      if (selectedId && !selected) throw configError("This project is not cached. Run project use ID to select an accessible project.");
+      if (selected?.token || (selectedId && file?.identity_token)) {
+        token = selected?.token ?? file?.identity_token;
         tokenSource = "config";
       }
       const logSocket = await validateLogSocketPath(file?.log_socket, options.fs);
       return {
         apiUrl: apiUrl.replace(/\/+$/, ""),
         token,
-        projectId: file?.project_id,
-        projectName: file?.project_name,
+        projectId: selectedId,
+        projectName: selected?.project_name,
+        organizationId: selected?.organization_id,
+        organizationName: selected?.organization_name,
+        identityToken: file?.identity_token,
         agentId: file?.agent_id,
         enrollment: file?.enrollment,
         agentConnection: file?.agent_connection,

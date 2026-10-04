@@ -84,7 +84,7 @@ test("revision aliases normalize, but duplicate spellings fail", () => {
 
 test("stdin validation and editable output need no jq or metadata stripping", async t => {
  const dir=await mkdtemp('/tmp/playlist-workflows-'); t.after(()=>rm(dir,{recursive:true,force:true}));
- const config=dir+'/config.json'; await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',token:'test-token'}),{mode:0o600});
+ const config=dir+'/config.json'; await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',project_id:'prj_AAAAAAAAAAAAAAAAAAAAAAAA',project_name:'Screens',organization_id:'org_AAAAAAAAAAAAAAAAAAAAAAAA',organization_name:'Example organization',token:'test-token'}),{mode:0o600});
  async function invoke(argv:string[], transport=new FakeTransport(), input=JSON.stringify(document())) {
   let out=''; const code=await run({...processRuntime(),argv:['--config',config,...argv],env:{},cwd:()=>dir,transport,stdin:Readable.from([input]),isStdinTty:()=>false,stdout:new Writable({write(c,e,done){out+=c;done();}}),stderr:new Writable({write(c,e,done){done();}})});
   return {code,body:JSON.parse(out)};
@@ -171,7 +171,7 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) for (const revision 
 
 test("publish --no-wait returns after assignment and a wait warning explains the next step",async t=>{
  const dir=await mkdtemp('/tmp/publish-cli-'); t.after(()=>rm(dir,{recursive:true,force:true}));
- const config=dir+'/config.json'; await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',token:'test-token'}),{mode:0o600});
+ const config=dir+'/config.json'; await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',project_id:'prj_AAAAAAAAAAAAAAAAAAAAAAAA',project_name:'Screens',organization_id:'org_AAAAAAAAAAAAAAAAAAAAAAAA',organization_name:'Example organization',token:'test-token'}),{mode:0o600});
  await writeFile(dir+'/lobby.json',JSON.stringify(document()));
  let assigned=false;
  const transport=new FakeTransport()
@@ -202,7 +202,7 @@ test("publish checks the expected screen revision before creating a playlist",as
 
 test("init CLI writes a reusable document and prompt-file preserves exact text", async t => {
  const dir=await mkdtemp('/tmp/authoring-commands-');t.after(()=>rm(dir,{recursive:true,force:true}));
- const config=dir+'/config.json';await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',token:'test-token'}),{mode:0o600});
+ const config=dir+'/config.json';await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',project_id:'prj_AAAAAAAAAAAAAAAAAAAAAAAA',project_name:'Screens',organization_id:'org_AAAAAAAAAAAAAAAAAAAAAAAA',organization_name:'Example organization',token:'test-token'}),{mode:0o600});
  const transport=new FakeTransport().on('GET','/api/v1/media/med_IMAGE',()=>response(media[0])).on('GET','/api/v1/media/med_VIDEO',()=>response(media[1]));
  async function invoke(argv:string[], input?:string) {
   let out=''; const code=await run({...processRuntime(),argv:['--config',config,...argv],env:{},cwd:()=>dir,transport,stdin:Readable.from([input??'']),isStdinTty:()=>false,stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
@@ -273,7 +273,7 @@ test("publish recovery arguments preserve paths with spaces without exposing URL
 for (const prefix of ["", "development_", "qa_", "stage_"]) test(`mixed preparation ${prefix || "production"} carries IDs unchanged`, async t => {
  const dir = await mkdtemp('/tmp/prepare mixed-'); t.after(() => rm(dir, {recursive:true,force:true}));
  const config = dir + '/config.json';
- await writeFile(config, JSON.stringify({api_url:'https://api.screenrig.ai',token:'test-token'}), {mode:0o600});
+ await writeFile(config, JSON.stringify({api_url:'https://api.screenrig.ai',project_id:'prj_AAAAAAAAAAAAAAAAAAAAAAAA',project_name:'Screens',organization_id:'org_AAAAAAAAAAAAAAAAAAAAAAAA',organization_name:'Example organization',token:'test-token'}), {mode:0o600});
  let mediaState = "ready", targetId = `${prefix}scr_TEST`;
  const transport = new FakeTransport()
   .on('GET',`/api/v1/screens/${prefix}scr_TEST`,()=>response({id:targetId,revision:7,observation:{surfaces:[{width:1080,height:1920}]}}))
@@ -308,7 +308,7 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) test(`mixed preparat
 
 test("file preparation uses upload readiness and protects existing output before remote writes", async t => {
  const dir=await mkdtemp('/tmp/prepare-upload-'); t.after(()=>rm(dir,{recursive:true,force:true}));
- const config=dir+'/config.json'; await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',token:'test-token'}),{mode:0o600});
+ const config=dir+'/config.json'; await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',project_id:'prj_AAAAAAAAAAAAAAAAAAAAAAAA',project_name:'Screens',organization_id:'org_AAAAAAAAAAAAAAAAAAAAAAAA',organization_name:'Example organization',token:'test-token'}),{mode:0o600});
  await writeFile(dir+'/poster.mp4',Buffer.from([0,0,0,24,102,116,121,112]));
  const transport=memoryBackend();
  let puts=0;
@@ -335,7 +335,7 @@ test("file preparation uses upload readiness and protects existing output before
 
 test("file preparation recovers from an interrupted run: empty output is replaced and uploaded media is reused", async t => {
  const dir=await mkdtemp('/tmp/prepare-resume-'); t.after(()=>rm(dir,{recursive:true,force:true}));
- const config=dir+'/config.json'; await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',token:'test-token'}),{mode:0o600});
+ const config=dir+'/config.json'; await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',project_id:'prj_AAAAAAAAAAAAAAAAAAAAAAAA',project_name:'Screens',organization_id:'org_AAAAAAAAAAAAAAAAAAAAAAAA',organization_name:'Example organization',token:'test-token'}),{mode:0o600});
  await writeFile(dir+'/poster.mp4',Buffer.from([0,0,0,24,102,116,121,112]));
  // What an interrupted run of an earlier version left behind.
  await writeFile(dir+'/prepared.json','');
@@ -360,7 +360,7 @@ for (const sameFile of [false, true]) for (const explicitKey of [false, true]) {
   const dir = await mkdtemp('/tmp/prepare-idempotency-');
   t.after(() => rm(dir, { recursive: true, force: true }));
   const config = dir + '/config.json';
-  await writeFile(config, JSON.stringify({ api_url: 'https://api.screenrig.ai', token: 'test-token' }), { mode: 0o600 });
+  await writeFile(config, JSON.stringify({ api_url: 'https://api.screenrig.ai', project_id: 'prj_AAAAAAAAAAAAAAAAAAAAAAAA', project_name: 'Screens', organization_id: 'org_AAAAAAAAAAAAAAAAAAAAAAAA', organization_name: 'Example organization', token: 'test-token' }), { mode: 0o600 });
   await writeFile(dir + '/first.mp4', Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
   await writeFile(dir + '/second.mp4', Buffer.from([0, 0, 0, 24, 102, 116, 121, 112, 1]));
   const declarations = new Map<string, { body: string; response: ReturnType<typeof response> }>();

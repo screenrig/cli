@@ -1,3 +1,4 @@
+import { projectConfigFor, withProjectConfig, assertProjectCredential } from "./project-state.js";
 import { readConfigFile, withConfigLock, writeConfigAtomic, type ResolvedConfig } from "./config.js";
 import { isValidIdempotencyKey, newIdempotencyKey } from "./ids.js";
 import { usageError } from "./problems.js";
@@ -24,7 +25,9 @@ export async function provisionRetryState(options: {
     options.runtime.fs,
     { sleep: options.runtime.sleep, now: () => options.runtime.now().getTime() },
     async () => {
-      const current = await readConfigFile(options.resolved.configPath, options.runtime.fs);
+      const stored = await readConfigFile(options.resolved.configPath, options.runtime.fs);
+      const current = stored ? projectConfigFor(stored, options.resolved) : undefined;
+      if (current) assertProjectCredential(current, options.resolved);
       if (current?.screen_provision) {
         if (!sameRequest(current.screen_provision, options.label)) {
           throw usageError("A browser provisioning retry is pending. Retry the same label before creating another screen.");
@@ -40,11 +43,11 @@ export async function provisionRetryState(options: {
         idempotency_key: idempotencyKey,
         ...(options.label ? { label: options.label } : {}),
       };
-      await writeConfigAtomic(options.resolved.configPath, {
+      await writeConfigAtomic(options.resolved.configPath, withProjectConfig(stored ?? { api_url: options.resolved.apiUrl }, options.resolved, {
         ...(current ?? { api_url: options.resolved.apiUrl }),
         screen_provision: state,
         updated_at: options.runtime.now().toISOString(),
-      }, options.runtime.fs);
+      }), options.runtime.fs);
       return state;
     },
   );
@@ -60,10 +63,12 @@ export async function clearProvisionRetryState(
     runtime.fs,
     { sleep: runtime.sleep, now: () => runtime.now().getTime() },
     async () => {
-      const current = await readConfigFile(resolved.configPath, runtime.fs);
+      const stored = await readConfigFile(resolved.configPath, runtime.fs);
+      const current = stored ? projectConfigFor(stored, resolved) : undefined;
+      if (current) assertProjectCredential(current, resolved);
       if (!current || current.screen_provision?.idempotency_key !== idempotencyKey) return;
       const { screen_provision: _complete, ...complete } = current;
-      await writeConfigAtomic(resolved.configPath, complete, runtime.fs);
+      await writeConfigAtomic(resolved.configPath, withProjectConfig(stored!, resolved, complete), runtime.fs);
     },
   );
 }

@@ -5,6 +5,12 @@ info:
   description: >-
     Agent-operated digital signage control and runtime API.
 
+    Project routes accept the existing project bearer, or an agent identity
+    bearer with exactly one ScreenRig-Project header naming the target project.
+    Identity capabilities are bounded by that project membership on every
+    request; no default or last-used project is inferred. A project bearer
+    remains bound to its project; a supplied target must match it.
+
     Public remaining is whole credits, never millicredits. Authenticated /api/v1
     and /api/v2/playlists JSON and problem responses, and the JSON and problem
     responses of a paired Player's runtime session (including
@@ -97,6 +103,211 @@ servers:
     description: Control-plane origin
 security: []
 paths:
+  /dashboard/v1/project/deletion-preview:
+    get:
+      operationId: previewProjectDeletionDashboard
+      description: Returns current confirmation details, deletion blockers and archived devices that will be disconnected.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDeletionPreview'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+  /dashboard/v1/project/owner:
+    put:
+      operationId: transferProjectOwnerDashboard
+      description: The owner transfers ownership to a verified existing project member; this grants no new membership.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectContext'
+        default:
+          $ref: '#/components/responses/Problem'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectOwnerTransfer'
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+  /dashboard/v1/project/move:
+    post:
+      operationId: moveProjectDashboard
+      description: Owner-authorized move transfers screen occupancy and new usage to the destination payer atomically; historical charges keep their payer.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectContext'
+        default:
+          $ref: '#/components/responses/Problem'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectMove'
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+  /dashboard/v1/project/moves:
+    get:
+      operationId: allowedProjectMovesDashboard
+      description: Lists destinations the owner administers or whose verified domain matches their verified email.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMoveDestinations'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+  /api/v1/projects:
+    get:
+      operationId: listAgentProjects
+      description: Lists only the identity’s active project memberships, with organization and owner context.
+      security:
+      - agentIdentityBearer: []
+      responses:
+        '200':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectContextList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createAgentProject
+      description: Creates a named project owned by the verified responsible person. Defaults to the current project organization; an organization name selects exactly
+        one visible match, otherwise creates a new organization. An exact idempotent retry redelivers its sealed membership credential for ten minutes. Enrollment is
+        exempt from the owner cap.
+      security:
+      - agentIdentityBearer: []
+      responses:
+        '201':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedProject'
+        default:
+          $ref: '#/components/responses/Problem'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreate'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+  /api/v1/project/deletion-preview:
+    get:
+      operationId: previewProjectDeletionAgent
+      description: Returns current confirmation details, deletion blockers and archived devices that will be disconnected.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDeletionPreview'
+        default:
+          $ref: '#/components/responses/Problem'
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+  /api/v1/project/owner:
+    put:
+      operationId: transferProjectOwnerAgent
+      description: The owner transfers ownership to a verified existing project member; this grants no new membership.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectContext'
+        default:
+          $ref: '#/components/responses/Problem'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectOwnerTransfer'
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+  /api/v1/project/move:
+    post:
+      operationId: moveProjectAgent
+      description: Owner-authorized move transfers screen occupancy and new usage to the destination payer atomically; historical charges keep their payer.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectContext'
+        default:
+          $ref: '#/components/responses/Problem'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectMove'
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+  /api/v1/project/moves:
+    get:
+      operationId: allowedProjectMovesAgent
+      description: Lists destinations the owner administers or whose verified domain matches their verified email.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMoveDestinations'
+        default:
+          $ref: '#/components/responses/Problem'
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
   /website/v1/demo-requests:
     servers: [{ url: "https://screenrig.ai" }]
     post:
@@ -205,6 +416,7 @@ paths:
         "200": { description: "Cookie set and saved demo request returned.", content: { application/json: { schema: { $ref: "#/components/schemas/DemoResult" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/invitations:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: createInvitations
       description: Creates member or ad-buyer invitations. Email delivery never returns a credential. Link delivery is member-only and returns one URL, including on
@@ -275,6 +487,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
   /api/v1/invitations/{id}/revoke:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: revokeInvitation
       description: Revokes an outstanding invitation. An accepted invitation returns invitation_consumed.
@@ -703,6 +916,29 @@ paths:
                 $ref: '#/components/schemas/DashboardProjectList'
         default:
           $ref: '#/components/responses/Problem'
+    post:
+      operationId: createDashboardProject
+      description: Creates a named project owned by the signed-in verified person, in the chosen or current organization or in a new named organization. Organization
+        ID and organization name are mutually exclusive. The ten-free-project creation cap is serialized per owner; covered creation is allowed.
+      security:
+      - dashboardSession: []
+      responses:
+        '201':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedProject'
+        default:
+          $ref: '#/components/responses/Problem'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreate'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
   /dashboard/v1/members:
     servers:
     - url: https://dashboard.screenrig.ai
@@ -721,6 +957,175 @@ paths:
                 $ref: '#/components/schemas/DashboardMemberList'
         default:
           $ref: '#/components/responses/Problem'
+  /dashboard/v1/staff/projects/{id}/deletion-preview:
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: { type: string }
+    get:
+      operationId: previewDashboardStaffProjectDeletion
+      description: Shows the current project name and revision plus the existing operator cascade counts, including bound active and archived devices. Deletion requires a separate approved project.delete request; paired devices require include_paired_screens in that exact request.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Project metadata and cascade counts, without credentials or device keys.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardStaffDeletionPreview' }
+        default: { $ref: '#/components/responses/Problem' }
+  /dashboard/v1/staff/organizations/{id}/lifecycle-preview:
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: { type: string }
+    get:
+      operationId: previewDashboardStaffOrganizationLifecycle
+      description: Shows the organization's current name and revision and up to 101 live project IDs. An approved merge binds the complete source project set, with at most 100 projects, and the destination revision. Reseller relationships require a dated end first. Deletion requires no live projects. Closure removes domain claims and retains the original wallet, recorded obligations and historical readers. A closed organization receives no new grants; a merge grants no membership and transfers no old money or charges.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Metadata to confirm deletion or a complete atomic merge.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardStaffOrganizationLifecyclePreview' }
+        default: { $ref: '#/components/responses/Problem' }
+  /dashboard/v1/staff/actions:
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+    post:
+      operationId: prepareDashboardStaffAction
+      description: Stores one normalized change for ten minutes, bound to this staff session. Preparation grants no access. Approve its request_id with a fresh staff_action passkey proof; the approval accepts no replacement change.
+      security:
+      - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DashboardStaffChange' }
+      responses:
+        '201':
+          description: The exact proposed change and its approval subject.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardStaffActionRequest' }
+        default: { $ref: '#/components/responses/Problem' }
+  /dashboard/v1/staff/actions/{id}/approve:
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: { type: string }
+    post:
+      operationId: approveDashboardStaffAction
+      description: A fresh passkey proof binds to this specific request_id. Current staff and session authority, the change, exact-retry result and permanent audit share one transaction. Development auth accepts a password proof. Completed retries recheck current staff authority before returning their original result.
+      security:
+      - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [proof]
+              properties:
+                proof: { $ref: '#/components/schemas/DashboardProof' }
+      responses:
+        '200':
+          description: The result of the approved change.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        default: { $ref: '#/components/responses/Problem' }
+  /dashboard/v1/staff/organizations:
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: listDashboardStaffOrganizations
+      security:
+      - dashboardSession: []
+      parameters:
+      - name: after
+        in: query
+        schema: { type: string, maxLength: 200 }
+      responses:
+        '200':
+          description: At most 100 organizations, including empty organizations.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardStaffOrganizationPage' }
+        default: { $ref: '#/components/responses/Problem' }
+  /dashboard/v1/staff/organizations/{id}/projects:
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: { type: string }
+    get:
+      operationId: listDashboardStaffOrganizationProjects
+      security:
+      - dashboardSession: []
+      parameters:
+      - name: after
+        in: query
+        schema: { type: string, maxLength: 200 }
+      responses:
+        '200':
+          description: At most 100 live projects with their owners.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrganizationProjectPage' }
+        default: { $ref: '#/components/responses/Problem' }
+  /dashboard/v1/session/staff-write-mode:
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+    delete:
+      tags: [Dashboard]
+      operationId: endDashboardStaffWriteMode
+      summary: End this session's approved staff write access
+      description: Removes the current write lease and records its end. A fresh approval is required to enter write mode again. Uses the dashboard cookie and same-origin mutation guard.
+      security: [{ dashboardSession: [] }]
+      responses:
+        '204': { description: Write mode ended. }
+        default: { $ref: '#/components/responses/Problem' }
+  /dashboard/v1/staff/audit:
+    servers:
+    - url: https://dashboard.screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: listDashboardStaffAudit
+      security:
+      - dashboardSession: []
+      parameters:
+      - name: after
+        in: query
+        schema: { type: string, maxLength: 200 }
+      responses:
+        '200':
+          description: At most 100 immutable staff changes, newest first. Pass next_cursor as after for older entries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardStaffAuditPage' }
+        default: { $ref: '#/components/responses/Problem' }
   /dashboard/v1/staff/feedback:
     servers:
     - url: https://dashboard.screenrig.ai
@@ -1313,10 +1718,28 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
       security: []
+  /api/v1/agent-identity/exchange:
+    post:
+      operationId: exchangeAgentIdentity
+      description: "Exchanges an active project credential with the project capability for a global identity credential, preserving the original project token. Exact retries recheck authority and return the same encrypted delivery for ten minutes. After delivery expiry, use a new Idempotency-Key. No cookie, Origin, query or body is accepted. This route does not debit the API meter."
+      security: [{ projectBearer: [] }]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { description: Identity credential delivery., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/AgentIdentityCredential" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/agent-identity/revoke:
+    post:
+      operationId: revokeAgentIdentity
+      description: "Revokes the global identity, all its identity credentials and project tokens, and its pending connections. An exact replay with a revoked identity credential succeeds without another transition. Project ownership and content remain. No cookie, Origin, query or body is accepted. This route does not debit the API meter."
+      security: [{ agentIdentityBearer: [] }]
+      responses:
+        "204": { description: Identity revoked., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } } }
+        default: { $ref: "#/components/responses/Problem" }
   /api/v1/agent-connections:
     post:
       operationId: startAgentConnection
-      description: Starts a request to connect another agent to an existing project. The human has 24 hours to approve it. The caller supplies an X25519 public JWK and receives a temporary connection credential separately from the browser approval URL. No project bearer, cookie, Origin header, query credential, or Idempotency-Key is accepted. The connection id is descriptive and never authority.
+      description: Starts a request to connect an agent to an existing project. An existing agent presents its identity bearer, optionally binding project_id to the exact target; a new agent sends no existing authority. Access is granted only when a project member explicitly approves this specific request. The human has 24 hours to approve it. The caller supplies an X25519 public JWK and receives a temporary connection credential separately from the browser approval URL. A project bearer, cookie, Origin header or query credential is refused. The connection id is descriptive and never authority.
+      security: [{}, { agentIdentityBearer: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AgentConnectionRequest" } } } }
       responses:
         "201": { description: "Temporary connection authority and safe dashboard approval URL. The temporary credential is never placed in the URL.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/AgentConnectionStart" } } } }
@@ -1337,7 +1760,7 @@ paths:
   /api/v1/agent-connections/{id}/credential:
     post:
       operationId: collectAgentCredential
-      description: Collects the exact replay-safe credential envelope after approval. The temporary connection bearer authenticates the request, while X25519, HKDF-SHA-256, and AES-256-GCM bind the envelope to the recipient key supplied at connection creation. No plaintext project bearer is returned by this route. Approval starts a fresh 24-hour delivery window so the recipient can resume after being offline. The envelope is deleted on activation, cancellation, or expiry.
+      description: Collects the exact replay-safe credential envelope after approval. The temporary connection bearer authenticates the request, while X25519, HKDF-SHA-256, and AES-256-GCM bind the envelope to the recipient key supplied at connection creation. No plaintext project bearer is returned by this route. Approval starts a fresh 24-hour delivery window so the recipient can resume after being offline. For a new identity the optional identity_credential_envelope uses the same algorithm with connection_id suffixed by :identity as its binding. An existing identity receives only the membership envelope. The envelopes are deleted on activation, cancellation, or expiry.
       security: [{ agentConnectionAuthorization: [] }]
       parameters: [{ $ref: "#/components/parameters/ResourceID" }]
       responses:
@@ -1347,9 +1770,10 @@ paths:
         "410": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/agents/self/activate:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: activateCurrentAgent
-      description: Proves successful envelope decryption and durable local storage by presenting the pending bearer. Atomically activates both the agent and token, deletes the delivery envelope, and is replay-safe with the now-active bearer. It takes no body and does not debit the API meter.
+      description: Proves successful envelope decryption and durable local storage by presenting the pending bearer. Atomically activates the project membership and its token, deletes the delivery envelope, and is replay-safe with the now-active bearer. It takes no body and does not debit the API meter.
       security: [{ pendingAgentBearer: [] }]
       responses:
         "200": { description: Active agent., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Agent" } } } }
@@ -1358,6 +1782,7 @@ paths:
         "410": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/agents/self:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: getCurrentAgent
       description: Returns the agent installation linked to the calling project bearer plus connection_ready. A project is ready when at least one member has a passkey or password. Identity status is diagnostic and does not debit the API meter.
@@ -1366,9 +1791,10 @@ paths:
         "200": { description: "Current agent and project connection readiness.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/AgentSelfStatus" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/agents/self/disconnect:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: disconnectCurrentAgent
-      description: Revokes the calling agent and its bearer without deleting the project or content. Repeating with the same cryptographically valid revoked bearer is a no-op success. Disconnecting the last active agent returns agent_lockout_risk unless allow_last_agent is explicit. Does not debit the API meter.
+      description: Revokes only the calling project membership and its project token, preserving the global identity, other memberships, project and content. Repeating with the same cryptographically valid revoked bearer is a no-op success. Disconnecting the last active agent returns agent_lockout_risk unless allow_last_agent is explicit. Does not debit the API meter.
       security: [{ revocableAgentBearer: [] }]
       requestBody: { required: false, content: { application/json: { schema: { $ref: "#/components/schemas/AgentDisconnectRequest" } } } }
       responses:
@@ -1377,6 +1803,8 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/project:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
     get:
       operationId: getProject
       description: The calling project. Does not debit the 1-credit API meter, so a zero-remaining project can still read remaining and recover. After a successful
@@ -1420,7 +1848,29 @@ paths:
                 $ref: '#/components/schemas/Project'
         default:
           $ref: '#/components/responses/Problem'
+    delete:
+      operationId: deleteProjectAgent
+      description: Requires the target membership project capability, the current name and revision, zero non-archived screens, zero obligations in its own wallet and
+        no live advertising. Queues member notices and uses the irreversible tombstone.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedProject'
+        default:
+          $ref: '#/components/responses/Problem'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectDeleteConfirmation'
   /api/v1/applications:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listApplications
       description: Lists applications newest first, at most 500 per page. Names are labels and need not be unique; address an application by id. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
@@ -1448,6 +1898,7 @@ paths:
         "202": { description: Upload accepted, headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/OperationAccepted" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/applications/{id}/releases:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: uploadApplicationRelease
       x-rate-limit-policies: [{ name: application-upload, quota: 10, windowSeconds: 60 }]
@@ -1473,6 +1924,7 @@ paths:
         "202": { description: Upload accepted, headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/OperationAccepted" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/applications/{id}:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: getApplication
       security: [{ projectBearer: [] }]
@@ -1513,6 +1965,7 @@ paths:
         "412": { description: revision_conflict — If-Match is stale; Problem.current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/operations/{id}:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: getOperation
       security: [{ projectBearer: [] }]
@@ -1521,6 +1974,7 @@ paths:
         "200": { description: Operation, content: { application/json: { schema: { $ref: "#/components/schemas/Operation" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/operations/{id}/cancel:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: cancelOperation
       security: [{ projectBearer: [] }]
@@ -1529,6 +1983,7 @@ paths:
         "200": { description: Cancelled durable operation. A current worker fence can no longer finalize it., content: { application/json: { schema: { $ref: "#/components/schemas/Operation" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v2/playlists:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listPlaylistsV2
       description: Versioned playlist list that may expose adslot pages. The v1 list refuses a page holding an ad-bearing document with version_required instead of filtering it. Pages like listPlaylists, newest first, at most 200 per page and fewer once a page holds 8 MiB of stored playlists. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
@@ -1547,6 +2002,7 @@ paths:
         "201": { description: Playlist with its adslot pages., content: { application/json: { schema: { $ref: "#/components/schemas/PlaylistV2" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v2/playlists/{id}:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: getPlaylistV2
       security: [{ projectBearer: [] }]
@@ -1571,6 +2027,7 @@ paths:
         "204": { description: Playlist tombstoned. }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/playlists:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listPlaylists
       description: Lists playlists newest first, at most 200 per page and fewer once a page holds 8 MiB of stored playlists (a page always holds at least one). next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page. Authenticated /api/v1 control-plane read; costs 1 credit per page.
@@ -1594,7 +2051,7 @@ paths:
         "201": { description: Playlist, content: { application/json: { schema: { $ref: "#/components/schemas/Playlist" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/playlists/{id}:
-    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ResourceID" }]
     get:
       operationId: getPlaylist
       security: [{ projectBearer: [] }]
@@ -1617,7 +2074,7 @@ paths:
         "204": { description: Deleted }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/comment/screen/{id}:
-    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ResourceID" }]
     get:
       operationId: getScreenComments
       description: >-
@@ -1652,7 +2109,7 @@ paths:
         "204": { description: Unset }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/comment/playlist/{id}:
-    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ResourceID" }]
     get:
       operationId: getPlaylistComments
       description: >-
@@ -1684,7 +2141,7 @@ paths:
         "204": { description: Unset }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/comment/playlist/{id}/page/{page_id}:
-    parameters: [{ $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/PlaylistPageID" }]
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ResourceID" }, { $ref: "#/components/parameters/PlaylistPageID" }]
     get:
       operationId: getPlaylistPageComments
       description: >-
@@ -1718,6 +2175,7 @@ paths:
         "204": { description: Unset }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listScreens
       description: Default list returns pairing_pending and active screens. Pass state=archived to list archived screens only. Pass tag to list only screens whose tags contain that exact tag; untagged screens are omitted when the filter is present. Screens are newest first, at most 500 per page. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
@@ -1727,6 +2185,7 @@ paths:
         "200": { description: Screens, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenList" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/project/browser-links/claim:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: claimBrowserLink
       x-rate-limit-policies: [{ name: browser-link-claim-project, quota: 20, windowSeconds: 3600 }, { name: browser-link-claim-token, quota: 5, windowSeconds: 3600 }, { name: browser-link-claim-ip, quota: 10, windowSeconds: 3600 }]
@@ -1746,6 +2205,7 @@ paths:
         "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/pair:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: pairScreen
       x-rate-limit-policies: [{ name: pairing-claim-project, quota: 30, windowSeconds: 60 }, { name: pairing-claim-ip, quota: 30, windowSeconds: 60 }]
@@ -1765,6 +2225,7 @@ paths:
         "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/provision:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: provisionScreen
       x-rate-limit-policies: [{ name: screen-provision-project, quota: 20, windowSeconds: 3600 }, { name: screen-provision-token, quota: 5, windowSeconds: 3600 }, { name: screen-provision-ip, quota: 10, windowSeconds: 3600 }]
@@ -1784,6 +2245,7 @@ paths:
         "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/actions:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: applyScreenActions
       x-rate-limit-policies: [{ name: screen-actions-project, quota: 30, windowSeconds: 60 }, { name: screen-actions-ip, quota: 60, windowSeconds: 60 }]
@@ -1858,7 +2320,7 @@ paths:
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}:
-    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ResourceID" }]
     get:
       operationId: getScreen
       description: Returns pairing_pending, active, and archived screens. Deleted screens are not found.
@@ -1893,6 +2355,7 @@ paths:
         "412": { description: revision_conflict — If-Match is stale; Problem.current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/public-id/rotate:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: rotateScreenPublicId
       security: [{ projectBearer: [] }]
@@ -1901,6 +2364,7 @@ paths:
         "200": { description: "Public URL credential rotated; player public-key enrollment preserved. Every runtime session is invalidated by the new content_access_generation and the live desired and active grants are reissued at that generation for their unchanged manifest revision, so a paired player that re-mints its session keeps authorizing the content it is already showing.", content: { application/json: { schema: { $ref: "#/components/schemas/Screen" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/recovery/confirm:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: confirmScreenRecovery
       description: >-
@@ -1939,6 +2403,7 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/archive:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: archiveScreen
       description: Hides the screen from the default list and clears the live glass to the "Screen archived" status. Does not unbind the player public key. Releases screen_count quota.
@@ -1952,6 +2417,7 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/unarchive:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: unarchiveScreen
       description: Restores an archived screen to the default list and remints a normal manifest. Must pass screen admission. Does not change the bound public key.
@@ -1966,6 +2432,7 @@ paths:
         "413": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/reload:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: reloadScreen
       x-rate-limit-policies: [{ name: reload-project, quota: 600, windowSeconds: 60 }, { name: reload-screen, quota: 6, windowSeconds: 60 }, { name: reload-ip, quota: 60, windowSeconds: 60 }]
@@ -1996,7 +2463,7 @@ paths:
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/playlist-schedule:
-    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ResourceID" }]
     get:
       operationId: getScreenPlaylistSchedule
       description: >-
@@ -2076,7 +2543,7 @@ paths:
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/takeover:
-    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ResourceID" }]
     post:
       operationId: setScreenTakeover
       x-rate-limit-policies: [{ name: screen-control-project, quota: 600, windowSeconds: 60 }, { name: screen-control-screen, quota: 20, windowSeconds: 60 }, { name: screen-control-ip, quota: 60, windowSeconds: 60 }]
@@ -2133,6 +2600,7 @@ paths:
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/reboot:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: rebootScreen
       x-rate-limit-policies: [{ name: reboot-project, quota: 600, windowSeconds: 60 }, { name: reboot-screen, quota: 2, windowSeconds: 600 }, { name: reboot-ip, quota: 60, windowSeconds: 60 }]
@@ -2163,6 +2631,7 @@ paths:
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/display:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: setScreenDisplay
       x-rate-limit-policies: [{ name: display-project, quota: 600, windowSeconds: 60 }, { name: display-screen, quota: 10, windowSeconds: 60 }, { name: display-ip, quota: 60, windowSeconds: 60 }]
@@ -2220,7 +2689,7 @@ paths:
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/display-schedule:
-    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ResourceID" }]
     get:
       operationId: getScreenDisplaySchedule
       description: Returns display_schedule (null when none) and the screen's display state. The ETag is the screen revision.
@@ -2278,6 +2747,7 @@ paths:
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/toast:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: postScreenToast
       x-rate-limit-policies: [{ name: toast-project, quota: 600, windowSeconds: 60 }, { name: toast-screen, quota: 20, windowSeconds: 60 }, { name: toast-ip, quota: 60, windowSeconds: 60 }]
@@ -2308,6 +2778,7 @@ paths:
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/storage-forecast:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: forecastScreenStorage
       x-rate-limit-policies: [{ name: storage-forecast-project, quota: 60, windowSeconds: 60 }, { name: storage-forecast-screen, quota: 30, windowSeconds: 60 }, { name: storage-forecast-ip, quota: 60, windowSeconds: 60 }]
@@ -2338,6 +2809,7 @@ paths:
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/screenshot:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: requestScreenScreenshot
       x-rate-limit-policies: [{ name: screenshot-screen, quota: 10, windowSeconds: 60 }, { name: screenshot-project, quota: 30, windowSeconds: 60 }, { name: screenshot-ip, quota: 30, windowSeconds: 60 }]
@@ -2396,6 +2868,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/screenshot/status:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: getScreenScreenshotStatus
       description: >-
@@ -2416,6 +2889,7 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/events:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listEvents
       description: >-
@@ -2432,6 +2906,7 @@ paths:
         "200": { description: Durable events, content: { application/json: { schema: { $ref: "#/components/schemas/EventList" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/events/stream:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: streamEvents
       description: >-
@@ -2450,6 +2925,7 @@ paths:
         "402": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/project/capabilities:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: getProjectCapabilities
       description: The calling project's plan, independent advertiser/screens flags with their revision, and the derived effective capability set. Never reflects a client claim; an unknown plan fails closed as forbidden.
@@ -2459,6 +2935,7 @@ paths:
         "403": { description: "forbidden - the project plan is not in the catalog.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/billing/balance:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: getBillingBalance
       description: The calling project's source-aware balance snapshot. All millicredit amounts are canonical decimal strings. It is a snapshot, not authority to pay; rails_available is false while card, tax and cash-out rail are unavailable.
@@ -2467,6 +2944,7 @@ paths:
         "200": { description: Balance snapshot., content: { application/json: { schema: { $ref: "#/components/schemas/BillingBalance" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/billing/statement:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: getBillingStatement
       description: Stable cursor pagination over immutable posted journal entries for the calling project. Holds are not posted entries. Corrections link to the original event instead of rewriting it. There is no arbitrary grant or payout mutation on this surface.
@@ -2479,6 +2957,7 @@ paths:
         "400": { description: "invalid_request - limit is out of range.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/network:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: getAdvertisingNetwork
       description: The calling seller's one network, including its resolved ScreenRig serving fee. Sellers cannot change that fee.
@@ -2496,6 +2975,7 @@ paths:
         "403": { description: "forbidden - the project lacks screen capability or has an unknown plan.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/network/rate:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: setAdvertisingDefaultRate
       description: Sets the seller's project default rate per 15 seconds of completed playback. A change that alters an accepted campaign's effective rate pauses that whole campaign with price_change_pending; a masked or no-op change does not. If-Match carries the network revision.
@@ -2507,6 +2987,7 @@ paths:
         "412": { description: "revision_conflict - If-Match is stale.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/inventory:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listAdvertisingInventory
       description: The calling seller's opted-in inventory.
@@ -2515,6 +2996,7 @@ paths:
         "200": { description: Inventory., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingInventoryList" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/inventory/{screen_id}:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     put:
       operationId: putAdvertisingInventory
       description: Upserts one owned screen's inventory. Verifies screen ownership. A rate override of null restores inheritance, not zero. A change that alters an accepted campaign's effective rate pauses that campaign.
@@ -2527,6 +3009,7 @@ paths:
         "412": { description: "revision_conflict.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/slots:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listAdvertisingSlots
       security: [{ projectBearer: [] }]
@@ -2542,6 +3025,7 @@ paths:
         "201": { description: Slotslot., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingSlot" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/slots/{id}:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: updateAdvertisingSlot
       description: Updates one seller slot. If-Match carries the slot revision. A rate override change re-runs the pricing fence.
@@ -2553,6 +3037,7 @@ paths:
         "412": { description: "revision_conflict.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/memberships:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listAdvertisingMemberships
       security: [{ projectBearer: [] }]
@@ -2560,6 +3045,7 @@ paths:
         "200": { description: Memberships., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingMembershipList" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/memberships/{id}:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: updateAdvertisingMembership
       description: Explicit seller policy/scope edit. An active membership is changed here, never by sending a second invitation. Scope changes stop new selection; financial history is preserved.
@@ -2571,6 +3057,7 @@ paths:
         "412": { description: "revision_conflict.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/memberships/{id}/revoke:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: revokeAdvertisingMembership
       description: Revokes one membership. Stops new selection for that network; it does not clear the advertiser flag, other memberships, or settled history.
@@ -2580,6 +3067,7 @@ paths:
         "200": { description: Revoked membership., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingMembership" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/networks:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listAdvertisingJoinedNetworks
       description: Networks the calling advertiser currently belongs to, with the scope and review policy it was granted. Screen count is not a guaranteed impression count.
@@ -2589,6 +3077,7 @@ paths:
         "403": { description: "forbidden - the project lacks the advertiser flag.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/networks/{seller_project_id}/inventory:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listAdvertisingJoinedInventory
       description: Opted-in inventory and reusable slots inside the caller's membership. Never exposes the seller's screenshots, playlists, or project-wide data.
@@ -2598,6 +3087,7 @@ paths:
         "200": { description: Permitted inventory and slots., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingJoinedInventory" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/creatives:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listAdvertisingCreatives
       security: [{ projectBearer: [] }]
@@ -2614,6 +3104,7 @@ paths:
         "201": { description: Creative., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCreative" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/creatives/{id}:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: getAdvertisingCreative
       security: [{ projectBearer: [] }]
@@ -2622,6 +3113,7 @@ paths:
         "200": { description: Creative., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCreative" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/campaigns:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listAdvertisingCampaigns
       security: [{ projectBearer: [] }]
@@ -2637,6 +3129,7 @@ paths:
         "201": { description: Draft campaign., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaign" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/campaigns/{id}:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: getAdvertisingCampaign
       security: [{ projectBearer: [] }]
@@ -2655,6 +3148,7 @@ paths:
         "412": { description: "revision_conflict.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/campaigns/{id}/quote:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: quoteAdvertisingCampaign
       description: Prices the campaign's current effective rates, formats, durations, flight and caps before activation. The quote is time-bounded and becomes stale when any pricing generation or effective rate changes.
@@ -2665,6 +3159,7 @@ paths:
         "412": { description: "revision_conflict.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/campaigns/{id}/activate:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: activateAdvertisingCampaign
       description: Explicitly accepts the named current quote and activates the campaign. Atomically checks ownership, membership, quote expiry, rate revisions, accepted scope and same-project denial, then records purchase terms. No wallet debit and no seller revenue occur from accepting terms. The same key with the same body replays; a changed body is a conflict.
@@ -2676,6 +3171,7 @@ paths:
         "409": { description: "quote_stale or self_deal or resource_conflict.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/campaigns/{id}/pause:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: pauseAdvertisingCampaign
       description: Pauses new reservations for this campaign. Already-started valid ads normally finish and are charged on completion.
@@ -2685,6 +3181,7 @@ paths:
         "200": { description: Paused campaign., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingCampaign" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/campaigns/{id}/resume:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: resumeAdvertisingCampaign
       description: Resumes a manually paused campaign. It cannot clear a price_change_pending block; a top-up, schedule tick, or seller action cannot supply that consent.
@@ -2695,6 +3192,7 @@ paths:
         "409": { description: "price_change_pending - accept current rates first.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/campaigns/{id}/accept-rates:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: acceptAdvertisingRates
       description: The buyer's explicit acceptance of changed effective rates, bound to quote ID, campaign revision and current pricing generations. It atomically replaces future delivery terms, records the actor and time, and clears the sticky price-change block. Another concurrent rate change leaves the campaign paused.
@@ -2706,6 +3204,7 @@ paths:
         "409": { description: "price_change_pending or quote_stale.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/reviews:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listAdvertisingReviews
       description: Creative versions submitted to the calling seller for review. A seller sees only exact submitted creative, never the buyer's library.
@@ -2714,6 +3213,7 @@ paths:
         "200": { description: Reviews., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingReviewList" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/reviews/{id}/approve:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: approveAdvertisingReview
       description: Approves one exact submitted creative revision. Approval does not choose the buyer's budget or grant access to its media library.
@@ -2723,6 +3223,7 @@ paths:
         "200": { description: Approved review., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingReview" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/reviews/{id}/reject:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: rejectAdvertisingReview
       security: [{ projectBearer: [] }]
@@ -2732,6 +3233,7 @@ paths:
         "200": { description: Rejected review., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingReview" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/reports/spend:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: getAdvertisingSpend
       description: Buyer-scoped spend and delivery counts for one campaign. Amounts are decimal mcr strings. It never exposes the seller's income, bank status, or project-wide usage.
@@ -2741,6 +3243,7 @@ paths:
         "200": { description: Spend report., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingSpendReport" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/reports/delivery:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: getAdvertisingDelivery
       description: Seller-scoped gross, serving fee and net for one window, with its own delivery evidence. It never exposes the buyer's wallet or other networks. Only authorized completed-play evidence establishes billable delivery. The window is at most 92 days; a wider window is invalid_request. When it holds more than 5000 settlements the response sets truncated, totals and counts still cover all of them and rows lists only the earliest 5000.
@@ -2752,6 +3255,7 @@ paths:
         "200": { description: Delivery report., content: { application/json: { schema: { $ref: "#/components/schemas/AdvertisingDeliveryReport" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/playback:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listPlaybackAggregates
       x-rate-limit-policies: [{ name: playback-export-project, quota: 30, windowSeconds: 60 }, { name: playback-export-ip, quota: 60, windowSeconds: 60 }]
@@ -2780,6 +3284,7 @@ paths:
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/playback/plays:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listPlaybackPlays
       x-rate-limit-policies: [{ name: playback-export-project, quota: 30, windowSeconds: 60 }, { name: playback-export-ip, quota: 60, windowSeconds: 60 }]
@@ -2828,6 +3333,7 @@ paths:
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/applications/{application_id}/kv:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listKV
       description: >-
@@ -2841,7 +3347,7 @@ paths:
         "200": { description: KV entries, content: { application/json: { schema: { $ref: "#/components/schemas/KVList" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/applications/{application_id}/kv/{key}:
-    parameters: [{ $ref: "#/components/parameters/ApplicationID" }, { name: key, in: path, required: true, schema: { type: string } }]
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ApplicationID" }, { name: key, in: path, required: true, schema: { type: string } }]
     get:
       operationId: getKV
       security: [{ projectBearer: [] }]
@@ -2864,6 +3370,7 @@ paths:
         "204": { description: Deleted }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/media:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listMedia
       description: Lists ready media newest first, at most 1000 per page. next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
@@ -2872,6 +3379,7 @@ paths:
       responses:
         "200": { description: Media, content: { application/json: { schema: { $ref: "#/components/schemas/MediaList" } } } }
   /api/v1/media/generations:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: createMediaGeneration
       description: >-
@@ -2916,6 +3424,7 @@ paths:
         "500": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/media/uploads:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: createMediaUpload
       x-rate-limit-policies: [{ name: media-upload-admission, quota: 120, windowSeconds: 60 }]
@@ -2927,6 +3436,7 @@ paths:
         "201": { description: Short-lived signed authorization for exactly one private object PUT. Send the returned method and every returned header verbatim., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/MediaUploadSession" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/media/uploads/{id}/commit:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: commitMediaUpload
       security: [{ projectBearer: [] }]
@@ -2936,7 +3446,7 @@ paths:
         "202": { description: Exact declaration persisted for asynchronous verification and immutable private publication., content: { application/json: { schema: { $ref: "#/components/schemas/Operation" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/media/{id}:
-    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ResourceID" }]
     get:
       operationId: getMedia
       security: [{ projectBearer: [] }]
@@ -2960,6 +3470,7 @@ paths:
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/media/{id}/content:
     parameters:
+      - { $ref: "#/components/parameters/ProjectTarget" }
       - { $ref: "#/components/parameters/ResourceID" }
       - { $ref: "#/components/parameters/Range" }
       - { name: If-None-Match, in: header, required: false, schema: { type: string }, description: Exact strong media SHA-256 ETag returned by this route. }
@@ -2992,6 +3503,7 @@ paths:
         "416": { description: Unsatisfiable or malformed range., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/reviews/{id}:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: getAdvertisingReview
       description: Seller detail for one review of its network. Returns the review and the exact submitted creative revision. It never exposes the buyer's other media.
@@ -3002,6 +3514,7 @@ paths:
         "404": { description: "not_found - the review is unknown to this seller.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/advertising/reviews/{id}/content:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: getAdvertisingReviewContent
       description: Streams only the exact creative revision this seller's own review refers to. Ownership stays with the buyer project; no object key or signed location is published, and no other buyer media is reachable.
@@ -3019,6 +3532,7 @@ paths:
         "200": { description: Metadata only., headers: { Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/feedback/bugs:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listBugReports
       description: >-
@@ -3052,6 +3566,7 @@ paths:
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/feedback/features:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listFeatureRequests
       description: >-
@@ -3085,6 +3600,7 @@ paths:
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/webhooks:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listWebhooks
       description: >-
@@ -3124,7 +3640,7 @@ paths:
         "409": { description: webhook_limit_reached or idempotency_mismatch., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/webhooks/{id}:
-    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ResourceID" }]
     get:
       operationId: getWebhook
       description: Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs.
@@ -3165,7 +3681,7 @@ paths:
         "412": { description: revision_conflict — If-Match is stale; Problem.current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/webhooks/{id}/rotate-secret:
-    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ResourceID" }]
     post:
       operationId: rotateWebhookSecret
       description: >-
@@ -3183,7 +3699,7 @@ paths:
         "412": { description: revision_conflict — If-Match is stale; Problem.current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/webhooks/{id}/test:
-    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ResourceID" }]
     post:
       operationId: testWebhook
       x-rate-limit-policies: [{ name: webhook-test-project, quota: 20, windowSeconds: 60 }]
@@ -3201,7 +3717,7 @@ paths:
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/webhooks/{id}/deliveries:
-    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ResourceID" }]
     get:
       operationId: listWebhookDeliveries
       description: >-
@@ -4447,6 +4963,27 @@ paths:
                 $ref: '#/components/schemas/DashboardProject'
         default:
           $ref: '#/components/responses/Problem'
+    delete:
+      operationId: deleteProjectDashboard
+      description: Requires the target membership project capability, the current name and revision, zero non-archived screens, zero obligations in its own wallet and
+        no live advertising. Queues member notices and uses the irreversible tombstone.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedProject'
+        default:
+          $ref: '#/components/responses/Problem'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectDeleteConfirmation'
   /dashboard/v1/project/capabilities:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
     get:
@@ -4460,7 +4997,7 @@ paths:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
     get:
       operationId: getDashboardBillingBalance
-      description: Source-aware balance snapshot for the session project. All millicredit amounts are canonical decimal strings. It is a snapshot, not authority to pay.
+      description: Source-aware balance snapshot for the session project wallet. A covered project identifies its payer without exposing shared sources or withdrawal balances. All millicredit amounts are canonical decimal strings. It is a snapshot, not authority to pay.
       security: [{ dashboardSession: [] }]
       responses:
         "200": { description: Balance snapshot., content: { application/json: { schema: { $ref: "#/components/schemas/BillingBalance" } } } }
@@ -4475,6 +5012,44 @@ paths:
         - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100 } }
       responses:
         "200": { description: Statement page., content: { application/json: { schema: { $ref: "#/components/schemas/BillingStatement" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/organizations/{org_id}/billing/balance:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned dashboard origin }]
+    get:
+      operationId: getOrganizationBillingBalance
+      description: The organization wallet. Requires a designated organization admin or staff session. Does not expose a reseller wallet or grant project membership.
+      security: [{ dashboardSession: [] }]
+      parameters:
+        - { name: org_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Organization billing balance., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/BillingBalance" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/organizations/{org_id}/billing/statement:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned dashboard origin }]
+    get:
+      operationId: getOrganizationBillingStatement
+      description: Journal entries attributed to this organization at charge time, with project and payer identities. Moves do not transfer historical access. Entries predating recorded organization context remain in their project statements.
+      security: [{ dashboardSession: [] }]
+      parameters:
+        - { name: org_id, in: path, required: true, schema: { type: string } }
+        - { name: cursor, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100 } }
+      responses:
+        "200": { description: Organization billing statement., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/BillingStatement" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/organizations/{org_id}/billing/usage:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned dashboard origin }]
+    get:
+      operationId: getOrganizationBillingUsage
+      description: The organization allowance pool and each project share for a UTC month. Covers usage paid by this organization; other payer costs are in the organization statement.
+      security: [{ dashboardSession: [] }]
+      parameters:
+        - { name: org_id, in: path, required: true, schema: { type: string } }
+        - { name: cursor, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { name: period, in: query, required: false, schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }, description: UTC month in YYYY-MM form; defaults to the current month. }
+      responses:
+        "200": { description: Organization billing usage., headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/OrganizationBillingUsage" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/billing/payout-status:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
@@ -5472,6 +6047,7 @@ paths:
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/support/status:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: supportStatus
       security: [{ projectBearer: [] }]
@@ -5480,6 +6056,7 @@ paths:
         "200": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportStatus" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/support/conversations:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listSupportConversations
       security: [{ projectBearer: [] }]
@@ -5504,6 +6081,7 @@ paths:
         "201": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportSubmission" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/support/conversations/{id}/messages:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: listSupportMessages
       security: [{ projectBearer: [] }]
@@ -5521,6 +6099,7 @@ paths:
         "201": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportSubmission" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/support/conversations/{id}/read:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     put:
       operationId: readSupportConversation
       security: [{ projectBearer: [] }]
@@ -5531,6 +6110,7 @@ paths:
         "200": { description: Support result., content: { application/json: { schema: { $ref: "#/components/schemas/SupportRead" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/support/conversations/{id}/close:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     post:
       operationId: closeSupportConversation
       security: [{ projectBearer: [] }]
@@ -5540,6 +6120,7 @@ paths:
         "200": { description: Closed conversation., content: { application/json: { schema: { $ref: "#/components/schemas/SupportConversation" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/support/events/stream:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: streamSupportMessages
       security: [{ projectBearer: [] }]
@@ -5631,6 +6212,323 @@ paths:
       responses:
         "200": { description: Support message SSE., content: { text/event-stream: { schema: { type: string } } } }
         default: { $ref: "#/components/responses/Problem" }
+  /api/v1/organizations:
+    servers:
+    - url: https://api.screenrig.ai
+    get:
+      operationId: agentOrganizationsList
+      description: Visible organizations, including empty organizations for their admins. Names are not unique.
+      security:
+      - agentIdentityBearer: []
+      responses:
+        '200':
+          description: Organization result.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/v1/organizations/{org_id}:
+    servers:
+    - url: https://api.screenrig.ai
+    patch:
+      operationId: agentOrganizationsRename
+      description: Designated admins and agents whose verified responsible person is an admin may rename an organization.
+        No project permission or membership is granted.
+      security:
+      - agentIdentityBearer: []
+      responses:
+        '200':
+          description: Organization result.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationView'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationRename'
+  /dashboard/v1/organizations:
+    servers:
+    - url: https://dashboard.screenrig.ai
+    get:
+      operationId: dashboardOrganizationsList
+      description: Visible organizations, including empty organizations for their admins. Names are not unique.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Organization result.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /dashboard/v1/organizations/{org_id}:
+    servers:
+    - url: https://dashboard.screenrig.ai
+    patch:
+      operationId: dashboardOrganizationsRename
+      description: Designated admins and agents whose verified responsible person is an admin may rename an organization.
+        No project permission or membership is granted.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Organization result.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationView'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationRename'
+  /dashboard/v1/organizations/{org_id}/projects:
+    servers:
+    - url: https://dashboard.screenrig.ai
+    get:
+      operationId: dashboardOrganizationsProjects
+      description: Organization admins read project names, owners, status and screen counts only; this grants no project
+        access.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Organization result.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationProjectPage'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      - name: cursor
+        in: query
+        schema:
+          type: string
+          maxLength: 200
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+  /dashboard/v1/organizations/{org_id}/discovery:
+    servers:
+    - url: https://dashboard.screenrig.ai
+    get:
+      operationId: dashboardOrganizationsDiscovery
+      description: Projects elsewhere whose owners have a verified email on the exact verified domain. Contact addresses
+        and subdomains do not match, and admins cannot pull projects in.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Organization result.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationProjectPage'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      - name: cursor
+        in: query
+        schema:
+          type: string
+          maxLength: 200
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 100
+  /dashboard/v1/organizations/{org_id}/domain-challenges:
+    servers:
+    - url: https://dashboard.screenrig.ai
+    post:
+      operationId: dashboardOrganizationsStartDomain
+      description: Replace this organization's 24-hour DNS TXT challenge. Put its exact value at its returned DNS
+        name.
+      security:
+      - dashboardSession: []
+      responses:
+        '201':
+          description: Organization result.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationDomainChallenge'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationDomainInput'
+  /dashboard/v1/organizations/{org_id}/domain-verification:
+    servers:
+    - url: https://dashboard.screenrig.ai
+    post:
+      operationId: dashboardOrganizationsVerifyDomain
+      description: Verify the current unexpired challenge against DNS. Claims are unique per exact domain and organization.
+        A proof rotated during lookup is refused.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Organization result.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifiedOrganizationDomain'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationDomainProof'
+  /dashboard/v1/organizations/{org_id}/domain:
+    servers:
+    - url: https://dashboard.screenrig.ai
+    delete:
+      operationId: dashboardOrganizationsRemoveDomain
+      description: Remove the verified domain and pending challenge; future placement and domain discovery stop.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Organization result.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationDomainRemoved'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
 components:
   # Anonymous demos have their own cookie, independent of project/dashboard auth.
   headers:
@@ -5661,6 +6559,7 @@ components:
       description: Whole credits granted by the plan each UTC month.
       schema: { type: integer, minimum: 0 }
   parameters:
+    ProjectTarget: { name: ScreenRig-Project, in: header, required: false, schema: { type: string, minLength: 1, maxLength: 200 }, description: "Required with an identity bearer on every project route. Exactly one project identifier; no implicit current target. With a project bearer, must match its bound project." }
     ResourceID: { name: id, in: path, required: true, schema: { type: string } }
     PlaylistPageID: { name: page_id, in: path, required: true, schema: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, description: Playlist page id string. }
     ApplicationID: { name: application_id, in: path, required: true, schema: { type: string } }
@@ -5732,7 +6631,8 @@ components:
       description: Temporary `ScreenRig-Agent-Connect <credential>` authority returned only by connection creation. It is never accepted as a project bearer, dashboard cookie, URL parameter, or runtime credential.
     pendingAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Pending agent bearer accepted only for its own activation, plus the same active bearer for exact acknowledgement replay." }
     revocableAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active agent bearer, or the same cryptographically verified revoked bearer for an idempotent self-disconnect replay." }
-    projectBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active agent bearer for its project. Use revocableAgentBearer for self-disconnect retries after revocation. Every bearer route requires its area AgentCapability; GET reads in an area also accept reports, except the webhook list and get reads (GET /api/v1/webhooks, GET /api/v1/webhooks/{id}), which need the project capability because they return receiver URLs, and the project reads, agents/self, operations reads, feedback routes, and support routes accept any active credential. A credential lacking the route capability is refused 403 forbidden with detail 'This agent credential lacks the <name> capability.' after the command is recorded and before any credit is metered, so refusals are attributed and never billed." }
+    agentIdentityBearer: { type: http, scheme: bearer, bearerFormat: sr_live_idt, description: "Global agent identity bearer. Project routes also require ScreenRig-Project and the target membership capabilities; it grants no global project permissions. Identity self-revocation accepts its same verified revoked credential for an exact replay." }
+    projectBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active project bearer, or identity bearer with ScreenRig-Project and an active target membership. Use revocableAgentBearer for self-disconnect retries after revocation. Every bearer route requires its area AgentCapability; GET reads in an area also accept reports, except the webhook list and get reads (GET /api/v1/webhooks, GET /api/v1/webhooks/{id}), which need the project capability because they return receiver URLs, and the project reads, agents/self, operations reads, feedback routes, and support routes accept any active credential. A credential lacking the route capability is refused 403 forbidden with detail 'This agent credential lacks the <name> capability.' after the command is recorded and before any credit is metered, so refusals are attributed and never billed." }
     nativePairingAuthorization:
       type: http
       scheme: ScreenRig-Pairing
@@ -5775,6 +6675,369 @@ components:
         RateLimit: { $ref: "#/components/headers/RateLimit" }
       content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
   schemas:
+    ProjectMoveDestinations:
+      type: object
+      additionalProperties: false
+      required:
+      - organizations
+      properties:
+        organizations:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationSummary'
+    DeletedProject:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - screens
+      - paired_screens_active
+      - paired_screens_archived
+      - paired_screens_completed_pending
+      - agents
+      - media
+      - applications
+      - playlists
+      - memberships
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 200
+        screens:
+          type: integer
+          minimum: 0
+        paired_screens_active:
+          type: integer
+          minimum: 0
+        paired_screens_archived:
+          type: integer
+          minimum: 0
+        paired_screens_completed_pending:
+          type: integer
+          minimum: 0
+        agents:
+          type: integer
+          minimum: 0
+        media:
+          type: integer
+          minimum: 0
+        applications:
+          type: integer
+          minimum: 0
+        playlists:
+          type: integer
+          minimum: 0
+        memberships:
+          type: integer
+          minimum: 0
+    ProjectDeletionPreview:
+      type: object
+      additionalProperties: false
+      required:
+      - project
+      - organization
+      - devices
+      - allowed
+      properties:
+        project:
+          $ref: '#/components/schemas/Project'
+        organization:
+          $ref: '#/components/schemas/OrganizationSummary'
+        owner_user_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArchivedProjectDevice'
+        allowed:
+          type: boolean
+        reason:
+          type: string
+    ArchivedProjectDevice:
+      type: object
+      additionalProperties: false
+      required:
+      - screen_id
+      - label
+      - host
+      properties:
+        screen_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+        label:
+          type: string
+        host:
+          type: object
+          additionalProperties: false
+          required:
+          - device
+          properties:
+            platform:
+              type: string
+            device:
+              type: object
+              additionalProperties: false
+              required: []
+              properties:
+                model:
+                  type: string
+    ProjectDeleteConfirmation:
+      type: object
+      additionalProperties: false
+      required:
+      - name
+      - revision
+      properties:
+        empty_only:
+          type: boolean
+          description: Require an empty Screens project in the deletion transaction, including content, other agents or members, work and correspondence. The CLI additionally requires its saved enrollment provenance before using this cleanup guard. Omission keeps explicit member deletion.
+        name:
+          $ref: '#/components/schemas/ProjectName'
+        revision:
+          type: integer
+          minimum: 1
+    ProjectOwnerTransfer:
+      type: object
+      additionalProperties: false
+      required:
+      - user_id
+      properties:
+        user_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+    ProjectMove:
+      type: object
+      additionalProperties: false
+      required:
+      - organization_id
+      properties:
+        organization_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+    ProjectContextList:
+      type: object
+      additionalProperties: false
+      required:
+      - projects
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectContext'
+    ProjectCreate:
+      type: object
+      additionalProperties: false
+      required:
+      - name
+      properties:
+        name:
+          $ref: '#/components/schemas/ProjectName'
+        organization_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+        organization_name:
+          $ref: '#/components/schemas/ProjectName'
+    CreatedProject:
+      type: object
+      additionalProperties: false
+      required:
+      - project
+      - organization
+      properties:
+        project:
+          $ref: '#/components/schemas/Project'
+        organization:
+          $ref: '#/components/schemas/OrganizationSummary'
+        owner_user_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+        token:
+          type: string
+          description: Project bearer for the new agent membership. Delivered once or by exact retry for ten minutes; absent for person creation.
+        issuance_expires_at:
+          type: string
+          format: date-time
+    ProjectContext:
+      type: object
+      additionalProperties: false
+      required:
+      - project
+      - organization
+      properties:
+        project:
+          $ref: '#/components/schemas/Project'
+        organization:
+          $ref: '#/components/schemas/OrganizationSummary'
+        owner_user_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+    VerifiedOrganizationDomain:
+      type: object
+      additionalProperties: false
+      required:
+      - domain
+      - organization_id
+      - state
+      - verified_at
+      properties:
+        domain:
+          type: string
+        organization_id:
+          type: string
+        state:
+          type: string
+          enum:
+          - verified
+        verified_at:
+          type: string
+          format: date-time
+    OrganizationView:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - name
+      - revision
+      - admin
+      properties:
+        id:
+          type: string
+        name:
+          $ref: '#/components/schemas/ProjectName'
+        revision:
+          type: integer
+        admin:
+          type: boolean
+        verified_domain:
+          $ref: '#/components/schemas/VerifiedOrganizationDomain'
+    OrganizationList:
+      type: object
+      additionalProperties: false
+      required:
+      - organizations
+      properties:
+        organizations:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationView'
+    OrganizationProject:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - name
+      - organization_id
+      - status
+      - screen_count
+      properties:
+        id:
+          type: string
+        name:
+          $ref: '#/components/schemas/ProjectName'
+        organization_id:
+          type: string
+        owner_user_id:
+          type: string
+        status:
+          type: string
+        screen_count:
+          type: integer
+    OrganizationProjectPage:
+      type: object
+      additionalProperties: false
+      required:
+      - projects
+      - next_cursor
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationProject'
+        next_cursor:
+          type: string
+    OrganizationDomainChallenge:
+      type: object
+      additionalProperties: false
+      required:
+      - organization_id
+      - challenge_id
+      - domain
+      - name
+      - value
+      - expires_at
+      properties:
+        organization_id:
+          type: string
+        challenge_id:
+          type: string
+        domain:
+          type: string
+        name:
+          type: string
+        value:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+    OrganizationDomainInput:
+      type: object
+      additionalProperties: false
+      required:
+      - domain
+      properties:
+        domain:
+          type: string
+          minLength: 3
+          maxLength: 253
+          description: Exact DNS domain; no wildcard, URL or IP address.
+    OrganizationDomainProof:
+      type: object
+      additionalProperties: false
+      required:
+      - challenge_id
+      properties:
+        challenge_id:
+          type: string
+    OrganizationRename:
+      type: object
+      additionalProperties: false
+      required:
+      - name
+      properties:
+        name:
+          $ref: '#/components/schemas/ProjectName'
+    OrganizationDomainRemoved:
+      type: object
+      additionalProperties: false
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - removed
+    OrganizationSummary:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - name
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 200
+        name:
+          $ref: '#/components/schemas/ProjectName'
     DemoSource: { type: string, enum: [home_hero, home_paid_plans, pricing_premium, pricing_enterprise, direct] }
     DemoRequestInput:
       type: object
@@ -5850,6 +7113,12 @@ components:
           type: string
         name:
           $ref: '#/components/schemas/ProjectName'
+        owner_user_id:
+          type: string
+        organization_id:
+          type: string
+        organization_name:
+          type: string
     DashboardProjectListItem:
       type: object
       additionalProperties: false
@@ -5865,6 +7134,12 @@ components:
         last_used_at:
           type: string
           format: date-time
+        owner_user_id:
+          type: string
+        organization_id:
+          type: string
+        organization_name:
+          type: string
     DashboardProjectList:
       type: object
       additionalProperties: false
@@ -5908,6 +7183,120 @@ components:
           items:
             $ref: '#/components/schemas/DashboardMember'
           maxItems: 200
+    DashboardStaffChange:
+      type: object
+      additionalProperties: false
+      required: [action]
+      description: Only fields required by the selected action are accepted. project.write-mode requires a reason and the current session project; it grants ten minutes of staff write access, ending on a project switch, logout, staff revoke or unshadow. Every admitted project write has a permanent audit. project.write, project.write-mode-end, project.shadow and project.unshadow are audit-only actions and cannot be proposed. staff.grant and staff.revoke appoint an existing verified person by ID. person.free-cap with no free_limit restores the normal cap; organization.domain with no domain removes the claim. project.owner explicitly appoints the person and adds their project membership. Admin and owner targets must be existing verified people. organization.plan with no plan_id schedules removal; project.plan-to-organization with no plan_id moves the existing plan. Organization billing must be enabled for both; the result names the actual effective time and grant. After the billing cutover, project.plan upgrades immediately and grants the monthly difference; downgrades wait for the next UTC month and refuse excess occupancy. Before the cutover, the retained provisioning path sets the project plan immediately and the existing monthly worker grants included credit. Project-held Enterprise is accepted only before organization billing is enabled.
+      properties:
+        action:
+          type: string
+          enum: [organization.create, organization.rename, organization.admins, organization.domain, project.rename, project.move, project.owner, person.deactivate, person.reinstate, person.free-cap, organization.plan, project.plan-to-organization, project.plan, project.delete, organization.delete, organization.merge, staff.grant, staff.revoke, project.write-mode, project.write-mode-end, project.write, project.shadow, project.unshadow]
+        organization_id: { type: string }
+        project_id: { type: string }
+        user_id: { type: string }
+        name: { type: string }
+        domain: { type: string }
+        admin_user_ids: { type: array, maxItems: 100, items: { type: string } }
+        reason: { type: string, maxLength: 240 }
+        free_limit: { type: integer, minimum: 0, maximum: 10000 }
+        plan_id: { type: string, enum: [standard, premium, enterprise, staff, promo] }
+        revision: { type: integer, minimum: 1 }
+        include_paired_screens: { type: boolean, default: false }
+        target_organization_id: { type: string }
+        target_revision: { type: integer, minimum: 1 }
+        project_ids: { type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: { type: string } }
+    DashboardStaffDeletionPreview:
+      allOf:
+      - { $ref: '#/components/schemas/ProjectContext' }
+      - type: object
+        required: [counts]
+        properties:
+          counts: { $ref: '#/components/schemas/DeletedProject' }
+    DashboardStaffOrganizationLifecyclePreview:
+      type: object
+      additionalProperties: false
+      required: [organization, project_ids, can_close]
+      properties:
+        organization: { $ref: '#/components/schemas/OrganizationView' }
+        project_ids: { type: array, maxItems: 101, items: { type: string } }
+        can_close:
+          type: boolean
+          description: The source can close after its live projects are moved or deleted. Target name, chain and screen capacity constraints are rechecked by the approved merge.
+        reason: { type: string }
+    DashboardStaffActionRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, change, state, created_at, expires_at]
+      properties:
+        request_id: { type: string }
+        change: { $ref: '#/components/schemas/DashboardStaffChange' }
+        state: { type: string, enum: [pending, completed] }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+    DashboardStaffAudit:
+      type: object
+      additionalProperties: false
+      required: [audit_id, request_id, user_id, change, created_at]
+      properties:
+        audit_id: { type: string }
+        request_id: { type: string }
+        user_id: { type: string }
+        change: { $ref: '#/components/schemas/DashboardStaffChange' }
+        created_at: { type: string, format: date-time }
+        result:
+          description: Metadata outcome retained after approval delivery expiry, including the actual billing effective time and grant. Contains no proof or credentials.
+          type: object
+          additionalProperties: true
+        operation: { $ref: '#/components/schemas/DashboardStaffProjectOperation' }
+    DashboardStaffProjectOperation:
+      type: object
+      additionalProperties: false
+      required: [route, state]
+      description: Recorded before staff domain work starts. A missing completion means its outcome is unknown. Contains the registered route pattern, never a raw URL, query, body, proof or credentials. Admitted work can finish after lease expiry or revocation.
+      properties:
+        route: { type: string }
+        approval_request_id: { type: string }
+        state: { type: string, enum: [admitted, completed] }
+        status: { type: integer, minimum: 200, maximum: 599 }
+        completed_at: { type: string, format: date-time }
+    DashboardStaffWriteMode:
+      type: object
+      additionalProperties: false
+      required: [request_id, project_id, expires_at]
+      properties:
+        request_id: { type: string }
+        project_id: { type: string }
+        expires_at: { type: string, format: date-time }
+    DashboardStaffAuditPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/DashboardStaffAudit' } }
+        next_cursor: { type: string }
+    DashboardStaffOrganization:
+      allOf:
+      - { $ref: '#/components/schemas/OrganizationView' }
+      - type: object
+        required: [admin_user_ids, plan_id, policy_revision, federation_enforced]
+        properties:
+          admin_user_ids: { type: array, items: { type: string } }
+          plan_id: { type: string }
+          previous_plan_id: { type: string }
+          plan_effective_at: { type: string, format: date-time }
+          reseller_id: { type: string }
+          federation_method: { type: string }
+          federation_issuer: { type: string }
+          policy_revision: { type: integer }
+          federation_enforced: { type: boolean }
+    DashboardStaffOrganizationPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/DashboardStaffOrganization' } }
+        next_cursor: { type: string }
     DashboardStaffMember:
       type: object
       additionalProperties: false
@@ -5998,6 +7387,7 @@ components:
       - created_at
       - projects
       properties:
+        free_project_limit: { type: integer, minimum: 0, maximum: 10000, description: An explicit free-project admission cap; absence uses ten. }
         user_id:
           type: string
         display_name:
@@ -6025,6 +7415,9 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DashboardStaffUserProject'
+        managed_by_org_id:
+          type: string
+          description: Organization that manages this person through an external identity provider, when configured.
     DashboardStaffUserList:
       type: object
       additionalProperties: false
@@ -6050,6 +7443,7 @@ components:
       - projects
       - active_sessions
       properties:
+        free_project_limit: { type: integer, minimum: 0, maximum: 10000, description: An explicit free-project admission cap; absence uses ten. }
         user_id:
           type: string
         display_name:
@@ -6135,6 +7529,9 @@ components:
       - members
       - shadowed
       properties:
+        organization_id: { type: string }
+        organization_name: { type: string }
+        owner_user_id: { type: string }
         id:
           type: string
         name:
@@ -6248,6 +7645,9 @@ components:
       - agents
       - shadowed
       properties:
+        organization_id: { type: string }
+        organization_name: { type: string }
+        owner_user_id: { type: string }
         id:
           type: string
         name:
@@ -6408,10 +7808,11 @@ components:
           - invitation_accept
           - account_delete
           - staff_grant
+          - staff_action
         subject_id:
           type: string
           minLength: 1
-          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id. kind staff_grant is staff only and requires the added person's email address."
+          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id. kind staff_grant is staff only and requires the added person's email address. kind staff_action requires the specific prepared request_id."
     DashboardReauthentication:
       type: object
       additionalProperties: false
@@ -6790,6 +8191,34 @@ components:
           type: string
           pattern: ^[A-Za-z0-9_-]{43}$
           writeOnly: true
+    SignInPolicy:
+      type: object
+      additionalProperties: false
+      required:
+      - password
+      - passkey
+      - passkey_enrollment_required
+      - policy_revision
+      - federated
+      properties:
+        password:
+          type: boolean
+        passkey:
+          type: boolean
+        passkey_enrollment_required:
+          type: boolean
+        organization_id:
+          type: string
+        policy_revision:
+          type: integer
+          minimum: 0
+        federated:
+          type: boolean
+        protocol:
+          type: string
+        issuer:
+          type: string
+      description: Verified person sign-in policy. Passive defaults preserve local sign-in. An enforced organization policy directs sign-in through its identity provider.
     InvitationInspect:
       type: object
       additionalProperties: false
@@ -6822,9 +8251,11 @@ components:
           oneOf:
           - type: object
             additionalProperties: false
-            required: [name]
+            required:
+            - name
             properties:
-              name: { $ref: '#/components/schemas/ProjectName' }
+              name:
+                $ref: '#/components/schemas/ProjectName'
           - type: 'null'
           description: Null for sign-in reset; other invitation kinds identify their target project.
         network:
@@ -6874,12 +8305,25 @@ components:
               type: boolean
             password:
               type: boolean
+        sign_in_policy:
+          $ref: '#/components/schemas/SignInPolicy'
       description: Non-consuming inspection. person is null for links. Never reports signup verification state. Email modes are create_login or signed_in; links offer
         both, and resets offer reset.
       allOf:
-      - if: { properties: { kind: { const: sign_in_reset } }, required: [kind] }
-        then: { properties: { project: { type: 'null' } } }
-        else: { properties: { project: { type: object } } }
+      - if:
+          properties:
+            kind:
+              const: sign_in_reset
+          required:
+          - kind
+        then:
+          properties:
+            project:
+              type: 'null'
+        else:
+          properties:
+            project:
+              type: object
     InvitationPasskeyOptionsRequest:
       type: object
       additionalProperties: false
@@ -7134,7 +8578,7 @@ components:
           type: string
           minLength: 1
           maxLength: 80
-          default: ScreenRig CLI
+          default: Agent
         agent_type:
           type: string
           pattern: ^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$
@@ -7147,7 +8591,9 @@ components:
           maxLength: 40
         project_name:
           $ref: '#/components/schemas/ProjectName'
-
+          description: Legacy explicit project name. Omission creates Screens in a new organization.
+        organization:
+          $ref: '#/components/schemas/ProjectName'
     Project:
       type: object
       additionalProperties: false
@@ -7185,20 +8631,24 @@ components:
           type: string
           minLength: 3
           maxLength: 254
-          description: 'Required contact address supplied at enrollment, preserving its capitalization after surrounding whitespace is trimmed. Read-only: no route updates
-            it, and it is published only on an authenticated read of the caller''s own project.'
+          description: 'Required contact address supplied at enrollment, preserving its capitalization after surrounding
+            whitespace is trimmed. Read-only: no route updates it, and it is published only on an authenticated read
+            of the caller''s own project.'
         email_verified:
           type: boolean
           enum:
           - false
-          description: Always false. The address is stored unverified; enrollment queues one invitation delivery to it, but no route treats a delivery as proof of possession
-            and no flow sets this true. It is published so a later recovery feature cannot mistake an unverified string for authority. It is not an authorization factor.
+          description: Always false. The address is stored unverified; enrollment queues one invitation delivery to
+            it, but no route treats a delivery as proof of possession and no flow sets this true. It is published so
+            a later recovery feature cannot mistake an unverified string for authority. It is not an authorization factor.
         used_bytes:
           type: integer
-          description: Durable bytes the project owns across media, expanded application release trees, and application key/value entries.
+          description: Durable bytes the project owns across media, expanded application release trees, and application
+            key/value entries.
         reserved_bytes:
           type: integer
-          description: Bytes held by uploads in flight. They count against a custom storage ceiling until the upload commits or its reservation is released.
+          description: Bytes held by uploads in flight. They count against a custom storage ceiling until the upload
+            commits or its reservation is released.
         screen_count:
           type: integer
         content_limit_bytes:
@@ -7210,8 +8660,9 @@ components:
         credit_remaining:
           type: integer
           minimum: 0
-          description: Remaining prepaid credits as a whole integer. Never negative. Standard includes no monthly credit grant. Every project waives the first 10 GB of
-            bandwidth, 1 GB-month of storage, and 10,000 API or billed listen-stream taxes each UTC month.
+          description: Remaining prepaid credits as a whole integer. Never negative. Standard includes no monthly credit
+            grant. Every project waives the first 10 GB of bandwidth, 1 GB-month of storage, and 10,000 API or billed
+            listen-stream taxes each UTC month.
         created_at:
           type: string
           format: date-time
@@ -7223,8 +8674,18 @@ components:
         last_used_at:
           type: string
           format: date-time
-          description: Server-maintained instant of the project's most recent durable activity touch (authenticated Player contact). Absent until the first touch. Read-only; never authorization.
-
+          description: Server-maintained instant of the project's most recent durable activity touch (authenticated
+            Player contact). Absent until the first touch. Read-only; never authorization.
+        organization_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+        organization_name:
+          type: string
+          minLength: 1
+          maxLength: 60
+        owner_user_id:
+          type: string
     RuntimeChrome:
       type: object
       additionalProperties: true
@@ -7277,6 +8738,10 @@ components:
           minLength: 32
           description: Permanent bearer credential for exactly this first agent. It has no scheduled expiry and is redelivered only through this short-lived encrypted
             issuance envelope.
+        identity_token:
+          type: string
+          pattern: "^sr_live_idt_"
+          description: Global identity credential delivered with the project token. Exact enrollment retries return the same credential; retained older deliveries may omit it and use the identity exchange.
         issuance_id:
           type: string
           description: Opaque identifier for the encrypted exact-retry delivery envelope.
@@ -7288,7 +8753,8 @@ components:
         invitation:
           $ref: '#/components/schemas/EnrollmentInvitation'
 
-    AgentInput: { type: object, additionalProperties: false, properties: { name: { type: string, minLength: 1, maxLength: 80, default: "ScreenRig CLI" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
+    AgentIdentityCredential: { type: object, additionalProperties: false, required: [agent_id, identity_token, issuance_expires_at], properties: { agent_id: { type: string }, identity_token: { type: string, pattern: "^sr_live_idt_" }, issuance_expires_at: { type: string, format: date-time } } }
+    AgentInput: { type: object, additionalProperties: false, properties: { name: { type: string, minLength: 1, maxLength: 80, default: "Agent" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
     AgentCapability:
       type: string
       enum: [screens, content, playlists, advertising, reports, project]
@@ -7300,31 +8766,85 @@ components:
     Agent:
       type: object
       additionalProperties: false
-      required: [id, name, agent_type, capabilities, state, authenticated_requests, metered_credits, created_at]
+      required:
+      - id
+      - name
+      - agent_type
+      - capabilities
+      - state
+      - authenticated_requests
+      - metered_credits
+      - created_at
       properties:
-        id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?agt_" }
-        name: { type: string, minLength: 1, maxLength: 80 }
-        agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$" }
-        platform: { type: string, maxLength: 80 }
-        version: { type: string, maxLength: 40 }
-        state: { type: string, enum: [pending, active, revoked, cancelled, expired] }
-        capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, minItems: 1, uniqueItems: true, description: "Capability areas this credential may call. Reads in an area also accept the reports capability, except webhook reads, which need the project capability. Fixed at mint." }
-        public_key_kid: { type: string, description: RFC 7638-style thumbprint of the X25519 recipient public JWK. Public key bytes are not returned. }
-        authenticated_requests: { type: integer, minimum: 0, description: "Best-effort diagnostic count of successful bearer verifications directly attributable to this agent installation. Authentication success is not coupled to this counter write, so a temporarily unavailable metadata update is intentionally omitted rather than failing the authenticated request." }
-        metered_credits: { type: integer, minimum: 0, description: Whole credits directly attributable to requests carrying this agent principal. }
-        created_at: { type: string, format: date-time }
-        connected_at: { type: string, format: date-time }
-        last_used_at: { type: string, format: date-time }
-        revoked_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time, description: "Server-maintained instant of the agent's last lifecycle or profile mutation. Absent when the agent was never mutated after creation. Read-only." }
+        id:
+          type: string
+          pattern: ^(?:(?:stage|qa|development)_)?agt_
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        agent_type:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$
+        platform:
+          type: string
+          maxLength: 80
+        version:
+          type: string
+          maxLength: 40
+        state:
+          type: string
+          enum:
+          - pending
+          - active
+          - suspended
+          - revoked
+          - cancelled
+          - expired
+        capabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentCapability'
+          minItems: 1
+          uniqueItems: true
+          description: Capability areas this credential may call. Reads in an area also accept the reports capability, except webhook reads, which need the project capability.
+            Fixed at mint.
+        public_key_kid:
+          type: string
+          description: RFC 7638-style thumbprint of the X25519 recipient public JWK. Public key bytes are not returned.
+        authenticated_requests:
+          type: integer
+          minimum: 0
+          description: Best-effort diagnostic count of successful bearer verifications directly attributable to this agent installation. Authentication success is not
+            coupled to this counter write, so a temporarily unavailable metadata update is intentionally omitted rather than failing the authenticated request.
+        metered_credits:
+          type: integer
+          minimum: 0
+          description: Whole credits directly attributable to requests carrying this agent principal.
+        created_at:
+          type: string
+          format: date-time
+        connected_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+          description: Server-maintained instant of the agent's last lifecycle or profile mutation. Absent when the agent was never mutated after creation. Read-only.
     AgentList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Agent" } } } }
     AgentSelfStatus: { type: object, additionalProperties: false, required: [agent, connection_ready], properties: { agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, description: True when at least one project member has a passkey or password and can authorize another agent. } } }
     X25519PublicJWK: { type: object, additionalProperties: false, required: [kty, crv, x], properties: { kty: { type: string, enum: [OKP] }, crv: { type: string, enum: [X25519] }, x: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
-    AgentConnectionRequest: { type: object, additionalProperties: false, required: [recipient_public_key], properties: { name: { type: string, minLength: 1, maxLength: 80 }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$" }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 }, capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, minItems: 1, uniqueItems: true, description: "The installation's requested capability areas. Omitted requests all six. Unknown, duplicate, or empty lists are invalid_request." }, recipient_public_key: { $ref: "#/components/schemas/X25519PublicJWK" } } }
+    AgentConnectionRequest: { type: object, additionalProperties: false, required: [recipient_public_key], properties: { project_id: { type: string, maxLength: 200, description: "Optional exact target, accepted only with an identity bearer. Approval against any other project is refused." }, name: { type: string, minLength: 1, maxLength: 80 }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$" }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 }, capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, minItems: 1, uniqueItems: true, description: "The installation's requested capability areas. Omitted requests all six. Unknown, duplicate, or empty lists are invalid_request." }, recipient_public_key: { $ref: "#/components/schemas/X25519PublicJWK" } } }
     AgentConnectionStart: { type: object, additionalProperties: false, required: [connection_id, connection_token, approval_url, expires_at], properties: { connection_id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?acn_" }, connection_token: { type: string, pattern: "^sac_[A-Za-z0-9_-]{43}$", description: Temporary header credential. Never place in a URL or log. }, approval_url: { type: string, format: uri, description: Safe URL containing only the non-authority connection id. }, expires_at: { type: string, format: date-time } } }
     AgentConnection: { type: object, additionalProperties: false, required: [connection_id, name, agent_type, status, capabilities, expires_at, created_at], properties: { connection_id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?acn_" }, name: { type: string }, agent_type: { type: string }, platform: { type: string }, version: { type: string }, status: { type: string, enum: [pending, approved, connected, denied, expired, cancelled] }, capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, minItems: 1, uniqueItems: true, description: "Capability areas the installation requested at connection start. A reviewer may approve a subset of these." }, expires_at: { type: string, format: date-time }, created_at: { type: string, format: date-time } } }
     AgentCredentialEnvelope: { type: object, additionalProperties: false, required: [algorithm, ephemeral_public_key, nonce, ciphertext], properties: { algorithm: { type: string, enum: [X25519-HKDF-SHA256-A256GCM] }, ephemeral_public_key: { $ref: "#/components/schemas/X25519PublicJWK" }, nonce: { type: string, description: Unpadded base64url AES-GCM nonce. }, ciphertext: { type: string, description: Unpadded base64url ciphertext and authentication tag. Decrypt with AAD screenrig/agent-credential-envelope/aad/v1 NUL connection_id NUL agent_id. } } }
-    AgentCredentialCollection: { type: object, additionalProperties: false, required: [agent, credential_envelope, issuance_expires_at], properties: { agent: { $ref: "#/components/schemas/Agent" }, credential_envelope: { $ref: "#/components/schemas/AgentCredentialEnvelope" }, issuance_expires_at: { type: string, format: date-time } } }
+    AgentCredentialCollection: { type: object, additionalProperties: false, required: [agent, credential_envelope, issuance_expires_at], properties: { agent: { $ref: "#/components/schemas/Agent" }, credential_envelope: { $ref: "#/components/schemas/AgentCredentialEnvelope" }, identity_credential_envelope: { $ref: "#/components/schemas/AgentCredentialEnvelope" }, issuance_expires_at: { type: string, format: date-time } } }
     AgentDisconnectRequest: { type: object, additionalProperties: false, properties: { allow_last_agent: { type: boolean, default: false, description: Explicitly accept loss of the last active agent bearer. A registered dashboard passkey remains independent administrative authority. } } }
     ApplicationRename: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string, minLength: 1, maxLength: 120, description: "Display name after trimming; controls and empty names are rejected." } } }
     Application: { type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: { id: { type: string }, name: { type: string }, revision: { type: integer }, latest_ready_release: { type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the application's releases were last used on glass (playback.application_started). Absent until first use. Read-only." } } }
@@ -7414,11 +8934,49 @@ components:
       properties:
         advertiser: { type: boolean }
         screens: { type: boolean }
+    BillingPayer:
+      type: object
+      additionalProperties: false
+      required: [kind, id]
+      properties:
+        kind: { type: string, enum: [project, organization, reseller] }
+        id: { type: string }
+    OrganizationBillingUsage:
+      type: object
+      additionalProperties: false
+      required: [org_id, period, pool, projects, next_cursor]
+      properties:
+        org_id: { type: string }
+        period: { type: string }
+        pool: { $ref: "#/components/schemas/BillingUsageAmounts" }
+        projects:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [project_id, usage]
+            properties:
+              project_id: { type: string }
+              usage: { $ref: "#/components/schemas/BillingUsageAmounts" }
+        next_cursor: { type: string, description: Exclusive project ID; empty at the end. }
+    BillingUsageAmounts:
+      type: object
+      additionalProperties: false
+      required: [bandwidth_bytes, waived_bandwidth_bytes, storage_mcr, waived_storage_mcr, api_events]
+      properties:
+        bandwidth_bytes: { $ref: "#/components/schemas/McrString" }
+        waived_bandwidth_bytes: { $ref: "#/components/schemas/McrString" }
+        storage_mcr: { $ref: "#/components/schemas/McrString" }
+        waived_storage_mcr: { $ref: "#/components/schemas/McrString" }
+        api_events: { $ref: "#/components/schemas/McrString" }
     BillingBalance:
       type: object
       additionalProperties: false
       required: [wallet_revision, remaining_mcr, reserved_mcr, available_mcr, sources, withdrawal]
       properties:
+        wallet_kind: { type: string, enum: [project, organization] }
+        wallet_id: { type: string }
+        payer: { $ref: "#/components/schemas/BillingPayer" }
         wallet_revision: { type: integer }
         remaining_mcr: { $ref: "#/components/schemas/McrString" }
         reserved_mcr: { $ref: "#/components/schemas/McrString" }
@@ -7464,6 +9022,9 @@ components:
       additionalProperties: false
       required: [sequence, journal_id, kind, amount_mcr, amount_credits, amount_usd, occurred_at]
       properties:
+        project_id: { type: string }
+        org_id: { type: string }
+        payer: { $ref: "#/components/schemas/BillingPayer" }
         sequence: { type: integer }
         journal_id: { type: string }
         kind: { type: string }
@@ -7789,11 +9350,21 @@ components:
         items: { type: array, items: { $ref: "#/components/schemas/AdvertisingQuoteItem" } }
         pricing_generations: { type: object, additionalProperties: { type: integer } }
         created_at: { type: string, format: date-time }
+    AdvertisingReportCoverage:
+      type: object
+      additionalProperties: false
+      required: [mode, outcomes_complete]
+      description: "Coverage of playback outcome counts. Monetary totals always come from immutable settlements. When outcomes_complete is false, counts are observed lower bounds and missing history is unavailable, not zero."
+      properties:
+        mode: { type: string, enum: [evidence, durable] }
+        outcomes_complete: { type: boolean }
+        complete_from: { type: string, format: date-time, description: "Earliest guaranteed durable history after explicit reader cutover. Earlier recoverable facts are retained without claiming complete history." }
     AdvertisingSpendReport:
       type: object
       additionalProperties: false
-      required: [campaign_id, spent_mcr, reserved_mcr, completed, unbillable, pending]
+      required: [campaign_id, spent_mcr, reserved_mcr, completed, unbillable, pending, coverage]
       properties:
+        coverage: { $ref: "#/components/schemas/AdvertisingReportCoverage" }
         campaign_id: { type: string }
         spent_mcr: { $ref: "#/components/schemas/McrString" }
         reserved_mcr: { $ref: "#/components/schemas/McrString" }
@@ -7815,8 +9386,9 @@ components:
     AdvertisingDeliveryReport:
       type: object
       additionalProperties: false
-      required: [gross_mcr, fee_mcr, net_mcr, completed, interrupted, unbillable, rows]
+      required: [gross_mcr, fee_mcr, net_mcr, completed, interrupted, unbillable, rows, coverage]
       properties:
+        coverage: { $ref: "#/components/schemas/AdvertisingReportCoverage" }
         gross_mcr: { $ref: "#/components/schemas/McrString" }
         fee_mcr: { $ref: "#/components/schemas/McrString" }
         net_mcr: { $ref: "#/components/schemas/McrString" }
@@ -10242,7 +11814,9 @@ components:
           description: The person carries the screenrig_staff operator flag and may use /dashboard/v1/staff. Set only by the operator CLI or another staff member.
         shadow:
           type: boolean
-          description: The current project is one the staff member shadows, not a membership. It is read-only; every current-project mutation answers 403 forbidden.
+          description: The current project is one the staff member shadows, without a membership. Reads grant no writes. Current-project mutations require an explicit active staff_write_mode approval.
+        staff_write_mode:
+          $ref: '#/components/schemas/DashboardStaffWriteMode'
         passkey_enrollment_required:
           type: boolean
           description: The person's account requires a passkey (every staff member's does) and has none. Until one is added, this session may only read GET /dashboard/v1/session and /me, list and add passkeys (/me/passkeys, /me/passkeys/options, /me/passkeys/complete) and sign out; every other dashboard route answers 403 forbidden. Always false on a development server, which registers no passkeys.
@@ -10584,4 +12158,89 @@ components:
         next: { $ref: "#/components/schemas/NextAction" }
         hint: { type: string, description: "What the caller should do next to fix or work around this problem, in one or two plain sentences. The server sends the problem registry's default for the code (api/problems.yaml) unless the handler has a more specific one for this case. Advisory text for agents; Players ignore it." }
 x-problem-registry: ./problems.yaml
-x-problem-codes: [internal_error, invalid_request, unauthorized, forbidden, not_found, method_not_allowed, idempotency_mismatch, credential_issuance_expired, user_email_conflict, provisioning_invalid, provisioning_expired, provisioning_consumed, provisioning_exchange_mismatch, browser_already_paired, handoff_code_invalid, handoff_code_expired, handoff_session_rate_limited, handoff_session_conflict, browser_link_not_claimed, browser_link_project_mismatch, origin_not_allowed, resource_conflict, revision_conflict, invalid_range, quota_exceeded, payment_required, rate_limited, dependency_unavailable, dependency_timeout, schema_incompatible, not_ready, server_draining, manifest_degraded, screenshot_unavailable, identity_invalid, identity_conflict, enrollment_bound, proof_invalid, screen_archived, screen_archive_required, passkey_invalid, passkeys_disabled, application_in_use, agent_connection_invalid, agent_connection_expired, agent_connection_conflict, agent_connection_not_approved, agent_connection_cancelled, agent_limit_exceeded, agent_lockout_risk, recovery_ambiguous, recovery_expired, recovery_not_offered, invitation_limit_reached, version_required, price_change_pending, quote_stale, insufficient_credits, self_deal, invitation_invalid, invitation_expired, invitation_consumed, invitation_email_mismatch, reauthentication_required, member_limit_reached, last_credential, no_project, billing_unavailable, feature_unavailable, user_binding_stale, session_expired, credential_revoked, proof_clock_skew, key_retired, assignment_not_found, upgrade_required, webhook_limit_reached, webhook_url_rejected, reboot_unsupported, support_conversation_closed, demo_slot_unavailable]
+x-problem-codes:
+- free_project_limit
+- project_name_conflict
+- project_delete_blocked
+- owner_required
+- internal_error
+- invalid_request
+- unauthorized
+- forbidden
+- not_found
+- method_not_allowed
+- idempotency_mismatch
+- credential_issuance_expired
+- user_email_conflict
+- provisioning_invalid
+- provisioning_expired
+- provisioning_consumed
+- provisioning_exchange_mismatch
+- browser_already_paired
+- handoff_code_invalid
+- handoff_code_expired
+- handoff_session_rate_limited
+- handoff_session_conflict
+- browser_link_not_claimed
+- browser_link_project_mismatch
+- origin_not_allowed
+- resource_conflict
+- revision_conflict
+- invalid_range
+- quota_exceeded
+- payment_required
+- rate_limited
+- dependency_unavailable
+- dependency_timeout
+- schema_incompatible
+- not_ready
+- server_draining
+- manifest_degraded
+- screenshot_unavailable
+- identity_invalid
+- identity_conflict
+- enrollment_bound
+- proof_invalid
+- screen_archived
+- screen_archive_required
+- passkey_invalid
+- passkeys_disabled
+- application_in_use
+- agent_connection_invalid
+- agent_connection_expired
+- agent_connection_conflict
+- agent_connection_not_approved
+- agent_connection_cancelled
+- agent_limit_exceeded
+- agent_lockout_risk
+- recovery_ambiguous
+- recovery_expired
+- recovery_not_offered
+- invitation_limit_reached
+- version_required
+- price_change_pending
+- quote_stale
+- insufficient_credits
+- self_deal
+- invitation_invalid
+- invitation_expired
+- invitation_consumed
+- invitation_email_mismatch
+- reauthentication_required
+- member_limit_reached
+- last_credential
+- no_project
+- billing_unavailable
+- feature_unavailable
+- user_binding_stale
+- session_expired
+- credential_revoked
+- proof_clock_skew
+- key_retired
+- assignment_not_found
+- upgrade_required
+- reboot_unsupported
+- webhook_limit_reached
+- webhook_url_rejected
+- support_conversation_closed
+- demo_slot_unavailable

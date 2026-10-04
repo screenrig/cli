@@ -10,7 +10,7 @@ import { FakeTransport } from "./transport/fake.js";
 async function invoke(argv: string[], transport = new FakeTransport(), authenticated = false, tty = false) {
   const directory = await mkdtemp(path.join(tmpdir(), "screenrig-output-"));
   const config = path.join(directory, "config.json");
-  if (authenticated) await writeFile(config, JSON.stringify({ api_url: "https://api.screenrig.ai", token: "test-only-token" }), { mode: 0o600 });
+  if (authenticated) await writeFile(config, JSON.stringify({ api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "test-only-token" }), { mode: 0o600 });
   let stdout = "", stderr = "";
   try {
     const code = await run({ ...processRuntime(), argv: ["--config", config, ...argv], env: {}, transport,
@@ -76,7 +76,7 @@ test("empty event lists emit one default JSON result without a human-text sentin
   assert.deepEqual(JSON.parse(result.stdout).data, { items: [], next_cursor: null });
   assert.equal(result.stdout.trim().split("\n").length, 1);
   const human = await invoke(["--human", "events", "list"], transport, true);
-  assert.equal(human.stdout, "");
+  assert.equal(human.stdout, "organization: Example organization\nproject: Screens (prj_AAAAAAAAAAAAAAAAAAAAAAAA)\n");
 });
 
 test("default event streams emit NDJSON without an extra final result", async () => {

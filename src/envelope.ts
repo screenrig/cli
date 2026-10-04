@@ -42,12 +42,14 @@ export interface SuccessEnvelope<T> {
   request_id?: string;
   operation_id?: string;
   warnings: Warning[];
+  context?: import("./project-context.js").ResultContext;
 }
 
 export interface ErrorEnvelope {
   ok: false;
   error: NormalizedProblem;
   warnings?: Warning[];
+  context?: import("./project-context.js").ResultContext;
 }
 
 export type Envelope<T> = SuccessEnvelope<T> | ErrorEnvelope;

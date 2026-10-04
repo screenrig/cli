@@ -1,3 +1,4 @@
+import { projectConfigFor, withProjectConfig, assertProjectCredential } from "./project-state.js";
 import { readConfigFile, withConfigLock, writeConfigAtomic, type ResolvedConfig } from "./config.js";
 import type { EnrollmentRuntime } from "./enrollment.js";
 import { isValidIdempotencyKey, newIdempotencyKey } from "./ids.js";
@@ -41,7 +42,9 @@ export async function browserSetupRetryState(options: {
     options.runtime.fs,
     { sleep: options.runtime.sleep, now: () => options.runtime.now().getTime() },
     async () => {
-      const current = await readConfigFile(options.resolved.configPath, options.runtime.fs);
+      const stored = await readConfigFile(options.resolved.configPath, options.runtime.fs);
+      const current = stored ? projectConfigFor(stored, options.resolved) : undefined;
+      if (current) assertProjectCredential(current, options.resolved);
       if (current?.browser_setup) {
         if (current.browser_setup.code !== options.code) {
           throw usageError("A browser setup claim retry is pending. Retry the same code before claiming another browser.");
@@ -54,11 +57,11 @@ export async function browserSetupRetryState(options: {
       const idempotencyKey = options.requestedKey ?? (options.generateIdempotencyKey ?? newIdempotencyKey)();
       if (!isValidIdempotencyKey(idempotencyKey)) throw usageError("Browser setup idempotency key is invalid.");
       const state = { idempotency_key: idempotencyKey, code: options.code };
-      await writeConfigAtomic(options.resolved.configPath, {
+      await writeConfigAtomic(options.resolved.configPath, withProjectConfig(stored ?? { api_url: options.resolved.apiUrl }, options.resolved, {
         ...(current ?? { api_url: options.resolved.apiUrl }),
         browser_setup: state,
         updated_at: options.runtime.now().toISOString(),
-      }, options.runtime.fs);
+      }), options.runtime.fs);
       return state;
     },
   );
@@ -74,10 +77,12 @@ export async function clearBrowserSetupRetryState(
     runtime.fs,
     { sleep: runtime.sleep, now: () => runtime.now().getTime() },
     async () => {
-      const current = await readConfigFile(resolved.configPath, runtime.fs);
+      const stored = await readConfigFile(resolved.configPath, runtime.fs);
+      const current = stored ? projectConfigFor(stored, resolved) : undefined;
+      if (current) assertProjectCredential(current, resolved);
       if (!current || current.browser_setup?.idempotency_key !== idempotencyKey) return;
       const { browser_setup: _complete, ...complete } = current;
-      await writeConfigAtomic(resolved.configPath, complete, runtime.fs);
+      await writeConfigAtomic(resolved.configPath, withProjectConfig(stored!, resolved, complete), runtime.fs);
     },
   );
 }

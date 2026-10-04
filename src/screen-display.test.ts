@@ -130,7 +130,7 @@ test("screen display: --power or trailing on|off, until rules, fleet action, Dis
   assert.deepEqual(call?.body, { power: "off", until: "2026-08-14T19:00:00Z" });
   assert.equal(off.envelope.data.display.requested, "off");
   const human = await cli(["--human", "screen", "display", LOBBY, "on"], transport, env);
-  assert.match(human.stdout, /^Display on on scr_LOBBYAAAAAAAAAAAAAAAAAA until the display schedule's next boundary, or until replaced\nDisplay: on \(manual override until replaced\)/);
+  assert.match(human.stdout, /^Display on on scr_LOBBYAAAAAAAAAAAAAAAAAA until the display schedule's next boundary, or until replaced\nDisplay: on \(manual override until replaced\)/m);
   assert.deepEqual(transport.calls.filter((item) => item.path === `/api/v1/screens/${LOBBY}/display`).at(-1)?.body, { power: "on" });
   const mixed = await cli(["--json", "screen", "display", LOBBY, "on", "--power", "off"], transport, env);
   assert.equal(mixed.code, ExitCode.Usage);

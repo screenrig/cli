@@ -17,7 +17,7 @@ async function runtimeFor(argv: string[], transport: FakeTransport, authenticate
   if (authenticated) {
     await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
       api_url: "https://api.screenrig.ai",
-      token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     }, fs);
   }
   const stdout = new PassThrough();
@@ -51,7 +51,7 @@ for (const outcome of ["success", "rejection"] as const) {
       started();
       await responseReady;
       if (outcome === "rejection") throw networkError("Deferred transport failed.");
-      return { status: 200, headers: {}, body: { id: "prj_TEST", revision: 1, credit_remaining: 2000 } };
+      return { status: 200, headers: {}, body: { id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", revision: 1, credit_remaining: 2000 } };
     });
     const fixture = await runtimeFor(["project", "show"], transport, true);
     let settled = false;
@@ -68,7 +68,7 @@ for (const outcome of ["success", "rejection"] as const) {
       assert.equal(lines.length, 1, fixture.output());
       const envelope = JSON.parse(lines[0]!);
       assert.equal(envelope.ok, outcome === "success");
-      if (outcome === "success") assert.equal(envelope.data.id, "prj_TEST");
+      if (outcome === "success") assert.equal(envelope.data.id, "prj_AAAAAAAAAAAAAAAAAAAAAAAA");
       else assert.equal(envelope.error.code, "transport_error");
       assert.equal(fixture.errors(), "");
       assert.equal(transport.calls.length, 1);
@@ -95,7 +95,7 @@ test("unauthenticated native mutation actions reject before local preparation or
       assert.equal(await run(fixture.runtime), ExitCode.Auth, fixture.output());
       const envelope = JSON.parse(fixture.output());
       assert.equal(envelope.error.code, "not_enrolled");
-      assert.equal(envelope.error.next.command, "screenrig agent enroll --email ADDRESS");
+      assert.equal(envelope.error.next.command, "screenrig agent enroll --email ADDRESS --organization NAME");
       assert.equal(transport.calls.length, 0);
       assert.deepEqual(await readdir(fixture.configDir), [], "authentication failure must not create retry or enrollment state");
     } finally {

@@ -27,6 +27,9 @@ export interface Project {
   revision: number;
   screen_count: number;
   screen_limit: number;
+  organization_id?: string;
+  organization_name?: string;
+  owner_user_id?: string;
   status: "active" | "cancelled" | "deleted";
   updated_at: string;
   used_bytes: number;
@@ -103,6 +106,7 @@ export interface ProjectCapabilities {
 }
 
 export interface CLIEnrollment {
+  identity_token?: string;
   project: Project;
   invitation: EnrollmentInvitation;
   agent: Agent;
@@ -113,6 +117,7 @@ export interface CLIEnrollment {
 }
 
 export interface CLIEnrollmentRequest {
+  organization?: string;
   client_id: string;
   email: string;
   project_name?: string;
@@ -161,6 +166,7 @@ export interface X25519PublicJWK {
 }
 
 export interface AgentConnectionRequest {
+  project_id?: string;
   agent_type?: string;
   capabilities?: AgentCapability[];
   name?: string;
@@ -196,6 +202,7 @@ export interface AgentCredentialEnvelope {
 }
 
 export interface AgentCredentialCollection {
+  identity_credential_envelope?: AgentCredentialEnvelope;
   agent: Agent;
   credential_envelope: AgentCredentialEnvelope;
   issuance_expires_at: string;
@@ -1160,3 +1167,16 @@ export interface ScreenEffectivePlaylist {
   entry_id?: string;
   until?: string;
 }
+
+/** Backend-owned principals contracts mirrored from the reviewed snapshot. */
+export interface AgentIdentityCredential {
+  agent_id: string;
+  identity_token: string;
+  issuance_expires_at: string;
+}
+
+export interface OrganizationSummary { id: string; name: string }
+export interface ProjectContext { organization: OrganizationSummary; project: Project; owner_user_id?: string }
+export interface ProjectContextList { projects: ProjectContext[] }
+export interface ProjectCreate { name: string; organization_id?: string; organization_name?: string }
+export interface CreatedProject extends ProjectContext { token?: string; issuance_expires_at?: string }

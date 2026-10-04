@@ -86,7 +86,7 @@ notes and examples live in `src/cli-commands/guidance.ts`.
 ## Product and security boundaries
 
 - Package metadata requires Node.js 22.11 or newer.
-- `agent enroll --email ADDRESS` is the explicit first-agent step. Other
+- `agent enroll --email ADDRESS --organization NAME` is the explicit first-agent step. Other
   authenticated commands do not enroll as a side effect; they fail with
   `not_enrolled` (exit 3). Keep that code stable.
 - No part of a stored credential reaches stdout. Report presence through
