@@ -17,7 +17,7 @@ import type { TransportRequest, TransportResponse } from "./transport/types.js";
 
 const NOW = new Date("2026-08-14T17:00:00.000Z");
 const DAY = ["--from", "2026-08-14T00:00:00Z", "--to", "2026-08-15T00:00:00Z"];
-const PLAY_HEADER = "screen_id,playlist_id,page_id,primitive_id,media_id,primitive,started_at,received_at";
+const PLAY_HEADER = "screen_id,playlist_id,page_id,primitive_id,media_id,primitive,started_at,received_at,manifest_revision,playlist_revision";
 
 interface Envelope {
   ok: boolean;
@@ -248,7 +248,7 @@ test("--output - writes only the CSV to stdout", async () => {
   const transport = memoryBackend({ now: () => NOW });
   const piped = await cli(["--json", "playback", "plays", ...DAY, "--tag", "Lobby", "--format", "csv", "--output", "-"], transport, env);
   assert.equal(piped.code, ExitCode.Success, piped.stderr);
-  assert.equal(piped.stdout, `${PLAY_HEADER}\r\nscr_LOBBYBBBBBBBBBBBBBBBBBB,pl_AAAAAAAAAAAAAAAAAAAAAAAA,poster,,med_BBBBBBBBBBBBBBBBBBBBBBBB,image,,2026-08-14T16:30:00Z\r\n`);
+  assert.equal(piped.stdout, `${PLAY_HEADER}\r\nscr_LOBBYBBBBBBBBBBBBBBBBBB,pl_AAAAAAAAAAAAAAAAAAAAAAAA,poster,,med_BBBBBBBBBBBBBBBBBBBBBBBB,image,,2026-08-14T16:30:00Z,man_PUBLISHED,7\r\n`);
   assert.deepEqual(await readdir(env.cwd), []);
 
   const truncated = new FakeTransport().onDownload("GET", "/api/v1/playback/plays", () => ({

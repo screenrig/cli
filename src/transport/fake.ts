@@ -561,6 +561,8 @@ export function memoryBackend(options: { now?: () => Date; listPageSize?: number
     screen_id: index === 3 ? "scr_LOBBYBBBBBBBBBBBBBBBBBB" : "scr_PAIRINGAAAAAAAAAAAAAAAA",
     playlist_id: "pl_AAAAAAAAAAAAAAAAAAAAAAAA",
     page_id: index % 2 === 0 ? "clip" : "poster",
+    manifest_revision: "man_PUBLISHED",
+    playlist_revision: 7,
     media_id: index % 2 === 0 ? "med_AAAAAAAAAAAAAAAAAAAAAAAA" : "med_BBBBBBBBBBBBBBBBBBBBBBBB",
     primitive: index % 2 === 0 ? "video" : "image",
     ...(index === 4 ? { primitive_id: "=hero", started_at: "2026-08-14T16:39:59Z" } : {}),
@@ -618,7 +620,7 @@ export function memoryBackend(options: { now?: () => Date; listPageSize?: number
     });
     return { rows, start: q.cursor ? Number(q.cursor.slice(3)) : 0 };
   };
-  const PLAY_COLUMNS = ["screen_id", "playlist_id", "page_id", "primitive_id", "media_id", "primitive", "started_at", "received_at"];
+  const PLAY_COLUMNS = ["screen_id", "playlist_id", "page_id", "primitive_id", "media_id", "primitive", "started_at", "received_at", "manifest_revision", "playlist_revision"];
   const AGGREGATE_COLUMNS = ["screen_id", "media_id", "filename", "primitive", "day", "play_count", "last_page_id", "last_manifest_revision", "first_started_at", "last_started_at"];
   const playsCsv = (req: TransportRequest): TransportResponse => {
     const selected = playsSelection(req);

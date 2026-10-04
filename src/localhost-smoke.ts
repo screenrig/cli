@@ -290,7 +290,7 @@ async function main(): Promise<void> {
     assert.equal(playsCsvData.rows, 1);
     assert.equal(playsCsvData.path, playsPath);
     assert.match(String(playsCsvData.sha256), /^[a-f0-9]{64}$/);
-    assert.match(await readFile(playsPath, "utf8"), /^screen_id,playlist_id,page_id,primitive_id,media_id,primitive,started_at,received_at\r\n/);
+    assert.match(await readFile(playsPath, "utf8"), /^screen_id,playlist_id,page_id,primitive_id,media_id,primitive,started_at,received_at,manifest_revision,playlist_revision\r\n/);
     const playsStdout = await invoke(["playback", "plays", "--from", "2026-08-14T00:00:00Z", "--to", "2026-08-15T00:00:00Z", "--format", "csv", "--output", "-"]);
     assert.equal(playsStdout.code, 0, playsStdout.stderr);
     assert.equal(playsStdout.stdout.split("\r\n").filter(Boolean).length, 6, "--output - writes only the CSV to stdout");

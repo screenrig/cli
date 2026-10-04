@@ -290,8 +290,13 @@ paths:
   /api/v1/sign-in-resets:
     post:
       operationId: requestSignInReset
-      description: Accepts a sign-in reset request without revealing whether a person holds the address. A live reset is superseded and expires after one hour. For
-        a contact address with no person, enrollment invitations are reissued for at most ten recent projects with zero members.
+      description: Accepts a sign-in reset request without revealing whether a person holds the address. A live reset is superseded and expires after one hour.
+        With or without a person, the request also re-sends at most ten invitations addressed to the email, and any one invitation at most once an hour. Of the ten
+        most recent non-deleted projects whose contact address matches, each active project with zero members and a catalog plan gets its enrollment invitation
+        back, even when it expired. Pending emailed member and ad-buyer invitations to active projects with a catalog plan fill the rest, newest first. A re-sent
+        invitation keeps its ID and gets a new link and expiry; the old link stops working and the project's outstanding invitation count is unchanged. An expired
+        enrollment returns as a new invitation that takes an invitation slot again, so the count rises by one, and it is skipped when the project is full. Other
+        expired invitations, and revoked, accepted and link invitations, are not re-sent.
       security: []
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
@@ -425,8 +430,13 @@ paths:
       description: Backend-owned project dashboard origin
     post:
       operationId: requestDashboardSignInReset
-      description: Accepts a sign-in reset request without revealing whether a person holds the address. A live reset is superseded and expires after one hour. For
-        a contact address with no person, enrollment invitations are reissued for at most ten recent projects with zero members.
+      description: Accepts a sign-in reset request without revealing whether a person holds the address. A live reset is superseded and expires after one hour.
+        With or without a person, the request also re-sends at most ten invitations addressed to the email, and any one invitation at most once an hour. Of the ten
+        most recent non-deleted projects whose contact address matches, each active project with zero members and a catalog plan gets its enrollment invitation
+        back, even when it expired. Pending emailed member and ad-buyer invitations to active projects with a catalog plan fill the rest, newest first. A re-sent
+        invitation keeps its ID and gets a new link and expiry; the old link stops working and the project's outstanding invitation count is unchanged. An expired
+        enrollment returns as a new invitation that takes an invitation slot again, so the count rises by one, and it is skipped when the project is full. Other
+        expired invitations, and revoked, accepted and link invitations, are not re-sent.
       security: []
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
@@ -9229,19 +9239,26 @@ components:
       additionalProperties: false
       required: [screen_id, page_id, media_id, primitive, received_at]
       description: >-
-        One visible start of an image or video. playlist_id is the playlist
+        One visible start of an image, video, or application. playlist_id is the playlist
         of the granted manifest revision the page came from (the effective
-        playlist at play time). primitive is server-resolved from the ready
-        media. primitive_id and started_at are present only when the Player
+        playlist at play time). manifest_revision and playlist_revision identify
+        that exact published content, captured from the authorized grant rather
+        than the playlist's current revision. Missing revision values remain absent.
+        Application starts carry release_id with empty media_id and primitive;
+        media starts resolve primitive from the ready media.
+        primitive_id and started_at are present only when the Player
         reported them; started_at is player time clamped to [received_at -
         24h, received_at + 5m].
       properties:
         screen_id: { type: string }
         playlist_id: { type: string }
+        manifest_revision: { type: string, pattern: "^man_", description: "Exact manifest revision authorized for this play." }
+        playlist_revision: { type: integer, minimum: 1, description: "Playlist revision captured from the same authorized manifest grant." }
         page_id: { type: string }
         primitive_id: { type: string }
         media_id: { type: string }
-        primitive: { type: string, enum: [image, video] }
+        primitive: { type: string, enum: [image, video, ""] }
+        release_id: { type: string, description: "Exact application release for an application start." }
         started_at: { type: string, format: date-time }
         received_at: { type: string, format: date-time }
     PlaybackPlayList:
@@ -9255,7 +9272,7 @@ components:
       type: string
       description: >-
         RFC 4180 CSV, CRLF records, UTF-8, with the header row
-        screen_id,playlist_id,page_id,primitive_id,media_id,primitive,started_at,received_at
+        screen_id,playlist_id,page_id,primitive_id,media_id,primitive,started_at,received_at,manifest_revision,playlist_revision
         in that fixed order; an absent value is an empty cell. Times are RFC
         3339 UTC. A cell beginning with =, +, -, @, tab, or carriage return
         is prefixed with a single quote. Content-Disposition names

@@ -626,7 +626,10 @@ stream ends cleanly. `--timeout` is the no-progress limit for the stream
 `path`, `bytes`, `rows`, `sha256`, and, for plays, `last_received_at`; the CSV
 itself never enters the envelope. `--output -` writes only the CSV to stdout.
 `primitive_id` and `started_at` cells are empty unless the Player reported
-them. A cell that begins with `=`, `+`, `-`, `@`, tab, or carriage return
+them. Play records carry `manifest_revision` and `playlist_revision` from
+the exact authorized manifest. CSV appends those two columns after
+`received_at`; an absent revision is an empty cell. A cell that begins with
+`=`, `+`, `-`, `@`, tab, or carriage return
 carries a leading `'` so spreadsheets do not evaluate it.
 
 If a stream fails partway, the command exits non-zero and never writes the
