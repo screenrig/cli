@@ -1182,7 +1182,7 @@ test("import can replace a playlist without a revision lookup or header", async 
 
 test("bundle export resolves dynamic selectors once per catalog and pins filename order", async () => {
   const source = playlist(mediaPrimitive({ by: "tag", tag: "Lobby", order: "filename", one_at_a_time: true }));
-  const transport = new FakeTransport().on("GET", "/api/v1/media", () => ({ status: 200, headers: {}, body: { items: [{ id: "med_B", filename: "z.png" }, { id: "med_A", filename: "a.png" }], next_cursor: null } }));
+  const transport = new FakeTransport().on("POST", "/api/v1/selectors/preview", () => ({ status: 200, headers: {}, body: { candidates: [{ media_id: "med_A", filename: "a.png" }, { media_id: "med_B", filename: "z.png" }] } }));
   const client = new ApiClient({ transport, token: "token" });
   const snapshot = await snapshotBundleSelectors(client, source);
   const normalized = normalizePlaylistForBundle(snapshot);
@@ -1192,7 +1192,7 @@ test("bundle export resolves dynamic selectors once per catalog and pins filenam
 });
 
 test("empty dynamic selectors leave other bundle primitives intact", async () => {
-  const transport = new FakeTransport().on("GET", "/api/v1/media", () => ({ status: 200, headers: {}, body: { items: [], next_cursor: null } }));
+  const transport = new FakeTransport().on("POST", "/api/v1/selectors/preview", () => ({ status: 200, headers: {}, body: { candidates: [] } }));
   const snapshot = await snapshotBundleSelectors(new ApiClient({ transport, token: "token" }), playlist(mediaPrimitive({ by: "all", one_at_a_time: true })));
   const normalized = normalizePlaylistForBundle(snapshot);
   assert.deepEqual(normalized.mediaIds, []);

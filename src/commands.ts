@@ -3038,6 +3038,15 @@ export const handleMediaShow = commandHandler(async (args, runtime, resolved) =>
   return simpleGet(args, runtime, resolved, `/api/v1/media/${id}`, "Media");
 }, true);
 
+export const handleSelectorPreview = commandHandler(async (args, runtime, resolved) => {
+  const file = args.positionals[2];
+  if (!file) throw usageError("media selector-preview requires <selector.json> and --primitive image|video.");
+  const selector = await readAuthoringJson(file, runtime);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "POST", path: "/api/v1/selectors/preview", body: { primitive: flagString(args.flags, "primitive"), selector } });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: JSON.stringify(response.body, null, 2) };
+}, true);
+
 export const handleMediaUpdate = commandHandler(async (args, runtime, resolved) => {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
@@ -3327,10 +3336,11 @@ async function mediaUpdate(args: ParsedArgs, client: ApiClient): Promise<Command
   if (!id) {
     throw usageError("media update requires <id>, and --tag TAG or --clear-tag.");
   }
-  if (clearTag === Boolean(tag)) {
-    throw usageError("media update requires exactly one of --tag TAG or --clear-tag.");
+  if ([clearTag, Boolean(tag), flagString(args.flags, "tags") !== undefined].filter(Boolean).length !== 1) {
+    throw usageError("media update requires exactly one of --tag TAG, --tags TAG1,TAG2, or --clear-tag.");
   }
-  const body: MediaTagPatch = { tag: clearTag ? null : tag ?? null };
+  const tagsFlag = flagString(args.flags, "tags");
+  const body: MediaTagPatch = tagsFlag === undefined ? { tag: clearTag ? null : tag ?? null } : { tags: tagsFlag.split(",") };
   const response = await client.call({
     method: "PATCH",
     path: `/api/v1/media/${id}`,
@@ -3341,7 +3351,7 @@ async function mediaUpdate(args: ParsedArgs, client: ApiClient): Promise<Command
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
-    human: clearTag ? `Cleared tag on media ${id}` : `Set tag ${tag} on media ${id}`,
+    human: clearTag ? `Cleared tags on media ${id}` : `Replaced tags on media ${id}`,
   };
 }
 

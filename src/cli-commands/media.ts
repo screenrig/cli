@@ -1,6 +1,6 @@
 import { positiveInteger, positiveNumber, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleMediaGenerate, handleMediaUpload, handleMediaUploadBatch, handleMediaShow, handleMediaDownload, handleMediaList, handleMediaUpdate, handleMediaDelete } from "../commands.js";
+import { handleSelectorPreview, handleMediaGenerate, handleMediaUpload, handleMediaUploadBatch, handleMediaShow, handleMediaDownload, handleMediaList, handleMediaUpdate, handleMediaDelete } from "../commands.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes.js";
 import { CREDIT_HELP } from "../help-text.js";
@@ -68,10 +68,18 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .addOption(new Option("--primitive <image|video|audio>", "Filter by media primitive").choices(["image", "video", "audio"]))
     .action(bind(handleMediaList));
 
-  media.command("update").description("Update a media tag")
+  const selectorPreview = media.command("selector-preview").description("Preview current selector matches without advancing playback")
+    .argument("<selector.json>", "JSON all/tag selector file, or stdin (-)")
+    .addOption(new Option("--primitive <image|video>", "Media primitive to match").choices(["image", "video"]).makeOptionMandatory())
+    .action(bind(handleSelectorPreview));
+  addCommandExamples(selectorPreview, 'screenrig media selector-preview selector.json --primitive video');
+  addCommandNotes(selectorPreview, "Reads current project-owned ready matches in filename order. Does not advance a Player cursor. Random order is a per-pass playback policy; see the returned normalized selector. Catalog changes take effect at the next loop refresh.");
+
+  media.command("update").description("Replace media tags")
     .argument("<id>", "Media identifier")
-    .addOption(new Option("--tag <TAG>", "Set the media tag").conflicts(["clearTag"]))
-    .addOption(new Option("--clear-tag", "Remove the media tag").conflicts(["tag"]))
+    .addOption(new Option("--tag <TAG>", "Set the media tag").conflicts(["clearTag", "tags"]))
+    .addOption(new Option("--clear-tag", "Remove the media tag").conflicts(["tag", "tags"]))
+    .addOption(new Option("--tags <TAGS>", "Replace the tag set with comma-separated tags").conflicts(["tag", "clearTag"]))
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleMediaUpdate));
 
@@ -79,5 +87,5 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .argument("<id>", "Media identifier")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleMediaDelete));
-  requireOptionGroup(media.commands.find(command => command.name() === "update")!, "exactlyOne", ["--tag", "--clear-tag"]);
+  requireOptionGroup(media.commands.find(command => command.name() === "update")!, "exactlyOne", ["--tag", "--tags", "--clear-tag"]);
 }

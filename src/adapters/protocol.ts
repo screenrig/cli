@@ -931,10 +931,8 @@ export interface MediaRecord {
   [key: string]: unknown;
 }
 
-/** PATCH /api/v1/media/{id}. tag is required; null clears it. */
-export interface MediaTagPatch {
-  tag: string | null;
-}
+/** PATCH /api/v1/media/{id}. Replace the tag set; null or [] clears it. */
+export type MediaTagPatch = { tag: string | null } | { tags: string[] };
 
 export type MediaGenerationAspectRatio = "1:1" | "16:9" | "9:16" | "4:3" | "3:4" | "3:2" | "2:3";
 export type MediaGenerationQuality = "low" | "medium" | "high";

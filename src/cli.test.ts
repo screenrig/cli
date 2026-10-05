@@ -6881,6 +6881,16 @@ test("playback list, media filters, media update, and app --name bind the consum
     );
     assert.equal(retiredKind.code, ExitCode.Usage, retiredKind.stdout);
     assert.match(JSON.parse(retiredKind.stdout).error.detail, /uses --primitive image\|video\|audio, not --kind/);
+    const tagSet = await withRuntime(["media", "update", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--tags", "Summer,Drinks"], transport, { fs: fsLike });
+    assert.equal(tagSet.code, ExitCode.Success, tagSet.stdout);
+    assert.deepEqual(transport.calls.filter(c => c.method === "PATCH" && c.path.startsWith("/api/v1/media/")).at(-1)?.body, { tags: ["Summer", "Drinks"] });
+    const selectorFile = path.join(configDir, "selector.json");
+    const selector = { by: "tag", tags: { all: ["Summer", "Drinks"], none: ["Expired"] }, batch_size: 3 };
+    await writeFile(selectorFile, JSON.stringify(selector));
+    transport.on("POST", "/api/v1/selectors/preview", () => ({ status: 200, headers: {}, body: { matched_count: 40, candidates: [], selector } }));
+    const preview = await withRuntime(["media", "selector-preview", selectorFile, "--primitive", "video"], transport, { fs: fsLike });
+    assert.equal(preview.code, ExitCode.Success, preview.stdout);
+    assert.deepEqual(transport.calls.filter(c => c.path === "/api/v1/selectors/preview").at(-1)?.body, { primitive: "video", selector });
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }

@@ -404,8 +404,8 @@ function normalizedMediaSelector(input: unknown): JsonRecord {
   } else {
     throw usageError("Playlist export requires selectors snapshotted to by:id or by:ids.");
   }
-  if (ids.length < 1 || ids.length > 32 || ids.some((id) => !MEDIA_ID_PATTERN.test(id))) {
-    throw usageError("Playlist export requires 1 to 32 valid snapshotted media ids per primitive.");
+  if (ids.length < 1 || ids.length > 1024 || ids.some((id) => !MEDIA_ID_PATTERN.test(id))) {
+    throw usageError("Playlist export requires 1 to 1024 valid snapshotted media ids per primitive.");
   }
   if (new Set(ids).size !== ids.length) throw usageError("Playlist contains duplicate resolved media ids in one selector.");
   const oneAtATime = selector.one_at_a_time === true;
@@ -639,20 +639,14 @@ export async function snapshotBundleSelectors(client: ApiClient, input: unknown)
       const selector = primitive.selector as JsonRecord | undefined;
       if (!selector || !["all", "tag"].includes(String(selector.by))) { primitives.push(primitive); continue; }
       const category = stringField(primitive, "primitive", "Playlist primitive");
-      const tag = selector.by === "tag" ? stringField(selector, "tag", "Playlist selector") : undefined;
-      const key = JSON.stringify([category, tag]);
+      if (selector.batch_size !== undefined && selector.one_at_a_time !== true) throw usageError("Static bundle export cannot retain a runtime batch cursor; remove batch_size or use explicit ids.");
+      const key = JSON.stringify([category, selector]);
       let ids = catalogs.get(key);
       if (!ids) {
-        const response = await client.call({ method: "GET", path: "/api/v1/media", query: { primitive: category, tag } });
-        const catalog = record(response.body, "Media catalog");
-        if (!Array.isArray(catalog.items)) throw usageError("Media catalog must contain items.");
-        if (catalog.items.length > 32 || catalog.next_cursor) throw usageError("Playlist export requires at most 32 matches per dynamic selector.");
-        const rows = catalog.items.map(item => record(item, "Media catalog item"));
-        rows.sort((a, b) => {
-          const left = stringField(a, "filename", "Media catalog item"), right = stringField(b, "filename", "Media catalog item");
-          return left < right ? -1 : left > right ? 1 : String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0;
-        });
-        ids = rows.map(item => stringField(item, "id", "Media catalog item"));
+        const response = await client.call({ method: "POST", path: "/api/v1/selectors/preview", body: { primitive: category, selector } });
+        const preview = record(response.body, "Selector preview");
+        if (!Array.isArray(preview.candidates) || preview.candidates.length > 1024) throw usageError("Selector preview must contain at most 1024 candidates.");
+        ids = preview.candidates.map(item => stringField(record(item, "Selector candidate"), "media_id", "Selector candidate"));
         catalogs.set(key, ids);
       }
       if (ids.length === 0) continue;

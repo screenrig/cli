@@ -96,6 +96,9 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
         }
       }
       if (primitive.primitive === "image" || primitive.primitive === "video") {
+        const mediaSelector = object(primitive.selector);
+        if (mediaSelector.by === "tag" && object(mediaSelector.tags) && mediaSelector.tags !== undefined && Object.keys(object(mediaSelector.tags)).length === 0) fail(`${itemPath}/selector/tags`, "must contain at least one filter");
+        if (mediaSelector.one_at_a_time === true && mediaSelector.batch_size !== undefined && mediaSelector.batch_size !== 1) fail(`${itemPath}/selector/batch_size`, "one_at_a_time requires batch_size 1");
         if (mode === "duration" || mode === "application") {
           if (Object.hasOwn(primitive, "dwell_ms")) fail(`${itemPath}/dwell_ms`, "is forbidden on duration and application pages");
           const selector = object(primitive.selector);
