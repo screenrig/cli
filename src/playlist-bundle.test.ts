@@ -29,6 +29,7 @@ import {
   exportPlaylistBundle,
   importPlaylistBundle,
   normalizePlaylistForBundle,
+  snapshotBundleSelectors,
   preflightPlaylistBundle,
   type PlaylistBundleManifest,
 } from "./playlist-bundle.js";
@@ -1176,4 +1177,24 @@ test("import can replace a playlist without a revision lookup or header", async 
   assert.equal(writes[0]?.headers?.["if-match"], undefined);
   assert.equal(transport.calls.some(c => c.method === "GET" && c.path === "/api/v1/playlists/pl_TARGET"), false);
  } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
+
+test("bundle export resolves dynamic selectors once per catalog and pins filename order", async () => {
+  const source = playlist(mediaPrimitive({ by: "tag", tag: "Lobby", order: "filename", one_at_a_time: true }));
+  const transport = new FakeTransport().on("GET", "/api/v1/media", () => ({ status: 200, headers: {}, body: { items: [{ id: "med_B", filename: "z.png" }, { id: "med_A", filename: "a.png" }], next_cursor: null } }));
+  const client = new ApiClient({ transport, token: "token" });
+  const snapshot = await snapshotBundleSelectors(client, source);
+  const normalized = normalizePlaylistForBundle(snapshot);
+  assert.deepEqual((normalized.playlist.pages as any[])[0].primitives[0].selector, { by: "ids", media_ids: ["med_A", "med_B"], one_at_a_time: true });
+  assert.deepEqual(source.pages[0]!.primitives[0]!.selector, { by: "tag", tag: "Lobby", order: "filename", one_at_a_time: true });
+  assert.equal(transport.calls.length, 1);
+});
+
+test("empty dynamic selectors leave other bundle primitives intact", async () => {
+  const transport = new FakeTransport().on("GET", "/api/v1/media", () => ({ status: 200, headers: {}, body: { items: [], next_cursor: null } }));
+  const snapshot = await snapshotBundleSelectors(new ApiClient({ transport, token: "token" }), playlist(mediaPrimitive({ by: "all", one_at_a_time: true })));
+  const normalized = normalizePlaylistForBundle(snapshot);
+  assert.deepEqual(normalized.mediaIds, []);
+  assert.equal((normalized.playlist.pages as any[])[0].primitives.length, 1);
 });

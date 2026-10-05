@@ -49,7 +49,7 @@ function cached(version: "v1" | "v2"): ReturnType<typeof buildValidators> {
   validators.set(version, built);
   return built;
 }
-export const PLAYLIST_SERVER_CHECKS = ["reference authorization and readiness", "dynamic selector cardinality", "media durations", "DNS and remote availability"];
+export const PLAYLIST_SERVER_CHECKS = ["reference authorization and readiness", "media durations", "DNS and remote availability"];
 
 /**
  * The cross-field checks for an ad-bearing document that the canonical v2

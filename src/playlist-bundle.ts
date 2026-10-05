@@ -624,6 +624,51 @@ async function destinationAbsent(destination: string): Promise<void> {
   throw usageError(`Playlist export destination already exists: ${destination}.`);
 }
 
+/** Bundles pin a catalog snapshot; playback keeps the authored selector dynamic. */
+export async function snapshotBundleSelectors(client: ApiClient, input: unknown): Promise<unknown> {
+  const source = cloneJson(record(input, "Playlist"));
+  if (!Array.isArray(source.pages)) return source;
+  const catalogs = new Map<string, string[]>();
+  const pages: unknown[] = [];
+  for (const rawPage of source.pages) {
+    const page = record(rawPage, "Playlist page");
+    if (!Array.isArray(page.primitives)) { pages.push(page); continue; }
+    const primitives: unknown[] = [];
+    for (const raw of page.primitives) {
+      const primitive = record(raw, "Playlist primitive");
+      const selector = primitive.selector as JsonRecord | undefined;
+      if (!selector || !["all", "tag"].includes(String(selector.by))) { primitives.push(primitive); continue; }
+      const category = stringField(primitive, "primitive", "Playlist primitive");
+      const tag = selector.by === "tag" ? stringField(selector, "tag", "Playlist selector") : undefined;
+      const key = JSON.stringify([category, tag]);
+      let ids = catalogs.get(key);
+      if (!ids) {
+        const response = await client.call({ method: "GET", path: "/api/v1/media", query: { primitive: category, tag } });
+        const catalog = record(response.body, "Media catalog");
+        if (!Array.isArray(catalog.items)) throw usageError("Media catalog must contain items.");
+        if (catalog.items.length > 32 || catalog.next_cursor) throw usageError("Playlist export requires at most 32 matches per dynamic selector.");
+        const rows = catalog.items.map(item => record(item, "Media catalog item"));
+        rows.sort((a, b) => {
+          const left = stringField(a, "filename", "Media catalog item"), right = stringField(b, "filename", "Media catalog item");
+          return left < right ? -1 : left > right ? 1 : String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0;
+        });
+        ids = rows.map(item => stringField(item, "id", "Media catalog item"));
+        catalogs.set(key, ids);
+      }
+      if (ids.length === 0) continue;
+      const ordered = [...ids];
+      if (selector.order === "random") for (let i = ordered.length - 1; i > 0; --i) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [ordered[i], ordered[j]] = [ordered[j]!, ordered[i]!];
+      }
+      primitive.selector = { by: "ids", media_ids: ordered, one_at_a_time: selector.one_at_a_time === true };
+      primitives.push(primitive);
+    }
+    if (primitives.length > 0 || page.primitives.length === 0) pages.push({ ...page, primitives });
+  }
+  return { ...source, pages };
+}
+
 export async function exportPlaylistBundle(options: {
   playlistId: string;
   outputDirectory: string;
@@ -635,7 +680,8 @@ export async function exportPlaylistBundle(options: {
   const destination = path.resolve(options.outputDirectory);
   await destinationAbsent(destination);
   const playlistResponse = await callVersionedPlaylist(options.client, { method: "GET", id: options.playlistId, preferred: "v1" });
-  const normalized = normalizePlaylistForBundle(playlistResponse.body, { skipApplications: options.skipApplications === true });
+  const snapshot = await snapshotBundleSelectors(options.client, playlistResponse.body);
+  const normalized = normalizePlaylistForBundle(snapshot, { skipApplications: options.skipApplications === true });
   if (normalized.id !== options.playlistId) throw usageError("Playlist export response id did not match the requested playlist.");
 
   // Resolve and validate every metadata row before creating local output or downloading bytes.

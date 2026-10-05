@@ -69,6 +69,15 @@ info:
     are not disclosed. Every operation with public fixed-window controls lists
     those controls in x-rate-limit-policies and names its optional admitted
     response headers in x-rate-limit-admitted-response-headers.
+
+    Runtime mutation device budgets use fresh active paired-screen authority.
+    Active paired devices behind one address have independent device budgets,
+    without the anonymous ten-device aggregate address ceiling. Signed session
+    parsing alone grants no exemption: failed authorization, invalid origins
+    and malformed payloads remain address protected. Anonymous sessions and
+    archived evidence retain their aggregate address ceilings. Nonwaiting
+    runtime concurrency refusal returns 429 rate_limited with Retry-After 1,
+    a service RateLimit entry and limit_kind runtime_concurrency.
 x-api-lifecycle:
   documentVersionMeaning: Contract-document version; not a URL or product API major.
   urlMajorFamilies: [/api/v1, /api/v2, /runtime/v1, /runtime/v2, /content/v1, /dashboard/v1, /website/v1]
@@ -3479,7 +3488,7 @@ paths:
       parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MediaTagPatch" } } } }
       responses:
-        "200": { description: Ready media with the updated tag. Matching by:tag playlists rematerialize in the same transaction., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Media" } } } }
+        "200": { description: Ready media with the updated tag. Runtime tag selectors observe the change at their next playlist-loop refresh., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Media" } } } }
         default: { $ref: "#/components/responses/Problem" }
     delete:
       operationId: deleteMedia
@@ -3992,7 +4001,7 @@ paths:
       operationId: createNativeIdentityRuntimeSession
       x-rate-limit-policies: [{ name: native-identity-session, quota: 60, windowSeconds: 60 }, { name: native-identity-session-ip, quota: 600, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
-      description: Verifies an EdDSA compact JWS (op=session.mint) against the enrolled public key and returns a signed 24-hour ScreenRig-Session. Cookies are neither accepted nor set. Exact Idempotency-Key replay precedes new abuse admission. An archived screen still mints a session so the player can show the archived glass. Session mint requires the exact durable project and screen binding established by signed completion; pending claim offers have no session authority. Exact replay rechecks that binding and rejects retired identities.
+      description: Verifies an EdDSA compact JWS (op=session.mint) against the enrolled public key and returns a signed 90-day ScreenRig-Session. Paired Players renew after thirty days with jitter through this same signed mint; renewal replaces the credential without closing an existing runtime stream. Renewal metadata is optional to readers and does not require a Player update. Cookies are neither accepted nor set. Exact Idempotency-Key replay precedes new abuse admission. An archived screen still mints a session so the player can show the archived glass. Session mint requires the exact durable project and screen binding established by signed completion; pending claim offers have no session authority. Exact replay rechecks that binding and rejects retired identities.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentitySessionRequest" } } } }
       responses:
@@ -4080,12 +4089,12 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: createRuntimeReport
-      x-rate-limit-policies: [{ name: runtime-report, quota: 120, windowSeconds: 60 }, { name: runtime-report-ip, quota: 1200, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: runtime-report, quota: 120, windowSeconds: 60 }, { name: runtime-report-ip, quota: 1200, windowSeconds: 60, condition: anonymous_or_archived }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
-      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeReport" } } } }
+      requestBody: { required: true, content: { application/json: { schema: { oneOf: [{ $ref: "#/components/schemas/RuntimeReport" }, { $ref: "#/components/schemas/RuntimeTelemetryBatch" }] } } } }
       responses:
-        "202": { description: "Accepted. manifest.activated is committed before this response and is idempotent for the current active revision. playback.media_started, legacy playback.video_started, and playback.application_started durably append one authenticated screen observation (GET /api/v1/playback/plays) before this response; reported item, page, and manifest identities do not require current content membership and do not authorize content access. Daily counts, optional metadata, and project-owned resource last_used_at are updated by recoverable batches and can lag the raw observation. Ordinary playback-start responses omit optional credit-balance headers. playback.page_failed replaces the screen's latest page-failure slot and appends a project-only durable event in the same transaction without changing screen or manifest revision. manifest.upgrade stores the screen's one latest-wins manifest-upgrade slot behind its revision fences and appends a project-only durable event in the same transaction only when the derived state changes; a stale, superseded, or post-activation pre-activation report is accepted with no change, and no report ever promotes a grant. application.event appends a durable project event before this response.", headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
+        "202": { description: "Accepted after durable persistence. A telemetry batch commits its watermark, raw observations, state and project events atomically, and returns stream_id, sequence, accepted (report count), and duplicate. Individual reports retain their existing response. manifest.activated is committed before this response and is idempotent for the current active revision. playback.media_started, legacy playback.video_started, and playback.application_started durably append one authenticated screen observation (GET /api/v1/playback/plays) before this response; reported item, page, and manifest identities do not require current content membership and do not authorize content access. Daily counts, optional metadata, and project-owned resource last_used_at are updated by recoverable batches and can lag the raw observation. Ordinary playback-start responses omit optional credit-balance headers. playback.page_failed replaces the screen's latest page-failure slot and appends a project-only durable event in the same transaction without changing screen or manifest revision. manifest.upgrade stores the screen's one latest-wins manifest-upgrade slot behind its revision fences and appends a project-only durable event in the same transaction only when the derived state changes; a stale, superseded, or post-activation pre-activation report is accepted with no change, and no report ever promotes a grant. application.event appends a durable project event before this response.", headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         default: { $ref: "#/components/responses/Problem" }
   /runtime/v1/screenshot:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -4135,9 +4144,9 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: resolveAdslots
-      x-rate-limit-policies: [{ name: runtime-adslot-resolve, quota: 60, windowSeconds: 60 }, { name: runtime-adslot-resolve-ip, quota: 600, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: runtime-adslot-resolve, quota: 60, windowSeconds: 60 }, { name: runtime-adslot-resolve-ip, quota: 600, windowSeconds: 60, condition: anonymous_or_archived }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
-      description: Resolves up to 16 server-verified page occurrences. A fresh candidate is atomically priced, budget-checked and reserved against the campaign-wide pricing fence. No eligible or affordable campaign is a successful empty result with no content and no debit; it is never a payment challenge. A lease renewal reuses the same reservation and does not advance rotation, and is denied while the campaign requires price reacceptance.
+      description: Resolves up to 16 server-verified page occurrences. A fresh candidate with a possible fill is atomically priced, budget-checked and reserved against the campaign-wide pricing fence. A fresh candidate with no possible fill returns empty without creating a decision or reservation. No eligible or affordable campaign is a successful empty result with no content and no debit; it is never a payment challenge. Empty results may include a server-clock no-fill hint lasting at most 60 seconds and ending at an earlier known eligibility boundary. Hints apply to the same screen, manifest, page, slot and eligibility context; they never authorize playback. A lease renewal reuses the same reservation and does not advance rotation, and is denied while the campaign requires price reacceptance.
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeAdslotResolveRequest" } } } }
       responses:
@@ -4150,7 +4159,7 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: reportAdslotEvents
-      x-rate-limit-policies: [{ name: runtime-adslot-events, quota: 120, windowSeconds: 60 }, { name: runtime-adslot-events-ip, quota: 1200, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: runtime-adslot-events, quota: 120, windowSeconds: 60 }, { name: runtime-adslot-events-ip, quota: 1200, windowSeconds: 60, condition: anonymous_or_archived }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: Authenticated playback evidence. Events dedupe on screen and event ID. A valid completion consumes its held reservation once at the reserved price and fee, credits the seller gross and debits the serving fee in one transaction. A confirmed non-play terminal event releases the hold once. Completion received after release is unbillable and never debits fresh credits. Completion before start is held pending reconciliation.
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
@@ -4163,7 +4172,7 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     put:
       operationId: putRuntimeObservation
-      x-rate-limit-policies: [{ name: runtime-observation, quota: 12, windowSeconds: 60 }, { name: runtime-observation-ip, quota: 120, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: runtime-observation, quota: 12, windowSeconds: 60 }, { name: runtime-observation-ip, quota: 120, windowSeconds: 60, condition: anonymous_or_archived }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Reports the playback surface the paired player used for the last
@@ -4197,7 +4206,7 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     put:
       operationId: putRuntimeHealth
-      x-rate-limit-policies: [{ name: runtime-health, quota: 1, windowSeconds: 60 }, { name: runtime-health-ip, quota: 600, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: runtime-health, quota: 1, windowSeconds: 60 }, { name: runtime-health-ip, quota: 600, windowSeconds: 60, condition: untrusted_or_archived }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Reports device health for the paired session's screen. Send one on
@@ -4237,7 +4246,7 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     put:
       operationId: putRuntimeStorage
-      x-rate-limit-policies: [{ name: runtime-storage, quota: 12, windowSeconds: 60 }, { name: runtime-storage-ip, quota: 120, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: runtime-storage, quota: 12, windowSeconds: 60 }, { name: runtime-storage-ip, quota: 120, windowSeconds: 60, condition: anonymous_or_archived }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Reports native player storage, the player's storage plan, and
@@ -4269,7 +4278,7 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     put:
       operationId: putRuntimeScreenLabel
-      x-rate-limit-policies: [{ name: runtime-screen-label, quota: 30, windowSeconds: 60 }, { name: runtime-screen-label-ip, quota: 300, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: runtime-screen-label, quota: 30, windowSeconds: 60 }, { name: runtime-screen-label-ip, quota: 300, windowSeconds: 60, condition: anonymous_or_archived }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Renames the screen bound to the paired runtime session. It is the
@@ -4326,7 +4335,7 @@ paths:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
       operationId: launchApplicationRelease
-      x-rate-limit-policies: [{ name: release-launch, quota: 120, windowSeconds: 60 }, { name: release-launch-ip, quota: 1200, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: release-launch, quota: 120, windowSeconds: 60 }, { name: release-launch-ip, quota: 1200, windowSeconds: 60, condition: anonymous_or_archived }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
       parameters:
@@ -4357,6 +4366,55 @@ paths:
       responses:
         "200": { description: Metadata only., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } } } }
         default: { $ref: "#/components/responses/Problem" }
+  /runtime/v1/manifests/{manifest_revision}/selectors/resolve:
+    parameters:
+      - { name: manifest_revision, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Runtime]
+      operationId: resolveRuntimeSelectors
+      summary: Resolve all dynamic media selectors for one playlist loop
+      description: >-
+        Uses the authenticated screen's assigned playlist and its manifest revision.
+        Returns a fixed snapshot in filename order; Players retain cursor and shuffle
+        state across loops. Uploads and tag changes never rewrite this manifest.
+        Empty matches are valid. Selected media are authorized by the screen's
+        runtime grant independently of the immutable manifest definition.
+      security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
+      responses:
+        "200": { description: "Resolved loop snapshot, including item metadata and media_end safety deadlines.", content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeSelectorSnapshot" } } } }
+        "401": { description: Runtime session invalid or expired, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "403": { description: Runtime capability denied, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "503": { description: Manifest projection pending or selector snapshot degraded; retain the current loop and retry, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+  /content/v1/media/{media_id}:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    get:
+      operationId: getStableProtectedMedia
+      description: >-
+        Stable immutable media URL shared across playlist revisions. The runtime session identifies the
+        screen and project for authorization and bandwidth accounting. Every request requires membership
+        in that screen's desired, active, or unexpired transition-grace grant in its current content-access
+        generation. IDs alone grant no access. Browser cookie and native session authentication remain
+        on the trusted Player origin; redirects and public object-storage access are not used.
+      security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
+      parameters: &stableMediaParameters
+        - { name: media_id, in: path, required: true, schema: { type: string } }
+        - { $ref: "#/components/parameters/Range" }
+        - { $ref: "#/components/parameters/SecFetchSite" }
+        - { $ref: "#/components/parameters/SecFetchMode" }
+        - { $ref: "#/components/parameters/SecFetchDest" }
+      responses: &stableMediaResponses
+        "200": { description: Session-authorized complete private media. Browser Fetch Metadata must describe trusted-player same-origin media/image/video use; authenticated native clients may omit it., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } }, Content-Disposition: { schema: { type: string } } } }
+        "206": { description: One standards-correct byte range., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } }, Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } } } }
+        "416": { description: "Unsatisfiable, multiple, or malformed range.", headers: { Content-Range: { schema: { type: string } }, Accept-Ranges: { schema: { type: string, enum: [bytes] } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "429": { description: "Per-client, screen, or project protected-media egress limit exceeded.", headers: { Retry-After: { schema: { type: integer, minimum: 1 } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        default: { $ref: "#/components/responses/Problem" }
+    head:
+      operationId: headStableProtectedMedia
+      description: Session-authorized immutable media metadata with the same grant checks as GET and no response body.
+      security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
+      parameters: *stableMediaParameters
+      responses: *stableMediaResponses
   /content/v1/manifests/{manifest_revision}/media/{media_id}:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     get:
@@ -4513,7 +4571,7 @@ paths:
         default: { $ref: "#/components/responses/Problem" }
     put:
       operationId: putRuntimeKV
-      x-rate-limit-policies: [{ name: runtime-kv-write, quota: 120, windowSeconds: 60 }, { name: runtime-kv-write-ip, quota: 1200, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: runtime-kv-write, quota: 120, windowSeconds: 60 }, { name: runtime-kv-write-ip, quota: 1200, windowSeconds: 60, condition: anonymous_or_archived }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ pairedRuntimeCookie: [], primitiveCapability: [] }, { nativeSessionAuthorization: [], primitiveCapability: [] }]
       parameters: [{ $ref: "#/components/parameters/OptionalIfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
@@ -4523,7 +4581,7 @@ paths:
         default: { $ref: "#/components/responses/Problem" }
     delete:
       operationId: deleteRuntimeKV
-      x-rate-limit-policies: [{ name: runtime-kv-write, quota: 120, windowSeconds: 60 }, { name: runtime-kv-write-ip, quota: 1200, windowSeconds: 60 }]
+      x-rate-limit-policies: [{ name: runtime-kv-write, quota: 120, windowSeconds: 60 }, { name: runtime-kv-write-ip, quota: 1200, windowSeconds: 60, condition: anonymous_or_archived }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       security: [{ pairedRuntimeCookie: [], primitiveCapability: [] }, { nativeSessionAuthorization: [], primitiveCapability: [] }]
       parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
@@ -9451,6 +9509,7 @@ components:
         playlistId: { type: string }
         playlistRevision: { type: integer }
         generatedAt: { type: string }
+        selectorSnapshotUrl: { type: string, description: "Same-origin POST endpoint resolving all dynamic selectors at playlist startup and each loop boundary." }
         playlistName: { type: string, description: "Name of the assigned playlist." }
         timezone: { type: string, description: "IANA time zone of the screen. Emitted when the screen has one. Every page visibility rule in this manifest is evaluated in this zone (docs/player-compatibility.md §1.3)." }
         pages: { type: array, items: { type: object, additionalProperties: true } }
@@ -9502,7 +9561,7 @@ components:
         report_before: { type: string, format: date-time }
         creative_revision: { type: integer }
         media: { $ref: "#/components/schemas/RuntimeAdslotMedia" }
-        hint_until: { type: string, format: date-time, description: "No-fill hint expiry on the server clock." }
+        hint_until: { type: string, format: date-time, description: "No-fill hint expiry on the server clock, at most 60 seconds after server_time and no later than an earlier known eligibility boundary. Scoped to this screen, manifest, page, slot and eligibility context." }
     RuntimeAdslotResolveResponse:
       type: object
       additionalProperties: true
@@ -9808,8 +9867,8 @@ components:
     PlaylistVideoPrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, selector, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, muted: { type: boolean, enum: [true], default: true }, loop: { type: boolean, default: false }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
     PlaylistIframePrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [iframe] }, src: { type: string, format: uri, pattern: "^https://" }, title: { type: string, minLength: 1, maxLength: 200 }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
     PlaylistApplicationPrimitive: { allOf: [{ $ref: "#/components/schemas/PlaylistApplicationPrimitiveWrite" }] }
-    PlaylistImagePrimitive: { type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [image] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, resolved_media: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistResolvedMedia" }, description: Server-resolved selector matches. Clients must not send this field. }, alt: { type: string, maxLength: 300 }, dwell_ms: { type: integer, minimum: 1000, maximum: 86400000 }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
-    PlaylistVideoPrimitive: { type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, muted, loop, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, resolved_media: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistResolvedMedia" }, description: Server-resolved selector matches. Clients must not send this field. }, muted: { type: boolean, enum: [true] }, loop: { type: boolean }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
+    PlaylistImagePrimitive: { type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [image] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, resolved_media: { type: array, minItems: 0, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistResolvedMedia" }, description: Static ID matches; all/tag selectors carry an empty array and resolve at runtime. Clients must not send this field. }, alt: { type: string, maxLength: 300 }, dwell_ms: { type: integer, minimum: 1000, maximum: 86400000 }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
+    PlaylistVideoPrimitive: { type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, muted, loop, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, resolved_media: { type: array, minItems: 0, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistResolvedMedia" }, description: Static ID matches; all/tag selectors carry an empty array and resolve at runtime. Clients must not send this field. }, muted: { type: boolean, enum: [true] }, loop: { type: boolean }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
     PlaylistIframePrimitive: { type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [iframe] }, src: { type: string, format: uri, pattern: "^https://" }, title: { type: string, minLength: 1, maxLength: 200 }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
     PlaylistMediaSelector:
       oneOf:
@@ -9820,8 +9879,8 @@ components:
       discriminator: { propertyName: by }
     PlaylistMediaSelectorByID: { type: object, additionalProperties: false, required: [by, media_id], properties: { by: { type: string, enum: [id] }, media_id: { type: string, pattern: "^med_" }, one_at_a_time: { type: boolean, enum: [false], default: false } } }
     PlaylistMediaSelectorByIDs: { type: object, additionalProperties: false, required: [by, media_ids], properties: { by: { type: string, enum: [ids] }, media_ids: { type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^med_" } }, one_at_a_time: { type: boolean, default: false } } }
-    PlaylistMediaSelectorByAll: { type: object, additionalProperties: false, required: [by], properties: { by: { type: string, enum: [all] }, one_at_a_time: { type: boolean, default: false } } }
-    PlaylistMediaSelectorByTag: { type: object, additionalProperties: false, required: [by, tag], properties: { by: { type: string, enum: [tag] }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, one_at_a_time: { type: boolean, default: false } } }
+    PlaylistMediaSelectorByAll: { type: object, additionalProperties: false, required: [by], properties: { by: { type: string, enum: [all] }, one_at_a_time: { type: boolean, default: false }, order: { type: string, enum: [filename, random], default: filename } } }
+    PlaylistMediaSelectorByTag: { type: object, additionalProperties: false, required: [by, tag], properties: { by: { type: string, enum: [tag] }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, one_at_a_time: { type: boolean, default: false }, order: { type: string, enum: [filename, random], default: filename } } }
     PlaylistResolvedMedia: { type: object, additionalProperties: false, required: [media_id, intrinsic_size], properties: { media_id: { type: string, pattern: "^med_" }, intrinsic_size: { $ref: "#/components/schemas/PlaylistIntrinsicSize" } } }
     CanvasColor: { type: string, pattern: "^#[0-9A-F]{8}$", description: Canonical uppercase sRGB RRGGBBAA. }
     LinearGradientStop:
@@ -10409,8 +10468,9 @@ components:
       required: [desired_revision, active_revision, desired_playlist, active_playlist, state, code, attempt, retry_at, missing_page_count, state_since, reported_at]
       description: >-
         Always-present computed manifest-upgrade state for this screen, derived
-        at read time from the screen's desired manifest revision, its last
-        server-acknowledged active manifest revision (manifest.activated), and
+        at read time from its issued desired revision or queued shared-playlist
+        content goal, its last server-acknowledged active manifest revision
+        (manifest.activated), and
         the latest accepted manifest.upgrade report slot. Read-only project
         state: no body can write it, and no report ever promotes a grant.
         active_revision is the last acknowledged activation, not proof that
@@ -10421,8 +10481,12 @@ components:
         activating names a target already on glass whose acknowledgement is
         still pending; a report slot whose revision stopped matching
         desired_revision is ignored until a new report matches, so a new
-        desired manifest derives pending without clearing anything. The nested
-        playlist objects are hydrated from the exact matching durable grants.
+        desired manifest derives pending without clearing anything. Before the
+        next manifest contact issues a shared edit's desired grant, the desired
+        revision and playlist can expose that queued goal as read-only intention;
+        it grants no access. Active identity always comes from the exact
+        acknowledged historical grant. An older activation cannot announce the
+        newer queued goal as current.
       properties:
         desired_revision: { oneOf: [{ type: string, pattern: "^man_" }, { type: "null" }] }
         active_revision: { oneOf: [{ type: string, pattern: "^man_" }, { type: "null" }] }
@@ -10440,14 +10504,15 @@ components:
       additionalProperties: false
       required: [id, name, revision]
       description: >-
-        The playlist identity behind a manifest revision, read from the exact
-        matching durable grant: the desired grant for desired_playlist and the
-        acknowledged (active) grant for active_playlist, never the screen's
-        current assignment. id plus revision are the playlist version an
-        operator reads as Target v42 / Playing v41; name is the playlist's
-        display name, null when the playlist no longer exists or cannot be
-        resolved. A missing historical grant is null, never a fabricated
-        revision.
+        The playlist identity behind an issued or queued desired revision:
+        desired_playlist uses its exact desired grant or the read-only shared
+        content goal for the current effective assignment before grant issuance.
+        active_playlist always uses the exact acknowledged historical grant,
+        never a newer assignment or content edit. id plus revision are the
+        playlist version an operator reads as Target v42 / Playing v41; name is
+        the playlist's display name, null when the playlist no longer exists or
+        cannot be resolved. A missing historical active grant is null, never a
+        fabricated revision. A queued desired goal grants no content access.
       properties:
         id: { type: string, minLength: 1 }
         name: { oneOf: [{ type: string, minLength: 1 }, { type: "null" }] }
@@ -11389,6 +11454,9 @@ components:
       required: [paired, capabilities, event_cursor, public_url]
       description: Runtime-owned session (docs/player-compatibility.md §8). Readers ignore unknown members and unknown capabilities values. A new member is sent only to sessions whose grants cover it.
       properties:
+        telemetry_epoch: { type: string, pattern: "^[0-9a-f]{64}$", description: "Paired telemetry queue generation. Persist with the stream and echo in batches. Stable across ordinary credential renewal; changes when screen authority is retired. This is an ordering hint, never authorization." }
+        renew_after_seconds: { type: integer, minimum: 1, description: "Paired credential renewal interval in seconds; currently thirty days. Add 0-20 percent jitter and renew through the existing mint without reopening SSE. Absent for anonymous viewers." }
+        credential_expires_at: { type: string, format: date-time, description: "Expiry of this credential, independent of an already authenticated runtime stream. Paired credentials currently last ninety days." }
         paired: { type: boolean }
         capabilities: { type: array, items: { type: string }, description: "Session scopes. Known values: manifest.read, events.read, content.read, kv.read, kv.write, runtime.report, presence.write, health.write (paired sessions; PUT /runtime/v1/health)." }
         event_cursor: { type: string }
@@ -11403,6 +11471,9 @@ components:
       required: [paired, capabilities, event_cursor, public_url, runtime_credential]
       description: Runtime-owned native session (docs/player-compatibility.md §8). Readers ignore unknown members and unknown capabilities values. A new member is sent only to sessions whose grants cover it.
       properties:
+        telemetry_epoch: { type: string, pattern: "^[0-9a-f]{64}$", description: "Paired telemetry queue generation. Persist with the stream and echo in batches. Stable across ordinary credential renewal; changes when screen authority is retired. This is an ordering hint, never authorization." }
+        renew_after_seconds: { type: integer, minimum: 1, description: "Paired credential renewal interval in seconds; currently thirty days. Add 0-20 percent jitter and renew through the existing mint without reopening SSE. Absent for anonymous viewers." }
+        credential_expires_at: { type: string, format: date-time, description: "Expiry of this credential, independent of an already authenticated runtime stream. Paired credentials currently last ninety days." }
         paired: { type: boolean, enum: [true] }
         capabilities: { type: array, items: { type: string }, description: "Session scopes. Known values: manifest.read, events.read, content.read, kv.read, kv.write, runtime.report, presence.write, health.write (paired sessions; PUT /runtime/v1/health)." }
         event_cursor: { type: string }
@@ -11412,6 +11483,26 @@ components:
         compat: { type: array, items: { type: string }, description: "Granted compat tokens, in registry order. Present only when the mint carried a valid player, and [] when nothing was granted (docs/player-compatibility.md §4.1)." }
         upgrade: { $ref: "#/components/schemas/RuntimeUpgradeNotice" }
         origins: { $ref: "#/components/schemas/RuntimeOrigins" }
+    RuntimeSelectorSnapshot:
+      type: object
+      required: [manifestRevision, snapshotRevision, selections, pageMaxMs]
+      properties:
+        manifestRevision: { type: string }
+        snapshotRevision: { type: string }
+        selections:
+          type: array
+          maxItems: 1024
+          items:
+            type: object
+            required: [pageId, primitiveId, resolvedMedia]
+            properties:
+              pageId: { type: string }
+              primitiveId: { type: string }
+              resolvedMedia:
+                type: array
+                maxItems: 32
+                items: { oneOf: [{ $ref: "#/components/schemas/RuntimeImageResolvedMedia" }, { $ref: "#/components/schemas/RuntimeVideoResolvedMedia" }] }
+        pageMaxMs: { type: object, additionalProperties: { type: integer, minimum: 1000, maximum: 86400000 } }
     RuntimeManifest:
       type: object
       description: >-
@@ -11428,6 +11519,7 @@ components:
         playlistId: { type: string }
         playlistRevision: { type: integer }
         generatedAt: { type: string }
+        selectorSnapshotUrl: { type: string, description: "Same-origin POST endpoint resolving all dynamic selectors at playlist startup and each loop boundary." }
         playlistName: { type: string, description: "Name of the assigned playlist." }
         timezone: { type: string, description: "IANA time zone identifier of the screen. Every page visibility rule in this manifest is evaluated in this zone. Emitted when the screen has one (docs/player-compatibility.md §1.3)." }
         pages: { type: array, items: { $ref: "#/components/schemas/RuntimePage" } }
@@ -11529,7 +11621,7 @@ components:
         id: { type: string }
         primitive: { type: string, enum: [image] }
         selector: { $ref: "#/components/schemas/RuntimeMediaSelector" }
-        resolvedMedia: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/RuntimeImageResolvedMedia" } }
+        resolvedMedia: { type: array, minItems: 0, maxItems: 32, items: { $ref: "#/components/schemas/RuntimeImageResolvedMedia" } }
         grantId: { type: string }
         alt: { type: string }
         dwellMs: { type: integer, minimum: 1000, maximum: 86400000 }
@@ -11545,7 +11637,7 @@ components:
         id: { type: string }
         primitive: { type: string, enum: [video] }
         selector: { $ref: "#/components/schemas/RuntimeMediaSelector" }
-        resolvedMedia: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/RuntimeVideoResolvedMedia" } }
+        resolvedMedia: { type: array, minItems: 0, maxItems: 32, items: { $ref: "#/components/schemas/RuntimeVideoResolvedMedia" } }
         muted: { type: boolean }
         loop: { type: boolean }
         grantId: { type: string }
@@ -11582,8 +11674,8 @@ components:
       discriminator: { propertyName: by }
     RuntimeMediaSelectorByID: { type: object, required: [by, mediaId, oneAtATime], properties: { by: { type: string, enum: [id] }, mediaId: { type: string, pattern: "^med_" }, oneAtATime: { type: boolean, enum: [false] } } }
     RuntimeMediaSelectorByIDs: { type: object, required: [by, mediaIds, oneAtATime], properties: { by: { type: string, enum: [ids] }, mediaIds: { type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^med_" } }, oneAtATime: { type: boolean } } }
-    RuntimeMediaSelectorByAll: { type: object, required: [by, oneAtATime], properties: { by: { type: string, enum: [all] }, oneAtATime: { type: boolean } } }
-    RuntimeMediaSelectorByTag: { type: object, required: [by, tag, oneAtATime], properties: { by: { type: string, enum: [tag] }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, oneAtATime: { type: boolean } } }
+    RuntimeMediaSelectorByAll: { type: object, required: [by, oneAtATime], properties: { by: { type: string, enum: [all] }, oneAtATime: { type: boolean }, order: { type: string, enum: [filename, random], default: filename } } }
+    RuntimeMediaSelectorByTag: { type: object, required: [by, tag, oneAtATime], properties: { by: { type: string, enum: [tag] }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, oneAtATime: { type: boolean }, order: { type: string, enum: [filename, random], default: filename } } }
     RuntimeApplicationPackage:
       type: object
       description: >-
@@ -11597,26 +11689,15 @@ components:
           type: string
           format: uri-reference
           description: &manifest-bound-route >-
-            Manifest-bound route. The runtime origin is the origin this session
-            fetched /runtime/v1/manifest from; that origin is deployment
-            configuration, so this binding is normative prose rather than a
-            machine-readable constraint. A consumer resolves this value — an
-            absolute URL or a root-relative path — against the runtime origin
-            and requires all of the following of the resolved URL: its scheme,
-            host, and effective port equal the runtime origin's, with
-            default-port normalization (443 for https, 80 for http); it carries
-            no query component, no fragment, and no user info; and its path is
-            byte-for-byte exactly the route emitted for this field —
-            /content/v1/manifests/{manifest_revision}/media/{media_id} for an
-            image or video item, with the containing manifest revision and the
-            item's mediaId, or
-            /content/v1/manifests/{manifest_revision}/releases/{release_id}/package
-            for an application package, with the containing manifest revision
-            and the content's releaseId. A value that fails this binding makes
-            the whole manifest invalid: the consumer rejects the manifest at
-            parse time, before any credentialed fetch, and never requests the
-            route. The sibling sha256 pins bytes after transfer; hash-pinning
-            is never destination authorization and never relaxes this binding.
+            Session-authorized content on the runtime credential origin. Resolve an absolute URL or
+            root-relative path against that origin; require matching scheme, host, and effective port,
+            no user info, and a normalized path under /content/. The exact route is not a reader constraint.
+            Images, videos, audio tracks, and stream fallback images use /content/v1/media/{media_id};
+            older manifests retain /content/v1/manifests/{manifest_revision}/media/{media_id}.
+            Application packages retain /content/v1/manifests/{manifest_revision}/releases/{release_id}/package.
+            Reject an unsafe destination before attaching credentials, drop its smallest containing unit,
+            and refuse redirects. The sibling sha256 verifies immutable bytes after transfer and never
+            authorizes a destination. Screen grant membership is checked on every request.
         bytes: { type: integer, minimum: 1, maximum: 272629760 }
         sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
         entrypoint: { type: string, enum: [index.html] }
@@ -11701,6 +11782,20 @@ components:
         - { $ref: "#/components/schemas/ApplicationEventReport" }
         - { $ref: "#/components/schemas/ManifestUpgradeReport" }
         - { $ref: "#/components/schemas/RuntimeConditionReport" }
+    RuntimeTelemetryBatch:
+      type: object
+      additionalProperties: true
+      required: [telemetry_epoch, stream_id, sequence, created_at, reports]
+      description: "A durable FIFO Player queue sends at most one ordinary batch per minute with a randomized phase, or earlier when full. Total JSON body is at most 256 KiB; at most 64 reports, each at most 32 KiB. Every report retains its occurrence timestamp and stable play_id. Keep one immutable in-flight batch on disk until 202, increment sequence only after acknowledgement, and retry the same bytes after lost replies or restarts. Sequence starts at 1 and has no gaps. Dedupe retains at most eight streams per screen for seven days; keep the same stream through credential renewal. Records expire locally after 24 hours with explicit accounting. manifest.activated and manifest.upgrade stay individual and immediate. Interactive writes, ad resolution, content fetches, screenshots, and SDK emitConfirmed() also stay immediate. Health sampling retains its fifteen-minute cadence; urgent display/health transitions are sent immediately. Observation and ordinary health snapshots are latest-wins with original occurrence times. Health requires health.write. Existing individual reports remain accepted. Report item abuse limits apply per new item rather than per HTTP envelope; committed replay consumes only request admission."
+      properties:
+        telemetry_epoch: { type: string, pattern: "^[0-9a-f]{64}$" }
+        stream_id: { type: string, pattern: "^[A-Za-z0-9_-]{16,64}$" }
+        sequence: { type: integer, minimum: 1, maximum: 9007199254740991 }
+        created_at: { type: string, format: date-time, description: "Immutable envelope creation time, within the previous 24 hours and at most two minutes ahead of receipt." }
+        reports: { type: array, maxItems: 64, items: { $ref: "#/components/schemas/RuntimeReport" }, description: "No manifest lifecycle reports. At least one report, health, or observation is required." }
+        health: { $ref: "#/components/schemas/RuntimeHealthWrite" }
+        health_at: { type: string, format: date-time, description: "Required with health; the original sample time within the same 24 hour and two minute bounds." }
+        observation: { $ref: "#/components/schemas/RuntimeObservationWrite" }
     ManifestActivatedReport: { type: object, additionalProperties: true, required: [severity, code, context], properties: { severity: { type: string, enum: [info] }, code: { type: string, enum: [manifest.activated] }, context: { $ref: "#/components/schemas/ManifestActivatedContext" } } }
     ManifestActivatedContext: { type: object, additionalProperties: true, required: [manifest_revision], properties: { manifest_revision: { type: string, pattern: "^man_" } } }
     ManifestUpgradeReport: { type: object, additionalProperties: true, required: [severity, code, context], description: "One latest-wins manifest-upgrade lifecycle snapshot for the session screen. The server stores one slot per screen and derives the project read model Screen.manifest_upgrade from it; a stale, superseded, or post-activation pre-activation report is accepted with no change (202), never refused as a conflict, and no report ever promotes a grant. severity is envelope-only: the derived project event severity comes from state.", properties: { severity: { type: string, enum: [info, warning, error] }, code: { type: string, enum: [manifest.upgrade] }, context: { $ref: "#/components/schemas/ManifestUpgradeContext" } } }

@@ -99,7 +99,7 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
         if (mode === "duration" || mode === "application") {
           if (Object.hasOwn(primitive, "dwell_ms")) fail(`${itemPath}/dwell_ms`, "is forbidden on duration and application pages");
           const selector = object(primitive.selector);
-          if (selector.by === "ids" && array(selector.media_ids).length > 1 && selector.one_at_a_time !== true) fail(`${itemPath}/selector/one_at_a_time`, "must be true for multiple media on duration or application pages");
+          if ((selector.by === "all" || selector.by === "tag" || selector.by === "ids" && array(selector.media_ids).length > 1) && selector.one_at_a_time !== true) fail(`${itemPath}/selector/one_at_a_time`, "must be true for multiple media on duration or application pages");
         }
         if (mode === "media_end") {
           if (primitive.primitive === "image" && !Object.hasOwn(primitive, "dwell_ms")) fail(`${itemPath}/dwell_ms`, "is required for a media_end image");
