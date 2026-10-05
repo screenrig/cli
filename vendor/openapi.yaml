@@ -5980,9 +5980,12 @@ paths:
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
       description: >-
         Mints one single-use thirty-second launch ticket for the latest ready
-        release of an application the session's project owns, on the existing
-        exact release host. The ticket converts to the release-grant cookie on
-        that host only, so the preview is cross-origin by construction and web
+        release of an application the session's project owns, on that
+        release's own exact preview host, never the release host Players frame,
+        so a Player and the dashboard in one browser never share that host's
+        cached documents or grant cookie. The ticket converts to the
+        release-grant cookie on that host only, so the preview is cross-origin
+        by construction and web
         application code can never read a dashboard cookie. Assign launch_url
         to iframe.src and to nothing else. Authority here is owner authority:
         the session's project owns the application. That is a deliberate second
