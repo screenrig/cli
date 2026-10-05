@@ -3334,13 +3334,15 @@ async function mediaUpdate(args: ParsedArgs, client: ApiClient): Promise<Command
   const clearTag = flagBool(args.flags, "clear-tag");
   const tag = mediaTagFromArgs(args);
   if (!id) {
-    throw usageError("media update requires <id>, and --tag TAG or --clear-tag.");
+    throw usageError("media update requires <id> and --tag TAG, --tags TAG1,TAG2, or --clear-tag.");
   }
   if ([clearTag, Boolean(tag), flagString(args.flags, "tags") !== undefined].filter(Boolean).length !== 1) {
     throw usageError("media update requires exactly one of --tag TAG, --tags TAG1,TAG2, or --clear-tag.");
   }
   const tagsFlag = flagString(args.flags, "tags");
-  const body: MediaTagPatch = tagsFlag === undefined ? { tag: clearTag ? null : tag ?? null } : { tags: tagsFlag.split(",") };
+  const tags = tagsFlag?.split(",");
+  if (tags !== undefined && (tags.length > 32 || new Set(tags).size !== tags.length || tags.some(value => !/^[A-Za-z0-9]{1,32}$/.test(value)))) throw usageError("--tags requires 1 through 32 unique alphanumeric tags separated by commas; use --clear-tag to clear the set.");
+  const body: MediaTagPatch = tags === undefined ? { tag: clearTag ? null : tag ?? null } : { tags };
   const response = await client.call({
     method: "PATCH",
     path: `/api/v1/media/${id}`,
