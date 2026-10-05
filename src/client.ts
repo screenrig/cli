@@ -8,6 +8,7 @@ import {
   bodySnippet,
   normalizeProblem,
   parseRetryAfter,
+  problemCodeOf,
   timeoutError,
   unexpectedResponseError,
   usageError,
@@ -69,11 +70,6 @@ function withTransportHint(err: unknown, method: string, keyed: boolean): unknow
       ? `${reach} The write may already have happened. Run the identical command again: it reuses the saved idempotency key, so work that already happened is returned, not repeated. screenrig recovery list shows writes still unresolved.`
       : `${reach} The write may already have happened. Inspect the resource with its show or list command before running the command again.`;
   return new CliError({ ...err.problem, hint }, err.exitCode, err.warnings);
-}
-
-function problemCode(body: unknown): string | undefined {
-  const code = body && typeof body === "object" ? (body as { code?: unknown }).code : undefined;
-  return typeof code === "string" ? code : undefined;
 }
 
 export interface ApiClientOptions {
@@ -221,7 +217,7 @@ export class ApiClient {
     // Definite refusals need reconciliation, not automatic replay of a stale key.
     // Keep ambiguous timeouts and conflicts (which can mean work is in progress).
     if (pending && response.status >= 400 && response.status < 500
-        && (![408, 409].includes(response.status) || DEFINITE_CONFLICT_CODES.has(problemCode(response.body) ?? ""))) {
+        && (![408, 409].includes(response.status) || DEFINITE_CONFLICT_CODES.has(problemCodeOf(response.body) ?? ""))) {
       await recovery!.clear(pending);
     }
     const remaining = this.token ? parseCreditsRemainingHeader(response.headers) : undefined;

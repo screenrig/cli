@@ -83,6 +83,35 @@ function asNext(value: unknown): ProblemNext | undefined {
   return argv ? { command, reason, argv } : { command, reason };
 }
 
+/**
+ * The flat view of a problem document. The API puts the error itself in
+ * `errors[0]` (status, code, type, title, detail, hint, and current_revision,
+ * next, or retryable where they apply) and keeps only document members
+ * (action, instance, request_id, server_time, trace_id) at the top level. The
+ * runtime routes, operation errors, and older servers carry every member at
+ * the top level. Either way the result reads the same; errors[] entries that
+ * name a request field stay in `errors` as `{field, detail}`.
+ */
+export function flattenProblemDocument(rec: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!rec || !Array.isArray(rec.errors) || asString(rec.code) !== undefined) {
+    return rec;
+  }
+  const first = asRecord(rec.errors[0]);
+  if (!first || !(asString(first.code) || asString(first.detail) || asString(first.title))) {
+    return rec;
+  }
+  const fields = rec.errors
+    .map(asRecord)
+    .filter((entry): entry is Record<string, unknown> => entry !== undefined && asString(entry.field) !== undefined)
+    .map((entry) => (asString(entry.detail) ? { field: entry.field, detail: entry.detail } : { field: entry.field }));
+  return { ...rec, ...first, errors: fields };
+}
+
+/** The stable problem code of a response body in either problem document shape. */
+export function problemCodeOf(body: unknown): string | undefined {
+  return asString(flattenProblemDocument(asRecord(body))?.code);
+}
+
 /** A problem document names at least its code, title, or detail. Anything else is a foreign body. */
 function isProblemDocument(rec: Record<string, unknown> | undefined): rec is Record<string, unknown> {
   return Boolean(rec && (asString(rec.code) || asString(rec.detail) || asString(rec.title)));
@@ -111,7 +140,7 @@ export function normalizeProblem(
   input: unknown,
   fallback: { status?: number; request_id?: string; bodyText?: string } = {},
 ): NormalizedProblem {
-  const redacted = asRecord(redactValue(input));
+  const redacted = flattenProblemDocument(asRecord(redactValue(input)));
   const rec = isProblemDocument(redacted) ? redacted : undefined;
   const status = asNumber(rec?.status) ?? fallback.status ?? 500;
   const code =

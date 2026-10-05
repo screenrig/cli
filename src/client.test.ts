@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ApiClient } from "./client.js";
+import { ExitCode } from "./exit-codes.js";
 import { CliError, networkError, timeoutError } from "./problems.js";
 import { FakeTransport } from "./transport/fake.js";
 
@@ -159,6 +160,35 @@ test("a server hint, next.argv, errors, and current_revision survive the client"
   assert.equal(problem.request_id, "req_rev");
   assert.deepEqual(problem.next?.argv, ["playlist", "show", "pl_1", "--editable"]);
   assert.deepEqual(problem.errors, [{ field: "revision", code: "stale", detail: "is 7, current is 8" }]);
+});
+
+test("the backend problem document's errors[0] reaches the caller as the problem", async () => {
+  const transport = new FakeTransport().on("DELETE", "/api/v1/media/med_1", () => ({
+    status: 409,
+    headers: { "content-type": "application/problem+json", "x-request-id": "req_media" },
+    body: {
+      action: "retry_backoff",
+      errors: [{
+        status: 409, code: "resource_conflict", type: "https://screenrig.ai/problems/resource-conflict",
+        title: "Resource state conflicts with the request",
+        detail: "The media item is still used by content a screen is showing.",
+        hint: "Remove it from the playlists those screens use, or assign them other playlists, then delete it again.",
+      }],
+      instance: "urn:screenrig:request:req_media", request_id: "req_media", server_time: "2026-10-05T17:00:00Z",
+    },
+  }));
+  const client = new ApiClient({ transport });
+  const error = await client.call({ method: "DELETE", path: "/api/v1/media/med_1", idempotent: true }).then(
+    () => assert.fail("expected a CliError"),
+    (caught: unknown) => caught,
+  );
+  assert.ok(error instanceof CliError);
+  assert.equal(error.exitCode, ExitCode.Conflict);
+  assert.equal(error.problem.code, "resource_conflict");
+  assert.equal(error.problem.status, 409);
+  assert.equal(error.problem.detail, "The media item is still used by content a screen is showing.");
+  assert.match(error.problem.hint ?? "", /Remove it from the playlists/);
+  assert.equal(error.problem.request_id, "req_media");
 });
 
 test("every HTTP request gets its own X-Request-ID and --request-id goes on the first only", async () => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { exitCodeForStatus, ExitCode } from "./exit-codes.js";
-import { fileError, networkError, normalizeProblem, renderProblem, withDefaultHint, withPaymentGuidance, withQuotaGuidance, withRetryAfter } from "./problems.js";
+import { fileError, networkError, normalizeProblem, problemCodeOf, renderProblem, withDefaultHint, withPaymentGuidance, withQuotaGuidance, withRetryAfter } from "./problems.js";
 
 test("maps HTTP statuses onto explicit exit codes", () => {
   assert.equal(exitCodeForStatus(401), ExitCode.Auth);
@@ -19,6 +19,61 @@ test("normalizes incomplete problem bodies", () => {
   assert.equal(problem.code, "resource_conflict");
   assert.equal(problem.request_id, "req_1");
   assert.match(problem.type, /resource-conflict/);
+});
+
+test("reads the error from errors[0] of the backend problem document", () => {
+  const document = {
+    action: "hold_lkg",
+    errors: [
+      {
+        status: 412,
+        code: "revision_conflict",
+        type: "https://screenrig.ai/problems/revision-conflict",
+        title: "Resource revision does not match",
+        detail: "The playlist changed since the revision in If-Match.",
+        hint: "Read it again and retry with its current revision.",
+        current_revision: 8,
+        next: { command: "screenrig playlist show pl_01", reason: "Fetch revision 8." },
+      },
+    ],
+    instance: "urn:screenrig:request:req_doc",
+    request_id: "req_doc",
+    server_time: "2026-10-05T17:00:00Z",
+    trace_id: "trace_doc",
+  };
+  const problem = normalizeProblem(document);
+  assert.equal(problem.code, "revision_conflict");
+  assert.equal(problem.status, 412);
+  assert.equal(problem.title, "Resource revision does not match");
+  assert.equal(problem.detail, "The playlist changed since the revision in If-Match.");
+  assert.equal(problem.hint, "Read it again and retry with its current revision.");
+  assert.equal(problem.current_revision, 8);
+  assert.deepEqual(problem.next, { command: "screenrig playlist show pl_01", reason: "Fetch revision 8." });
+  assert.equal(problem.request_id, "req_doc");
+  assert.equal(problem.instance, "urn:screenrig:request:req_doc");
+  assert.equal(problem.trace_id, "trace_doc");
+  assert.deepEqual(problem.errors, []);
+  assert.equal(problemCodeOf(document), "revision_conflict");
+  assert.equal(problemCodeOf({ code: "webhook_limit_reached", status: 409 }), "webhook_limit_reached");
+  assert.equal(problemCodeOf({ errors: [] }), undefined);
+});
+
+test("blamed request fields in the problem document become field errors", () => {
+  const problem = normalizeProblem({
+    errors: [
+      { status: 400, code: "invalid_request", type: "https://screenrig.ai/problems/invalid-request", title: "Request is invalid", detail: "The project name is invalid.", hint: "Correct the request.", field: "name" },
+      { status: 400, code: "invalid_request", type: "https://screenrig.ai/problems/invalid-request", title: "Request is invalid", detail: "limit must be between 1 and 200.", hint: "Correct the request.", field: "limit" },
+    ],
+    instance: "urn:screenrig:request:req_fields",
+    request_id: "req_fields",
+  });
+  assert.equal(problem.code, "invalid_request");
+  assert.equal(problem.detail, "The project name is invalid.");
+  assert.deepEqual(problem.errors, [
+    { field: "name", detail: "The project name is invalid." },
+    { field: "limit", detail: "limit must be between 1 and 200." },
+  ]);
+  assert.match(renderProblem(problem), /- limit: limit must be between 1 and 200\./);
 });
 
 test("human rendering includes next-action guidance", () => {

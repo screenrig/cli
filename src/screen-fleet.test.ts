@@ -75,8 +75,13 @@ async function cli(argv: string[], transport: FakeTransport, env: { fs: ConfigFs
   return { code, stdout: text, envelope };
 }
 
-function problem(status: number, code: string, detail: string): Record<string, unknown> {
-  return { type: `https://screenrig.ai/problems/${code.replaceAll("_", "-")}`, title: code, status, code, detail };
+/** The backend problem document: the error is errors[0]. */
+function problem(status: number, code: string, detail: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    errors: [{ status, code, type: `https://screenrig.ai/problems/${code.replaceAll("_", "-")}`, title: code, detail, hint: "Check the screen and retry.", ...extra }],
+    instance: "urn:screenrig:request:req_fleet",
+    request_id: "req_fleet",
+  };
 }
 
 function screen(id: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -133,7 +138,7 @@ function fleetBackend(): { transport: FakeTransport; screens: Map<string, Record
     if (!current) return { status: 404, headers: { "content-type": "application/problem+json" }, body: problem(404, "not_found", "Screen not found.") };
     const ifMatch = req.headers?.["if-match"];
     if (ifMatch && ifMatch !== `"${current.revision}"`) {
-      return { status: 412, headers: { "content-type": "application/problem+json" }, body: { ...problem(412, "revision_conflict", "The screen revision changed."), current_revision: current.revision } };
+      return { status: 412, headers: { "content-type": "application/problem+json" }, body: problem(412, "revision_conflict", "The screen revision changed.", { current_revision: current.revision }) };
     }
     Object.assign(current, req.body as object, { revision: current.revision + 1 });
     return { status: 200, headers: {}, body: current };

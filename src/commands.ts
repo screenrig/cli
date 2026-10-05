@@ -5262,7 +5262,7 @@ async function screenFleetAction(client: ApiClient, title: string, selector: Scr
   const result = screenActionResult(response.body, action.type);
   const outcome = fleetOutcome(result);
   return {
-    envelope: jsonBody(response, client.requestId, undefined, outcome.warnings),
+    envelope: jsonBody({ ...response, body: result }, client.requestId, undefined, outcome.warnings),
     exitCode: outcome.exitCode,
     human: [
       fleetHumanLines(title, result, (item) => {

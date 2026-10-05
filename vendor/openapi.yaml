@@ -1675,8 +1675,8 @@ paths:
         not clear by waiting.
       responses:
         "200": { description: Ready, content: { application/json: { schema: { $ref: "#/components/schemas/ReadyResponse" } } } }
-        "421": { $ref: "#/components/responses/Problem" }
-        "500": { $ref: "#/components/responses/Problem" }
+        "421": { $ref: "#/components/responses/RuntimeProblem" }
+        "500": { $ref: "#/components/responses/RuntimeProblem" }
   /.version:
     get:
       operationId: getVersion
@@ -1976,7 +1976,7 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ApplicationRename" } } } }
       responses:
         "200": { description: Renamed application., headers: { ETag: { description: Quoted application revision., schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Application" } } } }
-        "412": { description: revision_conflict — If-Match is stale; Problem.current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
     delete:
       operationId: deleteApplication
@@ -1991,7 +1991,7 @@ paths:
       responses:
         "204": { description: Application and releases tombstoned. }
         "409": { description: application_in_use — a live manifest still references one of the application's releases., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "412": { description: revision_conflict — If-Match is stale; Problem.current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/operations/{id}:
     parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
@@ -2381,7 +2381,7 @@ paths:
         "204": { description: "Screen soft-deleted; its tombstone is retained for at least 90 days." }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { description: "screen_archive_required for a native identity-bound screen.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "412": { description: revision_conflict — If-Match is stale; Problem.current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/screens/{id}/public-id/rotate:
     parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
@@ -3705,7 +3705,7 @@ paths:
       responses:
         "200": { description: Updated webhook., headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/Webhook" } } } }
         "400": { description: invalid_request or webhook_url_rejected., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "412": { description: revision_conflict — If-Match is stale; Problem.current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
     delete:
       operationId: deleteWebhook
@@ -3717,7 +3717,7 @@ paths:
       parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "204": { description: Deleted., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
-        "412": { description: revision_conflict — If-Match is stale; Problem.current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/webhooks/{id}/rotate-secret:
     parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ResourceID" }]
@@ -3735,7 +3735,7 @@ paths:
       parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "200": { description: The webhook and its new secret., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/WebhookWithSecret" } } } }
-        "412": { description: revision_conflict — If-Match is stale; Problem.current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision., content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/webhooks/{id}/test:
     parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ResourceID" }]
@@ -3778,10 +3778,10 @@ paths:
       description: Creates one fleet-global expiring pairing session and sets the temporary HttpOnly Secure SameSite=Strict pairing cookie. An untrusted Origin or cross-site browser request is rejected with forbidden before rate-limit or pairing state is created.
       responses:
         "201": { description: Exact six-character pairing code and expiry., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/PairingSession" } } } }
-        "403": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "500": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/RuntimeProblem" }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        "500": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/pairing-events:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     get:
@@ -3789,8 +3789,8 @@ paths:
       security: [{ pairingCookie: [] }]
       responses:
         "200": { description: Authenticated temporary pairing SSE. The terminal pairing.claimed data is PairingClaimedEvent and contains only a non-secret completion nonce., headers: { Cache-Control: { schema: { type: string, enum: ["no-cache, no-store, no-transform"] } }, X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
-        "401": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/pairing-sessions/complete:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
@@ -3801,13 +3801,13 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/PairingComplete" } } } }
       responses:
         "200": { description: Paired-device cookie issued; the Player next creates the ordinary paired runtime session., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/PairingCompletion" } } } }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "404": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "500": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/RuntimeProblem" }
+        "401": { $ref: "#/components/responses/RuntimeProblem" }
+        "403": { $ref: "#/components/responses/RuntimeProblem" }
+        "404": { $ref: "#/components/responses/RuntimeProblem" }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        "500": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/sessions:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
@@ -3817,8 +3817,8 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeSessionRequest" } } } }
       responses:
         "201": { description: Read-only runtime session cookie, headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeSession" } } } }
-        "404": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/device-sessions:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
@@ -3827,8 +3827,8 @@ paths:
       requestBody: { required: false, content: { application/json: { schema: { $ref: "#/components/schemas/DeviceSessionRequest" } } } }
       responses:
         "201": { description: Paired runtime session, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeSession" } } } }
-        "409": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/browser-provisioning/exchanges:
     servers: [{ url: https://play.screenrig.ai, description: Trusted browser Player origin }]
     post:
@@ -3839,14 +3839,14 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserProvisioningExchange" } } } }
       responses:
         "201": { description: Paired-device cookie issued without a runtime cookie or credential in the body., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserProvisioningCompletion" } } } }
-        "400": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "404": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
-        "410": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "500": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/RuntimeProblem" }
+        "403": { $ref: "#/components/responses/RuntimeProblem" }
+        "404": { $ref: "#/components/responses/RuntimeProblem" }
+        "409": { $ref: "#/components/responses/RuntimeProblem" }
+        "410": { $ref: "#/components/responses/RuntimeProblem" }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        "500": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/browser-links:
     servers: [{ url: https://screenrig.ai, description: HTTPS apex browser-link origin }]
     post:
@@ -3857,11 +3857,11 @@ paths:
       responses:
         "201": { description: Safe browser-link code/status metadata., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, Set-Cookie: { schema: { type: string } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserLinkSession" } } } }
         "303": { description: No-JavaScript form continuation to the read-only setup page., headers: { Location: { schema: { type: string, enum: [/setup] } }, Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, Set-Cookie: { schema: { type: string } } } }
-        "403": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "500": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/RuntimeProblem" }
+        "409": { $ref: "#/components/responses/RuntimeProblem" }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        "500": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
     get:
       operationId: getBrowserLinkStatus
       description: Read-only polling fallback authenticated only by the owning apex browser-link cookie. It returns safe status metadata and the fixed continuation path, never a provisioning URL or token.
@@ -3869,9 +3869,9 @@ paths:
       responses:
         "200": { description: Claimed safe status., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserLinkStatus" } } } }
         "202": { description: Browser link exists but is not claimed yet., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/BrowserLinkStatus" } } } }
-        "401": { $ref: "#/components/responses/Problem" }
-        "410": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/RuntimeProblem" }
+        "410": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/browser-links/events:
     servers: [{ url: https://screenrig.ai, description: HTTPS apex browser-link origin }]
     get:
@@ -3881,10 +3881,10 @@ paths:
       parameters: [{ $ref: "#/components/parameters/LastEventID" }]
       responses:
         "200": { description: Browser-link issued/claimed status SSE., headers: { Cache-Control: { schema: { type: string, enum: ["no-cache, no-store, no-transform"] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string, description: Data payloads conform to BrowserLinkEvent and contain no continuation secret. } } } }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "410": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/RuntimeProblem" }
+        "401": { $ref: "#/components/responses/RuntimeProblem" }
+        "410": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/browser-links/continue:
     servers: [{ url: https://screenrig.ai, description: HTTPS apex browser-link origin }]
     get:
@@ -3893,10 +3893,10 @@ paths:
       security: [{ browserLinkCookie: [] }]
       responses:
         "303": { description: Bodyless redirect to the Player provisioning fragment., headers: { Location: { schema: { type: string, pattern: "^https://play\\.screenrig\\.ai/s/[^#]+#provision=[A-Za-z0-9_-]{43}$" } }, Cache-Control: { schema: { type: string, enum: [no-store] } }, Referrer-Policy: { schema: { type: string, enum: [no-referrer] } } } }
-        "401": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
-        "410": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/RuntimeProblem" }
+        "409": { $ref: "#/components/responses/RuntimeProblem" }
+        "410": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /setup:
     servers: [{ url: https://screenrig.ai, description: HTTPS apex browser-link origin }]
     get:
@@ -3951,12 +3951,12 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingStart" } } } }
       responses:
         "201": { description: Native pairing code plus temporary ScreenRig-Pairing credential; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingSession" } } } }
-        "400": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "500": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/RuntimeProblem" }
+        "403": { $ref: "#/components/responses/RuntimeProblem" }
+        "409": { $ref: "#/components/responses/RuntimeProblem" }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        "500": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/native/pairing-events:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     get:
@@ -3965,12 +3965,12 @@ paths:
       security: [{ nativePairingAuthorization: [] }]
       responses:
         "200": { description: Authenticated native pairing SSE whose terminal data is PairingClaimedEvent., headers: { Cache-Control: { schema: { type: string, enum: ["no-cache, no-store, no-transform"] } }, X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "404": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "500": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/RuntimeProblem" }
+        "403": { $ref: "#/components/responses/RuntimeProblem" }
+        "404": { $ref: "#/components/responses/RuntimeProblem" }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        "500": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/native/pairing-sessions/complete:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
@@ -3982,14 +3982,14 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingComplete" } } } }
       responses:
         "200": { description: Native pairing completion; no Set-Cookie and no device credential., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativePairingCompletion" } } } }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "404": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "500": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/RuntimeProblem" }
+        "401": { $ref: "#/components/responses/RuntimeProblem" }
+        "403": { $ref: "#/components/responses/RuntimeProblem" }
+        "404": { $ref: "#/components/responses/RuntimeProblem" }
+        "409": { $ref: "#/components/responses/RuntimeProblem" }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        "500": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/native/identity/challenges:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
@@ -4000,11 +4000,11 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityChallengeRequest" } } } }
       responses:
         "201": { description: Challenge nonce for an EdDSA compact JWS proof; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityChallenge" } } } }
-        "400": { $ref: "#/components/responses/Problem" }
-        "404": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "500": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/RuntimeProblem" }
+        "404": { $ref: "#/components/responses/RuntimeProblem" }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        "500": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/native/identity/sessions:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
@@ -4016,14 +4016,14 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentitySessionRequest" } } } }
       responses:
         "201": { description: Paired native runtime session; no Set-Cookie., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/NativeRuntimeSession" } } } }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "404": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "500": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/RuntimeProblem" }
+        "401": { $ref: "#/components/responses/RuntimeProblem" }
+        "403": { $ref: "#/components/responses/RuntimeProblem" }
+        "404": { $ref: "#/components/responses/RuntimeProblem" }
+        "409": { $ref: "#/components/responses/RuntimeProblem" }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        "500": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/native/identity/reset:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
@@ -4053,12 +4053,12 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentityProof" } } } }
       responses:
         "204": { description: "Reset recorded: a live-project bound screen archived with the key kept; a deleted-project, unbound, or retired key made terminal; or an unknown key answered as an idempotent no-op that archives nothing. An authenticated retry of any of these also succeeds. No Set-Cookie.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "404": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        "500": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/RuntimeProblem" }
+        "401": { $ref: "#/components/responses/RuntimeProblem" }
+        "404": { $ref: "#/components/responses/RuntimeProblem" }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        "500": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/chrome:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     get:
@@ -4067,7 +4067,7 @@ paths:
       security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
       responses:
         "200": { description: Runtime chrome, headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeChrome" } } } }
-        default: { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/manifest:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     get:
@@ -4082,8 +4082,8 @@ paths:
       responses:
         "200": { description: Resolved player manifest, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeManifest" } } } }
         "304": { description: Manifest unchanged }
-        "409": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/events:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     get:
@@ -4094,7 +4094,7 @@ paths:
         - { $ref: "#/components/parameters/LastEventID" }
       responses:
         "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.archived and screen.unarchived are runtime audience events; they do not wipe credentials. screen.deleted is a runtime audience event delivered when signed identity reset tombstones the screen. No runtime event authorizes clearing local identity. Only successful signed reset initiated by a confirmed local player action permits local identity rotation. project.suspended and project.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive. The runtime audience is an allowlist (docs/player-compatibility.md §7.1): screen.content_changed, screen.manifest_changed, screen.toast, screen.screenshot_requested, screen.archived, screen.unarchived, screen.deleted, screen.device_credential_revoked, project.suspended, project.resumed, player.reload, which reaches every runtime session, and the per-screen commands player.reboot and player.display (docs/player-compatibility.md §6.5), never delivered past details.expires_at. Every other type stops at the scan, and stream.cursor advances the cursor past it. Players ignore unknown event types, including the default message type, and unknown field names, and advance the cursor from every id. The stream opens with retry: 3000; a draining host sends each stream its own retry between 1000 and 30000 ms. The in-band problem frame (event: problem) has no id; its data is {code, detail, action?}, where action is present when the registry defines one, and the stream then closes (payment_required sets retry: 60000). The fleet player.reload control frame has no id and never moves the cursor. No frame carries more than 64 KiB of data.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
-        default: { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/reports:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
@@ -4105,7 +4105,7 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { oneOf: [{ $ref: "#/components/schemas/RuntimeReport" }, { $ref: "#/components/schemas/RuntimeTelemetryBatch" }] } } } }
       responses:
         "202": { description: "Accepted after durable persistence. A telemetry batch commits its watermark, raw observations, state and project events atomically, and returns stream_id, sequence, accepted (report count), and duplicate. Individual reports retain their existing response. manifest.activated is committed before this response and is idempotent for the current active revision. playback.media_started, legacy playback.video_started, and playback.application_started durably append one authenticated screen observation (GET /api/v1/playback/plays) before this response; reported item, page, and manifest identities do not require current content membership and do not authorize content access. Daily counts, optional metadata, and project-owned resource last_used_at are updated by recoverable batches and can lag the raw observation. Ordinary playback-start responses omit optional credit-balance headers. playback.page_failed replaces the screen's latest page-failure slot and appends a project-only durable event in the same transaction without changing screen or manifest revision. manifest.upgrade stores the screen's one latest-wins manifest-upgrade slot behind its revision fences and appends a project-only durable event in the same transaction only when the derived state changes; a stale, superseded, or post-activation pre-activation report is accepted with no change, and no report ever promotes a grant. application.event appends a durable project event before this response.", headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
-        default: { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/screenshot:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     put:
@@ -4128,11 +4128,11 @@ paths:
       requestBody: { required: false, description: "Raw still WebP for success; empty when ScreenRig-Capture-Failure is supplied.", content: { image/webp: { schema: { type: string, format: binary } } } }
       responses:
         "204": { description: Still WebP stored as the current slot., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } } }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/RuntimeProblem" }
+        "401": { $ref: "#/components/responses/RuntimeProblem" }
+        "403": { $ref: "#/components/responses/RuntimeProblem" }
+        "409": { $ref: "#/components/responses/RuntimeProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v2/manifest:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     get:
@@ -4147,9 +4147,9 @@ paths:
       responses:
         "200": { description: Resolved player manifest., content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeManifestV2" } } } }
         "304": { description: Manifest unchanged }
-        "409": { $ref: "#/components/responses/Problem" }
-        "403": { description: "forbidden - the session lacks the adslot capability.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        default: { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/RuntimeProblem" }
+        "403": { description: "forbidden - the session lacks the adslot capability.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } } }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/adslots/resolve:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
@@ -4161,10 +4161,10 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeAdslotResolveRequest" } } } }
       responses:
         "200": { description: Per-candidate filled or empty results in request order., headers: { Cache-Control: { schema: { type: string, enum: ["no-store"] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeAdslotResolveResponse" } } } }
-        "400": { description: "invalid_request - batch size, duplicate keys, or forecast window is invalid.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "409": { description: "resource_conflict - a candidate was reused with a different request hash.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "400": { description: "invalid_request - batch size, duplicate keys, or forecast window is invalid.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } } }
+        "409": { description: "resource_conflict - a candidate was reused with a different request hash.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } } }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/adslots/events:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
@@ -4176,8 +4176,8 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeAdslotEventBatch" } } } }
       responses:
         "200": { description: Per-event outcomes., headers: { Cache-Control: { schema: { type: string, enum: ["no-store"] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeAdslotEventResponse" } } } }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/observation:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     put:
@@ -4206,12 +4206,12 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeObservationWrite" } } } }
       responses:
         "204": { description: Observation stored as the current surfaces array., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/RuntimeProblem" }
+        "401": { $ref: "#/components/responses/RuntimeProblem" }
+        "403": { $ref: "#/components/responses/RuntimeProblem" }
+        "409": { $ref: "#/components/responses/RuntimeProblem" }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/health:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     put:
@@ -4246,12 +4246,12 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeHealthWrite" } } } }
       responses:
         "204": { description: Health report stored., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/RuntimeProblem" }
+        "401": { $ref: "#/components/responses/RuntimeProblem" }
+        "403": { $ref: "#/components/responses/RuntimeProblem" }
+        "409": { $ref: "#/components/responses/RuntimeProblem" }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/storage:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     put:
@@ -4278,12 +4278,12 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeStorageWrite" } } } }
       responses:
         "204": { description: Storage report stored., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "409": { description: "resource_conflict - manifest_revision is not the screen's desired or active revision. The report is not stored.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/RuntimeProblem" }
+        "401": { $ref: "#/components/responses/RuntimeProblem" }
+        "403": { $ref: "#/components/responses/RuntimeProblem" }
+        "409": { description: "resource_conflict - manifest_revision is not the screen's desired or active revision. The report is not stored.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } } }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/screen-label:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     put:
@@ -4308,12 +4308,12 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeScreenLabelWrite" } } } }
       responses:
         "200": { description: Screen renamed. screen_label is the stored name., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeScreenLabel" } } } }
-        "400": { $ref: "#/components/responses/Problem" }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "400": { $ref: "#/components/responses/RuntimeProblem" }
+        "401": { $ref: "#/components/responses/RuntimeProblem" }
+        "403": { $ref: "#/components/responses/RuntimeProblem" }
+        "409": { $ref: "#/components/responses/RuntimeProblem" }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/unpair:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
@@ -4336,11 +4336,11 @@ paths:
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
       responses:
         "204": { description: Cookie-paired screen archived with its credential kept. Browser pairing cookies expired., headers: { Cache-Control: { schema: { type: string, enum: [no-store] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
-        "401": { $ref: "#/components/responses/Problem" }
-        "403": { $ref: "#/components/responses/Problem" }
-        "409": { $ref: "#/components/responses/Problem" }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/RuntimeProblem" }
+        "403": { $ref: "#/components/responses/RuntimeProblem" }
+        "409": { $ref: "#/components/responses/RuntimeProblem" }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/manifests/{manifest_revision}/releases/{release_id}/launch:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     post:
@@ -4353,7 +4353,7 @@ paths:
         - { name: release_id, in: path, required: true, schema: { type: string } }
       responses:
         "201": { description: Single-use 30-second exact-release-host launch ticket, headers: { Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }, RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/ReleaseLaunch" } } } }
-        default: { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /content/v1/ad-decisions/{decision_id}:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     get:
@@ -4364,10 +4364,10 @@ paths:
       responses:
         "200": { description: Complete decision-bound private media., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } } } }
         "206": { description: One standards-correct byte range., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } }, Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } } } }
-        "404": { description: "not_found - unknown decision.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "410": { description: "decision expired or otherwise not servable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "416": { description: "invalid_range.", headers: { Content-Range: { schema: { type: string } }, Accept-Ranges: { schema: { type: string, enum: [bytes] } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        default: { $ref: "#/components/responses/Problem" }
+        "404": { description: "not_found - unknown decision.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } } }
+        "410": { description: "decision expired or otherwise not servable.", content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } } }
+        "416": { description: "invalid_range.", headers: { Content-Range: { schema: { type: string } }, Accept-Ranges: { schema: { type: string, enum: [bytes] } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } } }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
     head:
       operationId: headAdDecisionContent
       description: Identical authority and metadata to the GET with no body.
@@ -4375,7 +4375,7 @@ paths:
       parameters: [{ name: decision_id, in: path, required: true, schema: { type: string } }, { $ref: "#/components/parameters/Range" }]
       responses:
         "200": { description: Metadata only., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } } } }
-        default: { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/manifests/{manifest_revision}/selectors/resolve:
     parameters:
       - { name: manifest_revision, in: path, required: true, schema: { type: string } }
@@ -4392,10 +4392,10 @@ paths:
       security: [{ runtimeCookie: [] }, { nativeSessionAuthorization: [] }]
       responses:
         "200": { description: "Resolved loop snapshot, including item metadata and media_end safety deadlines.", content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeSelectorSnapshot" } } } }
-        "401": { description: Runtime session invalid or expired, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "403": { description: Runtime capability denied, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "503": { description: Manifest projection pending or selector snapshot degraded; retain the current loop and retry, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        default: { $ref: "#/components/responses/Problem" }
+        "401": { description: Runtime session invalid or expired, content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } } }
+        "403": { description: Runtime capability denied, content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } } }
+        "503": { description: Manifest projection pending or selector snapshot degraded; retain the current loop and retry, content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } } }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /content/v1/media/{media_id}:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     get:
@@ -4416,9 +4416,9 @@ paths:
       responses: &stableMediaResponses
         "200": { description: Session-authorized complete private media. Browser Fetch Metadata must describe trusted-player same-origin media/image/video use; authenticated native clients may omit it., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } }, Content-Disposition: { schema: { type: string } } } }
         "206": { description: One standards-correct byte range., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } }, Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } } } }
-        "416": { description: "Unsatisfiable, multiple, or malformed range.", headers: { Content-Range: { schema: { type: string } }, Accept-Ranges: { schema: { type: string, enum: [bytes] } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "429": { description: "Per-client, screen, or project protected-media egress limit exceeded.", headers: { Retry-After: { schema: { type: integer, minimum: 1 } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        default: { $ref: "#/components/responses/Problem" }
+        "416": { description: "Unsatisfiable, multiple, or malformed range.", headers: { Content-Range: { schema: { type: string } }, Accept-Ranges: { schema: { type: string, enum: [bytes] } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } } }
+        "429": { description: "Per-client, screen, or project protected-media egress limit exceeded.", headers: { Retry-After: { schema: { type: integer, minimum: 1 } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } } }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
     head:
       operationId: headStableProtectedMedia
       description: Session-authorized immutable media metadata with the same grant checks as GET and no response body.
@@ -4440,9 +4440,9 @@ paths:
       responses:
         "200": { description: Session-authorized complete private media. Browser Fetch Metadata must describe trusted-player same-origin media/image/video use; authenticated native clients may omit it., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } }, Content-Disposition: { schema: { type: string } } } }
         "206": { description: One standards-correct byte range., headers: { Accept-Ranges: { schema: { type: string, enum: [bytes] } }, Content-Range: { schema: { type: string } }, Content-Length: { schema: { type: integer } }, ETag: { schema: { type: string } } } }
-        "416": { description: "Unsatisfiable, multiple, or malformed range.", headers: { Content-Range: { schema: { type: string } }, Accept-Ranges: { schema: { type: string, enum: [bytes] } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "429": { description: "Per-client, screen, or project protected-media egress limit exceeded.", headers: { Retry-After: { schema: { type: integer, minimum: 1 } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        default: { $ref: "#/components/responses/Problem" }
+        "416": { description: "Unsatisfiable, multiple, or malformed range.", headers: { Content-Range: { schema: { type: string } }, Accept-Ranges: { schema: { type: string, enum: [bytes] } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } } }
+        "429": { description: "Per-client, screen, or project protected-media egress limit exceeded.", headers: { Retry-After: { schema: { type: integer, minimum: 1 } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } } }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /content/v1/manifests/{manifest_revision}/releases/{release_id}/package:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     parameters:
@@ -4489,9 +4489,9 @@ paths:
             Cross-Origin-Resource-Policy: { schema: { type: string, enum: [same-origin] } }
             X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
             Vary: { schema: { type: string, enum: ["Cookie, Authorization"] } }
-        "416": { description: "Unsatisfiable, multiple, or malformed range.", headers: { Content-Range: { schema: { type: string } }, Accept-Ranges: { schema: { type: string, enum: [bytes] } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "416": { description: "Unsatisfiable, multiple, or malformed range.", headers: { Content-Range: { schema: { type: string } }, Accept-Ranges: { schema: { type: string, enum: [bytes] } } }, content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } } }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
     head:
       operationId: headNativeWebappPackage
       description: Returns the same authorization and immutable identity headers as GET without package bytes.
@@ -4525,8 +4525,8 @@ paths:
             X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
             Vary: { schema: { type: string, enum: ["Cookie, Authorization"] } }
         "416": { description: "Unsatisfiable, multiple, or malformed range.", headers: { Content-Range: { schema: { type: string } }, Accept-Ranges: { schema: { type: string, enum: [bytes] } } } }
-        "429": { $ref: "#/components/responses/RateLimitedProblem" }
-        default: { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /{asset_path}:
     servers:
       - url: https://r-{release_host_label}.apps.screenrig.ai
@@ -4569,7 +4569,7 @@ paths:
       parameters: [{ $ref: "#/components/parameters/ApplicationID" }]
       responses:
         "200": { description: Manifest-authorized application KV, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeKVList" } } } }
-        default: { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/apps/{application_id}/kv/{key}:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
     parameters: [{ $ref: "#/components/parameters/ApplicationID" }, { name: key, in: path, required: true, schema: { type: string } }]
@@ -4578,7 +4578,7 @@ paths:
       security: [{ runtimeCookie: [], primitiveCapability: [] }, { nativeSessionAuthorization: [], primitiveCapability: [] }]
       responses:
         "200": { description: Manifest-authorized application KV value, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeKVEntry" } } } }
-        default: { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
     put:
       operationId: putRuntimeKV
       x-rate-limit-policies: [{ name: runtime-kv-write, quota: 120, windowSeconds: 60 }, { name: runtime-kv-write-ip, quota: 1200, windowSeconds: 60, condition: anonymous_or_archived }]
@@ -4588,7 +4588,7 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeKVWrite" } } } }
       responses:
         "200": { description: Paired-device KV mutation, headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } }, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeKVEntry" } } } }
-        default: { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
     delete:
       operationId: deleteRuntimeKV
       x-rate-limit-policies: [{ name: runtime-kv-write, quota: 120, windowSeconds: 60 }, { name: runtime-kv-write-ip, quota: 1200, windowSeconds: 60, condition: anonymous_or_archived }]
@@ -4597,7 +4597,7 @@ paths:
       parameters: [{ $ref: "#/components/parameters/IfMatch" }, { $ref: "#/components/parameters/OptionalIdempotencyKey" }]
       responses:
         "204": { description: Paired-device KV deletion, headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
-        default: { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /dashboard/v1/advertising/reviews/{id}:
     servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
     get:
@@ -6762,6 +6762,16 @@ components:
         RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }
         RateLimit: { $ref: "#/components/headers/RateLimit" }
       content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
+    RuntimeProblem:
+      description: Stable RFC 9457 problem response on a Player-facing runtime, content, or probe route, in the runtime document shape (RuntimeProblem). A 421 server_draining carries Retry-After of 1 second, a 500 not_ready or dependency_unavailable carries 5, and a 500 manifest_degraded carries 60, unless the handler set a more specific value.
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } }
+    RuntimeRateLimitedProblem:
+      description: Stable rate_limited problem on a Player-facing runtime or content route, in the runtime document shape (RuntimeProblem). Retry only after the authoritative Retry-After interval. Fixed-window denials also include the applicable RateLimit-Policy and RateLimit members; concurrency and byte-budget denials omit those optional disclosures.
+      headers:
+        Retry-After: { required: true, schema: { type: integer, minimum: 1 } }
+        RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }
+        RateLimit: { $ref: "#/components/headers/RateLimit" }
+      content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } }
   schemas:
     ProjectMoveDestinations:
       type: object
@@ -12286,6 +12296,51 @@ components:
     Problem:
       type: object
       additionalProperties: true
+      description: >-
+        The problem document every route answers except the Player-facing
+        runtime, content, and probe routes (RuntimeProblem). The error itself
+        is errors[0]: its status, code, type, title, detail, and hint. Only
+        document members stay at the top level. Branch on errors[0].code,
+        never on detail or hint, which are prose. A blamed request field
+        adds errors[0].field; each further blamed field is its own entry with
+        that field's detail.
+      required: [errors, instance, request_id]
+      properties:
+        action: { type: string, description: "Player action class from the problem registry (docs/player-compatibility.md §5): retry_backoff, hold_lkg, remint, repair, clear_lkg, or upgrade_required. Present when the registry defines one for errors[0].code. A reader applies the status default to a class it does not know." }
+        errors: { type: array, minItems: 1, items: { $ref: "#/components/schemas/ProblemError" }, description: "The error first, then one entry per further blamed request field." }
+        instance: { type: string }
+        request_id: { type: string }
+        server_time: { type: string, format: date-time, description: "The server clock (RFC 3339 UTC) when the response was produced. Present on every problem response." }
+        trace_id: { type: string }
+    ProblemError:
+      type: object
+      additionalProperties: true
+      description: One error of a problem document. Members beyond these describe this error further (for example dependencies on not_ready).
+      required: [status, code, type, title, detail, hint]
+      allOf:
+        - if: { properties: { status: { type: integer, minimum: 500 } }, required: [status] }
+          then: { required: [retryable] }
+          else: { not: { required: [retryable] } }
+      properties:
+        status: { type: integer, description: "The HTTP status of the response." }
+        code: { type: string, description: "Stable problem code from the problem registry (api/problems.yaml)." }
+        type: { type: string, format: uri }
+        title: { type: string }
+        detail: { type: string }
+        hint: { type: string, description: "What the caller should do next to fix or work around this error, in one or two plain sentences. The server sends the problem registry's default for the code (api/problems.yaml) unless the handler has a more specific one for this case. Advisory text for agents and people." }
+        field: { type: string, description: "The request member this error is about, when one is to blame." }
+        retryable: { type: boolean, description: "Present on every 5xx error and absent below 500. True when retrying the same operation may succeed without changing the request; false when the unchanged request is not retryable." }
+        current_revision: { type: integer, description: "The resource's current revision, on revision_conflict." }
+        next: { $ref: "#/components/schemas/NextAction" }
+    RuntimeProblem:
+      type: object
+      additionalProperties: true
+      description: >-
+        The problem document of the Player-facing runtime (/runtime/) and
+        content (/content/) routes and the probe routes (/.ready, /.health):
+        every member flat at the top level. Store-released Players read its
+        top-level code and action (docs/player-compatibility.md §5), so this
+        shape stays as it is; every other route answers Problem.
       required: [type, title, status, detail, instance, code, request_id, errors]
       allOf:
         - if: { properties: { status: { type: integer, minimum: 500 } }, required: [status] }

@@ -3,7 +3,7 @@ import { flagString } from "./command-input.js";
 import type { Warning } from "./envelope.js";
 import { ExitCode, exitCodeForStatus } from "./exit-codes.js";
 import type { ScreenActionResult, ScreenActionScreenResult, ScreenActionSelector, ScreenActionType } from "./adapters/protocol.js";
-import { usageError } from "./problems.js";
+import { normalizeProblem, usageError } from "./problems.js";
 
 /** Screen tags share the media tag grammar. */
 export const SCREEN_TAG_PATTERN = /^[A-Za-z0-9]{1,32}$/;
@@ -74,7 +74,15 @@ export function screenActionResult(body: unknown, action: ScreenActionType): Scr
     && results.every((item: ScreenActionScreenResult) => item && typeof item.screen_id === "string" && (item.status === "ok" || item.status === "failed"))
     && results.filter((item) => item.status === "failed").length === result.failed;
   if (!valid) throw usageError("Screen actions response does not match the generated ScreenActionResult contract.");
-  return result as ScreenActionResult;
+  // Each failed screen carries the problem document its single-screen request
+  // would have answered; the envelope reports it the way a single-screen error
+  // envelope does, so data.results[].problem.code reads the same either way.
+  return {
+    ...(result as ScreenActionResult),
+    results: results.map((item) => item.status === "failed" && item.problem !== undefined
+      ? { ...item, problem: normalizeProblem(item.problem) as unknown as ScreenActionScreenResult["problem"] }
+      : item),
+  };
 }
 
 export interface FleetItem {
