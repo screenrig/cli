@@ -298,6 +298,13 @@ test("structured discovery exposes positional cardinality, choices, defaults and
   assert.equal(generate.usage.split("Provide exactly one").length, 2, "notes should appear only once");
 });
 
+test("agent enroll declares mutually exclusive credential sources", () => {
+  const enroll = invoke(["agent", "enroll", "--help"]).data;
+  assert.deepEqual(enroll.relationships, [{ kind: "atMostOne", options: ["--email", "--agentid-claim"] }]);
+  assert.ok(enroll.options.some((option) => option.name === "--agentid-claim"));
+  assert.equal(enroll.usage.split("Provide at most one").length, 2, "notes should appear only once");
+});
+
 
 test("explicit JSON inventory can be scoped to a group", () => {
   assert.deepEqual(invoke(["help", "--all"]).data.allCommands, leafCommandPaths(createCommandTree().root));

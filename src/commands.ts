@@ -235,6 +235,38 @@ function enrollmentEmail(value: string | undefined): string {
   return email;
 }
 
+/**
+ * One AgentID claim code: `agid_` plus at least 128 bits of base32 or
+ * base64url. The code is never echoed back, so errors name only the flag.
+ */
+function agentidClaim(value: string | undefined): string {
+  const claim = value?.trim();
+  if (!claim) {
+    throw usageError("agent enroll requires --agentid-claim CODE.");
+  }
+  if (!/^agid_[A-Za-z0-9_-]{43}$/.test(claim)) {
+    throw usageError("agent enroll --agentid-claim must be an AgentID claim code: agid_ followed by 43 base64url characters.");
+  }
+  return claim;
+}
+
+/**
+ * The AgentID sign-in route lives on the configured API host, derived from the
+ * configured API URL the way the dashboard and browser-setup helpers derive
+ * their origins. An unsupported origin yields no URL rather than a broken next
+ * action.
+ */
+function agentidSignInUrl(apiUrl: string): string | undefined {
+  let api: URL;
+  try {
+    api = new URL(apiUrl);
+  } catch {
+    return undefined;
+  }
+  const supported = api.protocol === "https:" || (api.protocol === "http:" && api.hostname.endsWith(".localhost"));
+  return supported ? `${api.origin}/agentid/v1/start` : undefined;
+}
+
 /** invitations create targets an existing project and never enrolls as a side effect. */
 function invitationEmail(value: string | undefined): string {
   const email = value?.trim();
@@ -515,10 +547,10 @@ function commandHandler(
         });
       }
       throw notEnrolledError("This installation is not enrolled. Enrollment is an explicit step and is never a side effect of another command.", {
-        command: resolved.enrollment?.email
+        command: resolved.enrollment
           ? "screenrig agent enroll"
           : "screenrig agent enroll --email ADDRESS --organization NAME",
-        reason: resolved.enrollment?.email
+        reason: resolved.enrollment
           ? "Resume the exact pending enrollment before running pairing or another project command."
           : "Create the first agent with unverified contact metadata, then retry the original command.",
       });
@@ -909,7 +941,11 @@ async function agentEnroll(
         reason: "Use --force only to discard the unwanted existing-project connection and enroll a new project.",
       });
     }
-    enrollmentEmail(flagString(args.flags, "email"));
+    const forceEmail = flagString(args.flags, "email");
+    const forceClaim = flagString(args.flags, "agentid-claim");
+    if (forceEmail !== undefined) enrollmentEmail(forceEmail);
+    else if (forceClaim !== undefined) agentidClaim(forceClaim);
+    else throw usageError("agent enroll --force requires --email ADDRESS or --agentid-claim CODE.");
     await clearPendingStateForEnrollment(runtime, resolved);
     enrollmentConfig = await resolveConfig({
       flags: args.flags,
@@ -1770,13 +1806,29 @@ async function enrollForCommand(
     });
   }
   const suppliedEmail = flagString(args.flags, "email");
+  const suppliedClaim = flagString(args.flags, "agentid-claim");
+  const alreadyEnrolled = Boolean(resolved.token && !resolved.enrollment);
   const persistedEmail = resolved.enrollment?.email;
+  const persistedClaim = resolved.enrollment?.agentid_claim;
   if (persistedEmail && suppliedEmail !== undefined && enrollmentEmail(suppliedEmail) !== persistedEmail) {
     throw usageError("The pending enrollment is bound to a different contact email. Resume it without changing --email.");
   }
-  const email = resolved.token && !resolved.enrollment
-    ? undefined
-    : persistedEmail ?? enrollmentEmail(suppliedEmail);
+  if (persistedClaim && suppliedClaim !== undefined && agentidClaim(suppliedClaim) !== persistedClaim) {
+    throw usageError("The pending enrollment is bound to a different AgentID claim. Resume it without changing --agentid-claim, or discard it with agent enroll --force.");
+  }
+  // A pending enrollment blessed exactly one credential source. Switching it
+  // would mutate the request behind an unchanged idempotency key, so refuse.
+  if (resolved.enrollment && suppliedEmail !== undefined && persistedClaim !== undefined) {
+    throw usageError("The pending enrollment redeems an AgentID claim, not a contact email. Resume it without --email, or discard it with agent enroll --force.");
+  }
+  if (resolved.enrollment && suppliedClaim !== undefined && persistedEmail !== undefined) {
+    throw usageError("The pending enrollment redeems a contact email, not an AgentID claim. Resume it without --agentid-claim, or discard it with agent enroll --force.");
+  }
+  const email = alreadyEnrolled ? undefined : persistedEmail ?? (suppliedEmail !== undefined ? enrollmentEmail(suppliedEmail) : undefined);
+  const claim = alreadyEnrolled ? undefined : persistedClaim ?? (suppliedClaim !== undefined ? agentidClaim(suppliedClaim) : undefined);
+  if (!alreadyEnrolled && (email === undefined) === (claim === undefined)) {
+    throw usageError("agent enroll requires --email ADDRESS or --agentid-claim CODE.");
+  }
     requireFlagValue(args, "project-name", "Screens");
     const projectName = flagString(args.flags, "project-name")?.trim();
     if (projectName !== undefined && (!projectName || [...projectName].length > 60 || /[\p{Cc}\p{Cf}]/u.test(projectName))) {
@@ -1790,7 +1842,8 @@ async function enrollForCommand(
     if (!resolved.token && !resolved.enrollment && !organization) throw usageError("agent enroll requires --organization NAME.");
     return await ensureCredential({
       resolved,
-      enrollmentEmail: email,
+      ...(email !== undefined ? { enrollmentEmail: email } : {}),
+      ...(claim !== undefined ? { enrollmentAgentIdClaim: claim } : {}),
       ...(projectName !== undefined && resolved.enrollment ? { enrollmentProjectName: projectName } : {}),
       ...(organization !== undefined ? { enrollmentOrganization: organization } : {}),
       ...(options.intent ? { enrollmentIntent: options.intent } : {}),
@@ -1804,7 +1857,8 @@ async function enrollForCommand(
         const betaKey = flagString(args.flags, "beta-key") ?? nonemptyEnv(runtime.env.SCREENRIG_BETA_KEY);
         const request: CLIEnrollmentRequest = {
           client_id: state.clientId,
-          email: state.email,
+          ...(state.email !== undefined ? { email: state.email } : {}),
+          ...(state.agentidClaim !== undefined ? { agentid_claim: state.agentidClaim } : {}),
           ...(state.projectName !== undefined ? { project_name: state.projectName } : {}),
           ...(state.organization !== undefined ? { organization: state.organization } : {}),
           ...(betaKey !== undefined ? { beta_key: betaKey } : {}),
@@ -1822,19 +1876,42 @@ async function enrollForCommand(
             body: request,
           });
         } catch (err) {
-          if (err instanceof CliError && err.problem.code === "invalid_request" && betaKey === undefined) {
-            const namesBeta = err.problem.errors.some((item) => {
-              if (!item || typeof item !== "object") return false;
-              return (item as { field?: string }).field === "beta_key";
-            });
-            if (namesBeta) {
+          if (err instanceof CliError) {
+            // The server's own next action always wins; these two are the CLI's
+            // documented recovery paths when the server leaves them empty.
+            if (err.problem.code === "agentid_claim_invalid" && !err.problem.next) {
+              const signIn = agentidSignInUrl(resolved.apiUrl);
               throw new CliError({
                 ...err.problem,
-                next: err.problem.next ?? {
-                  command: "screenrig --beta-key KEY agent enroll --email ADDRESS",
-                  reason: "The control plane gates enrollment. Retry the same email with the enrollment beta key.",
+                next: {
+                  command: signIn ?? "screenrig agent enroll --email ADDRESS --organization NAME",
+                  reason: signIn
+                    ? `The AgentID claim code is missing, already redeemed, or expired. Sign in again at ${signIn} for a new claim code, or enroll with a contact email: screenrig agent enroll --email ADDRESS --organization NAME.`
+                    : "The AgentID claim code is missing, already redeemed, or expired. Enroll with a contact email instead: screenrig agent enroll --email ADDRESS --organization NAME.",
                 },
               }, err.exitCode, err.warnings);
+            }
+            if (err.problem.code === "agentid_already_enrolled" && !err.problem.next) {
+              throw new CliError({
+                ...err.problem,
+                next: {
+                  command: "screenrig agent connect",
+                  reason: "This AgentID already holds an enrolled agent. Connect this installation to the existing project instead of enrolling a second agent.",
+                },
+              }, err.exitCode, err.warnings);
+            }
+            if (err.problem.code === "invalid_request" && betaKey === undefined) {
+              const namesBeta = err.problem.errors.some((item) =>
+                Boolean(item && typeof item === "object" && "field" in item && item.field === "beta_key"));
+              if (namesBeta) {
+                throw new CliError({
+                  ...err.problem,
+                  next: err.problem.next ?? {
+                    command: "screenrig --beta-key KEY agent enroll --email ADDRESS",
+                    reason: "The control plane gates enrollment. Retry the same email with the enrollment beta key.",
+                  },
+                }, err.exitCode, err.warnings);
+              }
             }
           }
           throw err;
@@ -6317,8 +6394,8 @@ function credentialCheck(resolved: Awaited<ReturnType<typeof resolveConfig>>): D
     detail: `${detail}; this installation is not enrolled`,
     path: "first_run_enroll",
     next: {
-      command: resolved.enrollment?.email ? "screenrig agent enroll" : "screenrig agent enroll --email ADDRESS --organization NAME",
-      reason: resolved.enrollment?.email
+      command: resolved.enrollment ? "screenrig agent enroll" : "screenrig agent enroll --email ADDRESS --organization NAME",
+      reason: resolved.enrollment
         ? "Resume the exact pending enrollment, then rerun doctor."
         : "Create the first agent with unverified contact metadata, then rerun doctor. Every authenticated command fails with not_enrolled until then.",
     },

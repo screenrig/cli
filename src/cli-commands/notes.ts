@@ -14,7 +14,7 @@ export function commandNotes(command: Command): string[] {
 }
 
 export interface OptionRelationship {
-  kind: "exactlyOne" | "together" | "atLeastOne" | "requires";
+  kind: "exactlyOne" | "together" | "atLeastOne" | "atMostOne" | "requires";
   options: string[];
 }
 const relationships = new WeakMap<Command, OptionRelationship[]>();
@@ -31,6 +31,7 @@ export function requireOptionGroup(command: Command, kind: OptionRelationship["k
   const message = kind === "exactlyOne"
     ? `Provide exactly one of ${names.join(" or ")}.`
     : kind === "atLeastOne" ? `Provide at least one of ${names.join(" or ")}.`
+    : kind === "atMostOne" ? `Provide at most one of ${names.join(" or ")}.`
     : kind === "requires" ? `${names[0]} requires ${names.slice(1).join(" and ")}.`
     : `Provide ${names.join(" and ")} together.`;
   addCommandNotes(command, message);
@@ -39,6 +40,7 @@ export function requireOptionGroup(command: Command, kind: OptionRelationship["k
     const supplied = (index: number) => command.getOptionValueSource(options[index]!.attributeName()) === "cli";
     const invalid = kind === "exactlyOne" ? count !== 1
       : kind === "atLeastOne" ? count === 0
+      : kind === "atMostOne" ? count > 1
       : kind === "requires" ? supplied(0) && options.slice(1).some((_, index) => !supplied(index + 1))
       : count !== 0 && count !== options.length;
     if (invalid) throw usageError(message);

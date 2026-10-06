@@ -1747,6 +1747,53 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
       security: []
+  /agentid/v1/start:
+    get:
+      operationId: startAgentIDSignIn
+      description: Starts an AgentID (OIDC) browser sign-in on the API host derived from the runtime public origin (https://play.<domain> -> https://api.<domain>). Sets a single-use binding cookie and redirects to the AgentID authorization endpoint with PKCE S256. Answers only on the API host. While the relying party has no client id and secret the route renders a plain unavailable page with 503.
+      responses:
+        '302':
+          description: Redirect to the AgentID authorization endpoint.
+        '503':
+          description: AgentID sign-in is unavailable.
+          content:
+            text/html:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Problem'
+      security: []
+  /agentid/v1/callback:
+    get:
+      operationId: completeAgentIDSignIn
+      description: Completes an AgentID browser sign-in on the API host. Requires iss equal to the configured issuer, the binding cookie, and an unexpired single-use transaction. Exchanges the code with client_secret_basic and PKCE, verifies the ES256 id_token (iss, aud, exp with 60 s skew, nonce) against the cached JWKS, calls userinfo and enforces the owner rules, then renders a single-use claim-code page. A subject already bound to an agent renders the already-enrolled page. This route never creates a project, identity, or invitation.
+      parameters:
+      - { name: code, in: query, schema: { type: string } }
+      - { name: state, in: query, schema: { type: string } }
+      - { name: iss, in: query, schema: { type: string } }
+      - { name: error, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Single-use AgentID claim-code page with plugin install steps.
+          content:
+            text/html:
+              schema:
+                type: string
+        '409':
+          description: The AgentID subject is already enrolled.
+          content:
+            text/html:
+              schema:
+                type: string
+        '503':
+          description: AgentID sign-in is unavailable.
+          content:
+            text/html:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Problem'
+      security: []
   /api/v1/agent-identity/exchange:
     post:
       operationId: exchangeAgentIdentity
@@ -2928,18 +2975,37 @@ paths:
         event while newer events already exist, and null at the end of the
         history. limit defaults to 50 and accepts 1-200; a value outside that
         range is refused with invalid_request and an errors[] member naming
-        limit. Offset paging is not supported.
+        limit. Offset paging is not supported. source=log lists the Player
+        log instead: the condition reports Players send (runtime.reported)
+        ascending by receipt time, filtered by screen_id and severity over a
+        window from to (default the last 24 hours, at most 31 days), with
+        lg1_ cursors. Player log records have no sequence, are not on
+        GET /api/v1/events/stream and are not delivered to webhooks. A record
+        is acknowledged when the Player log queue accepts it and is kept for
+        the project's event retention. A poll with the last cursor and the
+        default window follows the log. Player log records are not in the
+        default (source=project) list. screen_id, severity, from and to are refused
+        with invalid_request unless source is log.
       security: [{ projectBearer: [] }]
-      parameters: [{ $ref: "#/components/parameters/AfterCursor" }, { $ref: "#/components/parameters/EventListLimit" }]
+      parameters:
+        - { $ref: "#/components/parameters/AfterCursor" }
+        - { $ref: "#/components/parameters/EventListLimit" }
+        - { $ref: "#/components/parameters/EventSource" }
+        - { $ref: "#/components/parameters/EventLogScreen" }
+        - { $ref: "#/components/parameters/EventLogSeverity" }
+        - { $ref: "#/components/parameters/EventLogFrom" }
+        - { $ref: "#/components/parameters/EventLogTo" }
       responses:
-        "200": { description: Durable events, content: { application/json: { schema: { $ref: "#/components/schemas/EventList" } } } }
+        "200": { description: Durable events (source=project) or Player log records (source=log), content: { application/json: { schema: { $ref: "#/components/schemas/EventList" } } } }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/events/stream:
     parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
     get:
       operationId: streamEvents
       description: >-
-        Replayable project listen stream. Opening this request costs 1 credit
+        Replayable project listen stream. Player log records (runtime.reported)
+        are read with GET /api/v1/events?source=log and are not on this stream.
+        Opening this request costs 1 credit
         as the listen subscribe. Credit headers are omitted. Later billed
         events cost 1 credit each; screen.*, runtime.*, and application.event
         are exempt screen-conversation messages. Heartbeats and the retry
@@ -3332,8 +3398,11 @@ paths:
         carried when the play was received) filter. JSON is a page of at
         most limit rows (default 200, at most 1000) with next_cursor, null
         at the end of the range; pass it back as cursor with the same
-        filters. A later page never repeats or skips a row that existed
-        when the earlier page was read. format=csv (or Accept text/csv
+        filters. A later page never skips a row that existed when the
+        earlier page was read and does not repeat one, except that a start
+        the Player re-sent after an unacknowledged report (the same play_id,
+        received a moment later) can appear again on a later page; the CSV
+        stream lists it once. format=csv (or Accept text/csv
         without application/json) streams every play from cursor to the
         end of the range as CSV (PlaybackPlayCsv); limit is refused with
         CSV. Metering is per request: every JSON page costs one API request
@@ -3360,6 +3429,136 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/playback/totals:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
+    get:
+      operationId: getPlaybackTotals
+      description: >-
+        Play totals of the calling project over inclusive UTC days, read from the
+        daily rollups: by=day returns one row per day with plays (screen_id or
+        media_id narrows it to one screen or media), by=screen and by=media rank
+        the busiest screens or media (top, at most 100), and by=screen_day
+        returns the day series of the top screens (top at most 10). day_to
+        defaults to today (UTC) and day_from to 29 days before it. A day
+        series spans at most 366 days (92 when narrowed to a screen or
+        media); a ranking at most 92. Counts include every start the project
+        has recorded, including those stored before play rollups existed.
+        Rollups follow ingestion by up to about 21 minutes. truncated is true
+        when a ranking was built from slices of a window too large for one
+        read: it covers the best keys of each slice. Not rate limited. One
+        metered API request.
+      security: [{ projectBearer: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/PlaybackTotalsBy" }
+        - { $ref: "#/components/parameters/PlaybackTotalsDayFrom" }
+        - { $ref: "#/components/parameters/PlaybackTotalsDayTo" }
+        - { $ref: "#/components/parameters/PlaybackScreenID" }
+        - { $ref: "#/components/parameters/PlaybackMediaID" }
+        - { $ref: "#/components/parameters/PlaybackTotalsTop" }
+      responses:
+        "200": { description: "Totals of the requested grouping.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackTotals" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/{id}/health/history:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ResourceID" }]
+    get:
+      operationId: getScreenHealthHistory
+      description: >-
+        The health a screen reported over time. resolution=raw (default)
+        returns each accepted report in time order, shaped like Screen.health
+        without stale; resolution=hour returns one summary per UTC hour
+        (reports, peak and average temperature, peak load and memory ratio,
+        weakest Wi-Fi signal, whether the display was disconnected, peak crash
+        and renderer-restart counts). from (inclusive) and to (exclusive)
+        default to the last 24 hours; the range is at most 31 days for raw and
+        93 days for hour. A page holds at most limit rows (default 100, at most
+        500) with next_cursor, null at the end. History is kept for the plan's
+        event retention. Raw reports reach this view within seconds, hourly
+        summaries within about 5 minutes. A screen of another project is
+        not_found. Screen.health, the latest report, is unchanged.
+      security: [{ projectBearer: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/SeriesFrom" }
+        - { $ref: "#/components/parameters/SeriesTo" }
+        - { $ref: "#/components/parameters/HealthResolution" }
+        - { $ref: "#/components/parameters/SeriesLimit" }
+        - { $ref: "#/components/parameters/SeriesCursor" }
+      responses:
+        "200": { description: "A page of reports or hourly summaries.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenHealthHistory" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/screens/{id}/uptime:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }, { $ref: "#/components/parameters/ResourceID" }]
+    get:
+      operationId: getScreenUptime
+      description: >-
+        Daily availability of one screen over inclusive UTC days (day_to
+        defaults to today and day_from to 29 days before it, at most 366
+        days). Each row holds the online and offline seconds recorded that
+        day, availability (online over recorded time, null when nothing was
+        recorded) and coverage (the share of the day with a recorded state).
+        Time with no recorded state is never counted as downtime: it lowers
+        coverage only. The screen's current open interval is included up to
+        now and marks its days live. Days with nothing recorded have no row.
+        Offline is recorded after the screen has been unreachable for 60
+        seconds. A screen of another project is not_found.
+      security: [{ projectBearer: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/UptimeDayFrom" }
+        - { $ref: "#/components/parameters/UptimeDayTo" }
+      responses:
+        "200": { description: "Daily uptime rows, oldest first.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenUptime" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/health/trend:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
+    get:
+      operationId: getHealthTrend
+      description: >-
+        The project's fleet health by UTC hour: how many screens reported, and
+        how many of them were hot (at or above 80 °C), had a disconnected
+        display, or were crashing (3 or more crashes in 24 hours). from
+        (inclusive) and to (exclusive) default to the last 24 hours, at most
+        93 days; a page holds at most limit rows (default 100, at most 500)
+        with next_cursor, null at the end. Hours follow reports by up to about
+        5 minutes.
+      security: [{ projectBearer: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/SeriesFrom" }
+        - { $ref: "#/components/parameters/SeriesTo" }
+        - { $ref: "#/components/parameters/SeriesLimit" }
+        - { $ref: "#/components/parameters/SeriesCursor" }
+      responses:
+        "200": { description: "A page of hourly fleet health.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/HealthTrend" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/uptime/daily:
+    parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
+    get:
+      operationId: getProjectUptime
+      description: >-
+        Daily availability of the project's screens over inclusive UTC days
+        (defaults and range as GET /api/v1/screens/{id}/uptime). Each row sums
+        the online and offline seconds of the screens with a recorded state
+        that day; coverage is the share of those screens' day with a recorded
+        state. Intervals count when they end, so today's row covers
+        intervals that ended so far; the live online count is in the
+        dashboard summary.
+      security: [{ projectBearer: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/UptimeDayFrom" }
+        - { $ref: "#/components/parameters/UptimeDayTo" }
+      responses:
+        "200": { description: "Daily uptime rows, oldest first.", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ProjectUptime" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/applications/{application_id}/kv:
     parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
@@ -3829,6 +4028,16 @@ paths:
         "201": { description: Paired runtime session, content: { application/json: { schema: { $ref: "#/components/schemas/RuntimeSession" } } } }
         "409": { $ref: "#/components/responses/RuntimeProblem" }
         default: { $ref: "#/components/responses/RuntimeProblem" }
+  /runtime/v1/keys:
+    servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
+    get:
+      operationId: getRuntimeSessionKeys
+      description: The public keys that verify runtime and dashboard session tokens, as a JWKS document (OKP/Ed25519, one entry per key id). It carries public material only and needs no credential. An empty keys array means no session keys are installed. Cache-Control is public, max-age=300, with an ETag for If-None-Match.
+      responses:
+        "200": { description: Public session verification keys, headers: { Cache-Control: { schema: { type: string, enum: ["public, max-age=300"] } }, ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: "#/components/schemas/SessionKeySet" } } } }
+        "304": { description: Key set unchanged }
+        "429": { $ref: "#/components/responses/RuntimeRateLimitedProblem" }
+        default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/browser-provisioning/exchanges:
     servers: [{ url: https://play.screenrig.ai, description: Trusted browser Player origin }]
     post:
@@ -4011,7 +4220,7 @@ paths:
       operationId: createNativeIdentityRuntimeSession
       x-rate-limit-policies: [{ name: native-identity-session, quota: 60, windowSeconds: 60 }, { name: native-identity-session-ip, quota: 600, windowSeconds: 60 }]
       x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
-      description: Verifies an EdDSA compact JWS (op=session.mint) against the enrolled public key and returns a signed 90-day ScreenRig-Session. Paired Players renew after thirty days with jitter through this same signed mint; renewal replaces the credential without closing an existing runtime stream. Renewal metadata is optional to readers and does not require a Player update. Cookies are neither accepted nor set. Exact Idempotency-Key replay precedes new abuse admission. An archived screen still mints a session so the player can show the archived glass. Session mint requires the exact durable project and screen binding established by signed completion; pending claim offers have no session authority. Exact replay rechecks that binding and rejects retired identities.
+      description: Verifies an EdDSA compact JWS (op=session.mint) against the enrolled public key and returns a signed seven-day ScreenRig-Session. Paired Players renew after one day with jitter through this same signed mint; renewal replaces the credential without closing an existing runtime stream. Renewal metadata is optional to readers and does not require a Player update. Cookies are neither accepted nor set. Exact Idempotency-Key replay precedes new abuse admission. An archived screen still mints a session so the player can show the archived glass. Session mint requires the exact durable project and screen binding established by signed completion; pending claim offers have no session authority. Exact replay rechecks that binding and rejects retired identities.
       parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/NativeIdentitySessionRequest" } } } }
       responses:
@@ -4093,7 +4302,7 @@ paths:
         - { $ref: "#/components/parameters/AfterCursor" }
         - { $ref: "#/components/parameters/LastEventID" }
       responses:
-        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.archived and screen.unarchived are runtime audience events; they do not wipe credentials. screen.deleted is a runtime audience event delivered when signed identity reset tombstones the screen. No runtime event authorizes clearing local identity. Only successful signed reset initiated by a confirmed local player action permits local identity rotation. project.suspended and project.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive. The runtime audience is an allowlist (docs/player-compatibility.md §7.1): screen.content_changed, screen.manifest_changed, screen.toast, screen.screenshot_requested, screen.archived, screen.unarchived, screen.deleted, screen.device_credential_revoked, project.suspended, project.resumed, player.reload, which reaches every runtime session, and the per-screen commands player.reboot and player.display (docs/player-compatibility.md §6.5), never delivered past details.expires_at. Every other type stops at the scan, and stream.cursor advances the cursor past it. Players ignore unknown event types, including the default message type, and unknown field names, and advance the cursor from every id. The stream opens with retry: 3000; a draining host sends each stream its own retry between 1000 and 30000 ms. The in-band problem frame (event: problem) has no id; its data is {code, detail, action?}, where action is present when the registry defines one, and the stream then closes (payment_required sets retry: 60000). The fleet player.reload control frame has no id and never moves the cursor. No frame carries more than 64 KiB of data.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
+        "200": { description: "Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.archived and screen.unarchived are runtime audience events; they do not wipe credentials. screen.deleted is a runtime audience event delivered when signed identity reset tombstones the screen. No runtime event authorizes clearing local identity. Only successful signed reset initiated by a confirmed local player action permits local identity rotation. project.suspended and project.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive. The runtime audience is an allowlist (docs/player-compatibility.md §7.1): screen.content_changed, screen.manifest_changed, screen.toast, screen.screenshot_requested, screen.archived, screen.unarchived, screen.deleted, screen.device_credential_revoked, project.suspended, project.resumed, player.reload, which reaches every runtime session, and the per-screen commands player.reboot and player.display (docs/player-compatibility.md §6.5), never delivered past details.expires_at. Every other type stops at the scan, and stream.cursor advances the cursor past it. Players ignore unknown event types, including the default message type, and unknown field names, and advance the cursor from every id. The stream opens with its own retry, drawn per connection between 3000 and 15000 ms so that streams dropped together do not reconnect together; a draining host sends each stream its own retry between 1000 and 30000 ms. The in-band problem frame (event: problem) has no id; its data is {code, detail, action?}, where action is present when the registry defines one, and the stream then closes (payment_required sets retry: 60000). The fleet player.reload control frame has no id and never moves the cursor. No frame carries more than 64 KiB of data.", headers: { X-Accel-Buffering: { schema: { type: string, enum: [no] } } }, content: { text/event-stream: { schema: { type: string } } } }
         default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/reports:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -4104,7 +4313,7 @@ paths:
       security: [{ pairedRuntimeCookie: [] }, { nativeSessionAuthorization: [] }]
       requestBody: { required: true, content: { application/json: { schema: { oneOf: [{ $ref: "#/components/schemas/RuntimeReport" }, { $ref: "#/components/schemas/RuntimeTelemetryBatch" }] } } } }
       responses:
-        "202": { description: "Accepted after durable persistence. A telemetry batch commits its watermark, raw observations, state and project events atomically, and returns stream_id, sequence, accepted (report count), and duplicate. Individual reports retain their existing response. manifest.activated is committed before this response and is idempotent for the current active revision. playback.media_started, legacy playback.video_started, and playback.application_started durably append one authenticated screen observation (GET /api/v1/playback/plays) before this response; reported item, page, and manifest identities do not require current content membership and do not authorize content access. Daily counts, optional metadata, and project-owned resource last_used_at are updated by recoverable batches and can lag the raw observation. Ordinary playback-start responses omit optional credit-balance headers. playback.page_failed replaces the screen's latest page-failure slot and appends a project-only durable event in the same transaction without changing screen or manifest revision. manifest.upgrade stores the screen's one latest-wins manifest-upgrade slot behind its revision fences and appends a project-only durable event in the same transaction only when the derived state changes; a stale, superseded, or post-activation pre-activation report is accepted with no change, and no report ever promotes a grant. application.event appends a durable project event before this response.", headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
+        "202": { description: "Accepted after durable persistence. A telemetry batch is accepted or refused as a unit. It returns 202 only after its raw observations are durable and its stream watermark, latest health and observation state, page-failure slot and project events have committed together; it returns stream_id, sequence, accepted (report count), and duplicate. A refused batch (sequence gap, conflicting replay, full stream capacity, retired authority) stores nothing. A batch that was not acknowledged because of a server error or a lost connection can have stored some of its raw observations; replaying the same bytes stores each missing observation once, never stores one twice, and then acknowledges. A replay of an acknowledged batch returns 202 with duplicate true and changes nothing. Individual reports retain their existing response. A runtime condition report (any other report code, such as player.page_skipped) is recorded in the Player log (GET /api/v1/events?source=log), not in the project's events, and is acknowledged when the Player log queue accepts it; it is not on the event stream and not delivered to webhooks. manifest.activated is committed before this response and is idempotent for the current active revision. playback.media_started, legacy playback.video_started, and playback.application_started durably append one authenticated screen observation (GET /api/v1/playback/plays) before this response; reported item, page, and manifest identities do not require current content membership and do not authorize content access. Daily counts, optional metadata, and project-owned resource last_used_at are updated by recoverable batches and can lag the raw observation. Ordinary playback-start responses omit optional credit-balance headers. playback.page_failed replaces the screen's latest page-failure slot and appends a project-only durable event in the same transaction without changing screen or manifest revision. manifest.upgrade stores the screen's one latest-wins manifest-upgrade slot behind its revision fences and appends a project-only durable event in the same transaction only when the derived state changes; a stale, superseded, or post-activation pre-activation report is accepted with no change, and no report ever promotes a grant. application.event appends a durable project event before this response.", headers: { RateLimit-Policy: { $ref: "#/components/headers/RateLimitPolicy" }, RateLimit: { $ref: "#/components/headers/RateLimit" } } }
         default: { $ref: "#/components/responses/RuntimeProblem" }
   /runtime/v1/screenshot:
     servers: [{ url: https://play.screenrig.ai, description: Trusted player/runtime origin }]
@@ -6014,11 +6223,20 @@ paths:
         agent or the CLI produced carry no actor. Paging matches
         GET /api/v1/events: pass next_cursor back as after, next_cursor is null
         at the end of the history, and limit accepts 1-200 (default 50) or is
-        refused with invalid_request.
+        refused with invalid_request. source=log lists the Player log with the
+        same parameters, cursors and records as GET /api/v1/events?source=log;
+        its records have no sequence.
       security: [{ dashboardSession: [] }]
-      parameters: [{ $ref: "#/components/parameters/AfterCursor" }, { $ref: "#/components/parameters/EventListLimit" }]
+      parameters:
+        - { $ref: "#/components/parameters/AfterCursor" }
+        - { $ref: "#/components/parameters/EventListLimit" }
+        - { $ref: "#/components/parameters/EventSource" }
+        - { $ref: "#/components/parameters/EventLogScreen" }
+        - { $ref: "#/components/parameters/EventLogSeverity" }
+        - { $ref: "#/components/parameters/EventLogFrom" }
+        - { $ref: "#/components/parameters/EventLogTo" }
       responses:
-        "200": { description: Durable events, headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/EventList" } } } }
+        "200": { description: Durable events (source=project) or Player log records (source=log), headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/EventList" } } } }
         "401": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /dashboard/v1/events/stream:
@@ -6027,7 +6245,9 @@ paths:
       operationId: streamDashboardEvents
       description: >-
         Replayable project event stream for the session's project, used for the
-        live activity log and for screen presence changes. The query cursor
+        live activity log and for screen presence changes. Player log records
+        (runtime.reported) are not on this stream; read them with
+        GET /dashboard/v1/events?source=log. The query cursor
         takes precedence over Last-Event-ID. Invalid, future, and pre-retention
         cursors receive stream.resync_required at the current head and close.
         Screenshot image bytes and media bytes never appear on this stream.
@@ -6136,6 +6356,102 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimitedProblem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/playback/totals:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
+    get:
+      operationId: getDashboardPlaybackTotals
+      description: >-
+        The dashboard twin of GET /api/v1/playback/totals for the session's project: the same
+        parameters, limits and rows. Dashboard reads are not metered.
+      security: [{ dashboardSession: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/PlaybackTotalsBy" }
+        - { $ref: "#/components/parameters/PlaybackTotalsDayFrom" }
+        - { $ref: "#/components/parameters/PlaybackTotalsDayTo" }
+        - { $ref: "#/components/parameters/PlaybackScreenID" }
+        - { $ref: "#/components/parameters/PlaybackMediaID" }
+        - { $ref: "#/components/parameters/PlaybackTotalsTop" }
+      responses:
+        "200": { description: "As the project API.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/PlaybackTotals" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/screens/{id}/health/history:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    get:
+      operationId: getDashboardScreenHealthHistory
+      description: >-
+        The dashboard twin of GET /api/v1/screens/{id}/health/history for the session's project: the same
+        parameters, limits and rows. Dashboard reads are not metered.
+      security: [{ dashboardSession: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/SeriesFrom" }
+        - { $ref: "#/components/parameters/SeriesTo" }
+        - { $ref: "#/components/parameters/HealthResolution" }
+        - { $ref: "#/components/parameters/SeriesLimit" }
+        - { $ref: "#/components/parameters/SeriesCursor" }
+      responses:
+        "200": { description: "As the project API.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenHealthHistory" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/screens/{id}/uptime:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
+    parameters: [{ $ref: "#/components/parameters/ResourceID" }]
+    get:
+      operationId: getDashboardScreenUptime
+      description: >-
+        The dashboard twin of GET /api/v1/screens/{id}/uptime for the session's project: the same
+        parameters, limits and rows. Dashboard reads are not metered.
+      security: [{ dashboardSession: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/UptimeDayFrom" }
+        - { $ref: "#/components/parameters/UptimeDayTo" }
+      responses:
+        "200": { description: "As the project API.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ScreenUptime" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/health/trend:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
+    get:
+      operationId: getDashboardHealthTrend
+      description: >-
+        The dashboard twin of GET /api/v1/health/trend for the session's project: the same
+        parameters, limits and rows. Dashboard reads are not metered.
+      security: [{ dashboardSession: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/SeriesFrom" }
+        - { $ref: "#/components/parameters/SeriesTo" }
+        - { $ref: "#/components/parameters/SeriesLimit" }
+        - { $ref: "#/components/parameters/SeriesCursor" }
+      responses:
+        "200": { description: "As the project API.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/HealthTrend" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /dashboard/v1/uptime/daily:
+    servers: [{ url: https://dashboard.screenrig.ai, description: Backend-owned project dashboard origin }]
+    get:
+      operationId: getDashboardProjectUptime
+      description: >-
+        The dashboard twin of GET /api/v1/uptime/daily for the session's project: the same
+        parameters, limits and rows. Dashboard reads are not metered.
+      security: [{ dashboardSession: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/UptimeDayFrom" }
+        - { $ref: "#/components/parameters/UptimeDayTo" }
+      responses:
+        "200": { description: "As the project API.", headers: { Cache-Control: { schema: { type: string, enum: ["private, no-store"] } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ProjectUptime" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/support/status:
     parameters: [{ $ref: "#/components/parameters/ProjectTarget" }]
@@ -6683,7 +6999,12 @@ components:
       schema: { type: string, maxLength: 1447 }
     IfMatch: { name: If-Match, in: header, required: false, schema: { type: string }, description: "Optional positive resource revision. Omit to write the current resource; a supplied stale revision is revision_conflict." }
     OptionalIfMatch: { name: If-Match, in: header, required: false, schema: { type: string }, description: "Optional positive resource revision. Omit to create or overwrite a key; a supplied stale revision is revision_conflict." }
-    AfterCursor: { name: after, in: query, required: false, schema: { type: string } }
+    AfterCursor: { name: after, in: query, required: false, schema: { type: string }, description: "A cursor from a previous response: ev1_ for project events (and the event streams), lg1_ for the Player log (source=log). A cursor of the other kind is refused with invalid_request." }
+    EventSource: { name: source, in: query, required: false, schema: { type: string, enum: [project, log], default: project }, description: "project lists the sequenced project events. log lists the Player log: Player condition reports (runtime.reported), ascending by receipt time." }
+    EventLogScreen: { name: screen_id, in: query, required: false, schema: { type: string }, description: "With source=log, only records of this screen." }
+    EventLogSeverity: { name: severity, in: query, required: false, schema: { type: string, enum: [info, warning, error] }, description: "With source=log, only records of this severity." }
+    EventLogFrom: { name: from, in: query, required: false, schema: { type: string, format: date-time }, description: "With source=log, the start of the window (inclusive). Defaults to 24 hours before to." }
+    EventLogTo: { name: to, in: query, required: false, schema: { type: string, format: date-time }, description: "With source=log, the end of the window (exclusive). Defaults to now. The window is at most 31 days." }
     ListAfter: { name: after, in: query, required: false, schema: { type: string, maxLength: 256 }, description: "next_cursor of the previous page of the same list, with the same filters. Omitted starts at the newest row. A value that is not such a cursor is invalid_request." }
     EventListLimit: { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 }, description: "Page size. A value outside 1-200 is refused with invalid_request and an errors[] member whose field is limit." }
     PlaybackScreenID: { name: screen_id, in: query, required: false, schema: { type: string, pattern: "^(?:(?:stage|qa|development)_)?scr_" } }
@@ -6699,6 +7020,17 @@ components:
     PlaysTag: { name: tag, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, description: A screen tag the screen carried when the play was received. }
     PlaysCursor: { name: cursor, in: query, required: false, schema: { type: string, pattern: "^pc_" }, description: "next_cursor of the previous page, with the same filters. Opaque." }
     PlaysLimit: { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }, description: JSON page size. Refused with CSV. }
+    SeriesFrom: { name: from, in: query, required: false, schema: { type: string, format: date-time }, description: "Inclusive lower bound on the report time. Defaults to 24 hours before to." }
+    SeriesTo: { name: to, in: query, required: false, schema: { type: string, format: date-time }, description: "Exclusive upper bound on the report time. Defaults to now." }
+    SeriesLimit: { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500, default: 100 }, description: Page size. }
+    SeriesCursor: { name: cursor, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,512}$" }, description: "next_cursor of the previous page, with the same filters. Opaque." }
+    HealthResolution: { name: resolution, in: query, required: false, schema: { type: string, enum: [raw, hour], default: raw }, description: "raw returns each report; hour returns one summary per UTC hour." }
+    UptimeDayFrom: { name: day_from, in: query, required: false, schema: { type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, description: "First UTC day, inclusive. Defaults to 29 days before day_to. With day_to spans at most 366 days." }
+    UptimeDayTo: { name: day_to, in: query, required: false, schema: { type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, description: "Last UTC day, inclusive. Defaults to today (UTC)." }
+    PlaybackTotalsBy: { name: by, in: query, required: false, schema: { type: string, enum: [day, screen, media, screen_day], default: day }, description: "day: plays per day; screen, media: the busiest keys; screen_day: the day series of the top screens." }
+    PlaybackTotalsDayFrom: { name: day_from, in: query, required: false, schema: { type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, description: "First UTC day, inclusive. Defaults to 29 days before day_to. A day series spans at most 366 days (92 when narrowed to a screen or media), a ranking at most 92." }
+    PlaybackTotalsDayTo: { name: day_to, in: query, required: false, schema: { type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, description: "Last UTC day, inclusive. Defaults to today (UTC)." }
+    PlaybackTotalsTop: { name: top, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 10 }, description: "How many screens or media a ranking returns (at most 10 for by=screen_day). Refused with by=day." }
     LastEventID: { name: Last-Event-ID, in: header, required: false, schema: { type: string }, description: Durable cursor used when after is absent. }
     Range: { name: Range, in: header, required: false, schema: { type: string, pattern: "^bytes=[0-9]*-[0-9]*$" }, description: V1 accepts one byte range only. }
     ScreenshotCaptureID: { name: capture_id, in: query, required: false, schema: { $ref: "#/components/schemas/ScreenshotCaptureID" } }
@@ -6731,8 +7063,8 @@ components:
     nativeSessionAuthorization:
       type: http
       scheme: ScreenRig-Session
-      description: Native-only signed 24-hour runtime authorization. The credential is exactly srs_ plus an opaque signed base64url value.
-    runtimeCookie: { type: apiKey, in: cookie, name: __Host-screenrig-runtime }
+      description: Native runtime authorization. The credential is exactly srs_ plus an opaque base64url value; a native Player stores and sends it without reading it. A paired credential lasts seven days and renews after one day.
+    runtimeCookie: { type: apiKey, in: cookie, name: __Host-screenrig-runtime, description: Runtime session cookie. The value is opaque to the Player. }
     pairedRuntimeCookie: { type: apiKey, in: cookie, name: __Host-screenrig-runtime, description: Signed runtime session with paired-device mutation profile. }
     pairedDeviceCookie: { type: apiKey, in: cookie, name: __Host-screenrig-device }
     pairingCookie: { type: apiKey, in: cookie, name: __Host-screenrig-pairing, description: "Signed 24-hour pairing session; never grants project, content, or runtime authority." }
@@ -8672,7 +9004,6 @@ components:
       additionalProperties: false
       required:
       - client_id
-      - email
       properties:
         intent:
           type: string
@@ -8691,7 +9022,13 @@ components:
           format: email
           minLength: 3
           maxLength: 254
-          description: Unverified project contact address. Enrollment always creates a new project and queues its invitation; an address alone grants no authority.
+          description: Unverified project contact address. Exactly one of email or agentid_claim is required. Enrollment always creates a new project and queues
+            its invitation; an address alone grants no authority.
+        agentid_claim:
+          type: string
+          pattern: ^agid_[A-Za-z0-9_-]{43}$
+          description: Single-use AgentID claim code from the AgentID sign-in page. Exactly one of email or agentid_claim is required. The verified AgentID owner address
+            becomes the project contact and invitation recipient.
         beta_key:
           type: string
           description: Required when the server has a configured enrollment beta key. Omit when the server does not gate enrollment.
@@ -10844,7 +11181,7 @@ components:
       properties:
         capture_id: { $ref: "#/components/schemas/ScreenshotCaptureID" }
         reason: { type: string, enum: [expired, unsupported_surface, capture_failed] }
-    Event: { type: object, additionalProperties: true, required: [cursor, sequence, type, severity, message, at], properties: { cursor: { type: string }, sequence: { type: integer }, type: { type: string }, tag: { type: string, description: "Operation-log alias of type with each dot replaced by an underscore." }, id: { type: string, description: "Operation-log alias of resource.id. Absent when resource has no string id." }, params: { type: object, additionalProperties: { oneOf: [{ type: string, minLength: 1 }, { type: number }, { type: boolean }] }, description: "Operation-log alias containing only non-secret, non-empty scalar details. Nested values and secret-looking keys or values are omitted." }, severity: { type: string }, request_id: { type: string }, operation_id: { type: string }, message: { type: string }, actor: { $ref: "#/components/schemas/EventActor" }, agent: { $ref: "#/components/schemas/EventAgent" }, command: { $ref: "#/components/schemas/EventCommand" }, resource: { type: object, additionalProperties: true }, details: { type: object, additionalProperties: true }, at: { type: string } } }
+    Event: { type: object, additionalProperties: true, required: [cursor, type, severity, message, at], properties: { cursor: { type: string }, sequence: { type: integer, description: "Project sequence. Present on project events; absent on Player log records (source=log), whose cursor is an lg1_ cursor." }, type: { type: string }, tag: { type: string, description: "Operation-log alias of type with each dot replaced by an underscore." }, id: { type: string, description: "Operation-log alias of resource.id. Absent when resource has no string id." }, params: { type: object, additionalProperties: { oneOf: [{ type: string, minLength: 1 }, { type: number }, { type: boolean }] }, description: "Operation-log alias containing only non-secret, non-empty scalar details. Nested values and secret-looking keys or values are omitted." }, severity: { type: string }, request_id: { type: string }, operation_id: { type: string }, message: { type: string }, actor: { $ref: "#/components/schemas/EventActor" }, agent: { $ref: "#/components/schemas/EventAgent" }, command: { $ref: "#/components/schemas/EventCommand" }, resource: { type: object, additionalProperties: true }, details: { type: object, additionalProperties: true }, at: { type: string } } }
     EventCommand:
       type: object
       additionalProperties: false
@@ -11134,7 +11471,8 @@ components:
       additionalProperties: false
       required: [id, url, event_types, enabled, revision, status, created_at, updated_at]
       description: >-
-        A project webhook. Each matching project event is POSTed to url as the
+        A project webhook. Player log records (runtime.reported) are not
+        delivered. Each matching project event is POSTed to url as the
         same JSON object GET /api/v1/events returns, with headers
         ScreenRig-Webhook-Id, ScreenRig-Event-Id (the event cursor, stable
         across retries), User-Agent, and ScreenRig-Signature
@@ -11487,8 +11825,8 @@ components:
       description: Runtime-owned session (docs/player-compatibility.md §8). Readers ignore unknown members and unknown capabilities values. A new member is sent only to sessions whose grants cover it.
       properties:
         telemetry_epoch: { type: string, pattern: "^[0-9a-f]{64}$", description: "Paired telemetry queue generation. Persist with the stream and echo in batches. Stable across ordinary credential renewal; changes when screen authority is retired. This is an ordering hint, never authorization." }
-        renew_after_seconds: { type: integer, minimum: 1, description: "Paired credential renewal interval in seconds; currently thirty days. Add 0-20 percent jitter and renew through the existing mint without reopening SSE. Absent for anonymous viewers." }
-        credential_expires_at: { type: string, format: date-time, description: "Expiry of this credential, independent of an already authenticated runtime stream. Paired credentials currently last ninety days." }
+        renew_after_seconds: { type: integer, minimum: 1, description: "Paired credential renewal interval in seconds; currently one day. Add 0-20 percent jitter and renew through the existing mint without reopening SSE. Absent for anonymous viewers." }
+        credential_expires_at: { type: string, format: date-time, description: "Expiry of this credential, independent of an already authenticated runtime stream. Paired credentials currently last seven days." }
         paired: { type: boolean }
         capabilities: { type: array, items: { type: string }, description: "Session scopes. Known values: manifest.read, events.read, content.read, kv.read, kv.write, runtime.report, presence.write, health.write (paired sessions; PUT /runtime/v1/health)." }
         event_cursor: { type: string }
@@ -11504,8 +11842,8 @@ components:
       description: Runtime-owned native session (docs/player-compatibility.md §8). Readers ignore unknown members and unknown capabilities values. A new member is sent only to sessions whose grants cover it.
       properties:
         telemetry_epoch: { type: string, pattern: "^[0-9a-f]{64}$", description: "Paired telemetry queue generation. Persist with the stream and echo in batches. Stable across ordinary credential renewal; changes when screen authority is retired. This is an ordering hint, never authorization." }
-        renew_after_seconds: { type: integer, minimum: 1, description: "Paired credential renewal interval in seconds; currently thirty days. Add 0-20 percent jitter and renew through the existing mint without reopening SSE. Absent for anonymous viewers." }
-        credential_expires_at: { type: string, format: date-time, description: "Expiry of this credential, independent of an already authenticated runtime stream. Paired credentials currently last ninety days." }
+        renew_after_seconds: { type: integer, minimum: 1, description: "Paired credential renewal interval in seconds; currently one day. Add 0-20 percent jitter and renew through the existing mint without reopening SSE. Absent for anonymous viewers." }
+        credential_expires_at: { type: string, format: date-time, description: "Expiry of this credential, independent of an already authenticated runtime stream. Paired credentials currently last seven days." }
         paired: { type: boolean, enum: [true] }
         capabilities: { type: array, items: { type: string }, description: "Session scopes. Known values: manifest.read, events.read, content.read, kv.read, kv.write, runtime.report, presence.write, health.write (paired sessions; PUT /runtime/v1/health)." }
         event_cursor: { type: string }
@@ -11933,6 +12271,25 @@ components:
           description: 12–128 UTF-8 bytes, without whitespace. Cannot equal the email or display name or a bundled common password. Stored only as an Argon2id hash.
         proof:
           $ref: '#/components/schemas/DashboardProof'
+    SessionKeySet:
+      type: object
+      additionalProperties: false
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            additionalProperties: false
+            required: [kty, crv, kid, x]
+            properties:
+              kty: { type: string, enum: [OKP] }
+              crv: { type: string, enum: [Ed25519] }
+              kid: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,31}$" }
+              x: { type: string, pattern: "^[A-Za-z0-9_-]{43}$", description: "The 32-byte public key, base64url without padding." }
+              use: { type: string, enum: [sig] }
+              alg: { type: string, enum: [EdDSA] }
     DashboardSession:
       type: object
       additionalProperties: false
@@ -11986,6 +12343,11 @@ components:
         passkey_enrollment_required:
           type: boolean
           description: The person's account requires a passkey (every staff member's does) and has none. Until one is added, this session may only read GET /dashboard/v1/session and /me, list and add passkeys (/me/passkeys, /me/passkeys/options, /me/passkeys/complete) and sign out; every other dashboard route answers 403 forbidden. Always false on a development server, which registers no passkeys.
+        csrf_token:
+          type: string
+          minLength: 22
+          maxLength: 43
+          description: Present when the session cookie is a session token. The client sends it as the X-ScreenRig-CSRF header on every state-changing dashboard request; it is the same for the whole session. A state change with a session-token cookie must also carry Origin equal to the dashboard origin, and Sec-Fetch-Site same-origin when the browser sends it.
       description: 'Person session. Identifiers are descriptive; the session cookie establishes authority. A person with no projects has project: null.'
 
     DashboardSummary:
@@ -12079,6 +12441,162 @@ components:
         network: { type: object, additionalProperties: false, properties: { kind: { type: string, enum: [ethernet, wifi, cellular, unknown] }, wifi_rssi_dbm: { type: integer } } }
         crashes_24h: { type: integer, minimum: 0 }
         renderer_restarts_24h: { type: integer, minimum: 0 }
+    PlaybackTotalsDay:
+      type: object
+      additionalProperties: false
+      required: [day, play_count, first_started_at, last_started_at]
+      properties:
+        day: { type: string, format: date }
+        play_count: { type: integer, minimum: 0 }
+        first_started_at: { type: string, format: date-time }
+        last_started_at: { type: string, format: date-time }
+    PlaybackTotalsScreen:
+      type: object
+      additionalProperties: false
+      required: [screen_id, play_count, first_started_at, last_started_at]
+      properties:
+        screen_id: { type: string }
+        play_count: { type: integer, minimum: 0 }
+        first_started_at: { type: string, format: date-time }
+        last_started_at: { type: string, format: date-time }
+    PlaybackTotalsMedia:
+      type: object
+      additionalProperties: false
+      required: [media_id, play_count, first_started_at, last_started_at]
+      properties:
+        media_id: { type: string }
+        play_count: { type: integer, minimum: 0 }
+        first_started_at: { type: string, format: date-time }
+        last_started_at: { type: string, format: date-time }
+    PlaybackTotalsScreenDay:
+      type: object
+      additionalProperties: false
+      required: [screen_id, day, play_count]
+      properties:
+        screen_id: { type: string }
+        day: { type: string, format: date }
+        play_count: { type: integer, minimum: 0 }
+    PlaybackTotals:
+      type: object
+      additionalProperties: false
+      required: [by, day_from, day_to, truncated]
+      description: >-
+        Play totals over the inclusive UTC days day_from to day_to. Exactly one
+        of days (by=day), screens (by=screen), media (by=media) or screen_days
+        (by=screen_day, grouped by screen in rank order, days ascending) is
+        present, the one the request named. truncated is true when a ranking
+        may leave out keys that ranked below the best of a slice or a store.
+      properties:
+        by: { type: string, enum: [day, screen, media, screen_day] }
+        day_from: { type: string, format: date }
+        day_to: { type: string, format: date }
+        truncated: { type: boolean }
+        days: { type: array, maxItems: 366, items: { $ref: "#/components/schemas/PlaybackTotalsDay" } }
+        screens: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/PlaybackTotalsScreen" } }
+        media: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/PlaybackTotalsMedia" } }
+        screen_days: { type: array, maxItems: 920, items: { $ref: "#/components/schemas/PlaybackTotalsScreenDay" } }
+    ScreenHealthSample:
+      type: object
+      additionalProperties: false
+      required: [reported_at]
+      description: "One stored device health report: Screen.health without stale. A member the Player did not send is absent."
+      properties:
+        reported_at: { type: string, format: date-time }
+        uptime_s: { type: integer, minimum: 0 }
+        app_uptime_s: { type: integer, minimum: 0 }
+        memory: { type: object, additionalProperties: false, properties: { used_bytes: { type: integer, minimum: 0 }, total_bytes: { type: integer, minimum: 1 } } }
+        cpu: { type: object, additionalProperties: false, properties: { load_1m: { type: number, minimum: 0 }, cores: { type: integer, minimum: 1 } } }
+        temperature_c: { type: number }
+        display: { type: object, additionalProperties: false, properties: { connected: { type: boolean }, power: { type: string, enum: [on, off, standby, unknown] } } }
+        network: { type: object, additionalProperties: false, properties: { kind: { type: string, enum: [ethernet, wifi, cellular, unknown] }, wifi_rssi_dbm: { type: integer } } }
+        crashes_24h: { type: integer, minimum: 0 }
+        renderer_restarts_24h: { type: integer, minimum: 0 }
+    ScreenHealthHour:
+      type: object
+      additionalProperties: false
+      required: [hour, reports, temperature_max_c, temperature_avg_c, cpu_load_max, memory_used_ratio_max, wifi_rssi_min_dbm, display_disconnected, crashes_24h_max, renderer_restarts_24h_max, last_reported_at]
+      description: "One screen's reports in one UTC hour. A member is null when no report of the hour carried it."
+      properties:
+        hour: { type: string, format: date-time, description: Start of the UTC hour. }
+        reports: { type: integer, minimum: 1 }
+        temperature_max_c: { anyOf: [{ type: number }, { type: "null" }] }
+        temperature_avg_c: { anyOf: [{ type: number }, { type: "null" }] }
+        cpu_load_max: { anyOf: [{ type: number }, { type: "null" }] }
+        memory_used_ratio_max: { anyOf: [{ type: number }, { type: "null" }], description: "Highest used over total memory of the hour, 0 to 1." }
+        wifi_rssi_min_dbm: { anyOf: [{ type: integer }, { type: "null" }] }
+        display_disconnected: { type: boolean, description: A report of the hour said the display was disconnected. }
+        crashes_24h_max: { anyOf: [{ type: integer }, { type: "null" }] }
+        renderer_restarts_24h_max: { anyOf: [{ type: integer }, { type: "null" }] }
+        last_reported_at: { type: string, format: date-time }
+    ScreenHealthSamples:
+      type: object
+      additionalProperties: false
+      required: [resolution, samples, next_cursor]
+      properties:
+        resolution: { type: string, enum: [raw] }
+        samples: { type: array, maxItems: 500, items: { $ref: "#/components/schemas/ScreenHealthSample" } }
+        next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: Pass back as cursor for the next page; null at the end. }
+    ScreenHealthHours:
+      type: object
+      additionalProperties: false
+      required: [resolution, hours, next_cursor]
+      properties:
+        resolution: { type: string, enum: [hour] }
+        hours: { type: array, maxItems: 500, items: { $ref: "#/components/schemas/ScreenHealthHour" } }
+        next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: Pass back as cursor for the next page; null at the end. }
+    ScreenHealthHistory:
+      description: A page of reports (resolution raw) or hourly summaries (resolution hour).
+      oneOf: [{ $ref: "#/components/schemas/ScreenHealthSamples" }, { $ref: "#/components/schemas/ScreenHealthHours" }]
+    HealthTrendHour:
+      type: object
+      additionalProperties: false
+      required: [hour, screens_reporting, hot, display_disconnected, crashing]
+      properties:
+        hour: { type: string, format: date-time, description: Start of the UTC hour. }
+        screens_reporting: { type: integer, minimum: 0 }
+        hot: { type: integer, minimum: 0, description: Screens whose peak temperature of the hour was at or above 80 °C. }
+        display_disconnected: { type: integer, minimum: 0 }
+        crashing: { type: integer, minimum: 0, description: Screens whose crashes_24h reached 3 or more during the hour. }
+    HealthTrend:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: { type: array, maxItems: 500, items: { $ref: "#/components/schemas/HealthTrendHour" } }
+        next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: Pass back as cursor for the next page; null at the end. }
+    UptimeDay:
+      type: object
+      additionalProperties: false
+      required: [day, online_s, offline_s, availability, coverage]
+      description: >-
+        One UTC day. availability is online_s over online_s plus offline_s, null when
+        nothing was recorded. coverage is the share of the day (of every
+        reporting screen's day in a project row) with a recorded state, 0 to 1:
+        a gap lowers coverage and is never offline time. intervals (screen
+        rows) is how many recorded intervals touched the day; screens (project
+        rows) how many screens had a recorded state; live marks a screen day
+        that includes the open interval up to now.
+      properties:
+        day: { type: string, format: date }
+        online_s: { type: integer, minimum: 0 }
+        offline_s: { type: integer, minimum: 0 }
+        availability: { anyOf: [{ type: number, minimum: 0, maximum: 1 }, { type: "null" }] }
+        coverage: { type: number, minimum: 0, maximum: 1 }
+        intervals: { type: integer, minimum: 0 }
+        screens: { type: integer, minimum: 0 }
+        live: { type: boolean }
+    ScreenUptime:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, maxItems: 366, items: { $ref: "#/components/schemas/UptimeDay" } }
+    ProjectUptime:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, maxItems: 366, items: { $ref: "#/components/schemas/UptimeDay" } }
     ScreenRebootAccepted:
       type: object
       additionalProperties: false
@@ -12455,3 +12973,5 @@ x-problem-codes:
 - webhook_url_rejected
 - support_conversation_closed
 - demo_slot_unavailable
+- agentid_claim_invalid
+- agentid_already_enrolled

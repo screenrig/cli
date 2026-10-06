@@ -1,21 +1,25 @@
 import type { CommandActionBinder } from "./types.js";
 import { handleAgentEnroll, handleAgentConnect, handleAgentStatus, handleAgentDisconnect, handleAgentRevokeIdentity } from "../commands.js";
 import { type Command, Option } from "commander";
-import { addCommandNotes } from "./notes.js";
+import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { AGENT_CAPABILITIES } from "../adapters/protocol.js";
 import { usageError } from "../problems.js";
 
 export function registerAgentCommands(root: Command, bind: CommandActionBinder): void {
   const agent = root.command("agent").description("Enroll, connect, and manage this agent");
 
-  agent.command("enroll").description("Create a new project and its first agent")
+  const enroll = agent.command("enroll").description("Create a new project and its first agent")
     .option("--email <ADDRESS>", "Set the project contact email")
+    .option("--agentid-claim <CODE>", "Redeem an AgentID sign-in claim code instead of a contact email")
     .option("--organization <NAME>", "Create the organization containing Screens")
     .addOption(new Option("--project-name <NAME>", "Resume a retained enrollment's exact project name").hideHelp())
     .addOption(new Option("--intent <INTENT>", "Choose the project's purpose: signage (default) or advertising").choices(["signage", "advertising"]))
     .option("--name <NAME>", "Set this agent installation name")
     .option("--force", "Discard pending enrollment or connection state before enrolling")
     .action(bind(handleAgentEnroll));
+  // Mutually exclusive credential sources. A new enrollment must supply exactly
+  // one; a pending enrollment resumes without either flag.
+  requireOptionGroup(enroll, "atMostOne", ["--email", "--agentid-claim"]);
 
   addCommandNotes(agent.command("connect").description("Reconnect this installation to an existing project")
     .option("--target-project-id <ID>", "Request approval for this specific existing project")

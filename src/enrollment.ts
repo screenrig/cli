@@ -24,7 +24,10 @@ export interface EnrollmentCredential {
 export interface EnrollmentState {
   clientId: string;
   idempotencyKey: string;
-  email: string;
+  /** Exactly one of `email` or `agentidClaim` is set. */
+  email?: string;
+  /** AgentID claim code redeemed in place of a contact email. */
+  agentidClaim?: string;
   projectName?: string;
   organization?: string;
   /** Enrollment purpose, fixed for the lifetime of one pending enrollment. */
@@ -48,6 +51,8 @@ export async function ensureCredential(options: {
   verify: (token: string, projectId?: string) => Promise<void>;
   /** Exact validated, trimmed contact address for a new or pending enrollment. */
   enrollmentEmail?: string;
+  /** Exact AgentID claim code redeemed in place of a contact email. */
+  enrollmentAgentIdClaim?: string;
   /** Project name fixed for the lifetime of one pending enrollment. */
   enrollmentProjectName?: string;
   enrollmentOrganization?: string;
@@ -93,6 +98,16 @@ export async function ensureCredential(options: {
       if (existingEnrollment?.email && options.enrollmentEmail && existingEnrollment.email !== options.enrollmentEmail) {
         throw configError("Pending enrollment is bound to a different contact email. Resume it without changing --email.");
       }
+      if (existingEnrollment?.agentid_claim && options.enrollmentAgentIdClaim
+        && existingEnrollment.agentid_claim !== options.enrollmentAgentIdClaim) {
+        throw configError("Pending enrollment is bound to a different AgentID claim. Resume it without changing --agentid-claim, or discard it with agent enroll --force.");
+      }
+      if (existingEnrollment?.email && options.enrollmentAgentIdClaim) {
+        throw configError("Pending enrollment redeems a contact email, not an AgentID claim. Resume it without --agentid-claim, or discard it with agent enroll --force.");
+      }
+      if (existingEnrollment?.agentid_claim && options.enrollmentEmail) {
+        throw configError("Pending enrollment redeems an AgentID claim, not a contact email. Resume it without --email, or discard it with agent enroll --force.");
+      }
       if (existingEnrollment?.intent && options.enrollmentIntent && existingEnrollment.intent !== options.enrollmentIntent) {
         throw configError("Pending enrollment is bound to a different purpose. Resume it without changing --intent, or discard it with agent enroll --force.");
       }
@@ -101,11 +116,12 @@ export async function ensureCredential(options: {
         throw configError("Pending enrollment is bound to a different project name. Resume it without changing --project-name, or discard it with agent enroll --force.");
       }
       const email = existingEnrollment?.email ?? options.enrollmentEmail;
+      const agentidClaim = existingEnrollment?.agentid_claim ?? options.enrollmentAgentIdClaim;
       if (existingEnrollment && options.enrollmentOrganization !== undefined && existingEnrollment.organization !== options.enrollmentOrganization) {
         throw configError("Pending enrollment is bound to a different organization. Resume without changing --organization.");
       }
-      if (!email) {
-        throw configError("Enrollment requires a contact email. Run screenrig agent enroll --email ADDRESS --organization NAME.");
+      if ((email === undefined) === (agentidClaim === undefined)) {
+        throw configError("Enrollment requires exactly one of --email ADDRESS or --agentid-claim CODE. Run screenrig agent enroll --email ADDRESS --organization NAME or screenrig agent enroll --agentid-claim CODE --organization NAME.");
       }
       const intent = existingEnrollment?.intent ?? options.enrollmentIntent;
       const projectName = existingEnrollment ? existingEnrollment.project_name : options.enrollmentProjectName;
@@ -115,7 +131,8 @@ export async function ensureCredential(options: {
           client_id: (options.generateClientId ?? (() => randomPrefixedId("cli", 32)))(),
           idempotency_key: (options.generateIdempotencyKey ?? newIdempotencyKey)(),
         }),
-        email,
+        ...(email !== undefined ? { email } : {}),
+        ...(agentidClaim !== undefined ? { agentid_claim: agentidClaim } : {}),
         ...(projectName !== undefined ? { project_name: projectName } : {}),
         ...(organization !== undefined ? { organization } : {}),
         ...(intent ? { intent } : {}),
@@ -135,7 +152,8 @@ export async function ensureCredential(options: {
       const credential = await options.enroll({
         clientId: enrollment.client_id,
         idempotencyKey: enrollment.idempotency_key,
-        email: enrollment.email,
+        ...(enrollment.email !== undefined ? { email: enrollment.email } : {}),
+        ...(enrollment.agentid_claim !== undefined ? { agentidClaim: enrollment.agentid_claim } : {}),
         ...(enrollment.project_name !== undefined ? { projectName: enrollment.project_name } : {}),
         ...(enrollment.organization !== undefined ? { organization: enrollment.organization } : {}),
         ...(enrollment.intent ? { intent: enrollment.intent } : {}),

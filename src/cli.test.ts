@@ -339,6 +339,120 @@ test("explicit enrollment prefers --beta-key over SCREENRIG_BETA_KEY", async () 
   await rm(configDir, { recursive: true, force: true });
 });
 
+
+test("agent enroll --agentid-claim sends the claim instead of an email and stores the credential", async () => {
+  const transport = memoryBackend();
+  const claim = `agid_${"K".repeat(43)}`;
+  const configDir = await testTemp("enroll-agentid-claim-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const result = await withRuntime(
+    ["--json", "agent", "enroll", "--agentid-claim", claim, "--organization", "Example organization"],
+    transport,
+    { fs: fsLike },
+  );
+  assert.equal(result.code, 0, result.stdout);
+  const enroll = transport.calls.find((call) => call.path === "/api/v1/enrollments");
+  assert.deepEqual(enroll?.body, {
+    client_id: (enroll?.body as { client_id: string }).client_id,
+    agentid_claim: claim,
+    organization: "Example organization",
+    agent_type: "cli",
+    platform: `${process.platform}/${process.arch}`,
+    version: CLI_VERSION,
+  });
+  const stored = await readConfigFile(path.join(configDir, "screenrig", "config.json"), fsLike);
+  assert.ok(stored?.token);
+  assert.equal(stored?.project_name, "Screens");
+  assert.equal(stored?.enrollment, undefined);
+  assert.ok(!result.stdout.includes(claim));
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("a pending AgentID claim enrollment resumes without flags and reuses the saved claim", async () => {
+  const transport = memoryBackend();
+  const claim = `agid_${"R".repeat(43)}`;
+  const configDir = await testTemp("enroll-agentid-resume-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
+    api_url: "https://api.screenrig.ai",
+    enrollment: { client_id: `cli_${"S".repeat(43)}`, idempotency_key: "enroll-agentid-resume", agentid_claim: claim },
+  }, fsLike);
+  const result = await withRuntime(["--json", "agent", "enroll"], transport, { fs: fsLike });
+  assert.equal(result.code, 0, result.stdout);
+  const enroll = transport.calls.find((call) => call.path === "/api/v1/enrollments");
+  assert.equal(enroll?.headers?.["idempotency-key"], "enroll-agentid-resume");
+  assert.deepEqual(enroll?.body, {
+    client_id: `cli_${"S".repeat(43)}`,
+    agentid_claim: claim,
+    agent_type: "cli",
+    platform: `${process.platform}/${process.arch}`,
+    version: CLI_VERSION,
+  });
+  assert.ok(!result.stdout.includes(claim));
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("agentid_claim_invalid names signing in at the API host or enrolling by email", async () => {
+  const claim = `agid_${"I".repeat(43)}`;
+  const transport = memoryBackend({ agentidClaims: { [claim]: "invalid" } });
+  const { code, stdout, configDir } = await withRuntime(
+    ["--json", "agent", "enroll", "--agentid-claim", claim, "--organization", "Example organization"],
+    transport,
+  );
+  assert.equal(code, ExitCode.Client, stdout);
+  const envelope = JSON.parse(stdout) as {
+    ok: boolean;
+    error: { code: string; next?: { command: string; reason: string } };
+  };
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.error.code, "agentid_claim_invalid");
+  assert.equal(envelope.error.next?.command, "https://api.screenrig.ai/agentid/v1/start");
+  assert.match(envelope.error.next?.reason ?? "", /--email ADDRESS --organization NAME/);
+  assert.ok(!stdout.includes(claim));
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("agentid_already_enrolled names agent connect", async () => {
+  const claim = `agid_${"E".repeat(43)}`;
+  const transport = memoryBackend({ agentidClaims: { [claim]: "already_enrolled" } });
+  const { code, stdout, configDir } = await withRuntime(
+    ["--json", "agent", "enroll", "--agentid-claim", claim, "--organization", "Example organization"],
+    transport,
+  );
+  assert.equal(code, ExitCode.Conflict, stdout);
+  const envelope = JSON.parse(stdout) as {
+    ok: boolean;
+    error: { code: string; next?: { command: string; reason: string } };
+  };
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.error.code, "agentid_already_enrolled");
+  assert.equal(envelope.error.next?.command, "screenrig agent connect");
+  assert.match(envelope.error.next?.reason ?? "", /existing project/i);
+  assert.ok(!stdout.includes(claim));
+  await rm(configDir, { recursive: true, force: true });
+});
+
+test("agent enroll rejects both credential sources and a malformed AgentID claim before the network", async () => {
+  const both = new FakeTransport();
+  const conflict = await withRuntime(
+    ["--json", "agent", "enroll", "--email", "owner@example.com", "--agentid-claim", `agid_${"M".repeat(43)}`, "--organization", "Example organization"],
+    both,
+  );
+  assert.equal(conflict.code, ExitCode.Usage);
+  assert.match(JSON.parse(conflict.stdout).error.detail, /at most one/i);
+  assert.equal(both.calls.length, 0);
+  const malformedTransport = new FakeTransport();
+  const malformed = await withRuntime(
+    ["--json", "agent", "enroll", "--agentid-claim", "not-a-claim", "--organization", "Example organization"],
+    malformedTransport,
+  );
+  assert.equal(malformed.code, ExitCode.Usage);
+  assert.ok(!malformed.stdout.includes("not-a-claim"));
+  assert.equal(malformedTransport.calls.length, 0);
+  await rm(conflict.configDir, { recursive: true, force: true });
+  await rm(malformed.configDir, { recursive: true, force: true });
+});
+
 test("agent enroll names the organization independently of its agent and reports the member invitation safely", async () => {
   const transport = memoryBackend();
   const result = await withRuntime(["--json", "agent", "enroll", "--email", " Owner@example.com ", "--organization", "Office Screens", "--name", "Office Codex"], transport);

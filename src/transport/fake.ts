@@ -206,8 +206,15 @@ export function listPage(
  * `now` drives clock-dependent checks (takeover until); defaults to the real clock.
  * `listPageSize` sets the rows per page of the screens, media, playlists, and
  * applications lists; it defaults to the server's page size for each.
+ * `agentidClaims` maps an AgentID claim code to its refusal; a claim absent
+ * from this map redeems successfully, and the verified owner becomes the
+ * contact address.
  */
-export function memoryBackend(options: { now?: () => Date; listPageSize?: number } = {}): FakeTransport {
+export function memoryBackend(options: {
+  now?: () => Date;
+  listPageSize?: number;
+  agentidClaims?: Record<string, "invalid" | "already_enrolled">;
+} = {}): FakeTransport {
   const clock = options.now ?? (() => new Date());
   const pageSize = (serverSize: number) => options.listPageSize ?? serverSize;
   const transport = new FakeTransport();
@@ -319,6 +326,7 @@ export function memoryBackend(options: { now?: () => Date; listPageSize?: number
   transport.on("POST", "/api/v1/enrollments", (req): TransportResponse => {
     const input = req.body as CLIEnrollmentRequest | undefined;
     const email = input?.email;
+    const claim = input?.agentid_claim;
     const replayKey = req.headers?.["idempotency-key"];
     const request = JSON.stringify(req.body);
     const replay = replayKey ? enrollmentReplays.get(replayKey) : undefined;
@@ -326,13 +334,17 @@ export function memoryBackend(options: { now?: () => Date; listPageSize?: number
       return replay.request === request ? replay.response
         : problem(409, "idempotency_mismatch", "The enrollment request changed.");
     }
-    if (typeof email !== "string") {
+    if ((typeof email !== "string") === (typeof claim !== "string")) {
       return {
         status: 400,
         headers: { "content-type": "application/problem+json" },
-        body: { status: 400, code: "invalid_request", title: "Invalid request", detail: "A contact email is required." },
+        body: { status: 400, code: "invalid_request", title: "Invalid request", detail: "Supply exactly one of a contact email or an AgentID claim." },
       };
     }
+    const claimOutcome = typeof claim === "string" ? options.agentidClaims?.[claim] ?? "valid" : undefined;
+    if (claimOutcome === "invalid") return problem(400, "agentid_claim_invalid", "The AgentID claim is invalid, expired, or already redeemed.");
+    if (claimOutcome === "already_enrolled") return problem(409, "agentid_already_enrolled", "This AgentID already has an enrolled agent.");
+    const contact = typeof email === "string" ? email : "owner.agentid@example.com";
     projectSequence += 1;
     project = {
       ...project,
@@ -340,7 +352,7 @@ export function memoryBackend(options: { now?: () => Date; listPageSize?: number
       name: input?.project_name ?? "Screens",
       organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA",
       organization_name: input?.organization ?? "Example organization",
-      email,
+      email: contact,
       features: input?.intent === "advertising"
         ? { advertiser: true, screens: false } : { advertiser: false, screens: true },
       revision: 1,
@@ -349,7 +361,7 @@ export function memoryBackend(options: { now?: () => Date; listPageSize?: number
       reserved_bytes: 0,
       screen_count: 0,
     };
-    const invitation = issueInvitation("project_member", "email", email);
+    const invitation = issueInvitation("project_member", "email", contact);
     const response: TransportResponse = {
       status: 201,
       headers: {

@@ -58,6 +58,11 @@ import { isResourceID } from "./generated/resource-ids.js";
         idempotency_key: string;
         /** Exact trimmed contact address retained only until enrollment verifies. */
         email?: string;
+        /**
+         * AgentID claim code bound to this enrollment's idempotency key so a
+         * resume redeems the identical claim. Never printed in errors or JSON.
+         */
+        agentid_claim?: string;
         /** Exact project-name input bound to this enrollment's idempotency key. */
         project_name?: string;
         organization?: string;

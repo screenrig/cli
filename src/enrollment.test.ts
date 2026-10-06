@@ -3,7 +3,7 @@ import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import { ensureCredential } from "./enrollment.js";
-import { readConfigFile, resolveConfig, type ConfigFs, type ResolvedConfig } from "./config.js";
+import { readConfigFile, resolveConfig, writeConfigAtomic, type ConfigFs, type ResolvedConfig } from "./config.js";
 import { testTemp } from "./test-temp.js";
 import { CliError } from "./problems.js";
 
@@ -143,7 +143,7 @@ test("concurrent explicit enrollment calls perform one enrollment and share the 
 test("ambiguous enrollment retries reuse the persisted client, contact email, and idempotency state", async () => {
   const home = await testTemp("enrollment-retry-");
   const { fs, resolved } = fixture(home);
-  const seen: Array<{ clientId: string; idempotencyKey: string; email: string; projectName?: string }> = [];
+  const seen: Array<{ clientId: string; idempotencyKey: string; email?: string; projectName?: string }> = [];
   const runtime = { fs, now: () => new Date(), sleep: async () => undefined };
   const generators = {
     generateClientId: () => `cli_${"C".repeat(43)}`,
@@ -236,5 +236,98 @@ test("verification failure preserves the permanent token and exact enrollment re
   assert.equal(second.token, "sr_live_verify_secret");
   assert.equal(verifications, 1);
   assert.equal((await readConfigFile(resolved.configPath, fs))?.enrollment, undefined);
+  await rm(home, { recursive: true, force: true });
+});
+
+test("AgentID claim enrollment persists the claim, verifies, and completes", async () => {
+  const home = await testTemp("enrollment-agentid-");
+  const { fs, resolved } = fixture(home);
+  const claim = `agid_${"K".repeat(43)}`;
+  const seen: Array<{ clientId: string; idempotencyKey: string; email?: string; agentidClaim?: string }> = [];
+  const result = await ensureCredential({
+    resolved,
+    runtime: { fs, now: () => new Date("2026-08-14T20:00:00.000Z"), sleep: async () => undefined },
+    generateClientId: () => `cli_${"K".repeat(43)}`,
+    generateIdempotencyKey: () => "enroll-agentid-idempotency",
+    enrollmentAgentIdClaim: claim,
+    verify: async (token, projectId) => {
+      assert.equal(token, "sr_live_agentid_secret");
+      assert.equal(projectId, "prj_agentid");
+      assert.deepEqual((await readConfigFile(resolved.configPath, fs))?.enrollment, {
+        client_id: `cli_${"K".repeat(43)}`,
+        idempotency_key: "enroll-agentid-idempotency",
+        agentid_claim: claim,
+      });
+    },
+    enroll: async (state) => {
+      seen.push(state);
+      return { token: "sr_live_agentid_secret", projectId: "prj_agentid" };
+    },
+  });
+  assert.deepEqual(seen, [{
+    clientId: `cli_${"K".repeat(43)}`,
+    idempotencyKey: "enroll-agentid-idempotency",
+    agentidClaim: claim,
+  }]);
+  assert.equal(result.token, "sr_live_agentid_secret");
+  assert.equal(result.source.token, "config");
+  assert.equal((await readConfigFile(resolved.configPath, fs))?.enrollment, undefined);
+  await rm(home, { recursive: true, force: true });
+});
+
+test("a pending AgentID claim enrollment rejects a different claim or an email switch, then resumes the bound claim", async () => {
+  const home = await testTemp("enrollment-agentid-bound-");
+  const { fs, resolved } = fixture(home);
+  const claim = `agid_${"L".repeat(43)}`;
+  await writeConfigAtomic(resolved.configPath, {
+    api_url: resolved.apiUrl,
+    enrollment: {
+      client_id: `cli_${"L".repeat(43)}`,
+      idempotency_key: "enroll-agentid-bound",
+      agentid_claim: claim,
+    },
+  }, fs);
+  const runtime = { fs, now: () => new Date(), sleep: async () => undefined };
+  await assert.rejects(ensureCredential({
+    resolved,
+    runtime,
+    enrollmentAgentIdClaim: `agid_${"M".repeat(43)}`,
+    enroll: async () => { throw new Error("must reject before sending another enrollment"); },
+    verify: async () => undefined,
+  }), (error: unknown) => error instanceof CliError && error.problem.code === "config_error");
+  await assert.rejects(ensureCredential({
+    resolved,
+    runtime,
+    enrollmentEmail: "owner@example.com",
+    enroll: async () => { throw new Error("must reject before switching credential source"); },
+    verify: async () => undefined,
+  }), (error: unknown) => error instanceof CliError && error.problem.code === "config_error");
+  assert.deepEqual((await readConfigFile(resolved.configPath, fs))?.enrollment,
+    { client_id: `cli_${"L".repeat(43)}`, idempotency_key: "enroll-agentid-bound", agentid_claim: claim });
+
+  const seen: Array<{ agentidClaim?: string; email?: string }> = [];
+  const resumed = await ensureCredential({
+    resolved,
+    runtime,
+    enroll: async (state) => {
+      seen.push(state);
+      return { token: "sr_live_agentid_resume", projectId: "prj_agentid_resume" };
+    },
+    verify: async () => undefined,
+  });
+  assert.equal(resumed.token, "sr_live_agentid_resume");
+  assert.deepEqual(seen, [{ clientId: `cli_${"L".repeat(43)}`, idempotencyKey: "enroll-agentid-bound", agentidClaim: claim }]);
+  await rm(home, { recursive: true, force: true });
+});
+
+test("enrollment without a contact email or an AgentID claim is refused", async () => {
+  const home = await testTemp("enrollment-no-source-");
+  const { fs, resolved } = fixture(home);
+  await assert.rejects(ensureCredential({
+    resolved,
+    runtime: { fs, now: () => new Date(), sleep: async () => undefined },
+    enroll: async () => { throw new Error("enrollment must not run"); },
+    verify: async () => undefined,
+  }), (error: unknown) => error instanceof CliError && error.problem.code === "config_error");
   await rm(home, { recursive: true, force: true });
 });

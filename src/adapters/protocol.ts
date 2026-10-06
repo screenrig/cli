@@ -119,7 +119,14 @@ export interface CLIEnrollment {
 export interface CLIEnrollmentRequest {
   organization?: string;
   client_id: string;
-  email: string;
+  /** Exactly one of `email` or `agentid_claim` is present. */
+  email?: string;
+  /**
+   * AgentID claim code redeemed by the server; exactly one of `email` or
+   * `agentid_claim`. The server derives the contact address from the verified
+   * AgentID owner. Never echoed back to the operator.
+   */
+  agentid_claim?: string;
   project_name?: string;
   /** Present only when the operator supplies --beta-key or SCREENRIG_BETA_KEY. */
   beta_key?: string;

@@ -124,10 +124,14 @@ rules validate invocations before configuration or network access.
 
 An explicit enrollment creates a project, attaches this agent, and emails a
 member invitation to the contact address. The same person can belong to more
-than one project.
+than one project. `--agentid-claim` is the alternative to `--email`: redeem a
+single-use claim code from an AgentID sign-in at the API host's
+`/agentid/v1/start`. Exactly one of `--email` and `--agentid-claim` is required;
+the verified AgentID owner becomes the contact address and invitation recipient.
 
 ```sh
 screenrig agent enroll --email ADDRESS --organization NAME [--name NAME] [--intent signage|advertising] [--force]
+screenrig agent enroll --agentid-claim CODE --organization NAME [--name NAME] [--intent signage|advertising] [--force]
 screenrig project list
 screenrig project use ID
 screenrig project create NAME [--organization-id ID | --organization NAME]
@@ -223,7 +227,9 @@ Eligible pending invitations are refreshed in place, keeping their IDs so
 revocation continues to work; a refreshed invitation is sent at most once an hour.
 Rerunning an ambiguous request reuses its saved Idempotency-Key.
 
-First setup is `agent enroll --email ADDRESS --organization NAME`. To connect
+First setup is `agent enroll --email ADDRESS --organization NAME`, or
+`agent enroll --agentid-claim CODE --organization NAME` after an AgentID
+sign-in at the API host. To connect
 to an existing project, run `screenrig agent connect --target-project-id ID`
 and approve that specific request in its dashboard. This adds a membership to
 the same identity. After activation, the CLI removes its original enrollment
