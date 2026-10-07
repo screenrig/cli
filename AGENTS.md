@@ -20,8 +20,7 @@ does not require that file for standalone contribution.
 - `package.json` defines the executable, Node engine, scripts, and public
   metadata. Committed version stays `0.1.0`; CI stamps CalVer on the artifact.
 - `contracts.toml` names the backend OpenAPI/protocol inputs; `contracts.sha256`
-  pins their bytes. `assets/screenrig.runtime.js` is backend SDK build output,
-  tracked here but outside the sums.
+  pins their bytes, including the built `assets/screenrig.runtime.js`.
 - `scripts/package-release.sh` defines deterministic `screenrig-cli.tgz`.
 - `.github/workflows/ci.yml` defines public, test, package, and secret gates.
   `.github/workflows/npm-release.yml` is the only npm publication path.
@@ -30,8 +29,7 @@ does not require that file for standalone contribution.
 ## Edit and generation rules
 
 - Edit `src/`, never `dist/`. `npm run build` regenerates `dist/`.
-- Do not hand-edit `vendor/` or `assets/screenrig.runtime.js`. Refresh the
-  rest of `vendor/`, `assets/` and `src/generated/` from the workspace root:
+- Do not hand-edit `vendor/`, `assets/` or `src/generated/`. Refresh them from the workspace root:
 
   ```sh
   rig contracts sync cli

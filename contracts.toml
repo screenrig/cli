@@ -11,5 +11,4 @@ repo = "backend"
 "src/generated/playlist-write-semantics.ts" = "packages/protocol/src/playlist-write-semantics.ts"
 "vendor/protocol/openapi.gen.ts" = "packages/protocol/src/openapi.gen.ts"
 "vendor/openapi.yaml" = "api/openapi.yaml"
-# assets/screenrig.runtime.js comes from packages/sdk/dist/screenrig.runtime.js,
-# a build output that is not tracked, so it is not listed here.
+"assets/screenrig.runtime.js" = "contracts/sdk/dist/screenrig.runtime.js"
