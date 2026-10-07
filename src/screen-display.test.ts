@@ -98,7 +98,7 @@ test("screen reboot: single route, reboot_unsupported explained, fleet needs --y
   const ok = await cli(["--json", "screen", "reboot", LOBBY], transport, env);
   assert.equal(ok.code, ExitCode.Success, ok.stdout);
   assert.match(ok.envelope.data.reboot_id, /^rbt_/);
-  const call = transport.calls.find((item) => item.path === `/api/v1/screens/${LOBBY}/reboot`);
+  const call = transport.calls.find((item) => item.path === `/api/screens/${LOBBY}/reboot`);
   assert.equal(call?.method, "POST");
   assert.ok(call?.headers?.["idempotency-key"]);
 
@@ -113,7 +113,7 @@ test("screen reboot: single route, reboot_unsupported explained, fleet needs --y
   assert.equal(unconfirmed.envelope.error?.next?.command, "screenrig screen reboot --tag Lobby --yes");
   const two = await cli(["--json", "screen", "reboot", LOBBY, PLAIN], transport, env);
   assert.equal(two.code, ExitCode.Usage);
-  assert.equal(transport.calls.filter((item) => item.path === "/api/v1/screens/actions").length, 0);
+  assert.equal(transport.calls.filter((item) => item.path === "/api/screens/actions").length, 0);
   const confirmed = await cli(["--json", "screen", "reboot", "--tag", "Lobby", "--yes"], transport, env);
   assert.equal(confirmed.envelope.data.action, "reboot");
   assert.equal(confirmed.envelope.data.succeeded, 1);
@@ -126,12 +126,12 @@ test("screen display: --power or trailing on|off, until rules, fleet action, Dis
   const transport = fleet();
   const off = await cli(["--json", "screen", "display", LOBBY, "--power", "off", "--for", "2h"], transport, env);
   assert.equal(off.code, ExitCode.Success, off.stdout);
-  const call = transport.calls.find((item) => item.path === `/api/v1/screens/${LOBBY}/display`);
+  const call = transport.calls.find((item) => item.path === `/api/screens/${LOBBY}/display`);
   assert.deepEqual(call?.body, { power: "off", until: "2026-08-14T19:00:00Z" });
   assert.equal(off.envelope.data.display.requested, "off");
   const human = await cli(["--human", "screen", "display", LOBBY, "on"], transport, env);
   assert.match(human.stdout, /^Display on on scr_LOBBYAAAAAAAAAAAAAAAAAA until the display schedule's next boundary, or until replaced\nDisplay: on \(manual override until replaced\)/m);
-  assert.deepEqual(transport.calls.filter((item) => item.path === `/api/v1/screens/${LOBBY}/display`).at(-1)?.body, { power: "on" });
+  assert.deepEqual(transport.calls.filter((item) => item.path === `/api/screens/${LOBBY}/display`).at(-1)?.body, { power: "on" });
   const mixed = await cli(["--json", "screen", "display", LOBBY, "on", "--power", "off"], transport, env);
   assert.equal(mixed.code, ExitCode.Usage);
   const none = await cli(["--json", "screen", "display", LOBBY], transport, env);
@@ -140,10 +140,10 @@ test("screen display: --power or trailing on|off, until rules, fleet action, Dis
   assert.equal(badUntil.code, ExitCode.Usage);
   const tag = await cli(["--json", "screen", "display", "--tag", "Lobby", "--power", "off", "--until", "2026-08-15T07:00:00Z"], transport, env);
   assert.equal(tag.code, ExitCode.Success, tag.stdout);
-  const actions = transport.calls.filter((item) => item.path === "/api/v1/screens/actions").at(-1);
+  const actions = transport.calls.filter((item) => item.path === "/api/screens/actions").at(-1);
   assert.deepEqual(actions?.body, { selector: { by: "tag", tag: "Lobby" }, action: { type: "display", power: "off", until: "2026-08-15T07:00:00Z" } });
   const ids = await cli(["--json", "screen", "display", LOBBY, PLAIN, "off"], transport, env);
-  assert.deepEqual((transport.calls.filter((item) => item.path === "/api/v1/screens/actions").at(-1)?.body as { selector: unknown }).selector, { by: "ids", screen_ids: [LOBBY, PLAIN] });
+  assert.deepEqual((transport.calls.filter((item) => item.path === "/api/screens/actions").at(-1)?.body as { selector: unknown }).selector, { by: "ids", screen_ids: [LOBBY, PLAIN] });
   assert.equal(ids.envelope.data.succeeded, 2);
 });
 
@@ -153,7 +153,7 @@ test("screen display-schedule show|set|clear, single and fleet", async () => {
   await writeFile(path.join(env.cwd, "hours.json"), JSON.stringify(HOURS));
   const set = await cli(["--json", "screen", "display-schedule", "set", LOBBY, "--file", "hours.json", "--expect-rev", "3"], transport, env);
   assert.equal(set.code, ExitCode.Success, set.stdout);
-  const put = transport.calls.find((item) => item.method === "PUT" && item.path === `/api/v1/screens/${LOBBY}/display-schedule`);
+  const put = transport.calls.find((item) => item.method === "PUT" && item.path === `/api/screens/${LOBBY}/display-schedule`);
   assert.deepEqual(put?.body, HOURS);
   assert.equal(put?.headers?.["if-match"], '"3"');
   const shown = await cli(["--human", "screen", "display-schedule", "show", LOBBY], transport, env);
@@ -199,7 +199,7 @@ test("screen display clear: DELETE with optional --expect-rev, fleet display_cle
   await cli(["--json", "screen", "display", LOBBY, "--power", "off"], transport, env);
   const cleared = await cli(["--json", "screen", "display", "clear", LOBBY, "--expect-rev", "4"], transport, env);
   assert.equal(cleared.code, ExitCode.Success, cleared.stdout);
-  const call = transport.calls.find((item) => item.method === "DELETE" && item.path === `/api/v1/screens/${LOBBY}/display`);
+  const call = transport.calls.find((item) => item.method === "DELETE" && item.path === `/api/screens/${LOBBY}/display`);
   assert.equal(call?.headers?.["if-match"], '"4"');
   assert.equal(cleared.envelope.data.display, undefined, "no override and no schedule leaves no display state");
   const tag = await cli(["--json", "screen", "display", "clear", "--tag", "Lobby"], transport, env);

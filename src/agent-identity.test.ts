@@ -90,11 +90,11 @@ test("identity delivery has its own connection binding and cannot replace a proj
 test("agent approval URLs and SSE events stay on their closed status-only surfaces", () => {
   const id = "acn_AAAAAAAAAAAAAAAAAAAAAAAA";
   assert.equal(
-    validateAgentApprovalUrl(`https://dashboard.screenrig.ai/agents/connect/${id}`, "https://api.screenrig.ai", id),
-    `https://dashboard.screenrig.ai/agents/connect/${id}`,
+    validateAgentApprovalUrl(`https://screenrig.ai/dashboard/agents/connect/${id}`, "https://api.screenrig.ai", id),
+    `https://screenrig.ai/dashboard/agents/connect/${id}`,
   );
   assert.throws(
-    () => validateAgentApprovalUrl(`https://dashboard.screenrig.ai/agents/connect/${id}?token=no`, "https://api.screenrig.ai", id),
+    () => validateAgentApprovalUrl(`https://screenrig.ai/dashboard/agents/connect/${id}?token=no`, "https://api.screenrig.ai", id),
     /unsafe or off-origin/,
   );
   assert.equal(validateAgentConnectionEvent({

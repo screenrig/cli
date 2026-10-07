@@ -50,7 +50,7 @@ async function withRuntime(
   extra?: Partial<CliRuntime>,
 ): Promise<{ code: number; stdout: string; stderr: string; configDir: string }> {
   if (argv.includes("connect")) {
-    transport.on("GET", "/api/v1/project", () => ({ status: 200, headers: {}, body: {
+    transport.on("GET", "/api/project", () => ({ status: 200, headers: {}, body: {
       id: "prj_CONNECTEDAAAAAAAAAAAAAAA", name: "Screens",
       organization_id: "org_CONNECTEDAAAAAAAAAAAAAAA", organization_name: "Connected organization",
       revision: 1, status: "active", screen_count: 0, used_bytes: 0, reserved_bytes: 0,
@@ -167,14 +167,14 @@ test("pairing requires explicit enrollment and then preserves the original pairi
   };
   assert.equal(envelope.ok, true);
   assert.equal(envelope.data.screen.label, "Lobby");
-  assert.equal(envelope.data.public_url, "https://play.screenrig.ai/s/scr_public_pairing");
+  assert.equal(envelope.data.public_url, "https://play.screenrig.ai/player/s/scr_public_pairing");
   assert.ok(!paired.stdout.includes("sr_live_tokidAAAAAAAAAAAAAAAA_AAAA"));
   const methods = transport.calls.map((call) => `${call.method} ${call.path}`);
   assert.deepEqual(methods, [
-    "POST /api/v1/enrollments",
-    "GET /api/v1/project",
-    "GET /api/v1/agents/self",
-    "POST /api/v1/screens/pair",
+    "POST /api/enrollments",
+    "GET /api/project",
+    "GET /api/agents/self",
+    "POST /api/screens/pair",
   ]);
   assert.ok(transport.calls[0]?.headers?.["idempotency-key"]);
   assert.ok(transport.calls[0]?.headers?.["x-request-id"]);
@@ -182,9 +182,9 @@ test("pairing requires explicit enrollment and then preserves the original pairi
   assert.match(enrollBody.client_id ?? "", /^cli_[A-Za-z0-9_-]{43}$/);
   assert.equal(enrollBody.email, "Owner@example.com");
   assert.deepEqual(Object.keys(enrollBody).sort(), ["agent_type", "client_id", "email", "organization", "platform", "version"]);
-  const verification = transport.calls.find((call) => call.path === "/api/v1/project");
+  const verification = transport.calls.find((call) => call.path === "/api/project");
   assert.match(verification?.headers?.authorization ?? "", /^Bearer sr_live_/);
-  const pairing = transport.calls.find((call) => call.path === "/api/v1/screens/pair");
+  const pairing = transport.calls.find((call) => call.path === "/api/screens/pair");
   assert.deepEqual(pairing?.body, { code: "ABC234", label: "Lobby" });
   for (const call of transport.calls) {
     assert.ok(!call.path.includes("/bootstrap"));
@@ -211,7 +211,7 @@ test("pairing requires explicit enrollment and then preserves the original pairi
 });
 
 test("agent enroll without a beta key maps a gated invalid_request onto --beta-key next", async () => {
-  const transport = new FakeTransport().on("POST", "/api/v1/enrollments", () => ({
+  const transport = new FakeTransport().on("POST", "/api/enrollments", () => ({
     status: 400,
     headers: { "content-type": "application/problem+json", "cache-control": "no-store" },
     body: {
@@ -242,7 +242,7 @@ test("agent enroll without a beta key maps a gated invalid_request onto --beta-k
 });
 
 test("agent enroll preserves generic invalid_request without suggesting a beta key", async () => {
-  const transport = new FakeTransport().on("POST", "/api/v1/enrollments", () => ({
+  const transport = new FakeTransport().on("POST", "/api/enrollments", () => ({
     status: 400,
     headers: { "content-type": "application/problem+json", "cache-control": "no-store" },
     body: {
@@ -278,7 +278,7 @@ test("explicit enrollment includes beta_key when --beta-key is set", async () =>
     transport,
   );
   assert.equal(code, 0, stdout);
-  const enroll = transport.calls.find((call) => call.path === "/api/v1/enrollments");
+  const enroll = transport.calls.find((call) => call.path === "/api/enrollments");
   const body = enroll?.body as { client_id?: string; beta_key?: string; email?: string };
   assert.match(body.client_id ?? "", /^cli_[A-Za-z0-9_-]{43}$/);
   assert.equal(body.beta_key, "screenrig-beta-program");
@@ -302,7 +302,7 @@ test("explicit enrollment includes beta_key from SCREENRIG_BETA_KEY when the fla
   };
   const result = await withRuntime(["--json", "agent", "enroll", "--organization", "Example organization", "--email", "owner@example.com"], transport, { fs: fsLike });
   assert.equal(result.code, 0, result.stdout);
-  const enroll = transport.calls.find((call) => call.path === "/api/v1/enrollments");
+  const enroll = transport.calls.find((call) => call.path === "/api/enrollments");
   assert.deepEqual(enroll?.body, {
     client_id: (enroll?.body as { client_id: string }).client_id,
     email: "owner@example.com",
@@ -334,7 +334,7 @@ test("explicit enrollment prefers --beta-key over SCREENRIG_BETA_KEY", async () 
     { fs: fsLike },
   );
   assert.equal(result.code, 0, result.stdout);
-  const enroll = transport.calls.find((call) => call.path === "/api/v1/enrollments");
+  const enroll = transport.calls.find((call) => call.path === "/api/enrollments");
   assert.equal((enroll?.body as { beta_key?: string }).beta_key, "from-flag");
   await rm(configDir, { recursive: true, force: true });
 });
@@ -351,7 +351,7 @@ test("agent enroll --agentid-claim sends the claim instead of an email and store
     { fs: fsLike },
   );
   assert.equal(result.code, 0, result.stdout);
-  const enroll = transport.calls.find((call) => call.path === "/api/v1/enrollments");
+  const enroll = transport.calls.find((call) => call.path === "/api/enrollments");
   assert.deepEqual(enroll?.body, {
     client_id: (enroll?.body as { client_id: string }).client_id,
     agentid_claim: claim,
@@ -379,7 +379,7 @@ test("a pending AgentID claim enrollment resumes without flags and reuses the sa
   }, fsLike);
   const result = await withRuntime(["--json", "agent", "enroll"], transport, { fs: fsLike });
   assert.equal(result.code, 0, result.stdout);
-  const enroll = transport.calls.find((call) => call.path === "/api/v1/enrollments");
+  const enroll = transport.calls.find((call) => call.path === "/api/enrollments");
   assert.equal(enroll?.headers?.["idempotency-key"], "enroll-agentid-resume");
   assert.deepEqual(enroll?.body, {
     client_id: `cli_${"S".repeat(43)}`,
@@ -406,7 +406,7 @@ test("agentid_claim_invalid names signing in at the API host or enrolling by ema
   };
   assert.equal(envelope.ok, false);
   assert.equal(envelope.error.code, "agentid_claim_invalid");
-  assert.equal(envelope.error.next?.command, "https://api.screenrig.ai/agentid/v1/start");
+  assert.equal(envelope.error.next?.command, "https://api.screenrig.ai/agentid/start");
   assert.match(envelope.error.next?.reason ?? "", /--email ADDRESS --organization NAME/);
   assert.ok(!stdout.includes(claim));
   await rm(configDir, { recursive: true, force: true });
@@ -463,7 +463,7 @@ test("agent enroll names the organization independently of its agent and reports
   assert.equal(envelope.data.agent.id, TEST_AGENT.id);
   assert.deepEqual(envelope.data.project, { id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Screens" });
   assert.equal(envelope.data.invitation, "emailed to the contact address");
-  const enrollment = transport.calls.find((call) => call.path === "/api/v1/enrollments");
+  const enrollment = transport.calls.find((call) => call.path === "/api/enrollments");
   assert.deepEqual(enrollment?.body, {
     client_id: (enrollment?.body as { client_id: string }).client_id,
     email: "Owner@example.com",
@@ -474,9 +474,9 @@ test("agent enroll names the organization independently of its agent and reports
     version: CLI_VERSION,
   });
   assert.deepEqual(transport.calls.map((call) => call.path), [
-    "/api/v1/enrollments",
-    "/api/v1/project",
-    "/api/v1/agents/self",
+    "/api/enrollments",
+    "/api/project",
+    "/api/agents/self",
   ]);
   assert.doesNotMatch(result.stdout, /sr_live_|issuance|client_id|Owner@example\.com/);
   await rm(result.configDir, { recursive: true, force: true });
@@ -546,7 +546,7 @@ test("agent enroll --force discards an unwanted pending connection before enroll
   assert.equal(config?.agent_connection, undefined);
   assert.ok(config?.token);
   assert.doesNotMatch(JSON.stringify(config), /acn_UNWANTED|private-connection-token|pending-private|sr_live_pending|prj_PENDING|agt_PENDING/);
-  assert.equal(transport.calls.some((call) => call.path === "/api/v1/agent-connections"), false);
+  assert.equal(transport.calls.some((call) => call.path === "/api/agent-connections"), false);
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -629,7 +629,7 @@ test("agent status reports whether a persisted passkey can authorize another age
     project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
     agent_id: TEST_AGENT.id,
   }, fsLike);
-  transport.on("GET", "/api/v1/agents/self", () => ({
+  transport.on("GET", "/api/agents/self", () => ({
     status: 200,
     headers: { "cache-control": "private, no-store" },
     body: { agent: TEST_AGENT, connection_ready: true },
@@ -637,7 +637,7 @@ test("agent status reports whether a persisted passkey can authorize another age
   const result = await withRuntime(["--json", "agent", "status"], transport, { fs: fsLike });
   assert.equal(result.code, 0, result.stdout);
   assert.equal(JSON.parse(result.stdout).data.connection_ready, true);
-  assert.deepEqual(transport.calls.map((call) => call.path), ["/api/v1/agents/self"]);
+  assert.deepEqual(transport.calls.map((call) => call.path), ["/api/agents/self"]);
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -701,13 +701,13 @@ test("agent connect validates capability flags before network access", async () 
 test("agent connect requests canonical capabilities and preserves them across resume", async () => {
   for (const flags of [[], ["--capability", "advertising", "--capability", "content"]]) {
     const expected = flags.length ? ["content", "advertising"] : [...AGENT_CAPABILITIES];
-    const transport = new FakeTransport().on("POST", "/api/v1/agent-connections", () => ({
+    const transport = new FakeTransport().on("POST", "/api/agent-connections", () => ({
       status: 201,
       headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
       body: {
         connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA",
         connection_token: `sac_${"C".repeat(43)}`,
-        approval_url: "https://dashboard.screenrig.ai/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA",
+        approval_url: "https://screenrig.ai/dashboard/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA",
         expires_at: "2026-08-15T17:00:00.000Z",
       },
     }));
@@ -735,7 +735,7 @@ test("agent connect requests canonical capabilities and preserves them across re
 });
 
 test("agent status reports granted capabilities and capability denials give replacement guidance", async () => {
-  const transport = new FakeTransport().on("GET", "/api/v1/agents/self", () => ({
+  const transport = new FakeTransport().on("GET", "/api/agents/self", () => ({
     status: 200, headers: { "cache-control": "private, no-store" },
     body: { agent: { ...TEST_AGENT, capabilities: ["advertising"] }, connection_ready: true },
   }));
@@ -744,7 +744,7 @@ test("agent status reports granted capabilities and capability denials give repl
   assert.deepEqual(JSON.parse(status.stdout).data.agent.capabilities, ["advertising"]);
   const human = await withAuthenticatedRuntime(["agent", "status", "--human"], transport);
   assert.match(human.stdout, /capabilities: advertising/);
-  transport.on("GET", "/api/v1/screens", () => ({
+  transport.on("GET", "/api/screens", () => ({
     status: 403, headers: { "content-type": "application/problem+json" },
     body: { code: "forbidden", title: "Forbidden", status: 403, detail: "This agent credential lacks the screens capability." },
   }));
@@ -768,13 +768,13 @@ test("agent connect rejects waits beyond one day before network access", async (
 for (const waitFlags of [[], ["--no-wait", "--timeout", "30000"], ["--wait", "--timeout", "10"]]) {
   test(`agent connect ${waitFlags.join(" ")} returns resumable pending when the snapshot stalls`, async () => {
     const transport = new FakeTransport();
-    transport.on("POST", "/api/v1/agent-connections", () => ({
+    transport.on("POST", "/api/agent-connections", () => ({
       status: 201,
       headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
       body: {
         connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA",
         connection_token: `sac_${"C".repeat(43)}`,
-        approval_url: "https://dashboard.screenrig.ai/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA",
+        approval_url: "https://screenrig.ai/dashboard/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA",
         expires_at: "2026-08-15T17:00:00.000Z",
       },
     }));
@@ -801,7 +801,7 @@ test("agent connect resumes after its cached approval expiry when approved while
   const transport = new FakeTransport();
   let sealed: ReturnType<typeof agentConnectionEnvelope> | undefined;
   const connectionToken = `sac_${"C".repeat(43)}`;
-  transport.on("POST", "/api/v1/agent-connections", (req) => {
+  transport.on("POST", "/api/agent-connections", (req) => {
     const input = req.body as { recipient_public_key: { kty: "OKP"; crv: "X25519"; x: string } };
     sealed = agentConnectionEnvelope(input.recipient_public_key);
     sealed.collection.issuance_expires_at = "2026-08-16T16:00:00.000Z";
@@ -811,7 +811,7 @@ test("agent connect resumes after its cached approval expiry when approved while
       body: {
         connection_id: sealed.connectionId,
         connection_token: connectionToken,
-        approval_url: `https://dashboard.screenrig.ai/agents/connect/${sealed.connectionId}`,
+        approval_url: `https://screenrig.ai/dashboard/agents/connect/${sealed.connectionId}`,
         expires_at: "2026-08-15T17:00:00.000Z",
       },
     };
@@ -827,15 +827,15 @@ test("agent connect resumes after its cached approval expiry when approved while
     created_at: "2026-08-14T17:00:00.000Z",
     field_from_a_newer_server: true,
   })}\n\n`);
-  transport.on("POST", /\/api\/v1\/agent-connections\/acn_.*\/credential/, (req) => {
+  transport.on("POST", /\/api\/agent-connections\/acn_.*\/credential/, (req) => {
     assert.equal(req.headers?.authorization, `ScreenRig-Agent-Connect ${connectionToken}`);
     return { status: 200, headers: { "cache-control": "private, no-store" }, body: sealed!.collection };
   });
-  transport.on("POST", "/api/v1/agents/self/activate", (req) => {
+  transport.on("POST", "/api/agents/self/activate", (req) => {
     assert.equal(req.headers?.authorization, `Bearer ${sealed!.pendingToken}`);
     return { status: 200, headers: { "cache-control": "private, no-store" }, body: { ...sealed!.pendingAgent, state: "active", connected_at: "2026-08-14T17:00:01.000Z" } };
   });
-  transport.on("GET", "/api/v1/agents/self", () => ({
+  transport.on("GET", "/api/agents/self", () => ({
     status: 200,
     headers: { "cache-control": "private, no-store" },
     body: { agent: { ...sealed!.pendingAgent, state: "active", connected_at: "2026-08-14T17:00:01.000Z" }, connection_ready: true },
@@ -851,9 +851,9 @@ test("agent connect resumes after its cached approval expiry when approved while
     openUrl: async (url) => { opened.push(url); return true; },
   });
   const result = { ...resumed, configDir: interrupted.configDir };
-  assert.equal(transport.calls.filter(call => call.method === "POST" && call.path === "/api/v1/agent-connections").length, 1);
+  assert.equal(transport.calls.filter(call => call.method === "POST" && call.path === "/api/agent-connections").length, 1);
   assert.equal(result.code, 0, result.stdout);
-  assert.deepEqual(opened, ["https://dashboard.screenrig.ai/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA"]);
+  assert.deepEqual(opened, ["https://screenrig.ai/dashboard/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA"]);
   assert.equal(JSON.parse(result.stdout).data.status, "active");
   assert.equal(JSON.parse(result.stdout).data.connection_complete, true);
   assert.equal(result.stderr, "");
@@ -873,7 +873,7 @@ test("agent connect defaults to a snapshot, returns a pending handoff and resume
   const transport = new FakeTransport();
   let sealed: ReturnType<typeof agentConnectionEnvelope> | undefined;
   const connectionToken = `sac_${"C".repeat(43)}`;
-  transport.on("POST", "/api/v1/agent-connections", (req) => {
+  transport.on("POST", "/api/agent-connections", (req) => {
     const input = req.body as { recipient_public_key: { kty: "OKP"; crv: "X25519"; x: string } };
     sealed = agentConnectionEnvelope(input.recipient_public_key);
     sealed.collection.issuance_expires_at = "2026-08-16T16:00:00.000Z";
@@ -883,7 +883,7 @@ test("agent connect defaults to a snapshot, returns a pending handoff and resume
       body: {
         connection_id: sealed.connectionId,
         connection_token: connectionToken,
-        approval_url: `https://dashboard.screenrig.ai/agents/connect/${sealed.connectionId}`,
+        approval_url: `https://screenrig.ai/dashboard/agents/connect/${sealed.connectionId}`,
         expires_at: "2026-08-15T17:00:00.000Z",
       },
     };
@@ -897,15 +897,15 @@ test("agent connect defaults to a snapshot, returns a pending handoff and resume
     expires_at: "2026-08-15T17:00:00.000Z",
     created_at: "2026-08-14T17:00:00.000Z",
   })}\n\n`);
-  transport.on("POST", /\/api\/v1\/agent-connections\/acn_.*\/credential/, (req) => {
+  transport.on("POST", /\/api\/agent-connections\/acn_.*\/credential/, (req) => {
     assert.equal(req.headers?.authorization, `ScreenRig-Agent-Connect ${connectionToken}`);
     return { status: 200, headers: { "cache-control": "private, no-store" }, body: sealed!.collection };
   });
-  transport.on("POST", "/api/v1/agents/self/activate", (req) => {
+  transport.on("POST", "/api/agents/self/activate", (req) => {
     assert.equal(req.headers?.authorization, `Bearer ${sealed!.pendingToken}`);
     return { status: 200, headers: { "cache-control": "private, no-store" }, body: { ...sealed!.pendingAgent, state: "active", connected_at: "2026-08-14T17:00:01.000Z" } };
   });
-  transport.on("GET", "/api/v1/agents/self", () => ({
+  transport.on("GET", "/api/agents/self", () => ({
     status: 200,
     headers: { "cache-control": "private, no-store" },
     body: { agent: { ...sealed!.pendingAgent, state: "active", connected_at: "2026-08-14T17:00:01.000Z" }, connection_ready: true },
@@ -922,7 +922,7 @@ test("agent connect defaults to a snapshot, returns a pending handoff and resume
   assert.equal(pending.request_submitted, true);
   assert.equal(pending.connection_complete, false);
   assert.equal(pending.status_checked, true);
-  assert.equal(pending.approval_url, "https://dashboard.screenrig.ai/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA");
+  assert.equal(pending.approval_url, "https://screenrig.ai/dashboard/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA");
   assert.equal(pending.next.command, "screenrig agent connect --no-wait");
   assert.deepEqual(pending.next.argv, ["agent", "connect", "--no-wait", "--config",
     path.join(interrupted.configDir, "screenrig", "config.json"), "--api-url", "https://api.screenrig.ai"]);
@@ -937,7 +937,7 @@ test("agent connect defaults to a snapshot, returns a pending handoff and resume
     openUrl: async (url) => { opened.push(url); return true; },
   });
   const result = { ...resumed, configDir: interrupted.configDir };
-  assert.equal(transport.calls.filter(call => call.method === "POST" && call.path === "/api/v1/agent-connections").length, 1);
+  assert.equal(transport.calls.filter(call => call.method === "POST" && call.path === "/api/agent-connections").length, 1);
   assert.equal(result.code, 0, result.stdout);
   assert.deepEqual(opened, [], "approved snapshots must not reopen the approval page");
   assert.equal(JSON.parse(result.stdout).data.status, "active");
@@ -957,7 +957,7 @@ test("agent connect defaults to a snapshot, returns a pending handoff and resume
 
 test("agent disconnect locally cleans an unauthorized credential without retrying revoke", async () => {
   const transport = new FakeTransport();
-  transport.on("GET", "/api/v1/agents/self", () => ({
+  transport.on("GET", "/api/agents/self", () => ({
     status: 401,
     headers: { "content-type": "application/problem+json" },
     body: {
@@ -983,7 +983,7 @@ test("agent disconnect locally cleans an unauthorized credential without retryin
   assert.equal(JSON.parse(result.stdout).data.local_credential_removed, true);
   assert.equal(JSON.parse(result.stdout).data.credential_accepted, false);
   assert.equal(transport.calls.length, 1);
-  assert.equal(transport.calls[0]?.path, "/api/v1/agents/self");
+  assert.equal(transport.calls[0]?.path, "/api/agents/self");
   assert.doesNotMatch(result.stdout, /sr_live_|project_id|token/i);
   const local = await readConfigFile(configPath, fsLike);
   assert.equal(local?.token, undefined);
@@ -999,7 +999,7 @@ test("agent disconnect locally cleans an unauthorized credential without retryin
 
 test("agent status names disconnect --yes when the stored credential is rejected", async () => {
   const transport = new FakeTransport();
-  transport.on("GET", "/api/v1/agents/self", () => ({
+  transport.on("GET", "/api/agents/self", () => ({
     status: 401,
     headers: { "content-type": "application/problem+json" },
     body: {
@@ -1036,12 +1036,12 @@ test("agent status names disconnect --yes when the stored credential is rejected
 test("agent disconnect revokes only this installation and preserves safe disconnected status", async () => {
   const transport = new FakeTransport();
   const active = { ...TEST_AGENT, name: "Office Codex" };
-  transport.on("GET", "/api/v1/agents/self", () => ({
+  transport.on("GET", "/api/agents/self", () => ({
     status: 200,
     headers: { "cache-control": "private, no-store" },
     body: { agent: active, connection_ready: true },
   }));
-  transport.on("POST", "/api/v1/agents/self/disconnect", (req) => {
+  transport.on("POST", "/api/agents/self/disconnect", (req) => {
     assert.equal(req.body, undefined);
     return { status: 204, headers: { "cache-control": "private, no-store" }, body: undefined };
   });
@@ -1077,11 +1077,11 @@ test("agent connect resumes activation after the pending bearer was durably stor
   const transport = new FakeTransport();
   const token = `sr_live_resume_${"R".repeat(43)}`;
   const active = { ...TEST_AGENT, id: "agt_RESUMEAAAAAAAAAAAAAAAAA", name: "Resume agent" };
-  transport.on("POST", "/api/v1/agents/self/activate", (req) => {
+  transport.on("POST", "/api/agents/self/activate", (req) => {
     assert.equal(req.headers?.authorization, `Bearer ${token}`);
     return { status: 200, headers: { "cache-control": "private, no-store" }, body: active };
   });
-  transport.on("GET", "/api/v1/agents/self", () => ({
+  transport.on("GET", "/api/agents/self", () => ({
     status: 200,
     headers: { "cache-control": "private, no-store" },
     body: { agent: active, connection_ready: true },
@@ -1098,7 +1098,7 @@ test("agent connect resumes activation after the pending bearer was durably stor
       private_jwk: generateAgentConnectionKey(),
       connection_id: "acn_RESUMEAAAAAAAAAAAAAAAA",
       connection_token: `sac_${"S".repeat(43)}`,
-      approval_url: "https://dashboard.screenrig.ai/agents/connect/acn_RESUMEAAAAAAAAAAAAAAAA",
+      approval_url: "https://screenrig.ai/dashboard/agents/connect/acn_RESUMEAAAAAAAAAAAAAAAA",
       expires_at: "2026-08-14T16:10:00.000Z",
       pending_agent_id: active.id,
     },
@@ -1111,9 +1111,9 @@ test("agent connect resumes activation after the pending bearer was durably stor
   assert.equal(result.code, 0, result.stdout);
   assert.equal(opened, false);
   assert.deepEqual(transport.calls.map((call) => call.path), [
-    "/api/v1/agents/self/activate",
-    "/api/v1/agents/self",
-    "/api/v1/project",
+    "/api/agents/self/activate",
+    "/api/agents/self",
+    "/api/project",
   ]);
   assert.equal((await readConfigFile(configPath, fsLike))?.agent_connection, undefined);
   assert.doesNotMatch(result.stdout, /sr_live_|sac_|private|authorization/i);
@@ -1123,13 +1123,13 @@ test("agent connect resumes activation after the pending bearer was durably stor
 for (const waitFlags of [[], ["--no-wait"]]) test(`agent connect ${waitFlags.join(" ")} clears private state when the dashboard cancels`, async () => {
   const transport = new FakeTransport();
   const connectionId = "acn_CANCELAAAAAAAAAAAAAAAA";
-  transport.on("POST", "/api/v1/agent-connections", () => ({
+  transport.on("POST", "/api/agent-connections", () => ({
     status: 201,
     headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
     body: {
       connection_id: connectionId,
       connection_token: `sac_${"C".repeat(43)}`,
-      approval_url: `https://dashboard.screenrig.ai/agents/connect/${connectionId}`,
+      approval_url: `https://screenrig.ai/dashboard/agents/connect/${connectionId}`,
       expires_at: "2026-08-14T17:10:00.000Z",
     },
   }));
@@ -1158,13 +1158,13 @@ for (const waitFlags of [[], ["--no-wait"]]) test(`agent connect ${waitFlags.joi
 test("agent connect clears private state when credential collection reports cancellation", async () => {
   const transport = new FakeTransport();
   const connectionId = "acn_CANCELPROBLEMAAAAAAAAA";
-  transport.on("POST", "/api/v1/agent-connections", () => ({
+  transport.on("POST", "/api/agent-connections", () => ({
     status: 201,
     headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
     body: {
       connection_id: connectionId,
       connection_token: `sac_${"P".repeat(43)}`,
-      approval_url: `https://dashboard.screenrig.ai/agents/connect/${connectionId}`,
+      approval_url: `https://screenrig.ai/dashboard/agents/connect/${connectionId}`,
       expires_at: "2026-08-14T17:10:00.000Z",
     },
   }));
@@ -1177,7 +1177,7 @@ test("agent connect clears private state when credential collection reports canc
     expires_at: "2026-08-14T17:10:00.000Z",
     created_at: "2026-08-14T17:00:00.000Z",
   })}\n\n`);
-  transport.on("POST", `/api/v1/agent-connections/${connectionId}/credential`, () => ({
+  transport.on("POST", `/api/agent-connections/${connectionId}/credential`, () => ({
     status: 410,
     headers: { "content-type": "application/problem+json" },
     body: { status: 410, code: "agent_connection_cancelled", title: "Cancelled", detail: "Pending agent was disconnected." },
@@ -1195,13 +1195,13 @@ test("agent connect clears private state when credential collection reports canc
 test("agent connect clears private state when the SSE endpoint reports cancellation", async () => {
   const transport = new FakeTransport();
   const connectionId = "acn_CANCELSSEPROBLEMAAAAAA";
-  transport.on("POST", "/api/v1/agent-connections", () => ({
+  transport.on("POST", "/api/agent-connections", () => ({
     status: 201,
     headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
     body: {
       connection_id: connectionId,
       connection_token: `sac_${"Q".repeat(43)}`,
-      approval_url: `https://dashboard.screenrig.ai/agents/connect/${connectionId}`,
+      approval_url: `https://screenrig.ai/dashboard/agents/connect/${connectionId}`,
       expires_at: "2026-08-14T17:10:00.000Z",
     },
   }));
@@ -1240,7 +1240,7 @@ async function writePendingActivationConfig(
       private_jwk: generateAgentConnectionKey(),
       connection_id: "acn_HARDENAAAAAAAAAAAAAAAA",
       connection_token: `sac_${"H".repeat(43)}`,
-      approval_url: "https://dashboard.screenrig.ai/agents/connect/acn_HARDENAAAAAAAAAAAAAAAA",
+      approval_url: "https://screenrig.ai/dashboard/agents/connect/acn_HARDENAAAAAAAAAAAAAAAA",
       expires_at: "2026-08-14T17:10:00.000Z",
       pending_agent_id: active.id,
     },
@@ -1250,7 +1250,7 @@ async function writePendingActivationConfig(
 
 test("agent connect removes a cryptographically rejected pending credential", async () => {
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/agents/self/activate", () => ({
+  transport.on("POST", "/api/agents/self/activate", () => ({
     status: 401,
     headers: { "content-type": "application/problem+json" },
     body: { status: 401, code: "unauthorized", title: "Unauthorized", detail: "Pending bearer revoked." },
@@ -1274,12 +1274,12 @@ test("agent connect removes a cryptographically rejected pending credential", as
 
 test("agent connect recovers an activation committed before connection cleanup", async () => {
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/agents/self/activate", () => ({
+  transport.on("POST", "/api/agents/self/activate", () => ({
     status: 404,
     headers: { "content-type": "application/problem+json" },
     body: { status: 404, code: "agent_connection_invalid", title: "Invalid", detail: "Connection cleanup completed." },
   }));
-  transport.on("GET", "/api/v1/agents/self", () => ({
+  transport.on("GET", "/api/agents/self", () => ({
     status: 200,
     headers: { "cache-control": "private, no-store" },
     body: { agent: TEST_AGENT, connection_ready: true },
@@ -1289,7 +1289,7 @@ test("agent connect recovers an activation committed before connection cleanup",
   const { fsLike, configPath } = await writePendingActivationConfig(configDir, token, TEST_AGENT);
   const result = await withRuntime(["--json", "agent", "connect"], transport, { fs: fsLike });
   assert.equal(result.code, 0, result.stdout);
-  assert.deepEqual(transport.calls.map((call) => call.path), ["/api/v1/agents/self/activate", "/api/v1/agents/self", "/api/v1/project"]);
+  assert.deepEqual(transport.calls.map((call) => call.path), ["/api/agents/self/activate", "/api/agents/self", "/api/project"]);
   const local = await readConfigFile(configPath, fsLike);
   assert.equal(local?.token, token);
   assert.equal(local?.agent_id, TEST_AGENT.id);
@@ -1299,7 +1299,7 @@ test("agent connect recovers an activation committed before connection cleanup",
 
 test("agent connect retains pending activation state after an ambiguous transport failure", async () => {
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/agents/self/activate", () => { throw networkError("ambiguous activation response"); });
+  transport.on("POST", "/api/agents/self/activate", () => { throw networkError("ambiguous activation response"); });
   const configDir = await testTemp("agent-connect-ambiguous-");
   const token = `sr_live_ambiguous_${"A".repeat(43)}`;
   const { fsLike, configPath } = await writePendingActivationConfig(configDir, token, TEST_AGENT);
@@ -1314,12 +1314,12 @@ test("agent connect retains pending activation state after an ambiguous transpor
 
 test("agent disconnect keeps the credential on lockout risk and names the explicit override", async () => {
   const transport = new FakeTransport();
-  transport.on("GET", "/api/v1/agents/self", () => ({
+  transport.on("GET", "/api/agents/self", () => ({
     status: 200,
     headers: { "cache-control": "private, no-store" },
     body: { agent: TEST_AGENT, connection_ready: false },
   }));
-  transport.on("POST", "/api/v1/agents/self/disconnect", () => ({
+  transport.on("POST", "/api/agents/self/disconnect", () => ({
     status: 409,
     headers: { "content-type": "application/problem+json" },
     body: {
@@ -1356,8 +1356,8 @@ test("existing credential skips enrollment and directly runs the original comman
   );
   const result = await withRuntime(["--json", "screen", "list"], transport, { fs: fsLike });
   assert.equal(result.code, 0, result.stdout);
-  assert.equal(transport.calls.some((call) => call.path === "/api/v1/enrollments"), false);
-  assert.equal(transport.calls[0]?.path, "/api/v1/screens");
+  assert.equal(transport.calls.some((call) => call.path === "/api/enrollments"), false);
+  assert.equal(transport.calls[0]?.path, "/api/screens");
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -1385,12 +1385,12 @@ test("agent disconnect requires explicit confirmation and never auto-enrolls", a
 
 test("agent disconnect confirms server success before atomically removing all local credential state", async () => {
   const transport = new FakeTransport();
-  transport.on("GET", "/api/v1/agents/self", () => ({
+  transport.on("GET", "/api/agents/self", () => ({
     status: 200,
     headers: { "cache-control": "private, no-store" },
     body: { agent: TEST_AGENT, connection_ready: true },
   }));
-  transport.on("POST", "/api/v1/agents/self/disconnect", () => ({
+  transport.on("POST", "/api/agents/self/disconnect", () => ({
     status: 204,
     headers: { "cache-control": "private, no-store", "x-request-id": "req_revokeAAAAAAAAAAAAAAAA" },
     body: undefined,
@@ -1420,7 +1420,7 @@ test("agent disconnect confirms server success before atomically removing all lo
   });
   assert.deepEqual(envelope.warnings, []);
   assert.doesNotMatch(result.stdout, /current_private_secret|prj_current|enrollment-retry-key|browser-setup-key/);
-  assert.deepEqual(transport.calls.map((call) => call.path), ["/api/v1/agents/self", "/api/v1/agents/self/disconnect"]);
+  assert.deepEqual(transport.calls.map((call) => call.path), ["/api/agents/self", "/api/agents/self/disconnect"]);
   assert.equal(transport.calls[1]?.headers?.authorization, `Bearer ${token}`);
   assert.equal(transport.calls[1]?.headers?.["idempotency-key"], undefined);
   const cleaned = await readConfigFile(configPath, fsLike);
@@ -1433,12 +1433,12 @@ test("agent disconnect confirms server success before atomically removing all lo
 
 test("agent disconnect retains local state on a server failure and gives a safe retry", async () => {
   const transport = new FakeTransport();
-  transport.on("GET", "/api/v1/agents/self", () => ({
+  transport.on("GET", "/api/agents/self", () => ({
     status: 200,
     headers: { "cache-control": "private, no-store" },
     body: { agent: TEST_AGENT, connection_ready: true },
   }));
-  transport.on("POST", "/api/v1/agents/self/disconnect", () => ({
+  transport.on("POST", "/api/agents/self/disconnect", () => ({
     status: 503,
     headers: { "content-type": "application/problem+json" },
     body: {
@@ -1473,12 +1473,12 @@ test("agent disconnect retains local state on a server failure and gives a safe 
 
 test("agent disconnect retries the exact revoked bearer after cleanup failure and completes local cleanup", async () => {
   const transport = new FakeTransport();
-  transport.on("GET", "/api/v1/agents/self", () => ({
+  transport.on("GET", "/api/agents/self", () => ({
     status: 200,
     headers: { "cache-control": "private, no-store" },
     body: { agent: TEST_AGENT, connection_ready: true },
   }));
-  transport.on("POST", "/api/v1/agents/self/disconnect", () => ({
+  transport.on("POST", "/api/agents/self/disconnect", () => ({
     status: 204,
     headers: { "cache-control": "private, no-store" },
     body: undefined,
@@ -1522,12 +1522,12 @@ test("agent disconnect retries the exact revoked bearer after cleanup failure an
 
 test("agent disconnect shares the last-agent guard and explicit allow-lockout override", async () => {
   const transport = new FakeTransport();
-  transport.on("GET", "/api/v1/agents/self", () => ({
+  transport.on("GET", "/api/agents/self", () => ({
     status: 200,
     headers: { "cache-control": "private, no-store" },
     body: { agent: TEST_AGENT, connection_ready: true },
   }));
-  transport.on("POST", "/api/v1/agents/self/disconnect", (req) => {
+  transport.on("POST", "/api/agents/self/disconnect", (req) => {
     if (req.body) {
       return { status: 204, headers: { "cache-control": "private, no-store" } as Record<string, string>, body: undefined };
     }
@@ -1576,7 +1576,7 @@ test("screen pair rejects ambiguous or malformed codes before claiming", async (
   const transport = memoryBackend();
   const result = await withAuthenticatedRuntime(["--json", "screen", "pair", "ABCI01"], transport);
   assert.equal(result.code, ExitCode.Usage);
-  assert.equal(transport.calls.some((call) => call.path === "/api/v1/screens/pair"), false);
+  assert.equal(transport.calls.some((call) => call.path === "/api/screens/pair"), false);
   assert.match(result.stdout, /23456789ABCDEFGHJKMNPQRSTUVWXYZ/);
 });
 
@@ -1587,7 +1587,7 @@ test("screen provision rejects conflicting delivery modes", async () => {
     const transport = memoryBackend();
     const result = await withAuthenticatedRuntime(argv, transport);
     assert.equal(result.code, ExitCode.Usage);
-    assert.equal(transport.calls.some((call) => call.path === "/api/v1/screens/provision"), false);
+    assert.equal(transport.calls.some((call) => call.path === "/api/screens/provision"), false);
     await rm(result.configDir, { recursive: true, force: true });
   }
 });
@@ -1607,7 +1607,7 @@ test("screen provision --open launches by argv and returns only safe fields", as
   assert.equal(envelope.data.opened, true);
   assert.ok(!result.stdout.includes("#provision="));
   assert.ok(!result.stdout.includes("P".repeat(43)));
-  const provision = transport.calls.find((call) => call.path === "/api/v1/screens/provision");
+  const provision = transport.calls.find((call) => call.path === "/api/screens/provision");
   assert.equal(provision?.headers?.["idempotency-key"]?.length !== 0, true);
   assert.deepEqual(provision?.body, { label: "Demo" });
   const configPath = path.join(result.configDir, "screenrig", "config.json");
@@ -1640,7 +1640,7 @@ test("failed browser launch retains only the exact retry key and label", async (
   const second = await withAuthenticatedRuntime(argv, transport, { fs: fsLike, openUrl: async () => false });
   assert.equal(first.code, 0);
   assert.equal(second.code, 0);
-  const calls = transport.calls.filter((call) => call.path === "/api/v1/screens/provision");
+  const calls = transport.calls.filter((call) => call.path === "/api/screens/provision");
   assert.equal(calls.length, 2);
   assert.equal(calls[0]?.headers?.["idempotency-key"], calls[1]?.headers?.["idempotency-key"]);
   assert.deepEqual((await readConfigFile(path.join(configDir, "screenrig", "config.json"), fsLike))?.screen_provision, {
@@ -1661,10 +1661,10 @@ test("an enrolled agent completes browser setup with safe fragment-free output",
   assert.deepEqual(envelope.data, {
     code: "ABC-234",
     status: "claimed",
-    player_public_url: "https://play.screenrig.ai/s/browser-link-screen",
+    player_public_url: "https://play.screenrig.ai/player/s/browser-link-screen",
   });
   assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), [
-    "POST /api/v1/project/browser-links/claim",
+    "POST /api/project/browser-links/claim",
   ]);
   const claim = transport.calls.at(-1);
   assert.deepEqual(claim?.body, { code: "ABC234" });
@@ -1692,7 +1692,7 @@ test("browser setup --open opens only the public handoff URL by argv", async () 
   const envelope = JSON.parse(result.stdout) as { data: Record<string, unknown> };
   assert.equal(envelope.data.opened, true);
   assert.equal(envelope.data.code, "ABC-234");
-  assert.equal(envelope.data.player_public_url, "https://play.screenrig.ai/s/browser-link-screen");
+  assert.equal(envelope.data.player_public_url, "https://play.screenrig.ai/player/s/browser-link-screen");
   assert.doesNotMatch(JSON.stringify({ opened, envelope }), /#provision=|provisioning_url|token|cookie|proof/i);
   await rm(result.configDir, { recursive: true, force: true });
 });
@@ -1706,7 +1706,7 @@ test("dashboard and dashboard open launch the public origin without authenticati
     });
     try {
       assert.equal(result.code, ExitCode.Success, result.stdout);
-      assert.deepEqual(opened, ["https://dashboard.screenrig.ai"]);
+      assert.deepEqual(opened, ["https://screenrig.ai/dashboard/"]);
       assert.deepEqual(JSON.parse(result.stdout).data, { opened: true });
       assert.equal(transport.calls.length, 0);
       assert.equal(await readConfigFile(path.join(result.configDir, "screenrig", "config.json"), {
@@ -1724,7 +1724,7 @@ test("dashboard prints only the public origin when no browser can open", async (
   const result = await withRuntime(["--json", "dashboard"], transport, { openUrl: async () => false });
   try {
     assert.equal(result.code, ExitCode.Success, result.stdout);
-    assert.deepEqual(JSON.parse(result.stdout).data, { opened: false, url: "https://dashboard.screenrig.ai" });
+    assert.deepEqual(JSON.parse(result.stdout).data, { opened: false, url: "https://screenrig.ai/dashboard/" });
     assert.equal(transport.calls.length, 0);
     assert.doesNotMatch(result.stdout + result.stderr, /#|token|credential|expires_at/);
   } finally {
@@ -1766,12 +1766,12 @@ const BROWSER_CLAIM_SCREEN = {
   id: "scr_browser_link",
   public_id: "browser-link-screen",
   state: "pairing_pending" as const,
-  public_url: "https://play.screenrig.ai/s/browser-link-screen",
+  public_url: "https://play.screenrig.ai/player/s/browser-link-screen",
 };
 
 function browserSetupClaimTransport(body: unknown): FakeTransport {
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/enrollments", () => ({
+  transport.on("POST", "/api/enrollments", () => ({
     status: 201,
     headers: { "cache-control": "private, no-store" },
     body: {
@@ -1783,8 +1783,8 @@ function browserSetupClaimTransport(body: unknown): FakeTransport {
       issuance_expires_at: "2026-08-14T17:10:00.000Z",
     },
   }));
-  transport.on("GET", "/api/v1/project", () => ({ status: 200, headers: {}, body: { id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" } }));
-  transport.on("POST", "/api/v1/project/browser-links/claim", () => ({
+  transport.on("GET", "/api/project", () => ({ status: 200, headers: {}, body: { id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" } }));
+  transport.on("POST", "/api/project/browser-links/claim", () => ({
     status: 201,
     headers: { "cache-control": "private, no-store" },
     body,
@@ -1793,7 +1793,7 @@ function browserSetupClaimTransport(body: unknown): FakeTransport {
 }
 
 test("browser setup ignores extra claim and screen keys without echoing them", async () => {
-  const secret = `https://play.screenrig.ai/s/browser-link-screen#provision=${"S".repeat(43)}`;
+  const secret = `https://play.screenrig.ai/player/s/browser-link-screen#provision=${"S".repeat(43)}`;
   const transport = browserSetupClaimTransport({
     session_id: "bls_fixture",
     status: "claimed",
@@ -1813,7 +1813,7 @@ test("browser setup ignores extra claim and screen keys without echoing them", a
   assert.deepEqual(envelope.data, {
     code: "ABC-234",
     status: "claimed",
-    player_public_url: "https://play.screenrig.ai/s/browser-link-screen",
+    player_public_url: "https://play.screenrig.ai/player/s/browser-link-screen",
   });
   assert.doesNotMatch(result.stdout, /#provision=|provisioning_url|SSSSSS|timezone|observation|America\/Los_Angeles/i);
   await rm(result.configDir, { recursive: true, force: true });
@@ -1828,11 +1828,11 @@ test("browser setup rejects missing required claim fields, bad status, and unsaf
     { name: "missing public_id", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_id: "" } } },
     { name: "bad screen state", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, state: "active" } } },
     { name: "missing public_url", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "" } } },
-    { name: "hash in public_url", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://play.screenrig.ai/s/browser-link-screen#provision=SSS" } } },
-    { name: "search in public_url", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://play.screenrig.ai/s/browser-link-screen?q=1" } } },
-    { name: "userinfo in public_url", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://user:pass@play.screenrig.ai/s/browser-link-screen" } } },
+    { name: "hash in public_url", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://play.screenrig.ai/player/s/browser-link-screen#provision=SSS" } } },
+    { name: "search in public_url", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://play.screenrig.ai/player/s/browser-link-screen?q=1" } } },
+    { name: "userinfo in public_url", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://user:pass@play.screenrig.ai/player/s/browser-link-screen" } } },
     { name: "wrong origin", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://example.invalid/s/browser-link-screen" } } },
-    { name: "pathname mismatch", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://play.screenrig.ai/s/other-id" } } },
+    { name: "pathname mismatch", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://play.screenrig.ai/player/s/other-id" } } },
   ];
   for (const item of cases) {
     const result = await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC234"], browserSetupClaimTransport(item.body));
@@ -1848,7 +1848,7 @@ test("browser setup rejects malformed codes before claim and keeps exact ambiguo
   await rm(invalid.configDir, { recursive: true, force: true });
 
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/enrollments", () => ({
+  transport.on("POST", "/api/enrollments", () => ({
     status: 201,
     headers: { "cache-control": "private, no-store" },
     body: {
@@ -1860,8 +1860,8 @@ test("browser setup rejects malformed codes before claim and keeps exact ambiguo
       issuance_expires_at: "2026-08-14T17:10:00.000Z",
     },
   }));
-  transport.on("GET", "/api/v1/project", () => ({ status: 200, headers: {}, body: { id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" } }));
-  transport.on("POST", "/api/v1/project/browser-links/claim", () => ({
+  transport.on("GET", "/api/project", () => ({ status: 200, headers: {}, body: { id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" } }));
+  transport.on("POST", "/api/project/browser-links/claim", () => ({
     status: 503,
     headers: { "content-type": "application/problem+json" },
     body: { status: 503, code: "dependency_unavailable", title: "Unavailable", detail: "Retry." },
@@ -1870,7 +1870,7 @@ test("browser setup rejects malformed codes before claim and keeps exact ambiguo
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC234"], transport, { fs: fsLike });
   await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC-234"], transport, { fs: fsLike });
-  const claims = transport.calls.filter((call) => call.path === "/api/v1/project/browser-links/claim");
+  const claims = transport.calls.filter((call) => call.path === "/api/project/browser-links/claim");
   assert.equal(claims.length, 2);
   assert.equal(claims[0]?.headers?.["idempotency-key"], claims[1]?.headers?.["idempotency-key"]);
   assert.deepEqual((await readConfigFile(path.join(configDir, "screenrig", "config.json"), fsLike))?.browser_setup, {
@@ -1882,7 +1882,7 @@ test("browser setup rejects malformed codes before claim and keeps exact ambiguo
 
 test("expired enrollment replay surfaces 410 and reuses the persisted identity without pairing", async () => {
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/enrollments", () => ({
+  transport.on("POST", "/api/enrollments", () => ({
     status: 410,
     headers: { "content-type": "application/problem+json" },
     body: {
@@ -1907,7 +1907,7 @@ test("expired enrollment replay surfaces 410 and reuses the persisted identity w
   const result = await withRuntime(["--json", "agent", "enroll"], transport, { fs: fsLike });
   assert.notEqual(result.code, 0);
   assert.equal((JSON.parse(result.stdout) as { error: { code: string } }).error.code, "credential_issuance_expired");
-  assert.deepEqual(transport.calls.map((call) => call.path), ["/api/v1/enrollments"]);
+  assert.deepEqual(transport.calls.map((call) => call.path), ["/api/enrollments"]);
   assert.equal(transport.calls[0]?.headers?.["idempotency-key"], retryState.idempotency_key);
   assert.deepEqual(transport.calls[0]?.body, {
     client_id: retryState.client_id,
@@ -1948,7 +1948,7 @@ test("refuses group-readable config unless repairing", async () => {
 
 test("normalizes RFC 9457 problems and maps exit codes", async () => {
   const transport = new FakeTransport();
-  transport.on("GET", "/api/v1/project", () => ({
+  transport.on("GET", "/api/project", () => ({
     status: 412,
     headers: { "x-request-id": "req_AAAAAAAAAAAAAAAAAAAAAAAA" },
     body: {
@@ -1984,7 +1984,7 @@ test("normalizes RFC 9457 problems and maps exit codes", async () => {
 test("operations wait polls until a terminal success", async () => {
   const transport = new FakeTransport();
   let calls = 0;
-  transport.on("GET", "/api/v1/operations/op_wait", () => {
+  transport.on("GET", "/api/operations/op_wait", () => {
     calls += 1;
     const state = calls === 1 ? "running" : "succeeded";
     const operation: Operation = {
@@ -2028,7 +2028,7 @@ test("events list sends after and limit when the user supplies them", async () =
     { fs: fsLike },
   );
   assert.equal(limited.code, 0, limited.stdout);
-  const limitedCall = transport.calls.find((call) => call.path === "/api/v1/events");
+  const limitedCall = transport.calls.find((call) => call.path === "/api/events");
   assert.equal(limitedCall?.query?.after, "ev1_0");
   assert.equal(limitedCall?.query?.limit, "25");
 
@@ -2036,7 +2036,7 @@ test("events list sends after and limit when the user supplies them", async () =
   assert.equal(unscoped.code, 0, unscoped.stdout);
   const emptyPage = JSON.parse(unscoped.stdout) as { ok: true; data: { items: unknown[] } };
   assert.deepEqual(emptyPage.data.items, []);
-  const defaultCall = transport.calls.filter((call) => call.path === "/api/v1/events").at(-1);
+  const defaultCall = transport.calls.filter((call) => call.path === "/api/events").at(-1);
   assert.equal(defaultCall?.query?.after, undefined);
   assert.equal(defaultCall?.query?.limit, undefined);
   await rm(configDir, { recursive: true, force: true });
@@ -2063,7 +2063,7 @@ test("events list treats a null next_cursor as the end of history and surfaces t
     assert.equal(problem.error.status, 400);
     assert.equal(problem.error.code, "invalid_request");
     assert.equal(problem.error.errors[0]?.field, "limit", "the server's field name must reach the envelope");
-    const call = transport.calls.filter((item) => item.path === "/api/v1/events").at(-1);
+    const call = transport.calls.filter((item) => item.path === "/api/events").at(-1);
     assert.equal(call?.query?.limit, "500", "the CLI must not cap --limit locally");
 
     const missing = await withRuntime(["--json", "events", "list", "--limit"], transport, { fs: fsLike });
@@ -2285,7 +2285,7 @@ test("formatEventLine prints logfmt, never canned messages", () => {
 
 test("events list prints data or silence", async () => {
   const transport = new FakeTransport();
-  transport.on("GET", "/api/v1/events", () => ({
+  transport.on("GET", "/api/events", () => ({
     status: 200,
     headers: { "x-request-id": "req_events" },
     body: {
@@ -2337,7 +2337,7 @@ test("events list prints data or silence", async () => {
   assert.ok(!printed.stdout.includes("Runtime reported a bounded condition"));
 
   const emptyTransport = new FakeTransport();
-  emptyTransport.on("GET", "/api/v1/events", () => ({
+  emptyTransport.on("GET", "/api/events", () => ({
     status: 200,
     headers: { "x-request-id": "req_events_empty" },
     body: { items: [], next_cursor: "" },
@@ -2480,7 +2480,7 @@ test("events --json omits tokens, pixels, authorization, and object keys", async
     at: "2026-08-14T17:00:06.000Z",
   };
   const transport = new FakeTransport();
-  transport.on("GET", "/api/v1/events", () => ({
+  transport.on("GET", "/api/events", () => ({
     status: 200,
     headers: { "x-request-id": "req_events_json" },
     body: { items: [event], next_cursor: "ev1_9" },
@@ -2643,7 +2643,7 @@ test("events follow resumes with after equal to the last SSE id", async () => {
     { fs: fsLike },
   );
   assert.equal(code, 0, stdout);
-  const streamCalls = transport.calls.filter((call) => call.path === "/api/v1/events/stream");
+  const streamCalls = transport.calls.filter((call) => call.path === "/stream/project");
   assert.ok(streamCalls.length >= 2, `expected reconnect, calls=${streamCalls.length}`);
   assert.equal(streamCalls[0]?.query?.after, "ev1_0");
   assert.equal(streamCalls[1]?.query?.after, "ev1_1");
@@ -2875,7 +2875,7 @@ test("doctor warns about degraded application workers without failing HTTP readi
 });
 
 test("doctor prints the server's degraded_detail sentence verbatim for each degraded dependency", async () => {
-  const sentence = "Application upload is unavailable: POST /api/v1/applications answers 503 dependency_unavailable until the application workers run.";
+  const sentence = "Application upload is unavailable: POST /api/applications answers 503 dependency_unavailable until the application workers run.";
   const { code, status, byName, cleanup } = await doctorWithToolchain("doctor-degraded-detail-", {
     encoders: ["libx264", "libx265", "libwebp"], filters: ["zscale", "tonemap"], cwebp: true,
   }, {
@@ -3148,9 +3148,9 @@ test("control-plane payloads and mutation idempotency match the v0.2 architectur
 
   let result = await withRuntime(["--json", "app", "upload", appDir, "--no-wait"], transport, { fs: fsLike });
   assert.equal(result.code, 0, result.stdout);
-  const capIdx = transport.calls.findIndex((call) => call.method === "GET" && call.path === "/api/v1/capabilities");
-  const packPostIdx = transport.calls.findIndex((call) => call.method === "POST" && call.path === "/api/v1/applications");
-  assert.ok(capIdx >= 0, "app upload must GET /api/v1/capabilities before packing");
+  const capIdx = transport.calls.findIndex((call) => call.method === "GET" && call.path === "/api/capabilities");
+  const packPostIdx = transport.calls.findIndex((call) => call.method === "POST" && call.path === "/api/applications");
+  assert.ok(capIdx >= 0, "app upload must GET /api/capabilities before packing");
   assert.ok(packPostIdx > capIdx, "capabilities preflight must precede application POST");
   assert.ok(transport.calls[packPostIdx]?.headers?.["idempotency-key"]);
   const uploadCall = transport.calls[packPostIdx];
@@ -3167,14 +3167,14 @@ test("control-plane payloads and mutation idempotency match the v0.2 architectur
   result = await withRuntime(["--json", "screen", "pair", "ABC234", "--label", "Lobby"], transport, { fs: fsLike });
   assert.equal(result.code, 0, result.stdout);
   const pairingCall = transport.calls.at(-1);
-  assert.equal(pairingCall?.path, "/api/v1/screens/pair");
+  assert.equal(pairingCall?.path, "/api/screens/pair");
   assert.deepEqual(pairingCall?.body, { code: "ABC234", label: "Lobby" });
   assert.ok(pairingCall?.headers?.["idempotency-key"]);
   const pairingEnvelope = JSON.parse(result.stdout) as {
     ok: true;
     data: { public_url: string; screen: { id: string; label: string } };
   };
-  assert.equal(pairingEnvelope.data.public_url, "https://play.screenrig.ai/s/scr_public_pairing");
+  assert.equal(pairingEnvelope.data.public_url, "https://play.screenrig.ai/player/s/scr_public_pairing");
   assert.equal(pairingEnvelope.data.screen.id, "scr_PAIRINGAAAAAAAAAAAAAAAA");
   assert.equal(pairingEnvelope.data.screen.label, "Lobby");
   await rm(configDir, { recursive: true, force: true });
@@ -3218,7 +3218,7 @@ test("media upload returns usage error and makes no /media/uploads call", async 
   assert.equal(result.code, ExitCode.Usage);
   const envelope = JSON.parse(result.stdout) as { ok: false; error: { code: string } };
   assert.equal(envelope.error.code, "usage_error");
-  assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 0);
+  assert.equal(transport.calls.filter((call) => call.path === "/api/media/uploads").length, 0);
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -3243,7 +3243,7 @@ test("media upload refuses lossless WebP before declare", async () => {
   assert.equal(envelope.error.code, "usage_error");
   assert.match(envelope.error.detail, /Lossless WebP \(VP8L\) is not accepted/);
   assert.match(envelope.error.detail, /--no-transcode/);
-  assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 0);
+  assert.equal(transport.calls.filter((call) => call.path === "/api/media/uploads").length, 0);
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -3317,7 +3317,7 @@ test("media upload transcodes before declaring, and uploads only the transcoded 
     assert.match(String(encodeArgs[encodeArgs.indexOf("-vf") + 1]), /min\(3840,iw\)/);
     assert.equal(encodeArgs[encodeArgs.indexOf("-c:v") + 1], "libwebp");
 
-    const declare = transport.calls.find((call) => call.path === "/api/v1/media/uploads");
+    const declare = transport.calls.find((call) => call.path === "/api/media/uploads");
     assert.deepEqual((declare?.body as { filename: string; content_type: string; bytes: number }).content_type, "image/webp");
     assert.equal((declare?.body as { filename: string }).filename, "poster.webp");
     // The caller's name travels with the declaration so the server can derive a
@@ -3404,7 +3404,7 @@ test("media upload refuses a --content-type the bytes contradict before ffprobe,
     }
     assert.equal(processRuns, 0, "neither ffprobe nor ffmpeg may run on a contradicted declaration");
     assert.equal(signedPuts, 0);
-    assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 0);
+    assert.equal(transport.calls.filter((call) => call.path === "/api/media/uploads").length, 0);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
@@ -3446,8 +3446,8 @@ test("media download writes the verified original rendition to --output or ./<id
     "cache-control": "private, no-store",
   };
   const transport = new FakeTransport()
-    .on("GET", `/api/v1/media/${id}`, () => ({ status: 200, headers: { etag: '"1"' }, body: metadata }))
-    .onDownload("GET", `/api/v1/media/${id}/content`, () => ({ status: 200, headers, body: byteStream(bytes) }));
+    .on("GET", `/api/media/${id}`, () => ({ status: 200, headers: { etag: '"1"' }, body: metadata }))
+    .onDownload("GET", `/api/media/${id}/content`, () => ({ status: 200, headers, body: byteStream(bytes) }));
   const configDir = await testTemp("media-download-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
@@ -3474,7 +3474,7 @@ test("media download writes the verified original rendition to --output or ./<id
     assert.equal(envelope.data.source_filename, undefined, "a generated still declares no source_filename");
     assert.deepEqual(await readFile(envelope.data.path), bytes);
     assert.doesNotMatch(defaulted.stdout, /RIFF|WEBP|VP8X/, "no image bytes on stdout");
-    const downloadCall = transport.calls.find((call) => call.path === `/api/v1/media/${id}/content`);
+    const downloadCall = transport.calls.find((call) => call.path === `/api/media/${id}/content`);
     assert.equal(downloadCall?.method, "GET");
     assert.match(downloadCall?.headers?.authorization ?? "", /^Bearer /, "the content route needs the project bearer");
 
@@ -3498,8 +3498,8 @@ test("media download writes the verified original rendition to --output or ./<id
 
     // A body that does not hash to the metadata SHA-256 leaves no file behind.
     const tampered = new FakeTransport()
-      .on("GET", `/api/v1/media/${id}`, () => ({ status: 200, headers: { etag: '"1"' }, body: metadata }))
-      .onDownload("GET", `/api/v1/media/${id}/content`, () => ({
+      .on("GET", `/api/media/${id}`, () => ({ status: 200, headers: { etag: '"1"' }, body: metadata }))
+      .onDownload("GET", `/api/media/${id}/content`, () => ({
         status: 200,
         headers,
         body: byteStream(Buffer.concat([bytes.subarray(0, bytes.length - 1), Buffer.from([bytes[bytes.length - 1]! ^ 0xff])])),
@@ -3533,7 +3533,7 @@ test("feedback takes its kind from the route, carries no argv, and stays idempot
     );
     assert.equal(bug.code, 0, bug.stdout);
 
-    const post = transport.calls.find((call) => call.path === "/api/v1/feedback/bugs" && call.method === "POST");
+    const post = transport.calls.find((call) => call.path === "/api/feedback/bugs" && call.method === "POST");
     assert.ok(post, "the bug route must be selected by the command action");
     const body = post.body as { title: string; body: string; kind?: string; context?: Record<string, string> };
     assert.equal(body.kind, undefined, "the kind comes from the route, never the body");
@@ -3555,7 +3555,7 @@ test("feedback takes its kind from the route, carries no argv, and stays idempot
       { fs: fsLike },
     );
     assert.equal(feature.code, 0, feature.stdout);
-    const featurePost = transport.calls.find((call) => call.path === "/api/v1/feedback/features" && call.method === "POST");
+    const featurePost = transport.calls.find((call) => call.path === "/api/feedback/features" && call.method === "POST");
     assert.ok(featurePost);
     assert.equal((featurePost.body as { context?: Record<string, string> }).context?.command, undefined);
 
@@ -3601,7 +3601,7 @@ test("feedback refuses a --command that could carry an argument value", async ()
         { fs: fsLike },
       );
       assert.equal(result.code, 2, `${value} must be rejected: ${result.stdout}`);
-      assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/v1/feedback")).length, 0);
+      assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/feedback")).length, 0);
       const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string } };
       assert.equal(envelope.error.code, "usage_error");
       assert.match(envelope.error.detail, /command path only/);
@@ -3624,7 +3624,7 @@ test("feedback refuses a --command that could carry an argument value", async ()
       { fs: fsLike },
     );
     assert.equal(quiet.code, 0, quiet.stdout);
-    const post = transport.calls.find((call) => call.path === "/api/v1/feedback/bugs" && call.method === "POST");
+    const post = transport.calls.find((call) => call.path === "/api/feedback/bugs" && call.method === "POST");
     assert.equal((post?.body as { context?: unknown }).context, undefined);
   } finally {
     await rm(configDir, { recursive: true, force: true });
@@ -3635,7 +3635,7 @@ test("a rate-limited submission surfaces Retry-After instead of a bare 429", asy
   // A bare transport, because the first registered route wins in the fake and
   // memoryBackend() already binds a successful feedback route.
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/feedback/bugs", () => ({
+  transport.on("POST", "/api/feedback/bugs", () => ({
     status: 429,
     headers: { "retry-after": "180", "content-type": "application/problem+json" },
     body: {
@@ -3719,7 +3719,7 @@ function projectShowTransport(opts?: { header?: string; remaining?: number }): F
   if (opts?.header !== undefined) {
     headers["ScreenRig-Credits-Remaining"] = opts.header;
   }
-  transport.on("GET", "/api/v1/project", () => ({
+  transport.on("GET", "/api/project", () => ({
     status: 200,
     headers,
     body: projectRecord(opts?.remaining ?? 5000),
@@ -3813,7 +3813,7 @@ function invitationRecord() {
 
 function inviteTransport(): FakeTransport {
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/invitations", (req) => ({
+  transport.on("POST", "/api/invitations", (req) => ({
     status: 201,
     headers: { "cache-control": "private, no-store", "x-request-id": req.headers?.["x-request-id"] ?? "req_invite" },
     body: { invitations: [invitationRecord()] },
@@ -3824,10 +3824,10 @@ function inviteTransport(): FakeTransport {
 test("invitations create --link emits its secret once in the selected format and never persists or logs it", async () => {
   for (const mode of ["--json", "--human"]) {
     const secret = "L".repeat(43);
-    const url = new URL("https://dashboard.screenrig.ai/invite");
+    const url = new URL("https://screenrig.ai/dashboard/invite");
     url.hash = `token=${secret}`;
     const { logger, events } = createMemoryLogger({ command: ["invitations", "create"] });
-    const transport = new FakeTransport().on("POST", "/api/v1/invitations", () => ({
+    const transport = new FakeTransport().on("POST", "/api/invitations", () => ({
       status: 201,
       headers: { "cache-control": "private, no-store" },
       body: { invitations: [{ ...invitationRecord(), delivery: "link", status: "issued", url: url.href }] },
@@ -3864,17 +3864,17 @@ test("unified ad-buyer invitations preserve scope, filter listings, and revoke t
   let invitation = { ...invitationRecord(), kind: "ad_buyer", advertising };
   const headers = { "cache-control": "private, no-store" };
   const transport = new FakeTransport()
-    .on("POST", "/api/v1/invitations", request => {
+    .on("POST", "/api/invitations", request => {
       assert.deepEqual(request.body, {
         kind: "ad_buyer", delivery: "email", emails: ["buyer@example.com", "second@example.com"], advertising,
       });
       return { status: 201, headers, body: { invitations: [invitation] } };
     })
-    .on("GET", "/api/v1/invitations", request => {
+    .on("GET", "/api/invitations", request => {
       const matches = request.query?.kind === invitation.kind && request.query?.status === invitation.status;
       return { status: 200, headers, body: { items: matches ? [invitation] : [], next_cursor: "" } };
     })
-    .on("POST", `/api/v1/invitations/${invitation.id}/revoke`, request => {
+    .on("POST", `/api/invitations/${invitation.id}/revoke`, request => {
       assert.ok(request.headers?.["idempotency-key"]);
       invitation = { ...invitation, status: "revoked" };
       return { status: 200, headers, body: invitation };
@@ -3906,7 +3906,7 @@ test("invitations create posts an idempotent request for the current project and
     assert.equal(json.code, ExitCode.Success, json.stdout);
     const sent = transport.calls.at(-1);
     assert.equal(sent?.method, "POST");
-    assert.equal(sent?.path, "/api/v1/invitations");
+    assert.equal(sent?.path, "/api/invitations");
     assert.match(sent?.headers?.authorization ?? "", /^Bearer sr_live_/);
     assert.ok(sent?.headers?.["idempotency-key"], "invite must carry an Idempotency-Key");
     assert.deepEqual(sent?.body, { kind: "project_member", delivery: "email", emails: ["guest@example.com"] });
@@ -3925,7 +3925,7 @@ test("invitations create surfaces the outstanding-invitation cap without retryin
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   const transport = new FakeTransport();
   let calls = 0;
-  transport.on("POST", "/api/v1/invitations", () => {
+  transport.on("POST", "/api/invitations", () => {
     calls += 1;
     return {
       status: 409,
@@ -3958,7 +3958,7 @@ test("invitations create reuses its saved idempotency key after an ambiguous fai
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   const transport = new FakeTransport();
   let calls = 0;
-  transport.on("POST", "/api/v1/invitations", (req) => {
+  transport.on("POST", "/api/invitations", (req) => {
     calls += 1;
     if (calls === 1) throw networkError("connection reset by peer");
     return {
@@ -4006,7 +4006,7 @@ test("invitations create validates --email before any network call without echoi
 
 test("dashboard reset-sign-in posts an unauthenticated idempotent request and reports accepted, not delivery", async () => {
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/sign-in-resets", () => ({
+  transport.on("POST", "/api/sign-in-resets", () => ({
     status: 202,
     headers: { "cache-control": "private, no-store", "x-request-id": "req_recover" },
     body: { status: "accepted" },
@@ -4017,7 +4017,7 @@ test("dashboard reset-sign-in posts an unauthenticated idempotent request and re
     assert.equal(transport.calls.length, 1, "recovery must not enroll, verify a credential, or open a dashboard");
     const sent = transport.calls.at(-1);
     assert.equal(sent?.method, "POST");
-    assert.equal(sent?.path, "/api/v1/sign-in-resets");
+    assert.equal(sent?.path, "/api/sign-in-resets");
     assert.equal(sent?.headers?.authorization, undefined, "recovery must never send a credential");
     assert.ok(sent?.headers?.["idempotency-key"], "recovery must carry an Idempotency-Key");
     assert.deepEqual(sent?.body, { email: "owner@example.com" });
@@ -4057,7 +4057,7 @@ test("dashboard reset-sign-in never sends a stored credential and leaves credent
     agent_id: TEST_AGENT.id,
   }, fsLike);
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/sign-in-resets", () => ({
+  transport.on("POST", "/api/sign-in-resets", () => ({
     status: 202,
     headers: { "cache-control": "private, no-store" },
     body: { status: "accepted" },
@@ -4082,7 +4082,7 @@ test("dashboard reset-sign-in reuses its saved idempotency key after an ambiguou
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   const transport = new FakeTransport();
   let calls = 0;
-  transport.on("POST", "/api/v1/sign-in-resets", () => {
+  transport.on("POST", "/api/sign-in-resets", () => {
     calls += 1;
     if (calls === 1) throw networkError("connection reset by peer");
     return {
@@ -4132,7 +4132,7 @@ test("dashboard reset-sign-in validates --email before any network call without 
 });
 
 test("dashboard reset-sign-in rejects a response that deviates from the closed accepted contract", async () => {
-  const extraField = new FakeTransport().on("POST", "/api/v1/sign-in-resets", () => ({
+  const extraField = new FakeTransport().on("POST", "/api/sign-in-resets", () => ({
     status: 202,
     headers: { "cache-control": "private, no-store" },
     body: { status: "accepted", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" },
@@ -4141,7 +4141,7 @@ test("dashboard reset-sign-in rejects a response that deviates from the closed a
   assert.equal(withExtra.code, ExitCode.Usage, withExtra.stdout);
   assert.doesNotMatch(withExtra.stdout, /prj_AAAAAAAAAAAAAAAAAAAAAAAA/);
 
-  const wrongStatus = new FakeTransport().on("POST", "/api/v1/sign-in-resets", () => ({
+  const wrongStatus = new FakeTransport().on("POST", "/api/sign-in-resets", () => ({
     status: 202,
     headers: { "cache-control": "private, no-store" },
     body: { status: "queued" },
@@ -4149,7 +4149,7 @@ test("dashboard reset-sign-in rejects a response that deviates from the closed a
   const withWrong = await withRuntime(["--json", "dashboard", "reset-sign-in", "--email", "owner@example.com"], wrongStatus);
   assert.equal(withWrong.code, ExitCode.Usage, withWrong.stdout);
 
-  const missingPolicy = new FakeTransport().on("POST", "/api/v1/sign-in-resets", () => ({
+  const missingPolicy = new FakeTransport().on("POST", "/api/sign-in-resets", () => ({
     status: 202,
     headers: {},
     body: { status: "accepted" },
@@ -4164,7 +4164,7 @@ test("dashboard reset-sign-in rejects a response that deviates from the closed a
 });
 
 test("dashboard reset-sign-in surfaces server validation, key mismatch, and rate limits unchanged", async () => {
-  const invalid = new FakeTransport().on("POST", "/api/v1/sign-in-resets", () => ({
+  const invalid = new FakeTransport().on("POST", "/api/sign-in-resets", () => ({
     status: 400,
     headers: { "content-type": "application/problem+json" },
     body: {
@@ -4182,7 +4182,7 @@ test("dashboard reset-sign-in surfaces server validation, key mismatch, and rate
   assert.equal(invalidEnvelope.error.detail, "email is malformed");
   assert.equal(invalidEnvelope.error.next, undefined);
 
-  const mismatch = new FakeTransport().on("POST", "/api/v1/sign-in-resets", () => ({
+  const mismatch = new FakeTransport().on("POST", "/api/sign-in-resets", () => ({
     status: 409,
     headers: { "content-type": "application/problem+json" },
     body: {
@@ -4199,7 +4199,7 @@ test("dashboard reset-sign-in surfaces server validation, key mismatch, and rate
   assert.equal(mismatchEnvelope.error.code, "idempotency_key_conflict");
   assert.equal(mismatchEnvelope.error.detail, "this key was already used by a different request");
 
-  const limited = new FakeTransport().on("POST", "/api/v1/sign-in-resets", () => ({
+  const limited = new FakeTransport().on("POST", "/api/sign-in-resets", () => ({
     status: 429,
     headers: { "content-type": "application/problem+json", "retry-after": "30" },
     body: {
@@ -4239,7 +4239,7 @@ test("unauthenticated version does not add credits_low", async () => {
 test("an project quota rejection explains itself and points at the remaining allowance", async () => {
   // A custom storage ceiling is checked before the 1 GiB transport bound.
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/media/uploads", () => ({
+  transport.on("POST", "/api/media/uploads", () => ({
     status: 413,
     headers: { "content-type": "application/problem+json" },
     body: {
@@ -4280,7 +4280,7 @@ test("an project quota rejection explains itself and points at the remaining all
 
 test("a payment_required rejection points at remaining prepaid credit", async () => {
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/media/uploads", () => ({
+  transport.on("POST", "/api/media/uploads", () => ({
     status: 402,
     headers: { "content-type": "application/problem+json" },
     body: {
@@ -4325,7 +4325,7 @@ test("a payment_required rejection points at remaining prepaid credit", async ()
 
 test("a 402 with remaining header 0 includes payment_required and credits_low", async () => {
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/media/uploads", () => ({
+  transport.on("POST", "/api/media/uploads", () => ({
     status: 402,
     headers: {
       "content-type": "application/problem+json",
@@ -4397,7 +4397,7 @@ test("media upload validates transcode flags even when transcoding is off", asyn
         { fs: fsLike },
       );
       assert.equal(result.code, 2, `${bad.join(" ")} must be rejected under --no-transcode: ${result.stdout}`);
-      assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 0);
+      assert.equal(transport.calls.filter((call) => call.path === "/api/media/uploads").length, 0);
     }
   } finally {
     await rm(configDir, { recursive: true, force: true });
@@ -4437,7 +4437,7 @@ test("media upload warns on a low-information filename without blocking the uplo
     const warning = envelope.warnings.find((item) => item.code === "generic_filename");
     assert.ok(warning, result.stdout);
     assert.match(warning.message, /video\.mp4/);
-    assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 1);
+    assert.equal(transport.calls.filter((call) => call.path === "/api/media/uploads").length, 1);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
@@ -4459,7 +4459,7 @@ test("media upload rerun returns the existing media instead of uploading again, 
     assert.equal(result.code, 0, result.stdout);
     return JSON.parse(result.stdout).data as { media_id: string; reused: boolean; operation: { state: string }; timing: Record<string, number> };
   };
-  const declares = () => transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length;
+  const declares = () => transport.calls.filter((call) => call.path === "/api/media/uploads").length;
   try {
     const first = await upload();
     assert.equal(first.reused, false);
@@ -4602,7 +4602,7 @@ test("control-plane KV writes use binary-safe OpenAPI payloads and idempotency",
   }
 });
 
-test("comment show, set, and delete bind word commands to /api/v1/comment routes", async () => {
+test("comment show, set, and delete bind word commands to /api/comment routes", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("comment-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
@@ -4643,7 +4643,7 @@ test("comment show, set, and delete bind word commands to /api/v1/comment routes
     const unset = await withRuntime(["--json", "comment", "show", "screen", screenId], transport, { fs: fsLike });
     assert.equal(unset.code, ExitCode.Success, unset.stdout);
     assert.deepEqual(JSON.parse(unset.stdout).data, { comments: null });
-    assert.equal(transport.calls.at(-1)?.path, `/api/v1/comment/screen/${screenId}`);
+    assert.equal(transport.calls.at(-1)?.path, `/api/comment/screen/${screenId}`);
     assert.equal(transport.calls.at(-1)?.method, "GET");
 
     const setScreen = await withRuntime(
@@ -4654,7 +4654,7 @@ test("comment show, set, and delete bind word commands to /api/v1/comment routes
     assert.equal(setScreen.code, ExitCode.Success, setScreen.stdout);
     const setCall = transport.calls.at(-1);
     assert.equal(setCall?.method, "PUT");
-    assert.equal(setCall?.path, `/api/v1/comment/screen/${screenId}`);
+    assert.equal(setCall?.path, `/api/comment/screen/${screenId}`);
     assert.ok(setCall?.headers?.["idempotency-key"], "comment set must carry Idempotency-Key");
     assert.equal(setCall?.headers?.["if-match"], undefined);
     assert.deepEqual(setCall?.body, { comments: { note: "lobby" } });
@@ -4674,7 +4674,7 @@ test("comment show, set, and delete bind word commands to /api/v1/comment routes
       { fs: fsLike, cwd: () => configDir },
     );
     assert.equal(setPlaylist.code, ExitCode.Success, setPlaylist.stdout);
-    assert.equal(transport.calls.at(-1)?.path, `/api/v1/comment/playlist/${playlistId}`);
+    assert.equal(transport.calls.at(-1)?.path, `/api/comment/playlist/${playlistId}`);
     assert.deepEqual(transport.calls.at(-1)?.body, { comments: { slot: "hero" } });
 
     const setPage = await withRuntime(
@@ -4683,7 +4683,7 @@ test("comment show, set, and delete bind word commands to /api/v1/comment routes
       { fs: fsLike },
     );
     assert.equal(setPage.code, ExitCode.Success, setPage.stdout);
-    assert.equal(transport.calls.at(-1)?.path, `/api/v1/comment/playlist/${playlistId}/page/poster`);
+    assert.equal(transport.calls.at(-1)?.path, `/api/comment/playlist/${playlistId}/page/poster`);
     assert.deepEqual(JSON.parse(setPage.stdout).data, { comments: { why: "hero" } });
 
     const shownPlaylist = await withRuntime(["--json", "playlist", "show", playlistId], transport, { fs: fsLike });
@@ -4713,7 +4713,7 @@ test("comment show, set, and delete bind word commands to /api/v1/comment routes
       { fs: fsLike },
     );
     assert.equal(pageDelete.code, ExitCode.Success, pageDelete.stdout);
-    assert.equal(transport.calls.at(-1)?.path, `/api/v1/comment/playlist/${playlistId}/page/poster`);
+    assert.equal(transport.calls.at(-1)?.path, `/api/comment/playlist/${playlistId}/page/poster`);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
@@ -4728,7 +4728,7 @@ test("comment set rejects non-objects, oversize payloads, and last-write-wins fl
     { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
-  const commentCalls = () => transport.calls.filter((call) => String(call.path).startsWith("/api/v1/comment/"));
+  const commentCalls = () => transport.calls.filter((call) => String(call.path).startsWith("/api/comment/"));
   try {
     await withRuntime(["--json", "screen", "pair", "ABC234"], transport, { fs: fsLike });
     const cases: Array<[string[], RegExp]> = [
@@ -4769,8 +4769,8 @@ test("screen toast posts the closed write body and does not echo the text", asyn
       { fs: fsLike },
     );
     assert.equal(result.code, 0, result.stdout);
-    const post = transport.calls.find((call) => call.path === "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/toast");
-    assert.ok(post, "must bind POST /api/v1/screens/{id}/toast");
+    const post = transport.calls.find((call) => call.path === "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/toast");
+    assert.ok(post, "must bind POST /api/screens/{id}/toast");
     assert.equal(post.method, "POST");
     assert.ok(post.headers?.["idempotency-key"], "a toast write must carry an idempotency key");
     assert.deepEqual(post.body, { level: "info", text: "Lobby closed" });
@@ -4848,8 +4848,8 @@ test("screen toast defaults omitted --level to info", async () => {
       { fs: fsLike },
     );
     assert.equal(result.code, 0, result.stdout);
-    const post = transport.calls.find((call) => call.path === "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/toast");
-    assert.ok(post, "must bind POST /api/v1/screens/{id}/toast");
+    const post = transport.calls.find((call) => call.path === "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/toast");
+    assert.ok(post, "must bind POST /api/screens/{id}/toast");
     assert.deepEqual(post.body, { level: "info", text: "Lobby closed" });
     const envelope = JSON.parse(result.stdout) as { ok: boolean; data: { expires_at?: string; level?: string } };
     assert.equal(envelope.ok, true);
@@ -4951,7 +4951,7 @@ test("media, operation, screen credential, and K/V revision commands bind the fr
     assert.equal(signedRequest?.credentials, "omit");
     assert.deepEqual(signedRequest?.body, bytes);
     assert.doesNotMatch(JSON.stringify(signedRequest?.headers), /authorization|cookie|idempotency|request-id/i);
-    const declare = transport.calls.find((call) => call.path === "/api/v1/media/uploads");
+    const declare = transport.calls.find((call) => call.path === "/api/media/uploads");
     const commit = transport.calls.find((call) => call.path.endsWith("/commit"));
     assert.ok(declare?.headers?.["idempotency-key"]);
     assert.ok(commit?.headers?.["idempotency-key"]);
@@ -4980,7 +4980,7 @@ test("media, operation, screen credential, and K/V revision commands bind the fr
     const rotated = (JSON.parse(result.stdout) as { data: { revision: number } }).data;
     result = await withRuntime(["--json", "screen", "archive", paired.id, "--expect-rev", String(rotated.revision)], transport, runtimeExtra);
     assert.equal(result.code, 0, result.stdout);
-    assert.equal(transport.calls.at(-1)?.path, `/api/v1/screens/${paired.id}/archive`);
+    assert.equal(transport.calls.at(-1)?.path, `/api/screens/${paired.id}/archive`);
 
     result = await withRuntime(
       ["--json", "screen", "toast", paired.id, "--level", "info", "--text", "Lobby closed"],
@@ -4988,7 +4988,7 @@ test("media, operation, screen credential, and K/V revision commands bind the fr
       runtimeExtra,
     );
     assert.equal(result.code, 0, result.stdout);
-    assert.equal(transport.calls.at(-1)?.path, `/api/v1/screens/${paired.id}/toast`);
+    assert.equal(transport.calls.at(-1)?.path, `/api/screens/${paired.id}/toast`);
     assert.ok(transport.calls.at(-1)?.headers?.["idempotency-key"]);
 
     result = await withRuntime(["--json", "kv", "set", "settings", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA", "--json-value", '{"v":1}'], transport, runtimeExtra);
@@ -5020,7 +5020,7 @@ test("screen archive, unarchive, archived list, and retired unbind drive the rea
 
     const listed = await withRuntime(["--json", "screen", "list"], transport, { fs: fsLike });
     assert.equal(listed.code, 0, listed.stdout);
-    const listCall = transport.calls.find((call) => call.method === "GET" && call.path === "/api/v1/screens");
+    const listCall = transport.calls.find((call) => call.method === "GET" && call.path === "/api/screens");
     assert.equal(listCall?.query?.state, undefined);
     assert.deepEqual(
       ((JSON.parse(listed.stdout) as { data: { items: Array<{ id: string; state: string }> } }).data.items).map((item) => item.id),
@@ -5035,7 +5035,7 @@ test("screen archive, unarchive, archived list, and retired unbind drive the rea
     assert.equal(archived.code, 0, archived.stdout);
     const archiveCall = transport.calls.at(-1);
     assert.equal(archiveCall?.method, "POST");
-    assert.equal(archiveCall?.path, `/api/v1/screens/${screen.id}/archive`);
+    assert.equal(archiveCall?.path, `/api/screens/${screen.id}/archive`);
     assert.equal(archiveCall?.headers?.["if-match"], `"${screen.revision}"`);
     assert.ok(archiveCall?.headers?.["idempotency-key"]);
     const archivedScreen = (JSON.parse(archived.stdout) as { data: { state: string; revision: number } }).data;
@@ -5047,7 +5047,7 @@ test("screen archive, unarchive, archived list, and retired unbind drive the rea
 
     const archivedOnly = await withRuntime(["--json", "screen", "list", "--state", "archived"], transport, { fs: fsLike });
     assert.equal(archivedOnly.code, 0, archivedOnly.stdout);
-    const archivedListCall = [...transport.calls].reverse().find((call) => call.method === "GET" && call.path === "/api/v1/screens");
+    const archivedListCall = [...transport.calls].reverse().find((call) => call.method === "GET" && call.path === "/api/screens");
     assert.deepEqual(archivedListCall?.query, { state: "archived" });
     const archivedItems = (JSON.parse(archivedOnly.stdout) as { data: { items: Array<{ id: string; state: string }> } }).data.items;
     assert.equal(archivedItems.length, 1);
@@ -5066,7 +5066,7 @@ test("screen archive, unarchive, archived list, and retired unbind drive the rea
     assert.equal(unarchived.code, 0, unarchived.stdout);
     const unarchiveCall = transport.calls.at(-1);
     assert.equal(unarchiveCall?.method, "POST");
-    assert.equal(unarchiveCall?.path, `/api/v1/screens/${screen.id}/unarchive`);
+    assert.equal(unarchiveCall?.path, `/api/screens/${screen.id}/unarchive`);
     assert.equal(unarchiveCall?.headers?.["if-match"], `"${archivedScreen.revision}"`);
     const restored = (JSON.parse(unarchived.stdout) as { data: { state: string; revision: number } }).data;
     assert.equal(restored.state, "active");
@@ -5087,7 +5087,7 @@ test("screen archive, unarchive, archived list, and retired unbind drive the rea
     assert.equal(deleted.code, ExitCode.Conflict, deleted.stdout);
     const deleteCall = transport.calls.at(-1);
     assert.equal(deleteCall?.method, "DELETE");
-    assert.equal(deleteCall?.path, `/api/v1/screens/${screen.id}`);
+    assert.equal(deleteCall?.path, `/api/screens/${screen.id}`);
     assert.equal(deleteCall?.headers?.["if-match"], `"${restored.revision}"`);
     const deleteEnvelope = JSON.parse(deleted.stdout) as { ok: false; error: { code: string; status: number } };
     assert.equal(deleteEnvelope.error.code, "screen_archive_required");
@@ -5368,8 +5368,8 @@ test("one screen update that sets both a playlist and a timezone skips the sched
   assert.deepEqual(patch?.body, { playlist_id: "pl_AAAAAAAAAAAAAAAAAAAAAAAA", timezone: "America/Los_Angeles" });
   // The patch supplies the zone itself, so schedule validation does not need
   // the current screen. The playlist is read once for advisory aspect checks.
-  assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/v1/playlists/")).length, 1);
-  assert.equal(transport.calls.some((call) => call.method === "GET" && call.path.startsWith("/api/v1/screens/")), false);
+  assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/playlists/")).length, 1);
+  assert.equal(transport.calls.some((call) => call.method === "GET" && call.path.startsWith("/api/screens/")), false);
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -5388,7 +5388,7 @@ const SAMPLE_OBSERVATION = {
 
 function aspectMismatchTransport(): FakeTransport {
   const transport = new FakeTransport();
-  transport.on("GET", "/api/v1/playlists/pl_ASPECT", () => ({
+  transport.on("GET", "/api/playlists/pl_ASPECT", () => ({
     status: 200,
     headers: { "x-request-id": "req_playlist_aspect" },
     body: {
@@ -5407,7 +5407,7 @@ function aspectMismatchTransport(): FakeTransport {
       }],
     },
   }));
-  transport.on("PATCH", "/api/v1/screens/scr_ASPECT", (request) => ({
+  transport.on("PATCH", "/api/screens/scr_ASPECT", (request) => ({
     status: 200,
     headers: { "x-request-id": "req_screen_aspect" },
     body: {
@@ -5440,8 +5440,8 @@ test("screen assign emits aspect_mismatch beside credits_low from resolved playl
     message: "Remaining prepaid credit is 999, below 1000 credits.",
   }]);
   assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), [
-    "GET /api/v1/playlists/pl_ASPECT",
-    "PATCH /api/v1/screens/scr_ASPECT",
+    "GET /api/playlists/pl_ASPECT",
+    "PATCH /api/screens/scr_ASPECT",
   ]);
   await rm(result.configDir, { recursive: true, force: true });
 });
@@ -5458,7 +5458,7 @@ test("screen update --playlist-id emits aspect_mismatch without media lookups", 
     code: "aspect_mismatch",
     message: "Page page_portrait uses portrait media med_PORTRAIT on screen scr_ASPECT, whose player reported a landscape 1920x1080 surface.",
   }]);
-  assert.equal(transport.calls.some((call) => call.path.startsWith("/api/v1/media/")), false);
+  assert.equal(transport.calls.some((call) => call.path.startsWith("/api/media/")), false);
   await rm(result.configDir, { recursive: true, force: true });
 });
 
@@ -5481,7 +5481,7 @@ test("screen show prints optional player-reported observation", async () => {
     state: "active" as const,
     updated_at: "2026-08-14T17:00:00.000Z",
   };
-  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({
+  transport.on("GET", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({
     status: 200,
     headers: { "x-request-id": "req_show_observation" },
     body: screen,
@@ -5513,7 +5513,7 @@ test("screen show prints optional player-reported observation", async () => {
   assert.match(projectHumanBody(humanResult.stdout), /^Screen\n/);
   assert.match(humanResult.stdout, /"observed_at": "2026-08-19T12:00:00Z"/);
   assert.match(humanResult.stdout, /"presentation": "output"/);
-  assert.equal(transport.calls.some((call) => call.path === "/runtime/v1/observation"), false);
+  assert.equal(transport.calls.some((call) => call.path === "/screen/observation"), false);
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -5557,7 +5557,7 @@ test("screen update cannot send observation", async () => {
   const patch = transport.calls.find((call) => call.method === "PATCH");
   assert.equal(patch, undefined);
   assert.equal(transport.calls.length, 0, "unsupported flags must fail before any request");
-  assert.equal(transport.calls.some((call) => call.path === "/runtime/v1/observation"), false);
+  assert.equal(transport.calls.some((call) => call.path === "/screen/observation"), false);
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -5580,7 +5580,7 @@ test("screen show includes online and optional last_online_at and last_ip", asyn
     state: "active" as const,
     updated_at: "2026-08-14T17:00:00.000Z",
   };
-  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({
+  transport.on("GET", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({
     status: 200,
     headers: { "x-request-id": "req_show_online" },
     body: screen,
@@ -5645,7 +5645,7 @@ test("screen show still works when last_online_at and last_ip are absent", async
     state: "pairing_pending" as const,
     updated_at: "2026-08-14T17:00:00.000Z",
   };
-  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({
+  transport.on("GET", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({
     status: 200,
     headers: { "x-request-id": "req_show_offline" },
     body: screen,
@@ -5748,7 +5748,7 @@ async function hostConfigFs(prefix: string) {
 test("screen show prints the Host block and recovery deadline when the screen reports them", async () => {
   const transport = new FakeTransport();
   const screen = hostScreen({ host: SAMPLE_HOST, host_updated_at: "2026-09-10T08:00:00Z", recovery_pending: { expires_at: "2026-09-13T08:00:00Z" } });
-  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: screen }));
+  transport.on("GET", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: screen }));
   const { configDir, fsLike } = await hostConfigFs("screen-show-host-");
 
   const jsonResult = await withRuntime(["--json", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
@@ -5771,7 +5771,7 @@ test("screen show prints the Host block and recovery deadline when the screen re
 test("screen show omits absent host fields and the whole block without a host", async () => {
   const transport = new FakeTransport();
   const sparse = hostScreen({ host: { platform: "android", device: { model: "Pixel Tablet" } } });
-  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: sparse }));
+  transport.on("GET", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: sparse }));
   const { configDir, fsLike } = await hostConfigFs("screen-show-sparse-host-");
   const sparseResult = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
   assert.equal(sparseResult.code, ExitCode.Success, sparseResult.stdout);
@@ -5801,7 +5801,7 @@ test("screen show describes the display asking to reconnect on the recovery line
     host: { platform: "tizen" as const, model: "QM43B", firmware: "T-KTM2DEUC-1234", manufacturer: "Samsung" },
   };
   const screen = hostScreen({ host: SAMPLE_HOST, host_updated_at: "2026-09-10T08:00:00Z", recovery_pending: pending });
-  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: screen }));
+  transport.on("GET", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: screen }));
   const { configDir, fsLike } = await hostConfigFs("screen-show-recovery-host-");
 
   const jsonResult = await withRuntime(["--json", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
@@ -5822,7 +5822,7 @@ test("screen show describes the display asking to reconnect on the recovery line
 test("screen show omits absent recovery host fields and the description without a host", async () => {
   const transport = new FakeTransport();
   let body: Record<string, unknown> = hostScreen({ recovery_pending: { expires_at: "2026-09-13T08:00:00Z", host: { model: "QM43B" } } });
-  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body }));
+  transport.on("GET", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body }));
   const { configDir, fsLike } = await hostConfigFs("screen-show-recovery-sparse-");
   const sparseResult = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
   assert.equal(sparseResult.code, ExitCode.Success, sparseResult.stdout);
@@ -5880,7 +5880,7 @@ test("screen show prints a Storage block from the player's last storage report",
     storage,
     storage_forecast: { manifest_revision: "man_0000000000000007", fit: "fits", excluded_page_count: 0, basis: "reported_capacity", received_at: "2026-08-14T16:56:00Z" },
   });
-  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: screen }));
+  transport.on("GET", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: screen }));
   const { configDir, fsLike } = await hostConfigFs("screen-show-storage-");
 
   const human = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
@@ -5901,7 +5901,7 @@ test("screen show prints a Storage block from the player's last storage report",
 
 test("screen show marks a storage report older than 24 hours stale", async () => {
   const transport = new FakeTransport();
-  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({
+  transport.on("GET", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({
     status: 200,
     headers: {},
     body: hostScreen({ storage: storageReport({ received_at: "2026-08-13T16:00:00Z" }) }),
@@ -5915,7 +5915,7 @@ test("screen show marks a storage report older than 24 hours stale", async () =>
 
 test("screen show prints no Storage block when the screen never reported storage", async () => {
   const transport = new FakeTransport();
-  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: hostScreen() }));
+  transport.on("GET", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: hostScreen() }));
   const { configDir, fsLike } = await hostConfigFs("screen-show-storage-absent-");
   const human = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
   assert.equal(human.code, ExitCode.Success, human.stdout);
@@ -5925,7 +5925,7 @@ test("screen show prints no Storage block when the screen never reported storage
 
 test("screen show prints the active storage shortfall with needed versus capacity", async () => {
   const transport = new FakeTransport();
-  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({
+  transport.on("GET", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({
     status: 200,
     headers: {},
     body: hostScreen({
@@ -5960,7 +5960,7 @@ test("screen storage-forecast dry-runs a playlist fit without writing", async ()
     basis: "reported_capacity",
     received_at: "2026-08-14T16:56:00Z",
   };
-  transport.on("POST", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/storage-forecast", () => ({
+  transport.on("POST", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/storage-forecast", () => ({
     status: 200,
     headers: { "cache-control": "no-store" },
     body,
@@ -5975,7 +5975,7 @@ test("screen storage-forecast dry-runs a playlist fit without writing", async ()
     assert.equal(json.code, ExitCode.Success, json.stdout);
     const post = transport.calls.at(-1);
     assert.equal(post?.method, "POST");
-    assert.equal(post?.path, "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/storage-forecast");
+    assert.equal(post?.path, "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/storage-forecast");
     assert.deepEqual(post?.body, { playlist_id: "pl_LOBBY" });
     assert.equal(post?.headers?.["idempotency-key"], undefined, "a dry run writes nothing and mints no idempotency key");
     const envelope = JSON.parse(json.stdout) as Record<string, unknown>;
@@ -6019,7 +6019,7 @@ test("screen storage-forecast dry-runs a playlist fit without writing", async ()
 
 test("screen storage-forecast explains a partial fit with the excluded page count", async () => {
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/storage-forecast", () => ({
+  transport.on("POST", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/storage-forecast", () => ({
     status: 200,
     headers: { "cache-control": "no-store" },
     body: {
@@ -6047,7 +6047,7 @@ test("screen storage-forecast explains a partial fit with the excluded page coun
 
 test("screen storage-forecast reports unknown without byte counts when there is no report", async () => {
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/storage-forecast", () => ({
+  transport.on("POST", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/storage-forecast", () => ({
     status: 200,
     headers: { "cache-control": "no-store" },
     body: { fit: "unknown", excluded_page_count: 0, required_bytes: null, capacity_bytes: null, basis: "reported_capacity", received_at: null },
@@ -6076,7 +6076,7 @@ test("screen storage-forecast reports unknown without byte counts when there is 
 
 test("screen storage-forecast maps a changed playlist to revision_conflict and a nonzero exit", async () => {
   const transport = new FakeTransport();
-  transport.on("POST", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/storage-forecast", () => ({
+  transport.on("POST", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/storage-forecast", () => ({
     status: 412,
     headers: { "content-type": "application/problem+json", "x-request-id": "req_forecast_conflict" },
     body: {
@@ -6119,7 +6119,7 @@ test("screen list appends the platform column only when a screen reports a host"
     hostScreen({ id: "scr_BROWSERAAAAAAAAAAAAAAAA", label: "Cafe", public_id: "scr_public_cafe" }),
   ];
   let body: unknown = { items };
-  transport.on("GET", "/api/v1/screens", () => ({ status: 200, headers: {}, body }));
+  transport.on("GET", "/api/screens", () => ({ status: 200, headers: {}, body }));
   const { configDir, fsLike } = await hostConfigFs("screen-list-platform-");
 
   const human = await withRuntime(["--human", "screen", "list"], transport, { fs: fsLike });
@@ -6146,7 +6146,7 @@ test("screen list appends the platform column only when a screen reports a host"
 test("screen show explains an archived screen's reason and how unarchive resumes it", async () => {
   const transport = new FakeTransport();
   let body: Record<string, unknown> = hostScreen({ state: "archived", archive_reason: "device_reset", archived_at: "2026-09-21T10:00:00Z" });
-  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body }));
+  transport.on("GET", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body }));
   const { configDir, fsLike } = await hostConfigFs("screen-show-archived-");
   try {
     const json = await withRuntime(["--json", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
@@ -6197,9 +6197,9 @@ test("screen show and list surface applications_unsupported health", async () =>
   const transport = new FakeTransport();
   const unsupported = hostScreen({ applications_unsupported: { at: "2026-09-22T09:00:00Z" } });
   const plain = hostScreen({ id: "scr_BROWSERAAAAAAAAAAAAAAAA", label: "Cafe", public_id: "scr_public_cafe" });
-  transport.on("GET", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: unsupported }));
-  transport.on("GET", "/api/v1/screens/scr_BROWSERAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: plain }));
-  transport.on("GET", "/api/v1/screens", () => ({ status: 200, headers: {}, body: { items: [unsupported, plain] } }));
+  transport.on("GET", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: unsupported }));
+  transport.on("GET", "/api/screens/scr_BROWSERAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: plain }));
+  transport.on("GET", "/api/screens", () => ({ status: 200, headers: {}, body: { items: [unsupported, plain] } }));
   const { configDir, fsLike } = await hostConfigFs("screen-applications-unsupported-");
   try {
     const human = await withRuntime(["--human", "screen", "show", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
@@ -6211,10 +6211,10 @@ test("screen show and list surface applications_unsupported health", async () =>
     const other = await withRuntime(["--human", "screen", "show", "scr_BROWSERAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
     assert.doesNotMatch(other.stdout, /can't show applications/);
     const malformed = hostScreen({ id: "scr_BROWSERAAAAAAAAAAAAAAAA", applications_unsupported: { at: "yesterday\nforged line" } });
-    transport.on("GET", "/api/v1/screens/scr_BROWSERAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: malformed }));
+    transport.on("GET", "/api/screens/scr_BROWSERAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: malformed }));
     const garbled = await withRuntime(["--human", "screen", "show", "scr_BROWSERAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
     assert.doesNotMatch(garbled.stdout, /can't show applications|\nforged line/);
-    transport.on("GET", "/api/v1/screens/scr_BROWSERAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: plain }));
+    transport.on("GET", "/api/screens/scr_BROWSERAAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: plain }));
 
     const list = await withRuntime(["--human", "screen", "list"], transport, { fs: fsLike });
     const lines = projectHumanBody(list.stdout).split("\n");
@@ -6233,7 +6233,7 @@ test("screen list adds the reason column only when an archived screen reports on
     hostScreen({ id: "scr_BROWSERAAAAAAAAAAAAAAAA", label: "Cafe", public_id: "scr_public_cafe", state: "archived" }),
   ];
   let body: unknown = { items };
-  transport.on("GET", "/api/v1/screens", () => ({ status: 200, headers: {}, body }));
+  transport.on("GET", "/api/screens", () => ({ status: 200, headers: {}, body }));
   const { configDir, fsLike } = await hostConfigFs("screen-list-reason-");
   try {
     const human = await withRuntime(["--human", "screen", "list", "--state", "archived"], transport, { fs: fsLike });
@@ -6257,7 +6257,7 @@ test("screen reload posts the reload route with an idempotency key and returns r
   const paired = await withAuthenticatedRuntime(["--json", "screen", "pair", "ABC234"], transport);
   assert.equal(paired.code, ExitCode.Success, paired.stdout);
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => paired.configDir, env: { XDG_CONFIG_HOME: paired.configDir } };
-  const reloadCalls = () => transport.calls.filter((call) => call.path === "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/reload");
+  const reloadCalls = () => transport.calls.filter((call) => call.path === "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/reload");
   try {
     // A screen still waiting to pair has no Player; the refusal points at screen show.
     const pending = await withRuntime(["--json", "screen", "reload", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
@@ -6275,7 +6275,7 @@ test("screen reload posts the reload route with an idempotency key and returns r
     const result = await withRuntime(["--json", "screen", "reload", "scr_PAIRINGAAAAAAAAAAAAAAAA"], transport, { fs: fsLike });
     assert.equal(result.code, ExitCode.Success, result.stdout);
     const post = reloadCalls().at(-1);
-    assert.ok(post, "must bind POST /api/v1/screens/{id}/reload");
+    assert.ok(post, "must bind POST /api/screens/{id}/reload");
     assert.equal(post.method, "POST");
     assert.ok(post.headers?.["idempotency-key"], "a reload must carry an idempotency key");
     assert.equal(post.headers?.["if-match"], undefined, "If-Match is optional");
@@ -6328,7 +6328,7 @@ test("screen reload posts the reload route with an idempotency key and returns r
 test("screen reload validates its id and revision before calling the server and rejects a malformed answer", async () => {
   const transport = new FakeTransport();
   let body: unknown = { expires_at: "2026-08-14T17:10:00.000Z" };
-  transport.on("POST", "/api/v1/screens/scr_TEST/reload", () => ({ status: 202, headers: {}, body }));
+  transport.on("POST", "/api/screens/scr_TEST/reload", () => ({ status: 202, headers: {}, body }));
   const { configDir, fsLike } = await hostConfigFs("screen-reload-usage-");
   try {
     for (const argv of [["screen", "reload"], ["screen", "reload", "scr_TEST", "--expect-rev", "oops"]]) {
@@ -6357,7 +6357,7 @@ test("screen reload validates its id and revision before calling the server and 
 test("screen reload explains a server that predates the route and encodes the id", async () => {
   const transport = new FakeTransport();
   let answer: TransportResponse = { status: 404, headers: { "content-type": "text/plain; charset=utf-8" }, body: "404 page not found\n" };
-  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/reload$/, () => answer);
+  transport.on("POST", /^\/api\/screens\/[^/]+\/reload$/, () => answer);
   const { configDir, fsLike } = await hostConfigFs("screen-reload-old-server-");
   try {
     const old = await withRuntime(["--json", "screen", "reload", "scr_TEST"], transport, { fs: fsLike });
@@ -6381,7 +6381,7 @@ test("screen reload explains a server that predates the route and encodes the id
     answer = { status: 202, headers: {}, body: { reload_id: "rld_00000001", expires_at: "2026-08-14T17:10:00.000Z" } };
     const traversal = await withRuntime(["--json", "screen", "reload", "scr_TEST/../../project"], transport, { fs: fsLike });
     assert.equal(traversal.code, ExitCode.Success, traversal.stdout);
-    assert.equal(transport.calls.at(-1)?.path, "/api/v1/screens/scr_TEST%2F..%2F..%2Fproject/reload");
+    assert.equal(transport.calls.at(-1)?.path, "/api/screens/scr_TEST%2F..%2F..%2Fproject/reload");
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
@@ -6409,7 +6409,7 @@ test("screen help describes reload, archive recovery, and archive reasons", () =
 test("screen recover confirms a pending offer with a fresh idempotency key and prints the screen summary", async () => {
   const transport = new FakeTransport();
   const recovered = hostScreen({ host: SAMPLE_HOST, revision: 4 });
-  transport.on("POST", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/recovery/confirm", (req) => ({
+  transport.on("POST", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/recovery/confirm", (req) => ({
     status: 200, headers: { etag: '"4"', "x-request-id": req.headers?.["x-request-id"] ?? "req_recover" }, body: recovered,
   }));
   const { configDir, fsLike } = await hostConfigFs("screen-recover-");
@@ -6456,7 +6456,7 @@ test("screen recover maps each recovery problem to a one-line message and a nonz
   ];
   for (const testCase of cases) {
     const transport = new FakeTransport();
-    transport.on("POST", "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/recovery/confirm", () => ({
+    transport.on("POST", "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/recovery/confirm", () => ({
       status: testCase.status,
       headers: { "content-type": "application/problem+json", "x-request-id": "req_recover_problem" },
       body: {
@@ -6550,7 +6550,7 @@ test("app upload reports the release id an application primitive needs", async (
 test("app rename changes metadata without packing or publishing a release", async () => {
   for (const expectedRevision of [undefined, "7"]) {
     const transport = memoryBackend();
-    transport.on("PATCH", "/api/v1/applications/app_EXISTING", (request) => {
+    transport.on("PATCH", "/api/applications/app_EXISTING", (request) => {
       assert.equal(request.headers?.["if-match"], expectedRevision ? '"7"' : undefined);
       assert.ok(request.headers?.["idempotency-key"]);
       assert.deepEqual(request.body, { name: "Lobby 🚀" });
@@ -6559,7 +6559,7 @@ test("app rename changes metadata without packing or publishing a release", asyn
     const result = await withAuthenticatedRuntime(["--json", "app", "rename", "app_EXISTING", "--name", "  Lobby 🚀  ", ...(expectedRevision ? ["--expect-rev", expectedRevision] : [])], transport);
     assert.equal(result.code, ExitCode.Success, result.stdout);
     assert.deepEqual(JSON.parse(result.stdout).data, { id: "app_EXISTING", name: "Lobby 🚀", revision: 8, latest_ready_release: "rel_KEEP" });
-    assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), ["PATCH /api/v1/applications/app_EXISTING"]);
+    assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), ["PATCH /api/applications/app_EXISTING"]);
     await rm(result.configDir, { recursive: true, force: true });
   }
 });
@@ -6576,7 +6576,7 @@ test("app rename rejects invalid names and revisions before making requests", as
 
 test("app rename preserves a server revision conflict in the error envelope", async () => {
   const transport = memoryBackend();
-  transport.on("PATCH", "/api/v1/applications/app_EXISTING", () => ({
+  transport.on("PATCH", "/api/applications/app_EXISTING", () => ({
     status: 412, headers: { "content-type": "application/problem+json" },
     body: makeProblem("revision_conflict", "Revision conflict", 412, "The application changed.", { current_revision: 8 }),
   }));
@@ -6589,7 +6589,7 @@ test("app rename preserves a server revision conflict in the error envelope", as
 
 test("app update publishes to the existing application with revision and release output", async () => {
   const transport = memoryBackend();
-  transport.on("POST", "/api/v1/applications/app_EXISTING/releases", (request) => {
+  transport.on("POST", "/api/applications/app_EXISTING/releases", (request) => {
     assert.equal(request.headers?.["if-match"], '\"7\"');
     assert.ok(request.headers?.["idempotency-key"]);
     assert.equal(request.headers?.["screenrig-application-name"], undefined);
@@ -6712,7 +6712,7 @@ test("playlist create expands a picture template and forwards a full page unchan
   );
   const result = await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
   assert.equal(result.code, ExitCode.Success, result.stdout);
-  const posted = transport.calls.find((call) => call.method === "POST" && call.path === "/api/v1/playlists");
+  const posted = transport.calls.find((call) => call.method === "POST" && call.path === "/api/playlists");
   const body = posted?.body as { pages: Array<Record<string, unknown>> };
   assert.equal(body.pages.length, 2);
   assert.equal("template" in body.pages[0]!, false);
@@ -6765,7 +6765,7 @@ test("playlist create forwards swipe transition and object enter on a full page"
   await writeFile(file, JSON.stringify({ name: "Lobby", pages: [fullPage] }));
   const result = await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
   assert.equal(result.code, ExitCode.Success, result.stdout);
-  const posted = transport.calls.find((call) => call.method === "POST" && call.path === "/api/v1/playlists");
+  const posted = transport.calls.find((call) => call.method === "POST" && call.path === "/api/playlists");
   const body = posted?.body as { pages: Array<Record<string, unknown>> };
   assert.deepEqual(body.pages[0], fullPage);
   await rm(configDir, { recursive: true, force: true });
@@ -6794,7 +6794,7 @@ test("playlist create refuses a templated page that would emit text", async () =
   assert.equal(envelope.error.code, "usage_error");
   assert.match(envelope.error.detail, /compose render/);
   assert.equal(envelope.error.next?.command, "screenrig compose catalog");
-  assert.equal(transport.calls.some((call) => call.method === "POST" && call.path === "/api/v1/playlists"), false);
+  assert.equal(transport.calls.some((call) => call.method === "POST" && call.path === "/api/playlists"), false);
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -6850,7 +6850,7 @@ test("playlist create accepts a linear canvas.background on a picture template a
   );
   const result = await withRuntime(["--json", "playlist", "create", file], transport, { fs: fsLike });
   assert.equal(result.code, ExitCode.Success, result.stdout);
-  const posted = transport.calls.find((call) => call.method === "POST" && call.path === "/api/v1/playlists");
+  const posted = transport.calls.find((call) => call.method === "POST" && call.path === "/api/playlists");
   const body = posted?.body as { pages: Array<{ canvas: { background: unknown } }> };
   assert.deepEqual(body.pages[0]!.canvas.background, {
     type: "linear",
@@ -6888,7 +6888,7 @@ test("playback list, media filters, media update, and app --name bind the consum
     const playbackEnvelope = JSON.parse(playback.stdout) as { data: { items: Array<{ primitive?: string; filename: string }> } };
     assert.equal(playbackEnvelope.data.items[0]?.primitive, "video", "PlaybackAggregate.primitive passes through");
     assert.match(playback.stdout, /"primitive"/);
-    const playbackCall = transport.calls.find((call) => call.path === "/api/v1/playback");
+    const playbackCall = transport.calls.find((call) => call.path === "/api/playback");
     assert.deepEqual(playbackCall?.query, {
       screen_id: "scr_PAIRINGAAAAAAAAAAAAAAAA",
       media_id: "med_AAAAAAAAAAAAAAAAAAAAAAAA",
@@ -6904,12 +6904,12 @@ test("playback list, media filters, media update, and app --name bind the consum
       { fs: fsLike },
     );
     assert.equal(namedUpload.code, ExitCode.Success, namedUpload.stdout);
-    const appCall = transport.calls.find((call) => call.method === "POST" && call.path === "/api/v1/applications");
+    const appCall = transport.calls.find((call) => call.method === "POST" && call.path === "/api/applications");
     assert.equal(appCall?.headers?.["screenrig-application-name"], "Lobby board");
     const unicodeName = "Engineering — Fleet and usage lab";
     const unicodeUpload = await withRuntime(["--json", "app", "upload", appDir, "--name", unicodeName, "--no-wait"], transport, { fs: fsLike });
     assert.equal(unicodeUpload.code, ExitCode.Success, unicodeUpload.stdout);
-    const unicodeCall = transport.calls.filter((call) => call.method === "POST" && call.path === "/api/v1/applications").at(-1)!;
+    const unicodeCall = transport.calls.filter((call) => call.method === "POST" && call.path === "/api/applications").at(-1)!;
     assert.equal(unicodeCall.headers?.["screenrig-application-name"], undefined);
     assert.equal(decodeURIComponent(unicodeCall.headers!["screenrig-application-name*"]!.slice(7)), unicodeName);
     assert.doesNotThrow(() => new Headers(unicodeCall.headers));
@@ -6921,7 +6921,7 @@ test("playback list, media filters, media update, and app --name bind the consum
       { fs: fsLike, signedRawPut: async () => ({ status: 200 }) },
     );
     assert.equal(mediaUpload.code, ExitCode.Success, mediaUpload.stdout);
-    const declare = transport.calls.find((call) => call.path === "/api/v1/media/uploads");
+    const declare = transport.calls.find((call) => call.path === "/api/media/uploads");
     assert.equal((declare?.body as { tag?: string }).tag, "lobby");
     assert.equal((declare?.body as { source_filename?: string }).source_filename, "lobby-poster.png");
     const mediaEnvelope = JSON.parse(mediaUpload.stdout) as { data: { upload: { tag?: string; source_filename?: string } } };
@@ -6941,7 +6941,7 @@ test("playback list, media filters, media update, and app --name bind the consum
       { fs: fsLike },
     );
     assert.equal(listed.code, ExitCode.Success, listed.stdout);
-    const listCall = transport.calls.find((call) => call.method === "GET" && call.path === "/api/v1/media");
+    const listCall = transport.calls.find((call) => call.method === "GET" && call.path === "/api/media");
     assert.deepEqual(listCall?.query, { tag: "lobby", primitive: "image" });
     const listedEnvelope = JSON.parse(listed.stdout) as { data: { items: Array<{ tag?: string; source_filename?: string }> } };
     assert.equal(listedEnvelope.data.items[0]?.tag, "lobby");
@@ -6953,7 +6953,7 @@ test("playback list, media filters, media update, and app --name bind the consum
       { fs: fsLike },
     );
     assert.equal(updated.code, ExitCode.Success, updated.stdout);
-    const patch = transport.calls.find((call) => call.method === "PATCH" && call.path === "/api/v1/media/med_AAAAAAAAAAAAAAAAAAAAAAAA");
+    const patch = transport.calls.find((call) => call.method === "PATCH" && call.path === "/api/media/med_AAAAAAAAAAAAAAAAAAAAAAAA");
     assert.deepEqual(patch?.body, { tag: "lobby2" });
     assert.equal(patch?.headers?.["if-match"], '"1"');
 
@@ -6963,7 +6963,7 @@ test("playback list, media filters, media update, and app --name bind the consum
       { fs: fsLike },
     );
     assert.equal(cleared.code, ExitCode.Success, cleared.stdout);
-    const clearPatch = transport.calls.find((call) => call.method === "PATCH" && call.path === "/api/v1/media/med_AAAAAAAAAAAAAAAAAAAAAAAA" && (call.body as { tag: unknown }).tag === null);
+    const clearPatch = transport.calls.find((call) => call.method === "PATCH" && call.path === "/api/media/med_AAAAAAAAAAAAAAAAAAAAAAAA" && (call.body as { tag: unknown }).tag === null);
     assert.deepEqual(clearPatch?.body, { tag: null });
 
     const both = await withRuntime(
@@ -6997,14 +6997,14 @@ test("playback list, media filters, media update, and app --name bind the consum
     assert.match(JSON.parse(retiredKind.stdout).error.detail, /uses --primitive image\|video\|audio, not --kind/);
     const tagSet = await withRuntime(["media", "update", "med_AAAAAAAAAAAAAAAAAAAAAAAA", "--tags", "Summer,Drinks"], transport, { fs: fsLike });
     assert.equal(tagSet.code, ExitCode.Success, tagSet.stdout);
-    assert.deepEqual(transport.calls.filter(c => c.method === "PATCH" && c.path.startsWith("/api/v1/media/")).at(-1)?.body, { tags: ["Summer", "Drinks"] });
+    assert.deepEqual(transport.calls.filter(c => c.method === "PATCH" && c.path.startsWith("/api/media/")).at(-1)?.body, { tags: ["Summer", "Drinks"] });
     const selectorFile = path.join(configDir, "selector.json");
     const selector = { by: "tag", tags: { all: ["Summer", "Drinks"], none: ["Expired"] }, batch_size: 3 };
     await writeFile(selectorFile, JSON.stringify(selector));
-    transport.on("POST", "/api/v1/selectors/preview", () => ({ status: 200, headers: {}, body: { matched_count: 40, candidates: [], selector } }));
+    transport.on("POST", "/api/selectors/preview", () => ({ status: 200, headers: {}, body: { matched_count: 40, candidates: [], selector } }));
     const preview = await withRuntime(["media", "selector-preview", selectorFile, "--primitive", "video"], transport, { fs: fsLike });
     assert.equal(preview.code, ExitCode.Success, preview.stdout);
-    assert.deepEqual(transport.calls.filter(c => c.path === "/api/v1/selectors/preview").at(-1)?.body, { primitive: "video", selector });
+    assert.deepEqual(transport.calls.filter(c => c.path === "/api/selectors/preview").at(-1)?.body, { primitive: "video", selector });
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
@@ -7032,7 +7032,7 @@ test("playlist create refuses a mixed template-and-primitives page before the wr
   const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string } };
   assert.equal(envelope.error.code, "usage_error");
   assert.match(envelope.error.detail, /mixes template and primitives/);
-  assert.equal(transport.calls.some((call) => call.method === "POST" && call.path === "/api/v1/playlists"), false);
+  assert.equal(transport.calls.some((call) => call.method === "POST" && call.path === "/api/playlists"), false);
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -7050,7 +7050,7 @@ for (const argv of [
  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret"}, fsLike);
  const mutations: any[] = [];
- const paths = ["/api/v1/screens/scr_TEST", "/api/v1/screens/scr_TEST/archive", "/api/v1/screens/scr_TEST/unarchive", "/api/v1/screens/scr_TEST/public-id/rotate", "/api/v1/media/med_TEST", "/api/v1/playlists/pl_TEST", "/api/v1/applications/app_TEST/kv/key"];
+ const paths = ["/api/screens/scr_TEST", "/api/screens/scr_TEST/archive", "/api/screens/scr_TEST/unarchive", "/api/screens/scr_TEST/public-id/rotate", "/api/media/med_TEST", "/api/playlists/pl_TEST", "/api/applications/app_TEST/kv/key"];
  for (const method of ["PATCH", "POST", "PUT", "DELETE"] as const) for (const target of paths) transport.on(method, target, request => {
   mutations.push(request);
   return {status: method === "DELETE" ? 204 : 200, headers: {}, body: {id: argv[2], revision: 8, key: "key", value_base64: "e30=", content_type: "application/json"}};
@@ -7126,10 +7126,10 @@ test("campaign preview respects the current revision and never replaces an expli
   let revision = 9;
   const headers = { "cache-control": "private, no-store" };
   const transport = new FakeTransport()
-    .on("GET", "/api/v1/advertising/campaigns/cmp_TEST", () => ({
+    .on("GET", "/api/advertising/campaigns/cmp_TEST", () => ({
       status: 200, headers, body: { id: "cmp_TEST", revision },
     }))
-    .on("POST", "/api/v1/advertising/campaigns/cmp_TEST/quote", request => {
+    .on("POST", "/api/advertising/campaigns/cmp_TEST/quote", request => {
       if (request.headers?.["if-match"] !== `"${revision}"`) {
         return { status: 412, headers, body: makeProblem("revision_conflict", "Campaign changed", 412, "Read and accept the current campaign revision.") };
       }
@@ -7166,20 +7166,20 @@ test("partial advertising edits preserve stored eligibility, pricing, metadata a
     status: 412, headers, body: makeProblem("revision_conflict", "Resource changed", 412, "Revision precondition failed."),
   });
   const transport = new FakeTransport()
-    .on("GET", "/api/v1/advertising/slots", () => ({ status: 200, headers, body: { slots: [slot] } }))
-    .on("POST", "/api/v1/advertising/slots/ads_TEST", request => {
+    .on("GET", "/api/advertising/slots", () => ({ status: 200, headers, body: { slots: [slot] } }))
+    .on("POST", "/api/advertising/slots/ads_TEST", request => {
       if (request.headers?.["if-match"] !== `"${slot.revision}"`) return conflict();
       slot = { ...(request.body as Record<string, unknown>), id: slot.id, revision: Number(slot.revision) + 1 };
       return { status: 200, headers, body: slot };
     })
-    .on("GET", "/api/v1/advertising/inventory", () => ({ status: 200, headers, body: { inventory: [inventory] } }))
-    .on("PUT", "/api/v1/advertising/inventory/scr_TEST", request => {
+    .on("GET", "/api/advertising/inventory", () => ({ status: 200, headers, body: { inventory: [inventory] } }))
+    .on("PUT", "/api/advertising/inventory/scr_TEST", request => {
       if (request.headers?.["if-match"] !== `"${inventory.revision}"`) return conflict();
       inventory = { ...(request.body as Record<string, unknown>), screen_id: inventory.screen_id, revision: Number(inventory.revision) + 1 };
       return { status: 200, headers, body: inventory };
     })
-    .on("GET", "/api/v1/advertising/memberships", () => ({ status: 200, headers, body: { memberships: [membership] } }))
-    .on("POST", "/api/v1/advertising/memberships/mem_TEST", request => {
+    .on("GET", "/api/advertising/memberships", () => ({ status: 200, headers, body: { memberships: [membership] } }))
+    .on("POST", "/api/advertising/memberships/mem_TEST", request => {
       if (request.headers?.["if-match"] !== `"${membership.revision}"`) return conflict();
       const body = request.body as Record<string, unknown>;
       membership = {
@@ -7210,31 +7210,31 @@ test("partial advertising edits preserve stored eligibility, pricing, metadata a
 test("advertising lifecycle mutations send required If-Match preconditions and canonical bodies", async () => {
   const headers = { "cache-control": "private, no-store" };
   const transport = new FakeTransport()
-    .on("POST", "/api/v1/advertising/network/rate", request => {
+    .on("POST", "/api/advertising/network/rate", request => {
       assert.equal(request.headers?.["if-match"], '"7"');
       assert.deepEqual(request.body, { rate_mcr_per_15s: "150000" });
       return { status: 200, headers, body: { id: "net_TEST", revision: 8, default_rate_mcr_per_15s: "150000" } };
     })
-    .on("POST", "/api/v1/advertising/campaigns/cmp_TEST", request => {
+    .on("POST", "/api/advertising/campaigns/cmp_TEST", request => {
       assert.equal(request.headers?.["if-match"], '"2"');
       return { status: 200, headers, body: { id: "cmp_TEST", revision: 3 } };
     })
-    .on("POST", "/api/v1/advertising/campaigns/cmp_TEST/activate", request => {
+    .on("POST", "/api/advertising/campaigns/cmp_TEST/activate", request => {
       assert.equal(request.headers?.["if-match"], '"2"');
       assert.deepEqual(request.body, { quote_id: "quo_OK" });
       return { status: 200, headers, body: { id: "cmp_TEST", revision: 3, state: "active" } };
     })
-    .on("POST", "/api/v1/advertising/campaigns/cmp_TEST/pause", request => {
+    .on("POST", "/api/advertising/campaigns/cmp_TEST/pause", request => {
       assert.equal(request.headers?.["if-match"], '"4"');
       assert.equal(request.body, undefined);
       return { status: 200, headers, body: { id: "cmp_TEST", revision: 5, state: "paused" } };
     })
-    .on("POST", "/api/v1/advertising/campaigns/cmp_TEST/resume", request => {
+    .on("POST", "/api/advertising/campaigns/cmp_TEST/resume", request => {
       assert.equal(request.headers?.["if-match"], '"5"');
       assert.equal(request.body, undefined);
       return { status: 200, headers, body: { id: "cmp_TEST", revision: 6, state: "active" } };
     })
-    .on("POST", "/api/v1/advertising/campaigns/cmp_TEST/accept-rates", request => {
+    .on("POST", "/api/advertising/campaigns/cmp_TEST/accept-rates", request => {
       assert.equal(request.headers?.["if-match"], '"3"');
       assert.deepEqual(request.body, { quote_id: "quo_FRESH" });
       return { status: 200, headers, body: { id: "cmp_TEST", revision: 7, state: "active" } };
@@ -7258,7 +7258,7 @@ test("advertising lifecycle mutations send required If-Match preconditions and c
   try {
     const uncapped = await withAuthenticatedRuntime(["--json", "ads", "campaigns", "update", "cmp_TEST", await write("uncapped.json", draft), "--expect-rev", "2"], transport);
     assert.equal(uncapped.code, ExitCode.Success, uncapped.stdout);
-    const sent = transport.calls.find(call => call.method === "POST" && call.path === "/api/v1/advertising/campaigns/cmp_TEST");
+    const sent = transport.calls.find(call => call.method === "POST" && call.path === "/api/advertising/campaigns/cmp_TEST");
     assert.deepEqual(sent?.body, { ...draft, networks: [{ ...draft.networks[0] }] });
     assert.equal(Object.hasOwn(sent?.body as object, "max_play_price_mcr"), false, "an omitted ceiling stays omitted");
     transport.calls.length = 0;
@@ -7292,9 +7292,9 @@ test("stale advertising revisions surface as precondition failures and are never
   });
   let mutations = 0;
   const transport = new FakeTransport()
-    .on("POST", "/api/v1/advertising/network/rate", () => { mutations += 1; return conflict(); })
-    .on("POST", "/api/v1/advertising/campaigns/cmp_TEST", () => { mutations += 1; return conflict(); })
-    .on("POST", /\/api\/v1\/advertising\/campaigns\/cmp_TEST\/(activate|pause|resume|accept-rates)/, () => { mutations += 1; return conflict(); });
+    .on("POST", "/api/advertising/network/rate", () => { mutations += 1; return conflict(); })
+    .on("POST", "/api/advertising/campaigns/cmp_TEST", () => { mutations += 1; return conflict(); })
+    .on("POST", /\/api\/advertising\/campaigns\/cmp_TEST\/(activate|pause|resume|accept-rates)/, () => { mutations += 1; return conflict(); });
   const directory = await testTemp("ads-stale-");
   const draftFile = path.join(directory, "draft.json");
   const handle = await open(draftFile, "w");
@@ -7347,15 +7347,15 @@ test("advertising mutations refuse to leave without their required preconditions
 test("slot create writes the canonical required body and inventory creation needs an eligibility flag", async () => {
   const headers = { "cache-control": "private, no-store" };
   const transport = new FakeTransport()
-    .on("POST", "/api/v1/advertising/slots", request => {
+    .on("POST", "/api/advertising/slots", request => {
       assert.deepEqual(request.body, {
         enabled: true, name: "Lobby break", accepted_media: ["image"],
         max_image_duration_ms: 30000, max_video_duration_ms: 30000,
       });
       return { status: 201, headers, body: { id: "ads_NEW", revision: 1, ...request.body as object, muted: true } };
     })
-    .on("GET", "/api/v1/advertising/inventory", () => ({ status: 200, headers, body: { inventory: [] } }))
-    .on("PUT", "/api/v1/advertising/inventory/scr_NEW", request => ({
+    .on("GET", "/api/advertising/inventory", () => ({ status: 200, headers, body: { inventory: [] } }))
+    .on("PUT", "/api/advertising/inventory/scr_NEW", request => ({
       status: 200, headers, body: { screen_id: "scr_NEW", revision: 1, ...request.body as object },
     }));
   const created = await withAuthenticatedRuntime(["--json", "ads", "slots", "create", "--name", "Lobby break", "--accepted-media", "image"], transport);
@@ -7367,7 +7367,7 @@ test("slot create writes the canonical required body and inventory creation need
   transport.calls.length = 0;
   const optIn = await withAuthenticatedRuntime(["--json", "ads", "inventory", "update", "scr_NEW", "--enabled", "--site-name", "Lobby"], transport);
   assert.equal(optIn.code, ExitCode.Success, optIn.stdout);
-  const write = transport.calls.find(call => call.method === "PUT" && call.path === "/api/v1/advertising/inventory/scr_NEW");
+  const write = transport.calls.find(call => call.method === "PUT" && call.path === "/api/advertising/inventory/scr_NEW");
   assert.equal(write?.headers?.["if-match"], undefined, "a new row has no revision to check");
   assert.deepEqual(write?.body, { ads_enabled: true, site_name: "Lobby" });
 });
@@ -7379,10 +7379,10 @@ test("membership update carries the stored policy and scope when rows are readab
     scope: { screen_ids: ["scr_TEST"], slot_ids: ["ads_TEST"] },
   };
   const transport = new FakeTransport()
-    .on("GET", "/api/v1/advertising/memberships", () => ({
+    .on("GET", "/api/advertising/memberships", () => ({
       status: 200, headers, body: { memberships: membership ? [membership] : [] },
     }))
-    .on("POST", "/api/v1/advertising/memberships/mem_TEST", request => {
+    .on("POST", "/api/advertising/memberships/mem_TEST", request => {
       assert.equal(request.headers?.["if-match"], '"5"');
       assert.deepEqual(request.body, { screen_ids: ["scr_TEST"], slot_ids: ["ads_TEST"], policy: "trusted" });
       membership = { ...membership, revision: 6, policy: "trusted" };

@@ -100,7 +100,7 @@ function fleetBackend(): { transport: FakeTransport; screens: Map<string, Record
     [B, screen(B, { tags: ["Lobby", "Floor2"] })],
     [C, screen(C, { tags: ["Lobby"], state: "pairing_pending" })],
   ]);
-  transport.on("POST", "/api/v1/screens/actions", (req): TransportResponse => {
+  transport.on("POST", "/api/screens/actions", (req): TransportResponse => {
     const body = req.body as { selector: any; action: any };
     const ids: string[] = body.selector.by === "ids" ? body.selector.screen_ids
       : [...screens.values()].filter((item) => item.state === "active" && item.tags?.includes(body.selector.tag)).map((item) => item.id);
@@ -124,16 +124,16 @@ function fleetBackend(): { transport: FakeTransport; screens: Map<string, Record
     const failed = results.filter((item) => item.status === "failed").length;
     return { status: 200, headers: { "x-request-id": "req_fleetAAAAAAAAAAAAAAAA" }, body: { action: body.action.type, matched: results.length, succeeded: results.length - failed, failed, results } };
   });
-  transport.on("GET", "/api/v1/screens", (req) => {
+  transport.on("GET", "/api/screens", (req) => {
     const tag = req.query?.tag;
     const items = [...screens.values()].filter((item) => tag === undefined || item.tags?.includes(tag));
     return { status: 200, headers: {}, body: { items } };
   });
-  transport.on("GET", /^\/api\/v1\/screens\/[^/]+$/, (req): TransportResponse => {
+  transport.on("GET", /^\/api\/screens\/[^/]+$/, (req): TransportResponse => {
     const current = screens.get(decodeURIComponent(req.path.split("/").pop()!));
     return current ? { status: 200, headers: {}, body: current } : { status: 404, headers: { "content-type": "application/problem+json" }, body: problem(404, "not_found", "Screen not found.") };
   });
-  transport.on("PATCH", /^\/api\/v1\/screens\/[^/]+$/, (req): TransportResponse => {
+  transport.on("PATCH", /^\/api\/screens\/[^/]+$/, (req): TransportResponse => {
     const current = screens.get(decodeURIComponent(req.path.split("/").pop()!));
     if (!current) return { status: 404, headers: { "content-type": "application/problem+json" }, body: problem(404, "not_found", "Screen not found.") };
     const ifMatch = req.headers?.["if-match"];
@@ -146,7 +146,7 @@ function fleetBackend(): { transport: FakeTransport; screens: Map<string, Record
   return { transport, screens };
 }
 
-const actionCalls = (transport: FakeTransport): TransportRequest[] => transport.calls.filter((call) => call.path === "/api/v1/screens/actions");
+const actionCalls = (transport: FakeTransport): TransportRequest[] => transport.calls.filter((call) => call.path === "/api/screens/actions");
 
 test("screen list --tag filters by exact tag and adds a TAGS column", async () => {
   const env = await enrolled();
@@ -192,7 +192,7 @@ test("screen tag on one screen PATCHes the whole set with the screen's revision 
   assert.equal(set.code, 0, set.stdout);
   let patch = transport.calls.at(-1)!;
   assert.equal(patch.method, "PATCH");
-  assert.equal(patch.path, `/api/v1/screens/${A}`);
+  assert.equal(patch.path, `/api/screens/${A}`);
   assert.deepEqual(patch.body, { tags: ["Lobby", "Spring"] });
   assert.equal(patch.headers?.["if-match"], undefined, "--set without --expect-rev is unguarded");
   assert.ok(patch.headers?.["idempotency-key"]);
@@ -233,7 +233,7 @@ test("screen tag --add surfaces a concurrent change as revision_conflict instead
   const { transport, screens } = fleetBackend();
   // Another writer bumps the revision between this command's read and write.
   const original = transport.calls.length;
-  transport.on("GET", `/api/v1/screens/${A}`, () => ({ status: 200, headers: {}, body: { ...screens.get(A)!, revision: 2 } }));
+  transport.on("GET", `/api/screens/${A}`, () => ({ status: 200, headers: {}, body: { ...screens.get(A)!, revision: 2 } }));
   const routes = (transport as unknown as { routes: Array<{ method: string; path: unknown }> }).routes;
   routes.unshift(routes.pop()!);
   const result = await cli(["--json", "screen", "tag", A, "--add", "Spring"], transport, env);
@@ -329,7 +329,7 @@ test("fleet reload partial failure keeps ok true, lists every screen, and exits 
 
   const single = await cli(["--json", "screen", "reload", MISSING], transport, env);
   assert.equal(actionCalls(transport).length, 2, "one screen id keeps the single-screen reload route");
-  assert.equal(transport.calls.at(-1)!.path, `/api/v1/screens/${MISSING}/reload`);
+  assert.equal(transport.calls.at(-1)!.path, `/api/screens/${MISSING}/reload`);
   assert.equal(single.envelope.ok, false);
 });
 
@@ -341,7 +341,7 @@ test("fleet assign and toast send one typed action; toast text rules still apply
   assert.deepEqual(actionCalls(transport)[0]!.body, { selector: { by: "tag", tag: "Lobby" }, action: { type: "assign", playlist_id: "pl_AAAAAAAAAAAAAAAAAAAAAAAA" } });
   assert.equal(assigned.envelope.data.action, "assign");
   assert.equal(screens.get(A)!.playlist_id, "pl_AAAAAAAAAAAAAAAAAAAAAAAA");
-  assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/v1/playlists")).length, 0, "fleet assign leaves the timezone rule to each screen on the server");
+  assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/playlists")).length, 0, "fleet assign leaves the timezone rule to each screen on the server");
 
   const toast = await cli(["--json", "screen", "toast", A, B, "--text", "Closing soon", "--level", "alert", "--duration-ms", "5000"], transport, env);
   assert.equal(toast.code, 0, toast.stdout);
@@ -373,14 +373,14 @@ test("fleet actions: no match warns, a malformed answer is refused, and an older
   assert.equal(none.envelope.data.matched, 0);
   assert.deepEqual(none.envelope.warnings!.map((warning) => warning.code), ["fleet_no_match"]);
 
-  const malformed = new FakeTransport().on("POST", "/api/v1/screens/actions", () => ({
+  const malformed = new FakeTransport().on("POST", "/api/screens/actions", () => ({
     status: 200, headers: {}, body: { action: "reload", matched: 2, succeeded: 2, failed: 0, results: [{ screen_id: A, status: "ok" }] },
   }));
   const refused = await cli(["--json", "screen", "reload", A, B], malformed, env);
   assert.equal(refused.code, ExitCode.Usage);
   assert.match(refused.envelope.error!.detail, /ScreenActionResult contract/);
 
-  const older = new FakeTransport().on("POST", "/api/v1/screens/actions", () => ({ status: 405, headers: {}, body: "" }));
+  const older = new FakeTransport().on("POST", "/api/screens/actions", () => ({ status: 405, headers: {}, body: "" }));
   const unsupported = await cli(["--json", "screen", "reload", A, B], older, env);
   assert.equal(unsupported.envelope.ok, false);
   assert.match(unsupported.envelope.error!.detail, /does not offer fleet screen actions/);
@@ -389,12 +389,12 @@ test("fleet actions: no match warns, a malformed answer is refused, and an older
 function screenshotBackend(failing: string, inFlight: { now: number; max: number }): FakeTransport {
   const transport = new FakeTransport();
   const captures = new Map<string, string>();
-  transport.on("GET", "/api/v1/screens", (req) => ({
+  transport.on("GET", "/api/screens", (req) => ({
     status: 200, headers: {},
     body: { items: [screen(A, { tags: ["Lobby"] }), screen(C, { tags: ["Lobby"], state: "pairing_pending" }), screen(B, { tags: ["Lobby"] }), screen(failing, { tags: ["Lobby"] })].filter((item) => (item.tags as string[]).includes(req.query?.tag ?? "")) },
   }));
-  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/screenshot$/, async (req): Promise<TransportResponse> => {
-    const id = req.path.split("/")[4]!;
+  transport.on("POST", /^\/api\/screens\/[^/]+\/screenshot$/, async (req): Promise<TransportResponse> => {
+    const id = req.path.split("/")[3]!;
     inFlight.now += 1;
     inFlight.max = Math.max(inFlight.max, inFlight.now);
     await new Promise((resolve) => setImmediate(resolve));
@@ -404,11 +404,11 @@ function screenshotBackend(failing: string, inFlight: { now: number; max: number
     captures.set(id, capture);
     return { status: 202, headers: {}, body: { capture_id: capture, expires_at: "2026-08-14T17:00:30.000Z" } };
   });
-  transport.on("GET", /^\/api\/v1\/screens\/[^/]+\/screenshot\/status$/, (req) => ({
+  transport.on("GET", /^\/api\/screens\/[^/]+\/screenshot\/status$/, (req) => ({
     status: 200, headers: {},
-    body: { state: "ready", capture_id: captures.get(req.path.split("/")[4]!), bytes: IMAGE.byteLength, sha256: IMAGE_SHA256, width: 480, height: 270 },
+    body: { state: "ready", capture_id: captures.get(req.path.split("/")[3]!), bytes: IMAGE.byteLength, sha256: IMAGE_SHA256, width: 480, height: 270 },
   }));
-  transport.on("GET", /^\/api\/v1\/screens\/[^/]+\/screenshot$/, () => ({
+  transport.on("GET", /^\/api\/screens\/[^/]+\/screenshot$/, () => ({
     status: 200, headers: { "content-type": "image/webp", "content-length": String(IMAGE.byteLength) }, body: IMAGE,
   }));
   return transport;
@@ -421,7 +421,7 @@ test("screen screenshot --tag fans out client-side with bounded concurrency into
   const result = await cli(["--json", "screen", "screenshot", "--tag", "Lobby", "--output", "shots", "--concurrency", "2"], transport, env);
   assert.equal(result.code, ExitCode.Conflict, result.stdout);
   assert.equal(result.envelope.ok, true);
-  assert.equal(transport.calls[0]!.path, "/api/v1/screens");
+  assert.equal(transport.calls[0]!.path, "/api/screens");
   assert.deepEqual(transport.calls[0]!.query, { tag: "Lobby" });
   const data = result.envelope.data;
   assert.equal(data.action, "screenshot");
@@ -495,7 +495,7 @@ test("single-screen --add rerun after an ambiguous failure supersedes the obsole
   const env = await enrolled();
   const { transport, screens } = fleetBackend();
   let fail = true;
-  transport.on("PATCH", `/api/v1/screens/${A}`, (): TransportResponse => {
+  transport.on("PATCH", `/api/screens/${A}`, (): TransportResponse => {
     // The first write lands on the server, but its answer is lost.
     const current = screens.get(A)!;
     current.tags = [...current.tags, "Spring"];
@@ -558,7 +558,7 @@ test("screen screenshot fan-out keeps each capture's own exit code and stops on 
 
 test("screen screenshot caps --tag at 500 screens and validates ids before any request", async () => {
   const env = await enrolled();
-  const many = new FakeTransport().on("GET", "/api/v1/screens", () => ({
+  const many = new FakeTransport().on("GET", "/api/screens", () => ({
     status: 200, headers: {},
     body: { items: Array.from({ length: 501 }, (_, index) => screen(`scr_${String(index).padStart(24, "A")}`, { tags: ["Lobby"] })) },
   }));

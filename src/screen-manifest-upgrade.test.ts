@@ -197,7 +197,7 @@ test("names are literal text: CR/LF/tab become spaces and the name is capped at 
 });
 
 test("screen list adds UPGRADE only when a screen has a story, with version primary and no hashes", async () => {
-  const transport = new FakeTransport().on("GET", "/api/v1/screens", () => ({
+  const transport = new FakeTransport().on("GET", "/api/screens", () => ({
     status: 200, headers: {},
     body: {
       items: [
@@ -231,7 +231,7 @@ test("screen list adds UPGRADE only when a screen has a story, with version prim
   assert.match(lines.find((line) => line.startsWith("scr_FAIL"))!, /failed Target pl_PROMO v7 · Playing pl_LOBBY v41 manifest_invalid/);
   assert.match(lines.find((line) => line.startsWith("scr_CALM"))!, /active$/);
 
-  const calm = await cli(["--human", "screen", "list"], new FakeTransport().on("GET", "/api/v1/screens", () => ({
+  const calm = await cli(["--human", "screen", "list"], new FakeTransport().on("GET", "/api/screens", () => ({
     status: 200, headers: {}, body: { items: [screen("scr_CALM", "Calm", upgrade({ state: "none" })), screen("scr_NEW", "New")] },
   })));
   assert.equal(calm.code, 0, calm.stdout);
@@ -247,7 +247,7 @@ test("screen list keeps assignment, health, and acknowledged upgrade data under 
     effective_playlist: { id: PROMO, source: "schedule", entry_id: "lunch" },
     health: { reported_at: "2026-09-25T10:04:00Z", stale: false, temperature_c: 85 },
   };
-  const transport = new FakeTransport().on("GET", "/api/v1/screens", () => ({ status: 200, headers: {}, body: { items: [body] } }));
+  const transport = new FakeTransport().on("GET", "/api/screens", () => ({ status: 200, headers: {}, body: { items: [body] } }));
   const result = await cli(["--human", "screen", "list"], transport);
   assert.equal(result.code, 0, result.stdout);
   const lines = result.stdout.split("\n");
@@ -282,7 +282,7 @@ test("screen show prints the Manifest upgrade block and keeps the JSON body unch
     desired_playlist: playlist(PROMO, 7, "Weekend promo"), active_playlist: playlist(PROMO, 7, "Weekend promo"),
     missing_page_count: 3, state_since: "2026-09-25T10:00:00Z", reported_at: "2026-09-25T10:04:00Z",
   }));
-  const transport = new FakeTransport().on("GET", "/api/v1/screens/scr_LOBBY", () => ({ status: 200, headers: {}, body }));
+  const transport = new FakeTransport().on("GET", "/api/screens/scr_LOBBY", () => ({ status: 200, headers: {}, body }));
   const json = await cli(["--json", "screen", "show", "scr_LOBBY"], transport);
   assert.equal(json.code, 0, json.stdout);
   assert.deepEqual((JSON.parse(json.stdout) as { data: Screen }).data.manifest_upgrade, body.manifest_upgrade);

@@ -81,12 +81,12 @@ function screen(id: string, extra: Partial<Screen> = {}): Screen {
 
 test("listAll follows next_cursor across pages, keeps the other query parameters, and merges the items", async () => {
   let served = 0;
-  const transport = new FakeTransport().on("GET", "/api/v1/media", (req) => {
+  const transport = new FakeTransport().on("GET", "/api/media", (req) => {
     served += 1;
     return listPage(req, rows(5), 2, { "x-page": String(served) });
   });
   const query = { tag: "Lobby", primitive: "image", unset: undefined };
-  const response = await new ApiClient({ transport }).listAll("/api/v1/media", query);
+  const response = await new ApiClient({ transport }).listAll("/api/media", query);
   assert.deepEqual(response.body, { items: rows(5), next_cursor: null });
   assert.equal(response.status, 200);
   assert.equal(response.headers["x-page"], "3", "the answer carries the last page's headers");
@@ -104,8 +104,8 @@ test("listAll stops at a null, an absent, or an empty next_cursor", async () => 
     ["absent", { items: rows(2) }],
     ["empty", { items: rows(2), next_cursor: "" }],
   ] as const) {
-    const transport = new FakeTransport().on("GET", "/api/v1/screens", () => ({ status: 200, headers: {}, body }));
-    const response = await new ApiClient({ transport }).listAll("/api/v1/screens");
+    const transport = new FakeTransport().on("GET", "/api/screens", () => ({ status: 200, headers: {}, body }));
+    const response = await new ApiClient({ transport }).listAll("/api/screens");
     assert.deepEqual(response.body, { items: rows(2), next_cursor: null }, name);
     assert.equal(transport.calls.length, 1, `${name}: one request`);
     assert.equal(transport.calls[0]!.query, undefined, `${name}: no cursor on the first request`);
@@ -113,44 +113,44 @@ test("listAll stops at a null, an absent, or an empty next_cursor", async () => 
 });
 
 test("listAll reads exactly LIST_MAX_PAGES pages and fails one page beyond, never returning part of a list", async () => {
-  const listed = (count: number) => new FakeTransport().on("GET", "/api/v1/media", (req) => listPage(req, rows(count), 1));
+  const listed = (count: number) => new FakeTransport().on("GET", "/api/media", (req) => listPage(req, rows(count), 1));
   const exact = listed(LIST_MAX_PAGES);
-  const whole = await new ApiClient({ transport: exact }).listAll("/api/v1/media");
+  const whole = await new ApiClient({ transport: exact }).listAll("/api/media");
   assert.equal((whole.body as { items: unknown[] }).items.length, LIST_MAX_PAGES);
   assert.equal(exact.calls.length, LIST_MAX_PAGES);
 
   const over = listed(LIST_MAX_PAGES + 1);
-  const problem = await problemOf(new ApiClient({ transport: over }).listAll("/api/v1/media"));
+  const problem = await problemOf(new ApiClient({ transport: over }).listAll("/api/media"));
   assert.equal(problem.code, "unexpected_response");
-  assert.match(problem.detail, new RegExp(`GET /api/v1/media still offered another page after ${LIST_MAX_PAGES} pages \\(${LIST_MAX_PAGES} rows\\)`));
+  assert.match(problem.detail, new RegExp(`GET /api/media still offered another page after ${LIST_MAX_PAGES} pages \\(${LIST_MAX_PAGES} rows\\)`));
   assert.match(problem.hint ?? "", /Narrow the list/);
   assert.equal(over.calls.length, LIST_MAX_PAGES, "no request past the cap");
 
   let served = 0;
-  const endless = new FakeTransport().on("GET", "/api/v1/media", () => {
+  const endless = new FakeTransport().on("GET", "/api/media", () => {
     served += 1;
     return { status: 200, headers: {}, body: { items: [], next_cursor: `cur_${served}` } };
   });
-  assert.equal((await problemOf(new ApiClient({ transport: endless }).listAll("/api/v1/media"))).code, "unexpected_response");
+  assert.equal((await problemOf(new ApiClient({ transport: endless }).listAll("/api/media"))).code, "unexpected_response");
   assert.equal(served, LIST_MAX_PAGES, "a server that never ends the list is stopped at the cap");
 });
 
 test("listAll fails when a later page fails or is not a list, and returns a first answer that is not a list unchanged", async () => {
-  const secondPage = (answer: TransportResponse) => new FakeTransport().on("GET", "/api/v1/screens", (req) => req.query?.after === undefined
+  const secondPage = (answer: TransportResponse) => new FakeTransport().on("GET", "/api/screens", (req) => req.query?.after === undefined
     ? { status: 200, headers: {}, body: { items: rows(1), next_cursor: "cur_1" } }
     : answer);
   const failed = await problemOf(new ApiClient({ transport: secondPage({
     status: 500, headers: { "content-type": "application/problem+json" }, body: { status: 500, code: "internal_error", title: "Internal error", detail: "The list failed." },
-  }) }).listAll("/api/v1/screens"));
+  }) }).listAll("/api/screens"));
   assert.equal(failed.code, "internal_error");
-  const notAList = await problemOf(new ApiClient({ transport: secondPage({ status: 200, headers: {}, body: { next_cursor: null } }) }).listAll("/api/v1/screens"));
+  const notAList = await problemOf(new ApiClient({ transport: secondPage({ status: 200, headers: {}, body: { next_cursor: null } }) }).listAll("/api/screens"));
   assert.equal(notAList.code, "unexpected_response");
-  assert.match(notAList.detail, /GET \/api\/v1\/screens answered page 2 without an items array/);
+  assert.match(notAList.detail, /GET \/api\/screens answered page 2 without an items array/);
 
   // The caller has always judged a malformed first answer itself.
   const body = { unexpected: true };
-  const first = new FakeTransport().on("GET", "/api/v1/screens", () => ({ status: 200, headers: { "x-request-id": "req_first" }, body }));
-  const answer = await new ApiClient({ transport: first }).listAll("/api/v1/screens");
+  const first = new FakeTransport().on("GET", "/api/screens", () => ({ status: 200, headers: { "x-request-id": "req_first" }, body }));
+  const answer = await new ApiClient({ transport: first }).listAll("/api/screens");
   assert.equal(answer.body, body);
   assert.equal(answer.headers["x-request-id"], "req_first");
   assert.equal(first.calls.length, 1);
@@ -163,18 +163,18 @@ test("screen, media, app, playlist, and kv list return every page as one list", 
   const apps = rows(3, "app");
   const playlists = rows(4, "pl");
   const kv = rows(3, "key");
-  const kvRoute = "/api/v1/applications/app_AAAAAAAAAAAAAAAAAAAAAAAA/kv";
+  const kvRoute = "/api/applications/app_AAAAAAAAAAAAAAAAAAAAAAAA/kv";
   const transport = new FakeTransport()
-    .on("GET", "/api/v1/screens", (req) => listPage(req, screens, 2))
-    .on("GET", "/api/v1/media", (req) => listPage(req, media, 2))
-    .on("GET", "/api/v1/applications", (req) => listPage(req, apps, 2))
-    .on("GET", "/api/v1/playlists", (req) => listPage(req, playlists, 2))
+    .on("GET", "/api/screens", (req) => listPage(req, screens, 2))
+    .on("GET", "/api/media", (req) => listPage(req, media, 2))
+    .on("GET", "/api/applications", (req) => listPage(req, apps, 2))
+    .on("GET", "/api/playlists", (req) => listPage(req, playlists, 2))
     .on("GET", kvRoute, (req) => listPage(req, kv, 2));
   const cases: Array<[string[], string, unknown[], Record<string, string>]> = [
-    [["screen", "list", "--state", "archived"], "/api/v1/screens", screens, { state: "archived" }],
-    [["media", "list", "--tag", "lobby", "--primitive", "image"], "/api/v1/media", media, { tag: "lobby", primitive: "image" }],
-    [["app", "list"], "/api/v1/applications", apps, {}],
-    [["playlist", "list"], "/api/v1/playlists", playlists, {}],
+    [["screen", "list", "--state", "archived"], "/api/screens", screens, { state: "archived" }],
+    [["media", "list", "--tag", "lobby", "--primitive", "image"], "/api/media", media, { tag: "lobby", primitive: "image" }],
+    [["app", "list"], "/api/applications", apps, {}],
+    [["playlist", "list"], "/api/playlists", playlists, {}],
     [["kv", "list", "--application-id", "app_AAAAAAAAAAAAAAAAAAAAAAAA"], kvRoute, kv, {}],
   ];
   for (const [argv, route, all, query] of cases) {
@@ -204,7 +204,7 @@ test("screen screenshot --tag finds the tagged screens on later pages", async (t
   assert.equal(result.code, ExitCode.Success, result.stdout);
   assert.equal(result.envelope.data.matched, 5);
   assert.deepEqual(result.envelope.data.results.map((item: { screen_id: string }) => item.screen_id), lobby);
-  const lists = transport.calls.filter((call) => call.method === "GET" && call.path === "/api/v1/screens");
+  const lists = transport.calls.filter((call) => call.method === "GET" && call.path === "/api/screens");
   assert.deepEqual(lists.map((call) => call.query), [{ tag: "Lobby" }, { tag: "Lobby", after: "pg_2" }, { tag: "Lobby", after: "pg_4" }]);
 });
 
@@ -248,8 +248,8 @@ test("media upload reuses its earlier upload from a later page of the media list
   });
   const earlier = row("med_EARLIERAAAAAAAAAAAAAAAAA", createHash("sha256").update(bytes).digest("hex"));
   const transport = new FakeTransport()
-    .on("GET", "/api/v1/media", (req) => listPage(req, [row("med_OTHERAAAAAAAAAAAAAAAAAAA", "0".repeat(64)), earlier], 1))
-    .on("GET", "/api/v1/operations/op_EARLIER", () => ({
+    .on("GET", "/api/media", (req) => listPage(req, [row("med_OTHERAAAAAAAAAAAAAAAAAAA", "0".repeat(64)), earlier], 1))
+    .on("GET", "/api/operations/op_EARLIER", () => ({
       status: 200, headers: {},
       body: { id: "op_EARLIER", kind: "media.upload", state: "succeeded", created_at: earlier.created_at, updated_at: earlier.updated_at, result: { media_id: earlier.id } },
     }));
@@ -257,8 +257,8 @@ test("media upload reuses its earlier upload from a later page of the media list
   assert.equal(result.code, ExitCode.Success, result.stdout);
   assert.equal(result.envelope.data.reused, true);
   assert.equal(result.envelope.data.media_id, earlier.id);
-  assert.equal(transport.calls.some((call) => call.path === "/api/v1/media/uploads"), false, "nothing was uploaded again");
-  const lists = transport.calls.filter((call) => call.path === "/api/v1/media");
+  assert.equal(transport.calls.some((call) => call.path === "/api/media/uploads"), false, "nothing was uploaded again");
+  const lists = transport.calls.filter((call) => call.path === "/api/media");
   assert.deepEqual(lists.map((call) => call.query), [{ primitive: "video" }, { primitive: "video", after: "pg_1" }]);
 });
 
@@ -274,8 +274,8 @@ test("media upload reuses normalized media by its original upload identity", asy
   });
   const earlier = row("med_EARLIERAAAAAAAAAAAAAAAAA", createHash("sha256").update(bytes).digest("hex"));
   const transport = new FakeTransport()
-    .on("GET", "/api/v1/media", (req) => listPage(req, [row("med_OTHERAAAAAAAAAAAAAAAAAAA", "0".repeat(64)), earlier], 1))
-    .on("GET", "/api/v1/operations/op_EARLIER", () => ({
+    .on("GET", "/api/media", (req) => listPage(req, [row("med_OTHERAAAAAAAAAAAAAAAAAAA", "0".repeat(64)), earlier], 1))
+    .on("GET", "/api/operations/op_EARLIER", () => ({
       status: 200, headers: {},
       body: { id: "op_EARLIER", kind: "media.upload", state: "succeeded", created_at: earlier.created_at, updated_at: earlier.updated_at, result: { media_id: earlier.id } },
     }));
@@ -283,7 +283,7 @@ test("media upload reuses normalized media by its original upload identity", asy
   assert.equal(result.code, ExitCode.Success, result.stdout);
   assert.equal(result.envelope.data.reused, true);
   assert.equal(result.envelope.data.media_id, earlier.id);
-  assert.equal(transport.calls.some((call) => call.path === "/api/v1/media/uploads"), false, "nothing was uploaded again");
-  const lists = transport.calls.filter((call) => call.path === "/api/v1/media");
+  assert.equal(transport.calls.some((call) => call.path === "/api/media/uploads"), false, "nothing was uploaded again");
+  const lists = transport.calls.filter((call) => call.path === "/api/media");
   assert.deepEqual(lists.map((call) => call.query), [{ primitive: "image" }, { primitive: "image", after: "pg_1" }]);
 });

@@ -17,12 +17,12 @@ function fixture(pageSize?: number) {
   let malformed = false;
   const screens = [ { id: "scr_A", label: "Lobby", state: "active", revision: 3, playlist_id: "pl_BOARD" }, { id: "scr_B", label: "Stored", state: "archived", revision: 7, playlist_id: "pl_BOARD" }, { id: "scr_C", label: "Other", state: "active", revision: 2, playlist_id: "pl_OTHER" } ];
   const transport = new FakeTransport()
-    .on("GET", "/api/v1/playlists/pl_BOARD", () => response({ ...document, id: "pl_BOARD", revision }))
-    .on("GET", "/api/v1/screens", req => {
+    .on("GET", "/api/playlists/pl_BOARD", () => response({ ...document, id: "pl_BOARD", revision }))
+    .on("GET", "/api/screens", req => {
       const listed = screens.filter(s => (s.state === "archived") === (req.query?.state === "archived"));
       return malformed ? response({}) : pageSize === undefined ? response({ items: listed }) : listPage(req, listed, pageSize);
     })
-    .on("PUT", "/api/v1/playlists/pl_BOARD", req => failure ? { status: 409, headers: {}, body: { code: "revision_conflict", title: "Conflict", status: 409, detail: "Playlist changed", current_revision: 5 } } : response({ ...(req.body as object), id: "pl_BOARD", revision: 5 }));
+    .on("PUT", "/api/playlists/pl_BOARD", req => failure ? { status: 409, headers: {}, body: { code: "revision_conflict", title: "Conflict", status: 409, detail: "Playlist changed", current_revision: 5 } } : response({ ...(req.body as object), id: "pl_BOARD", revision: 5 }));
   const options = { client: new ApiClient({ transport }), apiUrl: "https://api.screenrig.ai", playlistId: "pl_BOARD", pageId: "page_1", primitiveId: "content", releaseId: "rel_NEW", apply: false };
   return { document, transport, options, screens, changeRevision: () => revision++, failWrite: () => failure = true, malformedList: () => malformed = true };
 }
@@ -66,7 +66,7 @@ test("the impact review reads every page of both screen lists", async () => {
   assert.deepEqual(preview.affected_screens!.map(s => s.id), ["scr_A", "scr_B", "scr_D"]);
   assert.equal(preview.impact, expected.impact, "the impact token does not depend on the page size");
   assert.deepEqual(
-    paged.transport.calls.filter(c => c.path === "/api/v1/screens").map(c => c.query),
+    paged.transport.calls.filter(c => c.path === "/api/screens").map(c => c.query),
     [undefined, { after: "pg_1" }, { after: "pg_2" }, { state: "archived" }],
   );
 });

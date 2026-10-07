@@ -7,14 +7,12 @@ import { ExitCode } from "./exit-codes.js";
 import { isAdSlotPage } from "./playlist-authoring.js";
 import { CliError, makeProblem } from "./problems.js";
 
-const validators = new Map<"v1" | "v2", ReturnType<typeof buildValidators>>();
 /**
- * Local validation compiles the canonical generated schema for the document's
- * own union: ordinary documents use the closed v1 schema, and a document with
- * an adslot page uses the v2 union. Neither schema is reimplemented here.
+ * Local validation compiles the canonical generated playlist write schema.
+ * The schema accepts ordinary pages and ad-slot pages. It is not reimplemented here.
  */
-function buildValidators(version: "v1" | "v2") {
-  const asset = version === "v2" ? "playlist-write-v2.schema.json" : "playlist-write.schema.json";
+function buildValidators() {
+  const asset = "playlist-write-v2.schema.json" as const;
 const ajv = new Ajv2020({ allErrors: true, strict: true });
 addFormats.default(ajv);
 const schema = JSON.parse(readAsset(asset).toString("utf8"));
@@ -41,21 +39,17 @@ const diagnose = diagnosticAjv.compile(diagnosticSchema);
 return { validate, diagnose };
 
  }
-/** Compile each canonical union once per process. */
-function cached(version: "v1" | "v2"): ReturnType<typeof buildValidators> {
-  const existing = validators.get(version);
-  if (existing) return existing;
-  const built = buildValidators(version);
-  validators.set(version, built);
-  return built;
+let compiled: ReturnType<typeof buildValidators> | undefined;
+/** Compile the canonical schema once per process. */
+function cached(): ReturnType<typeof buildValidators> {
+  return compiled ??= buildValidators();
 }
 export const PLAYLIST_SERVER_CHECKS = ["reference authorization and readiness", "media durations", "DNS and remote availability"];
 
 /**
- * The cross-field checks for an ad-bearing document that the canonical v2
- * schema cannot express, mirroring the server's own v2 rules. They run only on
- * a document that already passed that schema, and the server remains the
- * authority.
+ * Cross-field checks for an ad-bearing document that the canonical schema
+ * cannot express. They run only on a document that already passed that schema,
+ * and the server remains the authority.
  */
 function adslotPageIssues(pages: unknown[]): Array<{ path: string; message: string }> {
   const issues: Array<{ path: string; message: string }> = [];
@@ -74,8 +68,8 @@ function adslotPageIssues(pages: unknown[]): Array<{ path: string; message: stri
 export function playlistIssues(value: unknown): Array<{ path: string; message: string }> {
   const pages = value !== null && typeof value === "object" && !Array.isArray(value)
     && "pages" in value && Array.isArray(value.pages) ? value.pages : undefined;
-  const version = pages?.some(isAdSlotPage) ? "v2" : "v1";
-  const { validate, diagnose } = cached(version);
+  const adslot = pages?.some(isAdSlotPage) === true;
+  const { validate, diagnose } = cached();
   if (!validate(value)) {
     diagnose(value);
     const errors = diagnose.errors ?? validate.errors ?? [];
@@ -87,7 +81,7 @@ export function playlistIssues(value: unknown): Array<{ path: string; message: s
     }));
     return [...new Map(issues.map((issue) => [`${issue.path}:${issue.message}`, issue])).values()];
   }
-  return version === "v2" && pages ? [...validatePlaylistWriteSemantics(value), ...adslotPageIssues(pages)] : validatePlaylistWriteSemantics(value);
+  return adslot && pages ? [...validatePlaylistWriteSemantics(value), ...adslotPageIssues(pages)] : validatePlaylistWriteSemantics(value);
 }
 export function assertPlaylistValid(value: unknown): void {
   const errors = playlistIssues(value);

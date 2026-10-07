@@ -80,8 +80,8 @@ test("healthIssues flags disconnected, hot at 80 °C, crashing at 3, and stale",
 
 test("screen show passes health through and prints the Health block; list adds HEALTH only when needed", async () => {
   const transport = new FakeTransport()
-    .on("GET", "/api/v1/screens/scr_LOBBY", () => ({ status: 200, headers: {}, body: screen("scr_LOBBY", "Lobby", healthy) }))
-    .on("GET", "/api/v1/screens", () => ({ status: 200, headers: {}, body: { items: [screen("scr_LOBBY", "Lobby", healthy), screen("scr_BAR", "Bar")] } }));
+    .on("GET", "/api/screens/scr_LOBBY", () => ({ status: 200, headers: {}, body: screen("scr_LOBBY", "Lobby", healthy) }))
+    .on("GET", "/api/screens", () => ({ status: 200, headers: {}, body: { items: [screen("scr_LOBBY", "Lobby", healthy), screen("scr_BAR", "Bar")] } }));
   const json = await cli(["--json", "screen", "show", "scr_LOBBY"], transport);
   assert.equal(json.code, 0, json.stdout);
   assert.deepEqual((JSON.parse(json.stdout) as { data: { health: ScreenHealth } }).data.health, healthy);
@@ -90,7 +90,7 @@ test("screen show passes health through and prints the Health block; list adds H
   const calm = await cli(["--human", "screen", "list"], transport);
   assert.doesNotMatch(calm.stdout, /HEALTH/);
 
-  const hot = new FakeTransport().on("GET", "/api/v1/screens", () => ({
+  const hot = new FakeTransport().on("GET", "/api/screens", () => ({
     status: 200, headers: {},
     body: { items: [screen("scr_LOBBY", "Lobby", healthy), screen("scr_BAR", "Bar", { ...healthy, temperature_c: 85, display: { connected: false } }), screen("scr_NEW", "New")] },
   }));

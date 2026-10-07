@@ -6,7 +6,7 @@ import { requireCapability } from "./project-capabilities.js";
 import { ApiClient } from "./client.js";
 import { newIdempotencyKey } from "./ids.js";
 import { quotedRevision } from "./if-match.js";
-import { playlistApiVersion } from "./playlist-authoring.js";
+import { isAdSlotPage } from "./playlist-authoring.js";
 import { CliError, makeProblem, usageError } from "./problems.js";
 import { manifestUpgradeOf } from "./screen-manifest-upgrade.js";
 import type { CliRuntime } from "./runtime.js";
@@ -76,7 +76,7 @@ async function awaitPlayback(options: {
     if (!playback.playing && playback.state !== reported) options.progress?.("assigned", reported = playback.state);
     if (final || waited_ms + options.wait.pollMs > options.wait.timeoutMs) return { ...playback, waited_ms };
     await options.runtime.sleep(options.wait.pollMs);
-    screen = (await options.client.call({ method: "GET", path: `/api/v1/screens/${options.screenId}` })).body;
+    screen = (await options.client.call({ method: "GET", path: `/api/screens/${options.screenId}` })).body;
   }
 }
 
@@ -90,12 +90,11 @@ export async function publishScreen(options: {
 }) {
   const { client, screenId, document } = options;
   const expected = options.revision === undefined ? undefined : Number(options.revision.replaceAll('"', ''));
-  const project = (await client.call({ method: "GET", path: "/api/v1/project" })).body as { id?: string } | undefined;
+  const project = (await client.call({ method: "GET", path: "/api/project" })).body as { id?: string } | undefined;
   if (typeof project?.id !== "string" || project.id.length === 0) throw usageError("Project identity is missing.");
-  // An ad-bearing document is published under the v2 union, and only a
-  // signage/publish-capable project may place adslot pages at all.
-  const playlistVersion = playlistApiVersion(document.pages);
-  if (playlistVersion === "v2") {
+  // Only a signage/publish-capable project may place adslot pages.
+  const pages = document.pages;
+  if (Array.isArray(pages) && pages.some(isAdSlotPage)) {
     await requireCapability(client, "signage.publish", "screen publish with adslot pages", {
       command: "screenrig project capabilities",
       reason: "Read the project's effective capabilities before publishing an ad-bearing playlist; an advertising-only project cannot publish playlists.",
@@ -143,7 +142,7 @@ export async function publishScreen(options: {
       if (state.playlist) resource(state.playlist, "playlist");
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     if (!state) {
-      const screen = resource((await client.call({ method: "GET", path: `/api/v1/screens/${screenId}` })).body, "screen");
+      const screen = resource((await client.call({ method: "GET", path: `/api/screens/${screenId}` })).body, "screen");
       if (screen.id !== screenId) throw usageError("Screen response identity did not match.");
       if (expected !== undefined && screen.revision !== expected) conflict("Screen changed before publishing. Inspect it and retry with its intended revision.", screen.revision);
       if (document.pages.some((page: any) => page.visibility !== undefined) && !screen.timezone) throw usageError("Set the screen timezone before publishing a scheduled playlist.");
@@ -154,18 +153,18 @@ export async function publishScreen(options: {
       throw usageError("The publish replay window has expired. Inspect the project and screen before reconciling; this command will not repeat an ambiguous write after server idempotency expiry.");
     }
     if (!state.playlist) {
-      const response = await client.call({ method: "POST", path: `/api/${playlistVersion}/playlists`, body: document, idempotent: true, idempotencyKey: state.create_key });
+      const response = await client.call({ method: "POST", path: "/api/playlists", body: document, idempotent: true, idempotencyKey: state.create_key });
       state.playlist = resource(response.body, "playlist");
       // Persist identity only, never the returned playlist or resolved media.
       state.playlist = { id: state.playlist.id, revision: state.playlist.revision };
       await save();
     }
     if (!state.assigned) {
-      await client.call({ method: "PATCH", path: `/api/v1/screens/${screenId}`, body: { playlist_id: state.playlist.id }, headers: options.revision ? { "if-match": quotedRevision(options.revision) } : undefined, idempotent: true, idempotencyKey: state.assign_key });
+      await client.call({ method: "PATCH", path: `/api/screens/${screenId}`, body: { playlist_id: state.playlist.id }, headers: options.revision ? { "if-match": quotedRevision(options.revision) } : undefined, idempotent: true, idempotencyKey: state.assign_key });
       state.assigned = true;
       await save();
     }
-    const screen = resource((await client.call({ method: "GET", path: `/api/v1/screens/${screenId}` })).body, "screen");
+    const screen = resource((await client.call({ method: "GET", path: `/api/screens/${screenId}` })).body, "screen");
     if (screen.id !== screenId || screen.playlist_id !== state.playlist.id) conflict("The screen no longer has this playlist assigned. Inspect it before making another change.", screen.revision);
     const playback: PlaybackResult = options.wait
       ? await awaitPlayback({ client, runtime: options.runtime, screenId, playlist: state.playlist, screen, wait: options.wait, progress: options.progress })

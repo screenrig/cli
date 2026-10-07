@@ -35,7 +35,7 @@ export async function requireCapability(
 ): Promise<void> {
   let capabilities: ProjectCapabilities;
   try {
-    const response = await client.call({ method: "GET", path: "/api/v1/project/capabilities" });
+    const response = await client.call({ method: "GET", path: "/api/project/capabilities" });
     capabilities = validateProjectCapabilities(response.body);
   } catch (error) {
     const detail = error instanceof CliError ? error.problem.detail : error instanceof Error ? error.message : "the request failed";

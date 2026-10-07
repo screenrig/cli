@@ -129,7 +129,7 @@ test("USAGE and argv do not define a log-socket flag", () => {
 
 test("HTTP request and response share correlation_id with distinct event_id", async () => {
   const { logger, events } = createMemoryLogger({ command: ["screen", "list"] });
-  const transport = new FakeTransport().on("GET", "/api/v1/screens", () => ({
+  const transport = new FakeTransport().on("GET", "/api/screens", () => ({
     status: 200,
     headers: { "x-request-id": "req_AAAAAAAAAAAAAAAA", "content-type": "application/json" },
     body: { items: [] },
@@ -140,7 +140,7 @@ test("HTTP request and response share correlation_id with distinct event_id", as
     logger,
     requestId: "req_AAAAAAAAAAAAAAAA",
   });
-  await client.call({ method: "GET", path: "/api/v1/screens" });
+  await client.call({ method: "GET", path: "/api/screens" });
   const request = events.find((event) => event.kind === "http" && event.phase === "request");
   const response = events.find((event) => event.kind === "http" && event.phase === "response");
   assert.ok(request);
@@ -150,12 +150,12 @@ test("HTTP request and response share correlation_id with distinct event_id", as
   assert.equal(request.correlation_id, response.correlation_id);
   assert.notEqual(request.event_id, response.event_id);
   assert.equal(request.method, "GET");
-  assert.equal(request.path, "/api/v1/screens");
+  assert.equal(request.path, "/api/screens");
   assert.equal(request.tag, "get_screens");
   assert.equal(response.tag, "get_screens");
   assert.equal(request.message, undefined);
   assert.equal(response.status, 200);
-  assert.equal(request.op, "GET /api/v1/screens");
+  assert.equal(request.op, "GET /api/screens");
   assert.equal(response.request_id, "req_AAAAAAAAAAAAAAAA");
   assert.equal(request.request_id, "req_AAAAAAAAAAAAAAAA");
   assert.equal(request.invocation_id, "req_AAAAAAAAAAAAAAAA");
@@ -166,7 +166,7 @@ test("HTTP request and response share correlation_id with distinct event_id", as
 
 test("HTTP error logs status, problem, and the paired correlation_id", async () => {
   const { logger, events } = createMemoryLogger({ command: ["screen", "show"] });
-  const transport = new FakeTransport().on("GET", "/api/v1/screens/scr_missing", () => ({
+  const transport = new FakeTransport().on("GET", "/api/screens/scr_missing", () => ({
     status: 404,
     headers: { "content-type": "application/problem+json", "x-request-id": "req_BBBBBBBBBBBBBBBB" },
     body: {
@@ -178,7 +178,7 @@ test("HTTP error logs status, problem, and the paired correlation_id", async () 
     },
   }));
   const client = new ApiClient({ transport, logger, requestId: "req_BBBBBBBBBBBBBBBB" });
-  await assert.rejects(() => client.call({ method: "GET", path: "/api/v1/screens/scr_missing" }), CliError);
+  await assert.rejects(() => client.call({ method: "GET", path: "/api/screens/scr_missing" }), CliError);
   const request = events.find((event) => event.kind === "http" && event.phase === "request");
   const errorEvent = events.find((event) => event.kind === "http" && event.phase === "error");
   assert.ok(request);
@@ -186,7 +186,7 @@ test("HTTP error logs status, problem, and the paired correlation_id", async () 
   assert.equal(request.correlation_id, errorEvent.correlation_id);
   assert.equal(request.tag, "get_screen");
   assert.equal(errorEvent.tag, "get_screen");
-  assert.equal(request.path, "/api/v1/screens/scr_missing");
+  assert.equal(request.path, "/api/screens/scr_missing");
   assert.equal(errorEvent.status, 404);
   assert.equal((errorEvent.problem as { code?: string } | undefined)?.code, "not_found");
   assert.match(String((errorEvent.problem as { detail?: string } | undefined)?.detail), /Screen not found/);
@@ -194,13 +194,13 @@ test("HTTP error logs status, problem, and the paired correlation_id", async () 
 
 test("HTTP path with scr_ sets id on request and response", async () => {
   const { logger, events } = createMemoryLogger({ command: ["screen", "show"] });
-  const transport = new FakeTransport().on("GET", "/api/v1/screens/scr_1q2333321", () => ({
+  const transport = new FakeTransport().on("GET", "/api/screens/scr_1q2333321", () => ({
     status: 200,
     headers: { "content-type": "application/json" },
     body: { id: "scr_1q2333321" },
   }));
   const client = new ApiClient({ transport, logger, requestId: "req_CCCCCCCCCCCCCCCC" });
-  await client.call({ method: "GET", path: "/api/v1/screens/scr_1q2333321" });
+  await client.call({ method: "GET", path: "/api/screens/scr_1q2333321" });
   const request = events.find((event) => event.kind === "http" && event.phase === "request");
   const response = events.find((event) => event.kind === "http" && event.phase === "response");
   assert.ok(request);
@@ -215,9 +215,9 @@ test("HTTP path with scr_ sets id on request and response", async () => {
 test("HTTP startHttp uses explicit id and params over the path", () => {
   const { logger, events } = createMemoryLogger({ command: ["screen", "show"] });
   const span = logger.startHttp({
-    op: "GET /api/v1/screens/scr_from_path",
+    op: "GET /api/screens/scr_from_path",
     method: "GET",
-    path: "/api/v1/screens/scr_from_path",
+    path: "/api/screens/scr_from_path",
     id: "scr_explicit",
     params: { foo: "bar", blah: 2133 },
   });
@@ -463,7 +463,7 @@ test("agent connect rewrite keeps log_socket", async () => {
     { api_url: "https://api.screenrig.ai", log_socket: "/tmp/screenrig.sock" },
     fsLike,
   );
-  const transport = new FakeTransport().on("POST", "/api/v1/agent-connections", () => ({
+  const transport = new FakeTransport().on("POST", "/api/agent-connections", () => ({
     status: 500,
     headers: { "content-type": "application/problem+json" },
     body: { status: 500, code: "internal_error", title: "Failed", detail: "boom" },
@@ -487,7 +487,7 @@ test("quiet local spans emit start/finish only and suppress nested progress", ()
   const nested = logger.startLocal({ op: "media.transcode" });
   nested.progress({ percent: 50 });
   nested.finish();
-  const http = logger.startHttp({ op: "POST /api/v1/media/uploads", method: "POST", path: "/api/v1/media/uploads" });
+  const http = logger.startHttp({ op: "POST /api/media/uploads", method: "POST", path: "/api/media/uploads" });
   http.response(201);
   item.finish({ params: { outcome: "accepted" } });
   assert.deepEqual(

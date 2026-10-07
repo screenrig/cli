@@ -63,7 +63,7 @@ async function cli(argv: string[], transport: FakeTransport, env: Env, extra: Pa
   return { code, stdout: text, stderr: await errP, envelope };
 }
 
-const playsCalls = (transport: FakeTransport): TransportRequest[] => transport.calls.filter((call) => call.path === "/api/v1/playback/plays");
+const playsCalls = (transport: FakeTransport): TransportRequest[] => transport.calls.filter((call) => call.path === "/api/playback/plays");
 
 test("playsRange normalizes to UTC, defaults to the last 24 hours, and bounds 31 days", () => {
   assert.deepEqual(playsRange(undefined, undefined, NOW), { from: "2026-08-13T17:00:00Z", to: "2026-08-14T17:00:00Z" });
@@ -133,7 +133,7 @@ test("playback plays --all follows next_cursor and stops at the page cap with a 
 
   const endless = new FakeTransport();
   let served = 0;
-  endless.on("GET", "/api/v1/playback/plays", () => {
+  endless.on("GET", "/api/playback/plays", () => {
     served += 1;
     return { status: 200, headers: {}, body: { items: [{ screen_id: "scr_A", page_id: "p", media_id: "med_A", primitive: "image", received_at: "2026-08-14T16:00:00Z" }], next_cursor: `pc_${served}` } };
   });
@@ -214,7 +214,7 @@ test("a CSV stream that ends mid-row or is not CSV leaves the existing file unto
   const env = await enrolled();
   const target = path.join(env.cwd, "plays.csv");
   await writeFile(target, "previous export\r\n");
-  const truncated = new FakeTransport().onDownload("GET", "/api/v1/playback/plays", () => ({
+  const truncated = new FakeTransport().onDownload("GET", "/api/playback/plays", () => ({
     status: 200,
     headers: { "content-type": "text/csv; charset=utf-8" },
     body: { async *[Symbol.asyncIterator]() { yield Buffer.from(`${PLAY_HEADER}\r\nscr_A,pl_A,page`); } },
@@ -225,7 +225,7 @@ test("a CSV stream that ends mid-row or is not CSV leaves the existing file unto
   assert.equal(await readFile(target, "utf8"), "previous export\r\n");
   assert.deepEqual(await readdir(env.cwd), ["plays.csv"]);
 
-  const html = new FakeTransport().onDownload("GET", "/api/v1/playback/plays", () => ({
+  const html = new FakeTransport().onDownload("GET", "/api/playback/plays", () => ({
     status: 200, headers: { "content-type": "text/html" }, body: { async *[Symbol.asyncIterator]() { yield Buffer.from("<html>"); } },
   }));
   const wrong = await cli(["--json", "playback", "plays", ...DAY, "--format", "csv", "--output", "plays.csv"], html, env);
@@ -233,7 +233,7 @@ test("a CSV stream that ends mid-row or is not CSV leaves the existing file unto
   assert.equal(wrong.envelope.error?.code, "unexpected_response");
   assert.equal(await readFile(target, "utf8"), "previous export\r\n");
 
-  const refused = new FakeTransport().onDownload("GET", "/api/v1/playback/plays", () => ({
+  const refused = new FakeTransport().onDownload("GET", "/api/playback/plays", () => ({
     status: 400,
     headers: { "content-type": "application/problem+json" },
     problem: { type: "https://screenrig.ai/problems/invalid_request", title: "Invalid request", status: 400, code: "invalid_request", detail: "the range from to to must be at most 31 days" },
@@ -251,7 +251,7 @@ test("--output - writes only the CSV to stdout", async () => {
   assert.equal(piped.stdout, `${PLAY_HEADER}\r\nscr_LOBBYBBBBBBBBBBBBBBBBBB,pl_AAAAAAAAAAAAAAAAAAAAAAAA,poster,,med_BBBBBBBBBBBBBBBBBBBBBBBB,image,,2026-08-14T16:30:00Z,man_PUBLISHED,7\r\n`);
   assert.deepEqual(await readdir(env.cwd), []);
 
-  const truncated = new FakeTransport().onDownload("GET", "/api/v1/playback/plays", () => ({
+  const truncated = new FakeTransport().onDownload("GET", "/api/playback/plays", () => ({
     status: 200,
     headers: { "content-type": "text/csv" },
     body: { async *[Symbol.asyncIterator]() { yield Buffer.from(`${PLAY_HEADER}\r\nscr_A`); } },
@@ -272,7 +272,7 @@ test("playback list --format csv exports the daily aggregates", async () => {
   assert.equal(result.envelope.data.from, undefined);
   const text = await readFile(path.join(env.cwd, "daily.csv"), "utf8");
   assert.ok(text.startsWith("screen_id,media_id,filename,primitive,day,play_count,"));
-  const call = transport.calls.find((item) => item.path === "/api/v1/playback" && item.query?.format === "csv");
+  const call = transport.calls.find((item) => item.path === "/api/playback" && item.query?.format === "csv");
   assert.equal(call?.query?.screen_id, "scr_PAIRINGAAAAAAAAAAAAAAAA");
   const refused = await cli(["--json", "playback", "list", "--output", "daily.csv"], transport, env);
   assert.equal(refused.code, ExitCode.Usage);
@@ -298,7 +298,7 @@ test("a CSV stream that fails partway keeps the complete rows beside the target 
     "scr_A,pl_A,clip,,med_A,video,,2026-08-14T16:00:00Z",
     "scr_A,pl_A,poster,,med_B,image,,2026-08-14T16:10:00.250Z",
   ];
-  const aborted = new FakeTransport().onDownload("GET", "/api/v1/playback/plays", () => ({
+  const aborted = new FakeTransport().onDownload("GET", "/api/playback/plays", () => ({
     status: 200,
     headers: { "content-type": "text/csv; charset=utf-8" },
     body: {
@@ -323,7 +323,7 @@ test("a CSV stream that fails partway keeps the complete rows beside the target 
   ]);
   assert.match(error.next!.reason, /drop the repeats/);
 
-  const headerOnly = new FakeTransport().onDownload("GET", "/api/v1/playback", () => ({
+  const headerOnly = new FakeTransport().onDownload("GET", "/api/playback", () => ({
     status: 200,
     headers: { "content-type": "text/csv" },
     body: { async *[Symbol.asyncIterator]() { yield Buffer.from("screen_id,media_id\r\n"); throw networkError("stream failed"); } },
@@ -335,7 +335,7 @@ test("a CSV stream that fails partway keeps the complete rows beside the target 
   ]);
   assert.deepEqual((await readdir(env.cwd)).sort(), ["plays-rest.csv", "plays.csv", "plays.csv.partial", "plays.csv.partial-2"], "nothing kept without a complete row");
 
-  const piped = new FakeTransport().onDownload("GET", "/api/v1/playback/plays", () => ({
+  const piped = new FakeTransport().onDownload("GET", "/api/playback/plays", () => ({
     status: 200,
     headers: { "content-type": "text/csv" },
     body: { async *[Symbol.asyncIterator]() { yield Buffer.from(`${PLAY_HEADER}\r\n${rows[0]}\r\n`); throw networkError("stream failed"); } },
@@ -370,7 +370,7 @@ test("--all stops before the playback export budget runs out and a 429 keeps its
 
   const flaky = new FakeTransport();
   let calls = 0;
-  flaky.on("GET", "/api/v1/playback/plays", (): TransportResponse => {
+  flaky.on("GET", "/api/playback/plays", (): TransportResponse => {
     calls += 1;
     if (calls === 1) {
       return { status: 200, headers: {}, body: { items: [{ screen_id: "scr_A", page_id: "p", media_id: "med_A", primitive: "image", received_at: "2026-08-14T16:00:00Z" }], next_cursor: "pc_1" } };
@@ -393,7 +393,7 @@ test("playback list takes an inclusive --day-from/--day-to range of at most 366 
   const transport = memoryBackend({ now: () => NOW });
   const ranged = await cli(["--json", "playback", "list", "--day-from", "2026-08-01", "--day-to", "2026-08-14"], transport, env);
   assert.equal(ranged.code, ExitCode.Success, ranged.stdout);
-  const call = transport.calls.filter((item) => item.path === "/api/v1/playback").at(-1)!;
+  const call = transport.calls.filter((item) => item.path === "/api/playback").at(-1)!;
   assert.equal(call.query?.day_from, "2026-08-01");
   assert.equal(call.query?.day_to, "2026-08-14");
   assert.equal(ranged.envelope.data.items.length, 1);

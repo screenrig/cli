@@ -13,7 +13,7 @@ import {
   validateMediaUploadSession,
 } from "./media-upload.js";
 import { validatePlaylistWrite } from "./playlist-write-validation.js";
-import { callVersionedPlaylist } from "./playlist-api.js";
+import { callPlaylist } from "./playlist-api.js";
 import { isAdSlotPage } from "./playlist-authoring.js";
 import { CliError, makeProblem, usageError } from "./problems.js";
 import { fetchSignedRawPut, type CliRuntime } from "./runtime.js";
@@ -581,9 +581,9 @@ async function writePrivateJson(filename: string, value: unknown): Promise<void>
 }
 
 async function streamMediaToFile(client: ApiClient, media: RemoteMedia, filename: string): Promise<void> {
-  const head = await client.call({ method: "HEAD", path: `/api/v1/media/${media.id}/content` });
+  const head = await client.call({ method: "HEAD", path: `/api/media/${media.id}/content` });
   validateMediaHeaders(head.headers, media);
-  const response = await client.download({ method: "GET", path: `/api/v1/media/${media.id}/content` });
+  const response = await client.download({ method: "GET", path: `/api/media/${media.id}/content` });
   try {
     validateMediaHeaders(response.headers, media);
     if (!response.body) throw usageError(`Media ${media.id} export returned no body.`);
@@ -643,7 +643,7 @@ export async function snapshotBundleSelectors(client: ApiClient, input: unknown)
       const key = JSON.stringify([category, selector]);
       let ids = catalogs.get(key);
       if (!ids) {
-        const response = await client.call({ method: "POST", path: "/api/v1/selectors/preview", body: { primitive: category, selector } });
+        const response = await client.call({ method: "POST", path: "/api/selectors/preview", body: { primitive: category, selector } });
         const preview = record(response.body, "Selector preview");
         if (!Array.isArray(preview.candidates) || preview.candidates.length > 1024) throw usageError("Selector preview must contain at most 1024 candidates.");
         ids = preview.candidates.map(item => stringField(record(item, "Selector candidate"), "media_id", "Selector candidate"));
@@ -673,7 +673,7 @@ export async function exportPlaylistBundle(options: {
   if (!isResourceID(options.playlistId, "playlist")) throw usageError("playlist export requires a playlist identifier.");
   const destination = path.resolve(options.outputDirectory);
   await destinationAbsent(destination);
-  const playlistResponse = await callVersionedPlaylist(options.client, { method: "GET", id: options.playlistId, preferred: "v1" });
+  const playlistResponse = await callPlaylist(options.client, { method: "GET", id: options.playlistId });
   const snapshot = await snapshotBundleSelectors(options.client, playlistResponse.body);
   const normalized = normalizePlaylistForBundle(snapshot, { skipApplications: options.skipApplications === true });
   if (normalized.id !== options.playlistId) throw usageError("Playlist export response id did not match the requested playlist.");
@@ -681,7 +681,7 @@ export async function exportPlaylistBundle(options: {
   // Resolve and validate every metadata row before creating local output or downloading bytes.
   const media: RemoteMedia[] = [];
   for (const mediaId of normalized.mediaIds) {
-    const response = await options.client.call({ method: "GET", path: `/api/v1/media/${mediaId}` });
+    const response = await options.client.call({ method: "GET", path: `/api/media/${mediaId}` });
     media.push(parseRemoteMedia(response.body, mediaId));
   }
 
@@ -855,7 +855,7 @@ async function declareBundleMediaUpload(options: {
     try {
       const response = await options.client.call({
         method: "POST",
-        path: "/api/v1/media/uploads",
+        path: "/api/media/uploads",
         idempotent: true,
         idempotencyKey: options.idempotencyKey,
         body: options.body,
@@ -980,7 +980,7 @@ export async function importPlaylistBundle(options: {
 
   try {
     if (options.updateId && options.ifMatch) {
-      const target = await callVersionedPlaylist(options.client, { method: "GET", id: options.updateId, preferred: "v1" });
+      const target = await callPlaylist(options.client, { method: "GET", id: options.updateId });
       const targetBody = record(target.body, "Playlist update target");
       if (targetBody.id !== options.updateId) throw usageError("Playlist update target response did not match --update.");
       const current = targetBody.revision;
@@ -999,7 +999,7 @@ export async function importPlaylistBundle(options: {
       }
     }
     await options.beforePlaylistWrite?.(bundle.playlist, options.updateId);
-    const list = await options.client.listAll("/api/v1/media");
+    const list = await options.client.listAll("/api/media");
     const existing = existingMediaList(list.body);
     for (const source of bundle.manifest.media) {
       const reusable = existing
@@ -1045,7 +1045,7 @@ export async function importPlaylistBundle(options: {
       );
       const commit = await options.client.call({
         method: "POST",
-        path: `/api/v1/media/uploads/${session.id}/commit`,
+        path: `/api/media/uploads/${session.id}/commit`,
         idempotent: true,
         idempotencyKey: commitKey,
         body: { content_type: source.content_type, bytes: source.bytes, sha256: source.sha256 },
@@ -1072,20 +1072,17 @@ export async function importPlaylistBundle(options: {
       options.updateId ?? bundle.manifest.playlist.source_id,
     );
     playlistWriteStarted = true;
-    // A bundle never carries an adslot page, but --update may be replacing an
-    // ad-bearing playlist, so the update follows the version-required conflict.
     const response = options.updateId
-      ? await callVersionedPlaylist(options.client, {
+      ? await callPlaylist(options.client, {
         method: "PUT",
         id: options.updateId,
-        preferred: "v1",
         idempotencyKey: playlistKey,
         body: playlist,
         ...(ifMatch ? { headers: { "if-match": ifMatch } } : {}),
       })
       : await options.client.call({
         method: "POST",
-        path: "/api/v1/playlists",
+        path: "/api/playlists",
         idempotent: true,
         idempotencyKey: playlistKey,
         body: playlist,

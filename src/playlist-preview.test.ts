@@ -229,8 +229,8 @@ test("file preview fetches uploaded media from the project when logged in", asyn
   await writeFile(file, JSON.stringify(imagePlaylist("med_MENU")));
   const png = redPng();
   const transport = new FakeTransport()
-    .on("GET", "/api/v1/media/med_MENU", () => ({ status: 200, headers: {}, body: { id: "med_MENU", content_type: "image/png" } }))
-    .onDownload("GET", "/api/v1/media/med_MENU/content", () => ({
+    .on("GET", "/api/media/med_MENU", () => ({ status: 200, headers: {}, body: { id: "med_MENU", content_type: "image/png" } }))
+    .onDownload("GET", "/api/media/med_MENU/content", () => ({
       status: 200,
       headers: { "content-type": "image/png" },
       body: { async *[Symbol.asyncIterator]() { yield png; } },

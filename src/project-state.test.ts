@@ -84,7 +84,7 @@ test("generation, provisioning, browser claims and ordinary writes stay in their
   const provision = await provisionRetryState({ ...options, label: "A screen", generateIdempotencyKey: () => "provision-key-a" });
   const browser = await browserSetupRetryState({ ...options, code: "ABC234", generateIdempotencyKey: () => "browser-key-a" });
   const recovery = new WriteRecovery(resolvedA, runtime, "screen update");
-  const pending = await recovery.prepare({ method: "PATCH", path: "/api/v1/screens/scr_A", body: { name: "A screen" } }, "write-key-a");
+  const pending = await recovery.prepare({ method: "PATCH", path: "/api/screens/scr_A", body: { name: "A screen" } }, "write-key-a");
   assert.equal(pending.key, "write-key-a");
   const rerun = await generateRetryState({ ...options, requestHash: "hash-a" });
   assert.equal(rerun.state.idempotency_key, "generation-key-a");

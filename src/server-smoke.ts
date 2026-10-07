@@ -98,7 +98,7 @@ async function main(): Promise<void> {
   let kvBinaryRevision: number | undefined;
   let applicationId: string | undefined;
   try {
-    const pairingStartResponse = await fetch(new URL("/runtime/v1/pairing-sessions", playUrl), { method: "POST" });
+    const pairingStartResponse = await fetch(new URL("/screen/pairing-sessions", playUrl), { method: "POST" });
     await requireStatus(pairingStartResponse, 201, "player pairing session");
     assert.equal(pairingStartResponse.headers.get("cache-control"), "no-store");
     const pairingCookie = responseCookie(pairingStartResponse, "screenrig-local-pairing");
@@ -111,7 +111,7 @@ async function main(): Promise<void> {
     screenRevision = Number(pairedScreen?.revision);
     assert.ok(screenId && Number.isInteger(screenRevision));
     const publicUrl = String(pairing.data?.public_url ?? "");
-    assert.match(publicUrl, /^http:\/\/play\.screenrig\.localhost:8088\/s\/[A-Za-z0-9_-]+$/);
+    assert.match(publicUrl, /^http:\/\/play\.screenrig\.localhost:8088\/player\/s\/[A-Za-z0-9_-]+$/);
     assert.equal(new URL(publicUrl).origin, new URL(playUrl).origin);
     await run(["agent", "status"]);
     await run(["doctor"]);
@@ -126,7 +126,7 @@ async function main(): Promise<void> {
       "content-type": "application/json",
       "idempotency-key": randomBytes(16).toString("base64url"),
     };
-    const cancelDeclarationResponse = await fetch(new URL("/api/v1/media/uploads", apiUrl), {
+    const cancelDeclarationResponse = await fetch(new URL("/api/media/uploads", apiUrl), {
       method: "POST",
       headers: controlHeaders,
       body: JSON.stringify({
@@ -162,7 +162,7 @@ async function main(): Promise<void> {
     const assignedScreen = await run(["screen", "assign", screenId, "--playlist-id", playlistId, "--expect-rev", String(screenRevision)]);
     screenRevision = Number(assignedScreen.data?.revision);
 
-    const pairingEventsResponse = await fetch(new URL("/runtime/v1/pairing-events", playUrl), {
+    const pairingEventsResponse = await fetch(new URL("/stream/pairing-events", playUrl), {
       headers: { cookie: pairingCookie },
     });
     await requireStatus(pairingEventsResponse, 200, "pairing SSE");
@@ -172,7 +172,7 @@ async function main(): Promise<void> {
     const claimed = JSON.parse(claimedData) as { type?: string; completion_nonce?: string };
     assert.equal(claimed.type, "pairing.claimed");
     assert.match(claimed.completion_nonce ?? "", /^[A-Za-z0-9_-]{43}$/);
-    const completeResponse = await fetch(new URL("/runtime/v1/pairing-sessions/complete", playUrl), {
+    const completeResponse = await fetch(new URL("/screen/pairing-sessions/complete", playUrl), {
       method: "POST",
       headers: { cookie: pairingCookie, "content-type": "application/json" },
       body: JSON.stringify({ completion_nonce: claimed.completion_nonce }),
@@ -181,16 +181,16 @@ async function main(): Promise<void> {
     assert.equal(completeResponse.headers.get("cache-control"), "no-store");
     const deviceCookie = responseCookie(completeResponse, "screenrig-local-device");
     assert.ok(deviceCookie, "pairing completion must issue a localhost paired-device cookie");
-    const deviceSessionResponse = await fetch(new URL("/runtime/v1/device-sessions", playUrl), {
+    const deviceSessionResponse = await fetch(new URL("/screen/device-sessions", playUrl), {
       method: "POST", headers: { cookie: deviceCookie, "content-type": "application/json" }, body: "{}",
     });
     await requireStatus(deviceSessionResponse, 201, "paired runtime session");
     const runtimeCookie = responseCookie(deviceSessionResponse, "screenrig-local-runtime");
     assert.ok(runtimeCookie, "paired device session must issue a localhost runtime cookie");
-    const manifestResponse = await fetch(new URL("/runtime/v1/manifest", playUrl), { headers: { cookie: runtimeCookie } });
+    const manifestResponse = await fetch(new URL("/screen/manifest", playUrl), { headers: { cookie: runtimeCookie } });
     await requireStatus(manifestResponse, 200, "runtime manifest");
     const runtimeManifest = await manifestResponse.json() as { schemaVersion?: number };
-    assert.equal(runtimeManifest.schemaVersion, 2);
+    assert.equal(runtimeManifest.schemaVersion, 3);
 
     const shownScreen = await run(["screen", "show", screenId]);
     screenRevision = Number(shownScreen.data?.revision);
@@ -268,7 +268,7 @@ async function main(): Promise<void> {
       screen_id: screenId,
       media_id: mediaId,
       config_mode: "0600",
-      pairing_session_manifest: "active schemaVersion 2",
+      pairing_session_manifest: "active schemaVersion 3",
       screen_archive: "state archived, revision advanced",
       events_cursor_resume: "durable K/V delete observed after listed cursor",
       note: "real Compose API smoke passed; disposable project/application remain because this smoke has no project or application cleanup command",

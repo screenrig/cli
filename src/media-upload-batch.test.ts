@@ -111,12 +111,12 @@ function batchTransport(options: BatchTransportOptions = {}): BatchTransport {
   let seq = 0;
   let declares = 0;
   const declareKeys: string[] = [];
-  transport.on("GET", "/api/v1/project", () => ({
+  transport.on("GET", "/api/project", () => ({
     status: 200,
     headers: {},
     body: { id: PROJECT_ID },
   }));
-  transport.on("POST", "/api/v1/media/uploads", (req: TransportRequest): TransportResponse => {
+  transport.on("POST", "/api/media/uploads", (req: TransportRequest): TransportResponse => {
     declares += 1;
     declareKeys.push(req.headers?.["idempotency-key"] ?? "");
     if (options.rateLimitAt !== undefined && declares === options.rateLimitAt) {
@@ -173,7 +173,7 @@ function batchTransport(options: BatchTransportOptions = {}): BatchTransport {
       },
     };
   });
-  transport.on("POST", /^\/api\/v1\/media\/uploads\/[^/]+\/commit$/, (req) => {
+  transport.on("POST", /^\/api\/media\/uploads\/[^/]+\/commit$/, (req) => {
     const uploadId = req.path.split("/").at(-2) ?? "";
     const stored = uploads.get(uploadId);
     const mediaId = `med_${String(stored?.seq ?? 0).padStart(24, "A")}`;
@@ -189,7 +189,7 @@ function batchTransport(options: BatchTransportOptions = {}): BatchTransport {
     operations.set(opId, operation);
     return { status: 202, headers: {}, body: operation };
   });
-  transport.on("GET", /^\/api\/v1\/operations\/[^/]+$/, (req) => {
+  transport.on("GET", /^\/api\/operations\/[^/]+$/, (req) => {
     const id = req.path.split("/").pop() ?? "";
     const existing = operations.get(id) ?? {
       id,
@@ -434,7 +434,7 @@ test("attempts, wait_ms, and transfer_ms track retries separately", async () => 
   const transport = new FakeTransport();
   const operations = new Map<string, Operation>();
   let declares = 0;
-  transport.on("POST", "/api/v1/media/uploads", (req): TransportResponse => {
+  transport.on("POST", "/api/media/uploads", (req): TransportResponse => {
     declares += 1;
     if (declares === 1) {
       return {
@@ -469,12 +469,12 @@ test("attempts, wait_ms, and transfer_ms track retries separately", async () => 
       },
     };
   });
-  transport.on("POST", /^\/api\/v1\/media\/uploads\/[^/]+\/commit$/, () => ({
+  transport.on("POST", /^\/api\/media\/uploads\/[^/]+\/commit$/, () => ({
     status: 202,
     headers: {},
     body: operations.get("op_1"),
   }));
-  transport.on("GET", /^\/api\/v1\/operations\/[^/]+$/, () => ({
+  transport.on("GET", /^\/api\/operations\/[^/]+$/, () => ({
     status: 200,
     headers: {},
     body: operations.get("op_1"),
@@ -701,7 +701,7 @@ for (const pageSize of [undefined, 1]) test(`409 resource_conflict on a terminal
   const statePath = path.join(cwdDir, "upload-state.json");
   const transport = new FakeTransport();
   const declareKeys: string[] = [];
-  transport.on("POST", "/api/v1/media/uploads", (req): TransportResponse => {
+  transport.on("POST", "/api/media/uploads", (req): TransportResponse => {
     declareKeys.push(req.headers?.["idempotency-key"] ?? "");
     return {
       status: 409,
@@ -730,7 +730,7 @@ for (const pageSize of [undefined, 1]) test(`409 resource_conflict on a terminal
     updated_at: "2026-08-14T17:00:01.000Z",
   };
   const listed = [{ ...recovered, id: "med_OTHERAAAAAAAAAAAAAAAAAAAA", sha256: "0".repeat(64) }, recovered];
-  transport.on("GET", "/api/v1/media", (req) => pageSize === undefined
+  transport.on("GET", "/api/media", (req) => pageSize === undefined
     ? { status: 200, headers: {}, body: { items: listed } }
     : listPage(req, listed, pageSize));
   try {
@@ -768,7 +768,7 @@ test("409 resource_conflict on a terminal operation re-declares with a fresh key
   const transport = new FakeTransport();
   const declareKeys: string[] = [];
   const operations = new Map<string, Operation>();
-  transport.on("POST", "/api/v1/media/uploads", (req): TransportResponse => {
+  transport.on("POST", "/api/media/uploads", (req): TransportResponse => {
     const key = req.headers?.["idempotency-key"] ?? "";
     declareKeys.push(key);
     if (declareKeys.length === 1) {
@@ -809,13 +809,13 @@ test("409 resource_conflict on a terminal operation re-declares with a fresh key
       },
     };
   });
-  transport.on("GET", "/api/v1/media", () => ({ status: 200, headers: {}, body: { items: [] } }));
-  transport.on("POST", /^\/api\/v1\/media\/uploads\/[^/]+\/commit$/, () => ({
+  transport.on("GET", "/api/media", () => ({ status: 200, headers: {}, body: { items: [] } }));
+  transport.on("POST", /^\/api\/media\/uploads\/[^/]+\/commit$/, () => ({
     status: 202,
     headers: {},
     body: operations.get("op_rekey"),
   }));
-  transport.on("GET", /^\/api\/v1\/operations\/[^/]+$/, () => ({
+  transport.on("GET", /^\/api\/operations\/[^/]+$/, () => ({
     status: 200,
     headers: {},
     body: operations.get("op_rekey"),

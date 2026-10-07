@@ -383,7 +383,7 @@ async function resolveProjectId(client: ApiClient, configured?: string): Promise
   if (typeof configured === "string" && configured.length > 0) {
     return configured;
   }
-  const response = await client.call({ method: "GET", path: "/api/v1/project" });
+  const response = await client.call({ method: "GET", path: "/api/project" });
   const id = (response.body as Project | undefined)?.id;
   if (typeof id !== "string" || id.length === 0) {
     throw usageError("Cannot bind the upload-batch state file because the project id is unavailable.");
@@ -537,7 +537,7 @@ async function recoverMediaId(
   }
   if (options.sha256) {
     try {
-      const response = await client.listAll("/api/v1/media");
+      const response = await client.listAll("/api/media");
       return mediaMatchFromList(response.body, options.sha256);
     } catch {
       return undefined;

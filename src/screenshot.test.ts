@@ -103,17 +103,17 @@ function screenshotTransport(options: {
 }): FakeTransport {
   const transport = new FakeTransport();
   let statusIndex = 0;
-  transport.on("POST", `/api/v1/screens/${SCREEN_ID}/screenshot`, () => ({
+  transport.on("POST", `/api/screens/${SCREEN_ID}/screenshot`, () => ({
     status: 202,
     headers: { "cache-control": "no-store", "x-request-id": "req_screenshot" },
     body: { capture_id: CAPTURE_ID, expires_at: "2026-08-14T17:00:30.000Z" },
   }));
-  transport.on("GET", `/api/v1/screens/${SCREEN_ID}/screenshot/status`, () => {
+  transport.on("GET", `/api/screens/${SCREEN_ID}/screenshot/status`, () => {
     const body = options.statuses[Math.min(statusIndex, options.statuses.length - 1)] ?? { state: "pending", capture_id: CAPTURE_ID };
     statusIndex += 1;
     return { status: 200, headers: { "cache-control": "no-store" }, body };
   });
-  transport.on("GET", `/api/v1/screens/${SCREEN_ID}/screenshot`, () => options.image ?? {
+  transport.on("GET", `/api/screens/${SCREEN_ID}/screenshot`, () => options.image ?? {
     status: 200,
     headers: {
       "content-type": "image/webp",
@@ -218,10 +218,10 @@ test("screen screenshot downloads when status is ready and matching", async () =
     assert.equal(result.code, 0, result.stdout);
     const methods = screenshotCalls(transport).map((call) => `${call.method} ${call.path}`);
     assert.deepEqual(methods, [
-      `POST /api/v1/screens/${SCREEN_ID}/screenshot`,
-      `GET /api/v1/screens/${SCREEN_ID}/screenshot/status`,
-      `GET /api/v1/screens/${SCREEN_ID}/screenshot/status`,
-      `GET /api/v1/screens/${SCREEN_ID}/screenshot`,
+      `POST /api/screens/${SCREEN_ID}/screenshot`,
+      `GET /api/screens/${SCREEN_ID}/screenshot/status`,
+      `GET /api/screens/${SCREEN_ID}/screenshot/status`,
+      `GET /api/screens/${SCREEN_ID}/screenshot`,
     ]);
     const post = transport.calls.find((call) => call.method === "POST" && call.path.endsWith("/screenshot"));
     assert.ok(post?.headers?.["idempotency-key"]);

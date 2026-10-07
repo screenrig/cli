@@ -126,7 +126,7 @@ An explicit enrollment creates a project, attaches this agent, and emails a
 member invitation to the contact address. The same person can belong to more
 than one project. `--agentid-claim` is the alternative to `--email`: redeem a
 single-use claim code from an AgentID sign-in at the API host's
-`/agentid/v1/start`. Exactly one of `--email` and `--agentid-claim` is required;
+`/agentid/start`. Exactly one of `--email` and `--agentid-claim` is required;
 the verified AgentID owner becomes the contact address and invitation recipient.
 
 ```sh
@@ -335,7 +335,7 @@ screenrig screen screenshot --tag Lobby --output lobby-shots [--concurrency 4]
 ```
 
 `screen tag` takes exactly one of `--set`, `--add`, `--remove`, or `--clear`.
-With one screen id it uses `PATCH /api/v1/screens/{id}` with the whole tag set
+With one screen id it uses `PATCH /api/screens/{id}` with the whole tag set
 and returns the updated screen, like every other single-screen write. `--set`
 and `--clear` are guarded only by `--expect-rev`. `--add` and `--remove` read
 the screen first and send the new set guarded by `--expect-rev` or, when
@@ -344,7 +344,7 @@ omitted, by the revision just read, so a concurrent change fails with
 
 `screen assign`, `screen reload`, `screen toast`, and `screen tag` accept
 several screen ids or `--tag TAG` (not both) as one
-`POST /api/v1/screens/actions` request: one metered request for up to 500
+`POST /api/screens/actions` request: one metered request for up to 500
 screens. `--tag` selects active screens only. One screen id keeps the
 single-screen route and its envelope. Fleet requests take no `--expect-rev`
 because revision guards are per screen. They always send an Idempotency-Key.
@@ -489,7 +489,7 @@ one. `screen takeover ID` is short for `screen takeover set ID`.
 With one screen id, `schedule set`, `schedule clear`, `takeover`, and
 `takeover clear` use the single-screen routes and return the updated screen.
 `--expect-rev` guards its revision (`revision_conflict`, exit 6). Several ids
-or `--tag` become one `POST /api/v1/screens/actions` request
+or `--tag` become one `POST /api/screens/actions` request
 (`set_playlist_schedule`, `clear_playlist_schedule`, `takeover`,
 `takeover_clear`) with the fleet envelope and exit rules described above. Each
 screen fails alone; for example, a screen with no timezone or no default
@@ -1223,7 +1223,7 @@ Preview returns `matched_count`, filename-ordered `candidates` with media
 IDs and tags, and the normalized `selector` policy. With random order it
 shows the pool and shuffle policy; it does not choose the Player's shuffle,
 advance a cursor, create a playback grant, or change a manifest. The API is
-`POST /api/v1/selectors/preview` with `{ "primitive": "video", "selector": ... }`.
+`POST /api/selectors/preview` with `{ "primitive": "video", "selector": ... }`.
 It uses the authenticated project and the same matching rules as playback.
 Catalog changes after preview are resolved at playback's next loop boundary.
 

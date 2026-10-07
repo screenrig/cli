@@ -399,7 +399,7 @@ export async function submitPreparedMedia(
   const lap = () => { const now = runtime.now().getTime(); const elapsed = now - mark; mark = now; return elapsed; };
   const declarationResponse = await client.call({
     method: "POST",
-    path: "/api/v1/media/uploads",
+    path: "/api/media/uploads",
     idempotent: true,
     idempotencyKey: declareKey,
     body: prepared.declaration,
@@ -417,7 +417,7 @@ export async function submitPreparedMedia(
   const transfer_ms = lap();
   const commitResponse = await client.call({
     method: "POST",
-    path: `/api/v1/media/uploads/${session.id}/commit`,
+    path: `/api/media/uploads/${session.id}/commit`,
     idempotent: true,
     idempotencyKey: deriveCommitIdempotencyKey(declareKey),
     body: prepared.commit,
@@ -451,7 +451,7 @@ async function storedMediaFilename(
   mediaId: string,
 ): Promise<{ filename?: string; source_filename?: string }> {
   try {
-    const response = await client.call({ method: "GET", path: `/api/v1/media/${mediaId}` });
+    const response = await client.call({ method: "GET", path: `/api/media/${mediaId}` });
     const body = asRecord(response.body);
     const filename = typeof body?.filename === "string" && body.filename.length > 0 ? body.filename : undefined;
     const sourceFilename =
@@ -475,7 +475,7 @@ async function existingUpload(
 ): Promise<{ mediaId: string; operation: Operation; filename?: string; source_filename?: string } | undefined> {
   try {
     const primitive = declaration.content_type.split("/")[0];
-    const response = await client.listAll("/api/v1/media", { primitive });
+    const response = await client.listAll("/api/media", { primitive });
     const items = asRecord(response.body)?.items;
     if (!Array.isArray(items)) return undefined;
     const match = items.map(asRecord).find((item) => {

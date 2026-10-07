@@ -28,7 +28,7 @@ import type { OperationLogger } from "./log/types.js";
  * receiver token. Support history is private customer correspondence.
  */
 function privateBodies(method: string, path: string): boolean {
-  return (method === "POST" && path === "/api/v1/invitations") || /^\/api\/v1\/(?:webhooks|support)(?:\/|$)/.test(path);
+  return (method === "POST" && path === "/api/invitations") || /^\/api\/(?:webhooks|support)(?:\/|$)/.test(path);
 }
 
 /** 409 codes that are a definite refusal rather than possibly in-progress work. */
@@ -378,7 +378,7 @@ export class ApiClient {
   }
 
   async getOperation(id: string, timeoutMs?: number): Promise<Operation> {
-    const response = await this.call({ method: "GET", path: `/api/v1/operations/${id}`, timeout_ms: timeoutMs });
+    const response = await this.call({ method: "GET", path: `/api/operations/${id}`, timeout_ms: timeoutMs });
     return response.body as Operation;
   }
 

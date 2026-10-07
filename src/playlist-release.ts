@@ -16,7 +16,7 @@ export async function replacePlaylistRelease(options: {
   if (!options.apply && (options.revision || options.impact)) {
     throw usageError("Preview without write flags first. Use --apply to write; revision and impact guards are optional.");
   }
-  const response = await client.call({ method: "GET", path: `/api/v1/playlists/${playlistId}` });
+  const response = await client.call({ method: "GET", path: `/api/playlists/${playlistId}` });
   const resource = response.body as { id: string; revision: number };
   if (resource?.id !== playlistId || !Number.isSafeInteger(resource.revision) || resource.revision < 1) throw usageError("Playlist response has invalid identity or revision.");
   if (options.apply && options.revision !== undefined && options.revision !== String(resource.revision)) {
@@ -35,7 +35,7 @@ export async function replacePlaylistRelease(options: {
   const impactChecked = !options.apply || options.impact !== undefined;
   const screens: Pick<Screen, "id" | "label" | "state" | "revision">[] = [];
   for (const query of (!options.apply || options.impact ? [undefined, { state: "archived" }] : [])) {
-    const listed = await client.listAll("/api/v1/screens", query);
+    const listed = await client.listAll("/api/screens", query);
     const items = (listed.body as { items?: Screen[] })?.items;
     if (!Array.isArray(items)) throw usageError("Cannot determine affected screens: invalid screen list.");
     for (const screen of items) {
@@ -57,7 +57,7 @@ export async function replacePlaylistRelease(options: {
   if (!options.apply) return { ...review, impact, applied: false };
   if (options.impact !== undefined && options.impact !== impact) throw usageError("Replacement or affected screens changed. Preview again and review the new impact before applying.");
   if (unchanged) return { ...review, impact, applied: true, unchanged: true, playlist: response.body };
-  const updated = await client.call({ method: "PUT", path: `/api/v1/playlists/${playlistId}`, idempotent: true,
+  const updated = await client.call({ method: "PUT", path: `/api/playlists/${playlistId}`, idempotent: true,
     headers: options.revision ? { "if-match": quotedRevision(options.revision) } : undefined, body: document });
   return { ...review, impact, applied: true, playlist: updated.body };
 }

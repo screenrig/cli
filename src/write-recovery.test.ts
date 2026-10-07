@@ -26,13 +26,13 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   }
   return { directory, config, read, invoke };
 }
-const failed = () => new FakeTransport().on("PATCH", "/api/v1/screens/scr_TEST", () => { throw networkError("Response lost"); });
-const success = () => new FakeTransport().on("PATCH", "/api/v1/screens/scr_TEST", () => ({ status: 200, headers: {}, body: { id: "scr_TEST", revision: 2 } }));
+const failed = () => new FakeTransport().on("PATCH", "/api/screens/scr_TEST", () => { throw networkError("Response lost"); });
+const success = () => new FakeTransport().on("PATCH", "/api/screens/scr_TEST", () => ({ status: 200, headers: {}, body: { id: "scr_TEST", revision: 2 } }));
 const key = (transport: FakeTransport) => transport.calls[0]?.headers?.["idempotency-key"];
 
 test("ordinary writes persist before sending, replay after response loss, and clear after success", async (t) => {
   const f = await fixture(t);
-  const first = new FakeTransport().on("PATCH", "/api/v1/screens/scr_TEST", async request => {
+  const first = new FakeTransport().on("PATCH", "/api/screens/scr_TEST", async request => {
     const entries = Object.values((await f.read()).pending_writes) as Array<{ idempotency_key: string }>;
     assert.equal(entries[0]?.idempotency_key, request.headers?.["idempotency-key"]);
     throw networkError("Response lost");
@@ -64,7 +64,7 @@ test("changed body, revision, origin and credentials do not reuse pending write 
 
 test("definitive precondition refusal clears the pending key without retrying", async (t) => {
   const f = await fixture(t);
-  const refused = new FakeTransport().on("PATCH", "/api/v1/screens/scr_TEST", () => ({ status: 412, headers: {}, body: { code: "revision_conflict", detail: "Refetch", status: 412 } }));
+  const refused = new FakeTransport().on("PATCH", "/api/screens/scr_TEST", () => ({ status: 412, headers: {}, body: { code: "revision_conflict", detail: "Refetch", status: 412 } }));
   assert.notEqual((await f.invoke(refused)).code, 0);
   assert.equal(refused.calls.length, 1);
   assert.equal((await f.read()).pending_writes, undefined);
@@ -100,7 +100,7 @@ test("concurrent identical unresolved invocations use one persisted key", async 
 
 test("server errors retain the saved key and expose recovery guidance", async (t) => {
   const f = await fixture(t);
-  const first = new FakeTransport().on("PATCH", "/api/v1/screens/scr_TEST", () => ({ status: 503, headers: {}, body: { detail: "Unavailable", status: 503 } }));
+  const first = new FakeTransport().on("PATCH", "/api/screens/scr_TEST", () => ({ status: 503, headers: {}, body: { detail: "Unavailable", status: 503 } }));
   const result = await f.invoke(first);
   assert.notEqual(result.code, 0);
   assert.equal(result.result.warnings[0].code, "write_recovery_saved");
@@ -117,9 +117,9 @@ test("application acceptance followed by lost operation status replays the same 
   const transport = () => {
     const fake = new FakeTransport();
     const backend = memoryBackend();
-    fake.on("GET", "/api/v1/capabilities", req => backend.request(req));
-    fake.on("POST", "/api/v1/applications", req => backend.request(req));
-    fake.on("GET", /\/api\/v1\/operations\//, () => { throw networkError("Status unavailable"); });
+    fake.on("GET", "/api/capabilities", req => backend.request(req));
+    fake.on("POST", "/api/applications", req => backend.request(req));
+    fake.on("GET", /\/api\/operations\//, () => { throw networkError("Status unavailable"); });
     return fake;
   };
   const first = transport(); const second = transport();
@@ -196,9 +196,9 @@ test("recovery rejects malformed state and identifiers without clearing anything
 test("support retry retains one key and exposes safe recovery metadata without chat contents", async(t)=>{
  const args=["support","submit","--body","Private support question"];
  const f=await fixture(t);
- const first=new FakeTransport().on("POST","/api/v1/support/conversations",()=>{throw networkError("Response lost")});
+ const first=new FakeTransport().on("POST","/api/support/conversations",()=>{throw networkError("Response lost")});
  assert.notEqual((await f.invoke(first,args)).code,0);
  const pending=JSON.stringify((await f.read()).pending_writes);assert.doesNotMatch(pending,/Private support question/);assert.match(pending,/support submit/);
- const second=new FakeTransport().on("POST","/api/v1/support/conversations",()=>({status:201,headers:{},body:{conversation:{id:"sc_TEST"},message:{sequence:1}}}));
+ const second=new FakeTransport().on("POST","/api/support/conversations",()=>({status:201,headers:{},body:{conversation:{id:"sc_TEST"},message:{sequence:1}}}));
  assert.equal((await f.invoke(second,args)).code,0);assert.equal(key(second),key(first));assert.equal((await f.read()).pending_writes,undefined);
 });

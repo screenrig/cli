@@ -70,7 +70,7 @@ test("output flags conflict across command levels, including help", async () => 
 });
 
 test("empty event lists emit one default JSON result without a human-text sentinel", async () => {
-  const transport = new FakeTransport().on("GET", "/api/v1/events", () => ({ status: 200, headers: {}, body: { items: [], next_cursor: null } }));
+  const transport = new FakeTransport().on("GET", "/api/events", () => ({ status: 200, headers: {}, body: { items: [], next_cursor: null } }));
   const result = await invoke(["events", "list"], transport, true);
   assert.equal(result.code, 0);
   assert.deepEqual(JSON.parse(result.stdout).data, { items: [], next_cursor: null });

@@ -21,7 +21,7 @@ test("application name preserves ASCII and encodes Unicode as RFC 8187 ASCII byt
       requested = true;
       return Response.json({ id: "app_TEST" }, { status: 202 });
     });
-    assert.equal((await transport.request({ method: "POST", path: "/api/v1/applications", headers, body: new Uint8Array([1]) })).status, 202);
+    assert.equal((await transport.request({ method: "POST", path: "/api/applications", headers, body: new Uint8Array([1]) })).status, 202);
     assert.equal(requested, true);
   }
 });

@@ -1,11 +1,10 @@
 /** Compact snake_case display keys for operation-log events. */
 
-const API_PREFIXES = ["/api/v1/", "/runtime/v1/", "/content/v1/"] as const;
+const API_PREFIXES = ["/api/"] as const;
 
 const KEEP = new Set([
   "api",
-  "v1",
-  "runtime",
+  "screen",
   "native",
   "screens",
   "playlists",
@@ -61,6 +60,14 @@ const KEEP = new Set([
   "launch",
   "page",
   "stream",
+  "support",
+  "log",
+  "query",
+  "otel",
+  "agentid",
+  "website",
+  "start",
+  "callback",
   "health",
   "ready",
   "version",

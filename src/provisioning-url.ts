@@ -15,7 +15,7 @@ export function validateProvisioningUrls(value: ScreenProvisioning): ValidatedPr
   } catch {
     throw usageError("Browser provisioning response contains an invalid URL.");
   }
-  const expectedPath = `/s/${value.screen.public_id}`;
+  const expectedPath = `/player/s/${value.screen.public_id}`;
   const localHttp = publicUrl.protocol === "http:" && (publicUrl.hostname === "localhost" || publicUrl.hostname === "127.0.0.1" || publicUrl.hostname.endsWith(".localhost"));
   if (
     (publicUrl.protocol !== "https:" && !localHttp)

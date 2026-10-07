@@ -23,7 +23,7 @@ for (const action of ["upload", "update"] as const) {
     for (const noWait of [false, true]) {
       const transport = memoryBackend();
       if (action === "update") {
-        transport.on("POST", "/api/v1/applications/app_EXISTING/releases", (request) => {
+        transport.on("POST", "/api/applications/app_EXISTING/releases", (request) => {
           assert.equal(request.headers?.["if-match"], noWait ? undefined : '"7"');
           return { status: 202, headers: {}, body: {
             id: "app_EXISTING", release_id: "rel_NEW", operation_id: "op_NEW",
@@ -58,7 +58,7 @@ for (const action of ["upload", "update"] as const) {
       assert.equal(data.sha256, data.pack.sha256);
       assert.match(data.pack.sha256, /^[a-f0-9]{64}$/);
       assert.ok(data.pack.file_count > 0);
-      const polls = transport.calls.filter((call) => call.path.startsWith("/api/v1/operations/"));
+      const polls = transport.calls.filter((call) => call.path.startsWith("/api/operations/"));
       if (noWait) {
         assert.equal(data.operation, null);
         assert.equal(polls.length, 0, "no-wait must not poll to manufacture operation state");

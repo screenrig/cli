@@ -657,10 +657,10 @@ async function fetchMedia(
   options: { frameMs?: number; runtime?: CliRuntime },
 ): Promise<{ image?: Image; label?: string } | undefined> {
   try {
-    const meta = await client.call({ method: "GET", path: `/api/v1/media/${mediaId}` });
+    const meta = await client.call({ method: "GET", path: `/api/media/${mediaId}` });
     const body = recordOf(meta.body);
     const contentType = typeof body.content_type === "string" ? body.content_type : "";
-    const download = await client.download({ method: "GET", path: `/api/v1/media/${mediaId}/content` });
+    const download = await client.download({ method: "GET", path: `/api/media/${mediaId}/content` });
     if (!download.body) return { label: kind };
     const bytes = await readStream(download.body);
     await download.body.cancel?.();

@@ -84,7 +84,7 @@ async function enrolled(configDir: string): Promise<ConfigFs> {
 }
 
 function generateTransport(): FakeTransport {
-  return new FakeTransport().on("POST", "/api/v1/media/generations", (req) => {
+  return new FakeTransport().on("POST", "/api/media/generations", (req) => {
     const body = (req.body ?? {}) as { quality?: string; aspect_ratio?: string };
     const quality = body.quality === "low" || body.quality === "high" ? body.quality : "medium";
     const debit = GENERATE_DEBITS[quality];
@@ -148,7 +148,7 @@ test("media generate stores the still and returns med_… plus usage", async () 
     assert.doesNotMatch(result.stdout, new RegExp(PROMPT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.equal(transport.calls.length, 1);
     assert.equal(transport.calls[0]?.method, "POST");
-    assert.equal(transport.calls[0]?.path, "/api/v1/media/generations");
+    assert.equal(transport.calls[0]?.path, "/api/media/generations");
     assert.deepEqual(transport.calls[0]?.body, {
       prompt: PROMPT,
       aspect_ratio: "16:9",
@@ -157,9 +157,9 @@ test("media generate stores the still and returns med_… plus usage", async () 
     });
     assert.ok(transport.calls[0]?.headers?.["idempotency-key"]);
     assert.equal(transport.calls[0]?.timeout_ms, 150_000);
-    assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 0);
+    assert.equal(transport.calls.filter((call) => call.path === "/api/media/uploads").length, 0);
     assert.equal(transport.calls.filter((call) => call.method === "PUT").length, 0);
-    assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/v1/operations")).length, 0);
+    assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/operations")).length, 0);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
@@ -242,7 +242,7 @@ test("media generate rejects auto quality before any request", async () => {
 });
 
 test("media generate rejects a 201 without usage.usd", async () => {
-  const transport = new FakeTransport().on("POST", "/api/v1/media/generations", () => ({
+  const transport = new FakeTransport().on("POST", "/api/media/generations", () => ({
     status: 201,
     headers: { "content-type": "application/json", etag: '"1"' },
     body: {
@@ -269,7 +269,7 @@ test("media generate rejects a 201 without usage.usd", async () => {
 });
 
 test("media generate rejects a 201 without usage.credits", async () => {
-  const transport = new FakeTransport().on("POST", "/api/v1/media/generations", () => ({
+  const transport = new FakeTransport().on("POST", "/api/media/generations", () => ({
     status: 201,
     headers: { "content-type": "application/json", etag: '"1"' },
     body: {
@@ -328,7 +328,7 @@ test("media generate rejects an unknown aspect ratio before any request", async 
 });
 
 test("media generate maps 402 to payment_required and does not retry", async () => {
-  const transport = new FakeTransport().on("POST", "/api/v1/media/generations", () => ({
+  const transport = new FakeTransport().on("POST", "/api/media/generations", () => ({
     status: 402,
     headers: { "content-type": "application/problem+json" },
     body: {
@@ -359,7 +359,7 @@ test("media generate maps 402 to payment_required and does not retry", async () 
 });
 
 test("media generate does not poll a 202", async () => {
-  const transport = new FakeTransport().on("POST", "/api/v1/media/generations", () => ({
+  const transport = new FakeTransport().on("POST", "/api/media/generations", () => ({
     status: 202,
     headers: { "content-type": "application/json" },
     body: { id: "op_AAAAAAAAAAAAAAAAAAAAAAAA", state: "queued" },
@@ -377,14 +377,14 @@ test("media generate does not poll a 202", async () => {
     assert.equal(envelope.error.code, "unexpected_response");
     assert.match(envelope.error.detail, /expected HTTP 201 .* got HTTP 202/);
     assert.match(envelope.error.hint ?? "", /unknown whether one was created/);
-    assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/v1/operations")).length, 0);
+    assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/operations")).length, 0);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
 });
 
 test("the generate budget sits above the backend's 90 s vendor timeout while short calls keep 30 s", async () => {
-  const transport = generateTransport().on("GET", "/api/v1/media", () => ({
+  const transport = generateTransport().on("GET", "/api/media", () => ({
     status: 200,
     headers: { "content-type": "application/json" },
     body: { items: [], next_cursor: null },
@@ -398,7 +398,7 @@ test("the generate budget sits above the backend's 90 s vendor timeout while sho
       { configDir, fs: fsLike },
     );
     assert.equal(generated.code, ExitCode.Success, generated.stdout);
-    const generate = transport.calls.find((call) => call.path === "/api/v1/media/generations");
+    const generate = transport.calls.find((call) => call.path === "/api/media/generations");
     assert.ok(generate?.timeout_ms !== undefined);
     assert.ok(
       generate.timeout_ms > 90_000,
@@ -408,7 +408,7 @@ test("the generate budget sits above the backend's 90 s vendor timeout while sho
 
     const listed = await withRuntime(["--json", "media", "list"], transport, { configDir, fs: fsLike });
     assert.equal(listed.code, ExitCode.Success, listed.stdout);
-    const list = transport.calls.find((call) => call.path === "/api/v1/media");
+    const list = transport.calls.find((call) => call.path === "/api/media");
     assert.equal(list?.timeout_ms, 30_000, "the generic request budget is unchanged by the generate budget");
   } finally {
     await rm(configDir, { recursive: true, force: true });
@@ -466,7 +466,7 @@ test("media generate --no-progress suppresses the notice while returning the gen
     assert.equal(envelope.data.usage.usd, GENERATE_DEBITS.medium.usd);
     assert.equal(transport.calls.length, 1);
     assert.equal(transport.calls[0]?.method, "POST");
-    assert.equal(transport.calls[0]?.path, "/api/v1/media/generations");
+    assert.equal(transport.calls[0]?.path, "/api/media/generations");
     assert.deepEqual(transport.calls[0]?.body, {
       prompt: PROMPT,
       aspect_ratio: "16:9",
@@ -478,7 +478,7 @@ test("media generate --no-progress suppresses the notice while returning the gen
 });
 
 test("a generate that times out says the still may exist and names the command that checks", async () => {
-  const transport = new FakeTransport().on("POST", "/api/v1/media/generations", () => {
+  const transport = new FakeTransport().on("POST", "/api/media/generations", () => {
     throw timeoutError("API request timed out", "req_generatetimeout00000");
   });
   const configDir = await testTemp("media-generate-timeout-");
@@ -506,7 +506,7 @@ test("a generate that times out says the still may exist and names the command t
 test("an identical retry after a timeout reuses the idempotency key, and a resolved generation releases it", async () => {
   const configDir = await testTemp("media-generate-replay-");
   const fsLike = await enrolled(configDir);
-  const failing = new FakeTransport().on("POST", "/api/v1/media/generations", () => {
+  const failing = new FakeTransport().on("POST", "/api/media/generations", () => {
     throw timeoutError("API request timed out", "req_generatetimeout00000");
   });
   try {
@@ -519,7 +519,7 @@ test("an identical retry after a timeout reuses the idempotency key, and a resol
     const firstKey = failing.calls[0]?.headers?.["idempotency-key"];
     assert.ok(firstKey);
 
-    const secondFailing = new FakeTransport().on("POST", "/api/v1/media/generations", () => {
+    const secondFailing = new FakeTransport().on("POST", "/api/media/generations", () => {
       throw timeoutError("API request timed out", "req_generatetimeout00000");
     });
     const retried = await withRuntime(
@@ -534,7 +534,7 @@ test("an identical retry after a timeout reuses the idempotency key, and a resol
       "the identical retry must replay under the original key so the server returns the still it may already have billed",
     );
 
-    const different = new FakeTransport().on("POST", "/api/v1/media/generations", () => {
+    const different = new FakeTransport().on("POST", "/api/media/generations", () => {
       throw timeoutError("API request timed out", "req_generatetimeout00000");
     });
     await withRuntime(
@@ -577,7 +577,7 @@ test("an identical retry after a timeout reuses the idempotency key, and a resol
 test("a server answer releases the stored key: a 402 does not make the next run replay", async () => {
   const configDir = await testTemp("media-generate-402-key-");
   const fsLike = await enrolled(configDir);
-  const refused = new FakeTransport().on("POST", "/api/v1/media/generations", () => ({
+  const refused = new FakeTransport().on("POST", "/api/media/generations", () => ({
     status: 402,
     headers: { "content-type": "application/problem+json" },
     body: {
@@ -616,7 +616,7 @@ test("a server answer releases the stored key: a 402 does not make the next run 
 });
 
 test("media generate fails clearly on an empty 200 instead of reporting success", async () => {
-  const transport = new FakeTransport().on("POST", "/api/v1/media/generations", () => ({
+  const transport = new FakeTransport().on("POST", "/api/media/generations", () => ({
     status: 200,
     headers: { "x-request-id": "req_EMPTYEMPTYEMPTYEMPTY" },
     body: undefined,
@@ -645,7 +645,7 @@ test("media generate fails clearly on an empty 200 instead of reporting success"
 });
 
 test("media generate 402 tells the agent to stop and use its own image tools, keeping a server hint", async () => {
-  const problem = (extra: Record<string, unknown>) => new FakeTransport().on("POST", "/api/v1/media/generations", () => ({
+  const problem = (extra: Record<string, unknown>) => new FakeTransport().on("POST", "/api/media/generations", () => ({
     status: 402,
     headers: { "content-type": "application/problem+json" },
     body: {

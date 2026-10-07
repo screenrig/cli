@@ -5,8 +5,8 @@ import { assertOutputAvailable, readAuthoringJson, readAuthoringText, writeAutho
 import { publishScreen } from "./screen-publish.js";
 import { fleetHumanLines, fleetOutcome, rejectFleetRevision, screenActionResult, screenTag, screenTagList, screenTarget, SCREEN_TAGS_MAX, FLEET_SCREENS_MAX, type FleetItem } from "./screen-fleet.js";
 import { canonicalPairingCode } from "./pairing-code.js";
-import { editablePlaylist, isAdSlotPage, playlistApiVersion, preparePlaylist, targetDimensions } from "./playlist-authoring.js";
-import { callVersionedPlaylist } from "./playlist-api.js";
+import { editablePlaylist, isAdSlotPage, preparePlaylist, targetDimensions } from "./playlist-authoring.js";
+import { callPlaylist } from "./playlist-api.js";
 import { WriteRecovery } from "./write-recovery.js";
 import { ensureIdentityCredential, validateIdentityToken } from "./identity-credential.js";
 import { cacheProjectContexts, contextFromProject, formatResultContext, projectName as validateDisplayName, resultContext, setResultContext, validateProjectContext } from "./project-context.js";
@@ -264,7 +264,7 @@ function agentidSignInUrl(apiUrl: string): string | undefined {
     return undefined;
   }
   const supported = api.protocol === "https:" || (api.protocol === "http:" && api.hostname.endsWith(".localhost"));
-  return supported ? `${api.origin}/agentid/v1/start` : undefined;
+  return supported ? `${api.origin}/agentid/start` : undefined;
 }
 
 /** invitations create targets an existing project and never enrolls as a side effect. */
@@ -574,7 +574,7 @@ function commandHandler(
         && !(args.command[0] === "project" && ["list", "create", "use"].includes(args.command[1] ?? ""))
         && (!resolved.projectName || !resolved.organizationName)) {
         const contextClient = clientFor(runtime, args, resolved.apiUrl, resolved.token);
-        const contextResponse = await contextClient.call({ method: "GET", path: "/api/v1/project" });
+        const contextResponse = await contextClient.call({ method: "GET", path: "/api/project" });
         const context = contextFromProject(contextResponse.body as Project);
         if (resolved.projectId && context.project.id !== resolved.projectId) throw configError("Project credential resolved to a different project.");
         resolved = await cacheProjectContexts(runtime, resolved, [context], { credential: resolved.token });
@@ -735,7 +735,7 @@ export const handleProjectRename = commandHandler(projectRename);
 export const handleOrganizationList = commandHandler(async (args, runtime, resolved) => {
   const identity = await identityForCommand(args, runtime, resolved);
   const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
-  const response = await client.call({ method: "GET", path: "/api/v1/organizations" });
+  const response = await client.call({ method: "GET", path: "/api/organizations" });
   const body = response.body as { organizations?: Array<{ id: string; name: string; admin: boolean }> };
   if (!Array.isArray(body?.organizations) || body.organizations.some(org => !org || !/^(?:(?:stage|qa|development)_)?org_[A-Za-z0-9_-]+$/.test(org.id) || typeof org.name !== "string" || typeof org.admin !== "boolean")) throw configError("Organization list does not match the contract.");
   return { envelope: successEnvelope(body, { request_id: client.requestId }), exitCode: ExitCode.Success,
@@ -747,7 +747,7 @@ export const handleOrganizationRename = commandHandler(async (args, runtime, res
   const name = validateDisplayName(args.positionals[3], "Organization name");
   const identity = await identityForCommand(args, runtime, resolved);
   const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
-  const response = await client.call({ method: "PATCH", path: `/api/v1/organizations/${encodeURIComponent(id)}`, body: { name } });
+  const response = await client.call({ method: "PATCH", path: `/api/organizations/${encodeURIComponent(id)}`, body: { name } });
   const organization = response.body as { id: string; name: string };
   if (organization?.id !== id || validateDisplayName(organization.name, "Organization name") !== name) throw configError("Organization rename response does not match this request.");
   const listed = await accessibleProjects(args, runtime, identity);
@@ -771,13 +771,13 @@ export const handleAppUpdate = commandHandler(async (args, runtime, resolved) =>
 }, true);
 
 export const handleAppList = commandHandler(async (args, runtime, resolved) => {
-  return simpleList(args, runtime, resolved, "/api/v1/applications", "Applications");
+  return simpleList(args, runtime, resolved, "/api/applications", "Applications");
 }, true);
 
 export const handleAppShow = commandHandler(async (args, runtime, resolved) => {
   const id = args.positionals[2];
   if (!id) throw usageError("app show requires an application id.");
-  return simpleGet(args, runtime, resolved, `/api/v1/applications/${id}`, "Application");
+  return simpleGet(args, runtime, resolved, `/api/applications/${id}`, "Application");
 }, true);
 
 export const handleAppRename = commandHandler(async (args, runtime, resolved) => {
@@ -787,7 +787,7 @@ export const handleAppRename = commandHandler(async (args, runtime, resolved) =>
   const revision = flagString(args.flags, "if-match");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await client.call({
-    method: "PATCH", path: `/api/v1/applications/${encodeURIComponent(id)}`,
+    method: "PATCH", path: `/api/applications/${encodeURIComponent(id)}`,
     body: { name }, idempotent: true,
     headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
   });
@@ -879,7 +879,7 @@ async function agentStatus(
 
   const client = clientFor(runtime, args, resolved.apiUrl, resolved.token);
   try {
-    const response = await client.call({ method: "GET", path: "/api/v1/agents/self" });
+    const response = await client.call({ method: "GET", path: "/api/agents/self" });
     requirePrivateNoStore(response.headers, "Agent status response");
     const self = validateAgentSelfStatus(response.body);
     const agent = self.agent;
@@ -960,7 +960,7 @@ async function agentEnroll(
   const token = requireToken(enrolled.token);
   setResultContext(runtime, enrolled);
   const client = clientFor(runtime, args, enrolled.apiUrl, token);
-  const response = await client.call({ method: "GET", path: "/api/v1/agents/self" });
+  const response = await client.call({ method: "GET", path: "/api/agents/self" });
   requirePrivateNoStore(response.headers, "Agent enrollment verification response");
   const self = validateAgentSelfStatus(response.body, "active");
   const agent = self.agent;
@@ -968,7 +968,7 @@ async function agentEnroll(
   if (!resolved.token && enrolled.projectId && enrolled.projectName) {
     project = { id: enrolled.projectId, name: enrolled.projectName };
   } else {
-    const projectResponse = await client.call({ method: "GET", path: "/api/v1/project" });
+    const projectResponse = await client.call({ method: "GET", path: "/api/project" });
     project = projectResponse.body as Project;
   }
   return {
@@ -1068,7 +1068,7 @@ async function startOrResumeAgentConnection(
         recipient_public_key: publicAgentConnectionKey(pending.private_jwk),
         ...(pending.project_id ? { project_id: pending.project_id } : {}),
       };
-      const response = await client.call({ method: "POST", path: "/api/v1/agent-connections", body: request });
+      const response = await client.call({ method: "POST", path: "/api/agent-connections", body: request });
       requirePrivateNoStore(response.headers, "Agent connection start response");
       if (response.headers["referrer-policy"] !== "no-referrer") {
         throw configError("Agent connection start response did not return Referrer-Policy: no-referrer.");
@@ -1110,7 +1110,7 @@ async function waitForAgentConnectionApproval(
   try {
     const stream = await transport.stream({
       method: "GET",
-      path: `/api/v1/agent-connections/${connection.connection_id}/events`,
+      path: `/stream/agent-connections/${connection.connection_id}`,
       headers: {
         authorization: `ScreenRig-Agent-Connect ${connection.connection_token}`,
         "x-request-id": requestIdsFor(runtime, args).next(),
@@ -1224,14 +1224,14 @@ async function activateCollectedAgent(
   if (!connection.connection_id) throw configError("Pending agent connection identifier is unavailable.");
   const client = clientFor(runtime, args, resolved.apiUrl, pendingToken);
   const verifyActiveAgent = async (): Promise<Agent> => {
-    const verification = await client.call({ method: "GET", path: "/api/v1/agents/self" });
+    const verification = await client.call({ method: "GET", path: "/api/agents/self" });
     requirePrivateNoStore(verification.headers, "Agent verification response");
     const verified = validateAgentSelfStatus(verification.body, "active").agent;
     if (verified.id !== agentId) throw configError("Persisted agent credential did not verify against its agent.");
     return verified;
   };
   const persistActiveProject = async (): Promise<void> => {
-    const projectResponse = await client.call({ method: "GET", path: "/api/v1/project" });
+    const projectResponse = await client.call({ method: "GET", path: "/api/project" });
     const context = contextFromProject(projectResponse.body as Project);
     if (connection.project_id && context.project.id !== connection.project_id) throw configError("Connection activated a different project from its approved request.");
     await cacheProjectContexts(runtime, resolved, [context], { select: context.project.id, token: pendingToken, agentId, connectionId: connection.connection_id });
@@ -1239,7 +1239,7 @@ async function activateCollectedAgent(
 
   let activation;
   try {
-    activation = await client.call({ method: "POST", path: "/api/v1/agents/self/activate" });
+    activation = await client.call({ method: "POST", path: "/api/agents/self/activate" });
   } catch (err) {
     if (!(err instanceof CliError)) throw err;
     if (err.problem.code === "agent_connection_invalid") {
@@ -1333,7 +1333,7 @@ async function agentConnect(
       const target = projectConfigFor(updated, { ...resolved, projectId: cleanup.destination_project_id });
       const token = target.token ?? updated.identity_token;
       const client = fixedProjectClient(runtime, args, resolved.apiUrl, requireToken(token), cleanup.destination_project_id);
-      const verification = await client.call({ method: "GET", path: "/api/v1/agents/self" });
+      const verification = await client.call({ method: "GET", path: "/api/agents/self" });
       requirePrivateNoStore(verification.headers, "Agent verification response");
       const agent = validateAgentSelfStatus(verification.body, "active").agent;
       if (agent.id !== updated.agent_id) throw configError("Cleanup destination credential belongs to a different identity.");
@@ -1452,7 +1452,7 @@ async function agentConnect(
     try {
       collectedResponse = await collector.call({
         method: "POST",
-        path: `/api/v1/agent-connections/${connection.connection_id}/credential`,
+        path: `/api/agent-connections/${connection.connection_id}/credential`,
         headers: { authorization: `ScreenRig-Agent-Connect ${connection.connection_token}` },
       });
     } catch (err) {
@@ -1592,7 +1592,7 @@ async function agentDisconnect(
   let agent: Agent | undefined;
   let credentialRejected = false;
   try {
-    const current = await client.call({ method: "GET", path: "/api/v1/agents/self" });
+    const current = await client.call({ method: "GET", path: "/api/agents/self" });
     requirePrivateNoStore(current.headers, "Agent status response");
     agent = validateAgentSelfStatus(current.body).agent;
   } catch (err) {
@@ -1605,7 +1605,7 @@ async function agentDisconnect(
     try {
       response = await client.call({
         method: "POST",
-        path: "/api/v1/agents/self/disconnect",
+        path: "/api/agents/self/disconnect",
         ...(request.allow_last_agent ? { body: request } : {}),
       });
     } catch (err) {
@@ -1674,7 +1674,7 @@ async function agentRevokeIdentity(args: ParsedArgs, runtime: CliRuntime, resolv
   const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
   let alreadyRejected = false;
   try {
-    const response = await client.call({ method: "POST", path: "/api/v1/agent-identity/revoke" });
+    const response = await client.call({ method: "POST", path: "/api/agent-identity/revoke" });
     if (response.status !== 204 || response.body !== undefined) throw configError("Identity revocation did not return an empty 204; local credentials were retained.");
     requirePrivateNoStore(response.headers, "Identity revocation response");
   } catch (error) {
@@ -1722,7 +1722,7 @@ async function browserSetupCommand(
   const request: BrowserLinkClaimRequest = { code: code.canonical };
   const response = await client.call({
     method: "POST",
-    path: "/api/v1/project/browser-links/claim",
+    path: "/api/project/browser-links/claim",
     idempotent: true,
     idempotencyKey: retry.idempotency_key,
     body: request,
@@ -1738,7 +1738,7 @@ async function browserSetupCommand(
   const expectedPlayerOrigin = `https://${expectedPlayerHost}${apiUrl.port ? `:${apiUrl.port}` : ""}`;
   const publicUrl = new URL(screen.public_url);
   if (publicUrl.origin !== expectedPlayerOrigin || publicUrl.username || publicUrl.password
-    || publicUrl.hash || publicUrl.search || publicUrl.pathname !== `/s/${screen.public_id}`) {
+    || publicUrl.hash || publicUrl.search || publicUrl.pathname !== `/player/s/${screen.public_id}`) {
     throw usageError("Browser setup response did not contain a safe fragment-free Player public URL.");
   }
   const opened = flagBool(args.flags, "open")
@@ -1770,12 +1770,12 @@ async function dashboardCommand(
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<CommandResult> {
   const api = new URL(resolved.apiUrl);
-  const hostname = api.hostname === "api.screenrig.ai" ? "dashboard.screenrig.ai"
-    : api.hostname === "api.screenrig.localhost" ? "dashboard.screenrig.localhost" : undefined;
+  const hostname = api.hostname === "api.screenrig.ai" ? "screenrig.ai"
+    : api.hostname === "api.screenrig.localhost" ? "screenrig.localhost" : undefined;
   if (!hostname || (api.protocol !== "https:" && !(api.protocol === "http:" && api.hostname.endsWith(".localhost")))) {
     throw usageError("dashboard requires a supported ScreenRig API origin.");
   }
-  const origin = `${api.protocol}//${hostname}${api.port ? `:${api.port}` : ""}`;
+  const origin = `${api.protocol}//${hostname}${api.port ? `:${api.port}` : ""}/dashboard/`;
   let opened = false;
   try { opened = await (runtime.openUrl?.(origin) ?? Promise.resolve(false)); } catch { /* Fall back to the ordinary origin. */ }
   return {
@@ -1870,7 +1870,7 @@ async function enrollForCommand(
         try {
           response = await client.call({
             method: "POST",
-            path: "/api/v1/enrollments",
+            path: "/api/enrollments",
             idempotent: true,
             idempotencyKey: state.idempotencyKey,
             body: request,
@@ -1936,7 +1936,7 @@ async function enrollForCommand(
       },
       verify: async (token, projectId) => {
         const client = clientFor(runtime, args, resolved.apiUrl, token);
-        const response = await client.call({ method: "GET", path: "/api/v1/project" });
+        const response = await client.call({ method: "GET", path: "/api/project" });
         const project = response.body as { id?: string };
         if (!project.id || (projectId && project.id !== projectId)) {
           throw usageError("Persisted enrollment credential did not verify against its project.");
@@ -1948,7 +1948,7 @@ async function enrollForCommand(
 async function projectShow(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>): Promise<CommandResult> {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
-  const response = await client.call({ method: "GET", path: "/api/v1/project" });
+  const response = await client.call({ method: "GET", path: "/api/project" });
   // Presence only. The lookup segment of a credential identifies the live
   // token, so no part of the stored value is reported on stdout.
   const envelope = jsonBody(response, client.requestId, { token_present: hasToken(token) });
@@ -1978,7 +1978,7 @@ async function identityForCommand(args: ParsedArgs, runtime: CliRuntime, resolve
     runtime: { fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }, now: runtime.now, sleep: runtime.sleep },
     exchange: async (key) => {
       const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-      const response = await client.call({ method: "POST", path: "/api/v1/agent-identity/exchange", idempotent: true, idempotencyKey: key });
+      const response = await client.call({ method: "POST", path: "/api/agent-identity/exchange", idempotent: true, idempotencyKey: key });
       requirePrivateNoStore(response.headers, "Identity credential response");
       return response.body as AgentIdentityCredential;
     },
@@ -1988,7 +1988,7 @@ async function identityForCommand(args: ParsedArgs, runtime: CliRuntime, resolve
 async function accessibleProjects(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<{ resolved: ResolvedCommandConfig; projects: ProjectContextList["projects"]; requestId: string }> {
   const identity = await identityForCommand(args, runtime, resolved);
   const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
-  const response = await client.call({ method: "GET", path: "/api/v1/projects" });
+  const response = await client.call({ method: "GET", path: "/api/projects" });
   const body = response.body as ProjectContextList;
   if (!Array.isArray(body?.projects)) throw configError("Project list does not match the generated contract.");
   const projects = body.projects.map(validateProjectContext);
@@ -2024,7 +2024,7 @@ async function projectCreate(args: ParsedArgs, runtime: CliRuntime, resolved: Re
   const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
   const body: ProjectCreate = { name, ...(organizationId ? { organization_id: organizationId } : {}),
     ...(organizationName !== undefined ? { organization_name: validateDisplayName(organizationName, "Organization name") } : {}) };
-  const response = await client.call({ method: "POST", path: "/api/v1/projects", body, idempotent: true,
+  const response = await client.call({ method: "POST", path: "/api/projects", body, idempotent: true,
     ...(resolved.projectId ? { headers: { "screenrig-project": resolved.projectId } } : {}) });
   if (!(headerValue(response.headers, "cache-control") ?? "").split(",").map(value => value.trim().toLowerCase()).includes("no-store")) {
     throw configError("Project credential delivery response did not prohibit storage.");
@@ -2043,7 +2043,7 @@ async function projectCreate(args: ParsedArgs, runtime: CliRuntime, resolved: Re
 
 async function projectMoves(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "GET", path: "/api/v1/project/moves" });
+  const response = await client.call({ method: "GET", path: "/api/project/moves" });
   const organizations = (response.body as { organizations?: { id: string; name: string }[] }).organizations;
   if (!Array.isArray(organizations)) throw configError("Project move destinations do not match the contract.");
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success,
@@ -2063,18 +2063,18 @@ async function projectLifecycleWrite(args: ParsedArgs, runtime: CliRuntime, reso
 async function projectMove(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
   const id = flagString(args.flags, "organization-id");
   if (!id) throw usageError("project move requires --organization-id from project moves.");
-  return projectLifecycleWrite(args, runtime, resolved, "POST", "/api/v1/project/move", { organization_id: id });
+  return projectLifecycleWrite(args, runtime, resolved, "POST", "/api/project/move", { organization_id: id });
 }
 
 async function projectOwnerTransfer(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
   const id = flagString(args.flags, "user-id");
   if (!id) throw usageError("project transfer-owner requires --user-id for an existing verified project member.");
-  return projectLifecycleWrite(args, runtime, resolved, "PUT", "/api/v1/project/owner", { user_id: id });
+  return projectLifecycleWrite(args, runtime, resolved, "PUT", "/api/project/owner", { user_id: id });
 }
 
 async function projectDeletionPreview(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "GET", path: "/api/v1/project/deletion-preview" });
+  const response = await client.call({ method: "GET", path: "/api/project/deletion-preview" });
   const context = validateProjectContext(response.body);
   const preview = response.body as { allowed?: boolean; reason?: string; devices?: unknown[] };
   if (typeof preview.allowed !== "boolean" || !Array.isArray(preview.devices)) throw configError("Project deletion preview does not match the contract.");
@@ -2089,7 +2089,7 @@ async function projectDelete(args: ParsedArgs, runtime: CliRuntime, resolved: Re
     throw usageError("project delete requires --yes --name NAME --revision N matching project deletion-preview.");
   }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "DELETE", path: "/api/v1/project", body: { name, revision } });
+  const response = await client.call({ method: "DELETE", path: "/api/project", body: { name, revision } });
   if ((response.body as { id?: string })?.id !== resolved.projectId) throw configError("Project deletion response changed the command's target.");
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: "Deleted project " + resolved.projectName + " (" + resolved.projectId + ")" };
 }
@@ -2103,7 +2103,7 @@ async function projectDelete(args: ParsedArgs, runtime: CliRuntime, resolved: Re
 async function projectCapabilities(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
-  const response = await client.call({ method: "GET", path: "/api/v1/project/capabilities" });
+  const response = await client.call({ method: "GET", path: "/api/project/capabilities" });
   requirePrivateNoStore(response.headers, "Project capabilities response");
   const capabilities = validateProjectCapabilities(response.body);
   return {
@@ -2124,7 +2124,7 @@ async function projectRename(args: ParsedArgs, runtime: CliRuntime, resolved: Re
   const name = args.positionals[2]?.trim();
   if (!name || [...name].length > 60 || /[\p{Cc}\p{Cf}]/u.test(name)) throw usageError("project rename requires NAME containing 1–60 characters without controls.");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "PATCH", path: "/api/v1/project", body: { name }, idempotent: true });
+  const response = await client.call({ method: "PATCH", path: "/api/project", body: { name }, idempotent: true });
   const project = response.body as Project;
   const context = contextFromProject(project);
   if (context.project.id !== resolved.projectId) throw configError("Rename response changed the command's target.");
@@ -2369,21 +2369,21 @@ async function campaignDraft(file: string | undefined, runtime: CliRuntime): Pro
 }
 
 export const handleAdsNetworksList = commandHandler((args, runtime, resolved) =>
-  simpleGet(args, runtime, resolved, "/api/v1/advertising/networks", "Invited networks"));
+  simpleGet(args, runtime, resolved, "/api/advertising/networks", "Invited networks"));
 
 export const handleAdsNetworkInventoryShow = commandHandler(async (args, runtime, resolved) => {
   const seller = args.positionals[3];
   if (!seller) throw usageError("ads networks show requires <seller-project-id>.");
-  return simpleGet(args, runtime, resolved, `/api/v1/advertising/networks/${encodeURIComponent(seller)}/inventory`, "Permitted inventory");
+  return simpleGet(args, runtime, resolved, `/api/advertising/networks/${encodeURIComponent(seller)}/inventory`, "Permitted inventory");
 });
 
 export const handleAdsNetworkShow = commandHandler((args, runtime, resolved) =>
-  simpleGet(args, runtime, resolved, "/api/v1/advertising/network", "Advertising network"));
+  simpleGet(args, runtime, resolved, "/api/advertising/network", "Advertising network"));
 
 export const handleAdsNetworkCreate = commandHandler((args, runtime, resolved) =>
   adsMutation(args, runtime, resolved, {
     method: "POST",
-    path: "/api/v1/advertising/network",
+    path: "/api/advertising/network",
     body: { name: flagString(args.flags, "name") },
     human: "Network created. Set the default rate before enabling paid supply.",
   }));
@@ -2391,14 +2391,14 @@ export const handleAdsNetworkCreate = commandHandler((args, runtime, resolved) =
 export const handleAdsNetworkRate = commandHandler((args, runtime, resolved) =>
   adsMutation(args, runtime, resolved, {
     method: "POST",
-    path: "/api/v1/advertising/network/rate",
+    path: "/api/advertising/network/rate",
     body: adsNetworkRateBody(args),
     ifMatch: flagString(args.flags, "if-match"),
     human: "Default rate updated. Affected campaigns are paused until each buyer accepts a fresh quote.",
   }));
 
 export const handleAdsInventoryList = commandHandler((args, runtime, resolved) =>
-  simpleGet(args, runtime, resolved, "/api/v1/advertising/inventory", "Advertising inventory"));
+  simpleGet(args, runtime, resolved, "/api/advertising/inventory", "Advertising inventory"));
 
 /**
  * Upsert one screen's advertising inventory. When the row already exists the
@@ -2411,7 +2411,7 @@ export const handleAdsInventoryUpdate = commandHandler(async (args, runtime, res
   if (!screenId) throw usageError("ads inventory update requires <screen-id>.");
   const requested = flagString(args.flags, "if-match");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const current = await adsExistingRow(client, "/api/v1/advertising/inventory", "inventory", "screen_id", screenId);
+  const current = await adsExistingRow(client, "/api/advertising/inventory", "inventory", "screen_id", screenId);
   if (!current && requested) {
     throw usageError(`No advertising inventory row exists for ${screenId}, so --expect-rev has nothing to check. Omit it to create the row.`);
   }
@@ -2421,7 +2421,7 @@ export const handleAdsInventoryUpdate = commandHandler(async (args, runtime, res
   const currentRevision = typeof current?.revision === "number" ? String(current.revision) : undefined;
   return adsMutation(args, runtime, resolved, {
     method: "PUT",
-    path: `/api/v1/advertising/inventory/${encodeURIComponent(screenId)}`,
+    path: `/api/advertising/inventory/${encodeURIComponent(screenId)}`,
     body: adsInventoryWriteBody(current, args),
     ifMatch: requested ?? (current ? currentRevision : undefined),
     human: `Updated advertising inventory for ${screenId}. Fields you did not change keep their stored values.`,
@@ -2429,12 +2429,12 @@ export const handleAdsInventoryUpdate = commandHandler(async (args, runtime, res
 });
 
 export const handleAdsSlotsList = commandHandler((args, runtime, resolved) =>
-  simpleGet(args, runtime, resolved, "/api/v1/advertising/slots", "Ad slots"));
+  simpleGet(args, runtime, resolved, "/api/advertising/slots", "Ad slots"));
 
 export const handleAdsSlotsCreate = commandHandler((args, runtime, resolved) =>
   adsMutation(args, runtime, resolved, {
     method: "POST",
-    path: "/api/v1/advertising/slots",
+    path: "/api/advertising/slots",
     // The canonical slot write requires both duration limits; the values below
     // are the server's own normalization defaults for an omitted limit, so the
     // create body is complete without a second server round-trip.
@@ -2456,14 +2456,14 @@ export const handleAdsSlotsUpdate = commandHandler(async (args, runtime, resolve
   const slotId = args.positionals[3];
   if (!slotId) throw usageError("ads slots update requires <slot-id>.");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const current = await adsExistingRow(client, "/api/v1/advertising/slots", "slots", "id", slotId);
+  const current = await adsExistingRow(client, "/api/advertising/slots", "slots", "id", slotId);
   if (!current) {
     throw usageError(`No slot ${slotId} exists for this project, so there is nothing to update. Create it with ads slots create.`);
   }
   const currentRevision = typeof current.revision === "number" ? String(current.revision) : undefined;
   return adsMutation(args, runtime, resolved, {
     method: "POST",
-    path: `/api/v1/advertising/slots/${encodeURIComponent(slotId)}`,
+    path: `/api/advertising/slots/${encodeURIComponent(slotId)}`,
     body: adsSlotWriteBody(current, args),
     ifMatch: flagString(args.flags, "if-match") ?? currentRevision,
     human: "Slot updated. A changed effective rate pauses affected campaigns until each buyer accepts a fresh quote.",
@@ -2488,7 +2488,7 @@ export const handleInvitationsCreate = commandHandler(async (args, runtime, reso
   }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await client.call({
-    method: "POST", path: "/api/v1/invitations", idempotent: true,
+    method: "POST", path: "/api/invitations", idempotent: true,
     body: { kind, delivery: link ? "link" : "email",
       ...(!link ? { emails } : {}),
       ...(kind === "ad_buyer" ? { advertising: { screen_ids: screenIds, slot_ids: slotIds, policy: policy ?? "trusted" } } : {}),
@@ -2522,7 +2522,7 @@ export const handleInvitationsList = commandHandler(async (args, runtime, resolv
   const kind = flagString(args.flags, "kind");
   const status = flagString(args.flags, "status");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "GET", path: "/api/v1/invitations", query: {
+  const response = await client.call({ method: "GET", path: "/api/invitations", query: {
     ...(kind ? { kind: kind === "ad-buyer" ? "ad_buyer" : "project_member" } : {}),
     ...(status ? { status } : {}),
   } });
@@ -2534,13 +2534,13 @@ export const handleInvitationsRevoke = commandHandler(async (args, runtime, reso
   const id = args.positionals[2];
   if (!id) throw usageError("invitations revoke requires ID.");
   return adsMutation(args, runtime, resolved, {
-    method: "POST", path: `/api/v1/invitations/${encodeURIComponent(id)}/revoke`,
+    method: "POST", path: `/api/invitations/${encodeURIComponent(id)}/revoke`,
     human: `Revoked invitation ${id}.`,
   });
 });
 
 export const handleAdsMembershipsList = commandHandler((args, runtime, resolved) =>
-  simpleGet(args, runtime, resolved, "/api/v1/advertising/memberships", "Memberships"));
+  simpleGet(args, runtime, resolved, "/api/advertising/memberships", "Memberships"));
 
 /**
  * Update one membership. The route takes the policy and both scope lists, so an
@@ -2551,11 +2551,11 @@ export const handleAdsMembershipsUpdate = commandHandler(async (args, runtime, r
   const id = args.positionals[3];
   if (!id) throw usageError("ads memberships update requires <membership-id>.");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const current = await adsExistingRow(client, "/api/v1/advertising/memberships", "memberships", "id", id);
+  const current = await adsExistingRow(client, "/api/advertising/memberships", "memberships", "id", id);
   const currentRevision = typeof current?.revision === "number" ? String(current.revision) : undefined;
   return adsMutation(args, runtime, resolved, {
     method: "POST",
-    path: `/api/v1/advertising/memberships/${encodeURIComponent(id)}`,
+    path: `/api/advertising/memberships/${encodeURIComponent(id)}`,
     body: adsMembershipWriteBody(current, args),
     ifMatch: flagString(args.flags, "if-match") ?? currentRevision,
     human: `Updated membership ${id}. Scope changes stop new selections and invalidate unstarted decisions.`,
@@ -2567,18 +2567,18 @@ export const handleAdsMembershipsRevoke = commandHandler(async (args, runtime, r
   if (!id) throw usageError("ads memberships revoke requires <membership-id>.");
   return adsMutation(args, runtime, resolved, {
     method: "POST",
-    path: `/api/v1/advertising/memberships/${encodeURIComponent(id)}/revoke`,
+    path: `/api/advertising/memberships/${encodeURIComponent(id)}/revoke`,
     human: `Revoked membership ${id}. The buyer's advertiser flag and other networks are unchanged.`,
   });
 });
 
 export const handleAdsCreativesList = commandHandler((args, runtime, resolved) =>
-  simpleGet(args, runtime, resolved, "/api/v1/advertising/creatives", "Creatives"));
+  simpleGet(args, runtime, resolved, "/api/advertising/creatives", "Creatives"));
 
 export const handleAdsCreativesCreate = commandHandler(async (args, runtime, resolved) =>
   adsMutation(args, runtime, resolved, {
     method: "POST",
-    path: "/api/v1/advertising/creatives",
+    path: "/api/advertising/creatives",
     body: { media_id: flagString(args.flags, "media-id"), copy: flagString(args.flags, "copy") },
     human: "Creative created. It binds the ready media revision; the media is neither charged nor uploaded again.",
   }));
@@ -2586,16 +2586,16 @@ export const handleAdsCreativesCreate = commandHandler(async (args, runtime, res
 export const handleAdsCreativesShow = commandHandler(async (args, runtime, resolved) => {
   const id = args.positionals[3];
   if (!id) throw usageError("ads creatives show requires <creative-id>.");
-  return simpleGet(args, runtime, resolved, `/api/v1/advertising/creatives/${encodeURIComponent(id)}`, "Creative");
+  return simpleGet(args, runtime, resolved, `/api/advertising/creatives/${encodeURIComponent(id)}`, "Creative");
 });
 
 export const handleAdsCampaignsList = commandHandler((args, runtime, resolved) =>
-  simpleGet(args, runtime, resolved, "/api/v1/advertising/campaigns", "Campaigns"));
+  simpleGet(args, runtime, resolved, "/api/advertising/campaigns", "Campaigns"));
 
 export const handleAdsCampaignsCreate = commandHandler(async (args, runtime, resolved) =>
   adsMutation(args, runtime, resolved, {
     method: "POST",
-    path: "/api/v1/advertising/campaigns",
+    path: "/api/advertising/campaigns",
     body: await campaignDraft(args.positionals[3], runtime),
     human: "Campaign draft created. A draft reserves no credits and cannot deliver until an accepted quote activates it.",
   }));
@@ -2603,7 +2603,7 @@ export const handleAdsCampaignsCreate = commandHandler(async (args, runtime, res
 export const handleAdsCampaignsShow = commandHandler(async (args, runtime, resolved) => {
   const id = args.positionals[3];
   if (!id) throw usageError("ads campaigns show requires <campaign-id>.");
-  return simpleGet(args, runtime, resolved, `/api/v1/advertising/campaigns/${encodeURIComponent(id)}`, "Campaign");
+  return simpleGet(args, runtime, resolved, `/api/advertising/campaigns/${encodeURIComponent(id)}`, "Campaign");
 });
 /**
  * Quote a campaign. The route requires the current campaign revision as its
@@ -2616,7 +2616,7 @@ export const handleAdsCampaignsPreview = commandHandler(async (args, runtime, re
   let ifMatch = flagString(args.flags, "if-match");
   if (ifMatch === undefined) {
     const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-    const campaign = (await client.call({ method: "GET", path: `/api/v1/advertising/campaigns/${encodeURIComponent(id)}` })).body;
+    const campaign = (await client.call({ method: "GET", path: `/api/advertising/campaigns/${encodeURIComponent(id)}` })).body;
     const revision = campaign !== null && typeof campaign === "object" && !Array.isArray(campaign) && "revision" in campaign
       ? campaign.revision : undefined;
     if (!Number.isSafeInteger(revision) || (revision as number) < 1) {
@@ -2626,7 +2626,7 @@ export const handleAdsCampaignsPreview = commandHandler(async (args, runtime, re
   }
   return adsMutation(args, runtime, resolved, {
     method: "POST",
-    path: `/api/v1/advertising/campaigns/${encodeURIComponent(id)}/quote`,
+    path: `/api/advertising/campaigns/${encodeURIComponent(id)}/quote`,
     ifMatch,
     human: "Quote priced for current inventory and rates. Preview reserves and spends nothing; activate with --quote-id only after the user accepts this quote.",
   });
@@ -2637,7 +2637,7 @@ export const handleAdsCampaignsUpdate = commandHandler(async (args, runtime, res
   if (!id) throw usageError("ads campaigns update requires <campaign-id> <file>.");
   return adsMutation(args, runtime, resolved, {
     method: "POST",
-    path: `/api/v1/advertising/campaigns/${encodeURIComponent(id)}`,
+    path: `/api/advertising/campaigns/${encodeURIComponent(id)}`,
     body: await campaignDraft(args.positionals[4], runtime),
     ifMatch: flagString(args.flags, "if-match"),
     human: `Campaign ${id} draft replaced. Changing accepted scope requires a fresh quote and explicit acceptance.`,
@@ -2649,7 +2649,7 @@ export const handleAdsCampaignsActivate = commandHandler(async (args, runtime, r
   if (!id) throw usageError("ads campaigns activate requires <campaign-id>.");
   return adsMutation(args, runtime, resolved, {
     method: "POST",
-    path: `/api/v1/advertising/campaigns/${encodeURIComponent(id)}/activate`,
+    path: `/api/advertising/campaigns/${encodeURIComponent(id)}/activate`,
     body: { quote_id: flagString(args.flags, "quote-id") },
     ifMatch: flagString(args.flags, "if-match"),
     human: "Campaign activation accepted the quote. No wallet debit happens here: a per-occurrence hold is placed when the runtime resolves a play and it settles only on the verified completion. Activation is not proof that a screen displayed anything.",
@@ -2661,7 +2661,7 @@ export const handleAdsCampaignsPause = commandHandler(async (args, runtime, reso
   if (!id) throw usageError("ads campaigns pause requires <campaign-id>.");
   return adsMutation(args, runtime, resolved, {
     method: "POST",
-    path: `/api/v1/advertising/campaigns/${encodeURIComponent(id)}/pause`,
+    path: `/api/advertising/campaigns/${encodeURIComponent(id)}/pause`,
     ifMatch: flagString(args.flags, "if-match"),
     human: `Paused campaign ${id}. New reservations stop; already-started valid plays settle at their reserved price.`,
   });
@@ -2672,7 +2672,7 @@ export const handleAdsCampaignsResume = commandHandler(async (args, runtime, res
   if (!id) throw usageError("ads campaigns resume requires <campaign-id>.");
   return adsMutation(args, runtime, resolved, {
     method: "POST",
-    path: `/api/v1/advertising/campaigns/${encodeURIComponent(id)}/resume`,
+    path: `/api/advertising/campaigns/${encodeURIComponent(id)}/resume`,
     ifMatch: flagString(args.flags, "if-match"),
     human: `Resumed campaign ${id} after a manual pause. Resume cannot clear a price-change pause; that needs a fresh quote accepted with campaigns accept-rates.`,
   });
@@ -2683,7 +2683,7 @@ export const handleAdsCampaignsAcceptRates = commandHandler(async (args, runtime
   if (!id) throw usageError("ads campaigns accept-rates requires <campaign-id>.");
   return adsMutation(args, runtime, resolved, {
     method: "POST",
-    path: `/api/v1/advertising/campaigns/${encodeURIComponent(id)}/accept-rates`,
+    path: `/api/advertising/campaigns/${encodeURIComponent(id)}/accept-rates`,
     body: { quote_id: flagString(args.flags, "quote-id") },
     ifMatch: flagString(args.flags, "if-match"),
     human: `Accepted the fresh quote for campaign ${id}. Delivery resumes only if every other blocker, such as review or funds, is also clear.`,
@@ -2691,7 +2691,7 @@ export const handleAdsCampaignsAcceptRates = commandHandler(async (args, runtime
 });
 
 export const handleAdsReviewsList = commandHandler((args, runtime, resolved) =>
-  simpleGet(args, runtime, resolved, "/api/v1/advertising/reviews", "Creative reviews"));
+  simpleGet(args, runtime, resolved, "/api/advertising/reviews", "Creative reviews"));
 
 /**
  * The seller's preview of one submission: the dedicated review metadata route
@@ -2701,7 +2701,7 @@ export const handleAdsReviewsList = commandHandler((args, runtime, resolved) =>
 export const handleAdsReviewsShow = commandHandler(async (args, runtime, resolved) => {
   const id = args.positionals[3];
   if (!id) throw usageError("ads reviews show requires <review-id>.");
-  return simpleGet(args, runtime, resolved, `/api/v1/advertising/reviews/${encodeURIComponent(id)}`, "Review");
+  return simpleGet(args, runtime, resolved, `/api/advertising/reviews/${encodeURIComponent(id)}`, "Review");
 });
 
 export const handleAdsReviewsApprove = commandHandler(async (args, runtime, resolved) => {
@@ -2709,7 +2709,7 @@ export const handleAdsReviewsApprove = commandHandler(async (args, runtime, reso
   if (!id) throw usageError("ads reviews approve requires <review-id>.");
   return adsMutation(args, runtime, resolved, {
     method: "POST",
-    path: `/api/v1/advertising/reviews/${encodeURIComponent(id)}/approve`,
+    path: `/api/advertising/reviews/${encodeURIComponent(id)}/approve`,
     human: `Approved review ${id} for that exact creative version.`,
   });
 });
@@ -2719,7 +2719,7 @@ export const handleAdsReviewsReject = commandHandler(async (args, runtime, resol
   if (!id) throw usageError("ads reviews reject requires <review-id>.");
   return adsMutation(args, runtime, resolved, {
     method: "POST",
-    path: `/api/v1/advertising/reviews/${encodeURIComponent(id)}/reject`,
+    path: `/api/advertising/reviews/${encodeURIComponent(id)}/reject`,
     body: { reason: flagString(args.flags, "reason") },
     human: `Rejected review ${id}; the buyer sees the supplied reason.`,
   });
@@ -2754,7 +2754,7 @@ export const handleAdsReportsSpend = commandHandler(async (args, runtime, resolv
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const response = await client.call({
     method: "GET",
-    path: "/api/v1/advertising/reports/spend",
+    path: "/api/advertising/reports/spend",
     query: { campaign_id: flagString(args.flags, "campaign-id") },
   });
   requirePrivateNoStore(response.headers, "Advertising report response");
@@ -2770,7 +2770,7 @@ export const handleAdsReportsDelivery = commandHandler(async (args, runtime, res
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const response = await client.call({
     method: "GET",
-    path: "/api/v1/advertising/reports/delivery",
+    path: "/api/advertising/reports/delivery",
     query: { from: flagString(args.flags, "from"), to: flagString(args.flags, "to") },
   });
   requirePrivateNoStore(response.headers, "Advertising report response");
@@ -2791,7 +2791,7 @@ export const handleAdsReportsDelivery = commandHandler(async (args, runtime, res
 export const handleBillingBalance = commandHandler(async (args, runtime, resolved) => {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
-  const response = await client.call({ method: "GET", path: "/api/v1/billing/balance" });
+  const response = await client.call({ method: "GET", path: "/api/billing/balance" });
   requirePrivateNoStore(response.headers, "Billing balance response");
   const body = (response.body ?? {}) as {
     remaining_mcr?: unknown; reserved_mcr?: unknown; available_mcr?: unknown;
@@ -2818,7 +2818,7 @@ export const handleBillingBalance = commandHandler(async (args, runtime, resolve
 });
 
 export const handleBillingStatement = commandHandler((args, runtime, resolved) =>
-  simpleGet(args, runtime, resolved, "/api/v1/billing/statement", "Credit statement", {
+  simpleGet(args, runtime, resolved, "/api/billing/statement", "Credit statement", {
     cursor: flagString(args.flags, "cursor"),
     limit: flagString(args.flags, "limit"),
   }));
@@ -2884,7 +2884,7 @@ async function signInReset(
   const client = clientFor(runtime, args, resolved.apiUrl, undefined, writeRecoveries.get(runtime));
   const response = await client.call({
     method: "POST",
-    path: "/api/v1/sign-in-resets",
+    path: "/api/sign-in-resets",
     idempotent: true,
     body: { email },
   });
@@ -2947,14 +2947,14 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
   const nameHeaders = applicationNameHeaders(flagString(args.flags, "name"));
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
-  const capabilitiesResponse = await client.call({ method: "GET", path: "/api/v1/capabilities" });
+  const capabilitiesResponse = await client.call({ method: "GET", path: "/api/capabilities" });
   const packed = await packDirectory(path.resolve(runtime.cwd(), dir), {
     limits: limitsFromCapabilities(capabilitiesResponse.body as Capabilities),
     logger: loggerOf(runtime),
   });
   const response = await client.call({
     method: "POST",
-    path: update ? `/api/v1/applications/${encodeURIComponent(id!)}/releases` : "/api/v1/applications",
+    path: update ? `/api/applications/${encodeURIComponent(id!)}/releases` : "/api/applications",
     idempotent: true,
     headers: {
       "content-type": "application/gzip",
@@ -3102,7 +3102,7 @@ export const handleMediaList = commandHandler(async (args, runtime, resolved) =>
   if (Object.hasOwn(args.flags, "kind")) {
     throw usageError("media list uses --primitive image|video|audio, not --kind.");
   }
-  return simpleList(args, runtime, resolved, "/api/v1/media", "Media", {
+  return simpleList(args, runtime, resolved, "/api/media", "Media", {
     tag: mediaTagFromArgs(args),
     primitive: mediaPrimitiveFromArgs(args),
   });
@@ -3112,7 +3112,7 @@ export const handleMediaShow = commandHandler(async (args, runtime, resolved) =>
 
   const id = args.positionals[2];
   if (!id) throw usageError("media show requires an id.");
-  return simpleGet(args, runtime, resolved, `/api/v1/media/${id}`, "Media");
+  return simpleGet(args, runtime, resolved, `/api/media/${id}`, "Media");
 }, true);
 
 export const handleSelectorPreview = commandHandler(async (args, runtime, resolved) => {
@@ -3120,7 +3120,7 @@ export const handleSelectorPreview = commandHandler(async (args, runtime, resolv
   if (!file) throw usageError("media selector-preview requires <selector.json> and --primitive image|video.");
   const selector = await readAuthoringJson(file, runtime);
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "POST", path: "/api/v1/selectors/preview", body: { primitive: flagString(args.flags, "primitive"), selector } });
+  const response = await client.call({ method: "POST", path: "/api/selectors/preview", body: { primitive: flagString(args.flags, "primitive"), selector } });
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: JSON.stringify(response.body, null, 2) };
 }, true);
 
@@ -3149,7 +3149,7 @@ export const handleMediaDelete = commandHandler(async (args, runtime, resolved) 
   if (!id) throw usageError("media delete requires <id>.");
   const response = await client.call({
     method: "DELETE",
-    path: `/api/v1/media/${id}`,
+    path: `/api/media/${id}`,
     idempotent: true,
     headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
   });
@@ -3355,7 +3355,7 @@ async function mediaGenerate(
   try {
     response = await client.call({
       method: "POST",
-      path: "/api/v1/media/generations",
+      path: "/api/media/generations",
       idempotent: true,
       idempotencyKey: retry.state.idempotency_key,
       timeout_ms: timeoutMs,
@@ -3422,7 +3422,7 @@ async function mediaUpdate(args: ParsedArgs, client: ApiClient): Promise<Command
   const body: MediaTagPatch = tags === undefined ? { tag: clearTag ? null : tag ?? null } : { tags };
   const response = await client.call({
     method: "PATCH",
-    path: `/api/v1/media/${id}`,
+    path: `/api/media/${id}`,
     idempotent: true,
     headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
     body,
@@ -3464,7 +3464,7 @@ function mediaRecordFromBody(body: unknown, id: string): MediaRecord {
 }
 
 /**
- * `media download <id> [--output FILE]` binds `GET /api/v1/media/{id}/content`.
+ * `media download <id> [--output FILE]` binds `GET /api/media/{id}/content`.
  *
  * The metadata row is read first so the default name, the expected length,
  * and the expected SHA-256 come from the server; the streamed bytes are
@@ -3477,7 +3477,7 @@ async function mediaDownload(args: ParsedArgs, runtime: CliRuntime, client: ApiC
     throw usageError("media download requires <id> starting with med_.");
   }
 
-  const metadataResponse = await client.call({ method: "GET", path: `/api/v1/media/${id}` });
+  const metadataResponse = await client.call({ method: "GET", path: `/api/media/${id}` });
   const media = mediaRecordFromBody(metadataResponse.body, id);
   const extension = MEDIA_CONTENT_EXTENSIONS[media.content_type.toLowerCase()];
   if (!extension) {
@@ -3485,7 +3485,7 @@ async function mediaDownload(args: ParsedArgs, runtime: CliRuntime, client: ApiC
   }
   const outputPath = await resolveDownloadOutput(runtime.cwd(), `./${id}.${extension}`, args.flags);
 
-  const response = await client.download({ method: "GET", path: `/api/v1/media/${id}/content` });
+  const response = await client.download({ method: "GET", path: `/api/media/${id}/content` });
   let temp: Awaited<ReturnType<typeof openTempFile>> | undefined;
   let digest = "";
   let written = 0;
@@ -3612,14 +3612,14 @@ async function playbackList(
   const query = { screen_id: screenId, media_id: mediaId, day, ...days };
   if (playbackFormat(args, "playback list") === "csv") {
     return playbackCsvExport(args, runtime, resolved, {
-      path: "/api/v1/playback", query, what: "playback aggregates", defaultFile: "./playback-aggregates.csv",
+      path: "/api/playback", query, what: "playback aggregates", defaultFile: "./playback-aggregates.csv",
     });
   }
-  return simpleGet(args, runtime, resolved, "/api/v1/playback", "Playback", query);
+  return simpleGet(args, runtime, resolved, "/api/playback", "Playback", query);
 }
 
 /**
- * `playback plays` binds GET /api/v1/playback/plays. The received_at window is
+ * `playback plays` binds GET /api/playback/plays. The received_at window is
  * resolved locally (to = now, from = to - 24h by default, at most 31 days) and
  * sent explicitly, so every page of one export shares the same bounds.
  */
@@ -3652,7 +3652,7 @@ async function playbackPlays(
     if (limit !== undefined) throw usageError("--limit is JSON-only; --format csv streams the whole range in one request.");
     if (all) throw usageError("--all is JSON-only; --format csv already streams the whole range in one request.");
     return playbackCsvExport(args, runtime, resolved, {
-      path: "/api/v1/playback/plays", query: { ...query, cursor }, what: "playback plays", defaultFile: "./playback-plays.csv",
+      path: "/api/playback/plays", query: { ...query, cursor }, what: "playback plays", defaultFile: "./playback-plays.csv",
       range: reported, filters,
     });
   }
@@ -3667,7 +3667,7 @@ async function playbackPlays(
     let response: Awaited<ReturnType<ApiClient["call"]>>;
     try {
       response = await client.call({
-        method: "GET", path: "/api/v1/playback/plays",
+        method: "GET", path: "/api/playback/plays",
         query: { ...query, ...(next ? { cursor: next } : {}), ...(pageLimit ? { limit: pageLimit } : {}) },
       });
     } catch (error) {
@@ -4030,8 +4030,8 @@ async function mediaUploadBatch(
  * CLI action selects the path and nothing in the payload can contradict it.
  */
 const FEEDBACK_PATHS: Record<FeedbackKind, string> = {
-  bug: "/api/v1/feedback/bugs",
-  feature: "/api/v1/feedback/features",
+  bug: "/api/feedback/bugs",
+  feature: "/api/feedback/features",
 };
 
 /**
@@ -4143,7 +4143,7 @@ async function readFeedbackBody(args: ParsedArgs, runtime: CliRuntime): Promise<
 // Support messages are deliberately kept out of operation-log bodies.
 export const handleSupportStatus = commandHandler(async (args, runtime, resolved) => {
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "GET", path: "/api/v1/support/status" });
+  const response = await client.call({ method: "GET", path: "/api/support/status" });
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: JSON.stringify(response.body, null, 2) };
 });
 
@@ -4162,7 +4162,7 @@ export const handleSupportSubmit = commandHandler(async (args, runtime, resolved
   const body = (await readFeedbackBody(args, runtime)).trim();
   if (!body || [...body].length > 4000) throw usageError("A support message must contain 1–4000 characters.");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "POST", path: id ? `/api/v1/support/conversations/${id}/messages` : "/api/v1/support/conversations", idempotent: true, body: { body, human_requested: flagBool(args.flags, "human-requested") } });
+  const response = await client.call({ method: "POST", path: id ? `/api/support/conversations/${id}/messages` : "/api/support/conversations", idempotent: true, body: { body, human_requested: flagBool(args.flags, "human-requested") } });
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: JSON.stringify(response.body, null, 2) };
 });
 export const handleSupportHistory = commandHandler(async (args, runtime, resolved) => {
@@ -4172,20 +4172,20 @@ export const handleSupportHistory = commandHandler(async (args, runtime, resolve
   const before = flagString(args.flags, "before");
   if (before && (id || !/^sc_[A-Za-z0-9_-]+$/.test(before))) throw usageError("--before accepts a conversation cursor when listing conversations.");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "GET", path: id ? `/api/v1/support/conversations/${id}/messages` : "/api/v1/support/conversations", query: { after, before } });
+  const response = await client.call({ method: "GET", path: id ? `/api/support/conversations/${id}/messages` : "/api/support/conversations", query: { after, before } });
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: JSON.stringify(response.body, null, 2) };
 });
 export const handleSupportClose = commandHandler(async (args, runtime, resolved) => {
   const id = supportConversation(args, true)!;
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "POST", path: `/api/v1/support/conversations/${id}/close`, body: {} });
+  const response = await client.call({ method: "POST", path: `/api/support/conversations/${id}/close`, body: {} });
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: "Support conversation ended. Its history is saved." };
 });
 export const handleSupportRead = commandHandler(async (args, runtime, resolved) => {
   const id = supportConversation(args, true)!;
   const sequence = supportSequence(flagString(args.flags, "sequence"));
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "PUT", path: `/api/v1/support/conversations/${id}/read`, body: { sequence: Number(sequence) } });
+  const response = await client.call({ method: "PUT", path: `/api/support/conversations/${id}/read`, body: { sequence: Number(sequence) } });
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: "Support replies marked read." };
 });
 export const handleSupportFollow = commandHandler(async (args, runtime, resolved) => {
@@ -4203,7 +4203,7 @@ export const handleSupportFollow = commandHandler(async (args, runtime, resolved
     while (!controller.signal.aborted) {
       let buffer = "";
       try {
-        const stream = await transport.stream({ method: "GET", path: "/api/v1/support/events/stream", query: { after }, headers: { authorization: `Bearer ${token}`, "x-request-id": client.nextRequestId(), ...(resolved.projectId ? { "screenrig-project": resolved.projectId } : {}) }, signal: controller.signal });
+        const stream = await transport.stream({ method: "GET", path: "/stream/support", query: { after }, headers: { authorization: `Bearer ${token}`, "x-request-id": client.nextRequestId(), ...(resolved.projectId ? { "screenrig-project": resolved.projectId } : {}) }, signal: controller.signal });
         for await (const chunk of stream) {
           buffer += chunk;
           const parsed = parseSse(buffer); buffer = parsed.rest;
@@ -4377,7 +4377,7 @@ async function playlistPreviewCommand(
     }
     const token = requireToken(resolved.token);
     client = clientFor(runtime, args, resolved.apiUrl, token);
-    const response = await callVersionedPlaylist(client, { method: "GET", id: target, preferred: "v1" });
+    const response = await callPlaylist(client, { method: "GET", id: target });
     playlist = response.body;
     searchDirs = [runtime.cwd(), outputDir];
   }
@@ -4409,7 +4409,7 @@ async function playlistPreviewCommand(
 
 export const handlePlaylistList = commandHandler(async (args, runtime, resolved) => {
 
-  return simpleList(args, runtime, resolved, "/api/v1/playlists", "Playlists");
+  return simpleList(args, runtime, resolved, "/api/playlists", "Playlists");
 }, true);
 
 export const handlePlaylistShow = commandHandler(async (args, runtime, resolved) => {
@@ -4418,7 +4418,7 @@ export const handlePlaylistShow = commandHandler(async (args, runtime, resolved)
   if (!id) throw usageError("playlist get requires an id.");
   const output = flagString(args.flags, "output");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await callVersionedPlaylist(client, { method: "GET", id, preferred: "v1" });
+  const response = await callPlaylist(client, { method: "GET", id });
   if (!output && !flagBool(args.flags, "editable")) {
     return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Playlist\n${JSON.stringify(response.body, null, 2)}` };
   }
@@ -4523,11 +4523,8 @@ async function playlistCreateUpdateAction(args: ParsedArgs, runtime: CliRuntime,
   const pages = expandPlaylistPages(parsed.pages);
   const body = { name: parsed.name, ...(parsed.audio !== undefined ? { audio: parsed.audio } : {}), pages };
   assertPlaylistValid(body);
-  // An ad-bearing document is authored under the v2 union, and only a
-  // signage-capable project may place adslot pages at all. The ordinary
-  // document path above stays byte-for-byte the existing v1 write.
-  const version = playlistApiVersion(pages);
-  if (version === "v2") {
+  // Only a signage-capable project may place adslot pages.
+  if (pages.some(isAdSlotPage)) {
     await requireCapability(client, "signage.playlists", `playlist ${action} with adslot pages`, {
       command: "screenrig project capabilities",
       reason: "Read the project's effective capabilities before authoring an ad-bearing playlist; only a screens-capable project can place adslot pages.",
@@ -4538,15 +4535,11 @@ async function playlistCreateUpdateAction(args: ParsedArgs, runtime: CliRuntime,
   if (action === "update" && id) {
     await assertAssignedScreensHaveZone(client, id, pages);
   }
-  // A document known to hold an adslot page is created on the v2 union. An
-  // update may also be replacing a stored ad-bearing playlist, so it follows
-  // the version-required conflict rather than assuming the document's version.
   const response = action === "create"
-    ? await client.call({ method: "POST", path: `/api/${version}/playlists`, idempotent: true, body })
-    : await callVersionedPlaylist(client, {
+    ? await client.call({ method: "POST", path: "/api/playlists", idempotent: true, body })
+    : await callPlaylist(client, {
       method: "PUT",
       id: id!,
-      preferred: version,
       body,
       ...(ifMatch ? { headers: { "if-match": quotedRevision(ifMatch) } } : {}),
     });
@@ -4582,10 +4575,9 @@ export const handlePlaylistDelete = commandHandler(async (args, runtime, resolve
   if (!id) throw usageError("playlist delete requires <id>.");
   let response;
   try {
-    response = await callVersionedPlaylist(client, {
+    response = await callPlaylist(client, {
       method: "DELETE",
       id,
-      preferred: "v1",
       ...(ifMatch ? { headers: { "if-match": quotedRevision(ifMatch) } } : {}),
     });
   } catch (error) {
@@ -4628,11 +4620,11 @@ function scheduleZoneError(screenId: string): CliError {
  * between a clear message and an opaque rejection.
  */
 async function assertScheduledPlaylistHasZone(client: ApiClient, screenId: string, playlistId: string): Promise<unknown> {
-  const playlist = await callVersionedPlaylist(client, { method: "GET", id: playlistId, preferred: "v1" });
+  const playlist = await callPlaylist(client, { method: "GET", id: playlistId });
   if (!usesPageVisibility(playlist.body)) {
     return playlist.body;
   }
-  const screen = await client.call({ method: "GET", path: `/api/v1/screens/${screenId}` });
+  const screen = await client.call({ method: "GET", path: `/api/screens/${screenId}` });
   if ((screen.body as Screen | undefined)?.timezone) {
     return playlist.body;
   }
@@ -4648,7 +4640,7 @@ async function assertAssignedScreensHaveZone(client: ApiClient, playlistId: stri
   if (!usesPageVisibility({ pages })) {
     return;
   }
-  const response = await client.listAll("/api/v1/screens");
+  const response = await client.listAll("/api/screens");
   const items = (response.body as { items?: Screen[] } | undefined)?.items;
   if (!Array.isArray(items)) {
     return;
@@ -4662,7 +4654,7 @@ async function assertAssignedScreensHaveZone(client: ApiClient, playlistId: stri
 export const handleScreenList = commandHandler(async (args, runtime, resolved) => {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
-  const response = await client.listAll("/api/v1/screens", screenListQuery(args));
+  const response = await client.listAll("/api/screens", screenListQuery(args));
   const items = (response.body as { items?: Screen[] } | undefined)?.items;
   return {
     envelope: jsonBody(response, client.requestId),
@@ -4875,7 +4867,7 @@ export const handleScreenProvision = commandHandler(async (args, runtime, resolv
   try {
     response = await client.call({
       method: "POST",
-      path: "/api/v1/screens/provision",
+      path: "/api/screens/provision",
       idempotent: true,
       idempotencyKey: retry.idempotency_key,
       body: request,
@@ -4946,7 +4938,7 @@ export const handleScreenPair = commandHandler(async (args, runtime, resolved) =
   const request: PairScreen = { code, ...(label ? { label } : {}) };
   const response = await client.call({
     method: "POST",
-    path: "/api/v1/screens/pair",
+    path: "/api/screens/pair",
     idempotent: true,
     body: request,
   });
@@ -4973,7 +4965,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
 
   const id = args.positionals[2];
   if (!id) throw usageError("screen show requires an id.");
-  const response = await client.call({ method: "GET", path: `/api/v1/screens/${id}` });
+  const response = await client.call({ method: "GET", path: `/api/screens/${id}` });
   const screen = response.body as Screen | undefined;
   return {
     envelope: jsonBody(response, client.requestId),
@@ -5014,7 +5006,7 @@ export const handleScreenStorageForecast = commandHandler(async (args, runtime, 
   };
   const response = await client.call({
     method: "POST",
-    path: `/api/v1/screens/${id}/storage-forecast`,
+    path: `/api/screens/${id}/storage-forecast`,
     body,
   });
   const forecast = response.body as ScreenStorageForecastDryRun | undefined;
@@ -5057,7 +5049,7 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
     // This read exists only for advisory aspect warnings. A missing warning
     // must not block a patch that supplies the required timezone itself.
     try {
-      playlist = (await callVersionedPlaylist(client, { method: "GET", id: playlistId, preferred: "v1" })).body;
+      playlist = (await callPlaylist(client, { method: "GET", id: playlistId })).body;
     } catch {
       playlist = undefined;
     }
@@ -5067,7 +5059,7 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
     ...(playlistId ? { playlist_id: playlistId } : {}),
     ...(timezone ? { timezone } : {}),
   };
-  const response = await client.call({ method: "PATCH", path: `/api/v1/screens/${id}`, idempotent: true, headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined, body });
+  const response = await client.call({ method: "PATCH", path: `/api/screens/${id}`, idempotent: true, headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined, body });
   const warnings = playlistId ? aspectMismatchWarnings(id, response.body, playlist) : [];
   return {
     envelope: jsonBody(response, client.requestId, undefined, warnings),
@@ -5095,7 +5087,7 @@ export const handleScreenAssign = commandHandler(async (args, runtime, resolved)
   const body: ScreenPatch = { playlist_id: playlistId };
   const response = await client.call({
     method: "PATCH",
-    path: `/api/v1/screens/${id}`,
+    path: `/api/screens/${id}`,
     idempotent: true,
     headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
     body,
@@ -5122,7 +5114,7 @@ export const handleScreenSetTimezone = commandHandler(async (args, runtime, reso
   const body: ScreenPatch = { timezone };
   const response = await client.call({
     method: "PATCH",
-    path: `/api/v1/screens/${id}`,
+    path: `/api/screens/${id}`,
     idempotent: true,
     headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
     body,
@@ -5139,7 +5131,7 @@ async function screenArchiveUnarchiveAction(args: ParsedArgs, runtime: CliRuntim
   if (!id) throw usageError(`screen ${action} requires <id>.`);
   const response = await client.call({
     method: "POST",
-    path: `/api/v1/screens/${id}/${action}`,
+    path: `/api/screens/${id}/${action}`,
     idempotent: true,
     headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
   });
@@ -5168,7 +5160,7 @@ export const handleScreenDelete = commandHandler(async (args, runtime, resolved)
   if (!id) throw usageError("screen delete requires <id>.");
   const response = await client.call({
     method: "DELETE",
-    path: `/api/v1/screens/${id}`,
+    path: `/api/screens/${id}`,
     idempotent: true,
     headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
   });
@@ -5184,7 +5176,7 @@ export const handleScreenRotatePublicId = commandHandler(async (args, runtime, r
   if (!id) throw usageError("screen rotate-public-id requires <id>.");
   const response = await client.call({
     method: "POST",
-    path: `/api/v1/screens/${id}/public-id/rotate`,
+    path: `/api/screens/${id}/public-id/rotate`,
     idempotent: true,
     headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
   });
@@ -5223,7 +5215,7 @@ export const handleScreenRecover = commandHandler(async (args, runtime, resolved
     // operator did not pass --idempotency-key, and write recovery keeps it.
     response = await client.call({
       method: "POST",
-      path: `/api/v1/screens/${id}/recovery/confirm`,
+      path: `/api/screens/${id}/recovery/confirm`,
       idempotent: true,
       ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
     });
@@ -5266,7 +5258,7 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
   try {
     response = await client.call({
       method: "POST",
-      path: `/api/v1/screens/${encodeURIComponent(id)}/reload`,
+      path: `/api/screens/${encodeURIComponent(id)}/reload`,
       idempotent: true,
       ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
     });
@@ -5310,7 +5302,7 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
 }, true);
 
 /**
- * One POST /api/v1/screens/actions request for several screens: one metered
+ * One POST /api/screens/actions request for several screens: one metered
  * request regardless of fan-out. The server answers 200 with a result per
  * screen; partial success keeps `ok: true` and moves the exit code (see
  * fleetOutcome). An Idempotency-Key is always sent. The command's write
@@ -5324,14 +5316,14 @@ async function screenFleetAction(client: ApiClient, title: string, selector: Scr
   const body: ScreenActionRequest = { selector, action };
   let response;
   try {
-    response = await client.call({ method: "POST", path: "/api/v1/screens/actions", idempotent: true, body, ...(recoverySupersede ? { recoverySupersede } : {}) });
+    response = await client.call({ method: "POST", path: "/api/screens/actions", idempotent: true, body, ...(recoverySupersede ? { recoverySupersede } : {}) });
   } catch (error) {
     if (error instanceof CliError && !error.problem.next
       && ((error.problem.status === 404 && error.problem.code === "http_error") || error.problem.status === 405)) {
       throw new CliError({
         ...error.problem,
         detail: "This API server does not offer fleet screen actions. No screen was changed.",
-        next: { command: "screenrig screen --help", reason: "Target one screen id at a time, or use a server that offers POST /api/v1/screens/actions." },
+        next: { command: "screenrig screen --help", reason: "Target one screen id at a time, or use a server that offers POST /api/screens/actions." },
       }, error.exitCode, error.warnings);
     }
     throw error;
@@ -5357,7 +5349,7 @@ async function screenFleetAction(client: ApiClient, title: string, selector: Scr
 /**
  * `screen tag`: exactly one of --set, --add, --remove, --clear.
  *
- * One screen id uses PATCH /api/v1/screens/{id} with the whole tag set, the
+ * One screen id uses PATCH /api/screens/{id} with the whole tag set, the
  * same revision semantics as every other single-screen write. --set and
  * --clear send the set directly (If-Match only with --expect-rev). --add and
  * --remove read the screen, compute the new set, and PATCH it guarded by
@@ -5395,7 +5387,7 @@ export const handleScreenTag = commandHandler(async (args, runtime, resolved) =>
   let ifMatch = flagString(args.flags, "if-match");
   let next = tags;
   if (add !== undefined || remove !== undefined) {
-    const current = (await client.call({ method: "GET", path: `/api/v1/screens/${encodeURIComponent(id)}` })).body as Screen | undefined;
+    const current = (await client.call({ method: "GET", path: `/api/screens/${encodeURIComponent(id)}` })).body as Screen | undefined;
     if (!current || current.id !== id || !Number.isSafeInteger(current.revision) || current.revision < 1) {
       throw usageError("Screen response has invalid identity or revision.");
     }
@@ -5410,7 +5402,7 @@ export const handleScreenTag = commandHandler(async (args, runtime, resolved) =>
   const derived = add !== undefined || remove !== undefined;
   const response = await client.call({
     method: "PATCH",
-    path: `/api/v1/screens/${encodeURIComponent(id)}`,
+    path: `/api/screens/${encodeURIComponent(id)}`,
     idempotent: true,
     headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
     body,
@@ -5454,7 +5446,7 @@ async function screenToast(args: ParsedArgs, client: ApiClient): Promise<Command
   const id = target.id;
   const response = await client.call({
     method: "POST",
-    path: `/api/v1/screens/${id}/toast`,
+    path: `/api/screens/${id}/toast`,
     idempotent: true,
     body,
   });
@@ -5623,7 +5615,7 @@ interface ScreenshotSaved {
 async function captureScreenshot(runtime: CliRuntime, client: ApiClient, id: string, outputPath: string, timeoutMs: number, pollMs: number): Promise<ScreenshotSaved> {
   const acceptedResponse = await client.call({
     method: "POST",
-    path: `/api/v1/screens/${id}/screenshot`,
+    path: `/api/screens/${id}/screenshot`,
     idempotent: true,
   });
   const accepted = (acceptedResponse.body ?? {}) as ScreenScreenshotAccepted;
@@ -5644,7 +5636,7 @@ async function captureScreenshot(runtime: CliRuntime, client: ApiClient, id: str
       while (true) {
         const statusResponse = await client.call({
           method: "GET",
-          path: `/api/v1/screens/${id}/screenshot/status`,
+          path: `/api/screens/${id}/screenshot/status`,
         });
         status = (statusResponse.body ?? {}) as ScreenScreenshotStatus;
         const currentId = status.capture_id;
@@ -5677,7 +5669,7 @@ async function captureScreenshot(runtime: CliRuntime, client: ApiClient, id: str
 
   const download = await client.call({
     method: "GET",
-    path: `/api/v1/screens/${id}/screenshot`,
+    path: `/api/screens/${id}/screenshot`,
     query: { capture_id: captureId },
     headers: { accept: "image/webp" },
     binary: true,
@@ -5744,7 +5736,7 @@ type ScreenshotFleetItem = FleetItem & Partial<Omit<ScreenshotSaved, "screen_id"
 /**
  * Client-side screenshot fan-out: screenshots are unbilled per screen, so
  * there is no fleet screenshot action. --tag resolves through
- * GET /api/v1/screens?tag=T and keeps active screens, matching the fleet
+ * GET /api/screens?tag=T and keeps active screens, matching the fleet
  * actions selector (one metered list request per page; captures are unbilled). Each
  * capture writes DIRECTORY/<screen_id>.webp; a failed capture is that
  * screen's result, never a transport error. An unexpected (non-CliError)
@@ -5776,7 +5768,7 @@ async function screenScreenshotFleet(args: ParsedArgs, runtime: CliRuntime, clie
 
   let ids: string[];
   if (selector.by === "tag") {
-    const listed = await client.listAll("/api/v1/screens", { tag: selector.tag });
+    const listed = await client.listAll("/api/screens", { tag: selector.tag });
     const items = (listed.body as { items?: Screen[] } | undefined)?.items;
     if (!Array.isArray(items)) throw usageError("Screen list response does not match the generated ScreenList contract.");
     ids = items.filter((screen) => screen?.state === "active" && typeof screen.id === "string").map((screen) => screen.id);
@@ -5861,7 +5853,7 @@ export const handleKvList = commandHandler(async (args, runtime, resolved) => {
   if (!applicationId) throw usageError("kv commands require --app-id.");
   const key = args.positionals[2];
 
-  return simpleList(args, runtime, resolved, `/api/v1/applications/${applicationId}/kv`, "K/V");
+  return simpleList(args, runtime, resolved, `/api/applications/${applicationId}/kv`, "K/V");
 }, true);
 
 export const handleKvGet = commandHandler(async (args, runtime, resolved) => {
@@ -5870,7 +5862,7 @@ export const handleKvGet = commandHandler(async (args, runtime, resolved) => {
   const key = args.positionals[2];
 
   if (!key) throw usageError("kv get requires a key.");
-  return simpleGet(args, runtime, resolved, `/api/v1/applications/${applicationId}/kv/${encodeURIComponent(key)}`, "K/V");
+  return simpleGet(args, runtime, resolved, `/api/applications/${applicationId}/kv/${encodeURIComponent(key)}`, "K/V");
 }, true);
 
 export const handleKvSet = commandHandler(async (args, runtime, resolved) => {
@@ -5885,7 +5877,7 @@ export const handleKvSet = commandHandler(async (args, runtime, resolved) => {
   const revision = flagString(args.flags, "if-match");
   const response = await client.call({
     method: "PUT",
-    path: `/api/v1/applications/${applicationId}/kv/${encodeURIComponent(key)}`,
+    path: `/api/applications/${applicationId}/kv/${encodeURIComponent(key)}`,
     idempotent: true,
     headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
     body,
@@ -5915,7 +5907,7 @@ export const handleKvDelete = commandHandler(async (args, runtime, resolved) => 
   const ifMatch = flagString(args.flags, "if-match");
   const response = await client.call({
     method: "DELETE",
-    path: `/api/v1/applications/${applicationId}/kv/${encodeURIComponent(key)}`,
+    path: `/api/applications/${applicationId}/kv/${encodeURIComponent(key)}`,
     idempotent: true,
     headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
   });
@@ -5924,12 +5916,12 @@ export const handleKvDelete = commandHandler(async (args, runtime, resolved) => 
 
 function commentPath(target: "screen" | "playlist", id: string, pageId: string | undefined): string {
   if (target === "screen") {
-    return `/api/v1/comment/screen/${encodeURIComponent(id)}`;
+    return `/api/comment/screen/${encodeURIComponent(id)}`;
   }
   if (pageId) {
-    return `/api/v1/comment/playlist/${encodeURIComponent(id)}/page/${encodeURIComponent(pageId)}`;
+    return `/api/comment/playlist/${encodeURIComponent(id)}/page/${encodeURIComponent(pageId)}`;
   }
-  return `/api/v1/comment/playlist/${encodeURIComponent(id)}`;
+  return `/api/comment/playlist/${encodeURIComponent(id)}`;
 }
 
 function commentTarget(args: ParsedArgs, target: "screen" | "playlist") {
@@ -6053,7 +6045,7 @@ async function operationsCancel(args: ParsedArgs, runtime: CliRuntime, resolved:
   if (!id) throw usageError("operations cancel requires an id.");
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
-  const response = await client.call({ method: "POST", path: `/api/v1/operations/${id}/cancel`, idempotent: true });
+  const response = await client.call({ method: "POST", path: `/api/operations/${id}/cancel`, idempotent: true });
   const operation = response.body as Operation;
   return {
     envelope: successEnvelope(operation, { request_id: client.requestId, operation_id: operation.id }),
@@ -6184,7 +6176,7 @@ async function eventsList(args: ParsedArgs, runtime: CliRuntime, resolved: Await
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const response = await client.call({
     method: "GET",
-    path: "/api/v1/events",
+    path: "/api/events",
     query: {
       after: flagString(args.flags, "after") ?? flagString(args.flags, "cursor"),
       limit: flagString(args.flags, "limit"),
@@ -6278,7 +6270,7 @@ async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awa
       try {
         const stream = await transport.stream({
           method: "GET",
-          path: "/api/v1/events/stream",
+          path: "/stream/project",
           query: { after },
           headers: { "x-request-id": client.nextRequestId(), authorization: `Bearer ${token}`, ...(resolved.projectId ? { "screenrig-project": resolved.projectId } : {}) },
           signal: controller.signal,
@@ -6551,10 +6543,10 @@ async function doctor(
   }
 
   const client = clientFor(runtime, args, resolved.apiUrl, resolved.token);
-  for (const route of ["/.health", "/.ready", "/.version", "/api/v1/capabilities"] as const) {
+  for (const route of ["/.health", "/.ready", "/.version", "/api/capabilities"] as const) {
     try {
       const response = await client.call({ method: "GET", path: route });
-      const name = route === "/api/v1/capabilities" ? "capabilities" : route.slice(2);
+      const name = route === "/api/capabilities" ? "capabilities" : route.slice(2);
       const body = response.body;
       const degraded = route === "/.ready" && body !== null && typeof body === "object"
         && "degraded" in body && Array.isArray(body.degraded) ? body.degraded : [];
@@ -6586,7 +6578,7 @@ async function doctor(
         status: degraded.length > 0 ? "warn" : "pass",
         detail: `status ${response.status}${guidance.length > 0 ? `; service ready with degraded dependencies. ${guidance.join(". ")}` : ""}`,
       });
-      if (route === "/api/v1/capabilities") {
+      if (route === "/api/capabilities") {
         // Probe feedback support from the advertised feature map rather than
         // assuming the routes exist on every deployment.
         const features = ((response.body ?? {}) as Capabilities).features ?? {};
@@ -6602,7 +6594,7 @@ async function doctor(
       }
     } catch (err) {
       const detail = err instanceof CliError ? err.problem.detail : err instanceof Error ? err.message : `${route} failed`;
-      const name = route === "/api/v1/capabilities" ? "capabilities" : route.slice(2);
+      const name = route === "/api/capabilities" ? "capabilities" : route.slice(2);
       checks.push({ name, status: "fail", detail });
     }
   }
@@ -6637,7 +6629,7 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
     // a screen/media or uploads a file, bind legacy token-only configs to
     // their authenticated project before performing that remote work.
     if (!resolved.projectId || !resolved.projectName || !resolved.organizationName) {
-      const response = await client.call({ method: "GET", path: "/api/v1/project" });
+      const response = await client.call({ method: "GET", path: "/api/project" });
       const context = contextFromProject(response.body as Project);
       if (resolved.projectId && context.project.id !== resolved.projectId) throw configError("Project credential resolved to a different project.");
       resolved = await cacheProjectContexts(runtime, resolved, [context], { credential: resolved.token });
@@ -6647,7 +6639,7 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
   })();
   const screenId = flagString(args.flags, "screen");
   const width = flagNumber(args.flags, "target-width"), height = flagNumber(args.flags, "target-height");
-  const screen = screenId ? (await (await remote()).call({ method: "GET", path: `/api/v1/screens/${encodeURIComponent(screenId)}` })).body : undefined;
+  const screen = screenId ? (await (await remote()).call({ method: "GET", path: `/api/screens/${encodeURIComponent(screenId)}` })).body : undefined;
   const dimensions = targetDimensions(screen, width, height);
   const target = screen as { id: string; revision: number } | undefined;
   if (screenId && (!target || target.id !== screenId || !Number.isSafeInteger(target.revision) || target.revision < 1)) {
@@ -6658,7 +6650,7 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
   const warnings: Warning[] = [];
   for (const input of args.positionals.slice(2)) {
     if (RESOURCE_ID_PATTERNS.media.test(input)) {
-      const record = (await (await remote()).call({ method: "GET", path: `/api/v1/media/${input}` })).body as Record<string, any>;
+      const record = (await (await remote()).call({ method: "GET", path: `/api/media/${input}` })).body as Record<string, any>;
       if (record?.id !== input) throw usageError("Media response identity did not match.");
       content.push(record);
     } else if (RESOURCE_ID_PATTERNS.release.test(input)) {
@@ -6703,7 +6695,7 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
         timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000, pollMs: flagNumber(args.flags, "poll-ms") ?? 1000 }));
       warnings.push(...uploaded.warnings);
       if (!uploaded.mediaId) throw usageError("Upload completed without a media identifier.");
-      const record = (await (await remote()).call({ method: "GET", path: `/api/v1/media/${encodeURIComponent(uploaded.mediaId)}` })).body as Record<string, any>;
+      const record = (await (await remote()).call({ method: "GET", path: `/api/media/${encodeURIComponent(uploaded.mediaId)}` })).body as Record<string, any>;
       if (record?.id !== uploaded.mediaId) throw usageError("Media response identity did not match.");
       content[index] = record;
       uploads.push({ index, media_id: uploaded.mediaId, reused: uploaded.reused, timing: uploaded.timing });
@@ -6769,11 +6761,11 @@ function publishPlaybackWarning(result: Awaited<ReturnType<typeof publishScreen>
   return undefined;
 }
 
-// Customer webhooks: /api/v1/webhooks. The signing secret is printed once in
+// Customer webhooks: /api/webhooks. The signing secret is printed once in
 // data.secret (create, rotate-secret) and never reaches config, logs, or the
 // write-recovery ledger; an identical rerun after an ambiguous failure reuses
 // the saved Idempotency-Key and the server replays the same secret for 24 h.
-const WEBHOOKS_PATH = "/api/v1/webhooks";
+const WEBHOOKS_PATH = "/api/webhooks";
 
 async function webhookCall(
   client: ApiClient,
@@ -6989,14 +6981,14 @@ export const handleScreenScheduleShow = commandHandler(async (args, runtime, res
   const id = args.positionals[3];
   if (!id) throw usageError("screen schedule show requires <id>.");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await screenControlCall(client, id, { method: "GET", path: `/api/v1/screens/${encodeURIComponent(id)}/playlist-schedule` });
+  const response = await screenControlCall(client, id, { method: "GET", path: `/api/screens/${encodeURIComponent(id)}/playlist-schedule` });
   const view = response.body as ScreenPlaylistScheduleView | undefined;
   // The view carries no zone; human output reads it from the screen so civil
   // windows and instants are labelled. JSON output makes no extra request.
   let timezone: string | null | undefined;
   if (flagBool(args.flags, "human")) {
     try {
-      const screen = await client.call({ method: "GET", path: `/api/v1/screens/${encodeURIComponent(id)}` });
+      const screen = await client.call({ method: "GET", path: `/api/screens/${encodeURIComponent(id)}` });
       timezone = (screen.body as Screen | undefined)?.timezone ?? null;
     } catch {
       timezone = undefined;
@@ -7030,7 +7022,7 @@ export const handleScreenScheduleSet = commandHandler(async (args, runtime, reso
   const body: ScreenPlaylistScheduleWrite = { entries };
   const revision = flagString(args.flags, "if-match");
   const response = await screenControlCall(client, id, {
-    method: "PUT", path: `/api/v1/screens/${encodeURIComponent(id)}/playlist-schedule`, idempotent: true, body,
+    method: "PUT", path: `/api/screens/${encodeURIComponent(id)}/playlist-schedule`, idempotent: true, body,
     ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
   });
   return {
@@ -7050,7 +7042,7 @@ export const handleScreenScheduleClear = commandHandler(async (args, runtime, re
   const id = target.id;
   const revision = flagString(args.flags, "if-match");
   const response = await screenControlCall(client, id, {
-    method: "DELETE", path: `/api/v1/screens/${encodeURIComponent(id)}/playlist-schedule`, idempotent: true,
+    method: "DELETE", path: `/api/screens/${encodeURIComponent(id)}/playlist-schedule`, idempotent: true,
     ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
   });
   return {
@@ -7090,7 +7082,7 @@ export const handleScreenTakeover = commandHandler(async (args, runtime, resolve
   let response;
   try {
     response = await screenControlCall(client, id, {
-      method: "POST", path: `/api/v1/screens/${encodeURIComponent(id)}/takeover`, idempotent: true, body: write,
+      method: "POST", path: `/api/screens/${encodeURIComponent(id)}/takeover`, idempotent: true, body: write,
       ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
       ...(supersede ? { recoverySupersede: supersede } : {}),
     });
@@ -7114,7 +7106,7 @@ export const handleScreenTakeoverClear = commandHandler(async (args, runtime, re
   const id = target.id;
   const revision = flagString(args.flags, "if-match");
   const response = await screenControlCall(client, id, {
-    method: "DELETE", path: `/api/v1/screens/${encodeURIComponent(id)}/takeover`, idempotent: true,
+    method: "DELETE", path: `/api/screens/${encodeURIComponent(id)}/takeover`, idempotent: true,
     ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
   });
   return {
@@ -7146,7 +7138,7 @@ export const handleScreenReboot = commandHandler(async (args, runtime, resolved)
   let response;
   try {
     response = await client.call({
-      method: "POST", path: `/api/v1/screens/${encodeURIComponent(id)}/reboot`, idempotent: true,
+      method: "POST", path: `/api/screens/${encodeURIComponent(id)}/reboot`, idempotent: true,
       ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
     });
   } catch (error) {
@@ -7190,7 +7182,7 @@ export const handleScreenDisplay = commandHandler(async (args, runtime, resolved
   let response;
   try {
     response = await client.call({
-      method: "POST", path: `/api/v1/screens/${encodeURIComponent(id)}/display`, idempotent: true, body: write,
+      method: "POST", path: `/api/screens/${encodeURIComponent(id)}/display`, idempotent: true, body: write,
       ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
     });
   } catch (error) {
@@ -7208,12 +7200,12 @@ export const handleScreenDisplayScheduleShow = commandHandler(async (args, runti
   const id = args.positionals[3];
   if (!id) throw usageError("screen display-schedule show requires <id>.");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await screenControlCall(client, id, { method: "GET", path: `/api/v1/screens/${encodeURIComponent(id)}/display-schedule` });
+  const response = await screenControlCall(client, id, { method: "GET", path: `/api/screens/${encodeURIComponent(id)}/display-schedule` });
   const view = response.body as ScreenDisplayScheduleView | undefined;
   let timezone: string | undefined;
   if (flagBool(args.flags, "human")) {
     try {
-      timezone = ((await client.call({ method: "GET", path: `/api/v1/screens/${encodeURIComponent(id)}` })).body as Screen | undefined)?.timezone;
+      timezone = ((await client.call({ method: "GET", path: `/api/screens/${encodeURIComponent(id)}` })).body as Screen | undefined)?.timezone;
     } catch {
       timezone = undefined;
     }
@@ -7237,7 +7229,7 @@ export const handleScreenDisplayScheduleSet = commandHandler(async (args, runtim
   const id = target.id;
   const revision = flagString(args.flags, "if-match");
   const response = await screenControlCall(client, id, {
-    method: "PUT", path: `/api/v1/screens/${encodeURIComponent(id)}/display-schedule`, idempotent: true, body: write,
+    method: "PUT", path: `/api/screens/${encodeURIComponent(id)}/display-schedule`, idempotent: true, body: write,
     ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
   });
   return {
@@ -7255,7 +7247,7 @@ export const handleScreenDisplayScheduleClear = commandHandler(async (args, runt
   const id = target.id;
   const revision = flagString(args.flags, "if-match");
   const response = await screenControlCall(client, id, {
-    method: "DELETE", path: `/api/v1/screens/${encodeURIComponent(id)}/display-schedule`, idempotent: true,
+    method: "DELETE", path: `/api/screens/${encodeURIComponent(id)}/display-schedule`, idempotent: true,
     ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
   });
   return {
@@ -7275,7 +7267,7 @@ export const handleScreenDisplayClear = commandHandler(async (args, runtime, res
   let response;
   try {
     response = await client.call({
-      method: "DELETE", path: `/api/v1/screens/${encodeURIComponent(id)}/display`, idempotent: true,
+      method: "DELETE", path: `/api/screens/${encodeURIComponent(id)}/display`, idempotent: true,
       ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
     });
   } catch (error) {

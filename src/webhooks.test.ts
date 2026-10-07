@@ -66,7 +66,7 @@ async function cli(argv: string[], transport: FakeTransport, env: Env, logger?: 
   return { code, stdout: text, stderr: err, envelope };
 }
 
-const webhookCalls = (transport: FakeTransport): TransportRequest[] => transport.calls.filter((call) => call.path.startsWith("/api/v1/webhooks"));
+const webhookCalls = (transport: FakeTransport): TransportRequest[] => transport.calls.filter((call) => call.path.startsWith("/api/webhooks"));
 
 async function create(transport: FakeTransport, env: Env, ...extra: string[]) {
   const created = await cli(["--json", "webhooks", "create", "--url", URL_OK, "--event-types", "screen.*,playlist.updated", ...extra], transport, env);
@@ -82,7 +82,7 @@ test("webhooks create prints the secret once with a warning and never persists i
   assert.equal(created.code, 0, created.stdout);
   const call = webhookCalls(transport).at(-1)!;
   assert.equal(call.method, "POST");
-  assert.equal(call.path, "/api/v1/webhooks");
+  assert.equal(call.path, "/api/webhooks");
   assert.deepEqual(call.body, { url: URL_OK, event_types: ["screen.*", "playlist.updated"], description: "Ops bot" });
   assert.ok(call.headers?.["idempotency-key"], "create always sends an Idempotency-Key");
   assert.match(created.envelope.data.secret, /^whsec_/);
@@ -117,7 +117,7 @@ test("an ambiguous create reruns with the saved key and the server replays the s
   const original = backend.request.bind(backend);
   backend.request = async (req) => {
     const response = await original(req);
-    if (lose && req.method === "POST" && req.path === "/api/v1/webhooks") {
+    if (lose && req.method === "POST" && req.path === "/api/webhooks") {
       lose = false;
       throw networkError("connection reset after the request was sent");
     }
@@ -226,7 +226,7 @@ test("webhooks list and show render JSON by default and tables in human mode", a
 
   const shown = await cli(["--json", "webhooks", "show", id], transport, env);
   assert.equal(shown.code, 0);
-  assert.equal(webhookCalls(transport).at(-1)!.path, `/api/v1/webhooks/${id}`);
+  assert.equal(webhookCalls(transport).at(-1)!.path, `/api/webhooks/${id}`);
   assert.equal(shown.envelope.data.revision, 1);
   const shownHuman = await cli(["--human", "webhooks", "show", id], transport, env);
   assert.match(shownHuman.stdout, /^status: active$/m);
@@ -315,7 +315,7 @@ test("webhooks rotate-secret prints the new secret once and never persists it", 
   assert.equal(rotated.code, 0, rotated.stdout);
   const call = webhookCalls(transport).at(-1)!;
   assert.equal(call.method, "POST");
-  assert.equal(call.path, `/api/v1/webhooks/${first.id}/rotate-secret`);
+  assert.equal(call.path, `/api/webhooks/${first.id}/rotate-secret`);
   assert.equal(call.headers?.["if-match"], '"1"');
   assert.ok(call.headers?.["idempotency-key"]);
   assert.match(rotated.envelope.data.secret, /^whsec_/);
@@ -338,7 +338,7 @@ test("webhooks test queues one delivery and deliveries pages the log", async () 
   assert.equal(tested.code, 0, tested.stdout);
   const call = webhookCalls(transport).at(-1)!;
   assert.equal(call.method, "POST");
-  assert.equal(call.path, `/api/v1/webhooks/${id}/test`);
+  assert.equal(call.path, `/api/webhooks/${id}/test`);
   assert.ok(call.headers?.["idempotency-key"]);
   assert.equal(tested.envelope.data.event_type, "webhook.test");
   assert.equal(tested.envelope.data.test, true);
@@ -372,7 +372,7 @@ test("webhooks test queues one delivery and deliveries pages the log", async () 
 test("webhook test rate limiting keeps the exit-7 convention", async () => {
   const env = await enrolled();
   const id = "whk_LIMITEDAAAAAAAAAAAAAAA";
-  const transport = new FakeTransport().on("POST", `/api/v1/webhooks/${id}/test`, () => ({
+  const transport = new FakeTransport().on("POST", `/api/webhooks/${id}/test`, () => ({
     status: 429, headers: { "content-type": "application/problem+json", "retry-after": "12" },
     body: { status: 429, code: "rate_limited", title: "Too many requests", detail: "webhook-test-project limit reached." },
   }));
@@ -423,8 +423,8 @@ test("a 2xx answer without a secret clears the saved key and points at rotate-se
   const id = "whk_NOSECRETAAAAAAAAAAAAAA";
   const webhook = { id, url: URL_OK, event_types: ["screen.*"], enabled: true, revision: 1, status: "active", created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z" };
   const transport = new FakeTransport()
-    .on("POST", "/api/v1/webhooks", () => ({ status: 201, headers: {}, body: webhook }))
-    .on("POST", `/api/v1/webhooks/${id}/rotate-secret`, () => ({ status: 200, headers: {}, body: { ...webhook, revision: 2 } }));
+    .on("POST", "/api/webhooks", () => ({ status: 201, headers: {}, body: webhook }))
+    .on("POST", `/api/webhooks/${id}/rotate-secret`, () => ({ status: 200, headers: {}, body: { ...webhook, revision: 2 } }));
   for (const argv of [["webhooks", "create", "--url", URL_OK, "--event-types", "screen.*"], ["webhooks", "rotate-secret", id]]) {
     const answered = await cli(["--json", ...argv], transport, env);
     assert.equal(answered.code, ExitCode.Unexpected, answered.stdout);
@@ -438,7 +438,7 @@ test("a 2xx answer without a secret clears the saved key and points at rotate-se
 
 test("problem answers on webhook routes keep their bodies out of the operation log", async () => {
   const env = await enrolled();
-  const transport = new FakeTransport().on("POST", "/api/v1/webhooks", () => ({
+  const transport = new FakeTransport().on("POST", "/api/webhooks", () => ({
     status: 400, headers: { "content-type": "application/problem+json" },
     body: { status: 400, code: "webhook_url_rejected", title: "Rejected", detail: "url host must be a public Internet address.", errors: [{ field: "url", detail: "rcv_token_in_path" }] },
   }));

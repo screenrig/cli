@@ -120,14 +120,14 @@ function exportTransport(bytes: Uint8Array, options: { playlist?: unknown; heade
     ...options.headers,
   };
   return new FakeTransport()
-    .on("GET", "/api/v1/playlists/pl_SOURCE", () => ({
+    .on("GET", "/api/playlists/pl_SOURCE", () => ({
       status: 200,
       headers: {},
       body: options.playlist ?? playlist(mediaPrimitive({ by: "id", media_id: id })),
     }))
-    .on("GET", `/api/v1/media/${id}`, () => ({ status: 200, headers: {}, body: item }))
-    .on("HEAD", `/api/v1/media/${id}/content`, () => ({ status: 200, headers, body: undefined }))
-    .onDownload("GET", `/api/v1/media/${id}/content`, () => ({
+    .on("GET", `/api/media/${id}`, () => ({ status: 200, headers: {}, body: item }))
+    .on("HEAD", `/api/media/${id}/content`, () => ({ status: 200, headers, body: undefined }))
+    .onDownload("GET", `/api/media/${id}/content`, () => ({
       status: 200,
       headers,
       body: byteStream(options.body ?? bytes),
@@ -167,13 +167,13 @@ test("rejects application primitives before any media lookup or local output", a
     content_fit: "fill",
     controller: true,
   });
-  const transport = new FakeTransport().on("GET", "/api/v1/playlists/pl_SOURCE", () => ({ status: 200, headers: {}, body: source }));
+  const transport = new FakeTransport().on("GET", "/api/playlists/pl_SOURCE", () => ({ status: 200, headers: {}, body: source }));
   const client = new ApiClient({ transport, token: "token" });
   await assert.rejects(
     () => exportPlaylistBundle({ playlistId: "pl_SOURCE", outputDirectory: output, client }),
     (error: unknown) => error instanceof CliError && error.problem.code === "usage_error" && /--skip-applications/.test(error.problem.detail),
   );
-  assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), ["GET /api/v1/playlists/pl_SOURCE"]);
+  assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), ["GET /api/playlists/pl_SOURCE"]);
   await assert.rejects(() => lstat(output), /ENOENT/);
   await rm(dir, { recursive: true, force: true });
 });
@@ -480,15 +480,15 @@ function importTransport(
   const transport = new FakeTransport();
   let declaration = 0;
   const operations = new Map<string, string>();
-  transport.on("GET", "/api/v1/media", (req) => options.pageSize === undefined
+  transport.on("GET", "/api/media", (req) => options.pageSize === undefined
     ? { status: 200, headers: {}, body: { items: existing } }
     : listPage(req, existing, options.pageSize));
-  transport.on("GET", /^\/api\/v1\/playlists\/pl_/, (req) => ({
+  transport.on("GET", /^\/api\/playlists\/pl_/, (req) => ({
     status: 200,
     headers: { etag: '"8"' },
     body: { id: req.path.split("/").pop(), name: "Target", revision: 8, pages: [] },
   }));
-  transport.on("POST", "/api/v1/media/uploads", (request) => {
+  transport.on("POST", "/api/media/uploads", (request) => {
     const index = declaration++;
     const overridden = options.declarationResponse?.(index, request);
     if (overridden) return overridden;
@@ -507,11 +507,11 @@ function importTransport(
       },
     };
   });
-  transport.on("POST", /^\/api\/v1\/media\/uploads\/upload_\d+\/commit$/, (req) => {
+  transport.on("POST", /^\/api\/media\/uploads\/upload_\d+\/commit$/, (req) => {
     const index = req.path.match(/upload_(\d+)/)?.[1] ?? "0";
     return { status: 202, headers: {}, body: { id: `op_${index}`, state: "queued" } };
   });
-  transport.on("GET", /^\/api\/v1\/operations\/op_\d+$/, (req) => {
+  transport.on("GET", /^\/api\/operations\/op_\d+$/, (req) => {
     const operationId = req.path.split("/").pop()!;
     return {
       status: 200,
@@ -519,12 +519,12 @@ function importTransport(
       body: { id: operationId, kind: "media.upload", state: "succeeded", created_at: "", updated_at: "", result: { media_id: operations.get(operationId) } },
     };
   });
-  transport.on("POST", "/api/v1/playlists", (req) => options.playlistResponse?.(req) ?? ({
+  transport.on("POST", "/api/playlists", (req) => options.playlistResponse?.(req) ?? ({
     status: 201,
     headers: {},
     body: { ...(req.body as object), id: "pl_IMPORTED", revision: 1 },
   }));
-  transport.on("PUT", /^\/api\/v1\/playlists\//, (req) => options.playlistResponse?.(req) ?? ({
+  transport.on("PUT", /^\/api\/playlists\//, (req) => options.playlistResponse?.(req) ?? ({
     status: 200,
     headers: {},
     body: { ...(req.body as object), id: req.path.split("/").pop(), revision: 9 },
@@ -599,13 +599,13 @@ test("import dedupes exact media injectively, rewrites selectors, and performs n
     runtime: runtimeForImport([]),
   });
   assert.equal(result.media.reused, 2);
-  const create = transport.calls.find((call) => call.method === "POST" && call.path === "/api/v1/playlists")!;
+  const create = transport.calls.find((call) => call.method === "POST" && call.path === "/api/playlists")!;
   const text = JSON.stringify(create.body);
   assert.match(text, /med_SOURCE_A/);
   assert.match(text, /med_A_FIRST/);
   assert.doesNotMatch(text, /med_Z_LAST/);
   assert.equal(transport.calls.some((call) => call.method === "DELETE"), false);
-  assert.equal(transport.calls.some((call) => call.path === "/api/v1/media/uploads"), false);
+  assert.equal(transport.calls.some((call) => call.path === "/api/media/uploads"), false);
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -626,10 +626,10 @@ test("import reuses media that a later page of the media list holds", async () =
   });
   assert.deepEqual(result.media, { total: 1, reused: 1, uploaded: 0 });
   assert.deepEqual(
-    transport.calls.filter((call) => call.path === "/api/v1/media").map((call) => call.query?.after),
+    transport.calls.filter((call) => call.path === "/api/media").map((call) => call.query?.after),
     [undefined, "pg_1", "pg_2"],
   );
-  assert.equal(transport.calls.some((call) => call.path === "/api/v1/media/uploads"), false);
+  assert.equal(transport.calls.some((call) => call.path === "/api/media/uploads"), false);
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -647,7 +647,7 @@ test("import uploads missing media serially without transcoding, preserves decla
   const result = await importPlaylistBundle({ directory: dir, client, runtime: runtimeForImport(signedBodies) });
   assert.equal(result.media.uploaded, 2);
   assert.deepEqual(signedBodies.map((value) => [...value]), [[...first], [...second]]);
-  const declares = transport.calls.filter((call) => call.path === "/api/v1/media/uploads");
+  const declares = transport.calls.filter((call) => call.path === "/api/media/uploads");
   assert.deepEqual(declares.map((call) => call.body), [
     { filename: "first.png", content_type: "image/png", bytes: 3, sha256: sha(first), tag: "A1" },
     { filename: "second.png", content_type: "image/png", bytes: 4, sha256: sha(second) },
@@ -656,8 +656,8 @@ test("import uploads missing media serially without transcoding, preserves decla
   assert.equal(new Set(keys).size, keys.length);
   assert.equal(declares[0]?.headers?.["idempotency-key"], deriveBundleIdempotencyKey("bundle-base-key", "media-declare", "med_SOURCE_A"));
   const methods = transport.calls.map((call) => `${call.method} ${call.path}`);
-  assert.ok(methods.indexOf("POST /api/v1/media/uploads/upload_0/commit") < methods.indexOf("POST /api/v1/media/uploads" , methods.indexOf("POST /api/v1/media/uploads") + 1));
-  assert.equal(transport.calls.at(-1)?.path, "/api/v1/playlists");
+  assert.ok(methods.indexOf("POST /api/media/uploads/upload_0/commit") < methods.indexOf("POST /api/media/uploads" , methods.indexOf("POST /api/media/uploads") + 1));
+  assert.equal(transport.calls.at(-1)?.path, "/api/playlists");
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -675,7 +675,7 @@ test("import paces the twenty-first missing media declaration without delaying t
 
   assert.equal(result.media.uploaded, 21);
   assert.deepEqual(clock.sleeps, [60_000]);
-  assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 21);
+  assert.equal(transport.calls.filter((call) => call.path === "/api/media/uploads").length, 21);
   assert.equal((runtime.stdout as PassThrough).read(), null);
   assert.match(String((runtime.stderr as PassThrough).read()), /waiting 60 seconds for media upload admission/);
   await rm(dir, { recursive: true, force: true });
@@ -697,7 +697,7 @@ test("reused media does not consume upload admission slots", async () => {
 
   assert.deepEqual(result.media, { total: 21, reused: 1, uploaded: 20 });
   assert.deepEqual(clock.sleeps, []);
-  assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 20);
+  assert.equal(transport.calls.filter((call) => call.path === "/api/media/uploads").length, 20);
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -727,7 +727,7 @@ test("import honors Retry-After once for the same idempotent media declaration",
 
   assert.equal(result.media.uploaded, 1);
   assert.deepEqual(clock.sleeps, [7_000]);
-  const declarations = transport.calls.filter((call) => call.path === "/api/v1/media/uploads");
+  const declarations = transport.calls.filter((call) => call.path === "/api/media/uploads");
   assert.equal(declarations.length, 2);
   assert.equal(declarations[0]?.headers?.["idempotency-key"], declarations[1]?.headers?.["idempotency-key"]);
   assert.deepEqual(declarations[0]?.body, declarations[1]?.body);
@@ -764,12 +764,12 @@ test("two declaration 429s before any successful upload preserve the latest rate
     },
   );
 
-  const declarations = transport.calls.filter((call) => call.path === "/api/v1/media/uploads");
+  const declarations = transport.calls.filter((call) => call.path === "/api/media/uploads");
   assert.equal(declarations.length, 2);
   assert.equal(declarations[0]?.headers?.["idempotency-key"], declarations[1]?.headers?.["idempotency-key"]);
   assert.deepEqual(declarations[0]?.body, declarations[1]?.body);
   assert.deepEqual(clock.sleeps, [3_000]);
-  assert.equal(transport.calls.some((call) => /^\/api\/v1\/playlists/.test(call.path)), false);
+  assert.equal(transport.calls.some((call) => /^\/api\/playlists/.test(call.path)), false);
   assert.equal((runtime.stdout as PassThrough).read(), null);
   assert.match(String((runtime.stderr as PassThrough).read()), /rate limited; waiting 3 seconds/);
   await rm(dir, { recursive: true, force: true });
@@ -804,14 +804,14 @@ test("two declaration 429s after a ready upload preserve Retry-After and report 
     },
   );
 
-  const declarations = transport.calls.filter((call) => call.path === "/api/v1/media/uploads");
+  const declarations = transport.calls.filter((call) => call.path === "/api/media/uploads");
   assert.equal(declarations.length, 3);
   const limited = declarations.slice(1);
   assert.equal(limited.length, 2);
   assert.equal(limited[0]?.headers?.["idempotency-key"], limited[1]?.headers?.["idempotency-key"]);
   assert.deepEqual(limited[0]?.body, limited[1]?.body);
   assert.deepEqual(clock.sleeps, [5_000]);
-  assert.equal(transport.calls.some((call) => /^\/api\/v1\/playlists/.test(call.path)), false);
+  assert.equal(transport.calls.some((call) => /^\/api\/playlists/.test(call.path)), false);
   assert.equal((runtime.stdout as PassThrough).read(), null);
   assert.match(String((runtime.stderr as PassThrough).read()), /rate limited; waiting 5 seconds/);
   await rm(dir, { recursive: true, force: true });
@@ -850,7 +850,7 @@ test("playlist-write 429 preserves Retry-After and reports an unknown write outc
     },
   );
 
-  const playlistCalls = transport.calls.filter((call) => call.path === "/api/v1/playlists");
+  const playlistCalls = transport.calls.filter((call) => call.path === "/api/playlists");
   assert.equal(playlistCalls.length, 1);
   assert.deepEqual(clock.sleeps, []);
   assert.equal((runtime.stdout as PassThrough).read(), null);
@@ -894,7 +894,7 @@ test("import without --update creates like playlist create even when the name re
     });
     assert.equal(result.mode, "create");
   }
-  const creates = transport.calls.filter((call) => call.method === "POST" && call.path === "/api/v1/playlists");
+  const creates = transport.calls.filter((call) => call.method === "POST" && call.path === "/api/playlists");
   assert.equal(creates.length, 2);
   for (const create of creates) {
     assert.ok(create.body && typeof create.body === "object");
@@ -917,7 +917,7 @@ test("import without --update creates like playlist create even when the name re
       return true;
     },
   );
-  assert.equal(conflicting.calls.filter((call) => call.path === "/api/v1/playlists").length, 1);
+  assert.equal(conflicting.calls.filter((call) => call.path === "/api/playlists").length, 1);
 
   const named = importTransport(existing);
   const result = await importPlaylistBundle({
@@ -927,7 +927,7 @@ test("import without --update creates like playlist create even when the name re
     name: "  Lobby loop (copy) ",
   });
   assert.equal(result.mode, "create");
-  const create = named.calls.find((call) => call.method === "POST" && call.path === "/api/v1/playlists")!;
+  const create = named.calls.find((call) => call.method === "POST" && call.path === "/api/playlists")!;
   assert.ok(create.body && typeof create.body === "object" && "name" in create.body);
   assert.equal(create.body.name, "Lobby loop (copy)");
   assert.deepEqual(Object.keys(create.body).sort(), ["name", "pages"]);
@@ -975,8 +975,8 @@ test("a non-rate-limit declaration failure remains partial and is not retried", 
     },
   );
   assert.deepEqual(clock.sleeps, []);
-  assert.equal(transport.calls.filter((call) => call.path === "/api/v1/media/uploads").length, 2);
-  assert.equal(transport.calls.some((call) => /^\/api\/v1\/playlists/.test(call.path)), false);
+  assert.equal(transport.calls.filter((call) => call.path === "/api/media/uploads").length, 2);
+  assert.equal(transport.calls.some((call) => /^\/api\/playlists/.test(call.path)), false);
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -1027,7 +1027,7 @@ test("update target revision and timezone preflight finish before any media uplo
     updateId: "pl_TARGET",
     ifMatch: "7",
   }), /revision 8/);
-  assert.deepEqual(revisionTransport.calls.map((call) => `${call.method} ${call.path}`), ["GET /api/v1/playlists/pl_TARGET"]);
+  assert.deepEqual(revisionTransport.calls.map((call) => `${call.method} ${call.path}`), ["GET /api/playlists/pl_TARGET"]);
 
   const timezoneTransport = importTransport([]);
   await assert.rejects(() => importPlaylistBundle({
@@ -1038,7 +1038,7 @@ test("update target revision and timezone preflight finish before any media uplo
     ifMatch: "8",
     beforePlaylistWrite: async () => { throw new Error("timezone preflight failed"); },
   }), /timezone preflight failed/);
-  assert.deepEqual(timezoneTransport.calls.map((call) => `${call.method} ${call.path}`), ["GET /api/v1/playlists/pl_TARGET"]);
+  assert.deepEqual(timezoneTransport.calls.map((call) => `${call.method} ${call.path}`), ["GET /api/playlists/pl_TARGET"]);
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -1055,7 +1055,7 @@ test("update carries If-Match, and a later failure reports partial mutation with
     updateId: "pl_TARGET",
     ifMatch: "8",
   });
-  const update = updateTransport.calls.find((call) => call.method === "PUT" && call.path === "/api/v1/playlists/pl_TARGET");
+  const update = updateTransport.calls.find((call) => call.method === "PUT" && call.path === "/api/playlists/pl_TARGET");
   assert.equal(update?.headers?.["if-match"], '"8"');
 
   const partialDir = await testTemp("bundle-partial-");
@@ -1087,7 +1087,7 @@ test("update carries If-Match, and a later failure reports partial mutation with
     },
   );
   assert.equal(partial.calls.some((call) => call.method === "DELETE"), false);
-  assert.equal(partial.calls.some((call) => /^\/api\/v1\/playlists/.test(call.path)), false);
+  assert.equal(partial.calls.some((call) => /^\/api\/playlists/.test(call.path)), false);
   await Promise.all([updateDir, partialDir].map((entry) => rm(entry, { recursive: true, force: true })));
 });
 
@@ -1172,17 +1172,17 @@ test("import can replace a playlist without a revision lookup or header", async 
   await writeBundle(dir, [{id: "med_SOURCE", filename: "hero.png", bytes: Uint8Array.from([1, 2])}]);
   const transport = importTransport([]);
   await importPlaylistBundle({directory: dir, client: new ApiClient({transport, token: "token"}), runtime: runtimeForImport([]), updateId: "pl_TARGET"});
-  const writes = transport.calls.filter(c => c.method === "PUT" && c.path === "/api/v1/playlists/pl_TARGET");
+  const writes = transport.calls.filter(c => c.method === "PUT" && c.path === "/api/playlists/pl_TARGET");
   assert.equal(writes.length, 1);
   assert.equal(writes[0]?.headers?.["if-match"], undefined);
-  assert.equal(transport.calls.some(c => c.method === "GET" && c.path === "/api/v1/playlists/pl_TARGET"), false);
+  assert.equal(transport.calls.some(c => c.method === "GET" && c.path === "/api/playlists/pl_TARGET"), false);
  } finally { await rm(dir, {recursive: true, force: true}); }
 });
 
 
 test("bundle export resolves dynamic selectors once per catalog and pins filename order", async () => {
   const source = playlist(mediaPrimitive({ by: "tag", tag: "Lobby", order: "filename", one_at_a_time: true }));
-  const transport = new FakeTransport().on("POST", "/api/v1/selectors/preview", () => ({ status: 200, headers: {}, body: { candidates: [{ media_id: "med_A", filename: "a.png" }, { media_id: "med_B", filename: "z.png" }] } }));
+  const transport = new FakeTransport().on("POST", "/api/selectors/preview", () => ({ status: 200, headers: {}, body: { candidates: [{ media_id: "med_A", filename: "a.png" }, { media_id: "med_B", filename: "z.png" }] } }));
   const client = new ApiClient({ transport, token: "token" });
   const snapshot = await snapshotBundleSelectors(client, source);
   const normalized = normalizePlaylistForBundle(snapshot);
@@ -1192,7 +1192,7 @@ test("bundle export resolves dynamic selectors once per catalog and pins filenam
 });
 
 test("empty dynamic selectors leave other bundle primitives intact", async () => {
-  const transport = new FakeTransport().on("POST", "/api/v1/selectors/preview", () => ({ status: 200, headers: {}, body: { candidates: [] } }));
+  const transport = new FakeTransport().on("POST", "/api/selectors/preview", () => ({ status: 200, headers: {}, body: { candidates: [] } }));
   const snapshot = await snapshotBundleSelectors(new ApiClient({ transport, token: "token" }), playlist(mediaPrimitive({ by: "all", one_at_a_time: true })));
   const normalized = normalizePlaylistForBundle(snapshot);
   assert.deepEqual(normalized.mediaIds, []);

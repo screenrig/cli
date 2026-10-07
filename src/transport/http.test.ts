@@ -43,7 +43,7 @@ test("binary GET uses arrayBuffer and never calls text()", async () => {
   const transport = new FetchTransport("https://api.screenrig.ai/", "sr_live_test", async () => spy.response);
   const result = await transport.request({
     method: "GET",
-    path: "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/screenshot",
+    path: "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/screenshot",
     query: { capture_id: "shot_AAAAAAAAAAAAAAAA" },
     binary: true,
   });
@@ -70,7 +70,7 @@ test("binary GET problem response still avoids text() and does not leave bytes i
   const transport = new FetchTransport("https://api.screenrig.ai/", "sr_live_test", async () => spy.response);
   const result = await transport.request({
     method: "GET",
-    path: "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/screenshot",
+    path: "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/screenshot",
     binary: true,
   });
   assert.equal(spy.textCalls(), 0);
@@ -87,7 +87,7 @@ test("JSON GET still uses text()", async () => {
   const transport = new FetchTransport("https://api.screenrig.ai/", "sr_live_test", async () => spy.response);
   const result = await transport.request({
     method: "GET",
-    path: "/api/v1/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/screenshot/status",
+    path: "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/screenshot/status",
   });
   assert.equal(spy.textCalls(), 1);
   assert.equal(spy.arrayBufferCalls(), 0);
@@ -116,7 +116,7 @@ test("media download exposes response chunks without calling text or arrayBuffer
     arrayBuffer: async () => { arrayBufferCalls += 1; throw new Error("must not buffer as arrayBuffer"); },
   } as unknown as Response;
   const transport = new FetchTransport("https://api.screenrig.ai/", "sr_live_test", async () => response);
-  const result = await transport.download({ method: "GET", path: "/api/v1/media/med_1/content" });
+  const result = await transport.download({ method: "GET", path: "/api/media/med_1/content" });
   const received: number[] = [];
   assert.ok(result.body);
   for await (const chunk of result.body) received.push(...chunk);
@@ -136,7 +136,7 @@ for (const method of ["request", "download"] as const) {
       });
     });
     const caller = new AbortController();
-    const rejected = assert.rejects(transport[method]({ method: "GET", path: "/api/v1/media", timeout_ms: 5, signal: caller.signal }),
+    const rejected = assert.rejects(transport[method]({ method: "GET", path: "/api/media", timeout_ms: 5, signal: caller.signal }),
       (err: unknown) => err instanceof CliError && err.problem.code === "timeout");
     t.mock.timers.tick(5);
     const timedOut = fetchSignal?.aborted;
@@ -154,7 +154,7 @@ for (const method of ["request", "download"] as const) {
         signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
       });
     });
-    const rejected = assert.rejects(transport[method]({ method: "GET", path: "/api/v1/media", timeout_ms: 30_000, signal: caller.signal }),
+    const rejected = assert.rejects(transport[method]({ method: "GET", path: "/api/media", timeout_ms: 30_000, signal: caller.signal }),
       (err: unknown) => err instanceof CliError && err.problem.code === "timeout");
     caller.abort(new Error("Cancelled by caller"));
     await rejected;
@@ -176,7 +176,7 @@ test("media download keeps its deadline while reading an error response", async 
       }),
     } as Response;
   });
-  const rejected = assert.rejects(transport.download({ method: "GET", path: "/api/v1/media/med_1/content", timeout_ms: 5 }),
+  const rejected = assert.rejects(transport.download({ method: "GET", path: "/api/media/med_1/content", timeout_ms: 5 }),
     (err: unknown) => err instanceof CliError && err.problem.code === "timeout");
   await Promise.resolve();
   assert.ok(releaseBody, "the response body must be pending before the deadline");
@@ -261,7 +261,7 @@ test("a connection failure names its cause instead of a bare 'fetch failed'", as
     throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:8080"), { code: "ECONNREFUSED" }) });
   }) as unknown as typeof fetch;
   const transport = new FetchTransport("http://127.0.0.1:8080", undefined, failing);
-  await assert.rejects(transport.request({ method: "GET", path: "/api/v1/project" }), (error: unknown) => {
+  await assert.rejects(transport.request({ method: "GET", path: "/api/project" }), (error: unknown) => {
     assert.ok(error instanceof CliError);
     assert.equal(error.problem.code, "transport_error");
     assert.match(error.problem.detail, /^fetch failed \(ECONNREFUSED: connect ECONNREFUSED 127\.0\.0\.1:8080\)$/);

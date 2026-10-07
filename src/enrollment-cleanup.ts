@@ -50,7 +50,7 @@ export async function cleanupEnrollmentProject(runtime: CliRuntime, resolved: Re
   if (!token) { await finish(false); return result("retained"); }
   const client = clientFor(token, cleanup.project_id);
   try {
-    const response = await client.call({ method: "GET", path: "/api/v1/project/deletion-preview" });
+    const response = await client.call({ method: "GET", path: "/api/project/deletion-preview" });
     const preview = response.body as { project: Project; allowed: boolean; devices: unknown[] };
     const context = contextFromProject(preview.project);
     if (context.project.id !== cleanup.project_id || typeof preview.allowed !== "boolean" || !Array.isArray(preview.devices)) throw configError("Cleanup preview changed the saved project target.");
@@ -58,7 +58,7 @@ export async function cleanupEnrollmentProject(runtime: CliRuntime, resolved: Re
       || context.project.used_bytes !== 0 || context.project.reserved_bytes !== 0 || context.project.screen_count !== 0) {
       await finish(false); return result("retained");
     }
-    const deletion = await client.call({ method: "DELETE", path: "/api/v1/project", body: { name: "Screens", revision: context.project.revision, empty_only: true } });
+    const deletion = await client.call({ method: "DELETE", path: "/api/project", body: { name: "Screens", revision: context.project.revision, empty_only: true } });
     if ((deletion.body as { id?: string })?.id !== cleanup.project_id) throw configError("Cleanup deletion changed the saved project target.");
     await finish(true);
     return result("deleted");

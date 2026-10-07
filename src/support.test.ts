@@ -19,13 +19,13 @@ async function invoke(argv: string[], transport: FakeTransport) {
 }
 const ok=(body:unknown)=>({status:200,headers:{},body});
 test("support submissions use one thread, human handoff and an idempotency key",async()=>{
- const transport=new FakeTransport().on("POST","/api/v1/support/conversations/sc_SYNTHETIC/messages",()=>ok({conversation:{id:"sc_SYNTHETIC"},message:{sequence:2}}));
+ const transport=new FakeTransport().on("POST","/api/support/conversations/sc_SYNTHETIC/messages",()=>ok({conversation:{id:"sc_SYNTHETIC"},message:{sequence:2}}));
  const result=await invoke(["support","submit","--conversation-id","sc_SYNTHETIC","--body","Please ask staff","--human-requested"],transport);
  assert.equal(result.code,0,result.stdout);const call=transport.calls[0]!;
  assert.deepEqual(call.body,{body:"Please ask staff",human_requested:true});assert.ok(call.headers?.["idempotency-key"]);
 });
 test("support history routes conversation sequence cursors and rejects malformed cursors before HTTP",async()=>{
- const transport=new FakeTransport().on("GET","/api/v1/support/conversations/sc_SYNTHETIC/messages",()=>ok({items:[]}));
+ const transport=new FakeTransport().on("GET","/api/support/conversations/sc_SYNTHETIC/messages",()=>ok({items:[]}));
  const result=await invoke(["support","history","--conversation-id","sc_SYNTHETIC","--after","12"],transport);
  assert.equal(result.code,0,result.stdout);assert.equal(transport.calls[0]?.query?.after,"12");
  const bad=new FakeTransport();const rejected=await invoke(["support","history","--after","2"],bad);assert.notEqual(rejected.code,0);assert.equal(bad.calls.length,0);
@@ -38,7 +38,7 @@ test("support SSE resumes project sequence while filtering conversations and sup
  assert.equal(result.code,0,result.stdout);const rows=result.stdout.trim().split("\n").map((line)=>JSON.parse(line));assert.deepEqual(rows.map((row)=>row.data.sequence),[2,3]);assert.equal(transport.calls[1]?.query?.after,"2");assert.equal(transport.calls[2]?.query?.after,"3");
 });
 test("support read uses a monotonic receipt request",async()=>{
- const transport=new FakeTransport().on("PUT","/api/v1/support/conversations/sc_SYNTHETIC/read",()=>ok({sequence:5}));
+ const transport=new FakeTransport().on("PUT","/api/support/conversations/sc_SYNTHETIC/read",()=>ok({sequence:5}));
  const result=await invoke(["support","read","--conversation-id","sc_SYNTHETIC","--sequence","5"],transport);assert.equal(result.code,0,result.stdout);assert.deepEqual(transport.calls[0]?.body,{sequence:5});
 });
 
@@ -52,7 +52,7 @@ test("human support streams name their fixed project once without changing messa
 });
 
 test("support close ends only the selected conversation and returns retained state",async()=>{
- const transport=new FakeTransport().on("POST","/api/v1/support/conversations/sc_SYNTHETIC/close",()=>ok({id:"sc_SYNTHETIC",closed:true}));
+ const transport=new FakeTransport().on("POST","/api/support/conversations/sc_SYNTHETIC/close",()=>ok({id:"sc_SYNTHETIC",closed:true}));
  const result=await invoke(["support","close","--conversation-id","sc_SYNTHETIC"],transport);
  assert.equal(result.code,0,result.stdout);assert.deepEqual(transport.calls[0]?.body,{});assert.equal(JSON.parse(result.stdout).data.closed,true);
 });

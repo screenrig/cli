@@ -118,9 +118,9 @@ export function validateAgentSelfStatus(value: unknown, expectedState?: Agent["s
 function expectedDashboardOrigin(apiUrl: string): string {
   const api = new URL(apiUrl);
   let hostname: string;
-  if (api.hostname === "api.screenrig.ai") hostname = "dashboard.screenrig.ai";
-  else if (api.hostname === "api.screenrig.localhost") hostname = "dashboard.screenrig.localhost";
-  else if (api.hostname.startsWith("api.")) hostname = `dashboard.${api.hostname.slice(4)}`;
+  if (api.hostname === "api.screenrig.ai") hostname = "screenrig.ai";
+  else if (api.hostname === "api.screenrig.localhost") hostname = "screenrig.localhost";
+  else if (api.hostname.startsWith("api.")) hostname = api.hostname.slice(4);
   else throw configError("Agent connection approval URL cannot be bound to this API hostname.");
   return `${api.protocol}//${hostname}${api.port ? `:${api.port}` : ""}`;
 }
@@ -133,7 +133,7 @@ export function validateAgentApprovalUrl(value: string, apiUrl: string, connecti
     throw configError("Agent connection returned an invalid dashboard approval URL.");
   }
   if (parsed.origin !== expectedDashboardOrigin(apiUrl) || parsed.username || parsed.password || parsed.search || parsed.hash
-    || parsed.pathname !== `/agents/connect/${connectionId}`) {
+    || parsed.pathname !== `/dashboard/agents/connect/${connectionId}`) {
     throw configError("Agent connection returned an unsafe or off-origin dashboard approval URL.");
   }
   return parsed.href;

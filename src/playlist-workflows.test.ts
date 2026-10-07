@@ -94,7 +94,7 @@ test("stdin validation and editable output need no jq or metadata stripping", as
  // Shaped like the server's read: resolved media and controller on every primitive.
  const read=document();
  for (const page of read.pages) for (const primitive of page.primitives) Object.assign(primitive,{controller:false,resolved_media:[{media_id:primitive.selector.media_id,intrinsic_size:{width:1080,height:1920}}]});
- const transport=new FakeTransport().on('GET','/api/v1/playlists/pl_TEST',()=>response({...read,id:'pl_TEST',revision:4}));
+ const transport=new FakeTransport().on('GET','/api/playlists/pl_TEST',()=>response({...read,id:'pl_TEST',revision:4}));
  // An empty file left by an interrupted run does not block the retry.
  await writeFile(dir+'/editable.json','');
  const result=await invoke(['playlist','show','pl_TEST','--output','editable.json'],transport);
@@ -110,17 +110,17 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) for (const revision 
  let created=false, assigned=false, failed=false, reads=0;
  const createKeys:string[]=[],assignKeys:string[]=[];
  const transport=new FakeTransport()
- .on('GET','/api/v1/project',()=>response({id:`${prefix}prj_TEST`}))
- .on('GET',`/api/v1/screens/${prefix}scr_TEST`,()=>{
+ .on('GET','/api/project',()=>response({id:`${prefix}prj_TEST`}))
+ .on('GET',`/api/screens/${prefix}scr_TEST`,()=>{
   reads++; if(failure==='verify'&&assigned&&!failed){failed=true;throw networkError('Test connection failure');}
   return response({id:`${prefix}scr_TEST`,revision:assigned?8:7,playlist_id:assigned?`${prefix}pl_TEST`:undefined});
  })
- .on('POST','/api/v1/playlists',req=>{
+ .on('POST','/api/playlists',req=>{
   createKeys.push(req.headers!['idempotency-key']!); created=true;
   if(failure==='create'&&!failed){failed=true;throw networkError('Test connection failure');}
   return response({id:`${prefix}pl_TEST`,revision:1});
  })
- .on('PATCH',`/api/v1/screens/${prefix}scr_TEST`,req=>{
+ .on('PATCH',`/api/screens/${prefix}scr_TEST`,req=>{
   assert.equal(req.headers!['if-match'],revision ? '"7"' : undefined);assignKeys.push(req.headers!['idempotency-key']!);assigned=true;
   if(failure==='assign'&&!failed){failed=true;throw networkError('Test connection failure');}
   return response({id:`${prefix}scr_TEST`,revision:8,playlist_id:`${prefix}pl_TEST`});
@@ -154,10 +154,10 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) for (const revision 
   const dir=await mkdtemp('/tmp/publish-wait-'); t.after(()=>rm(dir,{recursive:true,force:true}));
   let read=0,assigned=false,clock=0; const stages:string[]=[];
   const transport=new FakeTransport()
-   .on('GET','/api/v1/project',()=>response({id:'prj_TEST'}))
-   .on('GET','/api/v1/screens/scr_TEST',()=>response(assigned?reads[Math.min(read++,reads.length-1)]:{id:'scr_TEST',revision:7}))
-   .on('POST','/api/v1/playlists',()=>response({id:'pl_TEST',revision:1}))
-   .on('PATCH','/api/v1/screens/scr_TEST',()=>{assigned=true;return response({id:'scr_TEST',revision:8,playlist_id:'pl_TEST'});});
+   .on('GET','/api/project',()=>response({id:'prj_TEST'}))
+   .on('GET','/api/screens/scr_TEST',()=>response(assigned?reads[Math.min(read++,reads.length-1)]:{id:'scr_TEST',revision:7}))
+   .on('POST','/api/playlists',()=>response({id:'pl_TEST',revision:1}))
+   .on('PATCH','/api/screens/scr_TEST',()=>{assigned=true;return response({id:'scr_TEST',revision:8,playlist_id:'pl_TEST'});});
   const runtime={...processRuntime(),now:()=>new Date(clock),sleep:async(ms:number)=>{clock+=ms;}};
   const result=await publishScreen({client:new ApiClient({transport,token:'test-token'}),runtime,configPath:dir+'/config.json',apiUrl:'https://api.screenrig.ai',screenId:'scr_TEST',document:document(),
    wait:{timeoutMs:10000,pollMs:2000},progress:(stage,state)=>stages.push(`${stage}${state?`:${state}`:''}`)});
@@ -175,10 +175,10 @@ test("publish --no-wait returns after assignment and a wait warning explains the
  await writeFile(dir+'/lobby.json',JSON.stringify(document()));
  let assigned=false;
  const transport=new FakeTransport()
-  .on('GET','/api/v1/project',()=>response({id:'prj_TEST'}))
-  .on('GET','/api/v1/screens/scr_TEST',()=>response(assigned?{id:'scr_TEST',revision:8,playlist_id:'pl_TEST',online:false}:{id:'scr_TEST',revision:7}))
-  .on('POST','/api/v1/playlists',()=>response({id:'pl_TEST',revision:1}))
-  .on('PATCH','/api/v1/screens/scr_TEST',()=>{assigned=true;return response({id:'scr_TEST',revision:8,playlist_id:'pl_TEST'});});
+  .on('GET','/api/project',()=>response({id:'prj_TEST'}))
+  .on('GET','/api/screens/scr_TEST',()=>response(assigned?{id:'scr_TEST',revision:8,playlist_id:'pl_TEST',online:false}:{id:'scr_TEST',revision:7}))
+  .on('POST','/api/playlists',()=>response({id:'pl_TEST',revision:1}))
+  .on('PATCH','/api/screens/scr_TEST',()=>{assigned=true;return response({id:'scr_TEST',revision:8,playlist_id:'pl_TEST'});});
  async function invoke(...extra:string[]) {
   let out='',err='';const code=await run({...processRuntime(),argv:['--config',config,'screen','publish','scr_TEST','lobby.json',...extra],env:{XDG_CONFIG_HOME:dir},cwd:()=>dir,transport,sleep:async()=>{},
    stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){err+=c;d();}})});
@@ -195,7 +195,7 @@ test("publish --no-wait returns after assignment and a wait warning explains the
 
 test("publish checks the expected screen revision before creating a playlist",async t=>{
  const dir=await mkdtemp('/tmp/publish-conflict-');t.after(()=>rm(dir,{recursive:true,force:true}));
- const transport=new FakeTransport().on('GET','/api/v1/project',()=>response({id:'prj_TEST'})).on('GET','/api/v1/screens/scr_TEST',()=>response({id:'scr_TEST',revision:9}));
+ const transport=new FakeTransport().on('GET','/api/project',()=>response({id:'prj_TEST'})).on('GET','/api/screens/scr_TEST',()=>response({id:'scr_TEST',revision:9}));
  await assert.rejects(()=>publishScreen({client:new ApiClient({transport}),runtime:processRuntime(),configPath:dir+'/config.json',apiUrl:'https://api.screenrig.ai',screenId:'scr_TEST',revision:'7',document:document()}));
  assert.equal(transport.calls.some(c=>c.method!=='GET'),false);
 });
@@ -203,7 +203,7 @@ test("publish checks the expected screen revision before creating a playlist",as
 test("init CLI writes a reusable document and prompt-file preserves exact text", async t => {
  const dir=await mkdtemp('/tmp/authoring-commands-');t.after(()=>rm(dir,{recursive:true,force:true}));
  const config=dir+'/config.json';await writeFile(config,JSON.stringify({api_url:'https://api.screenrig.ai',project_id:'prj_AAAAAAAAAAAAAAAAAAAAAAAA',project_name:'Screens',organization_id:'org_AAAAAAAAAAAAAAAAAAAAAAAA',organization_name:'Example organization',token:'test-token'}),{mode:0o600});
- const transport=new FakeTransport().on('GET','/api/v1/media/med_IMAGE',()=>response(media[0])).on('GET','/api/v1/media/med_VIDEO',()=>response(media[1]));
+ const transport=new FakeTransport().on('GET','/api/media/med_IMAGE',()=>response(media[0])).on('GET','/api/media/med_VIDEO',()=>response(media[1]));
  async function invoke(argv:string[], input?:string) {
   let out=''; const code=await run({...processRuntime(),argv:['--config',config,...argv],env:{},cwd:()=>dir,transport,stdin:Readable.from([input??'']),isStdinTty:()=>false,stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
   return {code,data:JSON.parse(out)};
@@ -214,7 +214,7 @@ test("init CLI writes a reusable document and prompt-file preserves exact text",
  assert.deepEqual(JSON.parse(await readFile(dir+'/lobby.json','utf8')),document());
  assert.equal((await invoke(['playlist','validate','lobby.json'])).code,0);
  await writeFile(dir+'/prompt.txt',' exact copy\n');
- let seen='';transport.on('POST','/api/v1/media/generations',req=>{seen=(req.body as any).prompt;return {status:402,headers:{},body:{code:'payment_required',title:'Test refusal',detail:'Test',status:402}};});
+ let seen='';transport.on('POST','/api/media/generations',req=>{seen=(req.body as any).prompt;return {status:402,headers:{},body:{code:'payment_required',title:'Test refusal',detail:'Test',status:402}};});
  await invoke(['media','generate','--prompt-file','prompt.txt','--no-progress']);
  assert.equal(seen,' exact copy\n');
  assert.equal((await invoke(['media','generate','--prompt-file','-'], 'x'.repeat(4001))).code,2);
@@ -223,7 +223,7 @@ test("init CLI writes a reusable document and prompt-file preserves exact text",
 test("expired ambiguous publish journals never retry writes", async t => {
  const dir=await mkdtemp('/tmp/publish-expiry-');t.after(()=>rm(dir,{recursive:true,force:true}));
  let now=Date.now();
- const transport=new FakeTransport().on('GET','/api/v1/project',()=>response({id:'prj_TEST'})).on('GET','/api/v1/screens/scr_TEST',()=>response({id:'scr_TEST',revision:7})).on('POST','/api/v1/playlists',()=>{throw networkError('Test interruption');});
+ const transport=new FakeTransport().on('GET','/api/project',()=>response({id:'prj_TEST'})).on('GET','/api/screens/scr_TEST',()=>response({id:'scr_TEST',revision:7})).on('POST','/api/playlists',()=>{throw networkError('Test interruption');});
  const options={client:new ApiClient({transport}),runtime:{...processRuntime(),now:()=>new Date(now)},configPath:dir+'/config.json',apiUrl:'https://api.screenrig.ai',screenId:'scr_TEST',revision:'7',document:document()};
  await assert.rejects(()=>publishScreen(options));now+=24*60*60*1000;
  await assert.rejects(()=>publishScreen(options),/replay window has expired/);
@@ -232,9 +232,9 @@ test("expired ambiguous publish journals never retry writes", async t => {
 
 test("assignment conflicts retain the created playlist and never create another on retry",async t=>{
  const dir=await mkdtemp('/tmp/publish-assignment-conflict-');t.after(()=>rm(dir,{recursive:true,force:true}));
- const transport=new FakeTransport().on('GET','/api/v1/project',()=>response({id:'prj_TEST'})).on('GET','/api/v1/screens/scr_TEST',()=>response({id:'scr_TEST',revision:7}))
- .on('POST','/api/v1/playlists',()=>response({id:'pl_TEST',revision:1}))
- .on('PATCH','/api/v1/screens/scr_TEST',()=>({status:409,headers:{},body:{code:'revision_conflict',title:'Conflict',status:409,detail:'Screen changed',current_revision:8}}));
+ const transport=new FakeTransport().on('GET','/api/project',()=>response({id:'prj_TEST'})).on('GET','/api/screens/scr_TEST',()=>response({id:'scr_TEST',revision:7}))
+ .on('POST','/api/playlists',()=>response({id:'pl_TEST',revision:1}))
+ .on('PATCH','/api/screens/scr_TEST',()=>({status:409,headers:{},body:{code:'revision_conflict',title:'Conflict',status:409,detail:'Screen changed',current_revision:8}}));
  const options={client:new ApiClient({transport}),runtime:processRuntime(),configPath:dir+'/config.json',apiUrl:'https://api.screenrig.ai',screenId:'scr_TEST',revision:'7',document:document()};
  for(let i=0;i<2;i++) await assert.rejects(()=>publishScreen(options),(e:any)=>{
   assert.equal(e.problem.errors.at(-1).playlist_id,'pl_TEST');
@@ -249,15 +249,15 @@ test("assignment conflicts retain the created playlist and never create another 
   return true;
  });
  assert.equal(transport.calls.filter(c=>c.method==='POST').length,1);
- assert.equal(transport.calls.filter(c=>c.method==='GET'&&c.path==='/api/v1/screens/scr_TEST').length,1);
+ assert.equal(transport.calls.filter(c=>c.method==='GET'&&c.path==='/api/screens/scr_TEST').length,1);
  for(const call of transport.calls.filter(c=>c.method==='PATCH')) assert.equal(call.headers?.['if-match'],'"7"');
 });
 
 test("publish recovery arguments preserve paths with spaces without exposing URL credentials",async t=>{
  const dir=await mkdtemp('/tmp/publish guidance-');t.after(()=>rm(dir,{recursive:true,force:true}));
- const transport=new FakeTransport().on('GET','/api/v1/project',()=>response({id:'prj_TEST'})).on('GET','/api/v1/screens/scr_TEST',()=>response({id:'scr_TEST',revision:7}))
- .on('POST','/api/v1/playlists',()=>response({id:'pl_TEST',revision:1}))
- .on('PATCH','/api/v1/screens/scr_TEST',()=>({status:409,headers:{},body:{code:'revision_conflict',title:'Conflict',status:409,detail:'Screen changed',next:{command:'retry',reason:'Try again'}}}));
+ const transport=new FakeTransport().on('GET','/api/project',()=>response({id:'prj_TEST'})).on('GET','/api/screens/scr_TEST',()=>response({id:'scr_TEST',revision:7}))
+ .on('POST','/api/playlists',()=>response({id:'pl_TEST',revision:1}))
+ .on('PATCH','/api/screens/scr_TEST',()=>({status:409,headers:{},body:{code:'revision_conflict',title:'Conflict',status:409,detail:'Screen changed',next:{command:'retry',reason:'Try again'}}}));
  const options={client:new ApiClient({transport,token:'private-test-token'}),runtime:processRuntime(),configPath:dir+'/selected config.json',apiUrl:'https://user:password@api.screenrig.ai/prefix?secret=value#private',screenId:'scr_TEST',revision:'7',document:document()};
  await assert.rejects(()=>publishScreen(options),(e:any)=>{
   for(const args of [e.problem.next.argv,e.problem.next.after_inspection.argv]) {
@@ -276,8 +276,8 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) test(`mixed preparat
  await writeFile(config, JSON.stringify({api_url:'https://api.screenrig.ai',project_id:'prj_AAAAAAAAAAAAAAAAAAAAAAAA',project_name:'Screens',organization_id:'org_AAAAAAAAAAAAAAAAAAAAAAAA',organization_name:'Example organization',token:'test-token'}), {mode:0o600});
  let mediaState = "ready", targetId = `${prefix}scr_TEST`;
  const transport = new FakeTransport()
-  .on('GET',`/api/v1/screens/${prefix}scr_TEST`,()=>response({id:targetId,revision:7,observation:{surfaces:[{width:1080,height:1920}]}}))
-  .on('GET','/api/v1/media/med_IMAGE',()=>response({...media[0],state:mediaState}));
+  .on('GET',`/api/screens/${prefix}scr_TEST`,()=>response({id:targetId,revision:7,observation:{surfaces:[{width:1080,height:1920}]}}))
+  .on('GET','/api/media/med_IMAGE',()=>response({...media[0],state:mediaState}));
  async function invoke(inputs:string[], output='prepared.json') {
   let out=''; const code = await run({...processRuntime(),argv:['--config',config,'playlist','init',...inputs,'--name','Lobby','--screen',`${prefix}scr_TEST`,'--output',output],env:{},cwd:()=>dir,transport,
    stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
@@ -322,8 +322,8 @@ test("file preparation uses upload readiness and protects existing output before
  assert.equal(doc.pages[0].primitives[0].selector.media_id,'med_AAAAAAAAAAAAAAAAAAAAAAAA');
  assert.equal(doc.pages[1].primitives[0].release_id,'rel_TEST');
  assert.equal(result.body.data.publish,undefined); assert.equal(puts,1);
- assert.ok(transport.calls.some(c=>c.path.startsWith('/api/v1/operations/')));
- assert.equal(transport.calls.some(c=>c.path==='/api/v1/playlists'),false);
+ assert.ok(transport.calls.some(c=>c.path.startsWith('/api/operations/')));
+ assert.equal(transport.calls.some(c=>c.path==='/api/playlists'),false);
  const writes=transport.calls.filter(c=>c.method!=='GET').length;
  assert.equal((await invoke()).code,2);assert.equal(puts,1);
  assert.equal(transport.calls.filter(c=>c.method!=='GET').length,writes);
@@ -368,7 +368,7 @@ for (const sameFile of [false, true]) for (const explicitKey of [false, true]) {
   let interrupted = false;
   const conflict = () => ({ status: 409, headers: {}, body: { code: 'idempotency_conflict', title: 'Conflict', status: 409 } });
   const transport = new FakeTransport()
-   .on('POST', '/api/v1/media/uploads', req => {
+   .on('POST', '/api/media/uploads', req => {
     const key = req.headers?.['idempotency-key']; assert.ok(key);
     const body = JSON.stringify(req.body);
     const cached = declarations.get(key);
@@ -383,7 +383,7 @@ for (const sameFile of [false, true]) for (const explicitKey of [false, true]) {
     if (explicitKey && id === '2' && !interrupted) { interrupted = true; throw networkError('Lost declaration response'); }
     return accepted;
    })
-   .on('POST', /^\/api\/v1\/media\/uploads\/upload_\d+\/commit$/, req => {
+   .on('POST', /^\/api\/media\/uploads\/upload_\d+\/commit$/, req => {
     const key = req.headers?.['idempotency-key']; assert.ok(key);
     const body = JSON.stringify(req.body), cached = commits.get(key);
     if (cached) return cached.path === req.path && cached.body === body ? cached.response : conflict();
@@ -392,11 +392,11 @@ for (const sameFile of [false, true]) for (const explicitKey of [false, true]) {
     commits.set(key, { path: req.path, body, response: accepted });
     return accepted;
    })
-   .on('GET', /^\/api\/v1\/operations\/op_\d+$/, req => {
+   .on('GET', /^\/api\/operations\/op_\d+$/, req => {
     const id = req.path.split('/').at(-1)!.slice('op_'.length);
     return response({ id: `op_${id}`, state: 'succeeded', result: { media_id: `med_${id}` } });
    })
-   .on('GET', /^\/api\/v1\/media\/med_\d+$/, req => response({ id: req.path.split('/').at(-1), state: 'ready', primitive: 'video' }));
+   .on('GET', /^\/api\/media\/med_\d+$/, req => response({ id: req.path.split('/').at(-1), state: 'ready', primitive: 'video' }));
   async function invoke() {
    let out = '';
    const code = await run({ ...processRuntime(), argv: ['--config', config,
@@ -423,7 +423,7 @@ for (const sameFile of [false, true]) for (const explicitKey of [false, true]) {
   const doc = JSON.parse(await readFile(dir + '/prepared.json', 'utf8'));
   assert.deepEqual(doc.pages.map((p: any) => declaredBytes.get(p.primitives[0].selector.media_id)), [8, sameFile ? 8 : 9]);
   assert.deepEqual(doc.pages.map((p: any) => p.primitives[0].selector.media_id).sort(), ['med_1', 'med_2']);
-  const keys = transport.calls.filter(c => c.path === '/api/v1/media/uploads').map(c => c.headers!['idempotency-key']);
+  const keys = transport.calls.filter(c => c.path === '/api/media/uploads').map(c => c.headers!['idempotency-key']);
   assert.equal(keys.length, explicitKey ? 4 : 2);
   if (explicitKey) {
    assert.deepEqual(keys.slice(0, 2).sort(), keys.slice(2).sort());

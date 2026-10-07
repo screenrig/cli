@@ -61,7 +61,7 @@ function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= FLEET_SCREENS_MAX;
 }
 
-/** Validate a POST /api/v1/screens/actions answer against the generated ScreenActionResult contract. */
+/** Validate a POST /api/screens/actions answer against the generated ScreenActionResult contract. */
 export function screenActionResult(body: unknown, action: ScreenActionType): ScreenActionResult {
   const result = body as Partial<ScreenActionResult> | undefined;
   const results = result?.results;

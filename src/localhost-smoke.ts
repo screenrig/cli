@@ -22,14 +22,14 @@ async function main(): Promise<void> {
     for (const [key, value] of Object.entries(req.headers)) {
       if (typeof value === "string") headers[key] = value;
     }
-    if (url.pathname === "/api/v1/events/stream") {
+    if (url.pathname === "/stream/project") {
       res.writeHead(200, { "content-type": "text/event-stream" });
       const stream = await backend.stream({ method: "GET", path: url.pathname, headers, query: Object.fromEntries(url.searchParams) });
       for await (const chunk of stream) res.write(chunk);
       res.end();
       return;
     }
-    if (/^\/api\/v1\/media\/[^/]+\/content$/.test(url.pathname) && req.method === "GET") {
+    if (/^\/api\/media\/[^/]+\/content$/.test(url.pathname) && req.method === "GET") {
       // The memory backend never sees the signed PUT bytes; serve the captured
       // upload back so `media download` can verify length and SHA-256.
       if (!signedUploadBytes) {
@@ -62,7 +62,7 @@ async function main(): Promise<void> {
       try { body = JSON.parse(raw) as unknown; } catch { body = raw; }
     }
     const response = await backend.request({ method: (req.method ?? "GET") as HttpMethod, path: url.pathname, headers, query: Object.fromEntries(url.searchParams), body });
-    if (url.pathname === "/api/v1/media/uploads" && response.body && typeof response.body === "object") {
+    if (url.pathname === "/api/media/uploads" && response.body && typeof response.body === "object") {
       response.body = { ...(response.body as Record<string, unknown>), upload_url: `${apiUrl}/signed-upload` };
     }
     res.writeHead(response.status, { "content-type": response.body === undefined ? "text/plain" : "application/json", ...response.headers });
@@ -139,7 +139,7 @@ async function main(): Promise<void> {
     const pairing = await run("--api-url", apiUrl, "screen", "pair", "abc234", "--label", "Pairing smoke");
     const pairingData = pairing.data as { public_url?: string; screen?: { id?: string } };
     assert.equal(pairingData.screen?.id, "scr_PAIRINGAAAAAAAAAAAAAAAA");
-    assert.equal(pairingData.public_url, "https://play.screenrig.ai/s/scr_public_pairing");
+    assert.equal(pairingData.public_url, "https://play.screenrig.ai/player/s/scr_public_pairing");
     await run("agent", "status");
     await runDoctor();
     await run("app", "pack", app);
@@ -407,7 +407,7 @@ async function main(): Promise<void> {
     assert.equal(deleted.code, 5, `screen delete must surface screen_archive_required: ${deleted.stderr || deleted.stdout}`);
     assert.equal((JSON.parse(deleted.stdout) as { error?: { code?: string } }).error?.code, "screen_archive_required");
     await run("playlist", "delete", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--expect-rev", "2");
-    process.stdout.write(`localhost v1 smoke passed: ${apiUrl} (mock-backed control-plane routes)\n`);
+    process.stdout.write(`localhost smoke passed: ${apiUrl} (mock-backed control-plane routes)\n`);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));
     await rm(temp, { recursive: true, force: true });

@@ -44,21 +44,12 @@ export function editablePlaylist(value: unknown): RecordValue {
 }
 
 /**
- * The advertising branch of the versioned page union: a whole-page slot
- * reference (`id`, `type`, `adslot_id`, optional `visibility`) with no canvas,
- * primitives, creative, duration, or price.
+ * An ad-slot page: a whole-page slot reference (`id`, `type`, `adslot_id`,
+ * optional `visibility`) with no canvas, primitives, creative, duration, or price.
  */
 export function isAdSlotPage(page: unknown): boolean {
   if (typeof page !== "object" || page === null || Array.isArray(page)) return false;
   return "type" in page && page.type === "adslot";
-}
-
-/**
- * Ad-bearing documents are authored, read, and written under the version 2
- * union. A document of ordinary pages keeps the v1 contract unchanged.
- */
-export function playlistApiVersion(pages: unknown): "v1" | "v2" {
-  return Array.isArray(pages) && pages.some(isAdSlotPage) ? "v2" : "v1";
 }
 
 export function initializePlaylist(options: {

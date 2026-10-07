@@ -300,7 +300,7 @@ export function memoryBackend(options: {
   transport.on("GET", "/.ready", () => ({ status: 200, headers: {}, body: { status: "ready", degraded: [] } }));
   transport.on("GET", "/.version", () => ({ status: 200, headers: {}, body: { version: "0.2.0", commit: "localhost-mock", api_version: "0.2.0", protocol_version: "1" } }));
 
-  transport.on("GET", "/api/v1/capabilities", () => ({
+  transport.on("GET", "/api/capabilities", () => ({
     status: 200,
     headers: { "x-request-id": "req_AAAAAAAAAAAAAAAAAAAAAAAA" },
     body: {
@@ -323,7 +323,7 @@ export function memoryBackend(options: {
     } satisfies Capabilities,
   }));
 
-  transport.on("POST", "/api/v1/enrollments", (req): TransportResponse => {
+  transport.on("POST", "/api/enrollments", (req): TransportResponse => {
     const input = req.body as CLIEnrollmentRequest | undefined;
     const email = input?.email;
     const claim = input?.agentid_claim;
@@ -382,13 +382,13 @@ export function memoryBackend(options: {
     return response;
   });
 
-  transport.on("GET", "/api/v1/agents/self", () => ({
+  transport.on("GET", "/api/agents/self", () => ({
     status: 200,
     headers: { "cache-control": "private, no-store", "x-request-id": "req_agent_selfAAAAAAAAAAAA" },
     body: { agent: currentAgent, connection_ready: false },
   }));
 
-  transport.on("POST", "/api/v1/screens/pair", (req) => {
+  transport.on("POST", "/api/screens/pair", (req) => {
     const input = req.body as { code?: string; label?: string } | undefined;
     const label = input?.label ?? "Screen";
     const item: Screen = {
@@ -412,12 +412,12 @@ export function memoryBackend(options: {
       },
       body: {
         screen: item,
-        public_url: "https://play.screenrig.ai/s/scr_public_pairing",
+        public_url: "https://play.screenrig.ai/player/s/scr_public_pairing",
       },
     };
   });
 
-  transport.on("POST", "/api/v1/screens/provision", (req) => {
+  transport.on("POST", "/api/screens/provision", (req) => {
     const label = (req.body as { label?: string } | undefined)?.label ?? "Browser screen";
     const item: Screen = {
       content_access_generation: 1,
@@ -437,14 +437,14 @@ export function memoryBackend(options: {
       headers: { "cache-control": "private, no-store", "x-request-id": req.headers?.["x-request-id"] ?? "req_provision" },
       body: {
         screen: item,
-        public_url: "https://play.screenrig.ai/s/browser-provisioned-screen",
-        provisioning_url: `https://play.screenrig.ai/s/browser-provisioned-screen#provision=${"P".repeat(43)}`,
+        public_url: "https://play.screenrig.ai/player/s/browser-provisioned-screen",
+        provisioning_url: `https://play.screenrig.ai/player/s/browser-provisioned-screen#provision=${"P".repeat(43)}`,
         expires_at: "2026-08-15T17:10:00.000Z",
       },
     };
   });
 
-  transport.on("POST", "/api/v1/project/browser-links/claim", (req) => ({
+  transport.on("POST", "/api/project/browser-links/claim", (req) => ({
     status: 201,
     headers: { "cache-control": "private, no-store", "x-request-id": req.headers?.["x-request-id"] ?? "req_browser_link" },
     body: {
@@ -454,17 +454,17 @@ export function memoryBackend(options: {
         id: "scr_BROWSERLINKAAAAAAAAAAAAA",
         public_id: "browser-link-screen",
         state: "pairing_pending",
-        public_url: "https://play.screenrig.ai/s/browser-link-screen",
+        public_url: "https://play.screenrig.ai/player/s/browser-link-screen",
       },
     },
   }));
 
-  transport.on("GET", "/api/v1/project", (req) => ({
+  transport.on("GET", "/api/project", (req) => ({
     status: 200,
     headers: { ...privateHeaders, etag: `"${project.revision}"`, "x-request-id": req.headers?.["x-request-id"] ?? "req_project" },
     body: project,
   }));
-  transport.on("PATCH", "/api/v1/project", (req) => {
+  transport.on("PATCH", "/api/project", (req) => {
     const name = (req.body as { name?: string } | undefined)?.name;
     if (typeof name !== "string" || !name.trim() || [...name.trim()].length > 60) {
       return problem(400, "invalid_request", "A project name of 1 to 60 characters is required.");
@@ -472,7 +472,7 @@ export function memoryBackend(options: {
     project = { ...project, name: name.trim(), revision: project.revision + 1 };
     return { status: 200, headers: { ...privateHeaders, etag: `"${project.revision}"` }, body: project };
   });
-  transport.on("GET", "/api/v1/project/capabilities", () => ({
+  transport.on("GET", "/api/project/capabilities", () => ({
     status: 200,
     headers: privateHeaders,
     body: {
@@ -487,7 +487,7 @@ export function memoryBackend(options: {
       ],
     },
   }));
-  transport.on("POST", "/api/v1/invitations", (req) => {
+  transport.on("POST", "/api/invitations", (req) => {
     const input = req.body as InvitationCreate | undefined;
     const delivery = input?.delivery ?? "email";
     if (!input || !["project_member", "ad_buyer"].includes(input.kind)
@@ -511,7 +511,7 @@ export function memoryBackend(options: {
       headers: privateHeaders,
       body: { invitations: issued.map((item) => {
         if (item.delivery !== "link") return item;
-        const link = new URL("/invite", "https://dashboard.screenrig.ai");
+        const link = new URL("/dashboard/invite", "https://screenrig.ai");
         link.hash = `token=${createHash("sha256").update(item.id).digest("base64url")}`;
         return { ...item, url: link.href };
       }) },
@@ -519,7 +519,7 @@ export function memoryBackend(options: {
     if (replayKey) invitationReplays.set(replayKey, { request, response });
     return response;
   });
-  transport.on("GET", "/api/v1/invitations", (req) => ({
+  transport.on("GET", "/api/invitations", (req) => ({
     status: 200,
     headers: privateHeaders,
     body: {
@@ -529,15 +529,15 @@ export function memoryBackend(options: {
       next_cursor: "",
     },
   }));
-  transport.on("POST", /^\/api\/v1\/invitations\/[^/]+\/revoke$/, (req) => {
-    const id = req.path.split("/")[4] ?? "";
+  transport.on("POST", /^\/api\/invitations\/[^/]+\/revoke$/, (req) => {
+    const id = req.path.split("/")[3] ?? "";
     const item = invitations.get(id);
     if (!item || item.project_id !== project.id) return problem(404, "not_found", "Invitation not found.");
     if (item.status === "accepted") return problem(409, "invitation_consumed", "The invitation was already accepted.");
     invitations.set(id, { ...item, status: "revoked" });
     return { status: 204, headers: privateHeaders, body: undefined };
   });
-  transport.on("POST", "/api/v1/sign-in-resets", () => ({
+  transport.on("POST", "/api/sign-in-resets", () => ({
     status: 202, headers: privateHeaders, body: { status: "accepted" },
   }));
 
@@ -560,7 +560,7 @@ export function memoryBackend(options: {
       last_started_at: "2026-08-14T17:04:00.000Z",
     },
   ];
-  transport.on("GET", "/api/v1/playback", (req) => {
+  transport.on("GET", "/api/playback", (req) => {
     if (req.query?.format === "csv") return aggregatesCsv(req);
     if (req.query?.day && (req.query.day_from || req.query.day_to)) return playbackInvalid(req, "day excludes day_from and day_to");
     const items = playbackItems.filter((item) => aggregateMatches(item, req));
@@ -571,7 +571,7 @@ export function memoryBackend(options: {
     };
   });
 
-  // Per-play records (GET /api/v1/playback/plays): received_at window, filters,
+  // Per-play records (GET /api/playback/plays): received_at window, filters,
   // pc_<offset> cursors, and the fixed-header CSV stream.
   const playItems = [0, 1, 2, 3, 4].map((index) => ({
     screen_id: index === 3 ? "scr_LOBBYBBBBBBBBBBBBBBBBBB" : "scr_PAIRINGAAAAAAAAAAAAAAAA",
@@ -657,7 +657,7 @@ export function memoryBackend(options: {
   const asDownload = (response: TransportResponse): TransportDownloadResponse => response.status >= 400
     ? { status: response.status, headers: response.headers, problem: response.body }
     : { status: response.status, headers: response.headers, body: bytesOf(response) };
-  transport.on("GET", "/api/v1/playback/plays", (req) => {
+  transport.on("GET", "/api/playback/plays", (req) => {
     if (wantsCsv(req)) return playsCsv(req);
     const selected = playsSelection(req);
     if ("status" in selected) return selected;
@@ -673,7 +673,7 @@ export function memoryBackend(options: {
       body: { items, next_cursor: end < selected.rows.length ? `pc_${end}` : null },
     };
   });
-  transport.onDownload("GET", "/api/v1/playback/plays", (req) => asDownload(playsCsv(req)));
+  transport.onDownload("GET", "/api/playback/plays", (req) => asDownload(playsCsv(req)));
   const aggregatesCsv = (req: TransportRequest): TransportResponse => {
     const budget = spendExport(req);
     if ("status" in budget) return budget as TransportResponse;
@@ -683,9 +683,9 @@ export function memoryBackend(options: {
       body: csvBody(AGGREGATE_COLUMNS, playbackItems.filter((item) => aggregateMatches(item, req))),
     };
   };
-  transport.onDownload("GET", "/api/v1/playback", (req) => asDownload(aggregatesCsv(req)));
+  transport.onDownload("GET", "/api/playback", (req) => asDownload(aggregatesCsv(req)));
 
-  transport.on("GET", /^\/api\/v1\/operations\/[^/]+$/, (req) => {
+  transport.on("GET", /^\/api\/operations\/[^/]+$/, (req) => {
     const id = req.path.split("/").pop() ?? "op_unknown";
     const existing = operations.get(id) ?? {
       id,
@@ -702,7 +702,7 @@ export function memoryBackend(options: {
       body: existing,
     };
   });
-  transport.on("POST", /^\/api\/v1\/operations\/[^/]+\/cancel$/, (req) => {
+  transport.on("POST", /^\/api\/operations\/[^/]+\/cancel$/, (req) => {
     const id = req.path.split("/").at(-2) ?? "op_unknown";
     const current = operations.get(id);
     const operation: Operation = {
@@ -718,7 +718,7 @@ export function memoryBackend(options: {
     return { status: 200, headers: {}, body: operation };
   });
 
-  transport.on("GET", "/api/v1/events", (req): TransportResponse => {
+  transport.on("GET", "/api/events", (req): TransportResponse => {
     const after = req.query?.after;
     // Contract: limit defaults to 50 and accepts 1..200; anything else is 400
     // invalid_request naming the field. No silent capping.
@@ -749,7 +749,7 @@ export function memoryBackend(options: {
     };
   });
 
-  transport.on("POST", "/api/v1/applications", (req) => {
+  transport.on("POST", "/api/applications", (req) => {
     const id = "app_AAAAAAAAAAAAAAAAAAAAAAAA";
     const releaseId = "rel_AAAAAAAAAAAAAAAAAAAAAAAA";
     const operationId = "op_AAAAAAAAAAAAAAAAAAAAAAAA";
@@ -783,11 +783,11 @@ export function memoryBackend(options: {
     };
   });
 
-  transport.on("GET", "/api/v1/applications", (req) => listPage(
+  transport.on("GET", "/api/applications", (req) => listPage(
     req, [...applications.values()], pageSize(500), { "x-request-id": req.headers?.["x-request-id"] ?? "req_apps" },
   ));
 
-  transport.on("GET", /^\/api\/v1\/applications\/[^/]+$/, (req) => ({
+  transport.on("GET", /^\/api\/applications\/[^/]+$/, (req) => ({
     status: 200,
     headers: { "x-request-id": req.headers?.["x-request-id"] ?? "req_app_get" },
     body: applications.get(req.path.split("/").pop() ?? "") ?? {
@@ -799,25 +799,25 @@ export function memoryBackend(options: {
     },
   }));
 
-  transport.on("POST", "/api/v1/playlists", (req) => {
+  transport.on("POST", "/api/playlists", (req) => {
     const item = { ...(req.body as object), id: "pl_AAAAAAAAAAAAAAAAAAAAAAAA", revision: 1 };
     playlists.set(String(item.id), item);
     return { status: 201, headers: {}, body: item };
   });
-  transport.on("GET", "/api/v1/playlists", (req) => listPage(req, [...playlists.values()], pageSize(200)));
-  transport.on("GET", /^\/api\/v1\/playlists\/[^/]+$/, (req): TransportResponse => {
+  transport.on("GET", "/api/playlists", (req) => listPage(req, [...playlists.values()], pageSize(200)));
+  transport.on("GET", /^\/api\/playlists\/[^/]+$/, (req): TransportResponse => {
     const item = playlists.get(req.path.split("/").pop() ?? "");
     return item
       ? { status: 200, headers: {}, body: item }
       : { status: 404, headers: { "content-type": "application/problem+json" }, body: { type: "https://screenrig.ai/problems/not-found", title: "Resource was not found", status: 404, code: "not_found", detail: "Playlist was not found." } };
   });
-  transport.on("PUT", /^\/api\/v1\/playlists\/[^/]+$/, (req) => {
+  transport.on("PUT", /^\/api\/playlists\/[^/]+$/, (req) => {
     const id = req.path.split("/").pop() ?? "";
     const item = { ...(req.body as object), id, revision: 2 };
     playlists.set(id, item);
     return { status: 200, headers: {}, body: item };
   });
-  transport.on("DELETE", /^\/api\/v1\/playlists\/[^/]+$/, (req): TransportResponse => {
+  transport.on("DELETE", /^\/api\/playlists\/[^/]+$/, (req): TransportResponse => {
     const playlistId = req.path.split("/").pop() ?? "";
     // Only schedule and takeover references are modelled as "in use" here.
     const inUse = [...screens.values()].some((screen) => screen.state !== "archived"
@@ -867,37 +867,37 @@ export function memoryBackend(options: {
     ));
   };
 
-  transport.on("GET", /^\/api\/v1\/comment\/playlist\/[^/]+\/page\/[^/]+$/, (req) => {
+  transport.on("GET", /^\/api\/comment\/playlist\/[^/]+\/page\/[^/]+$/, (req) => {
     const parts = req.path.split("/");
-    const playlist = playlists.get(decodeURIComponent(parts[5] ?? ""));
-    const page = playlistPage(playlist, decodeURIComponent(parts[7] ?? ""));
+    const playlist = playlists.get(decodeURIComponent(parts[4] ?? ""));
+    const page = playlistPage(playlist, decodeURIComponent(parts[6] ?? ""));
     if (!playlist || !page) return notFound("Playlist page not found");
     return { status: 200, headers: {}, body: { comments: page.comments ?? null } };
   });
-  transport.on("PUT", /^\/api\/v1\/comment\/playlist\/[^/]+\/page\/[^/]+$/, (req) => {
+  transport.on("PUT", /^\/api\/comment\/playlist\/[^/]+\/page\/[^/]+$/, (req) => {
     const parts = req.path.split("/");
-    const playlist = playlists.get(decodeURIComponent(parts[5] ?? ""));
-    const page = playlistPage(playlist, decodeURIComponent(parts[7] ?? ""));
+    const playlist = playlists.get(decodeURIComponent(parts[4] ?? ""));
+    const page = playlistPage(playlist, decodeURIComponent(parts[6] ?? ""));
     const comments = commentsFromBody(req.body);
     if (!playlist || !page) return notFound("Playlist page not found");
     if (!comments) return invalidComments();
     page.comments = comments;
     return { status: 200, headers: {}, body: { comments } };
   });
-  transport.on("DELETE", /^\/api\/v1\/comment\/playlist\/[^/]+\/page\/[^/]+$/, (req) => {
+  transport.on("DELETE", /^\/api\/comment\/playlist\/[^/]+\/page\/[^/]+$/, (req) => {
     const parts = req.path.split("/");
-    const playlist = playlists.get(decodeURIComponent(parts[5] ?? ""));
-    const page = playlistPage(playlist, decodeURIComponent(parts[7] ?? ""));
+    const playlist = playlists.get(decodeURIComponent(parts[4] ?? ""));
+    const page = playlistPage(playlist, decodeURIComponent(parts[6] ?? ""));
     if (!playlist || !page) return notFound("Playlist page not found");
     delete page.comments;
     return { status: 204, headers: {}, body: undefined };
   });
-  transport.on("GET", /^\/api\/v1\/comment\/playlist\/[^/]+$/, (req) => {
+  transport.on("GET", /^\/api\/comment\/playlist\/[^/]+$/, (req) => {
     const playlist = playlists.get(decodeURIComponent(req.path.split("/").pop() ?? ""));
     if (!playlist) return notFound("Playlist not found");
     return { status: 200, headers: {}, body: { comments: playlist.comments ?? null } };
   });
-  transport.on("PUT", /^\/api\/v1\/comment\/playlist\/[^/]+$/, (req) => {
+  transport.on("PUT", /^\/api\/comment\/playlist\/[^/]+$/, (req) => {
     const playlist = playlists.get(decodeURIComponent(req.path.split("/").pop() ?? ""));
     const comments = commentsFromBody(req.body);
     if (!playlist) return notFound("Playlist not found");
@@ -905,18 +905,18 @@ export function memoryBackend(options: {
     playlist.comments = comments;
     return { status: 200, headers: {}, body: { comments } };
   });
-  transport.on("DELETE", /^\/api\/v1\/comment\/playlist\/[^/]+$/, (req) => {
+  transport.on("DELETE", /^\/api\/comment\/playlist\/[^/]+$/, (req) => {
     const playlist = playlists.get(decodeURIComponent(req.path.split("/").pop() ?? ""));
     if (!playlist) return notFound("Playlist not found");
     delete playlist.comments;
     return { status: 204, headers: {}, body: undefined };
   });
-  transport.on("GET", /^\/api\/v1\/comment\/screen\/[^/]+$/, (req) => {
+  transport.on("GET", /^\/api\/comment\/screen\/[^/]+$/, (req) => {
     const screen = screens.get(decodeURIComponent(req.path.split("/").pop() ?? ""));
     if (!screen) return notFound("Screen not found");
     return { status: 200, headers: {}, body: { comments: screen.comments ?? null } };
   });
-  transport.on("PUT", /^\/api\/v1\/comment\/screen\/[^/]+$/, (req) => {
+  transport.on("PUT", /^\/api\/comment\/screen\/[^/]+$/, (req) => {
     const screen = screens.get(decodeURIComponent(req.path.split("/").pop() ?? ""));
     const comments = commentsFromBody(req.body);
     if (!screen) return notFound("Screen not found");
@@ -924,7 +924,7 @@ export function memoryBackend(options: {
     screen.comments = comments;
     return { status: 200, headers: {}, body: { comments } };
   });
-  transport.on("DELETE", /^\/api\/v1\/comment\/screen\/[^/]+$/, (req) => {
+  transport.on("DELETE", /^\/api\/comment\/screen\/[^/]+$/, (req) => {
     const screen = screens.get(decodeURIComponent(req.path.split("/").pop() ?? ""));
     if (!screen) return notFound("Screen not found");
     delete screen.comments;
@@ -981,15 +981,15 @@ export function memoryBackend(options: {
     return { screen: resolveEffective({ ...rest, revision: screen.revision + 1 }) };
   };
   const controlRoute = (req: TransportRequest, change: Control): TransportResponse => {
-    const screen = screens.get(decodeURIComponent(req.path.split("/")[4] ?? ""));
+    const screen = screens.get(decodeURIComponent(req.path.split("/")[3] ?? ""));
     if (!screen) return { status: 404, headers: { "content-type": "application/problem+json" }, body: controlProblem(404, "not_found", "Resource was not found.") };
     const outcome = applyControl(screen, change);
     if ("problem" in outcome) return { status: outcome.problem.status, headers: { "content-type": "application/problem+json" }, body: outcome.problem };
     screens.set(screen.id, outcome.screen);
     return { status: 200, headers: { etag: `"${outcome.screen.revision}"` }, body: outcome.screen };
   };
-  transport.on("GET", /^\/api\/v1\/screens\/[^/]+\/playlist-schedule$/, (req): TransportResponse => {
-    const screen = screens.get(decodeURIComponent(req.path.split("/")[4] ?? ""));
+  transport.on("GET", /^\/api\/screens\/[^/]+\/playlist-schedule$/, (req): TransportResponse => {
+    const screen = screens.get(decodeURIComponent(req.path.split("/")[3] ?? ""));
     if (!screen) return { status: 404, headers: { "content-type": "application/problem+json" }, body: controlProblem(404, "not_found", "Resource was not found.") };
     const resolved = resolveEffective(screen);
     return { status: 200, headers: {}, body: {
@@ -998,13 +998,13 @@ export function memoryBackend(options: {
       ...(resolved.effective_playlist ? { effective_playlist: resolved.effective_playlist } : {}),
     } };
   });
-  transport.on("PUT", /^\/api\/v1\/screens\/[^/]+\/playlist-schedule$/, (req) => controlRoute(req, { kind: "schedule", entries: ((req.body ?? {}) as { entries?: Array<Record<string, unknown>> }).entries ?? [] }));
-  transport.on("DELETE", /^\/api\/v1\/screens\/[^/]+\/playlist-schedule$/, (req) => controlRoute(req, { kind: "schedule_clear" }));
-  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/takeover$/, (req) => {
+  transport.on("PUT", /^\/api\/screens\/[^/]+\/playlist-schedule$/, (req) => controlRoute(req, { kind: "schedule", entries: ((req.body ?? {}) as { entries?: Array<Record<string, unknown>> }).entries ?? [] }));
+  transport.on("DELETE", /^\/api\/screens\/[^/]+\/playlist-schedule$/, (req) => controlRoute(req, { kind: "schedule_clear" }));
+  transport.on("POST", /^\/api\/screens\/[^/]+\/takeover$/, (req) => {
     const body = (req.body ?? {}) as { playlist_id: string; until?: string | null; reason?: string };
     return controlRoute(req, { kind: "takeover", playlist_id: body.playlist_id, until: body.until, reason: body.reason });
   });
-  transport.on("DELETE", /^\/api\/v1\/screens\/[^/]+\/takeover$/, (req) => controlRoute(req, { kind: "takeover_clear" }));
+  transport.on("DELETE", /^\/api\/screens\/[^/]+\/takeover$/, (req) => controlRoute(req, { kind: "takeover_clear" }));
 
   // Reboot and display power, simplified: a schedule makes the display
   // requested "on" (source schedule); an override wins until replaced.
@@ -1054,7 +1054,7 @@ export function memoryBackend(options: {
     }
     return { accepted: { reboot_id: `rbt_${screen.id.slice(-10).padStart(10, "0")}`, expires_at: new Date(clock().getTime() + 600_000).toISOString() } };
   };
-  const screenOf = (req: TransportRequest) => screens.get(decodeURIComponent(req.path.split("/")[4] ?? ""));
+  const screenOf = (req: TransportRequest) => screens.get(decodeURIComponent(req.path.split("/")[3] ?? ""));
   const displayRoute = (req: TransportRequest, change: DisplayChange): TransportResponse => {
     const screen = screenOf(req);
     if (!screen) return { status: 404, headers: { "content-type": "application/problem+json" }, body: controlProblem(404, "not_found", "Resource was not found.") };
@@ -1063,32 +1063,32 @@ export function memoryBackend(options: {
     screens.set(screen.id, outcome.screen);
     return { status: 200, headers: { etag: `"${outcome.screen.revision}"` }, body: outcome.screen };
   };
-  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/reboot$/, (req): TransportResponse => {
+  transport.on("POST", /^\/api\/screens\/[^/]+\/reboot$/, (req): TransportResponse => {
     const screen = screenOf(req);
     if (!screen) return { status: 404, headers: { "content-type": "application/problem+json" }, body: controlProblem(404, "not_found", "Resource was not found.") };
     const outcome = rebootOutcome(screen);
     if ("problem" in outcome) return { status: outcome.problem.status, headers: { "content-type": "application/problem+json" }, body: outcome.problem };
     return { status: 202, headers: { "cache-control": "no-store", etag: `"${screen.revision}"` }, body: outcome.accepted };
   });
-  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/display$/, (req) => {
+  transport.on("POST", /^\/api\/screens\/[^/]+\/display$/, (req) => {
     const body = (req.body ?? {}) as { power: "on" | "off"; until?: string | null };
     return displayRoute(req, { kind: "display", power: body.power, until: body.until });
   });
-  transport.on("DELETE", /^\/api\/v1\/screens\/[^/]+\/display$/, (req) => displayRoute(req, { kind: "display_clear" }));
-  transport.on("GET", /^\/api\/v1\/screens\/[^/]+\/display-schedule$/, (req): TransportResponse => {
+  transport.on("DELETE", /^\/api\/screens\/[^/]+\/display$/, (req) => displayRoute(req, { kind: "display_clear" }));
+  transport.on("GET", /^\/api\/screens\/[^/]+\/display-schedule$/, (req): TransportResponse => {
     const screen = screenOf(req);
     if (!screen) return { status: 404, headers: { "content-type": "application/problem+json" }, body: controlProblem(404, "not_found", "Resource was not found.") };
     return { status: 200, headers: { etag: `"${screen.revision}"` }, body: { display_schedule: screen.display?.schedule ?? null, ...(screen.display ? { display: screen.display } : {}) } };
   });
-  transport.on("PUT", /^\/api\/v1\/screens\/[^/]+\/display-schedule$/, (req) => {
+  transport.on("PUT", /^\/api\/screens\/[^/]+\/display-schedule$/, (req) => {
     const body = (req.body ?? {}) as { enabled: boolean; windows: Array<Record<string, unknown>> };
     return displayRoute(req, { kind: "display_schedule", enabled: body.enabled, windows: body.windows ?? [] });
   });
-  transport.on("DELETE", /^\/api\/v1\/screens\/[^/]+\/display-schedule$/, (req) => displayRoute(req, { kind: "display_schedule_clear" }));
+  transport.on("DELETE", /^\/api\/screens\/[^/]+\/display-schedule$/, (req) => displayRoute(req, { kind: "display_schedule_clear" }));
 
-  // POST /api/v1/screens/actions: one result per selected screen, in selector
+  // POST /api/screens/actions: one result per selected screen, in selector
   // order; a missing screen fails with not_found, the rest succeed.
-  transport.on("POST", "/api/v1/screens/actions", (req): TransportResponse => {
+  transport.on("POST", "/api/screens/actions", (req): TransportResponse => {
     const body = req.body as { selector: { by: "ids"; screen_ids: string[] } | { by: "tag"; tag: string }; action: { type: string; tags?: string[]; playlist_id?: string } };
     // Like the server, a fleet takeover's until is checked once before fan-out.
     const fleetUntil = (body.action as { until?: unknown }).until;
@@ -1149,7 +1149,7 @@ export function memoryBackend(options: {
       body: { action: body.action.type, matched: results.length, succeeded: results.length - failed, failed, results },
     };
   });
-  transport.on("GET", "/api/v1/screens", (req) => {
+  transport.on("GET", "/api/screens", (req) => {
     const archivedOnly = req.query?.state === "archived";
     const tag = typeof req.query?.tag === "string" ? req.query.tag : undefined;
     const items = [...screens.values()].filter((screen) => (
@@ -1157,8 +1157,8 @@ export function memoryBackend(options: {
     ) && (tag === undefined || (screen.tags ?? []).includes(tag)));
     return listPage(req, items, pageSize(500));
   });
-  transport.on("GET", /^\/api\/v1\/screens\/[^/]+$/, (req) => ({ status: 200, headers: {}, body: screens.get(req.path.split("/").pop() ?? "") }));
-  transport.on("PATCH", /^\/api\/v1\/screens\/[^/]+$/, (req): TransportResponse => {
+  transport.on("GET", /^\/api\/screens\/[^/]+$/, (req) => ({ status: 200, headers: {}, body: screens.get(req.path.split("/").pop() ?? "") }));
+  transport.on("PATCH", /^\/api\/screens\/[^/]+$/, (req): TransportResponse => {
     const id = req.path.split("/").pop() ?? "";
     const body = req.body as { name?: string; playlist_id?: string; timezone?: string; tags?: string[] };
     const ifMatch = req.headers?.["if-match"];
@@ -1189,8 +1189,8 @@ export function memoryBackend(options: {
     screens.set(id, item);
     return { status: 200, headers: {}, body: item };
   });
-  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/public-id\/rotate$/, (req) => {
-    const id = req.path.split("/")[4] ?? "";
+  transport.on("POST", /^\/api\/screens\/[^/]+\/public-id\/rotate$/, (req) => {
+    const id = req.path.split("/")[3] ?? "";
     const current = screens.get(id) as Screen;
     const item: Screen = {
       ...current,
@@ -1202,8 +1202,8 @@ export function memoryBackend(options: {
     screens.set(id, item);
     return { status: 200, headers: {}, body: item };
   });
-  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/archive$/, (req) => {
-    const id = req.path.split("/")[4] ?? "";
+  transport.on("POST", /^\/api\/screens\/[^/]+\/archive$/, (req) => {
+    const id = req.path.split("/")[3] ?? "";
     const current = screens.get(id) as Screen;
     const item: Screen = {
       ...current,
@@ -1217,8 +1217,8 @@ export function memoryBackend(options: {
     screens.set(id, item);
     return { status: 200, headers: {}, body: item };
   });
-  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/unarchive$/, (req) => {
-    const id = req.path.split("/")[4] ?? "";
+  transport.on("POST", /^\/api\/screens\/[^/]+\/unarchive$/, (req) => {
+    const id = req.path.split("/")[3] ?? "";
     const { archive_reason: _reason, archived_at: _archivedAt, ...current } = screens.get(id) as Screen;
     const item: Screen = {
       ...current,
@@ -1230,8 +1230,8 @@ export function memoryBackend(options: {
     screens.set(id, item);
     return { status: 200, headers: {}, body: item };
   });
-  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/recovery\/confirm$/, (req): TransportResponse => {
-    const id = req.path.split("/")[4] ?? "";
+  transport.on("POST", /^\/api\/screens\/[^/]+\/recovery\/confirm$/, (req): TransportResponse => {
+    const id = req.path.split("/")[3] ?? "";
     const current = screens.get(id);
     if (!current) {
       return { status: 404, headers: { "content-type": "application/problem+json" }, body: { type: "https://screenrig.ai/problems/not-found", title: "Not found", status: 404, code: "not_found", detail: "Screen not found." } };
@@ -1249,8 +1249,8 @@ export function memoryBackend(options: {
     return { status: 200, headers: { etag: `"${item.revision}"` }, body: item };
   });
   const reloads = new Map<string, { reload_id: string; expires_at: string }>();
-  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/reload$/, (req): TransportResponse => {
-    const id = req.path.split("/")[4] ?? "";
+  transport.on("POST", /^\/api\/screens\/[^/]+\/reload$/, (req): TransportResponse => {
+    const id = req.path.split("/")[3] ?? "";
     const current = screens.get(id);
     if (!current) {
       return { status: 404, headers: { "content-type": "application/problem+json" }, body: { type: "https://screenrig.ai/problems/not-found", title: "Not found", status: 404, code: "not_found", detail: "Screen not found." } };
@@ -1272,7 +1272,7 @@ export function memoryBackend(options: {
       body: accepted,
     };
   });
-  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/toast$/, (req) => {
+  transport.on("POST", /^\/api\/screens\/[^/]+\/toast$/, (req) => {
     const body = (req.body ?? {}) as { duration_ms?: number };
     const durationMs = body.duration_ms ?? 10_000;
     return {
@@ -1289,7 +1289,7 @@ export function memoryBackend(options: {
   const screenshotBytes = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0x08, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]);
   const screenshotSha256 = createHash("sha256").update(screenshotBytes).digest("hex");
   const screenshotCaptureId = "shot_AAAAAAAAAAAAAAAA";
-  transport.on("POST", /^\/api\/v1\/screens\/[^/]+\/screenshot$/, (req) => ({
+  transport.on("POST", /^\/api\/screens\/[^/]+\/screenshot$/, (req) => ({
     status: 202,
     headers: {
       "cache-control": "no-store",
@@ -1300,7 +1300,7 @@ export function memoryBackend(options: {
       expires_at: "2026-08-14T17:00:30.000Z",
     },
   }));
-  transport.on("GET", /^\/api\/v1\/screens\/[^/]+\/screenshot\/status$/, () => ({
+  transport.on("GET", /^\/api\/screens\/[^/]+\/screenshot\/status$/, () => ({
     status: 200,
     headers: { "cache-control": "no-store" },
     body: {
@@ -1312,7 +1312,7 @@ export function memoryBackend(options: {
       height: 270,
     },
   }));
-  transport.on("GET", /^\/api\/v1\/screens\/[^/]+\/screenshot$/, () => ({
+  transport.on("GET", /^\/api\/screens\/[^/]+\/screenshot$/, () => ({
     status: 200,
     headers: {
       "content-type": "image/webp",
@@ -1321,7 +1321,7 @@ export function memoryBackend(options: {
     },
     body: screenshotBytes,
   }));
-  transport.on("DELETE", /^\/api\/v1\/screens\/[^/]+$/, (req) => ({
+  transport.on("DELETE", /^\/api\/screens\/[^/]+$/, (req) => ({
     status: 409,
     headers: {
       "content-type": "application/problem+json",
@@ -1336,7 +1336,7 @@ export function memoryBackend(options: {
     },
   }));
 
-  transport.on("GET", "/api/v1/media", (req) => {
+  transport.on("GET", "/api/media", (req) => {
     const tag = req.query?.tag;
     const primitive = req.query?.primitive;
     const items = [...media.values()].filter((item) => {
@@ -1348,7 +1348,7 @@ export function memoryBackend(options: {
     });
     return listPage(req, items, pageSize(1000));
   });
-  transport.on("POST", "/api/v1/media/uploads", (req) => {
+  transport.on("POST", "/api/media/uploads", (req) => {
     const declaration = req.body as MediaUploadDeclaration;
     const operation: Operation = {
       id: "op_MEDIAAAAAAAAAAAAAAAAAAAAA",
@@ -1376,7 +1376,7 @@ export function memoryBackend(options: {
       },
     };
   });
-  transport.on("POST", /^\/api\/v1\/media\/uploads\/[^/]+\/commit$/, (req) => {
+  transport.on("POST", /^\/api\/media\/uploads\/[^/]+\/commit$/, (req) => {
     const uploadId = req.path.split("/").at(-2) ?? "";
     const stored = media.get(uploadId) as { declaration: MediaUploadDeclaration };
     const commit = req.body as MediaCommit;
@@ -1419,12 +1419,12 @@ export function memoryBackend(options: {
     operations.set(operationId, operation);
     return { status: 202, headers: {}, body: operation };
   });
-  transport.on("GET", /^\/api\/v1\/media\/[^/]+$/, (req) => ({
+  transport.on("GET", /^\/api\/media\/[^/]+$/, (req) => ({
     status: 200,
     headers: { etag: '"1"' },
     body: media.get(req.path.split("/").pop() ?? ""),
   }));
-  transport.on("PATCH", /^\/api\/v1\/media\/[^/]+$/, (req) => {
+  transport.on("PATCH", /^\/api\/media\/[^/]+$/, (req) => {
     const id = req.path.split("/").pop() ?? "";
     const current = (media.get(id) ?? { id, revision: 1 }) as Record<string, unknown>;
     const patch = (req.body ?? {}) as { tag?: string | null };
@@ -1437,20 +1437,20 @@ export function memoryBackend(options: {
     media.set(id, item);
     return { status: 200, headers: { etag: `"${item.revision}"` }, body: item };
   });
-  transport.on("DELETE", /^\/api\/v1\/media\/[^/]+$/, (req) => {
+  transport.on("DELETE", /^\/api\/media\/[^/]+$/, (req) => {
     media.delete(req.path.split("/").pop() ?? "");
     return { status: 204, headers: {}, body: undefined };
   });
-  transport.on("GET", /^\/api\/v1\/applications\/[^/]+\/kv$/, (req) => {
-    const applicationId = req.path.split("/")[4] ?? "";
+  transport.on("GET", /^\/api\/applications\/[^/]+\/kv$/, (req) => {
+    const applicationId = req.path.split("/")[3] ?? "";
     const items: KVSummary[] = [...kv.values()]
       .filter((entry) => entry.application_id === applicationId)
       .map(({ value_base64: _value, ...summary }) => summary);
     return { status: 200, headers: {}, body: { items } };
   });
-  transport.on("GET", /^\/api\/v1\/applications\/[^/]+\/kv\/[^/]+$/, (req): TransportResponse => {
+  transport.on("GET", /^\/api\/applications\/[^/]+\/kv\/[^/]+$/, (req): TransportResponse => {
     const parts = req.path.split("/");
-    const storageKey = `${parts[4]}:${decodeURIComponent(parts[6] ?? "")}`;
+    const storageKey = `${parts[3]}:${decodeURIComponent(parts[5] ?? "")}`;
     const entry = kv.get(storageKey);
     if (entry) return { status: 200, headers: {}, body: entry };
     return {
@@ -1459,10 +1459,10 @@ export function memoryBackend(options: {
       body: { type: "https://screenrig.ai/problems/not-found", title: "Not found", status: 404, detail: "K/V key not found", code: "not_found" },
     };
   });
-  transport.on("PUT", /^\/api\/v1\/applications\/[^/]+\/kv\/[^/]+$/, (req): TransportResponse => {
+  transport.on("PUT", /^\/api\/applications\/[^/]+\/kv\/[^/]+$/, (req): TransportResponse => {
     const parts = req.path.split("/");
-    const applicationId = parts[4] ?? "";
-    const key = decodeURIComponent(parts[6] ?? "");
+    const applicationId = parts[3] ?? "";
+    const key = decodeURIComponent(parts[5] ?? "");
     const storageKey = `${applicationId}:${key}`;
     const previous = kv.get(storageKey);
     const ifMatch = req.headers?.["if-match"];
@@ -1494,9 +1494,9 @@ export function memoryBackend(options: {
     kv.set(storageKey, item);
     return { status: 200, headers: {}, body: item };
   });
-  transport.on("DELETE", /^\/api\/v1\/applications\/[^/]+\/kv\/[^/]+$/, (req) => {
+  transport.on("DELETE", /^\/api\/applications\/[^/]+\/kv\/[^/]+$/, (req) => {
     const parts = req.path.split("/");
-    kv.delete(`${parts[4]}:${decodeURIComponent(parts[6] ?? "")}`);
+    kv.delete(`${parts[3]}:${decodeURIComponent(parts[5] ?? "")}`);
     return { status: 204, headers: {}, body: undefined };
   });
 
@@ -1520,14 +1520,14 @@ export function memoryBackend(options: {
     ["bug", []],
     ["feature", []],
   ]);
-  transport.on("POST", "/api/v1/feedback/bugs", submitFeedback("bug"));
-  transport.on("POST", "/api/v1/feedback/features", submitFeedback("feature"));
-  transport.on("GET", "/api/v1/feedback/bugs", () => ({
+  transport.on("POST", "/api/feedback/bugs", submitFeedback("bug"));
+  transport.on("POST", "/api/feedback/features", submitFeedback("feature"));
+  transport.on("GET", "/api/feedback/bugs", () => ({
     status: 200,
     headers: {},
     body: { items: feedback.get("bug") ?? [] },
   }));
-  transport.on("GET", "/api/v1/feedback/features", () => ({
+  transport.on("GET", "/api/feedback/features", () => ({
     status: 200,
     headers: {},
     body: { items: feedback.get("feature") ?? [] },
@@ -1564,14 +1564,14 @@ export function memoryBackend(options: {
     headers: { "content-type": "application/problem+json" },
     body: { status: 400, code: "webhook_url_rejected", title: "Webhook URL must be HTTPS on a public Internet host", detail: `${reason}.`, errors: [{ field: "url", code: "rejected", detail: `${reason}.` }] },
   });
-  const webhookFor = (req: TransportRequest): Record<string, unknown> | undefined => webhooks.get(decodeURIComponent(req.path.split("/")[4] ?? ""));
+  const webhookFor = (req: TransportRequest): Record<string, unknown> | undefined => webhooks.get(decodeURIComponent(req.path.split("/")[3] ?? ""));
   const staleRevision = (req: TransportRequest, webhook: Record<string, unknown>): TransportResponse | undefined => {
     const ifMatch = req.headers?.["if-match"];
     if (!ifMatch || ifMatch === `"${webhook.revision}"`) return undefined;
     return { status: 412, headers: { "content-type": "application/problem+json" }, body: { status: 412, code: "revision_conflict", title: "Revision conflict", detail: "The webhook revision does not match If-Match.", current_revision: webhook.revision } };
   };
-  transport.on("GET", "/api/v1/webhooks", () => ({ status: 200, headers: {}, body: { items: [...webhooks.values()] } }));
-  transport.on("POST", "/api/v1/webhooks", (req) => webhookReplay(req, () => {
+  transport.on("GET", "/api/webhooks", () => ({ status: 200, headers: {}, body: { items: [...webhooks.values()] } }));
+  transport.on("POST", "/api/webhooks", (req) => webhookReplay(req, () => {
     const body = (req.body ?? {}) as { url?: string; event_types?: string[]; enabled?: boolean; description?: string };
     const rejected = webhookUrlRejected(body.url);
     if (rejected) return rejectedUrl(rejected);
@@ -1588,11 +1588,11 @@ export function memoryBackend(options: {
     webhookDeliveries.set(webhook.id as string, []);
     return { status: 201, headers: { "cache-control": "no-store" }, body: { ...webhook, secret: webhookSecret() } };
   }));
-  transport.on("GET", /^\/api\/v1\/webhooks\/[^/]+$/, (req) => {
+  transport.on("GET", /^\/api\/webhooks\/[^/]+$/, (req) => {
     const webhook = webhookFor(req);
     return webhook ? { status: 200, headers: { etag: `"${webhook.revision}"` }, body: webhook } : notFound("Resource was not found.");
   });
-  transport.on("PATCH", /^\/api\/v1\/webhooks\/[^/]+$/, (req) => webhookReplay(req, () => {
+  transport.on("PATCH", /^\/api\/webhooks\/[^/]+$/, (req) => webhookReplay(req, () => {
     const webhook = webhookFor(req);
     if (!webhook) return notFound("Resource was not found.");
     const stale = staleRevision(req, webhook);
@@ -1615,7 +1615,7 @@ export function memoryBackend(options: {
     webhook.revision = (webhook.revision as number) + 1;
     return { status: 200, headers: { etag: `"${webhook.revision}"` }, body: { ...webhook } };
   }));
-  transport.on("DELETE", /^\/api\/v1\/webhooks\/[^/]+$/, (req) => webhookReplay(req, () => {
+  transport.on("DELETE", /^\/api\/webhooks\/[^/]+$/, (req) => webhookReplay(req, () => {
     const webhook = webhookFor(req);
     if (!webhook) return notFound("Resource was not found.");
     const stale = staleRevision(req, webhook);
@@ -1623,7 +1623,7 @@ export function memoryBackend(options: {
     webhooks.delete(webhook.id as string);
     return { status: 204, headers: { "cache-control": "no-store" }, body: undefined };
   }));
-  transport.on("POST", /^\/api\/v1\/webhooks\/[^/]+\/rotate-secret$/, (req) => webhookReplay(req, () => {
+  transport.on("POST", /^\/api\/webhooks\/[^/]+\/rotate-secret$/, (req) => webhookReplay(req, () => {
     const webhook = webhookFor(req);
     if (!webhook) return notFound("Resource was not found.");
     const stale = staleRevision(req, webhook);
@@ -1631,7 +1631,7 @@ export function memoryBackend(options: {
     webhook.revision = (webhook.revision as number) + 1;
     return { status: 200, headers: { "cache-control": "no-store" }, body: { ...webhook, secret: webhookSecret() } };
   }));
-  transport.on("POST", /^\/api\/v1\/webhooks\/[^/]+\/test$/, (req) => webhookReplay(req, () => {
+  transport.on("POST", /^\/api\/webhooks\/[^/]+\/test$/, (req) => webhookReplay(req, () => {
     const webhook = webhookFor(req);
     if (!webhook) return notFound("Resource was not found.");
     const rows = webhookDeliveries.get(webhook.id as string)!;
@@ -1643,7 +1643,7 @@ export function memoryBackend(options: {
     rows.unshift(delivery);
     return { status: 202, headers: {}, body: delivery };
   }));
-  transport.on("GET", /^\/api\/v1\/webhooks\/[^/]+\/deliveries$/, (req) => {
+  transport.on("GET", /^\/api\/webhooks\/[^/]+\/deliveries$/, (req) => {
     const webhook = webhookFor(req);
     if (!webhook) return notFound("Resource was not found.");
     const rows = webhookDeliveries.get(webhook.id as string) ?? [];

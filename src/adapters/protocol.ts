@@ -477,7 +477,7 @@ export interface ScreenStorageTransfer {
 
 /**
  * Sanitized player storage report. Absent until the first accepted
- * PUT /runtime/v1/storage. Cleared on identity reset, unpair, and archive.
+ * PUT /screen/storage. Cleared on identity reset, unpair, and archive.
  * received_at is the server receipt time, not the player clock. Read-only.
  */
 export interface ScreenStorage {
@@ -542,7 +542,7 @@ export interface ScreenStorageShortfall {
 }
 
 /**
- * Screen.health: the latest PUT /runtime/v1/health report, sanitized, with
+ * Screen.health: the latest PUT /screen/health report, sanitized, with
  * server reported_at. stale is true after 35 minutes without a report. A
  * member the Player did not send is absent.
  */
@@ -701,7 +701,7 @@ export interface Screen {
   applications_unsupported?: ScreenApplicationsUnsupported;
   /**
    * Sanitized player storage report. Absent until the first accepted
-   * PUT /runtime/v1/storage. Cleared on identity reset, unpair, and archive.
+   * PUT /screen/storage. Cleared on identity reset, unpair, and archive.
    * Readers treat received_at older than 24 hours as stale. Read-only.
    */
   storage?: ScreenStorage;
@@ -752,7 +752,7 @@ export interface ScreenPatch {
 
 export type ScreenTags = string[];
 
-/** POST /api/v1/screens/actions selector: explicit ids (any state) or every active screen with a tag. */
+/** POST /api/screens/actions selector: explicit ids (any state) or every active screen with a tag. */
 export type ScreenActionSelector =
   | { by: "ids"; screen_ids: string[] }
   | { by: "tag"; tag: string };
@@ -794,7 +794,7 @@ export interface ScreenActionScreenResult {
   problem?: { type?: string; title?: string; status?: number; detail?: string; code?: string; [key: string]: unknown };
 }
 
-/** 200 answer of POST /api/v1/screens/actions. Partial success is a normal answer. */
+/** 200 answer of POST /api/screens/actions. Partial success is a normal answer. */
 export interface ScreenActionResult {
   action: ScreenActionType;
   matched: number;
@@ -803,12 +803,12 @@ export interface ScreenActionResult {
   results: ScreenActionScreenResult[];
 }
 
-/** PUT /api/v1/comment/... body. Compact UTF-8 JSON of comments must be ≤ 1024 bytes. */
+/** PUT /api/comment/... body. Compact UTF-8 JSON of comments must be ≤ 1024 bytes. */
 export interface CommentsWrite {
   comments: Record<string, unknown>;
 }
 
-/** GET/PUT /api/v1/comment/... body. Null when the target exists and comments are unset. */
+/** GET/PUT /api/comment/... body. Null when the target exists and comments are unset. */
 export interface Comments {
   comments: Record<string, unknown> | null;
 }
@@ -832,7 +832,7 @@ export interface ScreenProvisioning {
 export type ScreenToastLevel = "error" | "alert" | "info";
 
 /**
- * Write body for POST /api/v1/screens/{id}/toast. Colours are player chrome
+ * Write body for POST /api/screens/{id}/toast. Colours are player chrome
  * and are never sent. duration_ms is omitted so the server can default it.
  */
 export interface ScreenToastWrite {
@@ -847,7 +847,7 @@ export interface ScreenToastAccepted {
 }
 
 /**
- * Accepted POST /api/v1/screens/{id}/reload. The reload itself is the durable
+ * Accepted POST /api/screens/{id}/reload. The reload itself is the durable
  * per-screen player.reload event; a Player acts on one reload_id at most once
  * and ignores it after expires_at.
  */
@@ -859,7 +859,7 @@ export interface ScreenReloadAccepted {
 /** shot_ plus 16 to 64 unpadded base64url characters. */
 export type ScreenshotCaptureID = string;
 
-/** Accepted POST /api/v1/screens/{id}/screenshot. */
+/** Accepted POST /api/screens/{id}/screenshot. */
 export interface ScreenScreenshotAccepted {
   capture_id: ScreenshotCaptureID;
   expires_at: string;
@@ -867,7 +867,7 @@ export interface ScreenScreenshotAccepted {
 
 export type ScreenScreenshotState = "idle" | "pending" | "ready" | "timed_out" | "unavailable";
 
-/** GET /api/v1/screens/{id}/screenshot/status. Image bytes are never present. */
+/** GET /api/screens/{id}/screenshot/status. Image bytes are never present. */
 export interface ScreenScreenshotStatus {
   bytes?: number;
   capture_id?: ScreenshotCaptureID;
@@ -938,13 +938,13 @@ export interface MediaRecord {
   [key: string]: unknown;
 }
 
-/** PATCH /api/v1/media/{id}. Replace the tag set; null or [] clears it. */
+/** PATCH /api/media/{id}. Replace the tag set; null or [] clears it. */
 export type MediaTagPatch = { tag: string | null } | { tags: string[] };
 
 export type MediaGenerationAspectRatio = "1:1" | "16:9" | "9:16" | "4:3" | "3:4" | "3:2" | "2:3";
 export type MediaGenerationQuality = "low" | "medium" | "high";
 
-/** POST /api/v1/media/generations. prompt is required; aspect_ratio and quality have server defaults. quality changes the image and the price. */
+/** POST /api/media/generations. prompt is required; aspect_ratio and quality have server defaults. quality changes the image and the price. */
 export interface MediaGenerationRequest {
   prompt: string;
   aspect_ratio?: MediaGenerationAspectRatio;
@@ -1032,7 +1032,7 @@ export interface FeedbackList {
 }
 
 /**
- * GET /api/v1/playback/plays JSON row. primitive_id and started_at are present
+ * GET /api/playback/plays JSON row. primitive_id and started_at are present
  * only when the Player reported them.
  */
 export interface PlaybackPlay {
@@ -1053,7 +1053,7 @@ export interface PlaybackPlayList {
 
 export const TEMPORARY_PROTOCOL_VERSION = "screenrig.cli.adapter/0";
 
-/** GET/PATCH /api/v1/webhooks/{id}. The signing secret is never part of this shape. */
+/** GET/PATCH /api/webhooks/{id}. The signing secret is never part of this shape. */
 export interface Webhook {
   created_at: string;
   description?: string;

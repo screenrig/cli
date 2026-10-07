@@ -47,7 +47,7 @@ for (const outcome of ["success", "rejection"] as const) {
     const requested = new Promise<void>((resolve) => { started = resolve; });
     let release!: () => void;
     const responseReady = new Promise<void>((resolve) => { release = resolve; });
-    const transport = new FakeTransport().on("GET", "/api/v1/project", async () => {
+    const transport = new FakeTransport().on("GET", "/api/project", async () => {
       started();
       await responseReady;
       if (outcome === "rejection") throw networkError("Deferred transport failed.");
