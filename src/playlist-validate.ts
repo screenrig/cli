@@ -20,6 +20,15 @@ const validate = ajv.compile(schema);
 // Route diagnostics to the selected tagged branch. This changes only error
 // presentation: the unmodified canonical validator above decides validity.
 const diagnosticSchema = structuredClone(schema);
+// The page union has no tag on the ordinary branch, so select the branch by the
+// adslot tag; otherwise every ordinary-page error drags in the adslot branch's.
+const pageUnion = diagnosticSchema.$defs.PlaylistPageWriteV2;
+if (Array.isArray(pageUnion?.oneOf) && diagnosticSchema.$defs.AdslotPageWrite && diagnosticSchema.$defs.PlaylistPageWrite) {
+  delete pageUnion.oneOf;
+  pageUnion.if = { type: "object", properties: { type: { const: "adslot" } }, required: ["type"] };
+  pageUnion.then = { $ref: "#/$defs/AdslotPageWrite" };
+  pageUnion.else = { $ref: "#/$defs/PlaylistPageWrite" };
+}
 for (const definition of Object.values(diagnosticSchema.$defs) as Array<Record<string, any>>) {
   if (!Array.isArray(definition.oneOf)) continue;
   const branches = definition.oneOf.map((item: { $ref?: string }) => item.$ref?.startsWith("#/$defs/") ? diagnosticSchema.$defs[item.$ref.slice(8)] : undefined);
@@ -75,7 +84,7 @@ export function playlistIssues(value: unknown): Array<{ path: string; message: s
     const errors = diagnose.errors ?? validate.errors ?? [];
     // Discriminator branches produce many irrelevant errors; retain actionable
     // leaf issues, deduplicated, while the canonical schema remains authoritative.
-    const issues = errors.filter((error) => error.keyword !== "oneOf" && error.keyword !== "anyOf").map((error) => ({
+    const issues = errors.filter((error) => error.keyword !== "oneOf" && error.keyword !== "anyOf" && error.keyword !== "if").map((error) => ({
       path: error.instancePath + (error.keyword === "additionalProperties" ? `/${String(error.params.additionalProperty).replaceAll("~", "~0").replaceAll("/", "~1")}` : error.keyword === "required" ? `/${String(error.params.missingProperty)}` : ""),
       message: error.keyword === "additionalProperties" && error.instancePath.endsWith("/enter") ? "unsupported entry field; keep only type and optional stagger (player timing is fixed)" : error.message ?? "does not match the canonical playlist schema",
     }));
