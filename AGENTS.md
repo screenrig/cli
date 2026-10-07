@@ -19,8 +19,9 @@ does not require that file for standalone contribution.
   reporter.
 - `package.json` defines the executable, Node engine, scripts, and public
   metadata. Committed version stays `0.1.0`; CI stamps CalVer on the artifact.
-- `vendor/manifest.json` records exact backend OpenAPI/protocol/SDK runtime
-  inputs.
+- `contracts.toml` names the backend OpenAPI/protocol inputs; `contracts.sha256`
+  pins their bytes. `assets/screenrig.runtime.js` is backend SDK build output,
+  tracked here but outside the sums.
 - `scripts/package-release.sh` defines deterministic `screenrig-cli.tgz`.
 - `.github/workflows/ci.yml` defines public, test, package, and secret gates.
   `.github/workflows/npm-release.yml` is the only npm publication path.
@@ -29,16 +30,16 @@ does not require that file for standalone contribution.
 ## Edit and generation rules
 
 - Edit `src/`, never `dist/`. `npm run build` regenerates `dist/`.
-- Do not hand-edit `vendor/` or `assets/screenrig.runtime.js`. Refresh from a
-  reviewed backend checkout:
+- Do not hand-edit `vendor/` or `assets/screenrig.runtime.js`. Refresh the
+  rest of `vendor/`, `assets/` and `src/generated/` from the workspace root:
 
   ```sh
-  node scripts/sync-contract-snapshots.mjs --sync --source-root ../backend
+  rig contracts sync cli
   ```
 
-- `npm run vendor:check` is the cheap vendor gate (tamper check, plus drift
-  against `../backend` when that sibling exists). Public GitHub Actions does
-  not clone backend.
+- `npm run vendor:check` is `sha256sum --strict -c contracts.sha256`, the
+  offline vendor gate. `rig contracts check cli` compares against backend
+  origin/main.
 - The release artifact is one minified ESM `dist/bin.js` that esbuild (the
   only build-only bundler) makes from `npm run build` output. It carries every
   non-development package recorded in `package-lock.json` except the

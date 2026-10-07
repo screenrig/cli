@@ -7847,7 +7847,7 @@ paths:
       responses:
         '200':
           description: 'Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries
-            an id cursor suitable for reconnect. Audience-only gaps emit payload-free stream.cursor frames. Invalid, future,
+            an id cursor suitable for reconnect. Served by the stream sidecar from Valkey (stream-valkey/v1); the stream carries no stream.cursor frames, and a cursor advances only with delivered events. Invalid, future,
             or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested
             are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never
             on this stream. screen.archived and screen.unarchived are runtime audience events; they do not wipe credentials.
@@ -7858,8 +7858,7 @@ paths:
             screen.manifest_changed, screen.toast, screen.screenshot_requested, screen.archived, screen.unarchived, screen.deleted,
             screen.device_credential_revoked, project.suspended, project.resumed, player.reload, which reaches every runtime
             session, and the per-screen commands player.reboot and player.display (docs/player-compatibility.md §6.5), never
-            delivered past details.expires_at. Every other type stops at the scan, and stream.cursor advances the cursor past
-            it. Players ignore unknown event types, including the default message type, and unknown field names, and advance
+            delivered past details.expires_at. Every other type is never published to the stream. Players ignore unknown event types, including the default message type, and unknown field names, and advance
             the cursor from every id. The stream opens with its own retry, drawn per connection between 3000 and 15000 ms so
             that streams dropped together do not reconnect together; a draining host sends each stream its own retry between
             1000 and 30000 ms. The in-band problem frame (event: problem) has no id; its data is {code, detail, action?}, where
