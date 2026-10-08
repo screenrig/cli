@@ -280,7 +280,8 @@ test("screen screenshot surfaces screenshot_unavailable when the Player cannot c
     assert.equal(result.code, ExitCode.Conflict, result.stdout);
     const envelope = JSON.parse(result.stdout) as { error: { code: string; type: string; status: number; detail: string } };
     assert.equal(envelope.error.code, "screenshot_unavailable");
-    assert.match(envelope.error.detail, /unavailable: unsupported_surface/);
+    assert.match(envelope.error.detail, /cannot capture the page it is showing now \(unavailable: unsupported_surface\)/);
+    assert.doesNotMatch(JSON.stringify(envelope.error), /Player type does not support/);
     assert.equal(envelope.error.type, "https://screenrig.ai/problems/screenshot-unavailable");
     assert.equal(envelope.error.status, 409);
     assert.equal(transport.calls.some((call) => call.method === "GET" && call.path.endsWith("/screenshot") && call.binary), false);
@@ -361,9 +362,11 @@ async function captureWith(transport: FakeTransport, argv: string[] = [], sleeps
   const cwdDir = await testTemp("screenshot-retry-cwd-");
   const fsLike = await enrolledFs(configDir);
   try {
-    const result = await withRuntime(["--json", "screen", "screenshot", SCREEN_ID, "--poll-ms", "1", ...argv], transport,
+    const mode = argv.includes("--human") ? [] : ["--json"];
+    const poll = argv.includes("--poll-ms") ? [] : ["--poll-ms", "1"];
+    const result = await withRuntime([...mode, "screen", "screenshot", SCREEN_ID, ...poll, ...argv], transport,
       { fs: fsLike, configDir, cwdDir, sleep: async (ms: number) => { sleeps.push(ms); } });
-    return { ...result, envelope: JSON.parse(result.stdout) };
+    return { ...result, envelope: mode.length ? JSON.parse(result.stdout) : undefined };
   } finally {
     await rm(configDir, { recursive: true, force: true });
     await rm(cwdDir, { recursive: true, force: true });
@@ -434,6 +437,73 @@ test("screen screenshot reports the server's own failure after bounded retries",
   assert.equal(transport.calls.filter((call) => call.method === "POST").length, 7);
 });
 
+test("the default wait honours a 429 Retry-After longer than itself, and an explicit --timeout does not", async () => {
+  const limited = () => {
+    const transport = new FakeTransport();
+    let posts = 0;
+    transport.on("POST", `/api/screens/${SCREEN_ID}/screenshot`, () => (++posts === 1
+      ? serverProblem(429, "rate_limited", "Too many screenshot requests.", { "retry-after": "43" })
+      : { status: 202, headers: {}, body: { capture_id: CAPTURE_ID, expires_at: "2026-08-14T17:00:30.000Z" } }));
+    const statuses = [{ state: "idle" }, readyStatus()];
+    transport.on("GET", `/api/screens/${SCREEN_ID}/screenshot/status`, () => ({ status: 200, headers: {}, body: statuses.shift() ?? readyStatus() }));
+    transport.on("GET", `/api/screens/${SCREEN_ID}/screenshot`, () => readyImage());
+    return transport;
+  };
+  const sleeps: number[] = [];
+  const waited = await captureWith(limited(), [], sleeps);
+  assert.equal(waited.code, 0, waited.stdout);
+  assert.ok(sleeps.includes(43_000), JSON.stringify(sleeps));
+
+  const bounded = await captureWith(limited(), ["--timeout", "5000"]);
+  assert.equal(bounded.envelope.error.code, "rate_limited");
+  assert.equal(bounded.envelope.error.retry_after_seconds, 43);
+  assert.match(bounded.envelope.error.hint, /No retry fit before --timeout/);
+});
+
+test("--human prints retry progress on stderr; JSON mode off a terminal stays quiet", async () => {
+  const flaky = () => {
+    const transport = new FakeTransport();
+    let posts = 0;
+    transport.on("POST", `/api/screens/${SCREEN_ID}/screenshot`, () => (++posts === 1
+      ? serverProblem(503, "not_ready", "Screenshot delivery is unavailable.", { "retry-after": "2" })
+      : { status: 202, headers: {}, body: { capture_id: CAPTURE_ID, expires_at: "2026-08-14T17:00:30.000Z" } }));
+    const statuses = [{ state: "idle" }, readyStatus()];
+    transport.on("GET", `/api/screens/${SCREEN_ID}/screenshot/status`, () => ({ status: 200, headers: {}, body: statuses.shift() ?? readyStatus() }));
+    transport.on("GET", `/api/screens/${SCREEN_ID}/screenshot`, () => readyImage());
+    return transport;
+  };
+  const human = await captureWith(flaky(), ["--human"]);
+  assert.match(human.stderr, /not_ready \(HTTP 503\); retrying in 2 s as Retry-After asks \(retry 1 of 6\)/);
+  const json = await captureWith(flaky());
+  assert.equal(json.stderr, "");
+});
+
+test("poll sleeps never pass --timeout, and --timeout 0 waits until the server resolves the capture", async () => {
+  const pending = () => {
+    const transport = new FakeTransport();
+    transport.on("POST", `/api/screens/${SCREEN_ID}/screenshot`, () => ({ status: 202, headers: {}, body: { capture_id: CAPTURE_ID, expires_at: "2026-08-14T17:00:30.000Z" } }));
+    const statuses = [{ state: "pending", capture_id: CAPTURE_ID }, { state: "pending", capture_id: CAPTURE_ID }, readyStatus()];
+    transport.on("GET", `/api/screens/${SCREEN_ID}/screenshot/status`, () => ({ status: 200, headers: {}, body: statuses.shift() ?? readyStatus() }));
+    transport.on("GET", `/api/screens/${SCREEN_ID}/screenshot`, () => readyImage());
+    return transport;
+  };
+  const sleeps: number[] = [];
+  const capped = await captureWith(pending(), ["--timeout", "200", "--poll-ms", "5000"], sleeps);
+  assert.equal(capped.code, 0, capped.stdout);
+  assert.ok(sleeps.length > 0 && sleeps.every((ms) => ms <= 200), JSON.stringify(sleeps));
+  const unbounded = await captureWith(pending(), ["--timeout", "0"]);
+  assert.equal(unbounded.code, 0, unbounded.stdout);
+});
+
+test("a capture that expired on an offline screen says the screen is offline", async () => {
+  const transport = screenshotTransport({ statuses: [{ state: "timed_out", capture_id: CAPTURE_ID }] });
+  transport.on("GET", `/api/screens/${SCREEN_ID}`, () => ({ status: 200, headers: {}, body: { id: SCREEN_ID, online: false, last_online_at: "2026-08-14T16:00:00.000Z" } }));
+  const result = await captureWith(transport);
+  assert.equal(result.code, ExitCode.Conflict, result.stdout);
+  assert.equal(result.envelope.error.code, "screenshot_unavailable");
+  assert.match(result.envelope.error.detail, /The screen is offline \(last online 2026-08-14T16:00:00.000Z\)/);
+});
+
 test("fleet screenshots send a separate fresh key per screen", async () => {
   const other = "scr_PAIRINGBBBBBBBBBBBBBBBB";
   const transport = new FakeTransport();
@@ -457,12 +527,12 @@ test("fleet screenshots send a separate fresh key per screen", async () => {
   }
 });
 
-test("screen screenshot surfaces resource_conflict when capture_id is replaced", async () => {
+test("screen screenshot adopts and returns a later capture of the same screen that replaced its own", async () => {
   const configDir = await testTemp("screenshot-replaced-");
   const cwdDir = await testTemp("screenshot-replaced-cwd-");
   const fsLike = await enrolledFs(configDir);
   const transport = screenshotTransport({
-    statuses: [{ state: "pending", capture_id: REPLACED_CAPTURE_ID }],
+    statuses: [{ state: "pending", capture_id: REPLACED_CAPTURE_ID }, readyStatus(REPLACED_CAPTURE_ID)],
   });
   try {
     const result = await withRuntime(
@@ -470,11 +540,10 @@ test("screen screenshot surfaces resource_conflict when capture_id is replaced",
       transport,
       { fs: fsLike, configDir, cwdDir },
     );
-    assert.equal(result.code, ExitCode.Conflict, result.stdout);
-    const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string } };
-    assert.equal(envelope.error.code, "resource_conflict");
-    assert.equal(envelope.error.detail, "A later screenshot request replaced this one.");
-    assert.equal(transport.calls.some((call) => call.binary), false);
+    assert.equal(result.code, 0, result.stdout);
+    const envelope = JSON.parse(result.stdout) as { data: { capture_id: string } };
+    assert.equal(envelope.data.capture_id, REPLACED_CAPTURE_ID);
+    assert.equal(transport.calls.find((call) => call.binary)?.query?.capture_id, REPLACED_CAPTURE_ID);
   } finally {
     await rm(configDir, { recursive: true, force: true });
     await rm(cwdDir, { recursive: true, force: true });
@@ -490,7 +559,7 @@ test("screen screenshot surfaces screenshot_unavailable when the wait deadline e
   });
   try {
     const result = await withRuntime(
-      ["--json", "screen", "screenshot", SCREEN_ID, "--timeout", "0", "--poll-ms", "1"],
+      ["--json", "screen", "screenshot", SCREEN_ID, "--timeout", "1", "--poll-ms", "1"],
       transport,
       { fs: fsLike, configDir, cwdDir },
     );

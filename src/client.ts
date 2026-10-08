@@ -292,7 +292,7 @@ export class ApiClient {
       });
     } catch (err) {
       span.error(err);
-      throw err;
+      throw withTransportHint(err, req.method, false);
     }
     const remaining = this.token ? parseCreditsRemainingHeader(response.headers) : undefined;
     const requestId = response.headers["x-request-id"] ?? headers["x-request-id"];

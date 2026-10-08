@@ -5583,27 +5583,32 @@ function isScreenId(value: string): boolean {
   return SCREEN_ID_PATTERN.test(value);
 }
 
-type ScreenshotFailure = "timed_out" | "unsupported_surface" | "capture_failed" | "unavailable" | "deadline";
+type ScreenshotFailure = "timed_out" | "unsupported_surface" | "capture_failed" | "unavailable" | "deadline" | "offline";
 
 const SCREENSHOT_FAILURE_DETAIL: Record<ScreenshotFailure, string> = {
   timed_out: "The Player did not upload the screenshot before the request expired (timed_out).",
-  unsupported_surface: "This Player cannot capture its screen (unavailable: unsupported_surface).",
+  unsupported_surface: "The Player cannot capture the page it is showing now (unavailable: unsupported_surface); an iframe page from another site, for example, cannot be captured.",
   capture_failed: "The Player tried to capture its screen and failed (unavailable: capture_failed).",
   unavailable: "The Player reported the screenshot as unavailable.",
   deadline: "No screenshot arrived before --timeout; the Player may still upload it (pending).",
+  offline: "The screen is offline, so its Player cannot take a screenshot.",
 };
 
 const SCREENSHOT_FAILURE_HINT: Record<ScreenshotFailure, string> = {
   timed_out: "Check the screen is online with screenrig screen show ID, then run screen screenshot again; every run requests a new capture.",
-  unsupported_surface: "This Player type does not support screenshots. Use screenrig screen show ID for its state instead.",
+  unsupported_surface: "Capture again while the screen shows an image, video or application page; screenrig screen show ID shows what it plays.",
   capture_failed: "Run screen screenshot again; every run requests a new capture.",
   unavailable: "Run screen screenshot again; every run requests a new capture.",
   deadline: "Run screen screenshot again with a larger --timeout; every run requests a new capture.",
+  offline: "Bring the Player back online (screenrig screen show ID shows last_online_at), then run screen screenshot again.",
 };
 
-function screenshotUnavailable(requestId: string, failure: ScreenshotFailure): CliError {
+function screenshotUnavailable(requestId: string, failure: ScreenshotFailure, lastSeen?: string): CliError {
+  const detail = failure === "offline" && lastSeen
+    ? `The screen is offline (last online ${lastSeen}), so its Player cannot take a screenshot.`
+    : SCREENSHOT_FAILURE_DETAIL[failure];
   return new CliError(
-    makeProblem("screenshot_unavailable", "Screenshot is not available", 409, SCREENSHOT_FAILURE_DETAIL[failure], {
+    makeProblem("screenshot_unavailable", "Screenshot is not available", 409, detail, {
       request_id: requestId,
       hint: SCREENSHOT_FAILURE_HINT[failure],
     }),
@@ -5662,8 +5667,7 @@ async function screenScreenshot(args: ParsedArgs, runtime: CliRuntime, client: A
     throw usageError("screen screenshot requires <id>.");
   }
   const outputPath = await resolveScreenshotOutput(runtime.cwd(), id, args.flags);
-  const { timeoutMs, pollMs } = screenshotTiming(args);
-  const data = await captureScreenshot(runtime, client, id, outputPath, timeoutMs, pollMs, client.idempotencyKey);
+  const data = await captureScreenshot(runtime, client, id, outputPath, screenshotOptions(args, runtime), client.idempotencyKey);
   return {
     envelope: successEnvelope(data, { request_id: client.requestId }),
     exitCode: ExitCode.Success,
@@ -5676,6 +5680,31 @@ async function screenScreenshot(args: ParsedArgs, runtime: CliRuntime, client: A
       ["width", String(data.width)],
       ["height", String(data.height)],
     ]),
+  };
+}
+
+/** How one invocation's captures wait, retry and report progress. */
+interface ScreenshotOptions {
+  /** Whole wait per capture in ms; 0 leaves it to the server, which expires an unanswered request after 30 s. */
+  timeoutMs: number;
+  pollMs: number;
+  /** Without an explicit --timeout, a Retry-After longer than the remaining wait is still honoured. */
+  explicitTimeout: boolean;
+  /** Shared by every capture of one invocation: no capture request goes out before this instant. */
+  pace: { until: number };
+  /** Progress lines for stderr, in human mode or when stderr is a terminal. */
+  notify?: (line: string) => void;
+}
+
+function screenshotOptions(args: ParsedArgs, runtime: CliRuntime): ScreenshotOptions {
+  const { timeoutMs, pollMs } = screenshotTiming(args);
+  const visible = flagBool(args.flags, "human") || runtime.isStderrTty?.() === true;
+  return {
+    timeoutMs,
+    pollMs,
+    explicitTimeout: flagNumber(args.flags, "timeout") !== undefined,
+    pace: { until: 0 },
+    ...(visible ? { notify: (line: string) => { runtime.stderr.write(`${line}\n`); } } : {}),
   };
 }
 
@@ -5707,6 +5736,8 @@ interface ScreenshotSaved {
 const SCREENSHOT_RETRY_MAX = 6;
 const SCREENSHOT_BACKOFF_MS = 500;
 const SCREENSHOT_BACKOFF_CAP_MS = 8000;
+/** The longest Retry-After a capture honours past its default wait. */
+const SCREENSHOT_RETRY_AFTER_CAP_MS = 120_000;
 
 /** Network failures, timeouts, 429 and 5xx answers: the capture may still succeed on a later try. */
 function transientScreenshotFailure(error: unknown): error is CliError {
@@ -5721,14 +5752,44 @@ function transientScreenshotFailure(error: unknown): error is CliError {
  */
 class ScreenshotRetry {
   private attempts = 0;
-  constructor(private readonly runtime: CliRuntime, private readonly deadline: number) {}
+  deadline: number;
+  constructor(private readonly runtime: CliRuntime, private readonly id: string, readonly options: ScreenshotOptions) {
+    this.deadline = options.timeoutMs === 0 ? Number.POSITIVE_INFINITY : Date.now() + options.timeoutMs;
+  }
 
   async wait(error: CliError): Promise<void> {
     const after = error.problem.retry_after_seconds;
     const delay = typeof after === "number" ? after * 1000 : Math.min(SCREENSHOT_BACKOFF_MS * 2 ** this.attempts, SCREENSHOT_BACKOFF_CAP_MS);
-    if (this.attempts >= SCREENSHOT_RETRY_MAX || Date.now() + delay > this.deadline) throw this.exhausted(error);
+    if (typeof after === "number" && error.problem.status === 429) {
+      // A rate limit holds for every capture of this invocation, not just this one.
+      this.options.pace.until = Math.max(this.options.pace.until, Date.now() + delay);
+    }
+    if (this.attempts >= SCREENSHOT_RETRY_MAX) throw this.exhausted(error);
+    if (Date.now() + delay > this.deadline) {
+      // The default wait honours one server-named wait, then allows a normal capture after it.
+      if (this.options.explicitTimeout || typeof after !== "number" || delay > SCREENSHOT_RETRY_AFTER_CAP_MS) throw this.exhausted(error);
+      this.deadline = Date.now() + delay + SCREENSHOT_DEFAULT_WAIT_MS;
+    }
     this.attempts += 1;
+    const reason = error.problem.code === "transport_error" || error.problem.code === "timeout"
+      ? error.problem.code : `${error.problem.code} (HTTP ${error.problem.status})`;
+    this.options.notify?.(`screen screenshot ${this.id}: ${reason}; retrying in ${Math.ceil(delay / 1000)} s${typeof after === "number" ? " as Retry-After asks" : ""} (retry ${this.attempts} of ${SCREENSHOT_RETRY_MAX}).`);
     await this.runtime.sleep(delay);
+  }
+
+  /** Sleep before the next poll, never past the deadline. */
+  async poll(): Promise<void> {
+    await this.runtime.sleep(Math.max(1, Math.min(this.options.pollMs, this.deadline - Date.now())));
+  }
+
+  /** Hold a new capture request until a shared Retry-After has passed. */
+  async paced(): Promise<void> {
+    const wait = this.options.pace.until - Date.now();
+    if (wait <= 0) return;
+    this.options.notify?.(`screen screenshot ${this.id}: waiting ${Math.ceil(wait / 1000)} s for the screenshot rate limit.`);
+    if (Date.now() + wait > this.deadline && this.options.explicitTimeout) return;
+    if (Date.now() + wait > this.deadline) this.deadline = Date.now() + wait + SCREENSHOT_DEFAULT_WAIT_MS;
+    await this.runtime.sleep(wait);
   }
 
   private exhausted(error: CliError): CliError {
@@ -5761,6 +5822,7 @@ async function requestScreenshotCapture(client: ApiClient, id: string, key: stri
     }
     let acceptedResponse;
     try {
+      await retry.paced();
       acceptedResponse = await client.call({ method: "POST", path: `/api/screens/${id}/screenshot`, idempotent: true, idempotencyKey: key });
     } catch (error) {
       if (!transientScreenshotFailure(error)) throw error;
@@ -5777,6 +5839,22 @@ async function requestScreenshotCapture(client: ApiClient, id: string, key: stri
     }
     return captureId;
   }
+}
+
+/**
+ * A capture that expired or outlived --timeout usually means the Player is not
+ * connected. Read the screen once to say so instead of the bare state.
+ */
+async function explainedScreenshotFailure(client: ApiClient, id: string, failure: ScreenshotFailure): Promise<CliError> {
+  if (failure === "timed_out" || failure === "deadline") {
+    try {
+      const screen = (await client.call({ method: "GET", path: `/api/screens/${id}` })).body as Partial<Screen> | undefined;
+      if (screen?.online === false) return screenshotUnavailable(client.requestId, "offline", typeof screen.last_online_at === "string" ? screen.last_online_at : undefined);
+    } catch {
+      // The explanation is best effort; the capture's own state still stands.
+    }
+  }
+  return screenshotUnavailable(client.requestId, failure);
 }
 
 /** One read, retried on transient failures until the shared retry budget runs out. */
@@ -5796,10 +5874,9 @@ async function retriedScreenshotRead<T>(retry: ScreenshotRetry, read: () => Prom
  * `key` is fresh for every run: a screenshot is an observation, so a stored
  * answer from an earlier run is never replayed.
  */
-async function captureScreenshot(runtime: CliRuntime, client: ApiClient, id: string, outputPath: string, timeoutMs: number, pollMs: number, key: string): Promise<ScreenshotSaved> {
-  const deadline = Date.now() + timeoutMs;
-  const retry = new ScreenshotRetry(runtime, deadline);
-  const captureId = await requestScreenshotCapture(client, id, key, retry);
+async function captureScreenshot(runtime: CliRuntime, client: ApiClient, id: string, outputPath: string, options: ScreenshotOptions, key: string): Promise<ScreenshotSaved> {
+  const retry = new ScreenshotRetry(runtime, id, options);
+  let captureId = await requestScreenshotCapture(client, id, key, retry);
 
   let status: ScreenScreenshotStatus | undefined;
   await loggerOf(runtime).withLocal(
@@ -5814,27 +5891,23 @@ async function captureScreenshot(runtime: CliRuntime, client: ApiClient, id: str
         const currentId = status.capture_id;
         span.progress({ capture_id: currentId, state: status.state });
         if (typeof currentId === "string" && currentId.length > 0 && currentId !== captureId) {
-          throw new CliError(
-            makeProblem(
-              "resource_conflict",
-              "Resource state conflicts with the request",
-              409,
-              "A later screenshot request replaced this one.",
-              { request_id: client.requestId },
-            ),
-          );
+          // A later request for this screen replaced ours. It captures the same
+          // screen, so wait for it and return it rather than failing.
+          span.progress({ adopted_capture_id: currentId, replaced_capture_id: captureId });
+          options.notify?.(`screen screenshot ${id}: a later request replaced capture ${captureId}; waiting for ${currentId}.`);
+          captureId = currentId;
         }
         if (status.state === "ready" && currentId === captureId) {
           span.finish({ capture_id: captureId, state: status.state });
           return;
         }
         if ((status.state === "timed_out" || status.state === "unavailable") && currentId === captureId) {
-          throw screenshotUnavailable(client.requestId, screenshotFailure(status));
+          throw await explainedScreenshotFailure(client, id, screenshotFailure(status));
         }
-        if (Date.now() >= deadline) {
-          throw screenshotUnavailable(client.requestId, "deadline");
+        if (Date.now() >= retry.deadline) {
+          throw await explainedScreenshotFailure(client, id, "deadline");
         }
-        await runtime.sleep(pollMs);
+        await retry.poll();
       }
     },
   );
@@ -5936,14 +6009,19 @@ async function screenScreenshotFleet(args: ParsedArgs, runtime: CliRuntime, clie
     if (error instanceof CliError) throw error;
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw usageError("--output must be a directory with several screens or --tag.");
   }
-  const { timeoutMs, pollMs } = screenshotTiming(args);
+  // One pace for the whole fleet: a 429's Retry-After holds every worker.
+  const options = screenshotOptions(args, runtime);
 
   let ids: string[];
+  const offline = new Map<string, string | undefined>();
   if (selector.by === "tag") {
     const listed = await client.listAll("/api/screens", { tag: selector.tag });
     const items = (listed.body as { items?: Screen[] } | undefined)?.items;
     if (!Array.isArray(items)) throw usageError("Screen list response does not match the generated ScreenList contract.");
-    ids = items.filter((screen) => screen?.state === "active" && typeof screen.id === "string").map((screen) => screen.id);
+    const active = items.filter((screen) => screen?.state === "active" && typeof screen.id === "string");
+    ids = active.map((screen) => screen.id);
+    // The list already says which screens are offline; do not wait out their captures.
+    for (const screen of active) if (screen.online === false) offline.set(screen.id, screen.last_online_at);
     if (ids.some((id) => !isScreenId(id))) throw usageError("Screen list response does not match the generated ScreenList contract.");
     if (ids.length > FLEET_SCREENS_MAX) {
       throw usageError(`--tag ${selector.tag} matches ${ids.length} active screens; screen screenshot captures at most ${FLEET_SCREENS_MAX}. Narrow the tag or pass screen ids.`);
@@ -5970,16 +6048,21 @@ async function screenScreenshotFleet(args: ParsedArgs, runtime: CliRuntime, clie
       const index = next++;
       const id = ids[index]!;
       try {
-        const saved = await captureScreenshot(runtime, client, id, path.join(directory, `${id}.webp`), timeoutMs, pollMs, newIdempotencyKey());
+        if (offline.has(id)) throw screenshotUnavailable(client.requestId, "offline", offline.get(id));
+        const saved = await captureScreenshot(runtime, client, id, path.join(directory, `${id}.webp`), options, newIdempotencyKey());
         results[index] = { ...saved, status: "ok" };
       } catch (error) {
         if (error instanceof CliError) {
           exitCodes.set(index, error.exitCode);
+          // A dropped connection or timeout has no HTTP status; do not report one.
+          const local = error.problem.code === "transport_error" || error.problem.code === "timeout";
           results[index] = failure(id, {
             code: error.problem.code,
-            status: error.problem.status,
+            ...(local ? {} : { status: error.problem.status }),
             title: error.problem.title,
             detail: error.problem.detail,
+            ...(error.problem.hint ? { hint: error.problem.hint } : {}),
+            ...(typeof error.problem.retry_after_seconds === "number" ? { retry_after_seconds: error.problem.retry_after_seconds } : {}),
             ...(error.problem.request_id ? { request_id: error.problem.request_id } : {}),
           });
         } else {

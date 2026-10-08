@@ -213,7 +213,9 @@ function renderProblemError(entry: unknown): string | undefined {
 }
 
 export function renderProblem(problem: NormalizedProblem): string {
-  const lines = [`${problem.title} (${problem.code}/${problem.status})`, problem.detail];
+  // A dropped connection or a client timeout has no HTTP status to show.
+  const local = problem.code === "transport_error" || problem.code === "timeout";
+  const lines = [`${problem.title} (${problem.code}${local ? "" : `/${problem.status}`})`, problem.detail];
   for (const entry of problem.errors) {
     const rendered = renderProblemError(entry);
     if (rendered) {

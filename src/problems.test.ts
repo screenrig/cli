@@ -221,3 +221,9 @@ test("local errors carry a concrete hint and, where one exists, a next command",
   assert.match(fileError("Cannot write out.csv.", Object.assign(new Error("denied"), { code: "EACCES" })).problem.hint ?? "", /cannot write there/);
   assert.equal(networkError("fetch failed").problem.next?.command, "screenrig doctor");
 });
+
+test("human rendering shows no HTTP status for a dropped connection or a client timeout", () => {
+  assert.match(renderProblem(networkError("socket hang up").problem), /^Network error \(transport_error\)$/m);
+  assert.doesNotMatch(renderProblem(networkError("socket hang up").problem), /503/);
+  assert.match(renderProblem(normalizeProblem({ code: "internal_error", status: 500, detail: "Boom" }, { status: 500 })), /\(internal_error\/500\)/);
+});

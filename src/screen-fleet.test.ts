@@ -414,6 +414,45 @@ function screenshotBackend(failing: string, inFlight: { now: number; max: number
   return transport;
 }
 
+test("fleet screenshots pace to a 429 Retry-After, keep it in the screen's result, and skip screens listed offline", async () => {
+  const env = await enrolled();
+  const transport = new FakeTransport();
+  const OFF = "scr_OFFLINEAAAAAAAAAAAAAAAAA";
+  transport.on("GET", "/api/screens", () => ({ status: 200, headers: {}, body: { items: [screen(A, { tags: ["Lobby"] }), screen(B, { tags: ["Lobby"] }), screen(OFF, { tags: ["Lobby"], online: false, last_online_at: "2026-08-14T16:00:00.000Z" })] } }));
+  const posts: string[] = [];
+  transport.on("POST", /^\/api\/screens\/[^/]+\/screenshot$/, (req): TransportResponse => {
+    const id = req.path.split("/")[3]!;
+    posts.push(id);
+    if (id === B) return { status: 429, headers: { "content-type": "application/problem+json", "retry-after": "43" }, body: problem(429, "rate_limited", "Too many screenshot requests.") };
+    return { status: 202, headers: {}, body: { capture_id: "shot_AAAAAAAAAAAAAAAA", expires_at: "2026-08-14T17:00:30.000Z" } };
+  });
+  transport.on("GET", /^\/api\/screens\/[^/]+\/screenshot\/status$/, () => ({ status: 200, headers: {}, body: { state: "ready", capture_id: "shot_AAAAAAAAAAAAAAAA", bytes: IMAGE.byteLength, sha256: IMAGE_SHA256, width: 480, height: 270 } }));
+  transport.on("GET", /^\/api\/screens\/[^/]+\/screenshot$/, () => ({ status: 200, headers: { "content-type": "image/webp", "content-length": String(IMAGE.byteLength) }, body: IMAGE }));
+  const result = await cli(["--json", "screen", "screenshot", "--tag", "Lobby", "--output", "shots", "--concurrency", "1", "--timeout", "5000"], transport, env);
+  const data = result.envelope.data;
+  const byId = new Map(data.results.map((item: any) => [item.screen_id, item]));
+  assert.equal((byId.get(A) as any).status, "ok");
+  const limited = (byId.get(B) as any).problem;
+  assert.equal(limited.code, "rate_limited");
+  assert.equal(limited.retry_after_seconds, 43);
+  assert.match(limited.hint, /No retry fit before --timeout/);
+  const off = (byId.get(OFF) as any).problem;
+  assert.equal(off.code, "screenshot_unavailable");
+  assert.match(off.detail, /offline \(last online 2026-08-14T16:00:00.000Z\)/);
+  assert.equal(posts.includes(OFF), false, "no capture is requested for a screen listed offline");
+});
+
+test("a dropped connection in a fleet result is a transport error with no HTTP status", async () => {
+  const env = await enrolled();
+  const transport = new FakeTransport();
+  transport.on("POST", /^\/api\/screens\/[^/]+\/screenshot$/, () => { throw networkError("socket hang up"); });
+  transport.on("GET", /^\/api\/screens\/[^/]+\/screenshot\/status$/, () => { throw networkError("socket hang up"); });
+  const result = await cli(["--json", "screen", "screenshot", A, B, "--output", "shots", "--timeout", "1"], transport, env);
+  const failure = result.envelope.data.results[0].problem;
+  assert.equal(failure.code, "transport_error");
+  assert.equal("status" in failure, false);
+});
+
 test("screen screenshot --tag fans out client-side with bounded concurrency into a directory", async () => {
   const env = await enrolled();
   const inFlight = { now: 0, max: 0 };

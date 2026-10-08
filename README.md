@@ -940,7 +940,12 @@ next run sends a fresh request; explicit revision checks remain in force.
 `screen screenshot` is an observation, not a protected write: every run requests
 a new capture under a fresh key. Within one run it retries network failures, 429
 and 5xx answers with backoff (honouring Retry-After) and reads the screen's status
-before asking again, so it never replaces a capture still in progress.
+before asking again, so it never replaces a capture still in progress; when a
+later request replaces its capture, it returns that newer capture. The server
+admits 10 captures per screen, 30 per project and 30 per address per minute; a
+429's Retry-After is honoured past the default wait (not past an explicit
+`--timeout`) and holds every capture of a fleet run. `--timeout 0` leaves the wait
+to the server, which expires an unanswered request after 30 seconds.
 
 Automatic replay stops after 23 hours, before the server's 24-hour replay window
 ends. Inspect the resource before explicitly supplying a new `--idempotency-key`
