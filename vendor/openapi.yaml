@@ -15,7 +15,8 @@ info:
     and /api/playlists JSON and problem responses, and the JSON and problem
     responses of a paired Player's runtime session (including
     /screen/manifest), include ScreenRig-Credits-Remaining,
-    ScreenRig-Credits-Reset, and ScreenRig-Credits-Included. SSE, content,
+    ScreenRig-Credits-Reset, ScreenRig-Credits-Included and
+    ScreenRig-Credits-Low. SSE, content,
     unauthenticated, and anonymous public-screen runtime responses omit them.
     The ledger unit remains
     millicredits (1000 mcr = 1 credit); published remaining is floored.
@@ -2163,6 +2164,8 @@ paths:
               $ref: '#/components/headers/ScreenRigCreditsReset'
             ScreenRig-Credits-Included:
               $ref: '#/components/headers/ScreenRigCreditsIncluded'
+            ScreenRig-Credits-Low:
+              $ref: '#/components/headers/ScreenRigCreditsLow'
           content:
             application/json:
               schema:
@@ -2193,7 +2196,9 @@ paths:
     delete:
       operationId: deleteProjectAgent
       description: Requires the target membership project capability, the current name and revision, zero non-archived screens,
-        zero obligations in its own wallet and no live advertising. Queues member notices and uses the irreversible tombstone.
+        no credit, reservations or debt in its own wallet and no live advertising. A negative balance run up under free or
+        launch terms does not block; deletion writes it off with a project_delete_writeoff ledger entry. Queues member notices
+        and uses the irreversible tombstone.
       security:
       - projectBearer: []
       - dashboardSession: []
@@ -9250,15 +9255,13 @@ paths:
     get:
       operationId: listRuntimeKV
       description: Returns at most 200 entries in ascending key order and does not page; a namespace with more keys is only
-        partly listed. Lists metadata for the application primitive named by the current manifest. Requires the HttpOnly runtime
-        session and the parent-only ScreenRig-Primitive-Capability handle issued on the application primitive. Handles expire
-        after five minutes and are refreshed by fetching the current runtime manifest; uploaded frames never receive the handle
-        and must use the validated parent SDK bridge.
+        partly listed. Lists metadata for an application the screen's current content holds. Runtime KV is authorized by the Player's
+        runtime session (kv.read, and kv.write for writes) and the screen's current grant, which must hold a ready release of
+        the application; a ScreenRig-Primitive-Capability header is ignored. Uploaded frames never call these routes and must
+        use the validated parent SDK bridge.
       security:
       - runtimeCookie: []
-        primitiveCapability: []
       - nativeSessionAuthorization: []
-        primitiveCapability: []
       parameters:
       - $ref: '#/components/parameters/ApplicationID'
       responses:
@@ -9285,9 +9288,7 @@ paths:
       operationId: getRuntimeKV
       security:
       - runtimeCookie: []
-        primitiveCapability: []
       - nativeSessionAuthorization: []
-        primitiveCapability: []
       responses:
         '200':
           description: Manifest-authorized application KV value
@@ -9312,9 +9313,7 @@ paths:
       - RateLimit
       security:
       - pairedRuntimeCookie: []
-        primitiveCapability: []
       - nativeSessionAuthorization: []
-        primitiveCapability: []
       parameters:
       - $ref: '#/components/parameters/OptionalIfMatch'
       - $ref: '#/components/parameters/OptionalIdempotencyKey'
@@ -9353,9 +9352,7 @@ paths:
       - RateLimit
       security:
       - pairedRuntimeCookie: []
-        primitiveCapability: []
       - nativeSessionAuthorization: []
-        primitiveCapability: []
       parameters:
       - $ref: '#/components/parameters/IfMatch'
       - $ref: '#/components/parameters/OptionalIdempotencyKey'
@@ -10761,6 +10758,15 @@ components:
     ScreenRigCreditsIncluded:
       description: Whole credits granted by the plan each UTC month.
       schema: { type: integer, minimum: 0 }
+    ScreenRigCreditsLow:
+      description: >-
+        Whether to warn that credit is running low. Under commercial terms it
+        is true whenever remaining is below 1000 credits. Under launch terms an
+        empty balance is not low, because usage is not refused and a free
+        project never held prepaid credit; it is true only while some credit
+        remains below 1000. A client warns on this rather than on remaining
+        alone.
+      schema: { type: string, enum: ["true", "false"] }
   parameters:
     ProjectTarget: { name: ScreenRig-Project, in: header, required: false, schema: { type: string, minLength: 1, maxLength: 200 }, description: "Required with an identity bearer on every project route. Exactly one project identifier; no implicit current target. With a project bearer, must match its bound project." }
     ResourceID: { name: id, in: path, required: true, schema: { type: string } }
@@ -10863,17 +10869,8 @@ components:
     runtimeCookie: { type: apiKey, in: cookie, name: __Host-screenrig-runtime, description: Runtime session cookie. The value is opaque to the Player. }
     pairedRuntimeCookie: { type: apiKey, in: cookie, name: __Host-screenrig-runtime, description: Signed runtime session with paired-device mutation profile. }
     pairedDeviceCookie: { type: apiKey, in: cookie, name: __Host-screenrig-device }
-    pairingCookie: { type: apiKey, in: cookie, name: __Host-screenrig-pairing, description: "Signed 24-hour pairing session; never grants project, content, or runtime authority." }
+    pairingCookie: { type: apiKey, in: cookie, name: __Host-screenrig-pairing, description: "Opaque 24-hour pairing session (`<session id>.<secret>`; the server stores only the secret's digest); never grants project, content, or runtime authority." }
     browserLinkCookie: { type: apiKey, in: cookie, name: __Host-screenrig-browser-link, description: "Apex host-only Secure HttpOnly SameSite=Strict Path=/ browser-link owner cookie; it authenticates a 24-hour unclaimed locator and, when claimed near the boundary, its fresh ten-minute protected delivery window. It has no Domain and is never accepted as a Player cookie." }
-    primitiveCapability:
-      type: apiKey
-      in: header
-      name: ScreenRig-Primitive-Capability
-      description: >-
-        Parent-only signed fifteen-minute primitive capability bound to the runtime
-        session, screen, application release, primitive, manifest revision,
-        content-access generation, and allowed KV operations. Refresh by fetching
-        the current manifest.
     dashboardSession:
       type: apiKey
       in: cookie
@@ -15751,7 +15748,7 @@ components:
       discriminator: { propertyName: primitive }
     RuntimeApplicationPrimitive:
       type: object
-      required: [id, primitive, applicationId, releaseId, launchUrl, origin, protocol, grantId, package, rect, layer, contentFit, capabilityHandle, capabilityExpiresAt]
+      required: [id, primitive, applicationId, releaseId, launchUrl, origin, protocol, grantId, package, rect, layer, contentFit]
       properties:
         id: { type: string }
         primitive: { type: string, enum: [application] }
@@ -15768,8 +15765,8 @@ components:
         controller: { type: boolean }
         enter: { $ref: "#/components/schemas/PrimitiveEnter" }
         motion: { $ref: "#/components/schemas/PrimitiveMotion" }
-        capabilityHandle: { type: string, minLength: 32, description: Opaque parent-only capability; never forward it into the uploaded iframe. }
-        capabilityExpiresAt: { type: string, format: date-time, description: "Fifteen-minute expiry, capped by the runtime session. Refresh the manifest before this time to obtain a replacement handle." }
+        capabilityHandle: { type: string, minLength: 32, description: "Opaque value with no authority: runtime KV is authorized by the session and the screen's current grant. Present for every Player that has not been granted the kv-session-auth compat token, which some shipped Players require on an application primitive; omitted for one that has. Never forward it into the uploaded iframe." }
+        capabilityExpiresAt: { type: string, format: date-time, description: "Present with capabilityHandle: fifteen minutes after issue, capped by the runtime session." }
     RuntimeImagePrimitive:
       type: object
       required: [id, primitive, selector, resolvedMedia, grantId, rect, layer, contentFit]
