@@ -700,3 +700,28 @@ test("agent disconnect and revoke-identity under a grant remove what they end", 
     await h.done();
   }
 });
+
+test("discovery that is missing or not JSON, and token answers that are not bearer session JWTs, send nothing further", async () => {
+  for (const answer of [
+    { status: 404, headers: { "content-type": "text/html" }, body: "<h1>Not found</h1>" },
+    { status: 200, headers: { "content-type": "text/html" }, body: "<html>proxy</html>" },
+  ] as TransportResponse[]) {
+    const transport = new FakeTransport().on("GET", "/.well-known/oauth-authorization-server", () => answer).on("POST", "/oauth/token", () => tokenResponse(access(), refresh(2)));
+    await assert.rejects(new OAuthClient(API, transport).refresh(refresh(1), { requestId: "r".repeat(43) }), (err: CliError) => err.problem.code === "oauth_unavailable");
+    assert.deepEqual(transport.oauthCalls.map((call) => call.method), ["GET"]);
+  }
+  for (const body of [
+    { access_token: access(), token_type: "mac", expires_in: 900 },
+    { access_token: "opaque-token", token_type: "Bearer", expires_in: 900 },
+    { access_token: access(), token_type: "Bearer", refresh_token: "opaque", expires_in: 900 },
+  ]) {
+    const transport = withDiscovery(new FakeTransport()).on("POST", "/oauth/token", () => json(200, body));
+    await assert.rejects(new OAuthClient(API, transport).refresh(refresh(1), { requestId: "r".repeat(43) }), (err: CliError) => err.problem.code === "unexpected_response");
+  }
+  const sent = withDiscovery(new FakeTransport()).on("POST", "/oauth/token", () => tokenResponse(access(), refresh(2)));
+  await new OAuthClient(API, sent).refresh(refresh(1), { requestId: "r".repeat(43), projectId: PROJECT });
+  const call = sent.oauthCalls.find((item) => item.path === "/oauth/token")!;
+  assert.equal(call.credential, true);
+  assert.equal(call.headers?.["content-type"], "application/x-www-form-urlencoded");
+  assert.deepEqual([...form(call).keys()].sort(), ["client_id", "grant_type", "project_id", "refresh_token", "request_id"]);
+});

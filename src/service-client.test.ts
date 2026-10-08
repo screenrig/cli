@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync, type KeyObject } from "node:crypto";
+import { createHash, generateKeyPairSync, verify, type KeyObject } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import { calculateJwkThumbprint, decodeProtectedHeader, importJWK, jwtVerify, type JWK } from "jose";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { run } from "./main.js";
@@ -17,6 +16,18 @@ const NOW = new Date();
 const PROJECT = "prj_AAAAAAAAAAAAAAAAAAAAAAAA";
 const CLIENT = "scl_AAAAAAAAAAAAAAAAAAAAAAAA";
 const SECRET = "sr_cs_never_printed_secret_value_0123456789abcdef";
+
+type JWK = Record<string, string>;
+
+/** RFC 7638, written out here so the test does not share the CLI's code. */
+function thumbprint(jwk: JWK): string {
+  const members = jwk.kty === "RSA" ? ["e", "kty", "n"] : jwk.kty === "EC" ? ["crv", "kty", "x", "y"] : ["crv", "kty", "x"];
+  return createHash("sha256").update(`{${members.map((name) => `"${name}":"${jwk[name]}"`).join(",")}}`).digest("base64url");
+}
+
+function decodePart(part: string): Record<string, unknown> {
+  return JSON.parse(Buffer.from(part, "base64url").toString("utf8")) as Record<string, unknown>;
+}
 
 function serviceToken(): string {
   const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -104,7 +115,7 @@ test("a SCREENRIG_CLIENT_KEY_FILE run signs an assertion that meets the server's
       const publicJwk = publicKey.export({ format: "jwk" }) as JWK;
       const keyFile = path.join(dir, "client.jwk");
       await writeFile(keyFile, JSON.stringify(privateJwk), { mode: 0o600 });
-      const kid = await calculateJwkThumbprint(publicJwk, "sha256");
+      const kid = thumbprint(publicJwk);
       let checked = false;
       const transport = server((req) => {
         const body = form(req);
@@ -113,7 +124,7 @@ test("a SCREENRIG_CLIENT_KEY_FILE run signs an assertion that meets the server's
         assert.equal(body.get("client_assertion_type"), "urn:ietf:params:oauth:client-assertion-type:jwt-bearer");
         assert.equal(req.headers?.authorization, undefined);
         const assertion = body.get("client_assertion")!;
-        const header = decodeProtectedHeader(assertion);
+        const header = decodePart(assertion.split(".")[0]!);
         assert.equal(header.alg, alg);
         assert.equal(header.kid, kid);
         for (const name of ["jku", "x5u", "jwk", "x5c"]) assert.equal((header as Record<string, unknown>)[name], undefined);
@@ -124,10 +135,17 @@ test("a SCREENRIG_CLIENT_KEY_FILE run signs an assertion that meets the server's
       assert.equal(result.code, 0, result.stdout);
       assert.ok(checked);
       const assertion = form(transport.oauthCalls.find((call) => call.path === "/oauth/token")!).get("client_assertion")!;
-      const { payload } = await jwtVerify(assertion, await importJWK(publicJwk, alg), { issuer: CLIENT, subject: CLIENT, audience: API });
-      assert.equal(typeof payload.aud, "string", "aud is one string");
-      assert.ok(payload.jti && payload.iat !== undefined && payload.exp !== undefined);
-      assert.ok(payload.exp! - payload.iat! <= 300);
+      const [head, body, signature] = assertion.split(".") as [string, string, string];
+      const data = Buffer.from(`${head}.${body}`);
+      const proof = Buffer.from(signature, "base64url");
+      const valid = alg === "EdDSA" ? verify(null, data, publicKey, proof)
+        : alg === "ES256" ? verify("sha256", data, { key: publicKey, dsaEncoding: "ieee-p1363" }, proof)
+          : verify("sha256", data, publicKey, proof);
+      assert.ok(valid, `${alg} signature verifies with the registered public key`);
+      const payload = decodePart(body) as { iss: string; sub: string; aud: unknown; jti: string; iat: number; exp: number };
+      assert.deepEqual([payload.iss, payload.sub, payload.aud], [CLIENT, CLIENT, API], "iss = sub = client_id; aud is the issuer as one string");
+      assert.ok(payload.jti && payload.iat <= Math.floor(Date.now() / 1000) + 1);
+      assert.ok(payload.exp - payload.iat <= 300 && payload.exp > payload.iat);
       await assert.rejects(stat(path.join(dir, "screenrig", "config.json")), (err: NodeJS.ErrnoException) => err.code === "ENOENT");
     } finally {
       await rm(dir, { recursive: true, force: true });
