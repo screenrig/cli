@@ -22,7 +22,8 @@ import {
   type ServiceClientCredentials,
   type TokenSet,
 } from "./oauth.js";
-import { CliError, configError } from "./problems.js";
+import { ExitCode } from "./exit-codes.js";
+import { CliError, configError, makeProblem } from "./problems.js";
 import { newRequestId } from "./ids.js";
 import type { Transport } from "./transport/types.js";
 import { CLI_VERSION } from "./version.js";
@@ -61,6 +62,13 @@ function legacyCredentials(file: ScreenRigConfig): { identity?: string; projects
     if (isLegacyToken(slot?.token) && !projects.has(id)) projects.set(id, slot.token);
   }
   return { ...(isLegacyToken(file.identity_token) ? { identity: file.identity_token } : {}), projects };
+}
+
+function projectUnavailable(projectId: string): CliError {
+  return new CliError(makeProblem("project_unavailable", "Project unavailable", 404,
+    `${projectId} was deleted, or this installation no longer belongs to it. The sign-in itself is still valid.`, {
+      next: { command: "screenrig project list", reason: "Lists the projects this sign-in can use; select one with screenrig project use ID." },
+    }), ExitCode.NotFound);
 }
 
 /** Whether the grant ended for good, with the CLI deleting what it stored. */
@@ -191,7 +199,7 @@ export class OAuthSession {
    * grant, the target project's access token (or, with no project, the
    * identity token) is renewed when it is missing or about to expire.
    */
-  async prepare(resolved: ResolvedConfig): Promise<ResolvedConfig> {
+  async prepare(resolved: ResolvedConfig, options: { identity?: boolean } = {}): Promise<ResolvedConfig> {
     if (this.service) {
       const token = await this.serviceToken();
       const project = accessClaims(token)?.prj;
@@ -204,6 +212,11 @@ export class OAuthSession {
     if (!file) return resolved;
     if (!file.oauth && await this.exchangeLegacy(file) && await this.confirmExchange()) file = await this.read();
     if (!file?.oauth) return resolved;
+    if (options.identity) {
+      // Project list, use and create act on the identity: a stale selection must not block them.
+      const identity = file.oauth.identity ? await this.accessFor(undefined) : undefined;
+      return identity ? { ...resolved, identityToken: identity } : resolved;
+    }
     if (resolved.identityWriteScope || !resolved.projectId) {
       const identity = file.oauth.identity ? await this.accessFor(undefined) : undefined;
       if (!identity) return resolved;
@@ -344,6 +357,18 @@ export class OAuthSession {
     try {
       tokens = await this.client.refresh(grant.refresh_token, { requestId: pending.request_id, ...(projectId ? { projectId } : {}) });
     } catch (err) {
+      if (isSessionEnded(err) && projectId) {
+        // A project that was deleted or left answers invalid_grant too. One
+        // refresh without it tells a dead project from a dead session.
+        const latest = (await this.read()) ?? file;
+        const alive = latest.oauth && await this.refreshLocked(latest, latest.oauth, undefined)
+          .then(() => true, (probe: unknown) => { if (isSessionEnded(probe)) return false; throw probe; });
+        if (alive) {
+          await this.dropProject(projectId);
+          throw projectUnavailable(projectId);
+        }
+        throw err;
+      }
       if (isSessionEnded(err)) {
         const current = (await this.read()) ?? file;
         if (current.oauth?.legacy) {
@@ -374,6 +399,20 @@ export class OAuthSession {
       },
     });
     return tokens.accessToken;
+  }
+
+  /** Forget a project the session can no longer reach; the selection stays until project use. */
+  private async dropProject(projectId: string): Promise<void> {
+    const current = await this.read();
+    if (!current) return;
+    const next: ScreenRigConfig = { ...current };
+    if (next.project_id === projectId) delete next.token;
+    if (next.projects?.[projectId]?.token) {
+      const { token: _token, ...kept } = next.projects[projectId]!;
+      next.projects = { ...next.projects, [projectId]: kept };
+    }
+    if (accessClaims(next.identity_token)?.prj === projectId) delete next.identity_token;
+    await this.write(next);
   }
 
   /**

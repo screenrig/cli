@@ -725,3 +725,45 @@ test("discovery that is missing or not JSON, and token answers that are not bear
   assert.equal(call.headers?.["content-type"], "application/x-www-form-urlencoded");
   assert.deepEqual([...form(call).keys()].sort(), ["client_id", "grant_type", "project_id", "refresh_token", "request_id"]);
 });
+
+test("a deleted project is not a dead session: the sign-in stays and project use moves on", async () => {
+  const config = grantConfig({ projects: { [OTHER_PROJECT]: { project_name: "Lobby" } } });
+  const h = await harness(config);
+  const other = access({ project: OTHER_PROJECT });
+  const identity = access({ project: "" });
+  const transport = withDiscovery(new FakeTransport())
+    .on("POST", "/oauth/token", (req) => {
+      const project = form(req).get("project_id");
+      if (project === PROJECT) return json(400, { error: "invalid_grant", error_description: "the membership or project is no longer live" });
+      return project === OTHER_PROJECT ? tokenResponse(other, refresh(3)) : tokenResponse(identity, refresh(2), "access:manage identity");
+    })
+    .on("GET", "/api/projects", (req) => {
+      assert.equal(req.headers?.authorization, `Bearer ${identity}`);
+      return json(200, { projects: [{ project: { id: OTHER_PROJECT, name: "Lobby", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization" },
+        organization: { id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Example organization" } }] });
+    })
+    .on("GET", "/api/project", (req) => {
+      assert.equal(req.headers?.authorization, `Bearer ${other}`);
+      return projectBody(OTHER_PROJECT, "Lobby");
+    });
+  try {
+    const gone = await h.cli(["--json", "project", "show"], transport);
+    assert.equal(gone.code, ExitCode.NotFound, gone.stdout);
+    const error = (JSON.parse(gone.stdout) as { error: { code: string; next: { command: string } } }).error;
+    assert.equal(error.code, "project_unavailable");
+    assert.equal(error.next.command, "screenrig project list");
+    let stored = await h.read();
+    assert.ok(stored?.oauth?.refresh_token, "the sign-in is kept");
+    assert.equal(stored?.signed_out_at, undefined);
+
+    const moved = await h.cli(["--json", "project", "use", OTHER_PROJECT], transport);
+    assert.equal(moved.code, 0, moved.stdout);
+    const shown = await h.cli(["--json", "project", "show"], transport);
+    assert.equal(shown.code, 0, shown.stdout);
+    stored = await h.read();
+    assert.equal(stored?.project_id, OTHER_PROJECT);
+    assert.equal(stored?.token, other);
+  } finally {
+    await h.done();
+  }
+});

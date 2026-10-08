@@ -506,6 +506,9 @@ async function streamToken(runtime: CliRuntime, token: string): Promise<string> 
  */
 const CREDENTIAL_COMMANDS = new Set(["project list", "project use", "agent status"]);
 
+/** Commands that act on the identity rather than the selected project. */
+const IDENTITY_COMMANDS = new Set(["project list", "project use", "project create"]);
+
 const writeRecoveries = new WeakMap<CliRuntime, WriteRecovery>();
 
 const invocationRequestIds = new WeakMap<CliRuntime, RequestIds>();
@@ -622,7 +625,7 @@ function commandHandler(
     const session = oauthSessionFor(runtime, resolved);
     if (authenticated || CREDENTIAL_COMMANDS.has(args.command.slice(0, 2).join(" "))) {
       try {
-        resolved = await session.prepare(resolved);
+        resolved = await session.prepare(resolved, { identity: IDENTITY_COMMANDS.has(args.command.slice(0, 2).join(" ")) });
       } catch (error) {
         oauthSessions.delete(runtime);
         throw error;
