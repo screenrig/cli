@@ -667,3 +667,36 @@ test("an exchanged session the API refuses before it ever worked gives way to th
     await h.done();
   }
 });
+
+test("agent disconnect and revoke-identity under a grant remove what they end", async () => {
+  const live = access();
+  const h = await harness(grantConfig({ projects: { [OTHER_PROJECT]: { token: access({ project: OTHER_PROJECT }) } } }, live));
+  const agent = { id: AGENT, name: "ScreenRig CLI", agent_type: "cli", capabilities: ["screens"], state: "active", authenticated_requests: 1, metered_credits: 0, created_at: NOW.toISOString(), connected_at: NOW.toISOString() };
+  const noStore = { "cache-control": "private, no-store" };
+  const transport = new FakeTransport()
+    .on("GET", "/api/agents/self", () => json(200, { agent, connection_ready: false }, noStore))
+    .on("POST", "/api/agents/self/disconnect", (req) => {
+      assert.equal(req.headers?.authorization, `Bearer ${live}`);
+      return { status: 204, headers: noStore, body: undefined };
+    })
+    .on("POST", "/api/agent-identity/revoke", () => ({ status: 204, headers: noStore, body: undefined }));
+  try {
+    const disconnected = await h.cli(["--json", "agent", "disconnect", "--yes"], transport);
+    assert.equal(disconnected.code, 0, disconnected.stdout);
+    let stored = await h.read();
+    assert.equal(stored?.token, undefined);
+    assert.equal(stored?.identity_token, undefined, "the identity slot held the disconnected project's token");
+    assert.ok(stored?.oauth, "the grant keeps its other projects");
+    assert.ok(stored?.projects?.[OTHER_PROJECT]?.token);
+
+    await writeConfigAtomic(h.configPath, { ...stored!, identity_token: access({ project: OTHER_PROJECT }) }, h.fs);
+    const revoked = await h.cli(["--json", "agent", "revoke-identity", "--yes"], transport);
+    assert.equal(revoked.code, 0, revoked.stdout);
+    stored = await h.read();
+    assert.equal(stored?.oauth, undefined);
+    assert.equal(stored?.identity_token, undefined);
+    assert.equal(JSON.stringify(stored).includes("eyJ"), false);
+  } finally {
+    await h.done();
+  }
+});

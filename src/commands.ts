@@ -1881,7 +1881,10 @@ async function removeLocalAgentCredential(
     assertProjectCredential(scoped, { ...resolved, token });
     if (current.identity_token || current.projects) {
       const { token: _token, screen_provision: _provision, browser_setup: _browser, media_generate: _generate, pending_writes: _writes, ...withoutCredential } = scoped;
-      await writeConfigAtomic(resolved.configPath, withProjectConfig(current, resolved, { ...withoutCredential, updated_at: runtime.now().toISOString() }), fsLike);
+      const next = withProjectConfig(current, resolved, { ...withoutCredential, updated_at: runtime.now().toISOString() });
+      // An access token bound to the disconnected project is spent wherever it is stored.
+      if (resolved.projectId && accessClaims(next.identity_token)?.prj === resolved.projectId) delete next.identity_token;
+      await writeConfigAtomic(resolved.configPath, next, fsLike);
       return;
     }
     const lastAgent = agent ? {
@@ -1924,8 +1927,7 @@ async function agentDisconnect(
     requirePrivateNoStore(current.headers, "Agent status response");
     agent = validateAgentSelfStatus(current.body).agent;
   } catch (err) {
-    // A refused access token is renewed by the client; a session that ended keeps nothing to remove here.
-    if (!(err instanceof CliError) || err.problem.code !== "unauthorized" || isSessionJwt(token)) throw err;
+    if (!(err instanceof CliError) || err.problem.code !== "unauthorized") throw err;
     credentialRejected = true;
   }
   if (!credentialRejected) {
@@ -1938,7 +1940,7 @@ async function agentDisconnect(
         ...(request.allow_last_agent ? { body: request } : {}),
       });
     } catch (err) {
-      if (err instanceof CliError && err.problem.code === "unauthorized" && !isSessionJwt(token)) {
+      if (err instanceof CliError && err.problem.code === "unauthorized") {
         credentialRejected = true;
       } else if (err instanceof CliError) {
         throw new CliError({
@@ -2007,8 +2009,7 @@ async function agentRevokeIdentity(args: ParsedArgs, runtime: CliRuntime, resolv
     if (response.status !== 204 || response.body !== undefined) throw configError("Identity revocation did not return an empty 204; local credentials were retained.");
     requirePrivateNoStore(response.headers, "Identity revocation response");
   } catch (error) {
-    // Under a grant a 401 is never proof of revocation: local credentials stay.
-    if (!(error instanceof CliError) || error.problem.code !== "unauthorized" || isSessionJwt(identity.identityToken)) throw error;
+    if (!(error instanceof CliError) || error.problem.code !== "unauthorized") throw error;
     alreadyRejected = true;
   }
   const fs = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
@@ -2019,7 +2020,9 @@ async function agentRevokeIdentity(args: ParsedArgs, runtime: CliRuntime, resolv
       const { token: _token, screen_provision: _provision, browser_setup: _browser, media_generate: _generate, pending_writes: _writes, ...rest } = value;
       return rest;
     };
-    const { identity_token: _identity, identity_exchange: _exchange, identity_writes: _writes, enrollment_project: _source, enrollment_cleanup: _cleanup, agent_connection: _connection, enrollment: _enrollment, ...rest } = scrub(current);
+    // Revoking the identity revokes every grant it holds, so the session goes too.
+    const { identity_token: _identity, identity_exchange: _exchange, identity_writes: _writes, enrollment_project: _source, enrollment_cleanup: _cleanup, agent_connection: _connection, enrollment: _enrollment,
+      oauth: _grant, oauth_exchange: _pendingExchange, login: _login, ...rest } = scrub(current);
     const projects = current.projects ? Object.fromEntries(Object.entries(current.projects).map(([id, value]) => [id, scrub({ api_url: current.api_url, ...value })])) : undefined;
     if (projects) for (const slot of Object.values(projects)) delete (slot as Partial<ScreenRigConfig>).api_url;
     await writeConfigAtomic(resolved.configPath, { ...rest, ...(projects ? { projects } : {}), updated_at: runtime.now().toISOString() }, fs);
