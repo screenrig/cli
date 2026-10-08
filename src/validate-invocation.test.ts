@@ -51,8 +51,19 @@ test("supported values, aliases, empty byte payload, and help paths remain valid
   assert.equal(parseArgv(["app", "pack", "--", "--directory"]).positionals[2], "--directory");
 });
 
-test("unknown option names and invalid values never appear in usage errors", () => {
-  for (const argv of [["screen", "list", "--private-secret=value"], ["screen", "list", "--timeout=private-secret"]]) {
-    assert.throws(() => parseArgv(argv), (error: unknown) => error instanceof CliError && !JSON.stringify(error.problem).includes("private-secret"));
+test("option values never appear in usage errors; an unknown option is named only by its plain name", () => {
+  assert.throws(() => parseArgv(["screen", "list", "--timeout=private-secret"]), (error: unknown) => error instanceof CliError && !JSON.stringify(error.problem).includes("private-secret"));
+  assert.throws(() => parseArgv(["screen", "list", "--unknown-flag=private-secret"]), (error: unknown) => error instanceof CliError
+    && error.problem.detail === "screen list does not accept --unknown-flag. See command help for supported options."
+    && !JSON.stringify(error.problem).includes("private-secret"));
+  assert.throws(() => parseArgv(["screen", "list", "-x"]), (error: unknown) => error instanceof CliError && error.problem.detail.includes("does not accept -x"));
+  // A name that is not a plain option shape (a pasted credential, say) is never echoed.
+  for (const argv of [["screen", "list", "--sr_live_private_secret"], ["screen", "list", `--${"a".repeat(60)}`]]) {
+    assert.throws(() => parseArgv(argv), (error: unknown) => error instanceof CliError && error.problem.code === "usage_error"
+      && !JSON.stringify(error.problem).includes("private_secret") && !JSON.stringify(error.problem).includes("a".repeat(60)));
   }
+});
+
+test("an unknown subcommand is named when it is a plain command word", () => {
+  assert.throws(() => parseArgv(["screen", "frobnicate"]), (error: unknown) => error instanceof CliError && /frobnicate/.test(error.problem.detail));
 });

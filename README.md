@@ -934,8 +934,11 @@ The private config stores request fingerprints, keys, timestamps, and the comman
 group/action, never request payloads. Fingerprints include the origin, credential, target, request
 body, and revision. Changed requests receive different keys. A completed command
 clears its pending state; application acceptance followed by a failed processing
-wait retains it so retrying does not create another application. Definite
-refusals still require reconciliation; explicit revision checks remain in force.
+wait retains it so retrying does not create another application. A definite
+refusal (any 4xx except 408) or a local validation error clears the entry, so the
+next run sends a fresh request; explicit revision checks remain in force.
+`screen screenshot` is an observation, not a protected write: every run requests
+a new capture.
 
 Automatic replay stops after 23 hours, before the server's 24-hour replay window
 ends. Inspect the resource before explicitly supplying a new `--idempotency-key`

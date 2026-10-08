@@ -40,8 +40,11 @@ export function commandError(error: CommanderError, command: Command): never {
     case "commander.missingArgument":
       if (path === "screen set-timezone") throw usageError("screen set-timezone requires <id> --timezone.");
       throw usageError(`${path} requires ${command.registeredArguments.filter((arg) => arg.required).map((arg) => `<${arg.name()}>`).join(" ")}.`);
-    case "commander.excessArguments":
+    case "commander.excessArguments": {
+      const word = command.commands.length && !command.registeredArguments.length && /^[a-z][a-z0-9-]{0,39}$/.test(command.args[0] ?? "") ? command.args[0] : undefined;
+      if (word) throw usageError(`${path || "screenrig"} has no command ${word}. See command help for supported commands.`, { command: `screenrig${path ? ` ${path}` : ""} --help`, reason: "List supported commands, arguments, and options." });
       throw usageError(`${path || "screenrig"} does not accept ${command.registeredArguments.length ? "extra" : "positional"} arguments.`);
+    }
     case "commander.conflictingOption":
       throw usageError("Conflicting options. See command help.");
     case "commander.missingMandatoryOptionValue": {
@@ -59,7 +62,23 @@ export function commandError(error: CommanderError, command: Command): never {
       const option = command.options.find((candidate) => error.message.includes(`option '${candidate.flags}'`));
       throw usageError(option ? `${option.long} requires a value.` : "An option requires a value. See command help for its arguments.");
     }
-    default:
-      throw usageError("Unknown command or unsupported option. See command help for supported arguments.", { command: `screenrig${path ? ` ${path}` : ""} --help`, reason: "List supported commands, arguments, and options." });
+    case "commander.unknownOption": {
+      const option = safeName(error.message, /unknown option '([^']*)'/, /^--?[A-Za-z][A-Za-z0-9-]{0,39}$/, "=");
+      if (option) throw usageError(`${path || "screenrig"} does not accept ${option}. See command help for supported options.`, { command: `screenrig${path ? ` ${path}` : ""} --help`, reason: "List supported commands, arguments, and options." });
+      break;
+    }
+    case "commander.unknownCommand": {
+      const name = safeName(error.message, /unknown command '([^']*)'/, /^[a-z][a-z0-9-]{0,39}$/);
+      if (name) throw usageError(`${path || "screenrig"} has no command ${name}. See command help for supported commands.`, { command: `screenrig${path ? ` ${path}` : ""} --help`, reason: "List supported commands, arguments, and options." });
+      break;
+    }
   }
+  throw usageError("Unknown command or unsupported option. See command help for supported arguments.", { command: `screenrig${path ? ` ${path}` : ""} --help`, reason: "List supported commands, arguments, and options." });
+}
+
+/** The option or command name commander quoted, without any `=value`; only a plain name shape is ever echoed. */
+function safeName(message: string, quoted: RegExp, shape: RegExp, cut?: string): string | undefined {
+  const raw = quoted.exec(message)?.[1];
+  const name = raw !== undefined && cut ? raw.split(cut)[0]! : raw;
+  return name !== undefined && shape.test(name) ? name : undefined;
 }

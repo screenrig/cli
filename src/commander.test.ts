@@ -55,7 +55,8 @@ test("required options are discoverable and enforced before dispatch", () => {
 
 test("Commander errors use one secret-safe envelope and never raw output", () => {
   const bin = fileURLToPath(new URL("bin.js", import.meta.url));
-  for (const argv of [["--json", "screen", "list", "--private-secret=value"], ["--json", "screen", "list", "--timeout", "private-secret"]]) {
+  // An unknown option is named by its plain name only; its value never appears.
+  for (const argv of [["--json", "screen", "list", "--unknown-flag=private-secret"], ["--json", "screen", "list", "--timeout", "private-secret"]]) {
     assert.throws(() => execFileSync(process.execPath, [bin, ...argv], { encoding: "utf8", stdio: "pipe" }), (error: unknown) => {
       const result = error as { status: number; stdout: string; stderr: string };
       assert.equal(result.status, 2);

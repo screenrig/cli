@@ -874,6 +874,8 @@ export interface ScreenScreenshotStatus {
   captured_at?: string;
   expires_at?: string;
   height?: number;
+  /** Present when state is unavailable. */
+  reason?: "unsupported_surface" | "capture_failed";
   sha256?: string;
   state: ScreenScreenshotState;
   width?: number;

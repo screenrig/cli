@@ -357,6 +357,33 @@ test("identity-targeted mutations reuse saved keys and refresh project names", a
   assert.equal((await f.saved())?.project_name, "Renamed elsewhere");
 });
 
+test("a successful rename whose response lacks the organization name reconciles context from a fresh project read", async t => {
+  const f = await fixture(t, initial());
+  f.transport.on("PATCH", "/api/project", () => {
+    const { organization_name: _omitted, ...project } = context(A, "Renamed").project;
+    return { status: 200, headers: {}, body: { ...project, revision: 3 } };
+  });
+  f.transport.on("GET", "/api/project", () => ({ status: 200, headers: {}, body: { ...context(A, "Renamed").project, revision: 3 } }));
+  const renamed = await f.invoke("project", "rename", "Renamed");
+  assert.equal(renamed.code, 0, renamed.out);
+  assert.equal(renamed.result.context.project.name, "Renamed");
+  assert.equal(renamed.result.context.organization.name, "Acme");
+  assert.deepEqual(f.transport.calls.map(call => call.method + " " + call.path), ["PATCH /api/project", "GET /api/project"]);
+  assert.equal((await f.saved())?.project_name, "Renamed");
+  assert.equal((await f.saved())?.pending_writes, undefined);
+});
+
+test("a rename whose response and re-read both fail validation leaves no replayable recovery entry", async t => {
+  const f = await fixture(t, initial());
+  const { organization_name: _omitted, ...project } = context(A, "Renamed").project;
+  f.transport.on("PATCH", "/api/project", () => ({ status: 200, headers: {}, body: project }));
+  f.transport.on("GET", "/api/project", () => ({ status: 200, headers: {}, body: project }));
+  const failed = await f.invoke("project", "rename", "Renamed");
+  assert.equal(failed.result.error.code, "config_error");
+  assert.equal(failed.result.warnings?.some((warning: { code: string }) => warning.code === "write_recovery_saved") ?? false, false);
+  assert.equal((await f.saved())?.pending_writes, undefined);
+});
+
 test("identity without a current project creates in an explicit organization and survives a concurrent selection", async t => {
   const config: ScreenRigConfig = { api_url: "https://api.screenrig.ai", identity_token: IDENTITY, agent_id: AGENT.id,
     projects: { [B]: { project_name: "Lobby", organization_id: initial().organization_id, organization_name: "Acme" } } };

@@ -250,8 +250,9 @@ test("screen screenshot surfaces screenshot_unavailable when status is timed_out
       { fs: fsLike, configDir, cwdDir },
     );
     assert.equal(result.code, ExitCode.Conflict, result.stdout);
-    const envelope = JSON.parse(result.stdout) as { error: { code: string; type: string; status: number } };
+    const envelope = JSON.parse(result.stdout) as { error: { code: string; type: string; status: number; detail: string } };
     assert.equal(envelope.error.code, "screenshot_unavailable");
+    assert.match(envelope.error.detail, /\(timed_out\)/);
     assert.equal(envelope.error.type, "https://screenrig.ai/problems/screenshot-unavailable");
     assert.equal(envelope.error.status, 409);
     assert.equal(transport.calls.some((call) => call.method === "GET" && call.path.endsWith("/screenshot") && call.binary), false);
@@ -267,7 +268,7 @@ test("screen screenshot surfaces screenshot_unavailable when the Player cannot c
   const cwdDir = await testTemp("screenshot-timeout-cwd-");
   const fsLike = await enrolledFs(configDir);
   const transport = screenshotTransport({
-    statuses: [{ state: "unavailable", capture_id: CAPTURE_ID }],
+    statuses: [{ state: "unavailable", reason: "unsupported_surface", capture_id: CAPTURE_ID }],
   });
   try {
     const result = await withRuntime(
@@ -276,12 +277,66 @@ test("screen screenshot surfaces screenshot_unavailable when the Player cannot c
       { fs: fsLike, configDir, cwdDir },
     );
     assert.equal(result.code, ExitCode.Conflict, result.stdout);
-    const envelope = JSON.parse(result.stdout) as { error: { code: string; type: string; status: number } };
+    const envelope = JSON.parse(result.stdout) as { error: { code: string; type: string; status: number; detail: string } };
     assert.equal(envelope.error.code, "screenshot_unavailable");
+    assert.match(envelope.error.detail, /unavailable: unsupported_surface/);
     assert.equal(envelope.error.type, "https://screenrig.ai/problems/screenshot-unavailable");
     assert.equal(envelope.error.status, 409);
     assert.equal(transport.calls.some((call) => call.method === "GET" && call.path.endsWith("/screenshot") && call.binary), false);
     assert.equal(result.stdout.includes(IMAGE_MARK), false);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+    await rm(cwdDir, { recursive: true, force: true });
+  }
+});
+
+test("screen screenshot names capture_failed when the Player could not capture", async () => {
+  const configDir = await testTemp("screenshot-failed-");
+  const cwdDir = await testTemp("screenshot-failed-cwd-");
+  const fsLike = await enrolledFs(configDir);
+  try {
+    const result = await withRuntime(
+      ["--json", "screen", "screenshot", SCREEN_ID, "--poll-ms", "1"],
+      screenshotTransport({ statuses: [{ state: "unavailable", reason: "capture_failed", capture_id: CAPTURE_ID }] }),
+      { fs: fsLike, configDir, cwdDir },
+    );
+    assert.equal(result.code, ExitCode.Conflict, result.stdout);
+    const envelope = JSON.parse(result.stdout) as { error: { detail: string } };
+    assert.match(envelope.error.detail, /unavailable: capture_failed/);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+    await rm(cwdDir, { recursive: true, force: true });
+  }
+});
+
+test("screen screenshot keeps no recovery entry: a rerun after a refusal requests a new capture with a new key", async () => {
+  const configDir = await testTemp("screenshot-rerun-");
+  const cwdDir = await testTemp("screenshot-rerun-cwd-");
+  const fsLike = await enrolledFs(configDir);
+  const configPath = path.join(configDir, "screenrig", "config.json");
+  try {
+    const refusing = new FakeTransport();
+    refusing.on("POST", `/api/screens/${SCREEN_ID}/screenshot`, () => ({
+      status: 409,
+      headers: { "content-type": "application/problem+json" },
+      body: { type: "https://screenrig.ai/problems/screenshot-unavailable", title: "Screenshot is not available", status: 409, code: "screenshot_unavailable", detail: "The screen's Player has not provided this screenshot." },
+    }));
+    const refused = await withRuntime(["--json", "screen", "screenshot", SCREEN_ID, "--poll-ms", "1"], refusing, { fs: fsLike, configDir, cwdDir });
+    assert.equal(refused.code, ExitCode.Conflict, refused.stdout);
+    const envelope = JSON.parse(refused.stdout) as { warnings?: Array<{ code: string }> };
+    assert.equal(envelope.warnings?.some((warning) => warning.code === "write_recovery_saved") ?? false, false);
+
+    const unavailable = screenshotTransport({ statuses: [{ state: "unavailable", reason: "capture_failed", capture_id: CAPTURE_ID }] });
+    assert.equal((await withRuntime(["--json", "screen", "screenshot", SCREEN_ID, "--poll-ms", "1"], unavailable, { fs: fsLike, configDir, cwdDir })).code, ExitCode.Conflict);
+    assert.equal(JSON.parse(await readFile(configPath, "utf8")).pending_writes, undefined);
+
+    const ready = screenshotTransport({ statuses: [readyStatus()] });
+    const captured = await withRuntime(["--json", "screen", "screenshot", SCREEN_ID, "--poll-ms", "1"], ready, { fs: fsLike, configDir, cwdDir });
+    assert.equal(captured.code, 0, captured.stdout);
+    const keys = [refusing, unavailable, ready].map((transport) => transport.calls.find((call) => call.method === "POST")?.headers?.["idempotency-key"]);
+    assert.ok(keys.every(Boolean));
+    assert.equal(new Set(keys).size, 3);
+    assert.equal(JSON.parse(await readFile(configPath, "utf8")).pending_writes, undefined);
   } finally {
     await rm(configDir, { recursive: true, force: true });
     await rm(cwdDir, { recursive: true, force: true });
@@ -326,8 +381,10 @@ test("screen screenshot surfaces screenshot_unavailable when the wait deadline e
       { fs: fsLike, configDir, cwdDir },
     );
     assert.equal(result.code, ExitCode.Conflict, result.stdout);
-    const envelope = JSON.parse(result.stdout) as { error: { code: string; type: string } };
+    const envelope = JSON.parse(result.stdout) as { error: { code: string; type: string; detail: string; hint: string } };
     assert.equal(envelope.error.code, "screenshot_unavailable");
+    assert.match(envelope.error.detail, /--timeout/);
+    assert.match(envelope.error.hint, /larger --timeout/);
     assert.equal(envelope.error.type, "https://screenrig.ai/problems/screenshot-unavailable");
     assert.equal(transport.calls.some((call) => call.binary), false);
   } finally {

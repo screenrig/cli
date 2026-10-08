@@ -22,7 +22,7 @@ export function registerAgentCommands(root: Command, bind: CommandActionBinder):
   requireOptionGroup(enroll, "atMostOne", ["--email", "--agentid-claim"]);
 
   addCommandNotes(agent.command("connect").description("Reconnect this installation to an existing project")
-    .option("--target-project-id <ID>", "Request approval for this specific existing project")
+    .option("--target-project-id <ID>", "Request approval for this specific existing project; needs the identity credential that agent enroll or an earlier approved agent connect saves")
     .option("--name <NAME>", "Set this agent installation name")
     .addOption(new Option("--capability <NAME>", "Request a capability (repeatable; default: all six)")
       .choices([...AGENT_CAPABILITIES])

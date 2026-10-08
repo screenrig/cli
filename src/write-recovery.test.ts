@@ -70,6 +70,43 @@ test("definitive precondition refusal clears the pending key without retrying", 
   assert.equal((await f.read()).pending_writes, undefined);
 });
 
+test("a definite 409 refusal clears the pending key so the rerun sends a fresh request", async (t) => {
+  const f = await fixture(t);
+  const refused = new FakeTransport().on("PATCH", "/api/screens/scr_TEST", () => ({ status: 409, headers: {}, body: { code: "resource_conflict", detail: "Conflict", status: 409 } }));
+  const result = await f.invoke(refused);
+  assert.equal(result.code, 5);
+  assert.equal(result.result.warnings?.some((warning: { code: string }) => warning.code === "write_recovery_saved") ?? false, false);
+  assert.equal((await f.read()).pending_writes, undefined);
+  const rerun = success();
+  assert.equal((await f.invoke(rerun)).code, 0);
+  assert.notEqual(key(rerun), key(refused));
+});
+
+test("a timeout keeps the pending key; it is the one ambiguous 4xx", async (t) => {
+  const f = await fixture(t);
+  const first = new FakeTransport().on("PATCH", "/api/screens/scr_TEST", () => ({ status: 408, headers: {}, body: { code: "timeout", detail: "Timed out", status: 408 } }));
+  const result = await f.invoke(first);
+  assert.equal(result.result.warnings[0].code, "write_recovery_saved");
+  const second = success(); await f.invoke(second);
+  assert.equal(key(second), key(first));
+});
+
+test("a local validation error after the server answered leaves no replayable entry", async (t) => {
+  const f = await fixture(t);
+  const empty = new FakeTransport().on("PATCH", "/api/screens/scr_TEST", () => ({ status: 200, headers: {}, body: "not json" }));
+  // A 2xx without a JSON body is an unknown outcome (5xx class): the key stays.
+  assert.equal((await f.invoke(empty)).result.warnings[0].code, "write_recovery_saved");
+  await f.invoke(success());
+  assert.equal((await f.read()).pending_writes, undefined);
+  // An accepted reboot whose body fails the CLI's contract check is a local validation error.
+  const malformed = new FakeTransport().on("POST", "/api/screens/scr_TEST/reboot", () => ({ status: 202, headers: {}, body: { status: "accepted" } }));
+  const rejected = await f.invoke(malformed, ["screen", "reboot", "scr_TEST"]);
+  assert.equal(rejected.result.error.code, "usage_error", JSON.stringify(rejected.result));
+  assert.equal(malformed.calls.length, 1);
+  assert.equal(rejected.result.warnings?.some((warning: { code: string }) => warning.code === "write_recovery_saved") ?? false, false);
+  assert.equal((await f.read()).pending_writes, undefined);
+});
+
 test("expired pending writes stop before network and require explicit reconciliation", async (t) => {
   const f = await fixture(t); const first = failed(); await f.invoke(first);
   const blocked = success();

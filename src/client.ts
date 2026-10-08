@@ -8,7 +8,6 @@ import {
   bodySnippet,
   normalizeProblem,
   parseRetryAfter,
-  problemCodeOf,
   timeoutError,
   unexpectedResponseError,
   usageError,
@@ -30,9 +29,6 @@ import type { OperationLogger } from "./log/types.js";
 function privateBodies(method: string, path: string): boolean {
   return (method === "POST" && path === "/api/invitations") || /^\/api\/(?:webhooks|support)(?:\/|$)/.test(path);
 }
-
-/** 409 codes that are a definite refusal rather than possibly in-progress work. */
-const DEFINITE_CONFLICT_CODES = new Set(["webhook_limit_reached"]);
 
 /** The error body as text, for a response that is not a problem document. Transports without raw text get the decoded body. */
 function errorBodyText(rawText: string | undefined, body: unknown): string {
@@ -214,10 +210,9 @@ export class ApiClient {
       span.error(err);
       throw withTransportHint(err, req.method, Boolean(pending));
     }
-    // Definite refusals need reconciliation, not automatic replay of a stale key.
-    // Keep ambiguous timeouts and conflicts (which can mean work is in progress).
-    if (pending && response.status >= 400 && response.status < 500
-        && (![408, 409].includes(response.status) || DEFINITE_CONFLICT_CODES.has(problemCodeOf(response.body) ?? ""))) {
+    // A 4xx is a definite refusal: the server did not do the work, so a rerun
+    // must send it afresh rather than reuse this key. Only a timeout keeps it.
+    if (pending && response.status >= 400 && response.status < 500 && response.status !== 408) {
       await recovery!.clear(pending);
     }
     const remaining = this.token ? parseCreditsRemainingHeader(response.headers) : undefined;

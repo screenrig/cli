@@ -565,7 +565,8 @@ function commandHandler(
         (group === "app" && ["upload", "update"].includes(action ?? "")) ||
         (group === "playlist" && ["create", "update", "delete"].includes(action ?? "")) ||
         (group === "media" && ["update", "delete"].includes(action ?? "")) ||
-        (group === "screen" && !["provision", "publish"].includes(action ?? "")) ||
+        // A screenshot is an observation: every run requests a new capture.
+        (group === "screen" && !["provision", "publish", "screenshot"].includes(action ?? "")) ||
         group === "invitations" || group === "webhooks" || (group === "project" && ["rename", "create"].includes(action ?? ""))
       ));
     let recovery: WriteRecovery | undefined;
@@ -593,9 +594,16 @@ function commandHandler(
       return contextual;
     } catch (error) {
       if (recovery?.hasPending && error instanceof CliError) {
+        // Only an unknown outcome (timeout, network, 5xx) keeps a replayable key.
+        // A refusal or a local validation error means a rerun must start afresh.
+        const status = error.problem.status;
+        if (typeof status === "number" && status < 500 && status !== 408) {
+          await recovery.finish();
+          throw error;
+        }
         throw new CliError(error.problem, error.exitCode, [...error.warnings, {
           code: "write_recovery_saved",
-          message: "The write key is saved locally. After an ambiguous failure, rerun the same command with unchanged input to reuse it. Reconcile explicit refusals or revision conflicts before changing the request.",
+          message: "The outcome of this write is unknown, so its key is saved locally. Rerun the same command with unchanged input to reuse it; the server returns work that already happened instead of repeating it. screenrig recovery list shows writes still unresolved.",
         }]);
       }
       throw error;
@@ -1029,6 +1037,12 @@ async function startOrResumeAgentConnection(
       // recipient key until the server confirms this connection is terminal.
       let pending = current?.agent_connection;
       if (pending && requestedProject !== undefined && pending.project_id !== requestedProject) throw usageError("The pending request is bound to a different project. Resume without changing --target-project-id.");
+      if (!pending && requestedProject !== undefined && !resolved.identityToken) {
+        throw usageError("--target-project-id needs this installation's identity credential, which agent enroll or an earlier approved agent connect saves. This installation has none; nothing was sent.", {
+          command: "screenrig agent connect",
+          reason: "Without --target-project-id, approve the request in the dashboard for the project this agent should join.",
+        });
+      }
       const identityHash = resolved.identityToken ? createHash("sha256").update(resolved.identityToken).digest("hex") : undefined;
       if (pending && pending.identity_hash !== identityHash) throw configError("The pending connection's identity credential changed.");
       if (pending?.name && requestedName && pending.name !== requestedName) {
@@ -1763,6 +1777,13 @@ async function browserSetupCommand(
   };
 }
 
+/** Each public API origin's dashboard host; the dashboard lives at its /dashboard/. */
+const DASHBOARD_HOSTS = new Map([
+  ["api.screenrig.ai", "screenrig.ai"],
+  ["api.stage.screenrig.ai", "stage.screenrig.ai"],
+  ["api.screenrig.localhost", "screenrig.localhost"],
+]);
+
 /** Opens the ordinary dashboard origin; no credential is minted or transferred. */
 async function dashboardCommand(
   _args: ParsedArgs,
@@ -1770,8 +1791,7 @@ async function dashboardCommand(
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<CommandResult> {
   const api = new URL(resolved.apiUrl);
-  const hostname = api.hostname === "api.screenrig.ai" ? "screenrig.ai"
-    : api.hostname === "api.screenrig.localhost" ? "screenrig.localhost" : undefined;
+  const hostname = DASHBOARD_HOSTS.get(api.hostname);
   if (!hostname || (api.protocol !== "https:" && !(api.protocol === "http:" && api.hostname.endsWith(".localhost")))) {
     throw usageError("dashboard requires a supported ScreenRig API origin.");
   }
@@ -2126,7 +2146,14 @@ async function projectRename(args: ParsedArgs, runtime: CliRuntime, resolved: Re
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await client.call({ method: "PATCH", path: "/api/project", body: { name }, idempotent: true });
   const project = response.body as Project;
-  const context = contextFromProject(project);
+  let context: ReturnType<typeof contextFromProject>;
+  try {
+    context = contextFromProject(project);
+  } catch (error) {
+    if (!(error instanceof CliError)) throw error;
+    // The rename succeeded; reconcile the cached context from a fresh read instead of failing on the response's shape.
+    context = contextFromProject((await client.call({ method: "GET", path: "/api/project" })).body as Project);
+  }
   if (context.project.id !== resolved.projectId) throw configError("Rename response changed the command's target.");
   await cacheProjectContexts(runtime, resolved, [context], { credential: resolved.token });
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success,
@@ -2933,6 +2960,24 @@ async function appPack(args: ParsedArgs, runtime: CliRuntime): Promise<CommandRe
   };
 }
 
+/** app upload and update pack the built directory themselves; a packed archive or other file is a usage error. */
+async function requireAppDirectory(runtime: CliRuntime, dir: string, usage: string): Promise<string> {
+  const root = path.resolve(runtime.cwd(), dir);
+  let isDirectory = false;
+  try {
+    isDirectory = (await stat(root)).isDirectory();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    throw usageError(`${dir} does not exist. Pass the built application directory (the one with index.html).`,
+      { command: `screenrig ${usage}`, reason: "Packs and uploads the directory in one step." });
+  }
+  if (!isDirectory) {
+    throw usageError(`${dir} is a file. Pass the built application directory (the one with index.html), not a packed archive; the upload packs the directory itself.`,
+      { command: `screenrig ${usage}`, reason: "Packs and uploads the directory in one step; app pack is only an optional local preview." });
+  }
+  return root;
+}
+
 async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>, update: boolean): Promise<CommandResult> {
   const id = update ? args.positionals[2] : undefined;
   const dir = args.positionals[update ? 3 : 2];
@@ -2945,10 +2990,11 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
   const ifMatch = update && revision ? quotedRevision(revision) : undefined;
   requireFlagValue(args, "name", "Lobby board");
   const nameHeaders = applicationNameHeaders(flagString(args.flags, "name"));
+  const root = await requireAppDirectory(runtime, dir, update ? `app update ${id} ./DIRECTORY` : "app upload ./DIRECTORY");
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const capabilitiesResponse = await client.call({ method: "GET", path: "/api/capabilities" });
-  const packed = await packDirectory(path.resolve(runtime.cwd(), dir), {
+  const packed = await packDirectory(root, {
     limits: limitsFromCapabilities(capabilitiesResponse.body as Capabilities),
     logger: loggerOf(runtime),
   });
@@ -5514,12 +5560,36 @@ function isScreenId(value: string): boolean {
   return SCREEN_ID_PATTERN.test(value);
 }
 
-function screenshotUnavailable(requestId: string): CliError {
+type ScreenshotFailure = "timed_out" | "unsupported_surface" | "capture_failed" | "unavailable" | "deadline";
+
+const SCREENSHOT_FAILURE_DETAIL: Record<ScreenshotFailure, string> = {
+  timed_out: "The Player did not upload the screenshot before the request expired (timed_out).",
+  unsupported_surface: "This Player cannot capture its screen (unavailable: unsupported_surface).",
+  capture_failed: "The Player tried to capture its screen and failed (unavailable: capture_failed).",
+  unavailable: "The Player reported the screenshot as unavailable.",
+  deadline: "No screenshot arrived before --timeout; the Player may still upload it (pending).",
+};
+
+const SCREENSHOT_FAILURE_HINT: Record<ScreenshotFailure, string> = {
+  timed_out: "Check the screen is online with screenrig screen show ID, then run screen screenshot again; every run requests a new capture.",
+  unsupported_surface: "This Player type does not support screenshots. Use screenrig screen show ID for its state instead.",
+  capture_failed: "Run screen screenshot again; every run requests a new capture.",
+  unavailable: "Run screen screenshot again; every run requests a new capture.",
+  deadline: "Run screen screenshot again with a larger --timeout; every run requests a new capture.",
+};
+
+function screenshotUnavailable(requestId: string, failure: ScreenshotFailure): CliError {
   return new CliError(
-    makeProblem("screenshot_unavailable", "Screenshot is not available", 409, "Screenshot is not available.", {
+    makeProblem("screenshot_unavailable", "Screenshot is not available", 409, SCREENSHOT_FAILURE_DETAIL[failure], {
       request_id: requestId,
+      hint: SCREENSHOT_FAILURE_HINT[failure],
     }),
   );
+}
+
+function screenshotFailure(status: ScreenScreenshotStatus): ScreenshotFailure {
+  if (status.state === "timed_out") return "timed_out";
+  return status.reason === "unsupported_surface" || status.reason === "capture_failed" ? status.reason : "unavailable";
 }
 
 const READINESS_SENTENCE_MAX = 400;
@@ -5657,10 +5727,10 @@ async function captureScreenshot(runtime: CliRuntime, client: ApiClient, id: str
           return;
         }
         if ((status.state === "timed_out" || status.state === "unavailable") && currentId === captureId) {
-          throw screenshotUnavailable(client.requestId);
+          throw screenshotUnavailable(client.requestId, screenshotFailure(status));
         }
         if (Date.now() >= deadline) {
-          throw screenshotUnavailable(client.requestId);
+          throw screenshotUnavailable(client.requestId, "deadline");
         }
         await runtime.sleep(pollMs);
       }

@@ -698,6 +698,26 @@ test("agent connect validates capability flags before network access", async () 
   }
 });
 
+test("agent connect --target-project-id on a fresh install explains the identity precondition before network access", async () => {
+  const transport = new FakeTransport();
+  const result = await withRuntime(["--json", "agent", "connect", "--target-project-id", "prj_AAAAAAAAAAAAAAAAAAAAAAAA", "--print-url"], transport);
+  try {
+    assert.equal(result.code, ExitCode.Usage, result.stdout);
+    const envelope = JSON.parse(result.stdout) as { error: { detail: string; next: { command: string; reason: string } } };
+    assert.match(envelope.error.detail, /needs this installation's identity credential/);
+    assert.equal(envelope.error.next.command, "screenrig agent connect");
+    assert.match(envelope.error.next.reason, /approve the request in the dashboard/);
+    assert.equal(transport.calls.length, 0);
+    // Nothing pending was saved, so a plain agent connect starts cleanly.
+    const config = await readConfigFile(path.join(result.configDir, "screenrig", "config.json"), {
+      mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir, env: { XDG_CONFIG_HOME: result.configDir },
+    });
+    assert.equal(config?.agent_connection, undefined);
+  } finally {
+    await rm(result.configDir, { recursive: true, force: true });
+  }
+});
+
 test("agent connect requests canonical capabilities and preserves them across resume", async () => {
   for (const flags of [[], ["--capability", "advertising", "--capability", "content"]]) {
     const expected = flags.length ? ["content", "advertising"] : [...AGENT_CAPABILITIES];
@@ -1716,6 +1736,21 @@ test("dashboard and dashboard open launch the public origin without authenticati
     } finally {
       await rm(result.configDir, { recursive: true, force: true });
     }
+  }
+});
+
+test("dashboard open maps the stage API origin to the stage dashboard", async () => {
+  const transport = new FakeTransport();
+  const opened: string[] = [];
+  const result = await withRuntime(["--json", "dashboard", "open", "--api-url", "https://api.stage.screenrig.ai"], transport, {
+    openUrl: async (url) => { opened.push(url); return true; },
+  });
+  try {
+    assert.equal(result.code, ExitCode.Success, result.stdout);
+    assert.deepEqual(opened, ["https://stage.screenrig.ai/dashboard/"]);
+    assert.equal(transport.calls.length, 0);
+  } finally {
+    await rm(result.configDir, { recursive: true, force: true });
   }
 });
 
@@ -6520,6 +6555,36 @@ test("adding a schedule to a playlist an unzoned screen already runs is refused"
   assert.equal(transport.calls.some((call) => call.method === "PUT"), false);
   await rm(configDir, { recursive: true, force: true });
   await rm(scheduled.configDir, { recursive: true, force: true });
+});
+
+test("app upload given a packed archive or a missing path is a usage error naming the directory requirement", async () => {
+  const configDir = await testTemp("upload-archive-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(
+    path.join(configDir, "screenrig", "config.json"),
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret" },
+    fsLike,
+  );
+  const archive = path.join(configDir, "qa-app.zip");
+  await writeFile(archive, "packed bytes");
+  try {
+    for (const [argv, detail] of [
+      [["app", "upload", archive], /is a file\. Pass the built application directory/],
+      [["app", "update", "app_AAAAAAAAAAAAAAAAAAAAAAAA", archive], /is a file\. Pass the built application directory/],
+      [["app", "upload", path.join(configDir, "missing")], /does not exist\. Pass the built application directory/],
+    ] as const) {
+      const transport = new FakeTransport();
+      const result = await withRuntime(["--json", ...argv], transport, { fs: fsLike });
+      assert.equal(result.code, ExitCode.Usage, result.stdout);
+      const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string; next: { command: string } } };
+      assert.equal(envelope.error.code, "usage_error");
+      assert.match(envelope.error.detail, detail);
+      assert.match(envelope.error.next.command, /\.\/DIRECTORY$/);
+      assert.equal(transport.calls.length, 0);
+    }
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
 });
 
 test("app upload reports the release id an application primitive needs", async () => {
