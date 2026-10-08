@@ -1,6 +1,7 @@
 import { requireCapability, validateProjectCapabilities } from "./project-capabilities.js";
 import { RESOURCE_ID_PATTERNS, isResourceID } from "./generated/resource-ids.js";
 import { newIdempotencyKey } from "./ids.js";
+import { apexHost } from "./apex-origin.js";
 import { replacePlaylistRelease } from "./playlist-release.js";
 import { assertOutputAvailable, readAuthoringJson, readAuthoringText, writeAuthoringJson, writeOutputFile } from "./authoring-input.js";
 import { publishScreen } from "./screen-publish.js";
@@ -1778,13 +1779,6 @@ async function browserSetupCommand(
   };
 }
 
-/** Each public API origin's dashboard host; the dashboard lives at its /dashboard/. */
-const DASHBOARD_HOSTS = new Map([
-  ["api.screenrig.ai", "screenrig.ai"],
-  ["api.stage.screenrig.ai", "stage.screenrig.ai"],
-  ["api.screenrig.localhost", "screenrig.localhost"],
-]);
-
 /** Opens the ordinary dashboard origin; no credential is minted or transferred. */
 async function dashboardCommand(
   _args: ParsedArgs,
@@ -1792,7 +1786,7 @@ async function dashboardCommand(
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<CommandResult> {
   const api = new URL(resolved.apiUrl);
-  const hostname = DASHBOARD_HOSTS.get(api.hostname);
+  const hostname = apexHost(api.hostname);
   if (!hostname || (api.protocol !== "https:" && !(api.protocol === "http:" && api.hostname.endsWith(".localhost")))) {
     throw usageError("dashboard requires a supported ScreenRig API origin.");
   }

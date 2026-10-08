@@ -14,9 +14,10 @@ test("browser setup code rejects ambiguous characters, wrong lengths, and other 
   }
 });
 
-test("browser setup opener derives only the public production or HTTPS localhost handoff", () => {
+test("browser setup opener derives the handoff from the same API-to-apex table as dashboard open", () => {
   assert.equal(browserHandoffUrl("https://api.screenrig.ai", "ABC-234"), "https://screenrig.ai/ABC-234");
+  assert.equal(browserHandoffUrl("https://api.stage.screenrig.ai", "ABC-234"), "https://stage.screenrig.ai/ABC-234");
   assert.equal(browserHandoffUrl("https://api.screenrig.localhost:8443", "ABC-234"), "https://screenrig.localhost:8443/ABC-234");
   assert.throws(() => browserHandoffUrl("http://api.screenrig.localhost:8088", "ABC-234"), /HTTPS/);
-  assert.throws(() => browserHandoffUrl("https://example.invalid", "ABC-234"), /requires api\.screenrig\.ai/);
+  assert.throws(() => browserHandoffUrl("https://example.invalid", "ABC-234"), /requires a supported ScreenRig API origin/);
 });

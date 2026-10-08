@@ -1,3 +1,4 @@
+import { apexHost } from "./apex-origin.js";
 import { projectConfigFor, withProjectConfig, assertProjectCredential } from "./project-state.js";
 import { readConfigFile, withConfigLock, writeConfigAtomic, type ResolvedConfig } from "./config.js";
 import type { EnrollmentRuntime } from "./enrollment.js";
@@ -20,12 +21,8 @@ export function browserHandoffUrl(apiUrl: string, displayCode: string): string {
   if (api.protocol !== "https:") {
     throw usageError("browser setup --open requires the configured HTTPS ScreenRig origin.");
   }
-  const host = api.hostname === "api.screenrig.ai"
-    ? "screenrig.ai"
-    : api.hostname === "api.screenrig.localhost"
-      ? "screenrig.localhost"
-      : undefined;
-  if (!host) throw usageError("browser setup --open requires api.screenrig.ai or the configured HTTPS ScreenRig localhost origin.");
+  const host = apexHost(api.hostname);
+  if (!host) throw usageError("browser setup --open requires a supported ScreenRig API origin (api.screenrig.ai, api.stage.screenrig.ai, or the configured HTTPS localhost origin).");
   const origin = `${api.protocol}//${host}${api.port ? `:${api.port}` : ""}`;
   return `${origin}/${displayCode}`;
 }

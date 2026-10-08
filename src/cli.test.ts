@@ -1717,6 +1717,22 @@ test("browser setup --open opens only the public handoff URL by argv", async () 
   await rm(result.configDir, { recursive: true, force: true });
 });
 
+test("browser setup --open on the stage API opens the stage apex handoff", async () => {
+  const transport = memoryBackend();
+  const opened: string[] = [];
+  const result = await withAuthenticatedRuntime(
+    ["--json", "browser", "setup", "--code", "ABC234", "--open", "--api-url", "https://api.stage.screenrig.ai"],
+    transport,
+    { openUrl: async (url) => { opened.push(url); return true; } },
+  );
+  try {
+    assert.equal(result.code, 0, result.stdout);
+    assert.deepEqual(opened, ["https://stage.screenrig.ai/ABC-234"]);
+  } finally {
+    await rm(result.configDir, { recursive: true, force: true });
+  }
+});
+
 test("dashboard and dashboard open launch the public origin without authentication or network access", async () => {
   for (const args of [["dashboard"], ["dashboard", "open"]]) {
     const transport = new FakeTransport();
