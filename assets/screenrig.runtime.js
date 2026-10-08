@@ -2442,9 +2442,13 @@
   var LOCAL_PLAYER_ORIGIN = "http://play.screenrig.localhost:8088";
   var STAGE_PLAYER_ORIGIN = "https://play.stage.screenrig.ai";
   var LOCAL_RELEASE_HOSTNAME = /^r-[a-f0-9]{40}\.apps\.screenrig\.localhost$/;
+  var STAGE_RELEASE_HOSTNAME = /^r-[a-f0-9]{40}\.apps\.stage\.screenrig\.ai$/;
   var NATIVE_PACKAGE_HOSTNAME = /^p-[a-f0-9]{32}\.[a-f0-9]{32}\.offline\.screenrig\.invalid$/;
   function isLocalReleaseDocument(location) {
     return location.protocol === "http:" && location.port === "8088" && LOCAL_RELEASE_HOSTNAME.test(location.hostname) && location.origin === `http://${location.hostname}:8088`;
+  }
+  function isStageReleaseDocument(location) {
+    return location.protocol === "https:" && location.port === "" && STAGE_RELEASE_HOSTNAME.test(location.hostname) && location.origin === `https://${location.hostname}`;
   }
   function isNativePackageDocument(location) {
     return location.protocol === "https:" && location.port === "" && NATIVE_PACKAGE_HOSTNAME.test(location.hostname) && location.origin === `https://${location.hostname}`;
@@ -2455,6 +2459,9 @@
     }
     if (isLocalReleaseDocument(location)) {
       return [LOCAL_PLAYER_ORIGIN];
+    }
+    if (isStageReleaseDocument(location)) {
+      return [STAGE_PLAYER_ORIGIN];
     }
     if (isNativePackageDocument(location)) {
       return [DEFAULT_PLAYER_ORIGIN, LOCAL_PLAYER_ORIGIN, STAGE_PLAYER_ORIGIN];
