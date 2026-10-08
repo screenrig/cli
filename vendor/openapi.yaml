@@ -3056,7 +3056,8 @@ paths:
       description: 'Soft-deletes an eligible screen and immediately revokes its cookie credentials and runtime grants. Ordinary
         reads then return not_found; the tombstoned row is retained for at least 90 days before cleanup. If-Match guards the
         revision and Idempotency-Key replays the result. A native identity-bound screen returns screen_archive_required: use
-        archive to retain that binding. This route does not grant administrative break-glass permission to release native enrollment.'
+        archive to retain that binding; an identity-bound screen that is already archived stays archived (the same problem,
+        saying so). This route does not grant administrative break-glass permission to release native enrollment.'
       security:
       - projectBearer: []
       - dashboardSession: []
@@ -3196,7 +3197,9 @@ paths:
     post:
       operationId: unarchiveScreen
       description: Restores an archived screen to the default list and remints a normal manifest. Must pass screen admission.
-        Does not change the bound public key.
+        Does not change the bound public key. The manifest is issued again, so the screen's playlist is checked as an assignment
+        is; a playlist that references missing or unready content answers resource_conflict naming the playlist, and the screen
+        stays archived until the playlist is fixed.
       security:
       - projectBearer: []
       - dashboardSession: []
@@ -10837,7 +10840,7 @@ components:
       in: header
       name: ScreenRig-Primitive-Capability
       description: >-
-        Parent-only signed five-minute primitive capability bound to the runtime
+        Parent-only signed fifteen-minute primitive capability bound to the runtime
         session, screen, application release, primitive, manifest revision,
         content-access generation, and allowed KV operations. Refresh by fetching
         the current manifest.
@@ -15135,7 +15138,7 @@ components:
     Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { tags: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 14400000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
     MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/Media" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     SupportHours: {"type": "object", "additionalProperties": false, "required": ["timezone", "start", "end", "weekdays", "excludes_bc_holidays"], "properties": {"timezone": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "weekdays": {"type": "array", "items": {"type": "string"}}, "excludes_bc_holidays": {"type": "boolean"}}}
-    SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean"}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0}, "docs_url": {"type": "string"}}}
+    SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean", "description": "This project can start or continue a conversation now. False where support chat is switched off in this environment."}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0}, "docs_url": {"type": "string"}}}
     SupportWrite: {"type": "object", "additionalProperties": false, "required": ["body"], "properties": {"body": {"type": "string", "minLength": 1, "maxLength": 4000}, "human_requested": {"type": "boolean", "default": false, "description": "Pause Luna and wait for a human for this conversation."}}}
     SupportConversation: {"type": "object", "additionalProperties": false, "required": ["id", "subject", "created_at", "updated_at", "last_sequence", "human_requested", "unread_staff", "closed"], "properties": {"id": {"type": "string"}, "subject": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}, "last_sequence": {"type": "integer", "minimum": 0}, "human_requested": {"type": "boolean"}, "unread_staff": {"type": "integer", "minimum": 0}, "closed": {"type": "boolean", "description": "Ended by the customer or resolved by staff. History remains readable; staff can reopen."}}}
     SupportMessage: {"type": "object", "additionalProperties": false, "required": ["id", "conversation_id", "sequence", "role", "author", "body", "created_at"], "properties": {"id": {"type": "string"}, "conversation_id": {"type": "string"}, "sequence": {"type": "integer", "minimum": 0}, "role": {"type": "string", "enum": ["customer", "staff", "ai", "system"]}, "author": {"type": "string"}, "avatar_url": {"type": "string", "format": "uri", "description": "Optional trusted Slack avatar for a staff reply. Use the screenRIG logo when absent."}, "body": {"type": "string"}, "created_at": {"type": "string", "format": "date-time"}}}
@@ -15736,7 +15739,7 @@ components:
         enter: { $ref: "#/components/schemas/PrimitiveEnter" }
         motion: { $ref: "#/components/schemas/PrimitiveMotion" }
         capabilityHandle: { type: string, minLength: 32, description: Opaque parent-only capability; never forward it into the uploaded iframe. }
-        capabilityExpiresAt: { type: string, format: date-time, description: Five-minute expiry. Refresh the manifest before this time to obtain a replacement handle. }
+        capabilityExpiresAt: { type: string, format: date-time, description: "Fifteen-minute expiry, capped by the runtime session. Refresh the manifest before this time to obtain a replacement handle." }
     RuntimeImagePrimitive:
       type: object
       required: [id, primitive, selector, resolvedMedia, grantId, rect, layer, contentFit]

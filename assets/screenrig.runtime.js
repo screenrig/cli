@@ -1503,6 +1503,27 @@
     win.addEventListener("message", listener);
     return () => win.removeEventListener("message", listener);
   }
+  function frameCaptureMode(registered) {
+    return registered ? "child" : "placeholder";
+  }
+  var FRAME_PLACEHOLDER_LABEL = "Embedded web page";
+  function framePlaceholder(frame) {
+    const width = Math.max(1, frame.clientWidth), height = Math.max(1, frame.clientHeight);
+    const scale = Math.min(1, Math.sqrt(MAX_PIXELS / (width * height)));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#2b2b2b";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const size = Math.max(12, Math.min(48, Math.round(Math.min(canvas.width, canvas.height) / 12)));
+    context.fillStyle = "#9a9a9a";
+    context.font = `${size}px sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(FRAME_PLACEHOLDER_LABEL, canvas.width / 2, canvas.height / 2, canvas.width * 0.9);
+    return canvas.toDataURL();
+  }
   async function captureFrame(frame, signal) {
     var _a2;
     const binding = (_a2 = frames.get(frame)) == null ? void 0 : _a2();
@@ -1652,6 +1673,13 @@
         return;
       }
       if (node instanceof HTMLIFrameElement) {
+        if (frameCaptureMode(frames.has(node)) === "placeholder") {
+          const key = String(marked.length);
+          replacements.set(key, framePlaceholder(node));
+          node.setAttribute(marker, key);
+          marked.push(node);
+          return;
+        }
         const blob = await captureFrame(node, signal);
         if (!boundedWebP(new Uint8Array(await blob.slice(0, 30).arrayBuffer()))) throw new CaptureUnavailable();
         const bitmap = await createImageBitmap(blob);
@@ -2379,6 +2407,9 @@
     }
     async kvSet(key, value, options = {}) {
       const context = this.requireCapability("kv.write");
+      if (typeof value !== "string" && !(value instanceof Uint8Array)) {
+        throw new SdkValidationError("invalid_value", "K/V value must be a string or a Uint8Array; serialize other values first (for example JSON.stringify)");
+      }
       const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value;
       const payload = {
         key: this.requireKey(key),
