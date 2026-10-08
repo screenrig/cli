@@ -55,8 +55,10 @@ function pageSource(input: unknown, pageId: string): unknown {
   if (!input || typeof input !== "object" || Array.isArray(input)) return input;
   const record = input as Record<string, unknown>;
   if (!Array.isArray(record.pages)) return input;
-  const match = record.pages.find((item) => (
-    item && typeof item === "object" && !Array.isArray(item) && (item as { id?: string }).id === pageId
+  // A page without an id has the default id the parser gives it: page-N, by position.
+  const match = record.pages.find((item, index) => (
+    item && typeof item === "object" && !Array.isArray(item)
+      && ((item as { id?: unknown }).id == null ? pageId === `page-${index + 1}` : (item as { id?: string }).id === pageId)
   ));
   if (!match || typeof match !== "object" || Array.isArray(match)) return input;
   const { pages: _pages, ...rails } = record;

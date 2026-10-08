@@ -441,6 +441,29 @@ test("compose batch contact-sheet and --only use the same engine", async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+test("compose batch renders pages without ids one page each, with a contact sheet", async () => {
+  const dir = await testTemp("compose-batch-noid-");
+  const input = path.join(dir, "deck.json");
+  await writeFile(input, JSON.stringify({
+    width: 320,
+    height: 180,
+    background: "#111111",
+    text: "#eeeeee",
+    pages: [{ left: { title: "One" } }, { left: { title: "Two" } }],
+  }));
+  const output = path.join(dir, "rendered");
+  const result = await composeBatch(input, output);
+  assert.equal(result.rendered, 2);
+  assert.equal(result.failed, 0);
+  assert.deepEqual(result.pages.map((page) => page.id), ["page-1", "page-2"]);
+  for (const id of ["page-1", "page-2"]) {
+    assert.equal(existsSync(path.join(output, id, "manifest.json")), true);
+    assert.equal(existsSync(path.join(output, id, "page-1")), false, "a page renders itself, not the whole deck");
+  }
+  assert.ok((await readFile(result.preview)).subarray(0, 8).equals(PNG_HEADER));
+  await rm(dir, { recursive: true, force: true });
+});
+
 test("compose batch continues after one page image fails", async () => {
   const dir = await testTemp("compose-batch-fail-");
   const input = path.join(dir, "deck.json");
