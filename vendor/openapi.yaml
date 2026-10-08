@@ -2024,6 +2024,36 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/agent-connections/{id}/cancel:
+    post:
+      operationId: cancelAgentConnection
+      description: Withdraws the caller's own connection request. The temporary connection bearer from POST /api/agent-connections
+        authenticates the request; no body is sent. A pending request becomes cancelled, so it can no longer be approved,
+        denied or collected. A request that is already cancelled, denied or expired is returned unchanged, so a retry is
+        safe. A request already approved answers 409 agent_connection_conflict; end that membership with agent disconnect.
+      security:
+      - agentConnectionAuthorization: []
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      responses:
+        '200':
+          description: The connection request as it now stands.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentConnection'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/agents/self/activate:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
