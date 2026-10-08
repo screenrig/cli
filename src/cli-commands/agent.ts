@@ -37,7 +37,9 @@ export function registerAgentCommands(root: Command, bind: CommandActionBinder):
     .option("--print-url", "Return the browser handoff URL")
     .option("--wait", "Wait for dashboard approval (30000 ms default; bounded by --timeout)")
     .option("--no-wait", "Read a status snapshot for at most 1000 ms (default)")
-    .action(bind(handleAgentConnect)), "Approval expires after 24 hours. By default, read one status snapshot for at most 1000 ms and return pending with a resume command, or complete an approved connection. --wait opts into a 30000 ms approval wait; --timeout bounds that wait (1–86400000 ms). Without --wait, --timeout can shorten but never extend the snapshot budget. Pending means the request was submitted, not that approval or activation completed. --print-url places the handoff URL in the pending result. Retry agent connect to resume after an interrupted wait.");
+    .addOption(new Option("--cancel", "Withdraw this installation's pending connection request and clear its local state")
+      .conflicts(["targetProjectId", "name", "capability", "printUrl", "wait"]))
+    .action(bind(handleAgentConnect)), "Approval expires after 24 hours. By default, read one status snapshot for at most 1000 ms and return pending with a resume command, or complete an approved connection. --wait opts into a 30000 ms approval wait; --timeout bounds that wait (1–86400000 ms). Without --wait, --timeout can shorten but never extend the snapshot budget. Pending means the request was submitted, not that approval or activation completed. --print-url places the handoff URL in the pending result. Retry agent connect to resume after an interrupted wait. --cancel withdraws a pending request (a cancelled, denied or expired one is cleared the same way); an approved request cannot be cancelled: finish it with agent connect, then run agent disconnect.");
 
   agent.command("status").description("Inspect this agent's connection")
     .action(bind(handleAgentStatus));

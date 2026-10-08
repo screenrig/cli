@@ -1337,11 +1337,81 @@ async function activateCollectedAgent(
   return { agent: verified, requestId: client.requestId };
 }
 
+/**
+ * Withdraw this installation's pending connection request. The connection
+ * bearer authenticates it, as for credential collection. Cancelled, denied and
+ * expired requests answer 200 unchanged, so the local state is cleared on any
+ * 200; an approved request (409) keeps it so agent connect can still finish.
+ */
+async function agentConnectCancel(
+  args: ParsedArgs,
+  runtime: CliRuntime,
+  resolved: Awaited<ReturnType<typeof resolveConfig>>,
+): Promise<CommandResult> {
+  const pending = (await currentAgentConnectionConfig(resolved, runtime))?.agent_connection;
+  if (!pending) {
+    throw usageError("This installation has no pending agent connection to cancel; nothing was sent.", {
+      command: "screenrig agent status", reason: "Shows this installation's credential and connection state.",
+    });
+  }
+  if (!pending.connection_id || !pending.connection_token) {
+    // The request never reached the server, so only the local key and inputs remain.
+    await clearUnsentAgentConnection(runtime, resolved);
+    return {
+      envelope: successEnvelope({ status: "cancelled", request_submitted: false, local_state_cleared: true }),
+      exitCode: ExitCode.Success,
+      human: humanLines("Agent connection cancelled", [["status", "cancelled"], ["request_submitted", "false"]]),
+    };
+  }
+  const client = clientFor(runtime, args, resolved.apiUrl);
+  let response;
+  try {
+    response = await client.call({
+      method: "POST",
+      path: `/api/agent-connections/${pending.connection_id}/cancel`,
+      headers: { authorization: `ScreenRig-Agent-Connect ${pending.connection_token}` },
+    });
+  } catch (err) {
+    if (err instanceof CliError && err.problem.code === "agent_connection_invalid") {
+      return clearDefinitivePendingAgentFailure(runtime, resolved, pending, err,
+        "The server does not recognize this installation's connection request, so nothing remains to cancel.");
+    }
+    if (err instanceof CliError && err.problem.code === "agent_connection_conflict") {
+      throw new CliError({ ...err.problem, hint: err.problem.hint ?? "The request was already approved, so it can no longer be cancelled.",
+        next: { command: "screenrig agent connect", reason: "Finish the approved connection, then end that membership with screenrig agent disconnect." } }, err.exitCode, err.warnings);
+    }
+    throw err;
+  }
+  requirePrivateNoStore(response.headers, "Agent connection cancel response");
+  const connection = validateAgentConnectionEvent(response.body, pending.connection_id);
+  if (connection.status !== "cancelled" && connection.status !== "denied" && connection.status !== "expired") {
+    throw unexpectedResponseError(`Cancel answered status ${connection.status} for a request it should have ended.`, client.requestId,
+      "Run screenrig agent connect to see the request's current state.");
+  }
+  await clearAgentConnection(runtime, resolved, pending.connection_id, true);
+  return {
+    envelope: successEnvelope({ status: connection.status, connection_id: pending.connection_id, request_submitted: true, local_state_cleared: true }, { request_id: client.requestId }),
+    exitCode: ExitCode.Success,
+    human: humanLines("Agent connection cancelled", [["status", connection.status], ["connection_id", pending.connection_id]]),
+  };
+}
+
+async function clearUnsentAgentConnection(runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>): Promise<void> {
+  const fsLike = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
+  await withConfigLock(resolved.configPath, fsLike, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
+    const current = await readConfigFile(resolved.configPath, fsLike);
+    if (!current?.agent_connection || current.agent_connection.connection_id) return;
+    const { agent_connection: _unsent, ...rest } = current;
+    await writeConfigAtomic(resolved.configPath, { ...rest, updated_at: runtime.now().toISOString() }, fsLike);
+  });
+}
+
 async function agentConnect(
   args: ParsedArgs,
   runtime: CliRuntime,
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<CommandResult> {
+  if (flagBool(args.flags, "cancel")) return agentConnectCancel(args, runtime, resolved);
 
   requireFlagValue(args, "name", "Office MacBook Codex");
   requireFlagValue(args, "timeout", "86400000");

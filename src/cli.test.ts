@@ -709,6 +709,80 @@ function agentConnectionEnvelope(recipient: { kty: "OKP"; crv: "X25519"; x: stri
   };
 }
 
+async function pendingConnectionConfig(prefix: string) {
+  const configDir = await testTemp(prefix);
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const configPath = path.join(configDir, "screenrig", "config.json");
+  await writeConfigAtomic(configPath, {
+    api_url: "https://api.screenrig.ai",
+    agent_connection: {
+      capabilities: [...AGENT_CAPABILITIES],
+      private_jwk: generateAgentConnectionKey(),
+      connection_id: "acn_CANCELAAAAAAAAAAAAAAAA",
+      connection_token: `sac_${"C".repeat(43)}`,
+      approval_url: "https://screenrig.ai/dashboard/agents/connect/acn_CANCELAAAAAAAAAAAAAAAA",
+      expires_at: "2026-08-15T17:00:00.000Z",
+    },
+  }, fsLike);
+  return { configDir, fsLike, configPath };
+}
+
+function cancelledConnection(status: string) {
+  return { connection_id: "acn_CANCELAAAAAAAAAAAAAAAA", name: "cli", agent_type: "cli", status, capabilities: [...AGENT_CAPABILITIES],
+    expires_at: "2026-08-15T17:00:00.000Z", created_at: "2026-08-14T17:00:00.000Z" };
+}
+
+test("agent connect --cancel withdraws the pending request with its connection bearer and clears local state", async () => {
+  for (const status of ["cancelled", "expired"]) {
+    const { configDir, fsLike, configPath } = await pendingConnectionConfig("agent-cancel-");
+    const transport = new FakeTransport().on("POST", "/api/agent-connections/acn_CANCELAAAAAAAAAAAAAAAA/cancel", () => ({
+      status: 200, headers: { "cache-control": "private, no-store" }, body: cancelledConnection(status),
+    }));
+    try {
+      const result = await withRuntime(["--json", "agent", "connect", "--cancel"], transport, { fs: fsLike });
+      assert.equal(result.code, 0, result.stdout);
+      assert.equal(JSON.parse(result.stdout).data.status, status);
+      const call = transport.calls[0]!;
+      assert.equal(call.headers?.authorization, `ScreenRig-Agent-Connect sac_${"C".repeat(43)}`);
+      assert.equal(call.body, undefined);
+      assert.equal((await readConfigFile(configPath, fsLike))?.agent_connection, undefined);
+      assert.doesNotMatch(result.stdout, /sac_|private_jwk/);
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("agent connect --cancel keeps an approved request and points at finishing it, and needs a pending request", async () => {
+  const { configDir, fsLike, configPath } = await pendingConnectionConfig("agent-cancel-approved-");
+  const transport = new FakeTransport().on("POST", "/api/agent-connections/acn_CANCELAAAAAAAAAAAAAAAA/cancel", () => ({
+    status: 409, headers: { "content-type": "application/problem+json" },
+    body: { status: 409, code: "agent_connection_conflict", title: "Agent connection is already resolved", detail: "This request was already approved; use agent disconnect." },
+  }));
+  try {
+    const refused = await withRuntime(["--json", "agent", "connect", "--cancel"], transport, { fs: fsLike });
+    assert.equal(refused.code, ExitCode.Conflict, refused.stdout);
+    assert.equal(JSON.parse(refused.stdout).error.next.command, "screenrig agent connect");
+    assert.ok((await readConfigFile(configPath, fsLike))?.agent_connection, "an approved request stays resumable");
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+  const none = new FakeTransport();
+  const empty = await withRuntime(["--json", "agent", "connect", "--cancel"], none);
+  try {
+    assert.equal(empty.code, ExitCode.Usage, empty.stdout);
+    assert.equal(none.calls.length, 0);
+  } finally {
+    await rm(empty.configDir, { recursive: true, force: true });
+  }
+  const conflicting = await withRuntime(["--json", "agent", "connect", "--cancel", "--wait"], new FakeTransport());
+  try {
+    assert.match(JSON.parse(conflicting.stdout).error.detail, /--cancel cannot be used with --wait|--wait cannot be used with --cancel/);
+  } finally {
+    await rm(conflicting.configDir, { recursive: true, force: true });
+  }
+});
+
 test("agent connect validates capability flags before network access", async () => {
   for (const flags of [["--capability", "unknown"], ["--capability", ""], ["--capability"], ["--capability", "screens", "--capability", "screens"]]) {
     const transport = new FakeTransport();
