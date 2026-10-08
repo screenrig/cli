@@ -1,5 +1,6 @@
 import { CliError, networkError, normalizeProblem, timeoutError } from "../problems.js";
 import { redactText } from "../redact.js";
+import { USER_AGENT } from "../user-agent.js";
 import type {
   Transport,
   TransportByteStream,
@@ -63,6 +64,7 @@ export class FetchTransport implements Transport {
 
   private headers(req: TransportRequest): Record<string, string> {
     const headers: Record<string, string> = {
+      "user-agent": USER_AGENT,
       accept: req.binary ? "image/webp" : req.json === false ? "*/*" : "application/json",
       ...req.headers,
     };

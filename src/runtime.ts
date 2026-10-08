@@ -5,6 +5,7 @@ import { Readable, type Writable } from "node:stream";
 import type { Transport } from "./transport/types.js";
 import type { ConfigFs } from "./config.js";
 import type { OperationLogger } from "./log/types.js";
+import { USER_AGENT } from "./user-agent.js";
 import { openExternalUrl, openLocalPath, type OpenPath, type OpenUrl } from "./open-url.js";
 
 export interface CliRuntime {
@@ -202,7 +203,7 @@ export function fetchSignedRawPut(fetchImpl: typeof fetch = fetch): SignedRawPut
       if (remaining !== undefined && remaining <= 0) throw new Error("Media upload session expired.");
       const response = await fetchImpl(request.url, {
         method: request.method,
-        headers: request.headers,
+        headers: { "user-agent": USER_AGENT, ...request.headers },
         body,
         credentials: request.credentials,
         redirect: request.redirect,

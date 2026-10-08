@@ -268,3 +268,18 @@ test("a connection failure names its cause instead of a bare 'fetch failed'", as
     return true;
   });
 });
+
+test("every request kind carries the screenrig-cli User-Agent", async () => {
+  const seen: Array<string | undefined> = [];
+  const transport = new FetchTransport("https://api.screenrig.ai/", "sr_live_test", async (_url, init) => {
+    seen.push((init?.headers as Record<string, string>)["user-agent"]);
+    return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+  });
+  await transport.request({ method: "GET", path: "/api/screens" });
+  await transport.stream({ method: "GET", path: "/stream/events" }).catch(() => undefined);
+  await transport.download({ method: "GET", path: "/api/media/med_x/content" });
+  assert.equal(seen.length, 3);
+  for (const agent of seen) {
+    assert.match(agent ?? "", new RegExp(`^screenrig-cli/\\d{2}\\.\\d{2}\\.\\d+(-dev)? \\(${process.platform}; ${process.arch}\\)$`));
+  }
+});

@@ -11,6 +11,7 @@ import type { ProblemNext } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
 import { CliError, fileError, makeProblem } from "./problems.js";
 import { removeOnSignal, shellQuote, tempPathFor } from "./temp-file.js";
+import { USER_AGENT } from "./user-agent.js";
 
 /**
  * The native 2D renderer (`@napi-rs/canvas`) loads only when a command draws.
@@ -189,7 +190,7 @@ export async function installRenderer(options: {
   const again = rerun(argv, "Run this command again; the renderer is downloaded once and then cached.");
   let tarball: Buffer;
   try {
-    const response = await options.fetch(entry.resolved, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+    const response = await options.fetch(entry.resolved, { headers: { "user-agent": USER_AGENT }, signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     tarball = Buffer.from(await response.arrayBuffer());
   } catch (error) {
