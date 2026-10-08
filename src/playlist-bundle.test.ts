@@ -757,7 +757,7 @@ test("two declaration 429s before any successful upload preserve the latest rate
       assert.equal(error.problem.retry_after_seconds, 11);
       assert.match(error.problem.detail, /remains limited for 11 seconds/);
       assert.match(error.problem.detail, /Retry-After is 11 seconds/);
-      assert.match(error.problem.next?.reason ?? "", /Wait 11 seconds/);
+      assert.match(error.problem.hint ?? "", /Wait 11 seconds/);
       assert.deepEqual(error.problem.errors, []);
       assert.doesNotMatch(error.problem.detail, /partial|confirmed ready|cleanup/i);
       return true;
@@ -796,7 +796,7 @@ test("two declaration 429s after a ready upload preserve Retry-After and report 
       assert.equal(error.problem.retry_after_seconds, 13);
       assert.match(error.problem.detail, /remains limited for 13 seconds/);
       assert.match(error.problem.detail, /Retry-After is 13 seconds/);
-      assert.match(error.problem.next?.reason ?? "", /Wait 13 seconds/);
+      assert.match(error.problem.hint ?? "", /Wait 13 seconds/);
       assert.match(error.problem.detail, /partially complete: 1 new media object is confirmed ready/);
       assert.match(error.problem.detail, /No playlist write was started, no cleanup was attempted, and no media was deleted/);
       assert.deepEqual(error.problem.errors, [{ code: "confirmed_media_ready", media_id: "med_UPLOADED_0" }]);
@@ -838,7 +838,7 @@ test("playlist-write 429 preserves Retry-After and reports an unknown write outc
       assert.equal(error.problem.retry_after_seconds, 17);
       assert.match(error.problem.detail, /remains limited for 17 seconds/);
       assert.match(error.problem.detail, /Retry-After is 17 seconds/);
-      assert.match(error.problem.next?.reason ?? "", /Wait 17 seconds/);
+      assert.match(error.problem.hint ?? "", /Wait 17 seconds/);
       assert.match(error.problem.next?.reason ?? "", /Read back the destination project/);
       assert.match(error.problem.next?.reason ?? "", /same idempotency key/);
       assert.match(error.problem.detail, /1 new media object is confirmed ready/);

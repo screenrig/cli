@@ -9,7 +9,10 @@ import {
   type ScreenRigConfig,
 } from "./config.js";
 import { isValidIdempotencyKey, newIdempotencyKey, randomPrefixedId } from "./ids.js";
-import { configError } from "./problems.js";
+import { CliError, configError } from "./problems.js";
+
+/** Refusals a resume cannot fix; 408, 409, 410 and 429 keep the pending enrollment. */
+const DEFINITE_ENROLL_REFUSALS = new Set([400, 403, 404, 422]);
 
 export interface EnrollmentCredential {
   token: string;
@@ -149,7 +152,9 @@ export async function ensureCredential(options: {
         updated_at: runtime.now().toISOString(),
       });
       await writeConfigAtomic(resolved.configPath, pending, runtime.fs);
-      const credential = await options.enroll({
+      let credential: Awaited<ReturnType<typeof options.enroll>>;
+      try {
+        credential = await options.enroll({
         clientId: enrollment.client_id,
         idempotencyKey: enrollment.idempotency_key,
         ...(enrollment.email !== undefined ? { email: enrollment.email } : {}),
@@ -157,7 +162,16 @@ export async function ensureCredential(options: {
         ...(enrollment.project_name !== undefined ? { projectName: enrollment.project_name } : {}),
         ...(enrollment.organization !== undefined ? { organization: enrollment.organization } : {}),
         ...(enrollment.intent ? { intent: enrollment.intent } : {}),
-      });
+        });
+      } catch (error) {
+        // A definite refusal (the feature is off, the claim or input is invalid)
+        // cannot succeed on a resume, so leave no pending claim or address behind.
+        if (error instanceof CliError && (error.problem.code === "feature_unavailable" || DEFINITE_ENROLL_REFUSALS.has(error.problem.status))) {
+          const { enrollment: _refused, ...rest } = current ?? { api_url: resolved.apiUrl };
+          await writeConfigAtomic(resolved.configPath, { ...rest, api_url: resolved.apiUrl }, runtime.fs);
+        }
+        throw error;
+      }
       if (!credential.token || credential.token.trim() !== credential.token) {
         throw configError("Enrollment returned an invalid credential.");
       }

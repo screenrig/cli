@@ -130,7 +130,7 @@ test("local guidance never replaces a server hint or next", () => {
   assert.match(older.hint ?? "", /storage limit/);
   const olderLimited = withRetryAfter({ ...PAYMENT_BASE, status: 429, code: "rate_limited" }, 90);
   assert.match(olderLimited.hint ?? "", /Wait 2 minutes/);
-  assert.equal(olderLimited.next?.command, "retry the same command");
+  assert.equal(olderLimited.next, undefined, "no invented command");
 });
 
 test("normalizeProblem carries hint, next.argv, retryable, trace_id, and errors from the server", () => {

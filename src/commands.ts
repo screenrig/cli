@@ -2543,10 +2543,12 @@ export const handleAdsSlotsUpdate = commandHandler(async (args, runtime, resolve
 
 /** Link URLs are an explicit one-time output, never logging or recovery metadata. */
 export const handleInvitationsCreate = commandHandler(async (args, runtime, resolved) => {
-  const emails = adsListOption(flagString(args.flags, "email"), "email").map(invitationEmail);
-  if (!emails.length || emails.length > 50) throw usageError("invitations create requires between 1 and 50 email addresses.");
   const kind = flagString(args.flags, "kind") === "ad-buyer" ? "ad_buyer" : "project_member";
   const link = flagBool(args.flags, "link");
+  // A link names no recipient (the server refuses emails with it), so never accept and drop an address.
+  if (link && flagString(args.flags, "email") !== undefined) throw usageError("--link cannot be used with --email: a link names no recipient. Use --email to invite by email, or --link alone.");
+  const emails = link ? [] : adsListOption(flagString(args.flags, "email"), "email").map(invitationEmail);
+  if (!link && (!emails.length || emails.length > 50)) throw usageError("invitations create requires --link, or --email with 1 to 50 addresses.");
   const screenIds = adsListOption(flagString(args.flags, "screen-id"), "screen-id");
   const slotIds = adsListOption(flagString(args.flags, "slot-id"), "slot-id");
   const policy = flagString(args.flags, "policy");
@@ -2604,10 +2606,14 @@ export const handleInvitationsList = commandHandler(async (args, runtime, resolv
 export const handleInvitationsRevoke = commandHandler(async (args, runtime, resolved) => {
   const id = args.positionals[2];
   if (!id) throw usageError("invitations revoke requires ID.");
-  return adsMutation(args, runtime, resolved, {
-    method: "POST", path: `/api/invitations/${encodeURIComponent(id)}/revoke`,
-    human: `Revoked invitation ${id}.`,
-  });
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  // The route answers 204 with no body; report what happened rather than an empty object.
+  await client.call({ method: "POST", path: `/api/invitations/${encodeURIComponent(id)}/revoke`, idempotent: true });
+  return {
+    envelope: successEnvelope({ id, status: "revoked" }, { request_id: client.requestId }),
+    exitCode: ExitCode.Success,
+    human: humanLines("Invitation revoked", [["id", id], ["status", "revoked"]]),
+  };
 });
 
 export const handleAdsMembershipsList = commandHandler((args, runtime, resolved) =>
@@ -5637,7 +5643,7 @@ type ScreenshotFailure = "timed_out" | "unsupported_surface" | "capture_failed" 
 
 const SCREENSHOT_FAILURE_DETAIL: Record<ScreenshotFailure, string> = {
   timed_out: "The Player did not upload the screenshot before the request expired (timed_out).",
-  unsupported_surface: "The Player cannot capture the page it is showing now (unavailable: unsupported_surface); an iframe page from another site, for example, cannot be captured.",
+  unsupported_surface: "The Player cannot capture the page it is showing now (unavailable: unsupported_surface).",
   capture_failed: "The Player tried to capture its screen and failed (unavailable: capture_failed).",
   unavailable: "The Player reported the screenshot as unavailable.",
   deadline: "No screenshot arrived before --timeout; the Player may still upload it (pending).",

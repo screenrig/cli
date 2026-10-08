@@ -379,7 +379,8 @@ test("webhook test rate limiting keeps the exit-7 convention", async () => {
   const limited = await cli(["--json", "webhooks", "test", id], transport, env);
   assert.equal(limited.code, ExitCode.RateLimited, limited.stdout);
   assert.equal(limited.envelope.error!.code, "rate_limited");
-  assert.equal(limited.envelope.error!.next!.command, "retry the same command");
+  assert.equal(limited.envelope.error!.next, undefined);
+  assert.match(limited.envelope.error!.detail, /webhook-test-project limit reached\. Retry-After is 12 seconds\./);
 });
 
 test("a secret answer that stdout cannot accept keeps the saved key for a replay", async () => {

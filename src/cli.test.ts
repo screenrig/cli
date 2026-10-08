@@ -412,6 +412,27 @@ test("agentid_claim_invalid names signing in at the API host or enrolling by ema
   await rm(configDir, { recursive: true, force: true });
 });
 
+test("an AgentID enrollment refused as feature_unavailable leaves no pending claim behind", async () => {
+  const claim = `agid_${"F".repeat(43)}`;
+  const configDir = await testTemp("enroll-agentid-off-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const off = new FakeTransport().on("POST", "/api/enrollments", () => ({
+    status: 404, headers: { "content-type": "application/problem+json" },
+    body: { status: 404, code: "feature_unavailable", title: "Feature unavailable", detail: "AgentID enrollment is not enabled here.", retryable: false },
+  }));
+  try {
+    const refused = await withRuntime(["--json", "agent", "enroll", "--agentid-claim", claim, "--organization", "Example organization"], off, { fs: fsLike });
+    assert.equal(JSON.parse(refused.stdout).error.code, "feature_unavailable");
+    const saved = await readConfigFile(path.join(configDir, "screenrig", "config.json"), fsLike);
+    assert.equal(saved?.enrollment, undefined);
+    assert.equal(JSON.stringify(saved ?? {}).includes(claim), false);
+    const byEmail = await withRuntime(["--json", "agent", "enroll", "--email", "owner@example.com", "--organization", "Example organization"], memoryBackend(), { fs: fsLike });
+    assert.equal(byEmail.code, ExitCode.Success, byEmail.stdout);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
 test("agentid_already_enrolled names agent connect", async () => {
   const claim = `agid_${"E".repeat(43)}`;
   const transport = memoryBackend({ agentidClaims: { [claim]: "already_enrolled" } });
@@ -3836,12 +3857,12 @@ test("a rate-limited submission surfaces Retry-After instead of a bare 429", asy
     );
     assert.equal(result.code, 7, `rate limiting must use the RateLimited exit code: ${result.stdout}`);
     const envelope = JSON.parse(result.stdout) as {
-      error: { code: string; detail: string; retry_after_seconds: number; next?: { reason: string } };
+      error: { code: string; detail: string; retry_after_seconds: number; next?: { reason: string }; hint?: string };
     };
     assert.equal(envelope.error.code, "rate_limited");
     assert.equal(envelope.error.retry_after_seconds, 180);
     assert.match(envelope.error.detail, /Retry-After is 180 seconds/);
-    assert.match(String(envelope.error.next?.reason), /Wait 3 minutes/);
+    assert.match(String(envelope.error.hint), /Wait 3 minutes/);
 
     const human = await withRuntime(["--human", "feedback", "bug", "Title", "--body", "Body"], transport, { fs: fsLike });
     assert.match(human.stderr, /retry_after_seconds: 180/);
@@ -3996,6 +4017,20 @@ function inviteTransport(): FakeTransport {
   return transport;
 }
 
+test("invitations create refuses --link with --email instead of dropping the address", async () => {
+  for (const argv of [["--link", "--email", "guest@example.com"], []]) {
+    const transport = new FakeTransport();
+    const result = await withAuthenticatedRuntime(["--json", "invitations", "create", ...argv], transport);
+    try {
+      assert.equal(result.code, ExitCode.Usage, result.stdout);
+      assert.match(JSON.parse(result.stdout).error.detail, argv.length ? /--link cannot be used with --email|--email cannot be used with --link/ : /exactly one of --email or --link/);
+      assert.equal(transport.calls.length, 0);
+    } finally {
+      await rm(result.configDir, { recursive: true, force: true });
+    }
+  }
+});
+
 test("invitations create --link emits its secret once in the selected format and never persists or logs it", async () => {
   for (const mode of ["--json", "--human"]) {
     const secret = "L".repeat(43);
@@ -4008,7 +4043,7 @@ test("invitations create --link emits its secret once in the selected format and
       body: { invitations: [{ ...invitationRecord(), delivery: "link", status: "issued", url: url.href }] },
     }));
     const result = await withAuthenticatedRuntime(
-      [mode, "invitations", "create", "--email", "guest@example.com", "--link"],
+      [mode, "invitations", "create", "--link"],
       transport,
       { logger },
     );
@@ -4052,7 +4087,7 @@ test("unified ad-buyer invitations preserve scope, filter listings, and revoke t
     .on("POST", `/api/invitations/${invitation.id}/revoke`, request => {
       assert.ok(request.headers?.["idempotency-key"]);
       invitation = { ...invitation, status: "revoked" };
-      return { status: 200, headers, body: invitation };
+      return { status: 204, headers, body: undefined };
     });
   const created = await withAuthenticatedRuntime([
     "--json", "invitations", "create", "--kind", "ad-buyer", "--email", "buyer@example.com,second@example.com",
@@ -4065,7 +4100,7 @@ test("unified ad-buyer invitations preserve scope, filter listings, and revoke t
   assert.deepEqual(JSON.parse(queued.stdout).data, { items: [invitation], next_cursor: "" });
   const revoked = await withAuthenticatedRuntime(["--json", "invitations", "revoke", invitation.id], transport);
   assert.equal(revoked.code, ExitCode.Success, revoked.stdout);
-  assert.equal(JSON.parse(revoked.stdout).data.status, "revoked");
+  assert.deepEqual(JSON.parse(revoked.stdout).data, { id: invitation.id, status: "revoked" });
   const after = await withAuthenticatedRuntime(["--json", "invitations", "list", "--kind", "ad-buyer", "--status", "queued"], transport);
   assert.equal(after.code, ExitCode.Success, after.stdout);
   assert.deepEqual(JSON.parse(after.stdout).data.items, []);

@@ -300,7 +300,7 @@ function withGuidance(problem: NormalizedProblem, guidance: { hint?: string; nex
 /**
  * A bare 429 tells an agent nothing actionable. The server declares
  * `Retry-After` on every rate-limited response, so fold it into the detail and
- * the next-action guidance instead of discarding the header.
+ * the hint instead of discarding the header.
  */
 export function withRetryAfter(problem: NormalizedProblem, retryAfterSeconds: number | undefined): NormalizedProblem {
   if (retryAfterSeconds === undefined) return problem;
@@ -313,12 +313,10 @@ export function withRetryAfter(problem: NormalizedProblem, retryAfterSeconds: nu
   const detail = problem.detail.includes("Retry-After")
     ? problem.detail
     : `${problem.detail} Retry-After is ${retryAfterSeconds} seconds.`;
+  // detail is the server's and names the limit that tripped; add the wait, but no
+  // command: the action is to wait, then run the same command again.
   return withGuidance({ ...problem, detail, retry_after_seconds: retryAfterSeconds }, {
     hint: `Wait ${interval}, then run the same command again. Do not retry sooner; each early retry is refused too.`,
-    next: {
-      command: "retry the same command",
-      reason: `The project rate limit is in effect. Wait ${interval} before retrying.`,
-    },
   });
 }
 
