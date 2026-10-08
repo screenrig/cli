@@ -1,5 +1,5 @@
 import type { WriteRecovery } from "./write-recovery.js";
-import { creditsLowWarnings, observeCreditsRemaining, parseCreditsRemainingHeader } from "./credits.js";
+import { creditsLowWarnings, observeCreditsRemaining, parseCreditsHeaders } from "./credits.js";
 import { ExitCode } from "./exit-codes.js";
 import { REQUEST_ID_MAX, REQUEST_ID_MIN, isValidIdempotencyKey, isValidRequestId, newIdempotencyKey, newRequestId } from "./ids.js";
 import {
@@ -215,7 +215,7 @@ export class ApiClient {
     if (pending && response.status >= 400 && response.status < 500 && response.status !== 408) {
       await recovery!.clear(pending);
     }
-    const remaining = this.token ? parseCreditsRemainingHeader(response.headers) : undefined;
+    const remaining = this.token ? parseCreditsHeaders(response.headers) : undefined;
     const requestId = response.headers["x-request-id"] ?? headers["x-request-id"];
     if (response.status >= 400) {
       const problem = normalizeProblem(response.body, {
@@ -294,7 +294,7 @@ export class ApiClient {
       span.error(err);
       throw withTransportHint(err, req.method, false);
     }
-    const remaining = this.token ? parseCreditsRemainingHeader(response.headers) : undefined;
+    const remaining = this.token ? parseCreditsHeaders(response.headers) : undefined;
     const requestId = response.headers["x-request-id"] ?? headers["x-request-id"];
     const lengthHeader = response.headers["content-length"];
     const parsedLength = lengthHeader !== undefined ? Number(lengthHeader) : undefined;

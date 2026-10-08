@@ -5,6 +5,7 @@ import {
   CREDITS_LOW_CODE,
   applyCreditsLowToSuccess,
   creditsLowWarning,
+  parseCreditsHeaders,
   parseCreditsInteger,
   parseCreditsRemainingHeader,
 } from "./credits.js";
@@ -57,4 +58,14 @@ test("success envelopes append credits_low without replacing other warnings", ()
   const emptyHuman = applyCreditsLowToSuccess({ envelope: successEnvelope({}), human: "" }, 0);
   assert.equal(emptyHuman.human, "");
   assert.equal(emptyHuman.envelope.warnings[0]?.code, CREDITS_LOW_CODE);
+});
+
+test("the ScreenRig-Credits-Low header carries the server's verdict", () => {
+  assert.deepEqual(parseCreditsHeaders({ "ScreenRig-Credits-Remaining": "0", "ScreenRig-Credits-Low": "false" }), { remaining: 0, low: false });
+  assert.deepEqual(parseCreditsHeaders({ "screenrig-credits-remaining": "10", "screenrig-credits-low": "true" }), { remaining: 10, low: true });
+  assert.deepEqual(parseCreditsHeaders({ "ScreenRig-Credits-Remaining": "10", "ScreenRig-Credits-Low": "maybe" }), { remaining: 10 });
+  assert.equal(parseCreditsHeaders({ "ScreenRig-Credits-Low": "true" }), undefined);
+  assert.equal(creditsLowWarning({ remaining: 0, low: false }), undefined);
+  assert.ok(creditsLowWarning({ remaining: 10, low: true }));
+  assert.ok(creditsLowWarning({ remaining: 10 }));
 });

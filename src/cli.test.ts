@@ -3925,11 +3925,14 @@ function projectRecord(credit_remaining: number): Record<string, unknown> {
   };
 }
 
-function projectShowTransport(opts?: { header?: string; remaining?: number }): FakeTransport {
+function projectShowTransport(opts?: { header?: string; remaining?: number; low?: string }): FakeTransport {
   const transport = new FakeTransport();
   const headers: Record<string, string> = { "x-request-id": "req_project" };
   if (opts?.header !== undefined) {
     headers["ScreenRig-Credits-Remaining"] = opts.header;
+  }
+  if (opts?.low !== undefined) {
+    headers["ScreenRig-Credits-Low"] = opts.low;
   }
   transport.on("GET", "/api/project", () => ({
     status: 200,
@@ -3966,6 +3969,19 @@ test("project show reports integer credit_remaining and warns when remaining is 
   assert.doesNotMatch(human.stdout, /sr_live_|tokidAAAA/);
   assert.match(human.stdout, /warning: Remaining prepaid credit is 0, below 1000 credits\./);
   assert.doesNotMatch(human.stdout, /kCr|stripe|x402|mcr|millicredit|\$/i);
+});
+
+test("ScreenRig-Credits-Low decides credits_low; remaining alone decides only without it", async () => {
+  const warns = async (opts: { header: string; low?: string }) => {
+    const json = await withTokenConfig(projectShowTransport({ ...opts, remaining: Number(opts.header) }), ["--json", "project", "show"]);
+    assert.equal(json.code, 0, json.stdout);
+    return (JSON.parse(json.stdout) as { warnings: Array<{ code: string }> }).warnings.some((item) => item.code === "credits_low");
+  };
+  assert.equal(await warns({ header: "0", low: "false" }), false, "a fresh free account at 0 is not low under launch terms");
+  assert.equal(await warns({ header: "500", low: "true" }), true);
+  assert.equal(await warns({ header: "5000", low: "true" }), true, "the server's verdict wins");
+  assert.equal(await warns({ header: "0" }), true, "an older server without the header falls back to remaining < 1000");
+  assert.equal(await warns({ header: "1000" }), false);
 });
 
 test("remaining header 1000 does not add credits_low", async () => {
