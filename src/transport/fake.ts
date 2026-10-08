@@ -57,8 +57,15 @@ function waitForAbort(signal: AbortSignal | undefined): Promise<void> {
   });
 }
 
+/** The authorization server's endpoints: discovery and /oauth/*. */
+function oauthPath(path: string): boolean {
+  return path.startsWith("/.well-known/oauth-") || path.startsWith("/oauth/");
+}
+
 export class FakeTransport implements Transport {
+  /** API calls. Authorization-server traffic is kept apart in `oauthCalls`. */
   readonly calls: TransportRequest[] = [];
+  readonly oauthCalls: TransportRequest[] = [];
   private readonly routes: FakeRoute[] = [];
   private readonly downloadRoutes: FakeDownloadRoute[] = [];
   private readonly streamChunks: string[] = [];
@@ -95,7 +102,7 @@ export class FakeTransport implements Transport {
   }
 
   async request(req: TransportRequest): Promise<TransportResponse> {
-    this.calls.push(req);
+    (oauthPath(req.path) ? this.oauthCalls : this.calls).push(req);
     const route = this.routes.find((item) => item.method === req.method && matchPath(item.path, req.path));
     if (!route) {
       return this.withExtraHeaders({

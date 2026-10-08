@@ -1,5 +1,7 @@
+import { randomBytes } from "node:crypto";
 import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
 import type { AgentCapability } from "./adapters/protocol.js";
+import { accessClaims } from "./oauth.js";
 import { isResourceID } from "./generated/resource-ids.js";
     import path from "node:path";
     import type { OperationLogger } from "./log/types.js";
@@ -71,6 +73,12 @@ import { isResourceID } from "./generated/resource-ids.js";
          * same idempotency key cannot change intent into a conflicting request.
          */
         intent?: "advertising" | "signage";
+        /**
+         * The credential format this enrollment asked for, fixed with its
+         * idempotency key. An enrollment an older CLI started has none and
+         * resumes with the identical body.
+         */
+        credential_format?: "oauth";
       };
       screen_provision?: {
         idempotency_key: string;
@@ -92,7 +100,52 @@ import { isResourceID } from "./generated/resource-ids.js";
       };
       /** Pending ordinary writes: hashes, keys, timestamps and command names; never payloads. */
       pending_writes?: Record<string, { idempotency_key: string; created_at: string; command?: string; supersede?: string }>;
+      /**
+       * The OAuth grant: the rotating refresh token of this installation's
+       * session. Access tokens live in the project slots' `token` and in
+       * `identity_token`, like the legacy credentials they replace.
+       */
+      oauth?: OAuthGrantState;
+      /** A legacy-credential exchange in flight: its request_id is reused for every retry within 10 minutes. */
+      oauth_exchange?: { request_id: string; source: string; started_at: string };
+      /** The server issued no OAuth tokens when last asked; the legacy credential stays in use until then. */
+      oauth_unavailable_until?: string;
+      /** A device login waiting for approval. The device code is a secret: it is sent only to the token endpoint. */
+      login?: PendingLogin;
+      /** Set by logout, so the next command names screenrig login. */
+      signed_out_at?: string;
       updated_at?: string;
+    }
+
+    export interface OAuthGrantState {
+      /** The authorization server that issued the grant; checked apart from the API origin. */
+      issuer: string;
+      client_id: string;
+      refresh_token: string;
+      /** Unix seconds when the refresh family ends at the latest. */
+      refresh_expires_at?: number;
+      /** Whether the grant carries identity access (project list and create). */
+      identity?: boolean;
+      /** A refresh in flight: a retry of the same refresh within 60 s reuses its request_id. */
+      refresh_request?: { request_id: string; from: string; started_at: string };
+      /** Legacy credentials an exchange replaced, kept until the first request a new access token authenticates. */
+      legacy?: { token?: string; identity_token?: string; projects?: Record<string, string> };
+    }
+
+    export interface PendingLogin {
+      /** The resume handle. It holds no secret. */
+      id: string;
+      issuer: string;
+      device_code: string;
+      user_code: string;
+      verification_uri: string;
+      verification_uri_complete: string;
+      expires_at: string;
+      interval: number;
+      access: "read" | "manage";
+      project_id?: string;
+      /** The login adds a project to this installation's existing grant. */
+      extends_grant?: boolean;
     }
 
     export type StoredProjectState = Pick<ScreenRigConfig,
@@ -308,6 +361,52 @@ import { isResourceID } from "./generated/resource-ids.js";
       retryMs?: number;
       staleMs?: number;
       maxWaitMs?: number;
+      /** Whether the lock owner's process still runs. */
+      isAlive?: (pid: number) => boolean;
+    }
+
+    interface LockOwner {
+      pid: number;
+      nonce: string;
+      acquired_at: number;
+    }
+
+    const LOCK_OWNER_FILE = "owner.json";
+
+    function processAlive(pid: number): boolean {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (err) {
+        return (err as NodeJS.ErrnoException).code === "EPERM";
+      }
+    }
+
+    async function readLockOwner(lockPath: string, fsLike: ConfigFs): Promise<LockOwner | undefined> {
+      let handle;
+      try {
+        handle = await fsLike.open(path.join(lockPath, LOCK_OWNER_FILE), "r");
+      } catch {
+        return undefined;
+      }
+      try {
+        const owner = JSON.parse(await handle.readFile("utf8")) as Partial<LockOwner>;
+        return typeof owner.pid === "number" && typeof owner.nonce === "string" && typeof owner.acquired_at === "number"
+          ? { pid: owner.pid, nonce: owner.nonce, acquired_at: owner.acquired_at } : undefined;
+      } catch {
+        return undefined;
+      } finally {
+        await handle.close();
+      }
+    }
+
+    async function writeLockOwner(lockPath: string, owner: LockOwner, fsLike: ConfigFs): Promise<void> {
+      const handle = await fsLike.open(path.join(lockPath, LOCK_OWNER_FILE), "wx", 0o600);
+      try {
+        await handle.writeFile(JSON.stringify(owner), "utf8");
+      } finally {
+        await handle.close();
+      }
     }
 
     /**
@@ -325,39 +424,66 @@ import { isResourceID } from "./generated/resource-ids.js";
       const lockPath = `${configPath}.lock`;
       const retryMs = options.retryMs ?? 50;
       const staleMs = options.staleMs ?? 30_000;
-      const maxWaitMs = options.maxWaitMs ?? 10_000;
+      // A refresh holds the lock for at most 15 s (one 10 s HTTP attempt plus I/O).
+      const maxWaitMs = options.maxWaitMs ?? 20_000;
       const started = options.now();
       await fsLike.mkdir(dir, { recursive: true, mode: 0o700 });
       await fsLike.chmod(dir, 0o700).catch(() => undefined);
 
+      const isAlive = options.isAlive ?? processAlive;
+      const nonce = randomBytes(16).toString("hex");
+      // A live owner past staleMs is reclaimed only when the same nonce is seen on two looks.
+      let observed: string | undefined;
+      const reclaim = async () => {
+        const abandoned = `${lockPath}.stale.${process.pid}.${options.now()}`;
+        try {
+          await fsLike.rename(lockPath, abandoned);
+          await fsLike.rm(abandoned, { recursive: true, force: true });
+        } catch (reclaimError) {
+          const code = (reclaimError as NodeJS.ErrnoException).code;
+          if (code !== "ENOENT" && code !== "EEXIST" && code !== "ENOTEMPTY") {
+            throw reclaimError;
+          }
+        }
+      };
+
       while (true) {
         try {
           await fsLike.mkdir(lockPath, { mode: 0o700 });
+          await writeLockOwner(lockPath, { pid: process.pid, nonce, acquired_at: options.now() }, fsLike);
           break;
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
             throw err;
           }
-          try {
-            const info = await fsLike.stat(lockPath);
-            if (options.now() - info.mtimeMs > staleMs) {
-              const abandoned = `${lockPath}.stale.${process.pid}.${options.now()}`;
-              try {
-                await fsLike.rename(lockPath, abandoned);
-                await fsLike.rm(abandoned, { recursive: true, force: true });
-              } catch (reclaimError) {
-                const code = (reclaimError as NodeJS.ErrnoException).code;
-                if (code !== "ENOENT" && code !== "EEXIST") {
-                  throw reclaimError;
-                }
+          const owner = await readLockOwner(lockPath, fsLike);
+          if (owner) {
+            if (!isAlive(owner.pid)) {
+              await reclaim();
+              continue;
+            }
+            if (options.now() - owner.acquired_at > staleMs) {
+              if (observed === owner.nonce) {
+                await reclaim();
+                continue;
+              }
+              observed = owner.nonce;
+            }
+          } else {
+            // A lock without an owner file comes from an older CLI, or is a
+            // moment from getting one: its age alone decides.
+            try {
+              const info = await fsLike.stat(lockPath);
+              if (options.now() - info.mtimeMs > staleMs) {
+                await reclaim();
+                continue;
+              }
+            } catch (statError) {
+              if ((statError as NodeJS.ErrnoException).code !== "ENOENT") {
+                throw statError;
               }
               continue;
             }
-          } catch (statError) {
-            if ((statError as NodeJS.ErrnoException).code !== "ENOENT") {
-              throw statError;
-            }
-            continue;
           }
           if (options.now() - started >= maxWaitMs) {
             throw configError(`Timed out waiting for the credential lock at ${lockPath}.`);
@@ -369,7 +495,11 @@ import { isResourceID } from "./generated/resource-ids.js";
       try {
         return await callback();
       } finally {
-        await fsLike.rm(lockPath, { recursive: true, force: true });
+        // Release only this holder's lock: one reclaimed by another process is theirs now.
+        const owner = await readLockOwner(lockPath, fsLike);
+        if (owner?.nonce === nonce) {
+          await fsLike.rm(lockPath, { recursive: true, force: true });
+        }
       }
       });
     }
@@ -388,6 +518,8 @@ import { isResourceID } from "./generated/resource-ids.js";
       enrollment?: ScreenRigConfig["enrollment"];
       agentConnection?: ScreenRigConfig["agent_connection"];
       lastAgent?: ScreenRigConfig["last_agent"];
+      /** Logout or an ended session left no credential: the next step is screenrig login. */
+      signedOut?: boolean;
       configPath: string;
       logSocket?: string;
       source: {
@@ -426,6 +558,7 @@ import { isResourceID } from "./generated/resource-ids.js";
 
     function holdsCredential(file: ScreenRigConfig): boolean {
       return Boolean(file.token || file.identity_token || file.agent_connection?.pending_token || file.agent_connection?.connection_token
+        || file.oauth?.refresh_token || file.login?.device_code
         || Object.values(file.projects ?? {}).some((project) => project?.token));
     }
 
@@ -457,6 +590,15 @@ import { isResourceID } from "./generated/resource-ids.js";
       }
       if (!file || !holdsCredential(file)) return;
       const issued = parsedOrigin(issuedFor);
+      // The grant's issuer is bound on its own: an api_url edit never redirects a refresh token.
+      for (const issuer of [file.oauth?.issuer, file.login?.issuer]) {
+        if (issuer !== undefined && parsedOrigin(issuer).origin !== target.origin) {
+          throw configError(`This config holds a sign-in issued by ${parsedOrigin(issuer).origin}; it is never sent to ${target.origin}. Nothing was sent.`, {
+            command: "screenrig --config PATH ...",
+            reason: `Use a separate --config for ${target.origin}.`,
+          });
+        }
+      }
       if (issued.origin !== target.origin) {
         throw configError(`This config holds a credential issued for ${issued.origin}; it is never sent to ${target.origin}. Nothing was sent.`, {
           command: "screenrig --config PATH ...",
@@ -528,10 +670,25 @@ import { isResourceID } from "./generated/resource-ids.js";
         enrollment: file?.enrollment,
         agentConnection: file?.agent_connection,
         lastAgent: file?.last_agent,
+        ...(file?.signed_out_at ? { signedOut: true } : {}),
         configPath,
         logSocket,
         source: { apiUrl: apiSource, token: tokenSource },
       };
+    }
+
+    /**
+     * Whether two stored credentials are the same authority. A legacy
+     * credential is its exact value; an access token is its grant (sid) and,
+     * for a project credential, its project, so a refresh by another process
+     * is not a change of credential.
+     */
+    export function sameCredential(a: string | undefined, b: string | undefined, kind: "project" | "identity" = "project"): boolean {
+      if (a === b) return true;
+      const left = accessClaims(a);
+      const right = accessClaims(b);
+      if (!left?.sid || left.sid !== right?.sid) return false;
+      return kind === "identity" || left.prj === right.prj;
     }
 
     /** Whether this installation holds a credential at all. */

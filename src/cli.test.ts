@@ -184,7 +184,7 @@ test("pairing requires explicit enrollment and then preserves the original pairi
   const enrollBody = transport.calls[0]?.body as { client_id?: string; email?: string };
   assert.match(enrollBody.client_id ?? "", /^cli_[A-Za-z0-9_-]{43}$/);
   assert.equal(enrollBody.email, "Owner@example.com");
-  assert.deepEqual(Object.keys(enrollBody).sort(), ["agent_type", "client_id", "email", "organization", "platform", "version"]);
+  assert.deepEqual(Object.keys(enrollBody).sort(), ["agent_type", "client_id", "credential_format", "email", "organization", "platform", "version"]);
   const verification = transport.calls.find((call) => call.path === "/api/project");
   assert.match(verification?.headers?.authorization ?? "", /^Bearer sr_live_/);
   const pairing = transport.calls.find((call) => call.path === "/api/screens/pair");
@@ -256,7 +256,7 @@ test("enrollment sends no beta_key: the flag is gone and SCREENRIG_BETA_KEY is n
     assert.equal(code, 0, stdout);
     const body = transport.calls.find((call) => call.path === "/api/enrollments")?.body as Record<string, unknown>;
     assert.match(String(body.client_id), /^cli_[A-Za-z0-9_-]{43}$/);
-    assert.deepEqual(Object.keys(body).sort(), ["agent_type", "client_id", "email", "organization", "platform", "version"]);
+    assert.deepEqual(Object.keys(body).sort(), ["agent_type", "client_id", "credential_format", "email", "organization", "platform", "version"]);
     const refused = await withRuntime(["--json", "--beta-key", "x", "agent", "enroll", "--email", "owner@example.com"], new FakeTransport());
     assert.equal(refused.code, ExitCode.Usage, refused.stdout);
     await rm(refused.configDir, { recursive: true, force: true });
@@ -279,6 +279,7 @@ test("agent enroll --agentid-claim sends the claim instead of an email and store
   const enroll = transport.calls.find((call) => call.path === "/api/enrollments");
   assert.deepEqual(enroll?.body, {
     client_id: (enroll?.body as { client_id: string }).client_id,
+    credential_format: "oauth",
     agentid_claim: claim,
     organization: "Example organization",
     agent_type: "cli",
@@ -412,6 +413,7 @@ test("agent enroll names the organization independently of its agent and reports
   const enrollment = transport.calls.find((call) => call.path === "/api/enrollments");
   assert.deepEqual(enrollment?.body, {
     client_id: (enrollment?.body as { client_id: string }).client_id,
+    credential_format: "oauth",
     email: "Owner@example.com",
     name: "Office Codex",
     organization: "Office Screens",

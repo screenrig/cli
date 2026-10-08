@@ -1,4 +1,5 @@
-import { CliError, networkError, normalizeProblem, timeoutError } from "../problems.js";
+import { ExitCode } from "../exit-codes.js";
+import { CliError, makeProblem, networkError, normalizeProblem, timeoutError } from "../problems.js";
 import { redactText } from "../redact.js";
 import { USER_AGENT } from "../user-agent.js";
 import type {
@@ -55,6 +56,19 @@ function buildUrl(base: string, path: string, query?: Record<string, string | un
   return url.toString();
 }
 
+/** A request that carries a credential never follows a redirect (manual), so a 3xx is refused here. */
+function carriesCredential(req: TransportRequest, headers: Record<string, string>): boolean {
+  return req.credential === true || headers.authorization !== undefined;
+}
+
+function redirectRefused(req: TransportRequest, status: number): CliError {
+  return new CliError(makeProblem("credential_redirect_refused", "Redirect refused", status,
+    `The API answered ${req.method} ${req.path} with a redirect (HTTP ${status}). The CLI never follows a redirect with a credential, so nothing was sent onward.`, {
+      request_id: req.headers?.["x-request-id"],
+      hint: "Check the API origin with screenrig doctor. A proxy in front of the API may be redirecting requests.",
+    }), ExitCode.Unexpected);
+}
+
 export class FetchTransport implements Transport {
   constructor(
     private readonly apiUrl: string,
@@ -98,13 +112,20 @@ export class FetchTransport implements Transport {
       req.timeout_ms && req.timeout_ms > 0
         ? setTimeout(() => controller.abort(), req.timeout_ms)
         : undefined;
+    const requestHeaders = this.headers(req);
+    const manual = carriesCredential(req, requestHeaders);
     try {
       const response = await this.fetchImpl(buildUrl(this.apiUrl, req.path, req.query), {
         method: req.method,
-        headers: this.headers(req),
+        headers: requestHeaders,
         body: this.serialize(req.body),
         signal,
+        redirect: manual ? "manual" : "follow",
       });
+      if (manual && response.status >= 300 && response.status < 400) {
+        await response.body?.cancel().catch(() => undefined);
+        throw redirectRefused(req, response.status);
+      }
       const headers = headerMap(response.headers);
       if (req.binary) {
         const bytes = new Uint8Array(await response.arrayBuffer());
@@ -117,6 +138,7 @@ export class FetchTransport implements Transport {
       const text = await response.text();
       return { status: response.status, headers, body: decodeTextBody(text, headers["content-type"] ?? ""), rawText: text };
     } catch (err) {
+      if (err instanceof CliError) throw err;
       if (signal.aborted || (err as Error).name === "AbortError") {
         throw timeoutError("API request timed out", req.headers?.["x-request-id"]);
       }
@@ -130,20 +152,24 @@ export class FetchTransport implements Transport {
 
   async stream(req: TransportRequest): Promise<TransportStream> {
     let response: Response;
+    const streamHeaders = { ...this.headers(req), accept: "text/event-stream" };
+    const manual = carriesCredential(req, streamHeaders);
     try {
       response = await this.fetchImpl(buildUrl(this.apiUrl, req.path, req.query), {
         method: req.method,
-        headers: {
-          ...this.headers(req),
-          accept: "text/event-stream",
-        },
+        headers: streamHeaders,
         signal: req.signal,
+        redirect: manual ? "manual" : "follow",
       });
     } catch (err) {
       if ((err as Error).name === "AbortError") {
         throw timeoutError("SSE connection timed out", req.headers?.["x-request-id"]);
       }
       throw networkError(fetchFailure(err, "SSE connection failed"), req.headers?.["x-request-id"]);
+    }
+    if (manual && response.status >= 300 && response.status < 400) {
+      await response.body?.cancel().catch(() => undefined);
+      throw redirectRefused(req, response.status);
     }
     if (!response.ok || !response.body) {
       const text = await response.text();
@@ -204,11 +230,14 @@ export class FetchTransport implements Transport {
       idleTimer = undefined;
     };
     let response: Response;
+    const downloadHeaders = { ...this.headers(req), accept: "*/*" };
+    const manual = carriesCredential(req, downloadHeaders);
     try {
       response = await this.fetchImpl(buildUrl(this.apiUrl, req.path, req.query), {
         method: req.method,
-        headers: { ...this.headers(req), accept: "*/*" },
+        headers: downloadHeaders,
         signal,
+        redirect: manual ? "manual" : "follow",
       });
     } catch (err) {
       clearTimers();
@@ -218,6 +247,11 @@ export class FetchTransport implements Transport {
       throw networkError(fetchFailure(err, `${what} failed`), req.headers?.["x-request-id"]);
     }
 
+    if (manual && response.status >= 300 && response.status < 400) {
+      clearTimers();
+      await response.body?.cancel().catch(() => undefined);
+      throw redirectRefused(req, response.status);
+    }
     touch();
     const headers = headerMap(response.headers);
     if (response.status >= 400) {

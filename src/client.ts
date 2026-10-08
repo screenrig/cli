@@ -1,4 +1,5 @@
 import type { WriteRecovery } from "./write-recovery.js";
+import type { NormalizedProblem } from "./envelope.js";
 import { creditsLowWarnings, observeCreditsRemaining, parseCreditsHeaders } from "./credits.js";
 import { ExitCode } from "./exit-codes.js";
 import { REQUEST_ID_MAX, REQUEST_ID_MIN, isValidIdempotencyKey, isValidRequestId, newIdempotencyKey, newRequestId } from "./ids.js";
@@ -68,9 +69,42 @@ function withTransportHint(err: unknown, method: string, keyed: boolean): unknow
   return new CliError({ ...err.problem, hint }, err.exitCode, err.warnings);
 }
 
+/**
+ * Renews an OAuth access token. A request refused with 401 invalid_token is
+ * renewed once and sent once more; the rest of the CLI never sees the change.
+ */
+export interface CredentialRenewal {
+  /** `invalidToken` is whether the refusal carried error="invalid_token". */
+  renewRejected(token: string, invalidToken: boolean): Promise<string | undefined>;
+  noteAuthenticated(token: string): void;
+}
+
+function invalidTokenChallenge(response: { status: number; headers: Record<string, string> }): boolean {
+  return response.status === 401 && /error="invalid_token"/.test(response.headers["www-authenticate"] ?? "");
+}
+
+/** A 401 on a session JWT: the renewal hook decides whether anything can be retried. */
+function refusedSession(response: { status: number }, token: string | undefined): boolean {
+  return response.status === 401 && typeof token === "string" && token.startsWith("eyJ");
+}
+
+/** Read only refusals name the sign-in that grants Manage. */
+function withAccessGuidance(problem: NormalizedProblem): NormalizedProblem {
+  if (problem.code !== "insufficient_access" || problem.next) return problem;
+  return { ...problem, next: { command: "screenrig login --access manage", reason: "This sign-in is Read only for the project. A person approves Manage access in the dashboard." } };
+}
+
+/** A renewed token that is refused again means the session ended. */
+function sessionEnded(problem: NormalizedProblem): NormalizedProblem {
+  return { ...problem, code: "session_ended", title: "Session ended",
+    next: { command: "screenrig login", reason: "The server refused a freshly renewed access token. Sign this installation in again." } };
+}
+
 export interface ApiClientOptions {
   transport: Transport;
   token?: string;
+  /** OAuth access-token renewal; absent for legacy credentials. */
+  auth?: CredentialRenewal;
   /** Fixed for this client; identity credentials require an explicit target. */
   projectId?: string;
   /** `--request-id`: the X-Request-ID of the invocation's first HTTP request, and its invocation_id. */
@@ -122,7 +156,8 @@ export class RequestIds {
 export class ApiClient {
   readonly requestIds: RequestIds;
   readonly idempotencyKey: string;
-  private readonly token?: string;
+  private token?: string;
+  private readonly auth?: CredentialRenewal;
   private readonly projectId?: string;
   private readonly transport: Transport;
   private readonly timeoutMs: number;
@@ -136,6 +171,7 @@ export class ApiClient {
     this.writeRecovery = options.writeRecovery;
     this.requestedKey = options.idempotencyKey;
     this.token = options.token;
+    this.auth = options.auth;
     this.projectId = options.projectId;
     this.timeoutMs = options.timeoutMs ?? 30_000;
     this.creditsOwner = options.creditsOwner;
@@ -200,15 +236,32 @@ export class ApiClient {
       request: summary.request,
     });
     let response: TransportResponse;
-    try {
-      response = await this.transport.request({
-        ...transportRequest,
-        timeout_ms: req.timeout_ms ?? this.timeoutMs,
-        headers,
+    let renewed = false;
+    let sentHeaders = headers;
+    const send = async (sent: Record<string, string>) => {
+      sentHeaders = sent;
+      try {
+        return await this.transport.request({
+          ...transportRequest,
+          timeout_ms: req.timeout_ms ?? this.timeoutMs,
+          headers: sent,
+        });
+      } catch (err) {
+        span.error(err);
+        throw withTransportHint(err, req.method, Boolean(pending));
+      }
+    };
+    response = await send(headers);
+    if (refusedSession(response, this.token) && this.auth && this.token) {
+      const token = await this.auth.renewRejected(this.token, invalidTokenChallenge(response)).catch((err: unknown) => {
+        span.error(err);
+        throw err;
       });
-    } catch (err) {
-      span.error(err);
-      throw withTransportHint(err, req.method, Boolean(pending));
+      if (token && token !== this.token) {
+        this.token = token;
+        renewed = true;
+        response = await send(this.headers(idempotent === true, req.headers, pending?.key ?? idempotencyKey));
+      }
     }
     // A 4xx is a definite refusal: the server did not do the work, so a rerun
     // must send it afresh rather than reuse this key. Only a timeout keeps it.
@@ -216,13 +269,14 @@ export class ApiClient {
       await recovery!.clear(pending);
     }
     const remaining = this.token ? parseCreditsHeaders(response.headers) : undefined;
-    const requestId = response.headers["x-request-id"] ?? headers["x-request-id"];
+    const requestId = response.headers["x-request-id"] ?? sentHeaders["x-request-id"];
     if (response.status >= 400) {
-      const problem = normalizeProblem(response.body, {
+      const normalized = normalizeProblem(response.body, {
         status: response.status,
         request_id: requestId,
         bodyText: errorBodyText(response.rawText, response.body),
       });
+      const problem = renewed && invalidTokenChallenge(response) ? sessionEnded(normalized) : withAccessGuidance(normalized);
       const wrapped = new CliError(
         withPaymentGuidance(
           withQuotaGuidance(
@@ -259,6 +313,7 @@ export class ApiClient {
       span.error(err, { status: response.status, request_id: requestId, content_type: response.headers["content-type"] });
       throw err;
     }
+    if (this.auth && this.token) this.auth.noteAuthenticated(this.token);
     span.response(response.status, {
       request_id: requestId,
       // Never put these bodies in generic logging fields, even before redaction.
@@ -273,7 +328,7 @@ export class ApiClient {
   }
 
   async download(req: Omit<TransportRequest, "headers"> & { headers?: Record<string, string> }): Promise<TransportDownloadResponse> {
-    const headers = this.headers(false, req.headers);
+    let headers = this.headers(false, req.headers);
     const keys = queryKeys(req.query);
     const span = this.logger.startHttp({
       op: `${req.method} ${req.path}`,
@@ -284,15 +339,28 @@ export class ApiClient {
       invocation_id: this.invocationId,
     });
     let response: TransportDownloadResponse;
-    try {
-      response = await this.transport.download({
-        ...req,
-        timeout_ms: req.timeout_ms ?? this.timeoutMs,
-        headers,
-      });
-    } catch (err) {
-      span.error(err);
-      throw withTransportHint(err, req.method, false);
+    const send = async () => {
+      try {
+        return await this.transport.download({
+          ...req,
+          timeout_ms: req.timeout_ms ?? this.timeoutMs,
+          headers,
+        });
+      } catch (err) {
+        span.error(err);
+        throw withTransportHint(err, req.method, false);
+      }
+    };
+    response = await send();
+    let renewed = false;
+    if (refusedSession(response, this.token) && this.auth && this.token) {
+      const token = await this.auth.renewRejected(this.token, invalidTokenChallenge(response));
+      if (token && token !== this.token) {
+        this.token = token;
+        renewed = true;
+        headers = this.headers(false, req.headers);
+        response = await send();
+      }
     }
     const remaining = this.token ? parseCreditsHeaders(response.headers) : undefined;
     const requestId = response.headers["x-request-id"] ?? headers["x-request-id"];
@@ -300,11 +368,12 @@ export class ApiClient {
     const parsedLength = lengthHeader !== undefined ? Number(lengthHeader) : undefined;
     const byteLength = parsedLength !== undefined && Number.isFinite(parsedLength) ? parsedLength : undefined;
     if (response.status >= 400) {
-      const problem = normalizeProblem(response.problem, {
+      const normalized = normalizeProblem(response.problem, {
         status: response.status,
         request_id: requestId,
         bodyText: errorBodyText(response.rawText, response.problem),
       });
+      const problem = renewed && invalidTokenChallenge(response) ? sessionEnded(normalized) : withAccessGuidance(normalized);
       const wrapped = new CliError(
         withPaymentGuidance(
           withQuotaGuidance(
@@ -323,6 +392,7 @@ export class ApiClient {
       });
       throw wrapped;
     }
+    if (this.auth && this.token) this.auth.noteAuthenticated(this.token);
     span.response(response.status, {
       request_id: requestId,
       content_type: response.headers["content-type"],

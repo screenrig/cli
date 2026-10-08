@@ -1,4 +1,4 @@
-import type { ResolvedConfig, ScreenRigConfig, StoredProjectState } from "./config.js";
+import { sameCredential, type ResolvedConfig, type ScreenRigConfig, type StoredProjectState } from "./config.js";
 import { configError } from "./problems.js";
 
 const PROJECT_FIELDS = [
@@ -59,7 +59,7 @@ export function withProjectConfig(config: ScreenRigConfig, resolved: ResolvedCon
 }
 
 export function assertProjectCredential(config: ScreenRigConfig, resolved: ResolvedConfig): void {
-  if ((config.token ?? (resolved.projectId ? config.identity_token : undefined)) !== resolved.token) {
+  if (!sameCredential(config.token ?? (resolved.projectId ? config.identity_token : undefined), resolved.token)) {
     throw configError("The command's project credential changed. Retry with the current membership credential.");
   }
 }

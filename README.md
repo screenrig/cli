@@ -132,6 +132,8 @@ the verified AgentID owner becomes the contact address and invitation recipient.
 ```sh
 screenrig agent enroll --email ADDRESS --organization NAME [--name NAME] [--intent signage|advertising] [--force]
 screenrig agent enroll --agentid-claim CODE --organization NAME [--name NAME] [--intent signage|advertising] [--force]
+screenrig login [--project ID] [--access read|manage] [--no-wait] [--resume ID]
+screenrig logout
 screenrig project list
 screenrig project use ID
 screenrig project create NAME [--organization-id ID | --organization NAME]
@@ -229,14 +231,10 @@ Rerunning an ambiguous request reuses its saved Idempotency-Key.
 
 First setup is `agent enroll --email ADDRESS --organization NAME`, or
 `agent enroll --agentid-claim CODE --organization NAME` after an AgentID
-sign-in at the API host. To connect
-to an existing project, run `screenrig agent connect --target-project-id ID`
-and approve that specific request in its dashboard. This adds a membership to
-the same identity. After activation, the CLI removes its original enrollment
-`Screens` project only when saved enrollment provenance and the server's
-transactional emptiness check allow it. Content, other members, other agents or
-paid coverage retain the project. Interrupted cleanup resumes on `agent connect`
-without starting another approval request.
+sign-in at the API host. To sign in to an existing project, run
+`screenrig login --project ID` and have a person approve it in the dashboard.
+An installation that already holds identity access adds the approved project
+to its session.
 
 ## Screen host and recovery
 
@@ -860,50 +858,48 @@ diagnosis and safe fixes.
 
 ## Configuration
 
-### Nonblocking agent connection
+### Sign-in and sessions
 
-`screenrig agent connect --print-url` starts or resumes a connection,
-reads one server status snapshot, and returns a JSON envelope. While approval is
-pending, `data.status` is `pending`, `data.request_submitted` is `true`,
-`data.connection_complete` is `false`, `data.approval_url` contains the dashboard
-handoff, and `data.next.command` identifies the resume command. `data.next.argv`
-supplies its arguments, preserving the selected config and API origin. Open the handoff
-for the intended user, then run `screenrig agent connect` again. An
-approved connection completes credential collection and activation and returns
-`data.status: active` and `data.connection_complete: true`. No credential is included in either result.
+`screenrig login` signs this installation in with a person's approval. It
+prints a dashboard URL and a code; the person opens the URL, checks that the
+code matches the terminal, chooses the project, Read only or Manage, and the
+capabilities, and approves. The CLI then stores the session and selects that
+project. The code lasts 10 minutes.
 
-Without `--print-url`, the CLI tries to open the browser and includes the handoff
-URL in the pending result only if opening fails. The default (also `--no-wait`)
-reads a status snapshot for at most one second. If none arrives, the request
-remains resumable and `data.status_checked` is `false`; this does not assert
-that the server still awaits approval. A received pending snapshot sets it to
-`true`. Success with pending status means submission succeeded, not connection
-completion.
+```sh
+screenrig login
+screenrig login --project prj_PROJECT --access read
+screenrig login --no-wait
+screenrig login --resume login_HANDLE
+screenrig logout
+```
 
-Use `agent connect --wait` to wait for approval for up to 30 seconds, or
-`agent connect --wait --timeout 10000` for an explicit budget in milliseconds
-(1–86400000). Reaching the wait budget returns a resumable pending result.
-Without `--wait`, `--timeout` can shorten but never extend the one-second
-snapshot budget. Approval requests expire after 24 hours. Terminal denial,
-cancellation, and expiry remain errors.
+`--no-wait` returns at once with `data.login_id`, `data.user_code` and
+`data.verification_uri_complete`; `data.next.argv` resumes the wait. The handle
+holds no secret. Read only lists and reads, and cannot change, publish or buy;
+metered reads still bill. Asking for Manage on a Read only project is how
+access is raised, and a person approves it.
+
+A session is a 15-minute access token and a rotating refresh token, stored in
+the 0600 config. The CLI renews the access token when it is about to expire,
+and once more when the API refuses it; concurrent CLI processes share one
+renewal through the config lock. A session lasts while it is used, up to one
+year, and commands warn 30 days before it ends. A credential stored by an
+earlier CLI version becomes a session transparently on first use.
+`screenrig logout` revokes the session on the server, then removes it; when the
+revocation might not have reached the server the session stays, and rerunning
+logout is safe.
+
+`agent connect` is an alias of `screenrig login`, kept for one release with a
+warning naming it: `--target-project-id` becomes `--project`, and `--wait`
+waits for approval.
 
 ### Agent credential capabilities
 
 `agent enroll` grants its first agent all six capabilities. For an existing
-project, request only what this installation needs:
-
-```sh
-screenrig agent connect --capability advertising --print-url
-screenrig agent connect --capability content --capability playlists --capability screens --print-url
-screenrig agent status
-```
-
-`--capability` is repeatable. Valid names, in canonical order, are `screens`,
-`content`, `playlists`, `advertising`, `reports`, and `project`. Omit the flag to
-request all six; unknown, empty, or duplicate names fail locally. The dashboard
-approver can grant a non-empty subset of the requested set. Resume without
-changing capabilities; `agent status` and enrollment/connection results show
-the granted `agent.capabilities`.
+project, the person approving `screenrig login` chooses the capabilities:
+`screens`, `content`, `playlists`, `advertising`, `reports`, and `project`.
+`agent status` shows the granted `agent.capabilities`.
 
 The area capabilities permit their area's reads and writes. `content` covers
 media, applications and operation cancellation; `project` covers project

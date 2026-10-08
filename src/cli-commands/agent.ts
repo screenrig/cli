@@ -1,11 +1,22 @@
 import type { CommandActionBinder } from "./types.js";
-import { handleAgentEnroll, handleAgentConnect, handleAgentStatus, handleAgentDisconnect, handleAgentRevokeIdentity } from "../commands.js";
+import { handleAgentEnroll, handleAgentConnect, handleAgentStatus, handleAgentDisconnect, handleAgentRevokeIdentity, handleLogin, handleLogout } from "../commands.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { AGENT_CAPABILITIES } from "../adapters/protocol.js";
 import { usageError } from "../problems.js";
 
 export function registerAgentCommands(root: Command, bind: CommandActionBinder): void {
+  addCommandNotes(root.command("login").description("Sign this installation in with a person's approval in the dashboard")
+    .option("--project <ID>", "Suggest the project the person approves")
+    .addOption(new Option("--access <LEVEL>", "Ask for Read only or Manage access (default manage)").choices(["read", "manage"]))
+    .option("--name <NAME>", "Set this agent installation name")
+    .option("--no-wait", "Print the sign-in URL and code with a resume handle, and return")
+    .option("--resume <ID>", "Continue a pending sign-in by the login_ handle --no-wait printed")
+    .action(bind(handleLogin)), "Prints a dashboard URL and a code. A person signed in to the dashboard opens it, checks that the code matches, chooses the project and Read only or Manage, and approves; the CLI then stores the session and selects that project. The code lasts 10 minutes. An installation that already holds identity access adds the approved project to its sign-in, which is also how a Read only project is raised to Manage. Read only lists and reads; it cannot change, publish or buy, and metered reads still bill. --no-wait returns at once with a login_ handle that holds no secret; screenrig login --resume ID waits for the approval later.");
+
+  addCommandNotes(root.command("logout").description("End this installation's sign-in and remove its tokens")
+    .action(bind(handleLogout)), "Revokes the sign-in on the server, then removes the stored session and access tokens. A failure that might not have reached the server keeps them, so rerunning logout is safe. Run screenrig login to sign in again.");
+
   const agent = root.command("agent").description("Enroll, connect, and manage this agent");
 
   const enroll = agent.command("enroll").description("Create a new project and its first agent")
@@ -21,7 +32,7 @@ export function registerAgentCommands(root: Command, bind: CommandActionBinder):
   // one; a pending enrollment resumes without either flag.
   requireOptionGroup(enroll, "atMostOne", ["--email", "--agentid-claim"]);
 
-  addCommandNotes(agent.command("connect").description("Reconnect this installation to an existing project")
+  addCommandNotes(agent.command("connect").description("Alias of screenrig login, kept for one release")
     .option("--target-project-id <ID>", "Request approval for this specific existing project; needs the identity credential that agent enroll or an earlier approved agent connect saves")
     .option("--name <NAME>", "Set this agent installation name")
     .addOption(new Option("--capability <NAME>", "Request a capability (repeatable; default: all six)")

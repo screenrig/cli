@@ -92,6 +92,8 @@ test("root help is compact and every command is discoverable through immediate c
     "agent status",
     "agent disconnect",
     "agent revoke-identity",
+    "login",
+    "logout",
     "dashboard open",
     "dashboard reset-sign-in",
     "app pack",

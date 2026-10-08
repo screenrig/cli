@@ -50,6 +50,7 @@ test("explicit enrollment atomically persists email, verifies, and completes out
         enrollment: {
           client_id: `cli_${"A".repeat(43)}`,
           idempotency_key: "enroll-first-idempotency",
+          credential_format: "oauth",
           email: "Owner@example.com",
           project_name: "Lobby displays",
         },
@@ -61,6 +62,7 @@ test("explicit enrollment atomically persists email, verifies, and completes out
       assert.deepEqual(state, {
         clientId: `cli_${"A".repeat(43)}`,
         idempotencyKey: "enroll-first-idempotency",
+        credentialFormat: "oauth",
         email: "Owner@example.com",
         projectName: "Lobby displays",
       });
@@ -69,6 +71,7 @@ test("explicit enrollment atomically persists email, verifies, and completes out
         enrollment: {
           client_id: `cli_${"A".repeat(43)}`,
           idempotency_key: "enroll-first-idempotency",
+          credential_format: "oauth",
           email: "Owner@example.com",
           project_name: "Lobby displays",
         },
@@ -168,6 +171,7 @@ test("ambiguous enrollment retries reuse the persisted client, contact email, an
   assert.deepEqual(pending?.enrollment, {
     client_id: `cli_${"C".repeat(43)}`,
     idempotency_key: "enroll-retry-idempotency",
+    credential_format: "oauth",
     email: "owner@example.com",
     project_name: "Lobby displays",
   });
@@ -216,6 +220,7 @@ test("verification failure preserves the permanent token and exact enrollment re
     enrollment: {
       client_id: `cli_${"D".repeat(43)}`,
       idempotency_key: "enroll-verify-retry",
+      credential_format: "oauth",
       email: "owner@example.com",
     },
     updated_at: "2026-08-14T20:00:00.000Z",
@@ -256,6 +261,7 @@ test("AgentID claim enrollment persists the claim, verifies, and completes", asy
       assert.deepEqual((await readConfigFile(resolved.configPath, fs))?.enrollment, {
         client_id: `cli_${"K".repeat(43)}`,
         idempotency_key: "enroll-agentid-idempotency",
+        credential_format: "oauth",
         agentid_claim: claim,
       });
     },
@@ -267,6 +273,7 @@ test("AgentID claim enrollment persists the claim, verifies, and completes", asy
   assert.deepEqual(seen, [{
     clientId: `cli_${"K".repeat(43)}`,
     idempotencyKey: "enroll-agentid-idempotency",
+    credentialFormat: "oauth",
     agentidClaim: claim,
   }]);
   assert.equal(result.token, "sr_live_agentid_secret");

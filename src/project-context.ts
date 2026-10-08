@@ -1,6 +1,6 @@
 import type { Project, ProjectContext } from "./adapters/protocol.js";
 import type { ResolvedConfig, ScreenRigConfig } from "./config.js";
-import { readConfigFile, withConfigLock, writeConfigAtomic } from "./config.js";
+import { readConfigFile, sameCredential, withConfigLock, writeConfigAtomic } from "./config.js";
 import { isResourceID } from "./generated/resource-ids.js";
 import { configError, usageError } from "./problems.js";
 import { projectConfigFor, selectProject, withProjectConfig } from "./project-state.js";
@@ -62,10 +62,10 @@ export async function cacheProjectContexts(
   await withConfigLock(resolved.configPath, fs, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
     let current = await readConfigFile(resolved.configPath, fs);
     if (!current || current.api_url.replace(/\/+$/, "") !== resolved.apiUrl) throw configError("Stored API configuration changed before project context persistence.");
-    if (options.identityToken && current.identity_token !== options.identityToken) throw configError("Identity credential changed before project selection.");
+    if (options.identityToken && !sameCredential(current.identity_token, options.identityToken, "identity")) throw configError("Identity credential changed before project selection.");
     if (options.agentId && current.agent_id && current.agent_id !== options.agentId) throw configError("Stored identity changed before credential persistence.");
     if (options.connectionId && current.agent_connection?.connection_id !== options.connectionId) throw configError("Pending agent connection changed before activation persistence.");
-    if (options.credential && (projectConfigFor(current, resolved).token ?? current.identity_token) !== options.credential) {
+    if (options.credential && !sameCredential(projectConfigFor(current, resolved).token ?? current.identity_token, options.credential)) {
       throw configError("Project credential changed before its context was stored.");
     }
     for (const context of verified) {

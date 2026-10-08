@@ -44,3 +44,38 @@ export function exitCodeForStatus(status: number): ExitCode {
   }
   return ExitCode.Unexpected;
 }
+
+/**
+ * RFC 6749 errors from /oauth/token, /oauth/device_authorization and
+ * /oauth/revoke, mapped by error code, never by status. authorization_pending
+ * and slow_down are not problems: a device login keeps polling.
+ */
+export interface OAuthProblemRow {
+  code: string;
+  title: string;
+  exitCode: ExitCode;
+  next?: { command: string; reason: string };
+}
+
+const SIGN_IN_AGAIN = { command: "screenrig login", reason: "Sign this installation in again; a person approves it in the dashboard." };
+
+export const OAUTH_PROBLEMS: Readonly<Record<string, OAuthProblemRow>> = {
+  invalid_grant: { code: "session_ended", title: "Session ended", exitCode: ExitCode.Auth, next: SIGN_IN_AGAIN },
+  invalid_client: { code: "client_auth_failed", title: "Client authentication failed", exitCode: ExitCode.Auth },
+  invalid_request: { code: "invalid_request", title: "Invalid request", exitCode: ExitCode.Client },
+  invalid_scope: {
+    code: "insufficient_access", title: "Insufficient access", exitCode: ExitCode.Auth,
+    next: { command: "screenrig login --access manage", reason: "Ask a person to approve Manage access for this project." },
+  },
+  invalid_target: { code: "invalid_request", title: "Invalid request", exitCode: ExitCode.Client },
+  unauthorized_client: { code: "client_not_allowed", title: "Client not allowed", exitCode: ExitCode.Auth },
+  unsupported_grant_type: { code: "client_not_allowed", title: "Client not allowed", exitCode: ExitCode.Auth },
+  access_denied: { code: "login_denied", title: "Sign-in denied", exitCode: ExitCode.Auth },
+  expired_token: { code: "login_expired", title: "Sign-in expired", exitCode: ExitCode.Timeout, next: SIGN_IN_AGAIN },
+  unsupported_token_type: {
+    code: "credential_retired", title: "Credential retired", exitCode: ExitCode.Auth,
+    next: { command: "screenrig login", reason: "The stored credential is retired. Sign this installation in again." },
+  },
+  temporarily_unavailable: { code: "service_unavailable", title: "Service unavailable", exitCode: ExitCode.Server },
+  rate_limited: { code: "rate_limited", title: "Rate limited", exitCode: ExitCode.RateLimited },
+};

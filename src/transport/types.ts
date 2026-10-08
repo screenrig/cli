@@ -15,6 +15,12 @@ export interface TransportRequest {
   /** download only: the operation named in transport errors (default "Media download"). */
   label?: string;
   signal?: AbortSignal;
+  /**
+   * The request carries a credential in its body (a refresh token, a device
+   * code, a legacy secret). A bearer header marks it too. Such a request never
+   * follows a redirect: any 3xx is an error and nothing is sent onward.
+   */
+  credential?: boolean;
 }
 
 export interface TransportResponse {

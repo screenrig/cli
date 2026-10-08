@@ -38,6 +38,7 @@ import {
   type AgentDisconnectRequest,
   type Capabilities,
   type CLIEnrollment,
+  type CLIEnrollmentOAuth,
   type CLIEnrollmentRequest,
   type AgentIdentityCredential,
   type ProjectContextList,
@@ -103,11 +104,15 @@ import {
   describeTokenPresence,
   hasToken,
   readConfigFile,
+  sameCredential,
   withConfigLock,
   writeConfigAtomic,
   type ScreenRigConfig,
 } from "./config.js";
 import { attachOperationLogger, loggerOf, loggingTransport } from "./log/index.js";
+import { accessClaims, isOAuthUnavailable, isSessionJwt, SCOPE_IDENTITY, type AccessLevel } from "./oauth.js";
+import { OAuthSession, refreshExpiryDays, type SessionRuntime } from "./oauth-session.js";
+import { DeviceLogin, type LoginOutcome } from "./login.js";
 import { ensureCredential } from "./enrollment.js";
 import { cleanupEnrollmentProject, type EnrollmentCleanupResult } from "./enrollment-cleanup.js";
 import {
@@ -468,6 +473,37 @@ function transportFor(runtime: CliRuntime, apiUrl: string, token?: string): Tran
   return loggingTransport(base, loggerOf(runtime));
 }
 
+/** The invocation's OAuth session: access-token renewal, the legacy exchange, logout. */
+const oauthSessions = new WeakMap<CliRuntime, OAuthSession>();
+
+function sessionRuntime(runtime: CliRuntime): SessionRuntime {
+  return { fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }, now: runtime.now, sleep: runtime.sleep, logger: loggerOf(runtime) };
+}
+
+function oauthSessionFor(runtime: CliRuntime, resolved: { configPath: string; apiUrl: string }): OAuthSession {
+  let session = oauthSessions.get(runtime);
+  if (!session) {
+    session = new OAuthSession(resolved.configPath, resolved.apiUrl, transportFor(runtime, resolved.apiUrl), sessionRuntime(runtime));
+    oauthSessions.set(runtime, session);
+  }
+  return session;
+}
+
+/** A stream's bearer, renewed before each (re)connect: an agent stream closes when its access token expires. */
+async function streamToken(runtime: CliRuntime, token: string): Promise<string> {
+  const claims = accessClaims(token);
+  const session = oauthSessions.get(runtime);
+  if (!session || !claims?.sid) return token;
+  return (await session.accessFor(claims.prj)) ?? token;
+}
+
+/**
+ * Commands that read credentials without requiring a project credential up
+ * front. They renew (or first exchange) credentials like authenticated ones;
+ * local commands never touch the network for it.
+ */
+const CREDENTIAL_COMMANDS = new Set(["project list", "project use", "agent status"]);
+
 const writeRecoveries = new WeakMap<CliRuntime, WriteRecovery>();
 
 const invocationRequestIds = new WeakMap<CliRuntime, RequestIds>();
@@ -487,6 +523,7 @@ function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?
   return new ApiClient({
     transport: transportFor(runtime, apiUrl, token),
     token,
+    auth: oauthSessions.get(runtime),
     projectId: token && token === invocationTargets.get(runtime)?.token ? invocationTargets.get(runtime)?.projectId : undefined,
     requestIds: requestIdsFor(runtime, args),
     idempotencyKey: flagString(args.flags, "idempotency-key"),
@@ -548,9 +585,25 @@ function commandHandler(
       }
     }
     await attachOperationLogger(runtime, args, resolved);
+    const session = oauthSessionFor(runtime, resolved);
+    if (authenticated || CREDENTIAL_COMMANDS.has(args.command.slice(0, 2).join(" "))) {
+      try {
+        resolved = await session.prepare(resolved);
+      } catch (error) {
+        oauthSessions.delete(runtime);
+        throw error;
+      }
+    }
     invocationTargets.set(runtime, resolved);
     setResultContext(runtime, resolved);
     if (authenticated && !resolved.token) {
+      oauthSessions.delete(runtime);
+      if (resolved.signedOut) {
+        throw notEnrolledError("This installation is signed out.", {
+          command: "screenrig login",
+          reason: "Sign this installation in again; a person approves it in the dashboard.",
+        });
+      }
       if (resolved.agentConnection) {
         throw notEnrolledError("This installation has a pending agent connection and no active credential.", {
           command: "screenrig agent connect",
@@ -600,7 +653,11 @@ function commandHandler(
       }
       recovery = ordinary ? new WriteRecovery(resolved, runtime, args.command.slice(0, 2).join(" ")) : undefined;
       if (recovery) writeRecoveries.set(runtime, recovery);
-      const result = await handler(args, runtime, resolved);
+      let result = await handler(args, runtime, resolved);
+      const expiring = signInExpiryWarning((await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }).catch(() => undefined))?.oauth, runtime.now());
+      if (expiring && result.output !== "stream") {
+        result = { ...result, envelope: { ...result.envelope, warnings: [...(result.envelope.warnings ?? []), expiring] } };
+      }
       const context = resultContext(runtime);
       const contextual = context ? { ...result, envelope: { ...result.envelope, context }, human: result.output === "stream" ? result.human : `${formatResultContext(runtime)}${result.human ? "\n" + result.human : ""}` } : result;
       if (recovery && result.keepRecoveryUntilOutput) {
@@ -628,6 +685,11 @@ function commandHandler(
       writeRecoveries.delete(runtime);
       invocationRequestIds.delete(runtime);
       invocationTargets.delete(runtime);
+      oauthSessions.delete(runtime);
+      // Dropping a replaced legacy secret is housekeeping: it never changes the command's result.
+      await session.finish().catch((err: unknown) => {
+        if (loggerOf(runtime).enabled) loggerOf(runtime).startLocal({ op: "oauth.legacy_cleanup" }).error(err);
+      });
     }
   };
 }
@@ -731,11 +793,159 @@ export const handleAppPack = commandHandler(appPack, false);
 
 export const handleAgentStatus = commandHandler(agentStatus, false);
 
+/** `agent connect` is an alias of `screenrig login` for one release. */
+const AGENT_CONNECT_ALIAS: Warning = {
+  code: "command_renamed",
+  message: "agent connect is now screenrig login; this alias is kept for one release. Run screenrig login.",
+};
+
 export const handleAgentConnect = commandHandler(async (args, runtime, resolved) => {
-  return loggerOf(runtime).withLocal({ op: "agent.connect", message: "agent connect" }, () =>
-    agentConnect(args, runtime, resolved),
-  );
+  return loggerOf(runtime).withLocal({ op: "agent.connect", message: "agent connect" }, async () => {
+    const stored = await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir });
+    // A connection request this installation already started finishes the way it began.
+    const legacy = Boolean(resolved.agentConnection || stored?.enrollment_cleanup)
+      || (flagBool(args.flags, "cancel") && !stored?.login);
+    let result: CommandResult;
+    if (legacy) {
+      result = await agentConnect(args, runtime, resolved);
+    } else if (flagBool(args.flags, "cancel")) {
+      await new DeviceLogin(oauthSessionFor(runtime, resolved), resolved.configPath, sessionRuntime(runtime)).clear(stored!.login!.id);
+      result = { envelope: successEnvelope({ status: "cancelled" }), exitCode: ExitCode.Success, human: "Pending sign-in cancelled." };
+    } else {
+      const warnings: Warning[] = [AGENT_CONNECT_ALIAS];
+      if (flagString(args.flags, "capability") !== undefined) {
+        warnings.push({ code: "capability_chosen_at_approval", message: "The person approving the sign-in chooses its capabilities; --capability was not sent." });
+      }
+      result = await login(args, runtime, resolved, {
+        project: flagString(args.flags, "target-project-id"),
+        access: "manage",
+        // agent connect returns pending by default; --wait waits for approval.
+        wait: flagBool(args.flags, "wait"),
+        warnings,
+      });
+      return result;
+    }
+    return { ...result, envelope: { ...result.envelope, warnings: [...(result.envelope.warnings ?? []), AGENT_CONNECT_ALIAS] } };
+  });
 }, false);
+
+export const handleLogin = commandHandler(async (args, runtime, resolved) => {
+  return loggerOf(runtime).withLocal({ op: "login", message: "login" }, () => {
+    const access = flagString(args.flags, "access") ?? "manage";
+    if (access !== "read" && access !== "manage") throw usageError("login --access must be read or manage.");
+    return login(args, runtime, resolved, {
+      project: flagString(args.flags, "project"),
+      access,
+      wait: !flagBool(args.flags, "no-wait"),
+      resume: flagString(args.flags, "resume"),
+      warnings: [],
+    });
+  });
+}, false);
+
+export const handleLogout = commandHandler(logout, false);
+
+/**
+ * The device sign-in. A server that issues no OAuth tokens gets the
+ * existing-project connection request instead, so this command works
+ * against every API version.
+ */
+async function login(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig,
+  request: { project?: string; access: AccessLevel; wait: boolean; resume?: string; warnings: Warning[] }): Promise<CommandResult> {
+  if (request.project !== undefined && !isResourceID(request.project, "project")) throw usageError("login --project must be a project ID (prj_...).");
+  const name = flagString(args.flags, "name");
+  if (name && name.length > 80) throw usageError("login --name is at most 80 characters.");
+  const session = oauthSessionFor(runtime, resolved);
+  const device = new DeviceLogin(session, resolved.configPath, sessionRuntime(runtime));
+  let outcome: LoginOutcome;
+  try {
+    outcome = await device.run({
+      access: request.access,
+      ...(request.project ? { project: request.project } : {}),
+      ...(name ? { name } : {}),
+      platform: agentPlatform(),
+      version: CLI_VERSION,
+      wait: request.wait,
+      ...(request.resume !== undefined ? { resume: request.resume } : {}),
+    }, (pending, resumed) => {
+      runtime.stderr.write(`${resumed ? "Still waiting" : "Sign-in started"}: open ${pending.verification_uri_complete} and confirm the code ${pending.user_code}. It expires at ${pending.expires_at}.\n`);
+    });
+  } catch (err) {
+    if (!isOAuthUnavailable(err) || request.resume !== undefined) throw err;
+    if (request.access === "read") {
+      throw usageError("This API offers no Read only sign-in. Run screenrig login without --access read.");
+    }
+    const flags: Record<string, string | boolean> = { ...args.flags };
+    for (const key of ["project", "access", "no-wait", "resume"]) delete flags[key];
+    if (request.project) flags["target-project-id"] = request.project;
+    if (request.wait) flags.wait = true;
+    const connected = await agentConnect({ ...args, flags }, runtime, resolved);
+    return { ...connected, envelope: { ...connected.envelope, warnings: [...(connected.envelope.warnings ?? []), ...request.warnings] } };
+  }
+  const pending = outcome.login;
+  if (outcome.status === "pending") {
+    const resume = ["login", "--resume", pending.id];
+    return {
+      envelope: successEnvelope({
+        status: "pending",
+        login_id: pending.id,
+        user_code: pending.user_code,
+        verification_uri: pending.verification_uri,
+        verification_uri_complete: pending.verification_uri_complete,
+        expires_at: pending.expires_at,
+        access: pending.access,
+        ...(pending.project_id ? { project_id: pending.project_id } : {}),
+        next: { command: `screenrig ${resume.join(" ")}`, argv: resume, reason: "After the person approves the sign-in, this stores its tokens." },
+      }, { warnings: request.warnings }),
+      exitCode: ExitCode.Success,
+      human: humanLines(outcome.resumed ? "Sign-in pending" : "Sign-in started", [
+        ["open", pending.verification_uri_complete],
+        ["code", pending.user_code],
+        ["expires_at", pending.expires_at],
+        ["next", `screenrig ${resume.join(" ")}`],
+      ]),
+    };
+  }
+  const signedIn = await resolveConfig({ flags: { ...(typeof args.flags.config === "string" ? { config: args.flags.config } : {}), ...(typeof args.flags["api-url"] === "string" ? { "api-url": args.flags["api-url"] } : {}) },
+    fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir } });
+  const token = requireToken(signedIn.token);
+  const client = clientFor(runtime, args, signedIn.apiUrl, token);
+  const response = await client.call({ method: "GET", path: "/api/project" });
+  const context = contextFromProject(response.body as Project);
+  await cacheProjectContexts(runtime, signedIn, [context], { credential: token });
+  const access = outcome.scope.includes("access:manage") ? "manage" : "read";
+  return {
+    envelope: successEnvelope({
+      status: "signed_in",
+      project: context.project,
+      organization: context.organization,
+      access,
+      identity: outcome.scope.includes(SCOPE_IDENTITY),
+      ...(outcome.agentId ? { agent_id: outcome.agentId } : {}),
+    }, { request_id: client.requestId, warnings: request.warnings }),
+    exitCode: ExitCode.Success,
+    human: humanLines("Signed in", [
+      ["project", `${context.organization.name} / ${context.project.name} (${context.project.id})`],
+      ["access", access === "manage" ? "Manage" : "Read only"],
+    ]),
+  };
+}
+
+async function logout(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
+  const stored = await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir });
+  if (!stored?.oauth && (stored?.token || stored?.identity_token || Object.values(stored?.projects ?? {}).some((slot) => slot?.token))) {
+    throw usageError("This installation holds an agent credential that logout does not end; nothing was sent.", {
+      command: "screenrig agent disconnect --yes",
+      reason: "Ends this project's membership. agent revoke-identity --yes ends every membership.",
+    });
+  }
+  const { revoked } = await oauthSessionFor(runtime, resolved).logout();
+  return {
+    envelope: successEnvelope({ status: "signed_out", revoked }),
+    exitCode: ExitCode.Success,
+    human: revoked ? "Signed out. The sign-in is revoked and its tokens were removed from this config." : "Already signed out.",
+  };
+}
 
 export const handleAgentEnroll = commandHandler(async (args, runtime, resolved) => {
   return loggerOf(runtime).withLocal({ op: "agent.enroll", message: "agent enroll" }, () =>
@@ -1714,7 +1924,8 @@ async function agentDisconnect(
     requirePrivateNoStore(current.headers, "Agent status response");
     agent = validateAgentSelfStatus(current.body).agent;
   } catch (err) {
-    if (!(err instanceof CliError) || err.problem.code !== "unauthorized") throw err;
+    // A refused access token is renewed by the client; a session that ended keeps nothing to remove here.
+    if (!(err instanceof CliError) || err.problem.code !== "unauthorized" || isSessionJwt(token)) throw err;
     credentialRejected = true;
   }
   if (!credentialRejected) {
@@ -1727,7 +1938,7 @@ async function agentDisconnect(
         ...(request.allow_last_agent ? { body: request } : {}),
       });
     } catch (err) {
-      if (err instanceof CliError && err.problem.code === "unauthorized") {
+      if (err instanceof CliError && err.problem.code === "unauthorized" && !isSessionJwt(token)) {
         credentialRejected = true;
       } else if (err instanceof CliError) {
         throw new CliError({
@@ -1796,13 +2007,14 @@ async function agentRevokeIdentity(args: ParsedArgs, runtime: CliRuntime, resolv
     if (response.status !== 204 || response.body !== undefined) throw configError("Identity revocation did not return an empty 204; local credentials were retained.");
     requirePrivateNoStore(response.headers, "Identity revocation response");
   } catch (error) {
-    if (!(error instanceof CliError) || error.problem.code !== "unauthorized") throw error;
+    // Under a grant a 401 is never proof of revocation: local credentials stay.
+    if (!(error instanceof CliError) || error.problem.code !== "unauthorized" || isSessionJwt(identity.identityToken)) throw error;
     alreadyRejected = true;
   }
   const fs = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
   await withConfigLock(resolved.configPath, fs, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
     const current = await readConfigFile(resolved.configPath, fs);
-    if (!current || current.identity_token !== identity.identityToken) throw configError("Identity changed before revocation cleanup. Local credentials were retained.");
+    if (!current || !sameCredential(current.identity_token, identity.identityToken, "identity")) throw configError("Identity changed before revocation cleanup. Local credentials were retained.");
     const scrub = (value: ScreenRigConfig): ScreenRigConfig => {
       const { token: _token, screen_provision: _provision, browser_setup: _browser, media_generate: _generate, pending_writes: _writes, ...rest } = value;
       return rest;
@@ -1985,6 +2197,7 @@ async function enrollForCommand(
         const client = clientFor(runtime, args, resolved.apiUrl);
         const request: CLIEnrollmentRequest = {
           client_id: state.clientId,
+          ...(state.credentialFormat ? { credential_format: state.credentialFormat } : {}),
           ...(state.email !== undefined ? { email: state.email } : {}),
           ...(state.agentidClaim !== undefined ? { agentid_claim: state.agentidClaim } : {}),
           ...(state.projectName !== undefined ? { project_name: state.projectName } : {}),
@@ -2031,7 +2244,33 @@ async function enrollForCommand(
           throw err;
         }
         requirePrivateNoStore(response.headers, "Enrollment response");
-        const enrollment = response.body as CLIEnrollment;
+        // A server that issues OAuth tokens answers the token pair; one that does not answers the legacy shape.
+        const delivered = response.body as CLIEnrollment | CLIEnrollmentOAuth;
+        if ("access_token" in delivered) {
+          const agent = validateAgent(delivered.agent, "active");
+          if (!delivered.project?.id || !delivered.project.name || !delivered.invitation?.id
+            || delivered.connection_ready !== false || !isSessionJwt(delivered.access_token) || !isSessionJwt(delivered.refresh_token)
+            || delivered.token_type !== "Bearer" || typeof delivered.scope !== "string"
+            || !delivered.issuance_id || !delivered.issuance_expires_at) {
+            throw usageError("Enrollment response does not match the generated CLIEnrollmentOAuth contract.");
+          }
+          const identity = delivered.scope.split(" ").includes(SCOPE_IDENTITY);
+          return {
+            token: delivered.access_token,
+            projectId: delivered.project.id,
+            projectName: delivered.project.name,
+            agentId: agent.id,
+            ...(identity ? { identityToken: delivered.access_token } : {}),
+            organizationId: delivered.project.organization_id,
+            organizationName: delivered.project.organization_name,
+            oauth: {
+              refreshToken: delivered.refresh_token,
+              ...(typeof delivered.refresh_expires_at === "number" ? { refreshExpiresAt: delivered.refresh_expires_at } : {}),
+              identity,
+            },
+          };
+        }
+        const enrollment = delivered;
         const agent = validateAgent(enrollment.agent, "active");
         if (!enrollment.project?.id || !enrollment.project.name || !enrollment.invitation?.id
           || enrollment.connection_ready !== false || !enrollment.token
@@ -2088,6 +2327,18 @@ async function projectShow(args: ParsedArgs, runtime: CliRuntime, resolved: Awai
 }
 
 async function identityForCommand(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<ResolvedCommandConfig> {
+  const stored = await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir });
+  if (stored?.oauth) {
+    // Under a grant, identity is a scope of the access token, renewed like any other.
+    const identityToken = await oauthSessionFor(runtime, resolved).identityToken();
+    if (!identityToken) {
+      throw new CliError(makeProblem("insufficient_access", "Insufficient access", 403,
+        "This sign-in covers one project and has no identity access, so it cannot list or create projects.", {
+          next: { command: "screenrig login", reason: "Sign in again; the approval grants identity access with the project capability." },
+        }), ExitCode.Auth);
+    }
+    return { ...resolved, identityToken };
+  }
   return ensureIdentityCredential({ resolved,
     runtime: { fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }, now: runtime.now, sleep: runtime.sleep },
     exchange: async (key) => {
@@ -2150,11 +2401,14 @@ async function projectCreate(args: ParsedArgs, runtime: CliRuntime, resolved: Re
   }
   const created = response.body as CreatedProject;
   const context = validateProjectContext(created);
-  if (typeof created.token !== "string" || !/^sr_live_(?!idt_)[A-Za-z0-9_-]+_[A-Za-z0-9_-]+$/.test(created.token)
-    || !created.issuance_expires_at || !Number.isFinite(Date.parse(created.issuance_expires_at))) {
+  // Under a grant the new project joins the grant's consent and delivers no token: the next command renews one for it.
+  const granted = isSessionJwt(identity.identityToken);
+  if (!granted && (typeof created.token !== "string" || !/^sr_live_(?!idt_)[A-Za-z0-9_-]+_[A-Za-z0-9_-]+$/.test(created.token)
+    || !created.issuance_expires_at || !Number.isFinite(Date.parse(created.issuance_expires_at)))) {
     throw configError("The new project did not deliver its membership credential. Local selection was retained; retry the exact create request.");
   }
-  await cacheProjectContexts(runtime, identity, [context], { identityToken: identity.identityToken, select: context.project.id, token: created.token });
+  await cacheProjectContexts(runtime, identity, [context], { identityToken: identity.identityToken, select: context.project.id,
+    ...(granted ? {} : { token: created.token }) });
   // The private credential is stored before returning the public result.
   return { envelope: successEnvelope({ project: context.project, organization: context.organization, ...(context.owner_user_id ? { owner_user_id: context.owner_user_id } : {}) }, { request_id: client.requestId }),
     exitCode: ExitCode.Success, human: `Created ${context.organization.name} / ${context.project.name} (${context.project.id})` };
@@ -4355,7 +4609,7 @@ export const handleSupportRead = commandHandler(async (args, runtime, resolved) 
 export const handleSupportFollow = commandHandler(async (args, runtime, resolved) => {
   const selected = supportConversation(args);
   let after = supportSequence(flagString(args.flags, "after")) ?? "0";
-  const token = requireToken(resolved.token);
+  let token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const transport = transportFor(runtime, resolved.apiUrl, token);
   const controller = new AbortController();
@@ -4367,6 +4621,7 @@ export const handleSupportFollow = commandHandler(async (args, runtime, resolved
     while (!controller.signal.aborted) {
       let buffer = "";
       try {
+        token = await streamToken(runtime, token);
         const stream = await transport.stream({ method: "GET", path: "/stream/support", query: { after }, headers: { authorization: `Bearer ${token}`, "x-request-id": client.nextRequestId(), ...(resolved.projectId ? { "screenrig-project": resolved.projectId } : {}) }, signal: controller.signal });
         for await (const chunk of stream) {
           buffer += chunk;
@@ -6613,7 +6868,7 @@ async function sleepWhileOpen(
 }
 
 async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>): Promise<CommandResult> {
-  const token = requireToken(resolved.token);
+  let token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const transport = transportFor(runtime, resolved.apiUrl, token);
   const json = !flagBool(args.flags, "human");
@@ -6642,6 +6897,7 @@ async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awa
       let buffer = "";
       let connected = false;
       try {
+        token = await streamToken(runtime, token);
         const stream = await transport.stream({
           method: "GET",
           path: "/stream/project",
@@ -6730,6 +6986,15 @@ function credentialCheck(resolved: Awaited<ReturnType<typeof resolveConfig>>): D
     return { name: "token", status: "pass", detail: describeTokenPresence(resolved.token) };
   }
   const detail = describeTokenPresence(resolved.token);
+  if (resolved.signedOut) {
+    return {
+      name: "token",
+      status: "warn",
+      detail: `${detail}; this installation is signed out`,
+      path: "reconnect_existing",
+      next: { command: "screenrig login", reason: "Sign this installation in again; a person approves it in the dashboard." },
+    };
+  }
   if (resolved.agentConnection) {
     return {
       name: "token",
@@ -6765,6 +7030,31 @@ function credentialCheck(resolved: Awaited<ReturnType<typeof resolveConfig>>): D
         ? "Resume the exact pending enrollment, then rerun doctor."
         : "Create the first agent with unverified contact metadata, then rerun doctor. Every authenticated command fails with not_enrolled until then.",
     },
+  };
+}
+
+/** The session's last possible day: the refresh family ends at the idle or absolute expiry, whichever comes first. */
+function signInCheck(grant: NonNullable<ScreenRigConfig["oauth"]>, now: Date): DoctorCheck {
+  const ends = grant.refresh_expires_at ? new Date(grant.refresh_expires_at * 1000).toISOString() : undefined;
+  const days = refreshExpiryDays(grant, now);
+  if (days === undefined) {
+    return { name: "sign_in", status: "pass", detail: ends ? `session ends by ${ends}; each use moves the idle end forward` : "session present" };
+  }
+  return {
+    name: "sign_in",
+    status: "warn",
+    detail: `session ends ${ends} (${days} days)`,
+    next: { command: "screenrig login", reason: "Sign in again before the session ends; a person approves it in the dashboard." },
+  };
+}
+
+/** Warnings 30 and 7 days before the session ends: an installation that only enrolled cannot sign in unattended. */
+function signInExpiryWarning(grant: ScreenRigConfig["oauth"], now: Date): Warning | undefined {
+  const days = refreshExpiryDays(grant, now);
+  if (days === undefined) return undefined;
+  return {
+    code: "sign_in_expiring",
+    message: `This installation's session ends in ${days} day${days === 1 ? "" : "s"}. Run screenrig login before then; a person approves it in the dashboard.`,
   };
 }
 
@@ -6805,6 +7095,8 @@ async function doctor(
     checks.push({ name: "config_permissions", status: "pass", detail: "config file not present" });
   }
   checks.push(credentialCheck(resolved));
+  const grant = (await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }).catch(() => undefined))?.oauth;
+  if (grant) checks.push(signInCheck(grant, runtime.now()));
   checks.push({
     name: "api_url",
     status: resolved.apiUrl.startsWith("https://") || resolved.apiUrl.startsWith("http://127.") || resolved.apiUrl.includes("localhost") ? "pass" : "fail",

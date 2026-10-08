@@ -276,3 +276,67 @@ test("default config directory falls back to homedir/.config/screenrig when XDG 
   assert.equal(await defaultConfigPath(fsLike), localDev);
   await rm(home, { recursive: true, force: true });
 });
+
+async function plantLock(configPath: string, fsLike: ConfigFs, owner: { pid: number; nonce: string; acquired_at: number }): Promise<string> {
+  const lockPath = `${configPath}.lock`;
+  await mkdir(lockPath, { recursive: true, mode: 0o700 });
+  await writeFile(path.join(lockPath, "owner.json"), JSON.stringify(owner), { mode: 0o600 });
+  void fsLike;
+  return lockPath;
+}
+
+test("a stale lock whose owner is still alive is not reclaimed", async () => {
+  const home = await testTemp("config-lock-alive-");
+  const fsLike = realFs(home);
+  const configPath = path.join(home, "screenrig", "config.json");
+  let clock = 1_000_000;
+  try {
+    await plantLock(configPath, fsLike, { pid: process.pid, nonce: "holder", acquired_at: clock });
+    let ran = false;
+    await assert.rejects(withConfigLock(configPath, fsLike, {
+      now: () => clock, sleep: async (ms) => { clock += ms; }, staleMs: 30_000, maxWaitMs: 20_000, isAlive: () => true,
+    }, async () => { ran = true; }), /Timed out waiting for the credential lock/);
+    assert.equal(ran, false);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("a lock is reclaimed when its owner is gone, or held past the stale age by an unchanged owner", async () => {
+  const home = await testTemp("config-lock-reclaim-");
+  const fsLike = realFs(home);
+  const configPath = path.join(home, "screenrig", "config.json");
+  let clock = 1_000_000;
+  const options = { now: () => clock, sleep: async (ms: number) => { clock += ms; }, staleMs: 30_000, maxWaitMs: 20_000 };
+  try {
+    await plantLock(configPath, fsLike, { pid: 2 ** 22 + 7, nonce: "dead", acquired_at: clock });
+    assert.equal(await withConfigLock(configPath, fsLike, { ...options, isAlive: () => false }, async () => "ran"), "ran");
+
+    await plantLock(configPath, fsLike, { pid: process.pid, nonce: "stuck", acquired_at: clock - 60_000 });
+    let looks = 0;
+    assert.equal(await withConfigLock(configPath, fsLike, { ...options, isAlive: () => { looks += 1; return true; } }, async () => "ran"), "ran");
+    assert.equal(looks, 2, "the same nonce is seen on two looks before reclaiming");
+    await assert.rejects(stat(`${configPath}.lock`), (err: NodeJS.ErrnoException) => err.code === "ENOENT");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("release removes only this holder's lock", async () => {
+  const home = await testTemp("config-lock-owner-");
+  const fsLike = realFs(home);
+  const configPath = path.join(home, "screenrig", "config.json");
+  const lockPath = `${configPath}.lock`;
+  try {
+    await withConfigLock(configPath, fsLike, { now: () => Date.now(), sleep: async () => undefined }, async () => {
+      const owner = JSON.parse(await readFile(path.join(lockPath, "owner.json"), "utf8")) as { pid: number; nonce: string };
+      assert.equal(owner.pid, process.pid);
+      assert.match(owner.nonce, /^[0-9a-f]{32}$/);
+      // Another process reclaimed the lock and holds it now.
+      await writeFile(path.join(lockPath, "owner.json"), JSON.stringify({ pid: process.pid, nonce: "other", acquired_at: Date.now() }));
+    });
+    assert.ok((await stat(lockPath)).isDirectory(), "another holder's lock stays");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});

@@ -9,13 +9,17 @@ import {
   type ScreenRigConfig,
 } from "./config.js";
 import { isValidIdempotencyKey, newIdempotencyKey, randomPrefixedId } from "./ids.js";
+import { OAUTH_CLIENT_ID } from "./oauth.js";
 import { CliError, configError } from "./problems.js";
 
 /** Refusals a resume cannot fix; 408, 409, 410 and 429 keep the pending enrollment. */
 const DEFINITE_ENROLL_REFUSALS = new Set([400, 403, 404, 422]);
 
 export interface EnrollmentCredential {
+  /** The project credential: a legacy bearer, or the grant's first access token. */
   token: string;
+  /** Present when the server enrolled in the oauth credential format. */
+  oauth?: { refreshToken: string; refreshExpiresAt?: number; identity: boolean };
   projectId?: string;
   projectName?: string;
   agentId?: string;
@@ -35,6 +39,8 @@ export interface EnrollmentState {
   organization?: string;
   /** Enrollment purpose, fixed for the lifetime of one pending enrollment. */
   intent?: EnrollmentIntent;
+  /** Sent only when this enrollment started with it, so a resume repeats the exact body. */
+  credentialFormat?: "oauth";
 }
 
 export interface EnrollmentRuntime {
@@ -133,6 +139,7 @@ export async function ensureCredential(options: {
         ...(existingEnrollment ?? {
           client_id: (options.generateClientId ?? (() => randomPrefixedId("cli", 32)))(),
           idempotency_key: (options.generateIdempotencyKey ?? newIdempotencyKey)(),
+          credential_format: "oauth" as const,
         }),
         ...(email !== undefined ? { email } : {}),
         ...(agentidClaim !== undefined ? { agentid_claim: agentidClaim } : {}),
@@ -162,6 +169,7 @@ export async function ensureCredential(options: {
         ...(enrollment.project_name !== undefined ? { projectName: enrollment.project_name } : {}),
         ...(enrollment.organization !== undefined ? { organization: enrollment.organization } : {}),
         ...(enrollment.intent ? { intent: enrollment.intent } : {}),
+        ...(enrollment.credential_format ? { credentialFormat: enrollment.credential_format } : {}),
         });
       } catch (error) {
         // A definite refusal (the feature is off, the claim or input is invalid)
@@ -184,6 +192,13 @@ export async function ensureCredential(options: {
         ...(credential.identityToken ? { identity_token: credential.identityToken } : {}),
         ...(credential.organizationId ? { organization_id: credential.organizationId } : {}),
         ...(credential.organizationName ? { organization_name: credential.organizationName } : {}),
+        ...(credential.oauth ? { oauth: {
+          issuer: new URL(resolved.apiUrl).origin,
+          client_id: OAUTH_CLIENT_ID,
+          refresh_token: credential.oauth.refreshToken,
+          ...(credential.oauth.refreshExpiresAt !== undefined ? { refresh_expires_at: credential.oauth.refreshExpiresAt } : {}),
+          identity: credential.oauth.identity,
+        } } : {}),
         ...(credential.projectId && credential.projectName === "Screens" && credential.agentId
           ? { enrollment_project: { project_id: credential.projectId, agent_id: credential.agentId } } : {}),
         enrollment,

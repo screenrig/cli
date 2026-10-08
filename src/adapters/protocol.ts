@@ -116,9 +116,27 @@ export interface CLIEnrollment {
   token: string;
 }
 
+/** Enrollment in the oauth credential format: the grant's first token pair in place of the legacy bearers. */
+export interface CLIEnrollmentOAuth {
+  project: Project;
+  invitation: EnrollmentInvitation;
+  agent: Agent;
+  connection_ready: false;
+  issuance_expires_at: string;
+  issuance_id: string;
+  access_token: string;
+  token_type: "Bearer";
+  expires_in: number;
+  refresh_token: string;
+  refresh_expires_at: number;
+  scope: string;
+}
+
 export interface CLIEnrollmentRequest {
   organization?: string;
   client_id: string;
+  /** oauth asks for a token pair; a server that does not issue answers the legacy shape. */
+  credential_format?: "oauth" | "legacy";
   /** Exactly one of `email` or `agentid_claim` is present. */
   email?: string;
   /**
