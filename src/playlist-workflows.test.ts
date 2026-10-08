@@ -132,7 +132,8 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) for (const revision 
  assert.equal(new Set(createKeys).size,1);assert.equal(new Set(assignKeys).size,1);
  await publishScreen(options);
  assert.equal(createKeys.length,failure==='create'?2:1);
- assert.equal(assignKeys.length,failure==='assign'?2:1);
+ // A resumed assignment that already landed is recognized from the screen, not sent again.
+ assert.equal(assignKeys.length,1);
  assert.ok(created&&assigned);
 });
 
@@ -193,6 +194,42 @@ test("publish --no-wait returns after assignment and a wait warning explains the
  assert.equal(unwaited.body.data.playback.reason,'not_waited'); assert.deepEqual(unwaited.body.warnings,[]); assert.equal(unwaited.err,'');
 });
 
+test("an identical publish rerun reports a finished publish, and starts fresh once the screen moved on",async t=>{
+ const dir=await mkdtemp('/tmp/publish-rerun-');t.after(()=>rm(dir,{recursive:true,force:true}));
+ let screen:{id:string;revision:number;playlist_id?:string}={id:'scr_TEST',revision:7};
+ let created=0;
+ const transport=new FakeTransport().on('GET','/api/project',()=>response({id:'prj_TEST'})).on('GET','/api/screens/scr_TEST',()=>response(screen))
+  .on('POST','/api/playlists',()=>response({id:`pl_TEST${++created}`,revision:1}))
+  .on('PATCH','/api/screens/scr_TEST',req=>{screen={...screen,revision:screen.revision+1,playlist_id:(req.body as any).playlist_id};return response(screen);});
+ const options={client:new ApiClient({transport}),runtime:processRuntime(),configPath:dir+'/config.json',apiUrl:'https://api.screenrig.ai',screenId:'scr_TEST',document:document()};
+ const first=await publishScreen(options);
+ assert.equal(first.playlist_id,'pl_TEST1');
+ const again=await publishScreen(options);
+ assert.equal((again as any).already_published,true);
+ assert.equal(created,1);
+ assert.equal(transport.calls.filter(c=>c.method==='PATCH').length,1,'a finished publish is reported, not replayed');
+ screen={...screen,revision:screen.revision+1,playlist_id:'pl_OTHER'};
+ const fresh=await publishScreen(options);
+ assert.equal(fresh.playlist_id,'pl_TEST2','the screen moved on, so the rerun publishes afresh');
+ assert.equal((fresh as any).already_published,undefined);
+ assert.equal(screen.playlist_id,'pl_TEST2');
+});
+
+test("a resumed publish never replays an assignment whose expected revision is stale",async t=>{
+ const dir=await mkdtemp('/tmp/publish-stale-');t.after(()=>rm(dir,{recursive:true,force:true}));
+ let revision=7, patches=0;
+ const transport=new FakeTransport().on('GET','/api/project',()=>response({id:'prj_TEST'})).on('GET','/api/screens/scr_TEST',()=>response({id:'scr_TEST',revision}))
+  .on('POST','/api/playlists',()=>response({id:'pl_TEST',revision:1}))
+  .on('PATCH','/api/screens/scr_TEST',()=>{patches++;throw networkError('Assignment response lost');});
+ const options={client:new ApiClient({transport}),runtime:processRuntime(),configPath:dir+'/config.json',apiUrl:'https://api.screenrig.ai',screenId:'scr_TEST',revision:'7',document:document()};
+ await assert.rejects(()=>publishScreen(options));
+ assert.equal(patches,1);
+ revision=9;
+ await assert.rejects(()=>publishScreen(options),(e:any)=>e.problem.code==='revision_conflict'&&e.exitCode===6&&e.problem.current_revision===9);
+ assert.equal(patches,1,'the stale assignment is not sent again');
+ assert.equal(transport.calls.filter(c=>c.method==='POST').length,1);
+});
+
 test("publish checks the expected screen revision before creating a playlist",async t=>{
  const dir=await mkdtemp('/tmp/publish-conflict-');t.after(()=>rm(dir,{recursive:true,force:true}));
  const transport=new FakeTransport().on('GET','/api/project',()=>response({id:'prj_TEST'})).on('GET','/api/screens/scr_TEST',()=>response({id:'scr_TEST',revision:9}));
@@ -250,7 +287,8 @@ test("assignment conflicts retain the created playlist and never create another 
   return true;
  });
  assert.equal(transport.calls.filter(c=>c.method==='POST').length,1);
- assert.equal(transport.calls.filter(c=>c.method==='GET'&&c.path==='/api/screens/scr_TEST').length,1);
+ // The first run reads the screen before creating; the resume reads it again before assigning.
+ assert.equal(transport.calls.filter(c=>c.method==='GET'&&c.path==='/api/screens/scr_TEST').length,2);
  for(const call of transport.calls.filter(c=>c.method==='PATCH')) assert.equal(call.headers?.['if-match'],'"7"');
 });
 

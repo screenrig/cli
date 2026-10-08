@@ -145,6 +145,31 @@ export async function publishScreen(options: {
       if (state?.version !== 1 || state.fingerprint !== fingerprint || !Number.isFinite(state.created_at) || !state.create_key || !state.assign_key) throw usageError("Publish journal is invalid.");
       if (state.playlist) resource(state.playlist, "playlist");
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    const resumed = state !== undefined;
+    let alreadyPublished = false;
+    if (state?.assigned && state.playlist) {
+      // A finished publish leaves its journal. If the screen still shows that
+      // playlist, the identical rerun reports it; if the screen has moved on,
+      // the journal is history, so start a fresh publish against the current screen.
+      const current = resource((await client.call({ method: "GET", path: `/api/screens/${screenId}` })).body, "screen");
+      if (current.id === screenId && current.playlist_id === state.playlist.id) alreadyPublished = true;
+      else {
+        await rm(journalPath, { force: true });
+        state = undefined;
+      }
+    }
+    if (resumed && state && !state.assigned && state.playlist) {
+      // Resuming an assignment: it may have landed before its answer was lost, and
+      // an assignment whose expected revision is now stale is never replayed.
+      const current = resource((await client.call({ method: "GET", path: `/api/screens/${screenId}` })).body, "screen");
+      if (current.id === screenId && current.playlist_id === state.playlist.id) {
+        // The earlier assignment reached the server before its answer was lost.
+        state.assigned = true;
+        await save();
+      } else if (expected !== undefined && current.revision !== expected) {
+        staleRevision("Screen changed since this publish created its playlist. Inspect it and reconcile before assigning.", current.revision);
+      }
+    }
     if (!state) {
       const screen = resource((await client.call({ method: "GET", path: `/api/screens/${screenId}` })).body, "screen");
       if (screen.id !== screenId) throw usageError("Screen response identity did not match.");
@@ -175,7 +200,8 @@ export async function publishScreen(options: {
       : { playing: false, reason: "not_waited", online: (screen as { online?: unknown }).online === true, waited_ms: 0 };
     if (playback.playing) options.progress?.("playing", playback.state);
     return { playlist_id: state.playlist.id, playlist_revision: state.playlist.revision, screen_id: screenId, screen_revision: screen.revision,
-      stage: playback.playing ? "playing" : "assigned", assignment_verified: true, playback_verified: playback.playing, playback, journal: journalPath };
+      stage: playback.playing ? "playing" : "assigned", assignment_verified: true, playback_verified: playback.playing, playback, journal: journalPath,
+      ...(alreadyPublished ? { already_published: true } : {}) };
   } catch (error) {
     if (error instanceof CliError) {
       error.problem.errors.push({ stage: state?.assigned ? "verify" : state?.playlist ? "assign" : "create", playlist_id: state?.playlist?.id, journal: journalPath });
