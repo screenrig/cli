@@ -279,8 +279,8 @@ export function screenControlProblem(error: unknown, id: string): unknown {
       ...problem,
       detail: `Set the screen timezone first: ${problem.detail}`,
       next: {
-        command: `screenrig screen set-timezone ${id} --timezone America/Los_Angeles`,
-        reason: "Schedules are civil times read in the screen timezone. Set an IANA zone, then rerun.",
+        command: `screenrig screen set-timezone ${id} --timezone ZONE`,
+        reason: "Schedules are civil times read in the screen timezone. Replace ZONE with the IANA name of where the screen is (for example Europe/London or America/New_York; ask the user if unsure), then rerun.",
       },
     }, error.exitCode, error.warnings);
   }

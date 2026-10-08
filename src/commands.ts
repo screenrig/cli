@@ -5127,14 +5127,22 @@ export const handleScreenPair = commandHandler(async (args, runtime, resolved) =
   if (!claim.screen?.id || !claim.screen.label || !claim.public_url) {
     throw usageError("Screen pairing response does not match the generated PairingClaim contract.");
   }
+  // The claim is done; the Player still has to pick it up. Say how to see that happen.
+  const waiting = claim.screen.state === "pairing_pending" || claim.screen.online === false;
+  const next = waiting ? {
+    command: `screenrig screen show ${claim.screen.id}`,
+    argv: ["screen", "show", claim.screen.id],
+    reason: "The Player finishes pairing the next time it contacts the service, with nothing to do on the display. screen show reports state active and online true once it has; assign a playlist with screen assign meanwhile or after.",
+  } : undefined;
   return {
-    envelope: jsonBody(response, client.requestId),
+    envelope: jsonBody(response, client.requestId, next ? { next } : undefined),
     exitCode: ExitCode.Success,
     human: humanLines("Screen paired", [
       ["code", code],
       ["screen_id", claim.screen.id],
       ["label", claim.screen.label],
       ["state", claim.screen.state],
+      ["next", next ? `${next.command} (the Player finishes pairing when it next contacts the service)` : undefined],
     ]),
   };
 }, true);

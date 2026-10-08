@@ -58,11 +58,11 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleScreenAssign));
 
-  screen.command("set-timezone").description("Set a screen's timezone")
+  addCommandNotes(screen.command("set-timezone").description("Set a screen's timezone")
     .argument("<id>", "Screen identifier")
-    .requiredOption("--timezone <ZONE>", "Set an IANA timezone (required)")
+    .requiredOption("--timezone <ZONE>", "Set an IANA timezone name, such as Europe/London (required)")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
-    .action(bind(handleScreenSetTimezone));
+    .action(bind(handleScreenSetTimezone)), "Timezone:\n  ZONE is an IANA timezone name: Area/City such as America/New_York,\n  Europe/London or Asia/Tokyo, or UTC. Playlist schedules, page visibility,\n  takeovers and display schedules read their civil times in this zone, so set\n  it before any of those.");
 
   screen.command("archive").description("Archive a screen")
     .argument("<id>", "Screen identifier")
@@ -208,7 +208,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
     .action(bind(handleScreenDisplayScheduleClear));
-  addCommandNotes(displaySchedule, "Display schedule:\n  1 to 16 windows when the display is ON, in the screen timezone (required):\n  {\"enabled\": true, \"windows\": [{\"days\": [\"mon\",\"tue\"], \"start\": \"07:00\", \"end\": \"19:00\"}]}.\n  end <= start crosses midnight; omit start and end for the whole day. Outside\n  every window the display goes to standby. enabled false keeps the windows and\n  leaves the display on. The device evaluates it offline.");
+  addCommandNotes(displaySchedule, "Display schedule:\n  The screen needs a timezone first (screen set-timezone ID --timezone ZONE).\n  1 to 16 windows when the display is ON, in the screen timezone (required):\n  {\"enabled\": true, \"windows\": [{\"days\": [\"mon\",\"tue\"], \"start\": \"07:00\", \"end\": \"19:00\"}]}.\n  end <= start crosses midnight; omit start and end for the whole day. Outside\n  every window the display goes to standby. enabled false keeps the windows and\n  leaves the display on. The device evaluates it offline.");
   addCommandExamples(displaySchedule.commands.find((command) => command.name() === "show")!, "screenrig screen display-schedule show scr_LOBBY");
   addCommandExamples(displaySchedule.commands.find((command) => command.name() === "set")!,
     "screenrig screen display-schedule set scr_LOBBY --file hours.json", "screenrig screen display-schedule set --tag Cafe --file hours.json");

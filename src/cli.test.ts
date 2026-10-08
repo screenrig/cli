@@ -168,6 +168,9 @@ test("pairing requires explicit enrollment and then preserves the original pairi
   assert.equal(envelope.ok, true);
   assert.equal(envelope.data.screen.label, "Lobby");
   assert.equal(envelope.data.public_url, "https://play.screenrig.ai/player/s/scr_public_pairing");
+  const next = (envelope.data as unknown as { next?: { command: string; reason: string } }).next;
+  assert.equal(next?.command, "screenrig screen show scr_PAIRINGAAAAAAAAAAAAAAAA", "a pending pairing names how to watch it finish");
+  assert.match(next?.reason ?? "", /state active and online true/);
   assert.ok(!paired.stdout.includes("sr_live_tokidAAAAAAAAAAAAAAAA_AAAA"));
   const methods = transport.calls.map((call) => `${call.method} ${call.path}`);
   assert.deepEqual(methods, [

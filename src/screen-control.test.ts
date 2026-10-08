@@ -217,7 +217,7 @@ test("schedule problems: missing timezone points at set-timezone, archived at un
   assert.equal(zoneless.code, ExitCode.Client, zoneless.stdout);
   assert.equal(zoneless.envelope.error!.code, "invalid_request");
   assert.match(zoneless.envelope.error!.detail, /^Set the screen timezone first: timezone: is required/);
-  assert.equal(zoneless.envelope.error!.next!.command, `screenrig screen set-timezone ${C} --timezone America/Los_Angeles`);
+  assert.equal(zoneless.envelope.error!.next!.command, `screenrig screen set-timezone ${C} --timezone ZONE`);
 
   const archived = new FakeTransport().on("PUT", `/api/screens/${A}/playlist-schedule`, () => ({
     status: 409, headers: { "content-type": "application/problem+json" },
