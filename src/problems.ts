@@ -301,7 +301,10 @@ function withGuidance(problem: NormalizedProblem, guidance: { hint?: string; nex
  * the next-action guidance instead of discarding the header.
  */
 export function withRetryAfter(problem: NormalizedProblem, retryAfterSeconds: number | undefined): NormalizedProblem {
-  if (problem.status !== 429 || retryAfterSeconds === undefined) {
+  if (retryAfterSeconds === undefined) return problem;
+  // A 503 may also name its wait; keep it for callers that retry on their own.
+  if (problem.status === 503) return { ...problem, retry_after_seconds: retryAfterSeconds };
+  if (problem.status !== 429) {
     return problem;
   }
   const interval = describeRetryInterval(retryAfterSeconds);

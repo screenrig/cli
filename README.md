@@ -938,7 +938,9 @@ wait retains it so retrying does not create another application. A definite
 refusal (any 4xx except 408) or a local validation error clears the entry, so the
 next run sends a fresh request; explicit revision checks remain in force.
 `screen screenshot` is an observation, not a protected write: every run requests
-a new capture.
+a new capture under a fresh key. Within one run it retries network failures, 429
+and 5xx answers with backoff (honouring Retry-After) and reads the screen's status
+before asking again, so it never replaces a capture still in progress.
 
 Automatic replay stops after 23 hours, before the server's 24-hour replay window
 ends. Inspect the resource before explicitly supplying a new `--idempotency-key`

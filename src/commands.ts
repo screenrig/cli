@@ -1,5 +1,6 @@
 import { requireCapability, validateProjectCapabilities } from "./project-capabilities.js";
 import { RESOURCE_ID_PATTERNS, isResourceID } from "./generated/resource-ids.js";
+import { newIdempotencyKey } from "./ids.js";
 import { replacePlaylistRelease } from "./playlist-release.js";
 import { assertOutputAvailable, readAuthoringJson, readAuthoringText, writeAuthoringJson, writeOutputFile } from "./authoring-input.js";
 import { publishScreen } from "./screen-publish.js";
@@ -5640,7 +5641,7 @@ async function screenScreenshot(args: ParsedArgs, runtime: CliRuntime, client: A
   }
   const outputPath = await resolveScreenshotOutput(runtime.cwd(), id, args.flags);
   const { timeoutMs, pollMs } = screenshotTiming(args);
-  const data = await captureScreenshot(runtime, client, id, outputPath, timeoutMs, pollMs);
+  const data = await captureScreenshot(runtime, client, id, outputPath, timeoutMs, pollMs, client.idempotencyKey);
   return {
     envelope: successEnvelope(data, { request_id: client.requestId }),
     exitCode: ExitCode.Success,
@@ -5681,33 +5682,112 @@ interface ScreenshotSaved {
   height: number;
 }
 
-/** Request, wait for, verify, and atomically write one screen's screenshot. */
-async function captureScreenshot(runtime: CliRuntime, client: ApiClient, id: string, outputPath: string, timeoutMs: number, pollMs: number): Promise<ScreenshotSaved> {
-  const acceptedResponse = await client.call({
-    method: "POST",
-    path: `/api/screens/${id}/screenshot`,
-    idempotent: true,
-  });
-  const accepted = (acceptedResponse.body ?? {}) as ScreenScreenshotAccepted;
-  const captureId = accepted.capture_id;
-  if (typeof captureId !== "string" || captureId.length === 0) {
-    throw new CliError(
-      makeProblem("invalid_request", "Request is invalid", 400, "Screenshot request did not return a capture_id.", {
-        request_id: client.requestId,
-      }),
-    );
+const SCREENSHOT_RETRY_MAX = 6;
+const SCREENSHOT_BACKOFF_MS = 500;
+const SCREENSHOT_BACKOFF_CAP_MS = 8000;
+
+/** Network failures, timeouts, 429 and 5xx answers: the capture may still succeed on a later try. */
+function transientScreenshotFailure(error: unknown): error is CliError {
+  return error instanceof CliError && error.problem.code !== "file_error"
+    && (error.problem.status >= 500 || error.problem.status === 408 || error.problem.status === 429);
+}
+
+/**
+ * Bounded backoff shared by every step of one capture. Retry-After wins over
+ * the exponential step; a wait that would pass the deadline ends the capture
+ * with the last real failure.
+ */
+class ScreenshotRetry {
+  private attempts = 0;
+  constructor(private readonly runtime: CliRuntime, private readonly deadline: number) {}
+
+  async wait(error: CliError): Promise<void> {
+    const after = error.problem.retry_after_seconds;
+    const delay = typeof after === "number" ? after * 1000 : Math.min(SCREENSHOT_BACKOFF_MS * 2 ** this.attempts, SCREENSHOT_BACKOFF_CAP_MS);
+    if (this.attempts >= SCREENSHOT_RETRY_MAX || Date.now() + delay > this.deadline) throw this.exhausted(error);
+    this.attempts += 1;
+    await this.runtime.sleep(delay);
   }
 
+  private exhausted(error: CliError): CliError {
+    const tried = this.attempts ? `screen screenshot retried this ${this.attempts} time${this.attempts === 1 ? "" : "s"} with backoff before giving up.` : "No retry fit before --timeout.";
+    const hint = `${error.problem.hint ? `${error.problem.hint} ` : ""}${tried} Run screen screenshot again later; every run requests a new capture.`;
+    return new CliError({ ...error.problem, hint }, error.exitCode, error.warnings);
+  }
+}
+
+/**
+ * Ask for a capture under one Idempotency-Key. After an ambiguous failure the
+ * screen's status is read first: a pending capture is still in progress (ours,
+ * or one requested elsewhere) and is adopted, because a new request would
+ * replace it. Otherwise the same key is sent again, so a request the server
+ * already accepted returns its original capture_id instead of starting another.
+ */
+async function requestScreenshotCapture(client: ApiClient, id: string, key: string, retry: ScreenshotRetry): Promise<string> {
+  let lastFailure: CliError | undefined;
+  while (true) {
+    if (lastFailure) {
+      await retry.wait(lastFailure);
+      try {
+        const current = (await client.call({ method: "GET", path: `/api/screens/${id}/screenshot/status` })).body as ScreenScreenshotStatus | undefined;
+        if (current?.state === "pending" && typeof current.capture_id === "string" && current.capture_id.length > 0) return current.capture_id;
+      } catch (error) {
+        if (!transientScreenshotFailure(error)) throw error;
+        lastFailure = error;
+        continue;
+      }
+    }
+    let acceptedResponse;
+    try {
+      acceptedResponse = await client.call({ method: "POST", path: `/api/screens/${id}/screenshot`, idempotent: true, idempotencyKey: key });
+    } catch (error) {
+      if (!transientScreenshotFailure(error)) throw error;
+      lastFailure = error;
+      continue;
+    }
+    const captureId = ((acceptedResponse.body ?? {}) as ScreenScreenshotAccepted).capture_id;
+    if (typeof captureId !== "string" || captureId.length === 0) {
+      throw new CliError(
+        makeProblem("invalid_request", "Request is invalid", 400, "Screenshot request did not return a capture_id.", {
+          request_id: client.requestId,
+        }),
+      );
+    }
+    return captureId;
+  }
+}
+
+/** One read, retried on transient failures until the shared retry budget runs out. */
+async function retriedScreenshotRead<T>(retry: ScreenshotRetry, read: () => Promise<T>): Promise<T> {
+  while (true) {
+    try {
+      return await read();
+    } catch (error) {
+      if (!transientScreenshotFailure(error)) throw error;
+      await retry.wait(error);
+    }
+  }
+}
+
+/**
+ * Request, wait for, verify, and atomically write one screen's screenshot.
+ * `key` is fresh for every run: a screenshot is an observation, so a stored
+ * answer from an earlier run is never replayed.
+ */
+async function captureScreenshot(runtime: CliRuntime, client: ApiClient, id: string, outputPath: string, timeoutMs: number, pollMs: number, key: string): Promise<ScreenshotSaved> {
   const deadline = Date.now() + timeoutMs;
+  const retry = new ScreenshotRetry(runtime, deadline);
+  const captureId = await requestScreenshotCapture(client, id, key, retry);
+
   let status: ScreenScreenshotStatus | undefined;
   await loggerOf(runtime).withLocal(
     { op: "screenshot.wait", message: `wait for screenshot ${id}` },
     async (span) => {
       while (true) {
-        const statusResponse = await client.call({
+        const statusResponse = await retriedScreenshotRead(retry, () => client.call({
           method: "GET",
           path: `/api/screens/${id}/screenshot/status`,
-        });
+        }));
         status = (statusResponse.body ?? {}) as ScreenScreenshotStatus;
         const currentId = status.capture_id;
         span.progress({ capture_id: currentId, state: status.state });
@@ -5737,13 +5817,13 @@ async function captureScreenshot(runtime: CliRuntime, client: ApiClient, id: str
     },
   );
 
-  const download = await client.call({
+  const download = await retriedScreenshotRead(retry, () => client.call({
     method: "GET",
     path: `/api/screens/${id}/screenshot`,
     query: { capture_id: captureId },
     headers: { accept: "image/webp" },
     binary: true,
-  });
+  }));
   const bytes = download.body;
   const contentType = download.headers["content-type"] ?? "";
   const digest = bytes instanceof Uint8Array ? createHash("sha256").update(bytes).digest("hex") : "";
@@ -5868,7 +5948,7 @@ async function screenScreenshotFleet(args: ParsedArgs, runtime: CliRuntime, clie
       const index = next++;
       const id = ids[index]!;
       try {
-        const saved = await captureScreenshot(runtime, client, id, path.join(directory, `${id}.webp`), timeoutMs, pollMs);
+        const saved = await captureScreenshot(runtime, client, id, path.join(directory, `${id}.webp`), timeoutMs, pollMs, newIdempotencyKey());
         results[index] = { ...saved, status: "ok" };
       } catch (error) {
         if (error instanceof CliError) {

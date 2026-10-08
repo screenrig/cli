@@ -8,6 +8,7 @@ import { parseArgv } from "./argv.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { run, type CliRuntime } from "./main.js";
+import { networkError } from "./problems.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 import type { TransportRequest, TransportResponse } from "./transport/types.js";
@@ -337,6 +338,119 @@ test("screen screenshot keeps no recovery entry: a rerun after a refusal request
     assert.ok(keys.every(Boolean));
     assert.equal(new Set(keys).size, 3);
     assert.equal(JSON.parse(await readFile(configPath, "utf8")).pending_writes, undefined);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+    await rm(cwdDir, { recursive: true, force: true });
+  }
+});
+
+function readyImage(): TransportResponse {
+  return {
+    status: 200,
+    headers: { "content-type": "image/webp", "content-length": String(IMAGE_BYTES.byteLength), "cache-control": "private, no-store" },
+    body: IMAGE_BYTES,
+  };
+}
+
+function serverProblem(status: number, code: string, detail: string, headers: Record<string, string> = {}): TransportResponse {
+  return { status, headers: { "content-type": "application/problem+json", ...headers }, body: { type: `https://screenrig.ai/problems/${code}`, title: "Server error", status, code, detail } };
+}
+
+async function captureWith(transport: FakeTransport, argv: string[] = [], sleeps: number[] = []) {
+  const configDir = await testTemp("screenshot-retry-");
+  const cwdDir = await testTemp("screenshot-retry-cwd-");
+  const fsLike = await enrolledFs(configDir);
+  try {
+    const result = await withRuntime(["--json", "screen", "screenshot", SCREEN_ID, "--poll-ms", "1", ...argv], transport,
+      { fs: fsLike, configDir, cwdDir, sleep: async (ms: number) => { sleeps.push(ms); } });
+    return { ...result, envelope: JSON.parse(result.stdout) };
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+    await rm(cwdDir, { recursive: true, force: true });
+  }
+}
+
+test("screen screenshot retries a 503 after Retry-After, reads status first, and resends the same key", async () => {
+  const transport = new FakeTransport();
+  let posts = 0;
+  transport.on("POST", `/api/screens/${SCREEN_ID}/screenshot`, () => {
+    posts += 1;
+    if (posts === 1) return serverProblem(503, "not_ready", "Screenshot delivery is unavailable.", { "retry-after": "2" });
+    return { status: 202, headers: { "cache-control": "no-store" }, body: { capture_id: CAPTURE_ID, expires_at: "2026-08-14T17:00:30.000Z" } };
+  });
+  const statuses = [{ state: "idle" }, readyStatus()];
+  transport.on("GET", `/api/screens/${SCREEN_ID}/screenshot/status`, () => ({ status: 200, headers: {}, body: statuses.shift() ?? readyStatus() }));
+  transport.on("GET", `/api/screens/${SCREEN_ID}/screenshot`, () => readyImage());
+  const sleeps: number[] = [];
+  const result = await captureWith(transport, [], sleeps);
+  assert.equal(result.code, 0, result.stdout);
+  assert.equal(sleeps[0], 2000, "Retry-After sets the first wait");
+  const calls = transport.calls.map((call) => `${call.method} ${call.path.replace(SCREEN_ID, "ID")}${call.binary ? " (image)" : ""}`);
+  assert.deepEqual(calls.slice(0, 3), ["POST /api/screens/ID/screenshot", "GET /api/screens/ID/screenshot/status", "POST /api/screens/ID/screenshot"]);
+  const keys = transport.calls.filter((call) => call.method === "POST").map((call) => call.headers?.["idempotency-key"]);
+  assert.ok(keys[0]);
+  assert.equal(keys[0], keys[1], "a retry inside one run reuses its key, so an accepted request is not repeated");
+});
+
+test("screen screenshot adopts a capture still in progress instead of replacing it after a network failure", async () => {
+  const transport = new FakeTransport();
+  transport.on("POST", `/api/screens/${SCREEN_ID}/screenshot`, () => { throw networkError("connection reset after the request was sent"); });
+  const statuses = [{ state: "pending", capture_id: CAPTURE_ID }, { state: "pending", capture_id: CAPTURE_ID }, readyStatus()];
+  transport.on("GET", `/api/screens/${SCREEN_ID}/screenshot/status`, () => ({ status: 200, headers: {}, body: statuses.shift() ?? readyStatus() }));
+  transport.on("GET", `/api/screens/${SCREEN_ID}/screenshot`, () => readyImage());
+  const sleeps: number[] = [];
+  const result = await captureWith(transport, [], sleeps);
+  assert.equal(result.code, 0, result.stdout);
+  assert.equal(result.envelope.data.capture_id, CAPTURE_ID);
+  assert.equal(transport.calls.filter((call) => call.method === "POST").length, 1, "no second request superseded the pending capture");
+  assert.equal(sleeps[0], 500);
+});
+
+test("screen screenshot retries 5xx answers on status and download reads", async () => {
+  const transport = new FakeTransport();
+  transport.on("POST", `/api/screens/${SCREEN_ID}/screenshot`, () => ({ status: 202, headers: {}, body: { capture_id: CAPTURE_ID, expires_at: "2026-08-14T17:00:30.000Z" } }));
+  let statusReads = 0;
+  transport.on("GET", `/api/screens/${SCREEN_ID}/screenshot/status`, () => (++statusReads === 1 ? serverProblem(502, "bad_gateway", "Upstream unavailable.") : { status: 200, headers: {}, body: readyStatus() }));
+  let downloads = 0;
+  transport.on("GET", `/api/screens/${SCREEN_ID}/screenshot`, () => (++downloads === 1 ? serverProblem(500, "internal_error", "Storage read failed.") : readyImage()));
+  const sleeps: number[] = [];
+  const result = await captureWith(transport, [], sleeps);
+  assert.equal(result.code, 0, result.stdout);
+  assert.equal(transport.calls.filter((call) => call.method === "POST").length, 1);
+  assert.deepEqual(sleeps, [500, 1000]);
+});
+
+test("screen screenshot reports the server's own failure after bounded retries", async () => {
+  const transport = new FakeTransport();
+  transport.on("POST", `/api/screens/${SCREEN_ID}/screenshot`, () => serverProblem(500, "internal_error", "Screenshot storage write failed."));
+  transport.on("GET", `/api/screens/${SCREEN_ID}/screenshot/status`, () => ({ status: 200, headers: {}, body: { state: "idle" } }));
+  const sleeps: number[] = [];
+  const result = await captureWith(transport, ["--timeout", "600000"], sleeps);
+  assert.notEqual(result.code, 0);
+  assert.equal(result.envelope.error.code, "internal_error");
+  assert.equal(result.envelope.error.detail, "Screenshot storage write failed.");
+  assert.match(result.envelope.error.hint, /retried this 6 times with backoff/);
+  assert.deepEqual(sleeps, [500, 1000, 2000, 4000, 8000, 8000]);
+  assert.equal(transport.calls.filter((call) => call.method === "POST").length, 7);
+});
+
+test("fleet screenshots send a separate fresh key per screen", async () => {
+  const other = "scr_PAIRINGBBBBBBBBBBBBBBBB";
+  const transport = new FakeTransport();
+  for (const id of [SCREEN_ID, other]) {
+    transport.on("POST", `/api/screens/${id}/screenshot`, () => ({ status: 202, headers: {}, body: { capture_id: CAPTURE_ID, expires_at: "2026-08-14T17:00:30.000Z" } }));
+    transport.on("GET", `/api/screens/${id}/screenshot/status`, () => ({ status: 200, headers: {}, body: readyStatus() }));
+    transport.on("GET", `/api/screens/${id}/screenshot`, () => readyImage());
+  }
+  const configDir = await testTemp("screenshot-fleet-keys-");
+  const cwdDir = await testTemp("screenshot-fleet-keys-cwd-");
+  const fsLike = await enrolledFs(configDir);
+  try {
+    const result = await withRuntime(["--json", "screen", "screenshot", SCREEN_ID, other, "--poll-ms", "1"], transport, { fs: fsLike, configDir, cwdDir });
+    assert.equal(result.code, 0, result.stdout);
+    const keys = transport.calls.filter((call) => call.method === "POST").map((call) => call.headers?.["idempotency-key"]);
+    assert.equal(keys.length, 2);
+    assert.notEqual(keys[0], keys[1]);
   } finally {
     await rm(configDir, { recursive: true, force: true });
     await rm(cwdDir, { recursive: true, force: true });
