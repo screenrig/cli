@@ -15,7 +15,7 @@ const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const URL_FRAGMENT_TOKEN_RE = /#(token|link|provision)=[A-Za-z0-9_-]{8,}/gi;
 
 const SENSITIVE_KEY_RE =
-  /(authorization|access_token|token|password|secret|private|ciphertext|nonce|cookie|object_key|signed_url|completion_nonce|upload_url|image_bytes|pixels|prompt|agentid_claim|claim_code)/i;
+  /(authorization|access_token|token|password|secret|private|ciphertext|nonce|cookie|object_key|signed_url|completion_nonce|upload_url|image_bytes|pixels|prompt|agentid_claim|claim_code|client_id|idempotency|beta_key)/i;
 const SENSITIVE_VALUE_RE =
   /(sr_live_|sac_|whsec_|agid_|Bearer\s|ScreenRig-Agent-Connect\s|data:image\/|#(token|link|provision)=|[?&](X-Amz-Signature|X-Goog-Signature|signature)=)/i;
 

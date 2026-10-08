@@ -210,38 +210,7 @@ test("pairing requires explicit enrollment and then preserves the original pairi
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("agent enroll without a beta key maps a gated invalid_request onto --beta-key next", async () => {
-  const transport = new FakeTransport().on("POST", "/api/enrollments", () => ({
-    status: 400,
-    headers: { "content-type": "application/problem+json", "cache-control": "no-store" },
-    body: {
-      type: "https://screenrig.ai/problems/invalid-request",
-      title: "Request is invalid",
-      status: 400,
-      detail: "Enrollment request is invalid.",
-      code: "invalid_request",
-      errors: [{ field: "beta_key", code: "required", message: "An enrollment beta key is required." }],
-    },
-  }));
-  const { code, stdout, configDir } = await withRuntime(
-    ["--json", "agent", "enroll", "--organization", "Example organization", "--email", "owner@example.com"],
-    transport,
-  );
-  assert.equal(code, ExitCode.Client, stdout);
-  const envelope = JSON.parse(stdout) as {
-    ok: boolean;
-    error: { code: string; detail: string; next?: { command: string } };
-  };
-  assert.equal(envelope.ok, false);
-  assert.equal(envelope.error.code, "invalid_request");
-  assert.equal(envelope.error.detail, "Enrollment request is invalid.");
-  assert.match(envelope.error.next?.command ?? "", /--beta-key/);
-  assert.match(envelope.error.next?.command ?? "", /agent enroll/);
-  assert.ok(!stdout.includes("owner@example.com"));
-  await rm(configDir, { recursive: true, force: true });
-});
-
-test("agent enroll preserves generic invalid_request without suggesting a beta key", async () => {
+test("agent enroll preserves a generic invalid_request with no invented next", async () => {
   const transport = new FakeTransport().on("POST", "/api/enrollments", () => ({
     status: 400,
     headers: { "content-type": "application/problem+json", "cache-control": "no-store" },
@@ -266,79 +235,32 @@ test("agent enroll preserves generic invalid_request without suggesting a beta k
   assert.equal(envelope.ok, false);
   assert.equal(envelope.error.code, "invalid_request");
   assert.equal(envelope.error.detail, "Enrollment request is invalid.");
-  assert.doesNotMatch(envelope.error.next?.command ?? "", /--beta-key/);
+  assert.equal(envelope.error.next, undefined);
   assert.ok(!stdout.includes("owner@example.com"));
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("explicit enrollment includes beta_key when --beta-key is set", async () => {
+test("enrollment sends no beta_key: the flag is gone and SCREENRIG_BETA_KEY is not read", async () => {
+  const configDir = await testTemp("enroll-no-beta-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir, SCREENRIG_BETA_KEY: "ignored" } };
   const transport = memoryBackend();
-  const { code, stdout, configDir } = await withRuntime(
-    ["--json", "--beta-key", "screenrig-beta-program", "agent", "enroll", "--organization", "Example organization", "--email", "owner@example.com"],
-    transport,
-  );
-  assert.equal(code, 0, stdout);
-  const enroll = transport.calls.find((call) => call.path === "/api/enrollments");
-  const body = enroll?.body as { client_id?: string; beta_key?: string; email?: string };
-  assert.match(body.client_id ?? "", /^cli_[A-Za-z0-9_-]{43}$/);
-  assert.equal(body.beta_key, "screenrig-beta-program");
-  assert.equal(body.email, "owner@example.com");
-  assert.deepEqual(Object.keys(body).sort(), ["agent_type", "beta_key", "client_id", "email", "organization", "platform", "version"]);
-  await rm(configDir, { recursive: true, force: true });
+  try {
+    const { code, stdout } = await withRuntime(
+      ["--json", "agent", "enroll", "--organization", "Example organization", "--email", "owner@example.com"],
+      transport,
+      { fs: fsLike, env: fsLike.env },
+    );
+    assert.equal(code, 0, stdout);
+    const body = transport.calls.find((call) => call.path === "/api/enrollments")?.body as Record<string, unknown>;
+    assert.match(String(body.client_id), /^cli_[A-Za-z0-9_-]{43}$/);
+    assert.deepEqual(Object.keys(body).sort(), ["agent_type", "client_id", "email", "organization", "platform", "version"]);
+    const refused = await withRuntime(["--json", "--beta-key", "x", "agent", "enroll", "--email", "owner@example.com"], new FakeTransport());
+    assert.equal(refused.code, ExitCode.Usage, refused.stdout);
+    await rm(refused.configDir, { recursive: true, force: true });
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
 });
-
-test("explicit enrollment includes beta_key from SCREENRIG_BETA_KEY when the flag is unset", async () => {
-  const transport = memoryBackend();
-  const configDir = await testTemp("enroll-beta-env-");
-  const fsLike = {
-    mkdir,
-    open,
-    rename,
-    rm,
-    chmod,
-    stat,
-    homedir: () => configDir,
-    env: { XDG_CONFIG_HOME: configDir, SCREENRIG_BETA_KEY: "screenrig-beta-program" },
-  };
-  const result = await withRuntime(["--json", "agent", "enroll", "--organization", "Example organization", "--email", "owner@example.com"], transport, { fs: fsLike });
-  assert.equal(result.code, 0, result.stdout);
-  const enroll = transport.calls.find((call) => call.path === "/api/enrollments");
-  assert.deepEqual(enroll?.body, {
-    client_id: (enroll?.body as { client_id: string }).client_id,
-    email: "owner@example.com",
-    beta_key: "screenrig-beta-program",
-    organization: "Example organization",
-    agent_type: "cli",
-    platform: `${process.platform}/${process.arch}`,
-    version: CLI_VERSION,
-  });
-  await rm(configDir, { recursive: true, force: true });
-});
-
-test("explicit enrollment prefers --beta-key over SCREENRIG_BETA_KEY", async () => {
-  const transport = memoryBackend();
-  const configDir = await testTemp("enroll-beta-flag-wins-");
-  const fsLike = {
-    mkdir,
-    open,
-    rename,
-    rm,
-    chmod,
-    stat,
-    homedir: () => configDir,
-    env: { XDG_CONFIG_HOME: configDir, SCREENRIG_BETA_KEY: "from-env" },
-  };
-  const result = await withRuntime(
-    ["--json", "--beta-key", "from-flag", "agent", "enroll", "--organization", "Example organization", "--email", "owner@example.com"],
-    transport,
-    { fs: fsLike },
-  );
-  assert.equal(result.code, 0, result.stdout);
-  const enroll = transport.calls.find((call) => call.path === "/api/enrollments");
-  assert.equal((enroll?.body as { beta_key?: string }).beta_key, "from-flag");
-  await rm(configDir, { recursive: true, force: true });
-});
-
 
 test("agent enroll --agentid-claim sends the claim instead of an email and stores the credential", async () => {
   const transport = memoryBackend();
@@ -1921,6 +1843,23 @@ test("a stored credential is never sent to another --api-url or SCREENRIG_API_UR
     // The same origin with a trailing slash is the same origin.
     const same = await withAuthenticatedRuntime(["--json", "project", "show", "--api-url", "https://api.screenrig.ai/"], memoryBackend(), { fs: fsLike });
     assert.equal(same.code, 0, same.stdout);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("a config without api_url binds its credential to the default origin", async () => {
+  const configDir = await testTemp("credential-origin-default-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const configPath = path.join(configDir, "screenrig", "config.json");
+  await mkdir(path.dirname(configPath), { recursive: true, mode: 0o700 });
+  await writeFile(configPath, JSON.stringify({ token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" }), { mode: 0o600 });
+  const transport = new FakeTransport();
+  try {
+    const result = await withRuntime(["--json", "project", "show", "--api-url", "https://example.com"], transport, { fs: fsLike });
+    assert.equal(result.code, ExitCode.Config, result.stdout);
+    assert.match(JSON.parse(result.stdout).error.detail, /issued for https:\/\/api\.screenrig\.ai; it is never sent to https:\/\/example\.com/);
+    assert.equal(transport.calls.length, 0);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }

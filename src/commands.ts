@@ -1983,14 +1983,12 @@ async function enrollForCommand(
       },
       enroll: async (state) => {
         const client = clientFor(runtime, args, resolved.apiUrl);
-        const betaKey = flagString(args.flags, "beta-key") ?? nonemptyEnv(runtime.env.SCREENRIG_BETA_KEY);
         const request: CLIEnrollmentRequest = {
           client_id: state.clientId,
           ...(state.email !== undefined ? { email: state.email } : {}),
           ...(state.agentidClaim !== undefined ? { agentid_claim: state.agentidClaim } : {}),
           ...(state.projectName !== undefined ? { project_name: state.projectName } : {}),
           ...(state.organization !== undefined ? { organization: state.organization } : {}),
-          ...(betaKey !== undefined ? { beta_key: betaKey } : {}),
           ...(state.intent ? { intent: state.intent } : {}),
           ...(options.name ? { name: options.name } : {}),
           ...(options.explicit ? { agent_type: "cli", platform: agentPlatform(), version: CLI_VERSION } : {}),
@@ -2028,19 +2026,6 @@ async function enrollForCommand(
                   reason: "This AgentID already holds an enrolled agent. Connect this installation to the existing project instead of enrolling a second agent.",
                 },
               }, err.exitCode, err.warnings);
-            }
-            if (err.problem.code === "invalid_request" && betaKey === undefined) {
-              const namesBeta = err.problem.errors.some((item) =>
-                Boolean(item && typeof item === "object" && "field" in item && item.field === "beta_key"));
-              if (namesBeta) {
-                throw new CliError({
-                  ...err.problem,
-                  next: err.problem.next ?? {
-                    command: "screenrig --beta-key KEY agent enroll --email ADDRESS",
-                    reason: "The control plane gates enrollment. Retry the same email with the enrollment beta key.",
-                  },
-                }, err.exitCode, err.warnings);
-              }
             }
           }
           throw err;

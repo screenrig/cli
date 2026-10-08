@@ -132,3 +132,8 @@ test("redactEvent omits tokens, pixels, authorization, and object keys", () => {
   assert.equal(redacted.message, "shot_1");
   assert.deepEqual(redacted.details, { capture_id: "shot_1", code: "cta.pressed" });
 });
+
+test("enrollment client ids and idempotency keys are redacted by key", () => {
+  for (const key of ["client_id", "idempotency_key", "idempotency-key", "beta_key"]) assert.equal(isSensitiveKey(key), true, key);
+  assert.doesNotMatch(JSON.stringify(redactValue({ client_id: `cli_${"Z".repeat(43)}`, idempotency_key: "retry-key-value" })), /ZZZZ|retry-key-value/);
+});

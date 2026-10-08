@@ -128,8 +128,6 @@ export interface CLIEnrollmentRequest {
    */
   agentid_claim?: string;
   project_name?: string;
-  /** Present only when the operator supplies --beta-key or SCREENRIG_BETA_KEY. */
-  beta_key?: string;
   /**
    * Advertising-purpose enrollment sets advertiser=true/screens=false without
    * changing billing-plan assignment. Omitted means signage (screens=true).

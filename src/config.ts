@@ -447,7 +447,7 @@ import { isResourceID } from "./generated/resource-ids.js";
      * never sent to another origin chosen by --api-url or SCREENRIG_API_URL,
      * and never over plain http beyond this machine.
      */
-    function assertCredentialOrigin(file: ScreenRigConfig | undefined, apiUrl: string, issuedFor: string | undefined): void {
+    function assertCredentialOrigin(file: ScreenRigConfig | undefined, apiUrl: string, issuedFor: string): void {
       const target = parsedOrigin(apiUrl);
       if (target.protocol !== "https:" && !(target.protocol === "http:" && loopbackHost(target.hostname))) {
         throw configError(`API URL ${target.origin} is not HTTPS. ScreenRig sends credentials only over HTTPS, or plain http to localhost.`, {
@@ -455,7 +455,7 @@ import { isResourceID } from "./generated/resource-ids.js";
           reason: "Shows the configured API origin. Use an https:// API URL.",
         });
       }
-      if (!file || !issuedFor || !holdsCredential(file)) return;
+      if (!file || !holdsCredential(file)) return;
       const issued = parsedOrigin(issuedFor);
       if (issued.origin !== target.origin) {
         throw configError(`This config holds a credential issued for ${issued.origin}; it is never sent to ${target.origin}. Nothing was sent.`, {
@@ -501,7 +501,9 @@ import { isResourceID } from "./generated/resource-ids.js";
         apiSource = "flag";
       }
 
-      assertCredentialOrigin(file, apiUrl, localDevProfile && storedApiUrl === DEFAULT_API_URL ? LOCAL_DEV_API_URL : storedApiUrl);
+      // A config without api_url was written for the default origin, so its credential is bound there.
+      assertCredentialOrigin(file, apiUrl, localDevProfile && (storedApiUrl === undefined || storedApiUrl === DEFAULT_API_URL)
+        ? LOCAL_DEV_API_URL : storedApiUrl ?? DEFAULT_API_URL);
 
       let token: string | undefined;
       let tokenSource: ResolvedConfig["source"]["token"] = "none";
