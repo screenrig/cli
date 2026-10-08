@@ -1600,6 +1600,74 @@ test("screen pair rejects ambiguous or malformed codes before claiming", async (
   assert.match(result.stdout, /23456789ABCDEFGHJKMNPQRSTUVWXYZ/);
 });
 
+function provisionTransport(publicUrl: string, provisioningUrl: string): FakeTransport {
+  return new FakeTransport().on("POST", "/api/screens/provision", () => ({
+    status: 201,
+    headers: { "cache-control": "private, no-store" },
+    body: {
+      screen: { id: "scr_PROVISIONAAAAAAAAAAAAAA", public_id: "browser-provisioned-screen", state: "pairing_pending", revision: 1, manifest_revision: 1, content_access_generation: 1, online: false, created_at: "2026-08-15T17:00:00.000Z", updated_at: "2026-08-15T17:00:00.000Z" },
+      public_url: publicUrl,
+      provisioning_url: provisioningUrl,
+      expires_at: "2026-08-15T17:10:00.000Z",
+    },
+  }));
+}
+
+test("screen provision --print-url accepts the backend's /s/ Player path", async () => {
+  const secret = "P".repeat(43);
+  const transport = provisionTransport("https://play.screenrig.ai/s/browser-provisioned-screen", `https://play.screenrig.ai/s/browser-provisioned-screen#provision=${secret}`);
+  const result = await withAuthenticatedRuntime(["--json", "screen", "provision", "--print-url"], transport);
+  try {
+    assert.equal(result.code, 0, result.stdout);
+    const data = JSON.parse(result.stdout).data;
+    assert.equal(data.screen_id, "scr_PROVISIONAAAAAAAAAAAAAA");
+    assert.equal(data.provisioning_url, `https://play.screenrig.ai/s/browser-provisioned-screen#provision=${secret}`);
+  } finally {
+    await rm(result.configDir, { recursive: true, force: true });
+  }
+});
+
+test("screen provision reports the created screen and withholds an unsafe URL instead of a usage error", async () => {
+  const secret = "P".repeat(43);
+  const transport = provisionTransport("https://play.screenrig.ai/s/browser-provisioned-screen", `https://elsewhere.example/s/browser-provisioned-screen#provision=${secret}`);
+  const result = await withAuthenticatedRuntime(["--json", "screen", "provision", "--print-url"], transport);
+  try {
+    assert.equal(result.code, 0, result.stdout);
+    const envelope = JSON.parse(result.stdout) as { data: Record<string, unknown>; warnings: Array<{ code: string }> };
+    assert.equal(envelope.data.screen_id, "scr_PROVISIONAAAAAAAAAAAAAA");
+    assert.equal(envelope.data.provisioning_url, undefined);
+    assert.match(String(envelope.data.url_withheld), /same Player page/);
+    assert.equal(envelope.warnings[0]?.code, "provisioning_url_withheld");
+    assert.doesNotMatch(result.stdout, new RegExp(secret));
+  } finally {
+    await rm(result.configDir, { recursive: true, force: true });
+  }
+});
+
+test("browser setup on stage accepts the stage Player /s/ URL and reports the claimed screen", async () => {
+  const configDir = await testTemp("stage-setup-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), { api_url: "https://api.stage.screenrig.ai" }, fsLike);
+  const claim = (publicUrl: string) => new FakeTransport().on("POST", "/api/project/browser-links/claim", () => ({
+    status: 201,
+    headers: { "cache-control": "private, no-store" },
+    body: { session_id: "blink_AAAAAAAAAAAAAAAAAAAAAAAA", status: "claimed", screen: { id: "scr_BROWSERLINKAAAAAAAAAAAAA", public_id: "browser-link-screen", state: "pairing_pending", public_url: publicUrl } },
+  }));
+  try {
+    const ok = await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC234"], claim("https://play.stage.screenrig.ai/s/browser-link-screen"), { fs: fsLike });
+    assert.equal(ok.code, 0, ok.stdout);
+    assert.equal(JSON.parse(ok.stdout).data.player_public_url, "https://play.stage.screenrig.ai/s/browser-link-screen");
+    const odd = await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC235"], claim("https://play.screenrig.ai/s/browser-link-screen"), { fs: fsLike });
+    assert.equal(odd.code, 0, odd.stdout);
+    const envelope = JSON.parse(odd.stdout) as { data: Record<string, unknown>; warnings: Array<{ code: string }> };
+    assert.equal(envelope.data.screen_id, "scr_BROWSERLINKAAAAAAAAAAAAA");
+    assert.equal(envelope.data.player_public_url, undefined);
+    assert.equal(envelope.warnings[0]?.code, "player_url_withheld");
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
 test("screen provision rejects conflicting delivery modes", async () => {
   for (const argv of [
     ["--json", "screen", "provision", "--open", "--print-url"],
@@ -1681,6 +1749,7 @@ test("an enrolled agent completes browser setup with safe fragment-free output",
   assert.deepEqual(envelope.data, {
     code: "ABC-234",
     status: "claimed",
+    screen_id: "scr_BROWSERLINKAAAAAAAAAAAAA",
     player_public_url: "https://play.screenrig.ai/player/s/browser-link-screen",
   });
   assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), [
@@ -1907,14 +1976,15 @@ test("browser setup ignores extra claim and screen keys without echoing them", a
   assert.deepEqual(envelope.data, {
     code: "ABC-234",
     status: "claimed",
+    screen_id: "scr_browser_link",
     player_public_url: "https://play.screenrig.ai/player/s/browser-link-screen",
   });
   assert.doesNotMatch(result.stdout, /#provision=|provisioning_url|SSSSSS|timezone|observation|America\/Los_Angeles/i);
   await rm(result.configDir, { recursive: true, force: true });
 });
 
-test("browser setup rejects missing required claim fields, bad status, and unsafe public URLs", async () => {
-  const cases: Array<{ name: string; body: Record<string, unknown> }> = [
+test("browser setup reports malformed claims as unexpected responses and withholds unsafe public URLs", async () => {
+  const malformed: Array<{ name: string; body: Record<string, unknown> }> = [
     { name: "missing session_id", body: { status: "claimed", screen: BROWSER_CLAIM_SCREEN } },
     { name: "bad status", body: { session_id: "bls_fixture", status: "waiting", screen: BROWSER_CLAIM_SCREEN } },
     { name: "missing screen", body: { session_id: "bls_fixture", status: "claimed" } },
@@ -1922,6 +1992,14 @@ test("browser setup rejects missing required claim fields, bad status, and unsaf
     { name: "missing public_id", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_id: "" } } },
     { name: "bad screen state", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, state: "active" } } },
     { name: "missing public_url", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "" } } },
+  ];
+  for (const item of malformed) {
+    const result = await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC234"], browserSetupClaimTransport(item.body));
+    assert.equal(result.code, ExitCode.Unexpected, item.name);
+    assert.equal(JSON.parse(result.stdout).error.code, "unexpected_response", item.name);
+    await rm(result.configDir, { recursive: true, force: true });
+  }
+  const cases: Array<{ name: string; body: Record<string, unknown> }> = [
     { name: "hash in public_url", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://play.screenrig.ai/player/s/browser-link-screen#provision=SSS" } } },
     { name: "search in public_url", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://play.screenrig.ai/player/s/browser-link-screen?q=1" } } },
     { name: "userinfo in public_url", body: { session_id: "bls_fixture", status: "claimed", screen: { ...BROWSER_CLAIM_SCREEN, public_url: "https://user:pass@play.screenrig.ai/player/s/browser-link-screen" } } },
@@ -1930,7 +2008,10 @@ test("browser setup rejects missing required claim fields, bad status, and unsaf
   ];
   for (const item of cases) {
     const result = await withAuthenticatedRuntime(["--json", "browser", "setup", "--code", "ABC234"], browserSetupClaimTransport(item.body));
-    assert.equal(result.code, ExitCode.Usage, item.name);
+    assert.equal(result.code, ExitCode.Success, item.name);
+    const envelope = JSON.parse(result.stdout) as { data: Record<string, unknown>; warnings: Array<{ code: string }> };
+    assert.equal(envelope.data.player_public_url, undefined, item.name);
+    assert.equal(envelope.warnings[0]?.code, "player_url_withheld", item.name);
     assert.doesNotMatch(result.stdout, /#provision=|user:pass|token|cookie|proof/i, item.name);
     await rm(result.configDir, { recursive: true, force: true });
   }

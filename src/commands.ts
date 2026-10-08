@@ -144,7 +144,7 @@ import { runMediaUploadBatch, UPLOAD_BATCH_DEFAULT_CONCURRENCY, UPLOAD_BATCH_MAX
 import { clearProvisionRetryState, provisionRetryState } from "./provisioning-state.js";
 import { clearGenerateRetryState, generateRequestHash, generateRetryState } from "./media-generate-retry.js";
 import { formatBytes } from "./media/progress.js";
-import { validateProvisioningUrls } from "./provisioning-url.js";
+import { isPlayerScreenPath, validateProvisioningUrls } from "./provisioning-url.js";
 import { aspectMismatchWarnings } from "./aspect-mismatch.js";
 import {
   browserHandoffUrl,
@@ -1747,36 +1747,48 @@ async function browserSetupCommand(
   const claim = response.body as BrowserLinkClaim;
   const screen = claim.screen;
   if (!claim.session_id || claim.status !== "claimed" || !screen?.id || !screen.public_id || screen.state !== "pairing_pending" || !screen.public_url) {
-    throw usageError("Browser setup response does not match the generated BrowserLinkClaim contract.");
+    throw unexpectedResponseError("Browser setup response does not match the generated BrowserLinkClaim contract.", client.requestId,
+      "The server may have claimed the code. Run screenrig screen list to find the screen before claiming again.");
   }
-  const apiUrl = new URL(resolved.apiUrl);
-  const expectedPlayerHost = apiUrl.hostname === "api.screenrig.localhost" ? "play.screenrig.localhost" : "play.screenrig.ai";
-  const expectedPlayerOrigin = `https://${expectedPlayerHost}${apiUrl.port ? `:${apiUrl.port}` : ""}`;
-  const publicUrl = new URL(screen.public_url);
-  if (publicUrl.origin !== expectedPlayerOrigin || publicUrl.username || publicUrl.password
-    || publicUrl.hash || publicUrl.search || publicUrl.pathname !== `/player/s/${screen.public_id}`) {
-    throw usageError("Browser setup response did not contain a safe fragment-free Player public URL.");
-  }
+  // The claim is done whatever the URL check says: report it, and withhold only an unsafe URL.
+  const withheld = playerPublicUrlProblem(resolved.apiUrl, screen.public_url, screen.public_id);
   const opened = flagBool(args.flags, "open")
     ? await (runtime.openUrl?.(browserHandoffUrl(resolved.apiUrl, code.display)) ?? Promise.resolve(false))
     : undefined;
   await clearBrowserSetupRetryState(resolved, retryRuntime, retry.idempotency_key);
+  const playerPublicUrl = withheld ? undefined : new URL(screen.public_url).href;
   const data = {
     code: code.display,
     status: claim.status,
-    player_public_url: publicUrl.href,
+    screen_id: screen.id,
+    ...(playerPublicUrl ? { player_public_url: playerPublicUrl } : { url_withheld: withheld }),
     ...(opened !== undefined ? { opened } : {}),
   };
+  const warnings = withheld ? [{ code: "player_url_withheld", message: `The browser setup was claimed, but its Player public URL is not shown: ${withheld}` }] : [];
   return {
-    envelope: successEnvelope(data, { request_id: client.requestId }),
+    envelope: successEnvelope(data, { request_id: client.requestId, warnings }),
     exitCode: ExitCode.Success,
     human: humanLines("Browser setup claimed", [
       ["code", code.display],
       ["status", claim.status],
-      ["player_public_url", publicUrl.href],
+      ["screen_id", screen.id],
+      ["player_public_url", playerPublicUrl],
+      ["url_withheld", withheld],
       ...(opened !== undefined ? [["opened", opened ? "true" : "false"] as [string, string]] : []),
     ]),
   };
+}
+
+/** Why a claimed screen's Player public URL is not safe to show, or undefined when it is. */
+function playerPublicUrlProblem(apiUrl: string, value: string, publicId: string): string | undefined {
+  const api = new URL(apiUrl);
+  const apex = apexHost(api.hostname);
+  let url: URL;
+  try { url = new URL(value); } catch { return "public_url is not a valid URL."; }
+  if (!apex || url.origin !== `https://play.${apex}${api.port ? `:${api.port}` : ""}`) return "public_url is not this API's Player origin.";
+  if (url.username || url.password || url.hash || url.search) return "public_url carries credentials, a query or a fragment.";
+  if (!isPlayerScreenPath(url.pathname, publicId)) return "public_url does not name this screen's Player path (/s/PUBLIC_ID).";
+  return undefined;
 }
 
 /** Opens the ordinary dashboard origin; no credential is minted or transferred. */
@@ -4922,9 +4934,25 @@ export const handleScreenProvision = commandHandler(async (args, runtime, resolv
   requirePrivateNoStore(response.headers, "Browser provisioning response");
   const provisioned = response.body as ScreenProvisioning;
   if (!provisioned.screen?.id || !provisioned.screen.public_id || !provisioned.expires_at || Number.isNaN(Date.parse(provisioned.expires_at))) {
-    throw usageError("Browser provisioning response does not match the generated ScreenProvisioning contract.");
+    throw unexpectedResponseError("Browser provisioning response does not match the generated ScreenProvisioning contract.", client.requestId,
+      "The server may have created the screen. Run screenrig screen list to find it before provisioning again.");
   }
   const urls = validateProvisioningUrls(provisioned);
+  if ("withheld" in urls) {
+    // The screen exists now. Report it and say why the handoff is not shown;
+    // a rerun would replay the same answer, so the retry key is done too.
+    await clearProvisionRetryState(resolved, enrollmentRuntime, retry.idempotency_key);
+    const warning = { code: "provisioning_url_withheld", message: `The screen was created, but its provisioning URL is not shown: ${urls.withheld} Report the request_id with screenrig feedback bug, and archive the screen if it is not needed.` };
+    return {
+      envelope: successEnvelope({ screen_id: provisioned.screen.id, expires_at: provisioned.expires_at, url_withheld: urls.withheld }, { request_id: client.requestId, warnings: [warning] }),
+      exitCode: ExitCode.Success,
+      human: humanLines("Screen created; provisioning URL withheld", [
+        ["screen_id", provisioned.screen.id],
+        ["expires_at", provisioned.expires_at],
+        ["url_withheld", urls.withheld],
+      ]),
+    };
+  }
   const opened = openMode ? await (runtime.openUrl?.(urls.provisioningUrl) ?? Promise.resolve(false)) : false;
   if (printMode || opened) await clearProvisionRetryState(resolved, enrollmentRuntime, retry.idempotency_key);
   const data = {

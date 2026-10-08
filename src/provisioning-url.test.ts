@@ -16,8 +16,17 @@ const screen = {
   updated_at: "2026-08-15T17:00:00Z",
 };
 
-test("validates production and localhost provisioning URLs", () => {
-  for (const origin of ["https://play.screenrig.ai", "http://play.screenrig.localhost:8088"]) {
+test("validates /s/ and /player/s/ provisioning URLs on production, stage and localhost", () => {
+  for (const origin of ["https://play.screenrig.ai", "https://play.stage.screenrig.ai", "http://play.screenrig.localhost:8088"]) {
+    assert.deepEqual(validateProvisioningUrls({
+      screen,
+      public_url: `${origin}/s/public-test`,
+      provisioning_url: `${origin}/s/public-test#provision=${"A".repeat(43)}`,
+      expires_at: "2026-08-15T17:10:00Z",
+    }), {
+      publicUrl: `${origin}/s/public-test`,
+      provisioningUrl: `${origin}/s/public-test#provision=${"A".repeat(43)}`,
+    });
     assert.deepEqual(validateProvisioningUrls({
       screen,
       public_url: `${origin}/player/s/public-test`,
@@ -30,18 +39,20 @@ test("validates production and localhost provisioning URLs", () => {
   }
 });
 
-test("rejects token leakage outside the exact fragment and mismatched targets", () => {
+test("withholds token leakage outside the exact fragment and mismatched targets", () => {
   for (const provisioning_url of [
     `https://play.screenrig.ai/player/s/other#provision=${"A".repeat(43)}`,
     `https://evil.invalid/s/public-test#provision=${"A".repeat(43)}`,
     `https://play.screenrig.ai/player/s/public-test?provision=${"A".repeat(43)}`,
   ]) {
-    assert.throws(() => validateProvisioningUrls({
+    const checked = validateProvisioningUrls({
       screen,
       public_url: "https://play.screenrig.ai/player/s/public-test",
       provisioning_url,
       expires_at: "2026-08-15T17:10:00Z",
-    }), /unsafe URL/);
+    });
+    assert.ok("withheld" in checked && checked.withheld.length > 0, provisioning_url);
+    assert.doesNotMatch(JSON.stringify(checked), /AAAA/);
   }
 });
 
