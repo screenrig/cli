@@ -8,6 +8,7 @@ import { registerInvitationCommands } from "./invitations.js";
 import { registerAdsCommands } from "./ads.js";
 import { registerBillingCommands } from "./billing.js";
 import { registerAgentCommands } from "./agent.js";
+import { registerServiceClientCommands } from "./service-client.js";
 import { registerDashboardCommands } from "./dashboard.js";
 import { registerAppCommands } from "./app.js";
 import { registerMediaCommands } from "./media.js";
@@ -36,6 +37,7 @@ export function registerCommands(root: Command, bind: CommandActionBinder): void
   registerAdsCommands(root, bind);
   registerBillingCommands(root, bind);
   registerAgentCommands(root, bind);
+  registerServiceClientCommands(root, bind);
   registerDashboardCommands(root, bind);
   registerAppCommands(root, bind);
   registerMediaCommands(root, bind);

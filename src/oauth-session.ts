@@ -19,6 +19,7 @@ import {
   SCOPE_IDENTITY,
   TOKEN_TYPE_IDENTITY_CREDENTIAL,
   TOKEN_TYPE_PROJECT_TOKEN,
+  type ServiceClientCredentials,
   type TokenSet,
 } from "./oauth.js";
 import { CliError, configError } from "./problems.js";
@@ -119,14 +120,36 @@ function restoreLegacy(file: ScreenRigConfig, legacy: NonNullable<OAuthGrantStat
 export class OAuthSession {
   private readonly client: OAuthClient;
   private authenticated = false;
+  /** A service client's token lives only in memory; it is minted again rather than refreshed. */
+  private serviceAccess?: string;
 
   constructor(
     private readonly configPath: string,
     private readonly apiUrl: string,
     private readonly transport: Transport,
     private readonly runtime: SessionRuntime,
+    private readonly service?: ServiceClientCredentials,
   ) {
-    this.client = new OAuthClient(apiUrl, transport);
+    this.client = new OAuthClient(apiUrl, transport, service);
+  }
+
+  get serviceMode(): boolean {
+    return this.service !== undefined;
+  }
+
+  /** The service token, minted when there is none or it is about to expire, or when the API refused it. */
+  private async serviceToken(rejected?: string): Promise<string> {
+    const claims = accessClaims(this.serviceAccess);
+    if (this.serviceAccess && this.serviceAccess !== rejected && claims && claims.exp - this.nowMs() / 1000 > ACCESS_RENEW_MARGIN_S) {
+      return this.serviceAccess;
+    }
+    const tokens = await this.client.clientCredentials();
+    this.serviceAccess = tokens.accessToken;
+    await this.locked(async () => {
+      const current = (await this.read()) ?? { api_url: this.apiUrl };
+      await this.write(placeAccessToken(current, tokens.accessToken, []));
+    });
+    return tokens.accessToken;
   }
 
   get oauth(): OAuthClient {
@@ -169,6 +192,14 @@ export class OAuthSession {
    * identity token) is renewed when it is missing or about to expire.
    */
   async prepare(resolved: ResolvedConfig): Promise<ResolvedConfig> {
+    if (this.service) {
+      const token = await this.serviceToken();
+      const project = accessClaims(token)?.prj;
+      if (resolved.projectId && project !== resolved.projectId) {
+        throw configError("This service client belongs to another project than --project-id names. Nothing else was sent.");
+      }
+      return { ...resolved, token, ...(project ? { projectId: project } : {}) };
+    }
     let file = await this.read();
     if (!file) return resolved;
     if (!file.oauth && await this.exchangeLegacy(file) && await this.confirmExchange()) file = await this.read();
@@ -185,6 +216,7 @@ export class OAuthSession {
 
   /** An access token carrying identity scope, renewed when needed; undefined when the grant has no identity access. */
   async identityToken(): Promise<string | undefined> {
+    if (this.service) return undefined;
     const file = await this.read();
     if (!file?.oauth?.identity) return undefined;
     return this.accessFor(undefined);
@@ -197,6 +229,7 @@ export class OAuthSession {
    * token once.
    */
   async renewRejected(token: string, invalidToken = true): Promise<string | undefined> {
+    if (this.service) return invalidToken ? this.serviceToken(token) : undefined;
     const claims = accessClaims(token);
     if (!claims?.sid) return undefined;
     if (!this.authenticated) {
@@ -277,6 +310,7 @@ export class OAuthSession {
    * process may have refreshed already, and then nothing is sent.
    */
   async accessFor(projectId: string | undefined, rejected?: string): Promise<string | undefined> {
+    if (this.service) return this.serviceToken(rejected);
     const stored = (file: ScreenRigConfig): string | undefined => {
       const slot = projectId
         ? (file.project_id === projectId ? file.token : file.projects?.[projectId]?.token)

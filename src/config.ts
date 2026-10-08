@@ -687,7 +687,9 @@ import { isResourceID } from "./generated/resource-ids.js";
       if (a === b) return true;
       const left = accessClaims(a);
       const right = accessClaims(b);
-      if (!left?.sid || left.sid !== right?.sid) return false;
+      // A grant's tokens share its sid; a service client's share its client_id.
+      const holder = (claims: typeof left) => claims?.sid ?? (claims?.clientId ? `client:${claims.clientId}` : undefined);
+      if (!left || !right || !holder(left) || holder(left) !== holder(right)) return false;
       return kind === "identity" || left.prj === right.prj;
     }
 

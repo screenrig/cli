@@ -134,6 +134,7 @@ screenrig agent enroll --email ADDRESS --organization NAME [--name NAME] [--inte
 screenrig agent enroll --agentid-claim CODE --organization NAME [--name NAME] [--intent signage|advertising] [--force]
 screenrig login [--project ID] [--access read|manage] [--no-wait] [--resume ID]
 screenrig logout
+screenrig service-client create --name NAME [--key-file PATH] [--secret-file PATH] [--access read|manage] [--capability NAME]...
 screenrig project list
 screenrig project use ID
 screenrig project create NAME [--organization-id ID | --organization NAME]
@@ -893,6 +894,32 @@ logout is safe.
 `agent connect` is an alias of `screenrig login`, kept for one release with a
 warning naming it: `--target-project-id` becomes `--project`, and `--wait`
 waits for approval.
+
+### Service clients
+
+A service client is a server, script or CI job owned by the project. It signs
+in with client credentials instead of a person's approval, so CI runs
+`screenrig` with no login:
+
+```sh
+screenrig service-client create --name "CI deploy" --key-file ci-key.pub.jwk
+SCREENRIG_CLIENT_ID=scl_CLIENT SCREENRIG_CLIENT_KEY_FILE=ci-key.jwk screenrig screen list
+SCREENRIG_CLIENT_ID=scl_CLIENT SCREENRIG_CLIENT_SECRET=... screenrig screen list
+```
+
+`SCREENRIG_CLIENT_KEY_FILE` holds the private key (a JWK or PEM; Ed25519, EC
+P-256 or RSA of at least 2048 bits) whose public half the client registered;
+each request signs a short assertion with it. `SCREENRIG_CLIENT_SECRET` sends
+the secret by HTTP Basic. Such a run keeps its 15-minute token in memory, mints
+another when needed, and never reads or writes the stored config. Agent
+commands (`login`, `logout`, `agent ...`) refuse to run in it.
+
+`service-client create|list|show|add-key|add-secret|remove-key|remove-secret|revoke`
+manages the project's clients and needs the project capability and Manage; a
+service client cannot manage clients. A generated secret is shown once, so it
+is written only to the new 0600 file `--secret-file` names, never to stdout.
+A second key or secret allows rotation without downtime; removing one ends its
+tokens within seconds, and `revoke --yes` ends the client permanently.
 
 ### Agent credential capabilities
 

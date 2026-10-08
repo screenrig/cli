@@ -20,7 +20,9 @@ import { healthChangesText, healthLines, screenHealthIssues } from "./screen-hea
 import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "./screen-manifest-upgrade.js";
 import { openTempFile, removeOnSignal, shellQuote, tempPathFor } from "./temp-file.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { tmpdir } from "node:os";
+import { memoryConfigFs } from "./memory-config.js";
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -110,7 +112,7 @@ import {
   type ScreenRigConfig,
 } from "./config.js";
 import { attachOperationLogger, loggerOf, loggingTransport } from "./log/index.js";
-import { accessClaims, isOAuthUnavailable, isSessionJwt, SCOPE_IDENTITY, type AccessLevel } from "./oauth.js";
+import { accessClaims, isOAuthUnavailable, isServiceClientId, isSessionJwt, readKeyFile, SCOPE_IDENTITY, serviceCredentialsFromEnv, type AccessLevel, type ServiceClientCredentials } from "./oauth.js";
 import { OAuthSession, refreshExpiryDays, type SessionRuntime } from "./oauth-session.js";
 import { DeviceLogin, type LoginOutcome } from "./login.js";
 import { ensureCredential } from "./enrollment.js";
@@ -123,7 +125,7 @@ import {
 } from "./credits.js";
 import { successEnvelope, type ProblemNext, type Warning } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
-import { CliError, configError, makeProblem, networkError, notEnrolledError, timeoutError, unexpectedResponseError, usageError } from "./problems.js";
+import { CliError, configError, fileError, makeProblem, networkError, notEnrolledError, timeoutError, unexpectedResponseError, usageError } from "./problems.js";
 import type { HttpMethod, Transport } from "./transport/types.js";
 import { packDirectory } from "./pack/index.js";
 import type { CliRuntime } from "./runtime.js";
@@ -483,7 +485,7 @@ function sessionRuntime(runtime: CliRuntime): SessionRuntime {
 function oauthSessionFor(runtime: CliRuntime, resolved: { configPath: string; apiUrl: string }): OAuthSession {
   let session = oauthSessions.get(runtime);
   if (!session) {
-    session = new OAuthSession(resolved.configPath, resolved.apiUrl, transportFor(runtime, resolved.apiUrl), sessionRuntime(runtime));
+    session = new OAuthSession(resolved.configPath, resolved.apiUrl, transportFor(runtime, resolved.apiUrl), sessionRuntime(runtime), serviceCredentials.get(runtime));
     oauthSessions.set(runtime, session);
   }
   return session;
@@ -569,12 +571,44 @@ function streamEnvelope(runtime: CliRuntime, data: unknown, requestId: string) {
 export type CommandHandler = (args: ParsedArgs, runtime: CliRuntime) => Promise<CommandResult>;
 type ResolvedCommandConfig = Awaited<ReturnType<typeof resolveConfig>>;
 
+/** A service client's credentials for this invocation (SCREENRIG_CLIENT_ID mode). */
+const serviceCredentials = new WeakMap<CliRuntime, ServiceClientCredentials>();
+
+/** Commands that act as an agent installation; a service-client run has none. */
+const AGENT_ONLY_COMMANDS = new Set(["login", "logout", "agent enroll", "agent connect", "agent disconnect", "agent revoke-identity"]);
+
+/**
+ * SCREENRIG_CLIENT_ID mode: the run authenticates as a service client. Its
+ * config, lock and token live in memory for this invocation only, so the
+ * stored config is neither read nor written.
+ */
+function withServiceClient(run: CommandHandler): CommandHandler {
+  return async (args, runtime) => {
+    const service = await serviceCredentialsFromEnv(runtime.env, (file) => readFile(file, "utf8"));
+    if (!service) return run(args, runtime);
+    const command = args.command.slice(0, 2).join(" ");
+    if (AGENT_ONLY_COMMANDS.has(command) || AGENT_ONLY_COMMANDS.has(args.command[0] ?? "")) {
+      throw usageError(`${command} acts as an agent installation; this run is a service client because SCREENRIG_CLIENT_ID is set. Nothing was sent.`);
+    }
+    const root = path.join(tmpdir(), `screenrig-service-${process.pid}-${randomBytes(8).toString("hex")}`);
+    const stored = runtime.fs;
+    runtime.fs = memoryConfigFs(stored, root);
+    serviceCredentials.set(runtime, service);
+    try {
+      return await run({ ...args, flags: { ...args.flags, config: path.join(root, "config.json") } }, runtime);
+    } finally {
+      runtime.fs = stored;
+      serviceCredentials.delete(runtime);
+    }
+  };
+}
+
 /** Prepare configuration, logging and credential guidance once for a bound leaf. */
 function commandHandler(
   handler: (args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig) => Promise<CommandResult>,
   authenticated = true,
 ): CommandHandler {
-  return async (args, runtime) => {
+  const run: CommandHandler = async (args, runtime) => {
     const repair = flagBool(args.flags, "repair-config");
     let resolved = await resolveConfig({ flags: args.flags, fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }, repair });
     if (args.command[0] === "project" && args.command[1] === "create" && resolved.identityToken && !flagString(args.flags, "project-id")) {
@@ -692,6 +726,7 @@ function commandHandler(
       });
     }
   };
+  return withServiceClient(run);
 }
 
 export const handleVersion: CommandHandler = async () => {
@@ -844,6 +879,161 @@ export const handleLogin = commandHandler(async (args, runtime, resolved) => {
 }, false);
 
 export const handleLogout = commandHandler(logout, false);
+
+interface ServiceClientView {
+  id: string;
+  name: string;
+  access: "read" | "manage";
+  state: "active" | "revoked";
+  capabilities: string[];
+  keys: Array<{ kid: string; alg: string }>;
+  secrets: Array<{ id: string; hint: string }>;
+  last_used_at?: string;
+}
+
+function serviceClientId(args: ParsedArgs, verb: string): string {
+  const id = args.positionals[2];
+  if (!isServiceClientId(id)) throw usageError(`service-client ${verb} requires a service client id (scl_...) from service-client list.`);
+  return id;
+}
+
+function serviceClientLines(client: ServiceClientView): Array<[string, string | undefined]> {
+  return [
+    ["id", client.id],
+    ["name", client.name],
+    ["access", client.access === "manage" ? "Manage" : "Read only"],
+    ["state", client.state],
+    ["capabilities", client.capabilities.join(", ")],
+    ["keys", client.keys.map((key) => `${key.kid} (${key.alg})`).join(", ") || undefined],
+    ["secrets", client.secrets.map((secret) => `${secret.id} (…${secret.hint})`).join(", ") || undefined],
+    ["last_used_at", client.last_used_at],
+  ];
+}
+
+/** A public JWK from --key-file; a private key file contributes only its public half. */
+async function serviceKeyFromFile(args: ParsedArgs, runtime: CliRuntime): Promise<Record<string, unknown> | undefined> {
+  const file = flagString(args.flags, "key-file");
+  if (file === undefined) return undefined;
+  let text: string;
+  try { text = await readFile(path.resolve(runtime.cwd(), file), "utf8"); } catch (error) { throw fileError(`Cannot read --key-file ${file}.`, error); }
+  return (await readKeyFile(text)).publicKey as Record<string, unknown>;
+}
+
+/**
+ * A new secret goes to a new 0600 file, never to stdout. The file is created
+ * before the request, so an unwritable path fails before a secret exists.
+ */
+async function reserveSecretFile(args: ParsedArgs, runtime: CliRuntime): Promise<{ path: string; write(secret: string): Promise<void>; discard(): Promise<void> } | undefined> {
+  const file = flagString(args.flags, "secret-file");
+  if (file === undefined) return undefined;
+  const target = path.resolve(runtime.cwd(), file);
+  let handle;
+  try { handle = await open(target, "wx", 0o600); } catch (error) { throw fileError(`Cannot create --secret-file ${file}; it must not exist yet.`, error); }
+  await handle.close();
+  return {
+    path: target,
+    write: async (secret) => {
+      const writer = await open(target, "w", 0o600);
+      try { await writer.writeFile(`${secret}\n`, "utf8"); await writer.sync(); } finally { await writer.close(); }
+    },
+    discard: () => rm(target, { force: true }),
+  };
+}
+
+async function serviceClientWrite(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig, request: { path: string; body?: Record<string, unknown>; title: string },
+  secretFile?: Awaited<ReturnType<typeof reserveSecretFile>>): Promise<CommandResult> {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  let response;
+  try {
+    response = await client.call({ method: "POST", path: request.path, ...(request.body ? { body: request.body } : {}) });
+  } catch (error) {
+    await secretFile?.discard();
+    throw error;
+  }
+  const result = response.body as { client: ServiceClientView; secret?: string; propagation?: string };
+  if (secretFile) {
+    if (typeof result.secret !== "string") {
+      await secretFile.discard();
+      throw unexpectedResponseError("The server created no secret.", client.requestId);
+    }
+    try {
+      await secretFile.write(result.secret);
+    } catch (error) {
+      throw fileError(`The secret was created but could not be written to ${secretFile.path}. Remove it with service-client remove-secret and add another.`, error);
+    }
+  }
+  return {
+    envelope: successEnvelope({ client: result.client, ...(secretFile ? { secret_file: secretFile.path } : {}), ...(result.propagation ? { propagation: result.propagation } : {}) },
+      { request_id: client.requestId }),
+    exitCode: ExitCode.Success,
+    human: humanLines(request.title, [...serviceClientLines(result.client), ["secret_file", secretFile?.path], ["propagation", result.propagation]]),
+  };
+}
+
+export const handleServiceClientList = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: "/api/service-clients" });
+  const items = (response.body as { items?: ServiceClientView[] }).items ?? [];
+  return { envelope: successEnvelope({ items }, { request_id: client.requestId }), exitCode: ExitCode.Success,
+    human: items.map((item) => `${item.id}  ${item.name}  ${item.access === "manage" ? "Manage" : "Read only"}  ${item.state}`).join("\n") || "No service clients." };
+});
+
+export const handleServiceClientShow = commandHandler(async (args, runtime, resolved) => {
+  const id = serviceClientId(args, "show");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: `/api/service-clients/${id}` });
+  return { envelope: successEnvelope(response.body, { request_id: client.requestId }), exitCode: ExitCode.Success,
+    human: humanLines("Service client", serviceClientLines(response.body as ServiceClientView)) };
+});
+
+export const handleServiceClientCreate = commandHandler(async (args, runtime, resolved) => {
+  const name = flagString(args.flags, "name");
+  if (!name || name.length > 80) throw usageError("service-client create requires --name with 1-80 characters.");
+  const key = await serviceKeyFromFile(args, runtime);
+  if (!key && flagString(args.flags, "secret-file") === undefined) {
+    throw usageError("service-client create needs --key-file PATH (a public key, recommended) or --secret-file PATH (a generated secret), or both.");
+  }
+  const capabilities = flagString(args.flags, "capability")?.split(",");
+  const access = flagString(args.flags, "access");
+  const secretFile = await reserveSecretFile(args, runtime);
+  return serviceClientWrite(args, runtime, resolved, { path: "/api/service-clients", title: "Service client created", body: {
+    name, ...(capabilities ? { capabilities } : {}), ...(access ? { access } : {}), ...(key ? { key } : {}), ...(secretFile ? { secret: true } : {}),
+  } }, secretFile);
+});
+
+export const handleServiceClientAddKey = commandHandler(async (args, runtime, resolved) => {
+  const id = serviceClientId(args, "add-key");
+  const key = await serviceKeyFromFile(args, runtime);
+  if (!key) throw usageError("service-client add-key requires --key-file PATH.");
+  return serviceClientWrite(args, runtime, resolved, { path: `/api/service-clients/${id}/keys`, body: { key }, title: "Key added" });
+});
+
+export const handleServiceClientAddSecret = commandHandler(async (args, runtime, resolved) => {
+  const id = serviceClientId(args, "add-secret");
+  if (flagString(args.flags, "secret-file") === undefined) throw usageError("service-client add-secret requires --secret-file PATH; the secret is written only there.");
+  const secretFile = await reserveSecretFile(args, runtime);
+  return serviceClientWrite(args, runtime, resolved, { path: `/api/service-clients/${id}/secrets`, title: "Secret added" }, secretFile);
+});
+
+export const handleServiceClientRemoveKey = commandHandler(async (args, runtime, resolved) => {
+  const id = serviceClientId(args, "remove-key");
+  const kid = flagString(args.flags, "kid");
+  if (!kid || kid.length > 200) throw usageError("service-client remove-key requires --kid KID from service-client show.");
+  return serviceClientWrite(args, runtime, resolved, { path: `/api/service-clients/${id}/keys/${encodeURIComponent(kid)}/remove`, title: "Key removed" });
+});
+
+export const handleServiceClientRemoveSecret = commandHandler(async (args, runtime, resolved) => {
+  const id = serviceClientId(args, "remove-secret");
+  const secretId = flagString(args.flags, "secret-id");
+  if (!secretId || !/^css_[A-Za-z0-9_-]+$/.test(secretId)) throw usageError("service-client remove-secret requires --secret-id css_... from service-client show.");
+  return serviceClientWrite(args, runtime, resolved, { path: `/api/service-clients/${id}/secrets/${secretId}/remove`, title: "Secret removed" });
+});
+
+export const handleServiceClientRevoke = commandHandler(async (args, runtime, resolved) => {
+  const id = serviceClientId(args, "revoke");
+  if (!flagBool(args.flags, "yes")) throw usageError("service-client revoke requires --yes. Revocation is permanent: the client's keys and secrets are deleted and its tokens end.");
+  return serviceClientWrite(args, runtime, resolved, { path: `/api/service-clients/${id}/revoke`, title: "Service client revoked" });
+});
 
 /**
  * The device sign-in. A server that issues no OAuth tokens gets the
