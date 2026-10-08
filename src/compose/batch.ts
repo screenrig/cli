@@ -23,7 +23,8 @@ export const COMPOSE_BATCH_CHUNK_SIZE = 100;
 
 export interface BatchPage {
   id: string;
-  status: "rendered" | "failed" | "not_selected";
+  /** checked: --lint-only linted the page and wrote no image. */
+  status: "rendered" | "checked" | "failed" | "not_selected";
   output?: string;
   width?: number;
   height?: number;
@@ -41,8 +42,11 @@ export interface BatchChunkTiming {
 
 export interface BatchResult {
   manifest: string;
-  preview: string;
+  /** Absent under --lint-only, which writes no contact sheet. */
+  preview?: string;
   rendered: number;
+  /** Pages linted without writing images (--lint-only). */
+  checked?: number;
   failed: number;
   not_selected: number;
   pages: BatchPage[];
@@ -170,8 +174,8 @@ export async function composeBatch(
         });
         pages.push({
           id,
-          status: "rendered",
-          output: pageDir,
+          status: options.lintOnly ? "checked" : "rendered",
+          ...(options.lintOnly ? {} : { output: pageDir }),
           width: page.manifest.canvas.width,
           height: page.manifest.canvas.height,
           warnings: page.warnings,
@@ -207,8 +211,9 @@ export async function composeBatch(
   );
   const result: BatchResult = {
     manifest: manifestPath,
-    preview: previewPath,
+    ...(options.lintOnly ? {} : { preview: previewPath }),
     rendered: pages.filter((p) => p.status === "rendered").length,
+    ...(options.lintOnly ? { checked: pages.filter((p) => p.status === "checked").length } : {}),
     failed: pages.filter((p) => p.status === "failed").length,
     not_selected: pages.filter((p) => p.status === "not_selected").length,
     pages,

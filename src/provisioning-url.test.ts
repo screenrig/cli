@@ -61,3 +61,14 @@ test("browser opener is argv-only and never enables a shell", async () => {
   assert.match(source, /shell:\s*false/);
   assert.doesNotMatch(source, /\bexec(?:File|Sync)?\s*\(/);
 });
+
+test("an opener counts as opened only when it exits 0 or keeps running, and never without a desktop", async () => {
+  const { hasDesktop, spawnDetached } = await import("./open-url.js");
+  assert.equal(hasDesktop("linux", {}), false);
+  assert.equal(hasDesktop("linux", { WAYLAND_DISPLAY: "wayland-1" }), true);
+  assert.equal(hasDesktop("darwin", {}), true);
+  assert.equal(await spawnDetached(process.execPath, ["-e", "process.exit(3)"]), false);
+  assert.equal(await spawnDetached(process.execPath, ["-e", "process.exit(0)"]), true);
+  assert.equal(await spawnDetached("/nonexistent/opener", []), false);
+  assert.equal(await spawnDetached(process.execPath, ["-e", "setTimeout(() => {}, 500)"], 50), true);
+});

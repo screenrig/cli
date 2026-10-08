@@ -94,10 +94,21 @@ test("CLI exposes explicit targets and revision aliases", () => {
   assert.throws(() => parseArgv(["playlist", "replace-release", "pl_BOARD"]));
 });
 
+test("a stale --expect-rev is a 412 and a stale --expect-impact a 409, both before any write", async () => {
+ const f = fixture(); const preview = await replacePlaylistRelease(f.options);
+ await assert.rejects(() => replacePlaylistRelease({ ...f.options, apply: true, revision: "3", impact: preview.impact }),
+  (error: any) => error.problem.code === "revision_conflict" && error.exitCode === 6);
+ await assert.rejects(() => replacePlaylistRelease({ ...f.options, apply: true, impact: "0".repeat(64) }),
+  (error: any) => error.problem.code === "resource_conflict" && error.exitCode === 5);
+ assert.ok(f.transport.calls.every(c => c.method === "GET"));
+});
+
 test("apply accepts omitted revision and sends no precondition", async () => {
  const f = fixture(); const preview = await replacePlaylistRelease(f.options);
  const applied = await replacePlaylistRelease({...f.options, apply: true, impact: preview.impact});
  assert.equal(applied.applied, true);
+ assert.equal(applied.revision, 5, "the top-level revision is the written one");
+ assert.equal((applied as { previous_revision?: number }).previous_revision, 4);
  assert.equal(f.transport.calls.find(c => c.method === "PUT")?.headers?.["if-match"], undefined);
 });
 

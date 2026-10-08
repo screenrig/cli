@@ -157,6 +157,10 @@ test("legacy identity exchange and project selection preserve both project retri
   const listed = await f.invoke("project", "list");
   assert.equal(listed.code, 0, listed.out);
   assert.equal((await f.saved())?.project_id, A);
+  const unknown = await f.invoke("project", "use", C);
+  assert.equal(unknown.code, 4, unknown.out);
+  assert.equal(unknown.result.error.code, "not_found");
+  assert.equal(unknown.result.error.next.command, "screenrig project list");
   const used = await f.invoke("project", "use", B);
   assert.equal(used.code, 0, used.out);
   const saved = (await f.saved())!;
@@ -289,6 +293,17 @@ for (const cleanup of ["none", "deleted", "retained", "pending"] as const) test(
   }
   assert.equal(f.transport.calls.filter(call => call.path === "/api/agent-connections").length, 1);
   assert.doesNotMatch(failed.out + changed.out + resumed.out, /sr_live_|sac_|private_jwk|pending_token/);
+});
+
+test("agent connect --target-project-id for a project this identity already belongs to asks for no approval", async t => {
+  const f = await fixture(t, initial());
+  f.transport.on("GET", "/api/projects", () => ({ status: 200, headers: {}, body: { projects: [context(A, "Screens"), context(B, "Lobby")] } }));
+  const result = await f.invoke("agent", "connect", "--target-project-id", B, "--print-url");
+  assert.equal(result.code, 0, result.out);
+  assert.equal(result.result.data.status, "already_member");
+  assert.equal(result.result.data.next.command, `screenrig project use ${B}`);
+  assert.equal(f.transport.calls.some(call => call.path === "/api/agent-connections"), false);
+  assert.equal((await f.saved())?.agent_connection, undefined);
 });
 
 test("membership disconnect cleans only its captured project after another process selects B", async t => {

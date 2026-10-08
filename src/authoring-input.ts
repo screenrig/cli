@@ -1,7 +1,7 @@
 import { open, mkdir, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { CliRuntime } from "./runtime.js";
-import { usageError } from "./problems.js";
+import { CliError, usageError } from "./problems.js";
 
 const MAX_INPUT_BYTES = 8 * 1024 * 1024;
 export async function readAuthoringText(file: string, runtime: CliRuntime, maxBytes = MAX_INPUT_BYTES): Promise<string> {
@@ -27,7 +27,14 @@ export async function readAuthoringText(file: string, runtime: CliRuntime, maxBy
       chunks.push(bytes);
     }
     return Buffer.concat(chunks).toString("utf8");
-  } catch { throw usageError("Cannot read input; provide a readable file or pipe, within the size limit."); }
+  } catch (error) {
+    if (error instanceof CliError) throw error;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (file !== "-" && code === "ENOENT") throw usageError(`${file} does not exist.`);
+    if (file !== "-" && code === "EISDIR") throw usageError(`${file} is a directory; pass a file.`);
+    if (file !== "-" && code === "EACCES") throw usageError(`${file} cannot be read (permission denied).`);
+    throw usageError(`Cannot read ${file === "-" ? "stdin" : file}; provide a readable file or pipe, within the size limit.`);
+  }
 }
 export async function readAuthoringJson(file: string, runtime: CliRuntime): Promise<any> {
   const text = await readAuthoringText(file, runtime);

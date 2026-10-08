@@ -277,8 +277,8 @@ test("webhooks update sends only supplied fields with the revision guard", async
   const before = transport.calls.length;
   for (const [args, message] of [
     [[], /at least one of --url or --event-types/],
-    [["--enable", "--disable"], /Conflicting options/],
-    [["--description", "x", "--clear-description"], /Conflicting options/],
+    [["--enable", "--disable"], /--enable cannot be used with --disable/],
+    [["--description", "x", "--clear-description"], /--clear-description cannot be used with --description|--description cannot be used with --clear-description/],
     [["--url", "http://x.example.com/"], /absolute https URL/],
   ] as Array<[string[], RegExp]>) {
     const refused = await cli(["--json", "webhooks", "update", id, ...args], transport, env);

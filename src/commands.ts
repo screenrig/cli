@@ -410,6 +410,21 @@ async function composeRender(args: ParsedArgs, runtime: CliRuntime): Promise<Com
     }));
   }
   const ordered = sortLint(lintWithPixels, written.result.pages.map((page) => page.id));
+  if (lintOnly) {
+    // Nothing was written, so report no output paths or files.
+    return {
+      envelope: successEnvelope({ lint_only: true, canvas: written.canvas, name: written.name, width: written.canvas.width,
+        height: written.canvas.height, font_family: written.font_family, quality: written.quality, lint: ordered }, { warnings: written.warnings }),
+      exitCode: ExitCode.Success,
+      human: humanLines("Compose lint (nothing written)", [
+        ["name", written.name ?? undefined],
+        ["width", String(written.canvas.width)],
+        ["height", String(written.canvas.height)],
+        ...written.warnings.map((warning): [string, string] => ["warning", warning.message]),
+        ...ordered.map((item): [string, string] => ["lint", `${item.code} ${item.id}`]),
+      ]),
+    };
+  }
   const data = {
     output,
     files: written.files,
@@ -684,14 +699,16 @@ export const handleComposeBatch = commandHandler(async (args, runtime, resolved)
   }
   catch (error) { rethrowCompose(error); }
   const warnings = result.pages.flatMap((page) => (page.warnings ?? []).map((warning) => ({ ...warning, message: `${page.id}: ${warning.message}` })));
-  if (result.failed) throw new CliError(makeProblem("usage_error", "Some pages could not render", 400, `${result.failed} page(s) failed. Successful outputs are retained. See ${result.manifest} and ${result.preview}.`, { errors: result.pages.filter((page) => page.status === "failed").map((page) => ({ page_id: page.id, ...page.error })) }), ExitCode.Usage, warnings);
+  if (result.failed) throw new CliError(makeProblem("usage_error", "Some pages could not render", 400, `${result.failed} page(s) failed. Successful outputs are retained. See ${result.manifest}${result.preview ? ` and ${result.preview}` : ""}.`, { errors: result.pages.filter((page) => page.status === "failed").map((page) => ({ page_id: page.id, ...page.error })) }), ExitCode.Usage, warnings);
   return {
     envelope: successEnvelope(result, { warnings }),
     exitCode: ExitCode.Success,
     human: [
-      `Rendered ${result.rendered} page(s). Preview: ${result.preview}. Details: ${result.manifest}.`,
+      result.preview
+        ? `Rendered ${result.rendered} page(s). Preview: ${result.preview}. Details: ${result.manifest}.`
+        : `Linted ${result.checked ?? 0} page(s); no images written. Details: ${result.manifest}.`,
       ...result.lint.map((item) => `lint: ${item.page_id} ${item.code} ${item.id}`),
-      LOOK_AT_THE_CONTACT_SHEET,
+      ...(result.preview ? [LOOK_AT_THE_CONTACT_SHEET] : []),
     ].join("\n"),
   };
 }, false);
@@ -1381,6 +1398,21 @@ async function agentConnect(
     }, resolved.apiUrl);
     connection = { ...pending, approval_url: checked.approval_url };
   } else {
+    const target = flagString(args.flags, "target-project-id");
+    if (target !== undefined && resolved.identityToken && !current?.agent_connection && isResourceID(target, "project")) {
+      // A membership this identity already holds needs no approval: select it instead of asking again.
+      // The check is best effort; without the list the request goes ahead as before.
+      const listed = await accessibleProjects(args, runtime, resolved).catch(() => undefined);
+      const member = listed?.projects.find((item) => item.project.id === target);
+      if (listed && member) {
+        const next = { command: `screenrig project use ${target}`, argv: ["project", "use", target], reason: "Selects this project; no new approval is needed." };
+        return {
+          envelope: successEnvelope({ status: "already_member", request_submitted: false, project_id: target, project_name: member.project.name, next }, { request_id: listed.requestId }),
+          exitCode: ExitCode.Success,
+          human: humanLines("Already a member of this project", [["project_id", target], ["project_name", member.project.name], ["next", next.command]]),
+        };
+      }
+    }
     connection = await startOrResumeAgentConnection(args, runtime, resolved, name, requestedCapabilities);
     current = await currentAgentConnectionConfig(resolved, runtime);
   }
@@ -2035,7 +2067,12 @@ async function projectUse(args: ParsedArgs, runtime: CliRuntime, resolved: Resol
   if (!isResourceID(id, "project")) throw usageError("project use requires a project ID from project list.");
   const listed = await accessibleProjects(args, runtime, resolved);
   const selected = listed.projects.find(item => item.project.id === id);
-  if (!selected) throw usageError("This identity has no active membership in the requested project. Request approval with agent connect first.");
+  if (!selected) {
+    throw new CliError(makeProblem("not_found", "Project not available", 404, `${id} is not a project this identity belongs to.`, {
+      hint: "Pick an ID from project list; to join another project, request approval with agent connect --target-project-id ID.",
+      next: { command: "screenrig project list", reason: "Lists the projects this identity can select." },
+    }));
+  }
   await cacheProjectContexts(runtime, listed.resolved, [selected], { identityToken: listed.resolved.identityToken, select: id });
   return { envelope: successEnvelope(selected, { request_id: listed.requestId }), exitCode: ExitCode.Success,
     human: `Selected ${selected.organization.name} / ${selected.project.name} (${id})` };
@@ -2940,7 +2977,7 @@ async function appPack(args: ParsedArgs, runtime: CliRuntime): Promise<CommandRe
   if (!dir) {
     throw usageError("app pack requires a directory.");
   }
-  const result = await packDirectory(path.resolve(runtime.cwd(), dir), { logger: loggerOf(runtime) });
+  const result = await packDirectory(await requireAppDirectory(runtime, dir, "app pack ./DIRECTORY"), { logger: loggerOf(runtime) });
   const output = flagString(args.flags, "output");
   if (output) {
     await writeFile(path.resolve(runtime.cwd(), output), result.archive);
@@ -2965,6 +3002,18 @@ async function appPack(args: ParsedArgs, runtime: CliRuntime): Promise<CommandRe
       ["sdk_injection", result.sdk_injection.injected ? "yes" : "deferred"],
     ]),
   };
+}
+
+/** Name a missing or unusable input file before any tool or request runs on it. */
+async function requireInputFile(resolved: string, given: string): Promise<void> {
+  let info;
+  try {
+    info = await stat(resolved);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw usageError(`${given} does not exist.`);
+    throw usageError(`${given} cannot be read.`);
+  }
+  if (info.isDirectory()) throw usageError(`${given} is a directory; pass a file.`);
 }
 
 /** app upload and update pack the built directory themselves; a packed archive or other file is a usage error. */
@@ -3977,6 +4026,7 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
   const file = args.positionals[2];
   if (!file) throw usageError("media upload requires a file.");
   const sourcePath = path.resolve(runtime.cwd(), file);
+  await requireInputFile(sourcePath, file);
   const explicitContentType = flagString(args.flags, "content-type");
 
   // Validate unconditionally so a typo such as --webp-quality 500 is rejected

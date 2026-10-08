@@ -20,7 +20,7 @@ export async function replacePlaylistRelease(options: {
   const resource = response.body as { id: string; revision: number };
   if (resource?.id !== playlistId || !Number.isSafeInteger(resource.revision) || resource.revision < 1) throw usageError("Playlist response has invalid identity or revision.");
   if (options.apply && options.revision !== undefined && options.revision !== String(resource.revision)) {
-    throw new CliError(makeProblem("revision_conflict", "Playlist changed", 409, "Preview the replacement again before applying.", { current_revision: resource.revision }));
+    throw new CliError(makeProblem("revision_conflict", "Playlist changed", 412, "Preview the replacement again before applying.", { current_revision: resource.revision }));
   }
   const document = editablePlaylist(response.body);
   const pages = document.pages.filter((page: { id: string }) => page.id === pageId);
@@ -55,9 +55,14 @@ export async function replacePlaylistRelease(options: {
   };
   const impact = createHash("sha256").update(JSON.stringify({ api_url: options.apiUrl, review, document })).digest("hex");
   if (!options.apply) return { ...review, impact, applied: false };
-  if (options.impact !== undefined && options.impact !== impact) throw usageError("Replacement or affected screens changed. Preview again and review the new impact before applying.");
+  if (options.impact !== undefined && options.impact !== impact) {
+    throw new CliError(makeProblem("resource_conflict", "Replacement impact changed", 409,
+      "Replacement or affected screens changed since the preview. Preview again and review the new impact before applying.", { current_revision: resource.revision }));
+  }
   if (unchanged) return { ...review, impact, applied: true, unchanged: true, playlist: response.body };
   const updated = await client.call({ method: "PUT", path: `/api/playlists/${playlistId}`, idempotent: true,
     headers: options.revision ? { "if-match": quotedRevision(options.revision) } : undefined, body: document });
-  return { ...review, impact, applied: true, playlist: updated.body };
+  // The top-level revision is the playlist's revision now; the reviewed one stays as previous_revision.
+  const written = (updated.body as { revision?: unknown } | undefined)?.revision;
+  return { ...review, ...(Number.isSafeInteger(written) ? { revision: written as number, previous_revision: review.revision } : {}), impact, applied: true, playlist: updated.body };
 }

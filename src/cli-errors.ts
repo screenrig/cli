@@ -45,8 +45,14 @@ export function commandError(error: CommanderError, command: Command): never {
       if (word) throw usageError(`${path || "screenrig"} has no command ${word}. See command help for supported commands.`, { command: `screenrig${path ? ` ${path}` : ""} --help`, reason: "List supported commands, arguments, and options." });
       throw usageError(`${path || "screenrig"} does not accept ${command.registeredArguments.length ? "extra" : "positional"} arguments.`);
     }
-    case "commander.conflictingOption":
+    case "commander.conflictingOption": {
+      // Commander quotes each option's declared flags, never the user's values.
+      const named = [...error.message.matchAll(/option '([^']+)'/g)]
+        .map((match) => command.options.find((option) => option.flags === match[1])?.long)
+        .filter((name): name is string => Boolean(name));
+      if (named.length === 2) throw usageError(`${named[0]} cannot be used with ${named[1]}. See command help.`);
       throw usageError("Conflicting options. See command help.");
+    }
     case "commander.missingMandatoryOptionValue": {
       if (path === "screen set-timezone") throw usageError("screen set-timezone requires <id> --timezone.");
       const required = command.options.filter((option) => option.mandatory && command.getOptionValue(option.attributeName()) === undefined);

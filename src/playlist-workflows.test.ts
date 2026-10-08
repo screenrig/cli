@@ -196,7 +196,8 @@ test("publish --no-wait returns after assignment and a wait warning explains the
 test("publish checks the expected screen revision before creating a playlist",async t=>{
  const dir=await mkdtemp('/tmp/publish-conflict-');t.after(()=>rm(dir,{recursive:true,force:true}));
  const transport=new FakeTransport().on('GET','/api/project',()=>response({id:'prj_TEST'})).on('GET','/api/screens/scr_TEST',()=>response({id:'scr_TEST',revision:9}));
- await assert.rejects(()=>publishScreen({client:new ApiClient({transport}),runtime:processRuntime(),configPath:dir+'/config.json',apiUrl:'https://api.screenrig.ai',screenId:'scr_TEST',revision:'7',document:document()}));
+ await assert.rejects(()=>publishScreen({client:new ApiClient({transport}),runtime:processRuntime(),configPath:dir+'/config.json',apiUrl:'https://api.screenrig.ai',screenId:'scr_TEST',revision:'7',document:document()}),
+  (e:any)=>e.problem.code==='revision_conflict'&&e.problem.status===412&&e.exitCode===6&&e.problem.current_revision===9);
  assert.equal(transport.calls.some(c=>c.method!=='GET'),false);
 });
 

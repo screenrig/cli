@@ -70,10 +70,10 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
 
   const selectorPreview = media.command("selector-preview").description("Preview current selector matches without advancing playback")
     .argument("<selector.json>", "JSON all/tag selector file, or stdin (-)")
-    .addOption(new Option("--primitive <image|video>", "Media primitive to match").choices(["image", "video"]).makeOptionMandatory())
+    .addOption(new Option("--primitive <image|video>", "Media primitive to match (required)").choices(["image", "video"]).makeOptionMandatory())
     .action(bind(handleSelectorPreview));
   addCommandExamples(selectorPreview, 'screenrig media selector-preview selector.json --primitive video');
-  addCommandNotes(selectorPreview, "Reads current project-owned ready matches in filename order. Does not advance a Player cursor. Random order is a per-pass playback policy; see the returned normalized selector. Catalog changes take effect at the next loop refresh.");
+  addCommandNotes(selectorPreview, "The file holds one playlist media selector: {\"by\": \"all\"}, {\"by\": \"tag\", \"tag\": \"Lobby\"}, {\"by\": \"id\", \"media_id\": \"med_...\"} or {\"by\": \"ids\", \"media_ids\": [\"med_...\"]}; all and tag also take order (filename or random), batch_size and one_at_a_time. Reads current project-owned ready matches in filename order. Does not advance a Player cursor. Random order is a per-pass playback policy; see the returned normalized selector. Catalog changes take effect at the next loop refresh.");
 
   media.command("update").description("Replace media tags")
     .argument("<id>", "Media identifier")

@@ -7,6 +7,7 @@ export { DEFAULT_ARCHIVE_LIMITS };
 export function packError(code: string, detail: string): CliError {
   return new CliError(
     makeProblem(code, "Application archive rejected", 400, detail, {
+      hint: "The CLI checks the archive locally; nothing was sent. Fix the file, line or ignore rule detail names, then run the command again.",
       next: {
         command: "screenrig app pack <directory>",
         reason: "Fix the named path or ignore rule, then rebuild the archive locally.",

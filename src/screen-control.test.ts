@@ -386,7 +386,7 @@ test("screen takeover validates its inputs locally", async () => {
     [[A, "--playlist-id", "pl_X", "--for", "0m"], /duration such as 30m/],
     [[A, "--playlist-id", "pl_X", "--until", "tomorrow"], /RFC 3339 instant with seconds and an offset/],
     [[A, "--playlist-id", "pl_X", "--until", "2026-08-15T18:00:00"], /and an offset/],
-    [[A, "--playlist-id", "pl_X", "--for", "1h", "--until", "none"], /Conflicting options/],
+    [[A, "--playlist-id", "pl_X", "--for", "1h", "--until", "none"], /--until cannot be used with --for|--for cannot be used with --until/],
     [[A, "--playlist-id", "pl_X", "--reason", "x".repeat(121)], /at most 120 characters/],
     [[A, "--playlist-id", "pl_X", "--tag", "Lobby"], /not both/],
   ] as Array<[string[], RegExp]>) {

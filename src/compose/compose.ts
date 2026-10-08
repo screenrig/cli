@@ -1348,13 +1348,17 @@ export async function composeAndWrite(
     for (const item of page.painted) {
       if (!item.png) continue;
       const file = `${item.id}.png`;
-      if (!options.lintOnly) await writeFile(join(dir, file), item.png);
-      files.push(`${prefix}${file}`);
+      if (!options.lintOnly) {
+        await writeFile(join(dir, file), item.png);
+        files.push(`${prefix}${file}`);
+      }
       images.push({ id: item.id, file: `${prefix}${file}` });
     }
     const manifest = page.manifest;
-    if (!options.lintOnly) await writeFile(join(dir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-    files.push(`${prefix}manifest.json`);
+    if (!options.lintOnly) {
+      await writeFile(join(dir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+      files.push(`${prefix}manifest.json`);
+    }
     const prefixed = structuredClone(manifest);
     if (prefix) {
       for (const layer of prefixed.layers) {
@@ -1364,8 +1368,10 @@ export async function composeAndWrite(
     let combinedPath: string | undefined;
     if (options.combined) {
       combinedPath = `${prefix}combined.png`;
-      if (!options.lintOnly) await writeFile(join(dir, "combined.png"), page.combined);
-      files.push(combinedPath);
+      if (!options.lintOnly) {
+        await writeFile(join(dir, "combined.png"), page.combined);
+        files.push(combinedPath);
+      }
     }
     pages.push({
       id: page.id,

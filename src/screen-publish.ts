@@ -19,8 +19,12 @@ function resource(value: unknown, kind: ResourceIDKind): Resource {
   if (!item || typeof item.id !== "string" || !isResourceID(item.id, kind) || !Number.isSafeInteger(item.revision) || item.revision < 1) throw usageError("Server response has invalid resource identity or revision.");
   return item;
 }
+/** A stale --expect-rev is a precondition failure (412, exit 6), like every other revision check. */
+function staleRevision(detail: string, revision: number): never {
+  throw new CliError(makeProblem("revision_conflict", "Publish needs reconciliation", 412, detail, { current_revision: revision }));
+}
 function conflict(detail: string, revision?: number): never {
-  throw new CliError(makeProblem("revision_conflict", "Publish needs reconciliation", 409, detail, { current_revision: revision }));
+  throw new CliError(makeProblem("resource_conflict", "Publish needs reconciliation", 409, detail, { current_revision: revision }));
 }
 
 type PlaybackReason = "not_waited" | "screen_offline" | "playlist_not_effective" | "playback_failed" | "playback_pending";
@@ -144,7 +148,7 @@ export async function publishScreen(options: {
     if (!state) {
       const screen = resource((await client.call({ method: "GET", path: `/api/screens/${screenId}` })).body, "screen");
       if (screen.id !== screenId) throw usageError("Screen response identity did not match.");
-      if (expected !== undefined && screen.revision !== expected) conflict("Screen changed before publishing. Inspect it and retry with its intended revision.", screen.revision);
+      if (expected !== undefined && screen.revision !== expected) staleRevision("Screen changed before publishing. Inspect it and retry with its intended revision.", screen.revision);
       if (document.pages.some((page: any) => page.visibility !== undefined) && !screen.timezone) throw usageError("Set the screen timezone before publishing a scheduled playlist.");
       state = { version: 1, created_at: options.runtime.now().getTime(), fingerprint, create_key: newIdempotencyKey(), assign_key: newIdempotencyKey() };
       await save();

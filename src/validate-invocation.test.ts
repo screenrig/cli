@@ -83,3 +83,8 @@ test("option values never appear in usage errors; an unknown option is named onl
 test("an unknown subcommand is named when it is a plain command word", () => {
   assert.throws(() => parseArgv(["screen", "frobnicate"]), (error: unknown) => error instanceof CliError && /frobnicate/.test(error.problem.detail));
 });
+
+test("conflicting options are named by their declared flags", () => {
+  assert.throws(() => parseArgv(["media", "upload", "poster.png", "--no-transcode", "--codec", "h264"]),
+    (error: unknown) => error instanceof CliError && /--no-transcode cannot be used with --codec|--codec cannot be used with --no-transcode/.test(error.problem.detail));
+});

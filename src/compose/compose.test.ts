@@ -427,7 +427,7 @@ test("compose batch contact-sheet and --only use the same engine", async () => {
   const first = await composeBatch(input, output);
   assert.equal(first.rendered, 2);
   assert.equal(first.failed, 0);
-  assert.ok((await readFile(first.preview)).subarray(0, 8).equals(PNG_HEADER));
+  assert.ok((await readFile(first.preview!)).subarray(0, 8).equals(PNG_HEADER));
   assert.equal(existsSync(path.join(output, "one", "manifest.json")), true);
   assert.equal(existsSync(path.join(output, "two", "manifest.json")), true);
   assert.equal(existsSync(path.join(output, "manifest.json")), false);
@@ -460,7 +460,22 @@ test("compose batch renders pages without ids one page each, with a contact shee
     assert.equal(existsSync(path.join(output, id, "manifest.json")), true);
     assert.equal(existsSync(path.join(output, id, "page-1")), false, "a page renders itself, not the whole deck");
   }
-  assert.ok((await readFile(result.preview)).subarray(0, 8).equals(PNG_HEADER));
+  assert.ok((await readFile(result.preview!)).subarray(0, 8).equals(PNG_HEADER));
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("compose --lint-only reports no files, paths or preview it did not write", async () => {
+  const dir = await testTemp("compose-lint-only-");
+  const input = path.join(dir, "deck.json");
+  await writeFile(input, JSON.stringify({ width: 320, height: 180, background: "#111111", text: "#eeeeee", pages: [{ left: { title: "One" } }] }));
+  const output = path.join(dir, "rendered");
+  const result = await composeBatch(input, output, { lintOnly: true });
+  assert.equal(result.preview, undefined);
+  assert.equal(result.checked, 1);
+  assert.equal(result.rendered, 0);
+  assert.equal(result.pages[0]?.status, "checked");
+  assert.equal(result.pages[0]?.output, undefined);
+  assert.equal(existsSync(path.join(output, "page-1")), false);
   await rm(dir, { recursive: true, force: true });
 });
 
