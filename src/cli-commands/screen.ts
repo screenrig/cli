@@ -162,7 +162,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   addCommandExamples(schedule.commands.find((command) => command.name() === "clear")!, "screenrig screen schedule clear scr_LOBBY", "screenrig screen schedule clear --tag Cafe");
   addCommandExamples(takeover.commands.find((command) => command.name() === "set")!,
     'screenrig screen takeover scr_LOBBY --playlist-id pl_DRILL --for 30m --reason "Fire drill"',
-    "screenrig screen takeover --tag Lobby --playlist-id pl_LAUNCH --until 2026-10-01T18:00:00Z",
+    "screenrig screen takeover --tag Lobby --playlist-id pl_LAUNCH --for 2h",
     "screenrig screen takeover scr_A scr_B --playlist-id pl_NOTICE --until none");
   addCommandExamples(takeover.commands.find((command) => command.name() === "clear")!,
     "screenrig screen takeover clear scr_LOBBY", "screenrig screen takeover clear --tag Lobby");
@@ -185,7 +185,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
     .action(bind(handleScreenDisplay));
   addCommandNotes(display, "Display power:\n  A manual override of the display schedule. Without --until or --for it ends\n  at the display schedule's next boundary; a later display-schedule change or\n  timezone change moves that end to the new next boundary. With no schedule\n  boundary in the next eight days (no enabled schedule) it holds until\n  screen display clear or a replacement. The Player applies it at once and\n  reports what it achieved (screen show: Display reported). At most 10\n  display changes per screen per minute; refusals and replays spend none.");
-  addCommandExamples(display, "screenrig screen display scr_LOBBY --power off --for 2h", "screenrig screen display --tag Lobby --power on", "screenrig screen display scr_A scr_B --power off --until 2026-10-01T07:00:00Z");
+  addCommandExamples(display, "screenrig screen display scr_LOBBY --power off --for 2h", "screenrig screen display --tag Lobby --power on", "screenrig screen display scr_A scr_B --power off --for 8h");
   const displayClear = displayGroup.command("clear").description("End the manual display override on a screen or a fleet; the schedule (else on) applies again")
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)

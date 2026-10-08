@@ -433,7 +433,7 @@ screenrig screen schedule set --tag Cafe --file dayparts.json
 screenrig screen schedule clear scr_CAFE [--expect-rev REVISION]
 screenrig screen schedule clear --tag Cafe
 screenrig screen takeover scr_LOBBY --playlist-id pl_DRILL --for 30m --reason "Fire drill"
-screenrig screen takeover --tag Lobby --playlist-id pl_LAUNCH --until 2026-10-01T18:00:00Z
+screenrig screen takeover --tag Lobby --playlist-id pl_LAUNCH --for 2h
 screenrig screen takeover scr_A scr_B --playlist-id pl_NOTICE --until none
 screenrig screen takeover clear --tag Lobby
 ```
@@ -476,7 +476,7 @@ validated as an assignment. An archived screen answers `screen_archived`
 
 A takeover shows one playlist ahead of the schedule and the assignment.
 `--until` takes an RFC 3339 instant with seconds and an offset, such as
-`2026-10-01T18:00:00Z` or `2026-10-01T11:00:00-07:00` (uppercase `T` and `Z`).
+`YYYY-MM-DDTHH:MM:SSZ` or `YYYY-MM-DDTHH:MM:SS-07:00` (uppercase `T` and `Z`).
 It is sent normalized to UTC and must be strictly in the future and at most 7
 days ahead. `--for 30m|2h|3d` is converted to an `until` from this computer's
 clock. It accepts up to 7 days, at most `6d23h59m`, which leaves a minute for
