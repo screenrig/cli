@@ -1503,6 +1503,45 @@
     win.addEventListener("message", listener);
     return () => win.removeEventListener("message", listener);
   }
+  var BACKGROUND_LONGHANDS = [
+    "background-attachment",
+    "background-blend-mode",
+    "background-clip",
+    "background-color",
+    "background-image",
+    "background-origin",
+    "background-position",
+    "background-position-x",
+    "background-position-y",
+    "background-repeat",
+    "background-size"
+  ];
+  function transparentColor(color) {
+    var _a2;
+    const value = color.trim().toLowerCase();
+    if (value === "" || value === "transparent") return true;
+    const alpha = (_a2 = /^rgba?\((?:[^,/)]+[,/\s]+){3}([\d.]+%?)\)$/.exec(value)) == null ? void 0 : _a2[1];
+    return alpha !== void 0 && parseFloat(alpha) === 0;
+  }
+  function backgroundTransparent(style) {
+    return transparentColor(style.backgroundColor) && (style.backgroundImage.trim() === "" || style.backgroundImage.trim() === "none");
+  }
+  function canvasBackgroundSource(html, body) {
+    if (!backgroundTransparent(html)) return "html";
+    return body !== void 0 && !backgroundTransparent(body) ? "body" : void 0;
+  }
+  function propagateCanvasBackground(source, html, body, height) {
+    if (source === void 0) return;
+    if (source === "body" && body !== void 0) {
+      for (const property of BACKGROUND_LONGHANDS) {
+        const value = body.getPropertyValue(property);
+        if (value === "") continue;
+        html.setProperty(property, value, body.getPropertyPriority(property));
+        body.removeProperty(property);
+      }
+    }
+    html.setProperty("min-height", `${height}px`);
+  }
   function frameCaptureMode(registered) {
     return registered ? "child" : "placeholder";
   }
@@ -1701,6 +1740,8 @@
       if (node instanceof HTMLObjectElement || node instanceof HTMLEmbedElement || node.shadowRoot) throw new CaptureUnavailable();
       for (const child of [...node.children]) await visit(child);
     };
+    const owner = root.ownerDocument;
+    const canvasSource = root === owner.documentElement ? canvasBackgroundSource(getComputedStyle(root), owner.body ? getComputedStyle(owner.body) : void 0) : void 0;
     let context;
     try {
       await visit(root);
@@ -1717,6 +1758,10 @@
         filter: (node) => !videos.has(node) && (!(node instanceof Element) || node.hasAttribute(marker) || visible(node)),
         onCloneNode: (clone) => {
           if (!(clone instanceof Element)) return;
+          if (canvasSource !== void 0 && clone instanceof HTMLElement) {
+            const body = Array.from(clone.children).find((child) => child instanceof HTMLElement && child.localName === "body");
+            propagateCanvasBackground(canvasSource, clone.style, body == null ? void 0 : body.style, height);
+          }
           for (const node of clone.querySelectorAll(`[${marker}]`)) {
             const key = node.getAttribute(marker);
             const videoStyle = videoClones.get(key);

@@ -10613,6 +10613,31 @@ paths:
                 $ref: '#/components/schemas/OAuthAuthorizationRedirect'
         default:
           $ref: '#/components/responses/Problem'
+  /api/agent-connections/pending:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: listDashboardAgentConnections
+      description: >-
+        The pending connection requests addressed to the session project, which a member may review and approve: requests naming
+        the project, and device sign-ins or connects by an agent identity already a member of it. A new installation's sign-in is
+        not listed (its project hint is client-supplied); a person reaches it by its user code (POST /api/agent-connections/lookup).
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: The pending requests, newest first, at most 100.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/AgentConnection' } }
+        default:
+          $ref: '#/components/responses/Problem'
   /api/agent-connections/lookup:
     servers:
     - url: https://screenrig.ai
@@ -14298,6 +14323,19 @@ components:
         agent_type:
           type: string
           pattern: ^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$
+          description: The installation's type. mcp_client is stable and marks a connected app (an MCP client approved through OAuth).
+        access:
+          type: string
+          enum: [read, manage]
+          description: The access level of the agent's OAuth consent for this project (Read only or Manage). Absent for a legacy credential.
+        source:
+          type: string
+          enum: [enroll, device, authorization_code, legacy_exchange, connect]
+          description: How the agent got access to this project. enroll, device (screenrig login), authorization_code (a connected app) and
+            legacy_exchange are OAuth grants; connect, or enroll without access, is a legacy credential.
+        approved_by_name:
+          type: string
+          description: The display name of the person who approved this access, when a person did.
         platform:
           type: string
           maxLength: 80
