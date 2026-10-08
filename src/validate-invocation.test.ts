@@ -51,6 +51,22 @@ test("supported values, aliases, empty byte payload, and help paths remain valid
   assert.equal(parseArgv(["app", "pack", "--", "--directory"]).positionals[2], "--directory");
 });
 
+test("a lone - is accepted wherever the help documents stdin, and only there", () => {
+  for (const [argv, name] of [
+    [["kv", "set", "key", "--application-id", "app_TEST", "--file", "-"], "file"],
+    [["screen", "schedule", "set", "scr_TEST", "--file", "-"], "file"],
+    [["screen", "display-schedule", "set", "scr_TEST", "--file", "-"], "file"],
+    [["media", "generate", "--prompt-file", "-"], "prompt-file"],
+    [["comment", "set", "screen", "scr_TEST", "--file", "-"], "file"],
+    [["playback", "plays", "--from", "7d", "--format", "csv", "--output", "-"], "output"],
+  ] as const) {
+    const parsed = parseArgv([...argv]);
+    assert.equal(parsed.flags[name], "-", JSON.stringify(argv));
+  }
+  // --body-file does not document stdin, so a lone - is still read as a missing value.
+  assert.throws(() => parseArgv(["feedback", "bug", "Title", "--body-file", "-"]), (error: unknown) => error instanceof CliError && /--body-file requires a value/.test(error.problem.detail));
+});
+
 test("option values never appear in usage errors; an unknown option is named only by its plain name", () => {
   assert.throws(() => parseArgv(["screen", "list", "--timeout=private-secret"]), (error: unknown) => error instanceof CliError && !JSON.stringify(error.problem).includes("private-secret"));
   assert.throws(() => parseArgv(["screen", "list", "--unknown-flag=private-secret"]), (error: unknown) => error instanceof CliError
