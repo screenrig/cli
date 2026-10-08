@@ -138,6 +138,8 @@ export interface LayerSpec {
   overMedia: boolean;
   align: Align;
   valign: Valign;
+  /** Region title grows to the largest size that fits the region, one line per line. */
+  headline: boolean;
   font: string | null;
   text: string;
   muted: string;

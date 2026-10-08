@@ -14,6 +14,11 @@ export const VIEWING_XHEIGHT_RATIO: Record<ViewingDistance, number> = {
 
 /** Fallback x-height as a fraction of font size when metrics are missing. */
 export const XHEIGHT_FALLBACK = 0.52;
+/**
+ * Role wishes per viewing distance. Far-away readers get larger type, not just
+ * a higher floor; near and mid keep the reference ramp.
+ */
+export const VIEWING_WISH_SCALE: Record<ViewingDistance, number> = { near: 1, mid: 1, far: 1.5 };
 export const SCALE_MIN = 0.65;
 export const SCALE_MAX = 1.35;
 export const REFERENCE_CANVAS = { width: 1920, height: 1080 } as const;
@@ -75,10 +80,12 @@ export function sizeFor(
     root: number;
     viewing: ViewingDistance;
     scale?: number;
+    /** Headline: a line-fit role may grow past its wish up to this size, as wide as the region allows. */
+    max?: number;
   },
 ): number {
   const spec = ROLE[args.role];
-  const baseWish = wishOf(args.role, args.root);
+  const baseWish = Math.round(wishOf(args.role, args.root) * VIEWING_WISH_SCALE[args.viewing]);
   const floor = floorOf(args.role, args.root, args.viewing);
   const scale = args.scale ?? 1;
   const ceiling = Math.max(floor, Math.round(baseWish * SCALE_MAX));
@@ -86,7 +93,7 @@ export function sizeFor(
   if (spec.fit !== "line" || !args.text) return wish;
   const lines = String(args.text).split("\n");
   let lo = floor;
-  let hi = wish;
+  let hi = args.max !== undefined ? Math.max(floor, Math.round(args.max * scale)) : wish;
   let best = floor;
   while (lo <= hi) {
     const mid = Math.floor((lo + hi) / 2);
@@ -122,12 +129,14 @@ export function sizesFor(
     title?: string;
     subtitle?: string;
     scale?: number;
+    /** Headline regions: the title's size limit from the region height. */
+    titleMax?: number;
   },
 ): TypeRamp {
   const shared = { family: args.family, width: args.width, root: args.root, viewing: args.viewing, scale: args.scale ?? 1 };
   return {
     eyebrow: sizeFor(ctx, { role: "eyebrow", text: args.eyebrow, ...shared }),
-    title: sizeFor(ctx, { role: "title", text: args.title, ...shared }),
+    title: sizeFor(ctx, { role: "title", text: args.title, ...shared, ...(args.titleMax !== undefined ? { max: args.titleMax } : {}) }),
     subtitle: sizeFor(ctx, { role: "subtitle", text: args.subtitle, ...shared }),
     text: sizeFor(ctx, { role: "text", ...shared }),
     footer: sizeFor(ctx, { role: "footer", ...shared }),
@@ -177,5 +186,12 @@ export function textHeight(
 }
 
 export function viewingGuidance(): string {
-  return 'optional page "near"|"mid"|"far"; default mid. Type floors use that x-height at layout (1080p mid body wish is ~45 px); lint warns too_small_for_distance if a node still undershoots 0.7%/1.2%/2.0% of the shorter edge.';
+  return 'optional page "near"|"mid"|"far"; default mid. far sets every role 1.5x larger (1080p far body ~68 px, title ~195 px) and every distance raises type floors to its x-height; lint warns too_small_for_distance if a node still undershoots 0.7%/1.2%/2.0% of the shorter edge.';
+}
+
+/** The largest title size a headline region can hold: its lines stacked in the region height. */
+export function headlineMax(title: string | undefined, regionHeight: number): number | undefined {
+  if (!title) return undefined;
+  const lines = Math.max(1, String(title).split("\n").length);
+  return Math.floor(regionHeight / (lines * 1.28));
 }

@@ -55,6 +55,8 @@ export interface ComposeCatalog {
     image_src: string;
     shadow: string;
     outline: string;
+    valign: string;
+    headline: string;
     layered: string;
     envelope: string;
     viewing: string;
@@ -71,7 +73,7 @@ const PAGE_KEYS = [
 ];
 const REGION_FIELDS = [
   "eyebrow", "title", "subtitle", "text", "footer", "image", "video", "iframe", "webapp", "cards", "card", "table",
-  "enter", "stagger", "motion", "align", "valign", "fill", "color", "z", "shadow", "outline",
+  "enter", "stagger", "motion", "align", "valign", "fill", "color", "z", "shadow", "outline", "headline",
 ];
 
 export async function composeCatalog(): Promise<ComposeCatalog> {
@@ -289,6 +291,8 @@ export async function composeCatalog(): Promise<ComposeCatalog> {
       image_src: "local filesystem path relative to the spec file directory; iframe and webapp src may be a URL",
       shadow: 'Text over a page image or video with no fill gets a 1px unblurred drop shadow: #000000E6 on light type, #FFFFFFE6 on dark type. Set shadow to "none" or { x, y, color, blur? } to override. Optional blur is an integer 0 through 32; omit is 0 (unblurred offset fill). Auto media shadow stays 1 px unblurred. A card plate is backing, so type on a card does not get the automatic shadow.',
       outline: "outline is { width: 0.5-12, color } and is off unless set.",
+      valign: "valign places a region's content vertically: top, center or bottom; auto (default) centers it, and side-by-side regions with the same top and height share one scale and offset so their titles line up. Explicit top, center or bottom opts a region out of that row.",
+      headline: "headline: true lets the region's title grow past its role size to the largest that fits the region's width and height, one line per \\n line (posters, sale signs). Needs a title; other roles keep their sizes, and the whole pack still has to fit.",
       layered: "compose render writes one PNG per region plus manifest.json. --combined writes a flattened PNG for inspection. Default for agent work is layered.",
       envelope: "structured JSON, not pixels",
       viewing: viewingGuidance(),
@@ -333,6 +337,8 @@ export function formatComposeCatalog(catalog: ComposeCatalog): string {
     `image_src: ${catalog.rules.image_src}`,
     `shadow: ${catalog.rules.shadow}`,
     `outline: ${catalog.rules.outline}`,
+    `valign: ${catalog.rules.valign}`,
+    `headline: ${catalog.rules.headline}`,
     `layered: ${catalog.rules.layered}`,
     `viewing: ${catalog.rules.viewing}`,
     `lint: ${catalog.rules.lint}`,

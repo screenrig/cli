@@ -73,6 +73,8 @@ test("low_contrast_rendered fires on grey-on-grey and stays silent on a clean pa
     fullpage: { title: "Hello contrast" },
   });
   assert.ok(codes(findings).includes("low_contrast_rendered"), JSON.stringify(findings));
+  const flagged = findings.find((finding) => finding.code === "low_contrast_rendered")!;
+  assert.match(flagged.message, /fullpage title "Hello contrast" contrast/);
   const clean = await lintSpec(CLEAN);
   assert.equal(codes(clean).includes("low_contrast_rendered"), false);
 });

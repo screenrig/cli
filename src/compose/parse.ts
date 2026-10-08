@@ -62,7 +62,7 @@ const REGION_KEYS = new Set([
   "image", "video", "iframe", "webapp",
   "cards", "card", "table",
   "enter", "stagger", "motion",
-  "align", "valign", "fill", "color", "z", "shadow", "outline",
+  "align", "valign", "fill", "color", "z", "shadow", "outline", "headline",
 ]);
 const SHADOW_KEYS = new Set(["x", "y", "color", "blur"]);
 const OUTLINE_KEYS = new Set(["width", "color"]);
@@ -365,6 +365,9 @@ function parseRegion(name: RegionName, value: unknown, canvas: { width: number; 
   if (!(ALIGN as readonly string[]).includes(String(align))) fail(`${name}.align must be left|center|right`);
   const valign = value.valign == null ? "auto" : value.valign;
   if (!(VALIGN as readonly string[]).includes(String(valign))) fail(`${name}.valign must be auto|top|center|bottom`);
+  if (value.headline != null && typeof value.headline !== "boolean") fail(`${name}.headline must be true or false`);
+  const headline = value.headline === true;
+  if (headline && content.title == null) fail(`${name}.headline needs a title`);
   let enter: PrimitiveEnter | null = null;
   if (value.enter != null) {
     if (typeof value.enter !== "string" || !(ENTER_TYPES as readonly string[]).includes(value.enter)) {
@@ -425,6 +428,7 @@ function parseRegion(name: RegionName, value: unknown, canvas: { width: number; 
     overMedia: Boolean(defaults.image || defaults.video),
     align: align as Align,
     valign: valign as Valign,
+    headline,
     font: defaults.font,
     text: defaults.text,
     muted: defaults.muted,
@@ -464,6 +468,7 @@ function backgroundLayer(canvas: { width: number; height: number }, defaults: Pa
     overMedia: false,
     align: "left",
     valign: "top",
+    headline: false,
     font: defaults.font,
     text: defaults.text,
     muted: defaults.muted,
@@ -502,6 +507,7 @@ function logoLayer(canvas: { width: number; height: number }, defaults: PageDefa
     overMedia: Boolean(defaults.image || defaults.video),
     align: "left",
     valign: "top",
+    headline: false,
     font: defaults.font,
     text: defaults.text,
     muted: defaults.muted,

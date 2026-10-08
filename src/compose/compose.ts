@@ -15,6 +15,7 @@ import { parseComposeSpec } from "./parse.js";
 import {
   SCALE_MAX,
   SCALE_MIN,
+  headlineMax,
   leadingOf,
   sizesFor,
   textHeight,
@@ -86,6 +87,8 @@ export interface ComposeQuality {
     ink: Box;
     font_size: number;
     family: string;
+    /** The run's plain copy, so a lint can name what it flags. */
+    text?: string;
   }>;
   fonts: Array<{ layer: string; family: string; fallback_from?: string; missing_codepoints: string[] }>;
   overlaps: Array<{ first: string; second: string; kind: "layer_layer"; area: number }>;
@@ -263,6 +266,7 @@ function chooseScale(
       title: title && title.role === "title" ? title.text : "",
       subtitle: subtitle && subtitle.role === "subtitle" ? subtitle.text : "",
       scale,
+      ...(layer.headline && title && title.role === "title" ? { titleMax: headlineMax(title.text, inner.h) } : {}),
     });
     const footerH = footerText ? textHeight(ctx, footerText, inner.w, ramp.footer, family, leadingOf(ramp.footer)) : 0;
     const footerGap = footerText ? Math.round(ramp.footer * 0.8) : 0;
@@ -830,6 +834,7 @@ async function paintLayer(
     title: title && title.role === "title" ? title.text : "",
     subtitle: subtitle && subtitle.role === "subtitle" ? subtitle.text : "",
     scale,
+    ...(layer.headline && title && title.role === "title" ? { titleMax: headlineMax(title.text, fitBox.h) } : {}),
   });
   if (shared.scale === undefined && !hasFluid && fixed.length) {
     const chosen = chooseScale(ctx, layer, fitBox, family, fixed, footerText);

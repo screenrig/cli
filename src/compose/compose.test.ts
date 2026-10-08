@@ -318,6 +318,24 @@ test("a type-only region uses one scale for every role", async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+test("a headline region grows a one-line title past the role wish, bounded by the region", async () => {
+  const dir = await testTemp("compose-headline-");
+  const base = { width: 1920, height: 1080, background: "#101010", text: "#FFFFFF" };
+  const titleSize = async (spec: Record<string, unknown>) => {
+    const result = await composeDocument({ ...base, ...spec }, { baseDir: dir });
+    return result.pages[0]!.quality.text.find((item) => item.role === "title")!.font_size;
+  };
+  const plain = await titleSize({ fullpage: { title: "SALE 20% OFF", align: "center", valign: "center" } });
+  const headline = await titleSize({ fullpage: { title: "SALE 20% OFF", align: "center", valign: "center", headline: true } });
+  assert.ok(plain <= Math.round(wishOf("title", 1080) * 1.35), `plain ${plain}`);
+  assert.ok(headline >= 220 && headline > plain * 1.4, `headline ${headline} plain ${plain}`);
+  assert.ok(headline <= 1080, `headline ${headline}`);
+  const far = await titleSize({ viewing: "far", fullpage: { title: "SALE 20% OFF", align: "center", valign: "center" } });
+  assert.ok(far > plain, `far ${far} plain ${plain}`);
+  await assertUsageRejects(() => composeDocument({ ...base, fullpage: { text: "x", headline: true } }, { baseDir: dir }), /headline needs a title/);
+  await rm(dir, { recursive: true, force: true });
+});
+
 test("missing font is usage_error", async () => {
   await assertUsageRejects(
     () => composeDocument({ ...page(), font: "DefinitelyNotAInstalledFamily" }, { baseDir: process.cwd() }),

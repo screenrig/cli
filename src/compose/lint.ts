@@ -137,7 +137,7 @@ export function lintComposedPage(args: {
           page_id: args.page_id,
           code: "low_contrast_rendered",
           id: run.layer,
-          message: `${args.page_id}: ${run.layer} contrast ${contrast.toFixed(2)}:1 is below 4.5:1.`,
+          message: `${args.page_id}: ${run.layer} ${run.role}${quotedExcerpt(run.text)} contrast ${contrast.toFixed(2)}:1 is below 4.5:1.`,
         });
       }
       if (overBusyImage(run.layer, run.ink, args.quality, args.pixels)) {
@@ -151,6 +151,13 @@ export function lintComposedPage(args: {
     }
   }
   return findings;
+}
+
+/** A short quote of the flagged copy, so the agent knows which text to change. */
+function quotedExcerpt(text: string | undefined): string {
+  const flat = (text ?? "").replace(/\s+/g, " ").trim();
+  if (!flat) return "";
+  return ` "${flat.length > 40 ? `${flat.slice(0, 40)}…` : flat}"`;
 }
 
 function countSpecWords(value: unknown): number {
