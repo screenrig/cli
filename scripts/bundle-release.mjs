@@ -5,6 +5,7 @@
 // every bundled package, and a package.json for the bundle.
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { isRendererPlatformPackage, loadRuntimeDependencyLock, NOTICES_FILE, RUNTIME_LOCK_FILE } from "./runtime-dependencies.mjs";
@@ -14,7 +15,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 // package (its module entry points, file list and scripts).
 const MANIFEST_FIELDS = ["name", "version", "private", "description", "homepage", "repository", "bugs", "license", "type", "bin", "engines", "dependencies"];
 
-// The release bundle carries src/assets.ts's files inline, JSON minified.
+// The release bundle carries src/assets.ts's files inline, JSON minified and gzip-compressed.
 const embedAssets = {
   name: "embed-assets",
   setup(build) {
@@ -24,11 +25,13 @@ const embedAssets = {
         const bytes = await readFile(path.join(root, "assets", name));
         const text = bytes.toString("utf8");
         if (!Buffer.from(text, "utf8").equals(bytes)) throw new Error(`assets/${name} is not UTF-8 text`);
-        assets[name] = name.endsWith(".json") ? JSON.stringify(JSON.parse(text)) : text;
+        // Gzip keeps the inline copies small; readAsset inflates the exact bytes on first use.
+        assets[name] = gzipSync(Buffer.from(name.endsWith(".json") ? JSON.stringify(JSON.parse(text)) : text, "utf8"), { level: 9 }).toString("base64");
       }
       return {
         loader: "js",
-        contents: `const assets = ${JSON.stringify(assets)};\nexport function readAsset(name) { return Buffer.from(assets[name], "utf8"); }\n`,
+        contents: `import { gunzipSync } from "node:zlib";\nconst assets = ${JSON.stringify(assets)};\nconst inflated = new Map();\n`
+          + `export function readAsset(name) { let bytes = inflated.get(name); if (!bytes) { bytes = gunzipSync(Buffer.from(assets[name], "base64")); inflated.set(name, bytes); } return Buffer.from(bytes); }\n`,
       };
     });
   },
