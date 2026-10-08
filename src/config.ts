@@ -424,6 +424,47 @@ import { isResourceID } from "./generated/resource-ids.js";
       return socketPath;
     }
 
+    function holdsCredential(file: ScreenRigConfig): boolean {
+      return Boolean(file.token || file.identity_token || file.agent_connection?.pending_token || file.agent_connection?.connection_token
+        || Object.values(file.projects ?? {}).some((project) => project?.token));
+    }
+
+    function parsedOrigin(value: string): URL {
+      try {
+        return new URL(value);
+      } catch {
+        throw configError(`API URL ${JSON.stringify(value)} is not a valid URL.`);
+      }
+    }
+
+    /** Plain http is allowed only to this machine: localhost, *.localhost and loopback addresses. */
+    function loopbackHost(hostname: string): boolean {
+      return hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "127.0.0.1" || hostname === "[::1]";
+    }
+
+    /**
+     * A stored credential is bound to the API origin it was issued for. It is
+     * never sent to another origin chosen by --api-url or SCREENRIG_API_URL,
+     * and never over plain http beyond this machine.
+     */
+    function assertCredentialOrigin(file: ScreenRigConfig | undefined, apiUrl: string, issuedFor: string | undefined): void {
+      const target = parsedOrigin(apiUrl);
+      if (target.protocol !== "https:" && !(target.protocol === "http:" && loopbackHost(target.hostname))) {
+        throw configError(`API URL ${target.origin} is not HTTPS. ScreenRig sends credentials only over HTTPS, or plain http to localhost.`, {
+          command: "screenrig doctor",
+          reason: "Shows the configured API origin. Use an https:// API URL.",
+        });
+      }
+      if (!file || !issuedFor || !holdsCredential(file)) return;
+      const issued = parsedOrigin(issuedFor);
+      if (issued.origin !== target.origin) {
+        throw configError(`This config holds a credential issued for ${issued.origin}; it is never sent to ${target.origin}. Nothing was sent.`, {
+          command: "screenrig --config PATH ...",
+          reason: `Drop --api-url and SCREENRIG_API_URL to use ${issued.origin}, or use a separate --config for ${target.origin}.`,
+        });
+      }
+    }
+
     export async function resolveConfig(options: {
       flags: Record<string, string | boolean>;
       fs: ConfigFs;
@@ -459,6 +500,8 @@ import { isResourceID } from "./generated/resource-ids.js";
         apiUrl = flagApi;
         apiSource = "flag";
       }
+
+      assertCredentialOrigin(file, apiUrl, localDevProfile && storedApiUrl === DEFAULT_API_URL ? LOCAL_DEV_API_URL : storedApiUrl);
 
       let token: string | undefined;
       let tokenSource: ResolvedConfig["source"]["token"] = "none";

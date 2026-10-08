@@ -962,7 +962,11 @@ handoffs retain their existing specialized recovery behavior.
 User-private config lives outside the replaceable plugin directory
 (`$XDG_CONFIG_HOME/screenrig/config.json`, or
 `%APPDATA%\screenrig\config.json` on Windows). The default service is `https://api.screenrig.ai`.
-`SCREENRIG_API_URL` and `--api-url` are explicit overrides.
+`SCREENRIG_API_URL` and `--api-url` are explicit overrides. A stored credential
+is bound to the API origin it was issued for: when a config holds a credential,
+an override naming another origin is refused before any request (use a separate
+`--config` per origin). API URLs must be HTTPS; plain http is accepted only for
+`localhost`, `*.localhost` and loopback addresses.
 
 Optional `log_socket` in that same config enables a side-channel NDJSON
 operation log. There is no `--log-socket` flag. Connect failure never fails the

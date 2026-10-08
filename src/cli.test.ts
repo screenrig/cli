@@ -1720,16 +1720,59 @@ test("browser setup --open opens only the public handoff URL by argv", async () 
 test("browser setup --open on the stage API opens the stage apex handoff", async () => {
   const transport = memoryBackend();
   const opened: string[] = [];
-  const result = await withAuthenticatedRuntime(
-    ["--json", "browser", "setup", "--code", "ABC234", "--open", "--api-url", "https://api.stage.screenrig.ai"],
-    transport,
-    { openUrl: async (url) => { opened.push(url); return true; } },
-  );
+  const configDir = await testTemp("stage-handoff-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), { api_url: "https://api.stage.screenrig.ai" }, fsLike);
   try {
+    const result = await withAuthenticatedRuntime(
+      ["--json", "browser", "setup", "--code", "ABC234", "--open"],
+      transport,
+      { fs: fsLike, openUrl: async (url) => { opened.push(url); return true; } },
+    );
     assert.equal(result.code, 0, result.stdout);
     assert.deepEqual(opened, ["https://stage.screenrig.ai/ABC-234"]);
   } finally {
-    await rm(result.configDir, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("a stored credential is never sent to another --api-url or SCREENRIG_API_URL origin", async () => {
+  const configDir = await testTemp("credential-origin-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } as Record<string, string> };
+  try {
+    for (const [argv, env] of [
+      [["--api-url", "http://127.0.0.1:18977"], {}],
+      [["--api-url", "https://example.com"], {}],
+      [[], { SCREENRIG_API_URL: "https://api.stage.screenrig.ai" }],
+    ] as const) {
+      const transport = new FakeTransport();
+      const result = await withAuthenticatedRuntime(["--json", "project", "show", ...argv], transport, { fs: { ...fsLike, env: { ...fsLike.env, ...env } } });
+      assert.equal(result.code, ExitCode.Config, result.stdout);
+      const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string } };
+      assert.equal(envelope.error.code, "config_error");
+      assert.match(envelope.error.detail, /issued for https:\/\/api\.screenrig\.ai; it is never sent to /);
+      assert.equal(transport.calls.length, 0, "nothing reaches the other origin");
+      assert.doesNotMatch(result.stdout, /sr_live_/);
+    }
+    // The same origin with a trailing slash is the same origin.
+    const same = await withAuthenticatedRuntime(["--json", "project", "show", "--api-url", "https://api.screenrig.ai/"], memoryBackend(), { fs: fsLike });
+    assert.equal(same.code, 0, same.stdout);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("plain http API URLs are refused except to this machine", async () => {
+  for (const url of ["http://api.screenrig.ai", "http://192.0.2.10:8080"]) {
+    const transport = new FakeTransport();
+    const result = await withRuntime(["--json", "agent", "enroll", "--email", "owner@example.com", "--organization", "Acme", "--api-url", url], transport);
+    try {
+      assert.equal(result.code, ExitCode.Config, result.stdout);
+      assert.match(JSON.parse(result.stdout).error.detail, /is not HTTPS/);
+      assert.equal(transport.calls.length, 0);
+    } finally {
+      await rm(result.configDir, { recursive: true, force: true });
+    }
   }
 });
 
