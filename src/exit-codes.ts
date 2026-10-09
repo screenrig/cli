@@ -72,10 +72,6 @@ export const OAUTH_PROBLEMS: Readonly<Record<string, OAuthProblemRow>> = {
   unsupported_grant_type: { code: "client_not_allowed", title: "Client not allowed", exitCode: ExitCode.Auth },
   access_denied: { code: "login_denied", title: "Sign-in denied", exitCode: ExitCode.Auth },
   expired_token: { code: "login_expired", title: "Sign-in expired", exitCode: ExitCode.Timeout, next: SIGN_IN_AGAIN },
-  unsupported_token_type: {
-    code: "credential_retired", title: "Credential retired", exitCode: ExitCode.Auth,
-    next: { command: "screenrig login", reason: "The stored credential is retired. Sign this installation in again." },
-  },
   temporarily_unavailable: { code: "service_unavailable", title: "Service unavailable", exitCode: ExitCode.Server },
   rate_limited: { code: "rate_limited", title: "Rate limited", exitCode: ExitCode.RateLimited },
 };

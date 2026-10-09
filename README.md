@@ -164,15 +164,16 @@ an ambiguous server failure so the original operation can be reconciled.
 `project create` defaults to the current organization. Names are unique within
 an organization; an agent's responsible person becomes owner. The server
 enforces the ten-free-Standard-project creation cap and payer coverage. With no
-current project, specify an organization. A successful create selects the new
-project and stores its credential privately.
+current project, specify an organization. A successful create adds the new
+project to this sign-in and selects it; the next command renews an access token
+for it.
 
 The current project is the last selected or created project. `--project-id ID`
 targets a cached project for one command without changing that selection.
 Every command keeps its target while it runs, and generation, provisioning,
 browser setup and ordinary-write retries are stored separately per project.
 JSON results include organization and project context; human output names both.
-Projects reached through the identity credential still require membership.
+Projects reached through the sign-in's identity access still require membership.
 
 `organization list` shows organizations visible to this identity. Organization
 names can repeat; use the ID when renaming an organization you administer.
@@ -893,15 +894,16 @@ A session is a 15-minute access token and a rotating refresh token, stored in
 the 0600 config. The CLI renews the access token when it is about to expire,
 and once more when the API refuses it; concurrent CLI processes share one
 renewal through the config lock. A session lasts while it is used, up to one
-year, and commands warn 30 days before it ends. A credential stored by an
-earlier CLI version becomes a session transparently on first use.
-`screenrig logout` revokes the session on the server, then removes it; when the
-revocation might not have reached the server the session stays, and rerunning
-logout is safe.
+year, and commands warn 30 days before it ends. A config that holds a project
+or identity token in place of a session sends nothing: commands exit 3 with
+`credential_retired` and name `screenrig login`, which signs the installation
+in and replaces what the config held. `screenrig logout` revokes the session
+on the server, then removes it; when the revocation might not have reached the
+server the session stays, and rerunning logout is safe.
 
 `agent connect` is an alias of `screenrig login`, kept for one release with a
-warning naming it: `--target-project-id` becomes `--project`, and `--wait`
-waits for approval.
+warning naming it: `--target-project-id` becomes `--project`, `--wait` waits
+for approval, and `--cancel` clears a pending sign-in.
 
 ### Service clients
 
@@ -944,12 +946,12 @@ project, current-agent and operation-status reads remain available to any
 active credential. These permissions are distinct from project feature
 entitlements (`project capabilities`); both must allow an operation.
 
-Capabilities cannot be changed on a credential. A capability refusal is HTTP
+Capabilities cannot be changed on an access token. A capability refusal is HTTP
 403 `forbidden`, with `This agent credential lacks the <name> capability.`
-Follow the CLI's `error.next` guidance: connect a new agent with the needed
-capabilities using a separate private `--config` path, obtain dashboard
-approval, verify it with `agent status`, then disconnect the old agent. Do not
-retry the denied write unchanged or broaden permissions without authorization.
+Follow the CLI's `error.next` guidance: run `screenrig login` and ask the
+person approving it in the dashboard to grant the needed capability, then
+verify it with `agent status`. Do not retry the denied write unchanged or
+broaden permissions without authorization.
 
 ### Recovering writes
 

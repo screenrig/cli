@@ -76,7 +76,6 @@ function withTransportHint(err: unknown, method: string, keyed: boolean): unknow
 export interface CredentialRenewal {
   /** `invalidToken` is whether the refusal carried error="invalid_token". */
   renewRejected(token: string, invalidToken: boolean): Promise<string | undefined>;
-  noteAuthenticated(token: string): void;
 }
 
 function invalidTokenChallenge(response: { status: number; headers: Record<string, string> }): boolean {
@@ -103,7 +102,7 @@ function sessionEnded(problem: NormalizedProblem): NormalizedProblem {
 export interface ApiClientOptions {
   transport: Transport;
   token?: string;
-  /** OAuth access-token renewal; absent for legacy credentials. */
+  /** OAuth access-token renewal. */
   auth?: CredentialRenewal;
   /** Fixed for this client; identity credentials require an explicit target. */
   projectId?: string;
@@ -313,7 +312,6 @@ export class ApiClient {
       span.error(err, { status: response.status, request_id: requestId, content_type: response.headers["content-type"] });
       throw err;
     }
-    if (this.auth && this.token) this.auth.noteAuthenticated(this.token);
     span.response(response.status, {
       request_id: requestId,
       // Never put these bodies in generic logging fields, even before redaction.
@@ -392,7 +390,6 @@ export class ApiClient {
       });
       throw wrapped;
     }
-    if (this.auth && this.token) this.auth.noteAuthenticated(this.token);
     span.response(response.status, {
       request_id: requestId,
       content_type: response.headers["content-type"],

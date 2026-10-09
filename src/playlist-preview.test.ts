@@ -224,7 +224,7 @@ async function centerPixel(file: string): Promise<number[]> {
 test("file preview fetches uploaded media from the project when logged in", async () => {
   const cwdDir = await testTemp("preview-fetch-");
   const fsLike: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => cwdDir, env: { XDG_CONFIG_HOME: cwdDir } };
-  await writeConfigAtomic(path.join(cwdDir, "screenrig", "config.json"), { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" }, fsLike);
+  await writeConfigAtomic(path.join(cwdDir, "screenrig", "config.json"), { api_url: "https://api.screenrig.ai", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" }, fsLike);
   const file = path.join(cwdDir, "menu-playlist.json");
   await writeFile(file, JSON.stringify(imagePlaylist("med_MENU")));
   const png = redPng();

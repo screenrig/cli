@@ -6,30 +6,22 @@ import { test } from "node:test";
 import type { TestContext } from "node:test";
 import { run } from "./main.js";
 import { readConfigFile, writeConfigAtomic, type ScreenRigConfig } from "./config.js";
-import { FakeTransport } from "./transport/fake.js";
+import { FakeTransport, fakeSessionJwt } from "./transport/fake.js";
 import { testTemp } from "./test-temp.js";
 import { networkError } from "./problems.js";
 import { AGENT_CAPABILITIES, type ProjectContext } from "./adapters/protocol.js";
 import { selectProject } from "./project-state.js";
-import { createCipheriv, createHash, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync } from "node:crypto";
-import type { AgentCredentialEnvelope, X25519PublicJWK } from "./adapters/protocol.js";
-
-function seal(recipient: X25519PublicJWK, binding: string, token: string): AgentCredentialEnvelope {
-  const ephemeral = generateKeyPairSync("x25519");
-  const publicKey = ephemeral.publicKey.export({ format: "jwk" });
-  const shared = diffieHellman({ privateKey: ephemeral.privateKey, publicKey: createPublicKey({ key: recipient as import("node:crypto").JsonWebKey, format: "jwk" }) });
-  const salt = createHash("sha256").update("screenrig/agent-credential-envelope/salt/v1\0" + binding).digest();
-  const key = Buffer.from(hkdfSync("sha256", shared, salt, Buffer.from("screenrig/agent-credential-envelope/key/v1"), 32));
-  const nonce = Buffer.alloc(12, 3), cipher = createCipheriv("aes-256-gcm", key, nonce);
-  cipher.setAAD(Buffer.from("screenrig/agent-credential-envelope/aad/v1\0" + binding + "\0" + AGENT.id));
-  const ciphertext = Buffer.concat([cipher.update(Buffer.from(JSON.stringify({ token, agent_id: AGENT.id, connection_id: binding }))), cipher.final(), cipher.getAuthTag()]);
-  return { algorithm: "X25519-HKDF-SHA256-A256GCM", ephemeral_public_key: { kty: "OKP", crv: "X25519", x: publicKey.x! }, nonce: nonce.toString("base64url"), ciphertext: ciphertext.toString("base64url") };
-}
-
 const A = "prj_AAAAAAAAAAAAAAAAAAAAAAAA", B = "prj_BBBBBBBBBBBBBBBBBBBBBBBB", C = "prj_CCCCCCCCCCCCCCCCCCCCCCCC";
-const IDENTITY = "sr_live_idt_" + "a".repeat(24) + "_" + "b".repeat(64);
-const TOKEN_A = "sr_live_projectA_" + "A".repeat(43), TOKEN_C = "sr_live_projectC_" + "C".repeat(43);
 const AGENT = { id: "agt_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Agent", agent_type: "cli", capabilities: [...AGENT_CAPABILITIES], state: "active" as const, authenticated_requests: 0, metered_credits: 0, created_at: "2026-10-04T12:00:00Z" };
+const API = "https://api.screenrig.ai";
+const SCOPE = "access:manage screens content playlists advertising reports project identity";
+/** Access tokens of one sign-in: identity scope with no project, and one per project. */
+function access(project?: string): string {
+  return fakeSessionJwt({ sub: `agent:${AGENT.id}`, sid: "grt_PRINCIPALS", exp: 4102444800, scope: SCOPE, ...(project ? { prj: project } : {}) });
+}
+const IDENTITY = access(), TOKEN_A = access(A), TOKEN_B = access(B);
+const REFRESH = fakeSessionJwt({ sub: `agent:${AGENT.id}`, sid: "grt_PRINCIPALS", gen: 1, exp: 4102444800 });
+const GRANT = { issuer: API, client_id: "screenrig-cli", refresh_token: REFRESH, identity: true };
 function context(id: string, name: string, organizationName = "Acme"): ProjectContext {
   return { project: { id, name, organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: organizationName, revision: 1, status: "active", email: "contact@example.com", email_verified: false, used_bytes: 0, reserved_bytes: 0, screen_count: 0, screen_limit: 100, content_limit_bytes: 0, credit_remaining: 0, created_at: "2026-10-04T12:00:00Z", updated_at: "2026-10-04T12:00:00Z" }, organization: { id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", name: organizationName } };
 }
@@ -48,10 +40,21 @@ async function fixture(t: TestContext, config?: ScreenRigConfig) {
     const code = await run({ argv, env: fs.env, fs, homedir: fs.homedir, cwd: () => process.cwd(), stdout, stderr, transport, now: () => new Date("2026-10-04T12:00:00Z"), sleep: ms => new Promise(resolve => setTimeout(resolve, Math.min(ms, 10))) });
     return { code, out, err, result: JSON.parse(out) };
   };
-  return { fs, configPath, transport, invoke, saved: () => readConfigFile(configPath, fs) };
+  /** The authorization server renews a project's access token the first time a command targets it. */
+  const renews = (tokens: Record<string, string>) => {
+    transport.on("GET", "/.well-known/oauth-authorization-server", () => ({ status: 200, headers: { "content-type": "application/json" },
+      body: { issuer: API, token_endpoint: `${API}/oauth/token`, revocation_endpoint: `${API}/oauth/revoke`, device_authorization_endpoint: `${API}/oauth/device_authorization` } }));
+    transport.on("POST", "/oauth/token", req => {
+      const token = tokens[new URLSearchParams(String(req.body)).get("project_id") ?? ""];
+      assert.ok(token, "a renewal names a project this test expects");
+      return { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" },
+        body: { access_token: token, token_type: "Bearer", expires_in: 900, scope: SCOPE } };
+    });
+  };
+  return { fs, configPath, transport, invoke, renews, saved: () => readConfigFile(configPath, fs) };
 }
 function initial(): ScreenRigConfig {
-  return { api_url: "https://api.screenrig.ai", token: TOKEN_A, identity_token: IDENTITY, agent_id: AGENT.id, project_id: A, project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Acme" };
+  return { api_url: API, token: TOKEN_A, identity_token: IDENTITY, agent_id: AGENT.id, project_id: A, project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Acme", oauth: GRANT };
 }
 
 test("remote playlist preparation resolves token-only project context before screen access", async t => {
@@ -72,7 +75,7 @@ test("remote playlist preparation resolves token-only project context before scr
   assert.equal(result.code, 0, result.out);
   assert.deepEqual(result.result.context, { project: { id: A, name: "Screens" }, organization: context(A, "Screens").organization });
   assert.equal((await f.saved())?.project_id, A);
-  assert.doesNotMatch(result.out + result.err, /sr_live_/);
+  assert.doesNotMatch(result.out + result.err, /eyJ/);
 });
 
 test("organization administration uses explicit IDs and preserves concurrent project selection", async t => {
@@ -99,24 +102,24 @@ test("organization administration uses explicit IDs and preserves concurrent pro
   assert.equal((await f.saved())?.project_id, B);
   assert.equal((await f.saved())?.organization_name, "North");
   assert.equal((await f.saved())?.projects?.[A]?.organization_name, "North");
-  assert.doesNotMatch(renamed.out + renamed.err, /sr_live_/);
+  assert.doesNotMatch(renamed.out + renamed.err, /eyJ/);
 });
 
-test("enrollment binds organization and stores both credentials without returning them", async t => {
+test("enrollment binds organization and stores the sign-in without returning it", async t => {
   const f = await fixture(t);
   f.transport.on("POST", "/api/enrollments", req => {
     assert.equal((req.body as { organization: string }).organization, "Acme");
     assert.equal((req.body as { project_name?: string }).project_name, undefined);
-    return { status: 201, headers: { "cache-control": "private, no-store" }, body: { project: context(A, "Screens").project, agent: AGENT, token: TOKEN_A, identity_token: IDENTITY, connection_ready: false, invitation: { id: "inv_first" }, issuance_id: "iss_first", issuance_expires_at: "2026-10-04T12:10:00Z" } };
+    return { status: 201, headers: { "cache-control": "private, no-store" }, body: { project: context(A, "Screens").project, agent: AGENT, access_token: TOKEN_A, token_type: "Bearer", expires_in: 900, refresh_token: REFRESH, refresh_expires_at: 4102444800, scope: SCOPE, connection_ready: false, invitation: { id: "inv_first" }, issuance_id: "iss_first", issuance_expires_at: "2026-10-04T12:10:00Z" } };
   });
   f.transport.on("GET", "/api/project", () => ({ status: 200, headers: {}, body: context(A, "Screens").project }));
   f.transport.on("GET", "/api/agents/self", () => ({ status: 200, headers: { "cache-control": "private, no-store" }, body: { agent: AGENT, connection_ready: false } }));
   const result = await f.invoke("agent", "enroll", "--email", "contact@example.com", "--organization", "Acme");
   assert.equal(result.code, 0, result.out);
-  assert.equal((await f.saved())?.identity_token, IDENTITY);
-  assert.deepEqual((await f.saved())?.enrollment_project, { project_id: A, agent_id: AGENT.id });
+  assert.equal((await f.saved())?.identity_token, TOKEN_A);
+  assert.deepEqual((await f.saved())?.oauth, { ...GRANT, refresh_expires_at: 4102444800 });
   assert.deepEqual(result.result.context, { organization: { id: context(A, "Screens").organization.id, name: "Acme" }, project: { id: A, name: "Screens" } });
-  assert.doesNotMatch(result.out + result.err, /sr_live_|issuance_id|contact@example.com/);
+  assert.doesNotMatch(result.out + result.err, /eyJ|issuance_id|contact@example.com/);
 });
 
 test("new enrollment requires organization, preserves Screens, and never infers from email", async t => {
@@ -141,15 +144,11 @@ test("ambiguous enrollment keeps the exact organization and rejects a changed re
   assert.equal((f.transport.calls[1]?.body as { organization?: string }).organization, "Acme");
 });
 
-test("legacy identity exchange and project selection preserve both project retries", async t => {
-  const config = initial(); delete config.identity_token;
+test("project list and project use under a sign-in preserve both project retries", async t => {
+  const config = initial();
   config.media_generate = { idempotency_key: "first-generation-key", request_hash: "hash" };
   const f = await fixture(t, config);
-  f.transport.on("POST", "/api/agent-identity/exchange", req => {
-    assert.equal(req.headers?.authorization, "Bearer " + TOKEN_A);
-    assert.ok(req.headers?.["idempotency-key"]);
-    return { status: 201, headers: { "cache-control": "private, no-store" }, body: { agent_id: AGENT.id, identity_token: IDENTITY, issuance_expires_at: "2026-10-04T12:10:00Z" } };
-  });
+  f.renews({ [B]: TOKEN_B });
   f.transport.on("GET", "/api/projects", req => {
     assert.equal(req.headers?.authorization, "Bearer " + IDENTITY);
     return { status: 200, headers: {}, body: { projects: [context(A, "Screens"), context(B, "Lobby")] } };
@@ -168,14 +167,14 @@ test("legacy identity exchange and project selection preserve both project retri
   assert.deepEqual(saved.projects?.[A]?.media_generate, config.media_generate);
   assert.equal(saved.projects?.[B]?.media_generate, undefined);
   f.transport.on("GET", "/api/project", req => {
-    assert.equal(req.headers?.authorization, "Bearer " + IDENTITY);
-    assert.equal(req.headers?.["screenrig-project"], B);
+    assert.equal(req.headers?.authorization, "Bearer " + TOKEN_B);
     return { status: 200, headers: {}, body: context(B, "Lobby").project };
   });
   const shown = await f.invoke("project", "show");
   assert.equal(shown.code, 0, shown.out);
   assert.equal(shown.result.context.project.id, B);
-  assert.doesNotMatch(listed.out + used.out + shown.out, /sr_live_|identity_token/);
+  assert.equal((await f.saved())?.token, TOKEN_B);
+  assert.doesNotMatch(listed.out + used.out + shown.out, /eyJ|identity_token/);
 });
 
 test("a captured create retry stays in A while another process selects B", async t => {
@@ -193,7 +192,7 @@ test("a captured create retry stays in A while another process selects B", async
       throw networkError("Response lost after acceptance");
     }
     assert.equal(req.headers?.["idempotency-key"], key);
-    return { status: 201, headers: { "cache-control": "no-store" }, body: { ...context(C, "Menu"), token: TOKEN_C, issuance_expires_at: "2026-10-04T12:10:00Z" } };
+    return { status: 201, headers: { "cache-control": "no-store" }, body: context(C, "Menu") };
   });
   const failed = await f.invoke("project", "create", "Menu");
   assert.notEqual(failed.code, 0);
@@ -202,12 +201,13 @@ test("a captured create retry stays in A while another process selects B", async
   const retried = await f.invoke("--project-id", A, "project", "create", "Menu");
   assert.equal(retried.code, 0, retried.out);
   const saved = (await f.saved())!;
-  assert.equal(saved.project_id, C); assert.equal(saved.token, TOKEN_C);
+  // The new project delivers no token: the next command renews one for it.
+  assert.equal(saved.project_id, C); assert.equal(saved.token, undefined);
   assert.equal(saved.projects?.[A]?.token, TOKEN_A);
   assert.equal(saved.projects?.[A]?.pending_writes, undefined);
   assert.equal(saved.projects?.[B]?.token, undefined);
   assert.equal(retried.result.context.project.id, C);
-  assert.doesNotMatch(retried.out, /sr_live_|issuance_expires_at/);
+  assert.doesNotMatch(retried.out, /eyJ/);
 });
 
 test("project deletion sends only exact confirmation and never archives screens on refusal", async t => {
@@ -224,91 +224,9 @@ test("project deletion sends only exact confirmation and never archives screens 
   assert.equal((await f.saved())?.token, TOKEN_A);
 });
 
-for (const cleanup of ["none", "deleted", "retained", "pending"] as const) test(`existing identity connects once through activation retry and ${cleanup} enrollment cleanup`, async t => {
-  const config = initial();
-  if (cleanup !== "none") config.enrollment_project = { project_id: A, agent_id: AGENT.id };
-  const f = await fixture(t, config);
-  const connectionId = "acn_AAAAAAAAAAAAAAAAAAAAAAAA";
-  const projectToken = "sr_live_projectB_" + "B".repeat(43);
-  let envelope: AgentCredentialEnvelope;
-  f.transport.on("POST", "/api/agent-connections", req => {
-    assert.equal(req.headers?.authorization, "Bearer " + IDENTITY);
-    assert.equal((req.body as { project_id: string }).project_id, B);
-    envelope = seal((req.body as { recipient_public_key: X25519PublicJWK }).recipient_public_key, connectionId, projectToken);
-    return { status: 201, headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" }, body: { connection_id: connectionId, connection_token: "sac_" + "S".repeat(43), approval_url: "https://screenrig.ai/dashboard/agents/connect/" + connectionId, expires_at: "2026-10-05T12:00:00Z" } };
-  });
-  f.transport.pushStream("event: agent.connection\ndata: " + JSON.stringify({ connection_id: connectionId, name: "Agent", agent_type: "cli", capabilities: [...AGENT_CAPABILITIES], status: "approved", expires_at: "2026-10-05T12:00:00Z", created_at: "2026-10-04T12:00:00Z" }) + "\n\n");
-  f.transport.on("POST", "/api/agent-connections/" + connectionId + "/credential", () => ({ status: 200, headers: { "cache-control": "private, no-store" }, body: { agent: { ...AGENT, state: "pending" }, credential_envelope: envelope, issuance_expires_at: "2026-10-05T12:00:00Z" } }));
-  let attempts = 0;
-  f.transport.on("POST", "/api/agents/self/activate", async req => {
-    assert.equal(req.headers?.authorization, "Bearer " + projectToken);
-    assert.equal(req.headers?.["screenrig-project"], undefined, "A's target must not follow B's temporary bearer");
-    assert.equal((await f.saved())?.token, TOKEN_A);
-    if (++attempts === 1) throw networkError("Activation response lost");
-    return { status: 200, headers: { "cache-control": "private, no-store" }, body: AGENT };
-  });
-  f.transport.on("GET", "/api/agents/self", () => ({ status: 200, headers: { "cache-control": "private, no-store" }, body: { agent: AGENT, connection_ready: true } }));
-  f.transport.on("GET", "/api/project", () => ({ status: 200, headers: {}, body: context(B, "Lobby").project }));
-  let cleanupAttempts = 0;
-  f.transport.on("GET", "/api/project/deletion-preview", req => {
-    assert.equal(req.headers?.["screenrig-project"], A);
-    assert.equal(req.headers?.authorization, "Bearer " + TOKEN_A);
-    return { status: 200, headers: {}, body: { ...context(A, "Screens"), allowed: true, devices: [] } };
-  });
-  f.transport.on("DELETE", "/api/project", req => {
-    assert.equal(req.headers?.["screenrig-project"], A);
-    assert.equal(req.headers?.authorization, "Bearer " + TOKEN_A);
-    assert.deepEqual(req.body, { name: "Screens", revision: 1, empty_only: true });
-    if (cleanup === "pending" && ++cleanupAttempts === 1) throw networkError("Cleanup response lost");
-    if (cleanup === "retained") return { status: 409, headers: { "content-type": "application/problem+json" }, body: { status: 409, code: "project_delete_blocked", detail: "Work arrived after the preview" } };
-    return { status: 200, headers: { "content-type": "application/json" }, body: { id: A } };
-  });
-  const failed = await f.invoke("agent", "connect", "--target-project-id", B, "--print-url");
-  assert.notEqual(failed.code, 0);
-  assert.equal((await f.saved())?.token, TOKEN_A);
-  assert.equal((await f.saved())?.agent_connection?.pending_token, projectToken);
-  const before = f.transport.calls.length;
-  const changed = await f.invoke("agent", "connect", "--target-project-id", C);
-  assert.equal(changed.result.error.code, "usage_error"); assert.equal(f.transport.calls.length, before);
-  const resumed = await f.invoke("agent", "connect");
-  assert.equal(resumed.code, 0, resumed.out);
-  assert.equal((await f.saved())?.project_id, B); assert.equal((await f.saved())?.token, projectToken);
-  assert.equal((await f.saved())?.projects?.[A]?.token, cleanup === "deleted" ? undefined : TOKEN_A);
-  assert.equal((await f.saved())?.identity_token, IDENTITY);
-  assert.equal((await f.saved())?.agent_connection, undefined);
-  if (cleanup === "pending") {
-    assert.equal(resumed.result.data.enrollment_cleanup.status, "pending");
-    assert.ok((await f.saved())?.enrollment_cleanup);
-    const inspected = await f.invoke("agent", "connect");
-    assert.equal(inspected.code, 0, inspected.out);
-    assert.equal(inspected.result.data.enrollment_cleanup.status, "deleted");
-    assert.equal((await f.saved())?.projects?.[A]?.token, undefined);
-    assert.equal((await f.saved())?.enrollment_cleanup, undefined);
-    assert.equal((await f.saved())?.token, projectToken);
-  } else if (cleanup !== "none") {
-    assert.equal(resumed.result.data.enrollment_cleanup.status, cleanup);
-    assert.equal((await f.saved())?.enrollment_cleanup, undefined);
-  } else {
-    assert.equal(f.transport.calls.filter(call => call.path === "/api/project/deletion-preview").length, 0, "A named Screens project without enrollment provenance is never cleaned up");
-  }
-  assert.equal(f.transport.calls.filter(call => call.path === "/api/agent-connections").length, 1);
-  assert.doesNotMatch(failed.out + changed.out + resumed.out, /sr_live_|sac_|private_jwk|pending_token/);
-});
-
-test("agent connect --target-project-id for a project this identity already belongs to asks for no approval", async t => {
-  const f = await fixture(t, initial());
-  f.transport.on("GET", "/api/projects", () => ({ status: 200, headers: {}, body: { projects: [context(A, "Screens"), context(B, "Lobby")] } }));
-  const result = await f.invoke("agent", "connect", "--target-project-id", B, "--print-url");
-  assert.equal(result.code, 0, result.out);
-  assert.equal(result.result.data.status, "already_member");
-  assert.equal(result.result.data.next.command, `screenrig project use ${B}`);
-  assert.equal(f.transport.calls.some(call => call.path === "/api/agent-connections"), false);
-  assert.equal((await f.saved())?.agent_connection, undefined);
-});
-
 test("membership disconnect cleans only its captured project after another process selects B", async t => {
   const config = initial();
-  config.projects = { [B]: { token: "sr_live_projectB_" + "B".repeat(43), project_name: "Lobby", organization_id: config.organization_id, organization_name: "Acme", media_generate: { idempotency_key: "b-generation", request_hash: "b-hash" } } };
+  config.projects = { [B]: { token: TOKEN_B, project_name: "Lobby", organization_id: config.organization_id, organization_name: "Acme", media_generate: { idempotency_key: "b-generation", request_hash: "b-hash" } } };
   const f = await fixture(t, config);
   f.transport.on("GET", "/api/agents/self", () => ({ status: 200, headers: { "cache-control": "private, no-store" }, body: { agent: AGENT, connection_ready: true } }));
   f.transport.on("POST", "/api/agents/self/disconnect", async req => {
@@ -327,7 +245,7 @@ test("membership disconnect cleans only its captured project after another proce
 });
 
 test("global identity revocation retains all credentials after response loss, then clears all memberships", async t => {
-  const config = initial(); config.projects = { [B]: { token: TOKEN_C, project_name: "Lobby" } };
+  const config = initial(); config.projects = { [B]: { token: TOKEN_B, project_name: "Lobby" } };
   const f = await fixture(t, config);
   let attempts = 0;
   f.transport.on("POST", "/api/agent-identity/revoke", req => {
@@ -338,22 +256,23 @@ test("global identity revocation retains all credentials after response loss, th
   const refused = await f.invoke("agent", "revoke-identity");
   assert.equal(refused.result.error.code, "usage_error"); assert.equal(f.transport.calls.length, 0);
   await f.invoke("agent", "revoke-identity", "--yes");
-  assert.equal((await f.saved())?.token, TOKEN_A); assert.equal((await f.saved())?.projects?.[B]?.token, TOKEN_C);
+  assert.equal((await f.saved())?.token, TOKEN_A); assert.equal((await f.saved())?.projects?.[B]?.token, TOKEN_B);
   const result = await f.invoke("agent", "revoke-identity", "--yes");
   assert.equal(result.code, 0, result.out);
   const saved = (await f.saved())!;
   assert.equal(saved.token, undefined); assert.equal(saved.identity_token, undefined); assert.equal(saved.projects?.[B]?.token, undefined);
-  assert.doesNotMatch(result.out, /sr_live_|identity_token/);
+  assert.equal(saved.oauth, undefined);
+  assert.doesNotMatch(result.out, /eyJ|identity_token/);
 });
 
 
-test("identity-targeted mutations reuse saved keys and refresh project names", async t => {
+test("project mutations without a stored project token renew one, reuse saved keys and refresh project names", async t => {
   const config = initial(); delete config.token;
   const f = await fixture(t, config);
+  f.renews({ [A]: TOKEN_A });
   let attempts = 0, key: string | undefined;
   f.transport.on("PATCH", "/api/project", req => {
-    assert.equal(req.headers?.authorization, "Bearer " + IDENTITY);
-    assert.equal(req.headers?.["screenrig-project"], A);
+    assert.equal(req.headers?.authorization, "Bearer " + TOKEN_A);
     if (++attempts === 1) { key = req.headers?.["idempotency-key"]; throw networkError("Rename response lost"); }
     assert.equal(req.headers?.["idempotency-key"], key);
     return { status: 200, headers: {}, body: context(A, "Renamed").project };
@@ -400,7 +319,7 @@ test("a rename whose response and re-read both fail validation leaves no replaya
 });
 
 test("identity without a current project creates in an explicit organization and survives a concurrent selection", async t => {
-  const config: ScreenRigConfig = { api_url: "https://api.screenrig.ai", identity_token: IDENTITY, agent_id: AGENT.id,
+  const config: ScreenRigConfig = { api_url: API, identity_token: IDENTITY, agent_id: AGENT.id, oauth: GRANT,
     projects: { [B]: { project_name: "Lobby", organization_id: initial().organization_id, organization_name: "Acme" } } };
   const f = await fixture(t, config);
   const missing = await f.invoke("project", "create", "Menu");
@@ -417,7 +336,7 @@ test("identity without a current project creates in an explicit organization and
       throw networkError("Create response lost");
     }
     assert.equal(req.headers?.["idempotency-key"], key);
-    return { status: 201, headers: { "cache-control": "no-store" }, body: { ...context(C, "Menu"), token: TOKEN_C, issuance_expires_at: "2026-10-04T12:10:00Z" } };
+    return { status: 201, headers: { "cache-control": "no-store" }, body: context(C, "Menu") };
   });
   assert.notEqual((await f.invoke("project", "create", "Menu", "--organization", "Acme")).code, 0);
   assert.equal((await f.saved())?.project_id, B);
@@ -429,5 +348,5 @@ test("identity without a current project creates in an explicit organization and
   assert.equal((await f.saved())?.project_id, C);
   assert.equal((await f.saved())?.identity_writes, undefined);
   assert.equal((await f.saved())?.projects?.[B]?.project_name, "Lobby");
-  assert.doesNotMatch(created.out + recovery.out, /sr_live_|idempotency_key/);
+  assert.doesNotMatch(created.out + recovery.out, /eyJ|idempotency_key/);
 });

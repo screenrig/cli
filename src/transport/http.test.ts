@@ -40,7 +40,7 @@ test("binary GET uses arrayBuffer and never calls text()", async () => {
     status: 200,
     headers: { "content-type": "image/webp", "content-length": String(payload.byteLength) },
   });
-  const transport = new FetchTransport("https://api.screenrig.ai/", "sr_live_test", async () => spy.response);
+  const transport = new FetchTransport("https://api.screenrig.ai/", "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_test", async () => spy.response);
   const result = await transport.request({
     method: "GET",
     path: "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/screenshot",
@@ -67,7 +67,7 @@ test("binary GET problem response still avoids text() and does not leave bytes i
     status: 409,
     headers: { "content-type": "application/problem+json" },
   });
-  const transport = new FetchTransport("https://api.screenrig.ai/", "sr_live_test", async () => spy.response);
+  const transport = new FetchTransport("https://api.screenrig.ai/", "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_test", async () => spy.response);
   const result = await transport.request({
     method: "GET",
     path: "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/screenshot",
@@ -84,7 +84,7 @@ test("JSON GET still uses text()", async () => {
     status: 200,
     headers: { "content-type": "application/json" },
   });
-  const transport = new FetchTransport("https://api.screenrig.ai/", "sr_live_test", async () => spy.response);
+  const transport = new FetchTransport("https://api.screenrig.ai/", "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_test", async () => spy.response);
   const result = await transport.request({
     method: "GET",
     path: "/api/screens/scr_PAIRINGAAAAAAAAAAAAAAAA/screenshot/status",
@@ -115,7 +115,7 @@ test("media download exposes response chunks without calling text or arrayBuffer
     text: async () => { textCalls += 1; throw new Error("must not buffer as text"); },
     arrayBuffer: async () => { arrayBufferCalls += 1; throw new Error("must not buffer as arrayBuffer"); },
   } as unknown as Response;
-  const transport = new FetchTransport("https://api.screenrig.ai/", "sr_live_test", async () => response);
+  const transport = new FetchTransport("https://api.screenrig.ai/", "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_test", async () => response);
   const result = await transport.download({ method: "GET", path: "/api/media/med_1/content" });
   const received: number[] = [];
   assert.ok(result.body);
@@ -271,7 +271,7 @@ test("a connection failure names its cause instead of a bare 'fetch failed'", as
 
 test("every request kind carries the screenrig-cli User-Agent", async () => {
   const seen: Array<string | undefined> = [];
-  const transport = new FetchTransport("https://api.screenrig.ai/", "sr_live_test", async (_url, init) => {
+  const transport = new FetchTransport("https://api.screenrig.ai/", "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_test", async (_url, init) => {
     seen.push((init?.headers as Record<string, string>)["user-agent"]);
     return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
   });

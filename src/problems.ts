@@ -182,8 +182,8 @@ export function normalizeProblem(
     errors,
     // The server's own next action always wins over local guidance.
     next: asNext(rec?.next) ?? (missingCapability ? {
-      command: `screenrig agent connect --capability ${missingCapability} --config NEW_PRIVATE_CONFIG`,
-      reason: `Connect a new agent with the ${missingCapability} capability and approve it in the dashboard. Repeat --capability for every permission needed. Capabilities are immutable; use a separate private config, then disconnect the old agent after verifying the new one.`,
+      command: "screenrig login",
+      reason: `This sign-in lacks the ${missingCapability} capability. Sign in again and ask the person approving it in the dashboard to grant ${missingCapability}.`,
     } : undefined),
   };
 }
@@ -377,8 +377,9 @@ const DEFAULT_HINTS: Record<string, string> = {
   unexpected_error: "The CLI hit an internal error. Run the command again; if it keeps happening, report the command (without secrets) with screenrig feedback bug.",
   operation_failed: "The server finished the operation with an error. Read detail, fix the input it names, and start the command again; screenrig operations show OPERATION_ID shows the stored result.",
   invalid_request: "The server rejected the request as invalid. Read detail and errors[] for the field to change, fix it, and send the request again; the unchanged request is refused the same way.",
-  unauthorized: "The stored credential was not accepted, so this installation's project is gone. Clear it with screenrig agent disconnect --yes, then create a new project with screenrig agent enroll --email ADDRESS --organization NAME. Use screenrig agent connect only when the user asked to join an existing project.",
-  credential_revoked: "A project member revoked this agent credential. Tell the user; with their approval, screenrig agent connect asks to rejoin that project, or screenrig agent enroll --email ADDRESS --organization NAME creates a new one.",
+  unauthorized: "The stored credential was not accepted, so this installation's project is gone. Clear it with screenrig agent disconnect --yes, then create a new project with screenrig agent enroll --email ADDRESS --organization NAME. Use screenrig login only when the user asked to join an existing project.",
+  credential_revoked: "A project member revoked this agent credential. Tell the user; with their approval, screenrig login asks to rejoin that project, or screenrig agent enroll --email ADDRESS --organization NAME creates a new one.",
+  credential_retired: "This installation's stored credential is no longer accepted. Run screenrig login; a person approves the sign-in in the dashboard.",
   forbidden: "This credential is not allowed to do this. Do not retry it unchanged; screenrig agent status lists the granted capabilities.",
   capability_required: "This project does not have the capability this command needs. Do not retry; tell the user, who can change the project's purpose in the dashboard.",
   capability_unavailable: "The project's capabilities could not be read, so the write was not attempted. Retry shortly; screenrig project capabilities checks them directly.",

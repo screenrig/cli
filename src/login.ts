@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
-import { readConfigFile, withConfigLock, writeConfigAtomic, type PendingLogin, type ScreenRigConfig } from "./config.js";
+import { preserveLogSocket, readConfigFile, withConfigLock, writeConfigAtomic, type PendingLogin, type ScreenRigConfig } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { accessClaims, OAUTH_CLIENT_ID, SCOPE_IDENTITY, type AccessLevel, type TokenSet } from "./oauth.js";
-import { placeAccessToken, withoutSession, type OAuthSession, type SessionRuntime } from "./oauth-session.js";
+import { placeAccessToken, type OAuthSession, type SessionRuntime } from "./oauth-session.js";
 import { CliError, configError, makeProblem, usageError } from "./problems.js";
 import { selectProject } from "./project-state.js";
 
@@ -173,12 +173,8 @@ export class DeviceLogin {
         if (!rest.oauth) throw configError("The sign-in extended a grant this config no longer holds. Run screenrig login again.");
         next = placeAccessToken(rest, tokens.accessToken, tokens.scope);
       } else {
-        // A new installation: nothing of a previous credential or its projects carries over.
-        const cleared = withoutSession(rest);
-        const { token: _t, identity_token: _i, identity_exchange: _x, identity_writes: _w, projects: _p, project_id: _id, project_name: _n,
-          organization_id: _o, organization_name: _on, agent_connection: _c, enrollment: _e, enrollment_project: _ep, enrollment_cleanup: _ec,
-          last_agent: _la, oauth_unavailable_until: _u, screen_provision: _sp, browser_setup: _bs, media_generate: _mg, pending_writes: _pw, ...kept } = cleared;
-        next = placeAccessToken({ ...kept, api_url: rest.api_url ?? this.session.oauth.issuer }, tokens.accessToken, tokens.scope);
+        // A new installation: nothing of a previous credential, its projects or its state carries over.
+        next = placeAccessToken(preserveLogSocket(rest, { api_url: rest.api_url ?? this.session.oauth.issuer }), tokens.accessToken, tokens.scope);
         next.oauth = {
           issuer: login.issuer,
           client_id: OAUTH_CLIENT_ID,

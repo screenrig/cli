@@ -6,10 +6,7 @@ import type { Transport, TransportResponse } from "./transport/types.js";
 
 /** The first-party CLI and the plugin's bundled CLI: a public client. */
 export const OAUTH_CLIENT_ID = "screenrig-cli";
-export const GRANT_TOKEN_EXCHANGE = "urn:ietf:params:oauth:grant-type:token-exchange";
 export const GRANT_DEVICE_CODE = "urn:ietf:params:oauth:grant-type:device_code";
-export const TOKEN_TYPE_IDENTITY_CREDENTIAL = "urn:screenrig:token-type:identity-credential";
-export const TOKEN_TYPE_PROJECT_TOKEN = "urn:screenrig:token-type:project-token";
 export const SCOPE_IDENTITY = "identity";
 /** One HTTP attempt. A refresh holds the config lock for at most 15 s: this plus I/O. */
 export const OAUTH_TIMEOUT_MS = 10_000;
@@ -93,14 +90,9 @@ function oauthProblem(error: string, status: number, description: string | undef
   return new CliError(problem, row.exitCode);
 }
 
-/** The server offers no agent OAuth (no discovery document, or one this CLI must not use). Callers fall back silently. */
+/** The server offers no agent OAuth (no discovery document, or one this CLI must not use). */
 export function oauthUnavailable(detail: string, status = 404): CliError {
   return new CliError(makeProblem("oauth_unavailable", "Sign-in unavailable", status, detail), ExitCode.Unexpected);
-}
-
-export function isOAuthUnavailable(err: unknown): boolean {
-  return err instanceof CliError && (err.problem.code === "oauth_unavailable" || err.problem.code === "service_unavailable"
-    || err.problem.code === "client_not_allowed");
 }
 
 /** An RFC 6749 §5.2 error body, or undefined for an answer that is not one. */
@@ -272,17 +264,6 @@ export class OAuthClient {
       refresh_token: refreshToken,
       request_id: options.requestId,
       ...(options.projectId ? { project_id: options.projectId } : {}),
-    });
-  }
-
-  exchange(subjectToken: string, options: { subjectTokenType: string; requestId: string; identity?: boolean; clientVersion: string }): Promise<TokenSet> {
-    return this.grant({
-      grant_type: GRANT_TOKEN_EXCHANGE,
-      subject_token: subjectToken,
-      subject_token_type: options.subjectTokenType,
-      request_id: options.requestId,
-      client_version: options.clientVersion,
-      ...(options.identity ? { scope: SCOPE_IDENTITY } : {}),
     });
   }
 

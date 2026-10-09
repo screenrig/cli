@@ -105,18 +105,7 @@ export interface ProjectCapabilities {
   capabilities: string[];
 }
 
-export interface CLIEnrollment {
-  identity_token?: string;
-  project: Project;
-  invitation: EnrollmentInvitation;
-  agent: Agent;
-  connection_ready: false;
-  issuance_expires_at: string;
-  issuance_id: string;
-  token: string;
-}
-
-/** Enrollment in the oauth credential format: the grant's first token pair in place of the legacy bearers. */
+/** Enrollment delivers the grant's first token pair. */
 export interface CLIEnrollmentOAuth {
   project: Project;
   invitation: EnrollmentInvitation;
@@ -135,8 +124,8 @@ export interface CLIEnrollmentOAuth {
 export interface CLIEnrollmentRequest {
   organization?: string;
   client_id: string;
-  /** oauth asks for a token pair; a server that does not issue answers the legacy shape. */
-  credential_format?: "oauth" | "legacy";
+  /** The token pair the enrollment delivers; the only format the server issues. */
+  credential_format: "oauth";
   /** Exactly one of `email` or `agentid_claim` is present. */
   email?: string;
   /**
@@ -180,55 +169,6 @@ export interface Agent {
 export interface AgentSelfStatus {
   agent: Agent;
   connection_ready: boolean;
-}
-
-export interface X25519PublicJWK {
-  kty: "OKP";
-  crv: "X25519";
-  x: string;
-}
-
-export interface AgentConnectionRequest {
-  project_id?: string;
-  agent_type?: string;
-  capabilities?: AgentCapability[];
-  name?: string;
-  platform?: string;
-  recipient_public_key: X25519PublicJWK;
-  version?: string;
-}
-
-export interface AgentConnectionStart {
-  approval_url: string;
-  connection_id: string;
-  connection_token: string;
-  expires_at: string;
-}
-
-export interface AgentConnection {
-  agent_type: string;
-  capabilities: AgentCapability[];
-  connection_id: string;
-  created_at: string;
-  expires_at: string;
-  name: string;
-  platform?: string;
-  status: "pending" | "approved" | "connected" | "denied" | "expired" | "cancelled";
-  version?: string;
-}
-
-export interface AgentCredentialEnvelope {
-  algorithm: "X25519-HKDF-SHA256-A256GCM";
-  ciphertext: string;
-  ephemeral_public_key: X25519PublicJWK;
-  nonce: string;
-}
-
-export interface AgentCredentialCollection {
-  identity_credential_envelope?: AgentCredentialEnvelope;
-  agent: Agent;
-  credential_envelope: AgentCredentialEnvelope;
-  issuance_expires_at: string;
 }
 
 export interface AgentDisconnectRequest {
@@ -1192,14 +1132,8 @@ export interface ScreenEffectivePlaylist {
 }
 
 /** Backend-owned principals contracts mirrored from the reviewed snapshot. */
-export interface AgentIdentityCredential {
-  agent_id: string;
-  identity_token: string;
-  issuance_expires_at: string;
-}
-
 export interface OrganizationSummary { id: string; name: string }
 export interface ProjectContext { organization: OrganizationSummary; project: Project; owner_user_id?: string }
 export interface ProjectContextList { projects: ProjectContext[] }
 export interface ProjectCreate { name: string; organization_id?: string; organization_name?: string }
-export interface CreatedProject extends ProjectContext { token?: string; issuance_expires_at?: string }
+export type CreatedProject = ProjectContext;

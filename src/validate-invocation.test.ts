@@ -74,7 +74,7 @@ test("option values never appear in usage errors; an unknown option is named onl
     && !JSON.stringify(error.problem).includes("private-secret"));
   assert.throws(() => parseArgv(["screen", "list", "-x"]), (error: unknown) => error instanceof CliError && error.problem.detail.includes("does not accept -x"));
   // A name that is not a plain option shape (a pasted credential, say) is never echoed.
-  for (const argv of [["screen", "list", "--sr_live_private_secret"], ["screen", "list", `--${"a".repeat(60)}`]]) {
+  for (const argv of [["screen", "list", "--eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_private_secret"], ["screen", "list", `--${"a".repeat(60)}`]]) {
     assert.throws(() => parseArgv(argv), (error: unknown) => error instanceof CliError && error.problem.code === "usage_error"
       && !JSON.stringify(error.problem).includes("private_secret") && !JSON.stringify(error.problem).includes("a".repeat(60)));
   }

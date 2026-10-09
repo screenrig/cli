@@ -57,6 +57,12 @@ function waitForAbort(signal: AbortSignal | undefined): Promise<void> {
   });
 }
 
+/** A token shaped like the server's session JWTs. The CLI reads its claims and never verifies it. */
+export function fakeSessionJwt(claims: Record<string, unknown>): string {
+  const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${part({ alg: "EdDSA", typ: "at+jwt", kid: "fake" })}.${part(claims)}.${"c2lnbmF0dXJl".repeat(4)}`;
+}
+
 /** The authorization server's endpoints: discovery and /oauth/*. */
 function oauthPath(path: string): boolean {
   return path.startsWith("/.well-known/oauth-") || path.startsWith("/oauth/");
@@ -217,6 +223,8 @@ export function listPage(
  * from this map redeems successfully, and the verified owner becomes the
  * contact address.
  */
+const ENROLLMENT_SCOPE = "access:manage screens content playlists advertising reports project identity";
+
 export function memoryBackend(options: {
   now?: () => Date;
   listPageSize?: number;
@@ -380,7 +388,13 @@ export function memoryBackend(options: {
         invitation: { id: invitation.id, status: invitation.status, expires_at: invitation.expires_at },
         agent: currentAgent,
         connection_ready: false,
-        token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        // Far-future expiry: the memory backend has no token endpoint to renew against.
+        access_token: fakeSessionJwt({ sub: `agent:${currentAgent.id}`, sid: "grt_fake", prj: project.id, exp: 4102444800, scope: ENROLLMENT_SCOPE }),
+        token_type: "Bearer",
+        expires_in: 900,
+        refresh_token: fakeSessionJwt({ sub: `agent:${currentAgent.id}`, sid: "grt_fake", gen: 1, exp: 4102444800 }),
+        refresh_expires_at: 4102444800,
+        scope: ENROLLMENT_SCOPE,
         issuance_id: "iss_AAAAAAAAAAAAAAAAAAAAAAAA",
         issuance_expires_at: "2026-08-14T17:10:00.000Z",
       },

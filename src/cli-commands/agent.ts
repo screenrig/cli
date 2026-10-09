@@ -17,7 +17,7 @@ export function registerAgentCommands(root: Command, bind: CommandActionBinder):
   addCommandNotes(root.command("logout").description("End this installation's sign-in and remove its tokens")
     .action(bind(handleLogout)), "Revokes the sign-in on the server, then removes the stored session and access tokens. A failure that might not have reached the server keeps them, so rerunning logout is safe. Run screenrig login to sign in again.");
 
-  const agent = root.command("agent").description("Enroll, connect, and manage this agent");
+  const agent = root.command("agent").description("Enroll and manage this agent");
 
   const enroll = agent.command("enroll").description("Create a new project and its first agent")
     .option("--email <ADDRESS>", "Set the project contact email")
@@ -26,16 +26,16 @@ export function registerAgentCommands(root: Command, bind: CommandActionBinder):
     .addOption(new Option("--project-name <NAME>", "Resume a retained enrollment's exact project name").hideHelp())
     .addOption(new Option("--intent <INTENT>", "Choose the project's purpose: signage (default) or advertising").choices(["signage", "advertising"]))
     .option("--name <NAME>", "Set this agent installation name")
-    .option("--force", "Discard pending enrollment or connection state before enrolling")
+    .option("--force", "Discard a pending enrollment before enrolling")
     .action(bind(handleAgentEnroll));
   // Mutually exclusive credential sources. A new enrollment must supply exactly
   // one; a pending enrollment resumes without either flag.
   requireOptionGroup(enroll, "atMostOne", ["--email", "--agentid-claim"]);
 
   addCommandNotes(agent.command("connect").description("Alias of screenrig login, kept for one release")
-    .option("--target-project-id <ID>", "Request approval for this specific existing project; needs the identity credential that agent enroll or an earlier approved agent connect saves")
+    .option("--target-project-id <ID>", "Suggest the project the person approves (screenrig login --project)")
     .option("--name <NAME>", "Set this agent installation name")
-    .addOption(new Option("--capability <NAME>", "Request a capability (repeatable; default: all six)")
+    .addOption(new Option("--capability <NAME>", "Not sent: the person approving the sign-in chooses capabilities")
       .choices([...AGENT_CAPABILITIES])
       .argParser((value: string, previous?: string) => {
         if (!AGENT_CAPABILITIES.some((name) => name === value)) {
@@ -45,12 +45,12 @@ export function registerAgentCommands(root: Command, bind: CommandActionBinder):
         if (requested.includes(value)) throw usageError(`Capability ${value} was supplied more than once.`);
         return [...requested, value].join(",");
       }))
-    .option("--print-url", "Return the browser handoff URL")
-    .option("--wait", "Wait for dashboard approval (30000 ms default; bounded by --timeout)")
-    .option("--no-wait", "Read a status snapshot for at most 1000 ms (default)")
-    .addOption(new Option("--cancel", "Withdraw this installation's pending connection request and clear its local state")
+    .addOption(new Option("--print-url", "Return the sign-in URL in the pending result").hideHelp())
+    .option("--wait", "Wait for dashboard approval")
+    .option("--no-wait", "Print the sign-in URL and code with a resume handle, and return (default)")
+    .addOption(new Option("--cancel", "Clear this installation's pending sign-in")
       .conflicts(["targetProjectId", "name", "capability", "printUrl", "wait"]))
-    .action(bind(handleAgentConnect)), "Approval expires after 24 hours. By default, read one status snapshot for at most 1000 ms and return pending with a resume command, or complete an approved connection. --wait opts into a 30000 ms approval wait; --timeout bounds that wait (1–86400000 ms). Without --wait, --timeout can shorten but never extend the snapshot budget. Pending means the request was submitted, not that approval or activation completed. --print-url places the handoff URL in the pending result. Retry agent connect to resume after an interrupted wait. --cancel withdraws a pending request (a cancelled, denied or expired one is cleared the same way); an approved request cannot be cancelled: finish it with agent connect, then run agent disconnect.");
+    .action(bind(handleAgentConnect)), "Runs screenrig login and adds a command_renamed warning naming it. Without --wait it returns pending with a login_ resume handle; screenrig login --resume ID finishes it. The person approving the sign-in in the dashboard chooses the project, Read only or Manage, and the capabilities.");
 
   agent.command("status").description("Inspect this agent's connection")
     .action(bind(handleAgentStatus));

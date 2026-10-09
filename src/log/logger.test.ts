@@ -136,7 +136,7 @@ test("HTTP request and response share correlation_id with distinct event_id", as
   }));
   const client = new ApiClient({
     transport,
-    token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     logger,
     requestId: "req_AAAAAAAAAAAAAAAA",
   });
@@ -160,7 +160,7 @@ test("HTTP request and response share correlation_id with distinct event_id", as
   assert.equal(request.request_id, "req_AAAAAAAAAAAAAAAA");
   assert.equal(request.invocation_id, "req_AAAAAAAAAAAAAAAA");
   const serialized = events.map((event) => JSON.stringify(event)).join("\n");
-  assert.doesNotMatch(serialized, /sr_live_tokidAAAAAAAAAAAAAAAA_AAAA/);
+  assert.doesNotMatch(serialized, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAA/);
   assert.doesNotMatch(serialized, /authorization/i);
 });
 
@@ -257,7 +257,7 @@ test("local finish uses capture_id as id when id is empty", () => {
 
 test("token-like values never appear in params", () => {
   const { logger, events } = createMemoryLogger({ command: ["media", "upload"] });
-  const token = "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const token = "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
   const span = logger.startLocal({
     op: "media.signed_put",
     params: {
@@ -275,7 +275,7 @@ test("token-like values never appear in params", () => {
     },
   });
   const serialized = events.map((event) => JSON.stringify(event)).join("\n");
-  assert.doesNotMatch(serialized, /sr_live_tokidAAAAAAAAAAAAAAAA_AAAA/);
+  assert.doesNotMatch(serialized, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAA/);
   assert.doesNotMatch(serialized, /X-Amz-Signature=abc/);
   assert.doesNotMatch(serialized, /data:image\/webp;base64,AAAA/);
   assert.doesNotMatch(serialized, /sid=secret/);
@@ -285,7 +285,7 @@ test("token-like values never appear in params", () => {
       continue;
     }
     const encoded = JSON.stringify(params);
-    assert.doesNotMatch(encoded, /sr_live_/);
+    assert.doesNotMatch(encoded, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_/);
     assert.doesNotMatch(encoded, /Bearer /);
     assert.doesNotMatch(encoded, /X-Amz-Signature/);
     assert.doesNotMatch(encoded, /data:image/);
@@ -309,16 +309,16 @@ test("redaction strips tokens, authorization, signed URLs, and pixels from seria
     correlation_id: "11111111-1111-4111-8111-111111111111",
     message: "PUT https://storage.example.invalid/private?signature=secret",
     request: {
-      authorization: "Bearer sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-      token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      authorization: "Bearer eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       upload_url: "https://storage.example.invalid/private?X-Amz-Signature=abc",
       pixels: "data:image/webp;base64,AAAA",
       email: "owner@example.com",
     },
   });
   const line = JSON.stringify(events[0]);
-  assert.doesNotMatch(line, /sr_live_tokidAAAAAAAAAAAAAAAA_AAAA/);
-  assert.doesNotMatch(line, /Bearer sr_live_/);
+  assert.doesNotMatch(line, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAA/);
+  assert.doesNotMatch(line, /Bearer eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_/);
   assert.doesNotMatch(line, /X-Amz-Signature=abc/);
   assert.doesNotMatch(line, /data:image\/webp;base64,AAAA/);
   assert.doesNotMatch(line, /owner@example\.com/);
@@ -351,7 +351,7 @@ test("no log_socket leaves commands working without a socket connect", async () 
   const fsLike = realFs(home);
   await writeConfigAtomic(
     path.join(home, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" },
+    { api_url: "https://api.screenrig.ai", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" },
     fsLike,
   );
   const result = await withRuntime(["--json", "screen", "list"], transport, { fs: fsLike });
@@ -368,7 +368,7 @@ test("log_socket without a listener keeps the command and warns once", async () 
     path.join(home, "screenrig", "config.json"),
     {
       api_url: "https://api.screenrig.ai",
-      token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       log_socket: socketPath,
     },
     fsLike,
@@ -382,7 +382,7 @@ test("log_socket without a listener keeps the command and warns once", async () 
   assert.equal(envelope.warnings.length, 1);
   assert.equal(envelope.warnings[0]?.code, "log_sink_degraded");
   assert.ok((envelope.warnings[0]?.dropped ?? 0) >= 1);
-  assert.doesNotMatch(result.stdout, /sr_live_/);
+  assert.doesNotMatch(result.stdout, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_/);
   await rm(home, { recursive: true, force: true });
 });
 
@@ -397,7 +397,7 @@ test("log_socket writes one NDJSON object per line with v 1", async () => {
       path.join(home, "screenrig", "config.json"),
       {
         api_url: "https://api.screenrig.ai",
-        token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         log_socket: socketPath,
       },
       fsLike,
@@ -421,7 +421,7 @@ test("log_socket writes one NDJSON object per line with v 1", async () => {
     assert.equal(httpReq.correlation_id, httpRes.correlation_id);
     assert.equal(httpRes.status, 200);
     const serialized = listener.events.map((event) => JSON.stringify(event)).join("\n");
-    assert.doesNotMatch(serialized, /sr_live_tokidAAAAAAAAAAAAAAAA_AAAA/);
+    assert.doesNotMatch(serialized, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAA/);
   } finally {
     await listener.close();
     await rm(home, { recursive: true, force: true });
@@ -446,37 +446,12 @@ test("enrollment rewrite keeps log_socket", async () => {
     generateIdempotencyKey: () => "enroll-log-socket-idempotency",
     enrollmentEmail: "Owner@example.com",
     verify: async () => undefined,
-    enroll: async () => ({ token: "sr_live_enrollment_secret", projectId: "prj_enrollment" }),
+    enroll: async () => ({ token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_enrollment_secret", projectId: "prj_enrollment",
+      oauth: { refreshToken: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_refresh_secret", identity: false } }),
   });
   const stored = await readConfigFile(configPath, fsLike);
   assert.equal(stored?.log_socket, "/tmp/screenrig.sock");
-  assert.equal(stored?.token, "sr_live_enrollment_secret");
-  await rm(home, { recursive: true, force: true });
-});
-
-test("agent connect rewrite keeps log_socket", async () => {
-  const home = await testTemp("log-connect-");
-  const fsLike = realFs(home);
-  const configPath = path.join(home, "screenrig", "config.json");
-  await writeConfigAtomic(
-    configPath,
-    { api_url: "https://api.screenrig.ai", log_socket: "/tmp/screenrig.sock" },
-    fsLike,
-  );
-  const transport = new FakeTransport().on("POST", "/api/agent-connections", () => ({
-    status: 500,
-    headers: { "content-type": "application/problem+json" },
-    body: { status: 500, code: "internal_error", title: "Failed", detail: "boom" },
-  }));
-  const { logger } = createMemoryLogger({ command: ["agent", "connect"] });
-  const result = await withRuntime(["--json", "agent", "connect", "--name", "Office Codex"], transport, {
-    fs: fsLike,
-    logger,
-    openUrl: async () => true,
-  });
-  assert.notEqual(result.code, 0);
-  const stored = await readConfigFile(configPath, fsLike);
-  assert.equal(stored?.log_socket, "/tmp/screenrig.sock");
+  assert.equal(stored?.token, "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_enrollment_secret");
   await rm(home, { recursive: true, force: true });
 });
 
@@ -516,7 +491,7 @@ test("local spans tag start, progress, finish, and error from op", () => {
 
 test("preserveLogSocket copies the field onto a sparse rewrite", () => {
   const next = preserveLogSocket(
-    { api_url: "https://api.screenrig.ai", log_socket: "/tmp/screenrig.sock", token: "sr_live_secret" },
+    { api_url: "https://api.screenrig.ai", log_socket: "/tmp/screenrig.sock", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_secret" },
     { api_url: "https://api.screenrig.ai" },
   );
   assert.equal(next.log_socket, "/tmp/screenrig.sock");
