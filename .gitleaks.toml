@@ -1,2 +1,10 @@
 [extend]
 useDefault = true
+
+# Test fixtures use an unsigned JWT ({"alg":"none"}.{"test":true}) as an
+# opaque bearer; it authenticates nowhere.
+[[allowlists]]
+description = "unsigned test JWT fixtures"
+condition = "AND"
+paths = ['''^src/.*\.test\.ts$''']
+regexes = ['''^eyJhbGciOiJub25lIn0\.eyJ0ZXN0Ijp0cnVlfQ\.signature_[A-Za-z0-9_]*$''']
