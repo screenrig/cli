@@ -1434,6 +1434,39 @@
     return await imageToCanvas(image, context);
   }
 
+  // src/protocol.ts
+  var PROTOCOL = "1";
+  var PARENT_HANDSHAKE_PROTOCOL = "screenrig.parent-handshake/1";
+  var CAPTURE_PROTOCOL = "screenrig.capture/1";
+  var LIVENESS_PROTOCOL = "screenrig.liveness/1";
+  var SIDE_CHANNEL_PROTOCOLS = [CAPTURE_PROTOCOL, LIVENESS_PROTOCOL];
+  var DEFAULT_PLAYER_ORIGIN = "https://play.screenrig.ai";
+  var MAX_MESSAGE_BYTES = 65536;
+  var MAX_LOG_MESSAGE_BYTES = 2048;
+  var MAX_CLIENT_LOGS = 32;
+  var MESSAGE_KINDS = [
+    "context",
+    "ready",
+    "log",
+    "event.emit",
+    "page.advance",
+    "viewport.changed",
+    "kv.get",
+    "kv.list",
+    "kv.set",
+    "kv.delete",
+    "response.ack",
+    "response.problem"
+  ];
+  var BASELINE_FEATURES = MESSAGE_KINDS;
+  var MAX_FEATURES = 64;
+  var MAX_FEATURE_LENGTH = 64;
+  var EMPTY_CAPABILITIES = {
+    "page.advance": false,
+    "kv.read": false,
+    "kv.write": false
+  };
+
   // src/capture.ts
   /*! Bundled modern-screenshot 4.7.0
   The MIT License (MIT)
@@ -1446,7 +1479,6 @@
   
   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
   */
-  var CAPTURE_PROTOCOL = "screenrig.capture/1";
   var CAPTURE_MAX_BYTES = 2097152;
   var CAPTURE_TIMEOUT_MS = 5e3;
   var MAX_PIXELS = 8388608;
@@ -1793,35 +1825,27 @@
     }
   }
 
-  // src/protocol.ts
-  var PROTOCOL = "1";
-  var PARENT_HANDSHAKE_PROTOCOL = "screenrig.parent-handshake/1";
-  var DEFAULT_PLAYER_ORIGIN = "https://play.screenrig.ai";
-  var MAX_MESSAGE_BYTES = 65536;
-  var MAX_LOG_MESSAGE_BYTES = 2048;
-  var MAX_CLIENT_LOGS = 32;
-  var MESSAGE_KINDS = [
-    "context",
-    "ready",
-    "log",
-    "event.emit",
-    "page.advance",
-    "viewport.changed",
-    "kv.get",
-    "kv.list",
-    "kv.set",
-    "kv.delete",
-    "response.ack",
-    "response.problem"
-  ];
-  var BASELINE_FEATURES = MESSAGE_KINDS;
-  var MAX_FEATURES = 64;
-  var MAX_FEATURE_LENGTH = 64;
-  var EMPTY_CAPABILITIES = {
-    "page.advance": false,
-    "kv.read": false,
-    "kv.write": false
-  };
+  // src/liveness.ts
+  function validLivenessRequest(value, context) {
+    if (!context || !value || typeof value !== "object") return false;
+    const request = value;
+    if (Object.prototype.hasOwnProperty.call(request, "__proto__") || Object.prototype.hasOwnProperty.call(request, "constructor")) return false;
+    return request.protocol === LIVENESS_PROTOCOL && request.kind === "ping" && request.primitive_id === context.primitive_id && request.generation === context.generation && request.nonce === context.nonce;
+  }
+  function attachLivenessReceiver(win, context) {
+    const listener = (event) => {
+      const binding = context();
+      if (event.source !== win.parent || event.origin === "null" || event.origin !== (binding == null ? void 0 : binding.player_origin) || !validLivenessRequest(event.data, binding) || event.ports.length !== 1) return;
+      const port = event.ports[0];
+      try {
+        port.postMessage({ protocol: LIVENESS_PROTOCOL, kind: "pong", generation: binding.generation, nonce: binding.nonce });
+      } finally {
+        port.close();
+      }
+    };
+    win.addEventListener("message", listener);
+    return () => win.removeEventListener("message", listener);
+  }
 
   // src/validate.ts
   var SdkValidationError = class extends Error {
@@ -2095,6 +2119,9 @@
     }
     return output;
   }
+  function isSideChannelMessage(data) {
+    return typeof data === "object" && data !== null && SIDE_CHANNEL_PROTOCOLS.includes(data.protocol);
+  }
   var ScreenRigClient = class {
     constructor(options, allowOpaqueNativeParent = false, nativeParentOrigin) {
       this.nativeParentOrigin = nativeParentOrigin;
@@ -2160,6 +2187,7 @@
           this.report("debug", "ignored_source", "Ignored message from non-parent source");
           return;
         }
+        if (isSideChannelMessage(event.data)) return;
         if (isParentHandshakeCandidate(event.data)) {
           this.acceptParentHandshake(event);
           return;
@@ -2571,6 +2599,8 @@
   var candidate = globalThis.window;
   if ((candidate == null ? void 0 : candidate.parent) && typeof candidate.addEventListener === "function") {
     const client = attachScreenRig(candidate);
-    if (typeof document !== "undefined") attachCaptureReceiver(window, () => client.readyState === "active" ? client.context : null);
+    const active = () => client.readyState === "active" ? client.context : null;
+    if (typeof document !== "undefined") attachCaptureReceiver(window, active);
+    attachLivenessReceiver(candidate, active);
   }
 })();

@@ -1189,6 +1189,12 @@ paths:
         schema:
           type: string
           maxLength: 200
+      - name: exclude_system
+        in: query
+        description: true leaves out the changes the backend made on its own, recorded with user_id system (an orphaned
+          organization's deletion, change.reason orphaned).
+        schema:
+          type: boolean
       responses:
         '200':
           description: At most 100 immutable staff changes, newest first. Pass next_cursor as after for older entries.
@@ -2194,8 +2200,8 @@ paths:
       description: Revokes the global identity, all its identity credentials and project tokens, and its pending connections.
         An exact replay with a revoked identity credential succeeds without another transition. Project ownership and content
         remain. No cookie, Origin, query or body is accepted. This route does not debit the API meter. An agent access JWT
-        carrying the identity scope and Manage, whose grant holds Manage identity access, revokes the same and every OAuth grant
-        of the identity; its tokens are refused within seconds. A retry with the same JWT after the revocation is a no-op
+        carrying the identity scope, whose grant holds identity access (Read only or Manage, whatever the access level of the
+        token's project), revokes the same and every OAuth grant of the identity; its tokens are refused within seconds. A retry with the same JWT after the revocation is a no-op
         success.
       security:
       - agentIdentityBearer: []
@@ -2420,7 +2426,7 @@ paths:
       description: Revokes only the calling project membership and its project token, preserving the global identity, other
         memberships, project and content. Repeating with the same cryptographically valid revoked bearer is a no-op success.
         Disconnecting the last active agent returns agent_lockout_risk unless allow_last_agent is explicit. Does not debit the
-        API meter. An agent access JWT with Manage disconnects the agent from its token's project; the membership ends, the
+        API meter. An agent access JWT, Read only included, disconnects the agent from its token's project; the membership ends, the
         project's consent leaves the agent's grants and every access token of the agent is refused within seconds (refresh for
         the projects that remain). A retry with the same JWT after the disconnect is a no-op success.
       security:
@@ -11580,7 +11586,12 @@ paths:
     post:
       operationId: dashboardOrganizationsVerifyDomain
       description: Verify the current unexpired challenge against DNS. Claims are unique per exact domain and organization.
-        A proof rotated during lookup is refused.
+        A proof rotated during lookup is refused. Once the claim commits, and in the background after this response, each
+        project whose owner is a verified person at exactly the domain and which sits alone in that owner's personal
+        organization is moved into this organization (renamed "<name> (<owner>)" on a name conflict). Projects in any other
+        organization, projects holding a customer-paid plan of their own, and projects their owner or staff moved out of a
+        domain organization stay where they are; a project the organization's limits refuse is retried a day later.
+        Placement grants no access.
       security:
       - dashboardSession: []
       responses:
@@ -11680,6 +11691,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OrganizationAdmins'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/people:
+    servers:
+    - url: https://screenrig.ai
+    parameters:
+    - name: org_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+    get:
+      operationId: dashboardOrganizationsPeople
+      description: A designated admin reads the organization's people across its live projects. Read-only. projects lists
+        the organization's live projects, ordered by name, at most 500. people is the union of those projects' active
+        memberships (suspended memberships are left out) and the designated admins, ordered by display name then email; each
+        person carries their role in each project (owner or member) and whether they are an admin, and an admin in no
+        project appears with an empty projects list. email is empty for a person whose address is not verified. Deactivated
+        people and agents never appear. At most 500 people are returned, admins always among them; truncated is true when
+        people, projects or memberships were left out. Anyone else is refused as on the other organization admin routes.
+        People only; agents and bearer credentials have no route.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Organization people.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationPeople'
         default:
           $ref: '#/components/responses/Problem'
   /api/organizations/{org_id}/domain:
@@ -12224,6 +12273,82 @@ components:
             type: string
             minLength: 1
             maxLength: 200
+    OrganizationPeople:
+      type: object
+      additionalProperties: false
+      required:
+      - projects
+      - people
+      - truncated
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationPeopleProject'
+          maxItems: 500
+          description: The organization's live projects, ordered by name; at most 500.
+        people:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/OrganizationPeoplePerson'
+          description: Active members of the organization's live projects and its designated admins, ordered by display
+            name then email. Deactivated people and agents never appear.
+        truncated:
+          type: boolean
+          description: True when people (beyond 500, never an admin), projects (beyond 500) or memberships were left out.
+    OrganizationPeopleProject:
+      type: object
+      additionalProperties: false
+      required:
+      - project_id
+      - name
+      properties:
+        project_id:
+          type: string
+        name:
+          type: string
+    OrganizationPeoplePerson:
+      type: object
+      additionalProperties: false
+      required:
+      - user_id
+      - display_name
+      - email
+      - admin
+      - projects
+      properties:
+        user_id:
+          type: string
+        display_name:
+          type: string
+        email:
+          type: string
+          description: The verified address; empty while the person's address is not verified.
+        admin:
+          type: boolean
+          description: Whether the person is a designated admin of the organization.
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationPeopleMembership'
+          description: The person's active memberships of the organization's live projects, in the order of the top-level
+            projects list; empty for an admin in no project.
+    OrganizationPeopleMembership:
+      type: object
+      additionalProperties: false
+      required:
+      - project_id
+      - role
+      properties:
+        project_id:
+          type: string
+        role:
+          type: string
+          enum:
+          - owner
+          - member
+          description: owner for the project's owner, member otherwise.
     OrganizationList:
       type: object
       additionalProperties: false
@@ -12519,7 +12644,7 @@ components:
       type: object
       additionalProperties: false
       required: [action]
-      description: Only fields required by the selected action are accepted. project.write-mode requires a reason and the current session project; it grants ten minutes of staff write access, ending on a project switch, logout, staff revoke or unshadow. Every admitted project write has a permanent audit. project.write, project.write-mode-end, project.shadow, project.unshadow, project.member and project.member-remove are audit-only actions and cannot be proposed; project.member records a membership granted, and project.member-remove one ended, by the screenrig-admin org apply command, whose rows carry its reason. staff.grant and staff.revoke appoint an existing verified person by ID. person.free-cap with no free_limit restores the normal cap; organization.domain with no domain removes the claim. project.owner explicitly appoints the person and adds their project membership. Admin and owner targets must be existing verified people. organization.plan with no plan_id schedules removal; project.plan-to-organization with no plan_id moves the existing plan. An organization holds premium, enterprise or the staff-assigned staff plan. Organization billing must be enabled for both; the result names the actual effective time and grant. After the billing cutover, project.plan upgrades immediately and grants the monthly difference; downgrades wait for the next UTC month and refuse excess occupancy. Before the cutover, the retained provisioning path sets the project plan immediately and the existing monthly worker grants included credit. Project-held Enterprise is accepted only before organization billing is enabled. person.reset-sign-in emails a one-hour sign-in reset link to the person's verified email address only; the link is never returned to staff, and the result names only the delivery and expiry. With revoke_passkeys it also removes every passkey of the person, ends every dashboard session and cuts off every token already issued to them, in the same approved action.
+      description: Only fields required by the selected action are accepted. project.write-mode requires a reason and the current session project; it grants ten minutes of staff write access, ending on a project switch, logout, staff revoke or unshadow. Every admitted project write has a permanent audit. project.write, project.write-mode-end, project.shadow, project.unshadow, project.member and project.member-remove are audit-only actions and cannot be proposed; project.member records a membership granted, and project.member-remove one ended, by the screenrig-admin org apply command, whose rows carry its reason. staff.grant and staff.revoke appoint an existing verified person by ID. person.free-cap with no free_limit restores the normal cap; organization.domain with no domain removes the claim; a domain set pulls in, after the approved change commits, the projects its verified people hold alone in their personal organizations, as domain verification does. project.owner explicitly appoints the person and adds their project membership. Admin and owner targets must be existing verified people. organization.plan with no plan_id schedules removal; project.plan-to-organization with no plan_id moves the existing plan; the organization's other projects holding plans of their own roll up into it, each paying for itself until the next UTC month boundary or the organization plan's start, whichever is later. An organization holds premium, enterprise or the staff-assigned staff plan. Organization billing must be enabled for both; the result names the actual effective time and grant. After the billing cutover, project.plan upgrades immediately and grants the monthly difference; downgrades wait for the next UTC month and refuse excess occupancy. Before the cutover, the retained provisioning path sets the project plan immediately and the existing monthly worker grants included credit. Project-held Enterprise is accepted only before organization billing is enabled. person.reset-sign-in emails a one-hour sign-in reset link to the person's verified email address only; the link is never returned to staff, and the result names only the delivery and expiry. With revoke_passkeys it also removes every passkey of the person, ends every dashboard session and cuts off every token already issued to them, in the same approved action.
       properties:
         action:
           type: string
@@ -12585,7 +12710,9 @@ components:
       properties:
         audit_id: { type: string }
         request_id: { type: string }
-        user_id: { type: string }
+        user_id:
+          type: string
+          description: The staff person who made the change, or system for a change the backend made on its own.
         change: { $ref: '#/components/schemas/DashboardStaffChange' }
         created_at: { type: string, format: date-time }
         result:
