@@ -859,6 +859,14 @@ diagnosis and safe fixes.
 
 ## Configuration
 
+The default profile is `config.json` in the user's screenRIG configuration
+folder, and a new profile targets `https://api.screenrig.ai`. Other profile
+files are never selected merely because they exist. Select a local or other
+non-production profile explicitly with `--config PATH` or `SCREENRIG_CONFIG`.
+For example, `--config ~/.config/screenrig/config.local-dev.json` selects local
+development. Keep each environment's credentials in its own profile; changing
+the API URL does not transfer credentials between environments.
+
 ### Sign-in and sessions
 
 `screenrig login` signs this installation in with a person's approval. It

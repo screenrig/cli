@@ -184,18 +184,6 @@ import { isResourceID } from "./generated/resource-ids.js";
       return path.join(fsLike.homedir(), ".config", "screenrig");
     }
 
-    async function configPathExists(filePath: string, fsLike: Pick<ConfigFs, "stat">): Promise<boolean> {
-      try {
-        await fsLike.stat(filePath);
-        return true;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-          return false;
-        }
-        throw err;
-      }
-    }
-
     export async function defaultConfigPath(
       fsLike: Pick<ConfigFs, "homedir" | "env" | "stat">,
     ): Promise<string> {
@@ -203,12 +191,7 @@ import { isResourceID } from "./generated/resource-ids.js";
       if (fromEnv && fromEnv.length > 0) {
         return fromEnv;
       }
-      const dir = defaultConfigDir(fsLike);
-      const localDev = path.join(dir, LOCAL_DEV_CONFIG_NAME);
-      if (await configPathExists(localDev, fsLike)) {
-        return localDev;
-      }
-      return path.join(dir, DEFAULT_CONFIG_NAME);
+      return path.join(defaultConfigDir(fsLike), DEFAULT_CONFIG_NAME);
     }
 
     function modeOf(value: { mode: number }): number {
