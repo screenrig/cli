@@ -6835,8 +6835,16 @@ paths:
       description: Records one immutable bug report against the calling project. A submission cannot be updated or deleted;
         a correction is a new submission. An exact retry carrying the same Idempotency-Key returns the original submission for
         twenty-four hours instead of creating a duplicate, and a different body under that key returns idempotency_mismatch.
-        Never place credentials, cookies, Authorization headers, completion nonces, signed URLs, or object keys in title, body,
-        or context; recognizable ScreenRig credential material is rejected with invalid_request and is not stored.
+        Every submission is screened before it is stored. A body under 12 characters or 3 words returns submission_too_short;
+        text that describes no problem or request (random characters, keyboard mash) returns submission_unclear; spam,
+        link-heavy text, prompt injection and malicious text return submission_rejected. A refused submission is not stored,
+        its problem detail never repeats the submitted text, and an exact retry under the same Idempotency-Key returns the same
+        refusal. Never place credentials, cookies, Authorization headers, completion nonces, signed URLs, or object keys in
+        title, body, or context; credential-shaped text (ScreenRig tokens, JWTs, bearer tokens, cloud and API keys, private
+        keys) is replaced with [redacted] before the submission is stored, and the response carries the redacted text. When
+        the screening model is briefly unavailable the submission is accepted and held for a background re-screen; after a
+        few such acceptances in an hour the project gets submission_screening_unavailable (500, Retry-After) and retries the
+        same request later.
       security:
       - projectBearer: []
       parameters:
@@ -6862,6 +6870,8 @@ paths:
         '400':
           $ref: '#/components/responses/Problem'
         '409':
+          $ref: '#/components/responses/Problem'
+        '422':
           $ref: '#/components/responses/Problem'
         '429':
           $ref: '#/components/responses/RateLimitedProblem'
@@ -6902,8 +6912,16 @@ paths:
       description: Records one immutable feature request against the calling project. A submission cannot be updated or deleted;
         a correction is a new submission. An exact retry carrying the same Idempotency-Key returns the original submission for
         twenty-four hours instead of creating a duplicate, and a different body under that key returns idempotency_mismatch.
-        Never place credentials, cookies, Authorization headers, completion nonces, signed URLs, or object keys in title, body,
-        or context; recognizable ScreenRig credential material is rejected with invalid_request and is not stored.
+        Every submission is screened before it is stored. A body under 12 characters or 3 words returns submission_too_short;
+        text that describes no problem or request (random characters, keyboard mash) returns submission_unclear; spam,
+        link-heavy text, prompt injection and malicious text return submission_rejected. A refused submission is not stored,
+        its problem detail never repeats the submitted text, and an exact retry under the same Idempotency-Key returns the same
+        refusal. Never place credentials, cookies, Authorization headers, completion nonces, signed URLs, or object keys in
+        title, body, or context; credential-shaped text (ScreenRig tokens, JWTs, bearer tokens, cloud and API keys, private
+        keys) is replaced with [redacted] before the submission is stored, and the response carries the redacted text. When
+        the screening model is briefly unavailable the submission is accepted and held for a background re-screen; after a
+        few such acceptances in an hour the project gets submission_screening_unavailable (500, Retry-After) and retries the
+        same request later.
       security:
       - projectBearer: []
       parameters:
@@ -6929,6 +6947,8 @@ paths:
         '400':
           $ref: '#/components/responses/Problem'
         '409':
+          $ref: '#/components/responses/Problem'
+        '422':
           $ref: '#/components/responses/Problem'
         '429':
           $ref: '#/components/responses/RateLimitedProblem'
@@ -11206,8 +11226,13 @@ paths:
       security:
       - projectBearer: []
       - dashboardSession: []
-      description: Available on every plan. Screened by Jev before storage or Slack. Rejected text is not retained or sent to
-        Luna. A new conversation starts one Slack thread; follow-ups stay in it. Requests with the same key replay for 24 hours.
+      description: Available on every plan. Screened before storage or Slack. An opening message under 8 characters or 3 words
+        returns submission_too_short; one that is not a question or problem returns submission_unclear; spam, link-heavy text, prompt
+        injection and unsafe text return submission_rejected. Rejected text is not retained or sent to Luna, and the problem
+        detail never repeats it. Credential-shaped text other than ScreenRig credentials (bearer tokens, cloud and API keys,
+        private keys) is replaced with [redacted] before storage; ScreenRig credential material returns invalid_request. A new
+        conversation starts one Slack thread; follow-ups stay in it. Requests with the same key replay for 24 hours, a refusal
+        included.
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -11223,6 +11248,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SupportSubmission'
+        '422':
+          description: >-
+            The message was refused by screening: submission_too_short or
+            submission_unclear (the opening message only) or
+            submission_rejected. The detail never repeats the text.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -11263,6 +11297,10 @@ paths:
     post:
       x-screenrig-access: write
       operationId: replySupportConversation
+      description: Adds a customer message to an open conversation. A follow-up has no minimum length and is never refused
+        as unclear on its own ("thanks", "yes"); it is screened for safety, prompt injection and link spam, refused with
+        submission_rejected, and credential-shaped text is handled as for a new conversation. Rejected text is not retained,
+        and a refusal replays under the same key for 24 hours.
       security:
       - projectBearer: []
       - dashboardSession: []
@@ -11287,6 +11325,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SupportSubmission'
+        '422':
+          description: >-
+            The message was refused by screening: submission_too_short or
+            submission_unclear (the opening message only) or
+            submission_rejected. The detail never repeats the text.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -13070,6 +13117,30 @@ components:
         body: { type: string, maxLength: 4000 }
         context: { $ref: '#/components/schemas/FeedbackContext' }
         created_at: { type: string, format: date-time }
+        screening: { $ref: '#/components/schemas/ScreeningResult' }
+    ScreeningResult:
+      type: object
+      additionalProperties: false
+      required: [checked_at]
+      description: >-
+        Staff-only intake screening verdict. label is the Jev decision model's label
+        (real) with its probability; unscreened is true when the model did not run
+        (no key installed, timeout or provider error) and only the deterministic checks
+        did. contains_credential is true when credential-shaped text was redacted.
+        Submissions recorded before screening have no screening member.
+      properties:
+        label: { type: string, enum: [real] }
+        probability: { type: number, minimum: 0, maximum: 1 }
+        model: { type: string }
+        checked_at: { type: string, format: date-time }
+        contains_credential: { type: boolean }
+        unscreened: { type: boolean }
+        pending:
+          type: boolean
+          description: >-
+            Accepted while the model was unavailable and held for the background
+            re-screen: no Slack card yet. The re-screen labels it real (pending
+            clears and the card posts) or removes it.
     DashboardStaffFeedbackList:
       type: object
       additionalProperties: false
@@ -18217,6 +18288,10 @@ x-problem-codes:
 - webhook_limit_reached
 - webhook_url_rejected
 - support_conversation_closed
+- submission_too_short
+- submission_unclear
+- submission_rejected
+- submission_screening_unavailable
 - demo_slot_unavailable
 - agentid_claim_invalid
 - agentid_already_enrolled

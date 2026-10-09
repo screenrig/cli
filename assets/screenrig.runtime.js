@@ -1574,6 +1574,9 @@
     }
     html.setProperty("min-height", `${height}px`);
   }
+  function documentRootDisplay(computedDisplay) {
+    return computedDisplay === "block" ? "flow-root" : void 0;
+  }
   function frameCaptureMode(registered) {
     return registered ? "child" : "placeholder";
   }
@@ -1773,7 +1776,9 @@
       for (const child of [...node.children]) await visit(child);
     };
     const owner = root.ownerDocument;
-    const canvasSource = root === owner.documentElement ? canvasBackgroundSource(getComputedStyle(root), owner.body ? getComputedStyle(owner.body) : void 0) : void 0;
+    const documentCapture = root === owner.documentElement;
+    const canvasSource = documentCapture ? canvasBackgroundSource(getComputedStyle(root), owner.body ? getComputedStyle(owner.body) : void 0) : void 0;
+    const rootDisplay = documentCapture ? documentRootDisplay(getComputedStyle(root).display) : void 0;
     let context;
     try {
       await visit(root);
@@ -1790,6 +1795,7 @@
         filter: (node) => !videos.has(node) && (!(node instanceof Element) || node.hasAttribute(marker) || visible(node)),
         onCloneNode: (clone) => {
           if (!(clone instanceof Element)) return;
+          if (rootDisplay !== void 0 && clone instanceof HTMLElement) clone.style.setProperty("display", rootDisplay);
           if (canvasSource !== void 0 && clone instanceof HTMLElement) {
             const body = Array.from(clone.children).find((child) => child instanceof HTMLElement && child.localName === "body");
             propagateCanvasBackground(canvasSource, clone.style, body == null ? void 0 : body.style, height);
