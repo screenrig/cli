@@ -11,7 +11,7 @@ import { FakeTransport } from "./transport/fake.js";
 async function invoke(argv: string[], transport: FakeTransport) {
  const dir = await testTemp("support-cfg-");
  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: { XDG_CONFIG_HOME: dir } };
- await writeConfigAtomic(path.join(dir,"screenrig","config.json"), {api_url:"https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token:"sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr"}, fs);
+ await writeConfigAtomic(path.join(dir,"screenrig","config.json"), {api_url:"https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token:"eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr"}, fs);
  const stdout = new PassThrough(); const stderr = new PassThrough(); const chunks: Buffer[] = [];
  stdout.on("data", (chunk) => chunks.push(Buffer.from(chunk)));stderr.resume();
  const runtime: CliRuntime = {argv,env:fs.env,stdout,stderr,now:()=>new Date("2026-10-01T17:00:00Z"),sleep:async()=>undefined,homedir:fs.homedir,cwd:()=>dir,fs,transport};

@@ -10,7 +10,6 @@ import { canonicalPairingCode } from "./pairing-code.js";
 import { editablePlaylist, isAdSlotPage, preparePlaylist, targetDimensions } from "./playlist-authoring.js";
 import { callPlaylist } from "./playlist-api.js";
 import { WriteRecovery } from "./write-recovery.js";
-import { ensureIdentityCredential, validateIdentityToken } from "./identity-credential.js";
 import { cacheProjectContexts, contextFromProject, formatResultContext, projectName as validateDisplayName, resultContext, setResultContext, validateProjectContext } from "./project-context.js";
 import { projectConfigFor, withProjectConfig, assertProjectCredential } from "./project-state.js";
 import { instantInZone, normalizeInstant, assignmentLine, playlistInUseProblem, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "./screen-control.js";
@@ -33,16 +32,10 @@ import {
   type Invitation,
   type InvitationIssued,
   type Agent,
-  type AgentConnection,
-  type AgentConnectionRequest,
-  AGENT_CAPABILITIES,
-  type AgentCredentialCollection,
   type AgentDisconnectRequest,
   type Capabilities,
-  type CLIEnrollment,
   type CLIEnrollmentOAuth,
   type CLIEnrollmentRequest,
-  type AgentIdentityCredential,
   type ProjectContextList,
   type ProjectCreate,
   type CreatedProject,
@@ -112,11 +105,10 @@ import {
   type ScreenRigConfig,
 } from "./config.js";
 import { attachOperationLogger, loggerOf, loggingTransport } from "./log/index.js";
-import { accessClaims, isOAuthUnavailable, isServiceClientId, isSessionJwt, readKeyFile, SCOPE_IDENTITY, serviceCredentialsFromEnv, type AccessLevel, type ServiceClientCredentials } from "./oauth.js";
+import { accessClaims, isServiceClientId, isSessionJwt, readKeyFile, SCOPE_IDENTITY, serviceCredentialsFromEnv, type AccessLevel, type ServiceClientCredentials } from "./oauth.js";
 import { OAuthSession, refreshExpiryDays, type SessionRuntime } from "./oauth-session.js";
 import { DeviceLogin, type LoginOutcome } from "./login.js";
 import { ensureCredential } from "./enrollment.js";
-import { cleanupEnrollmentProject, type EnrollmentCleanupResult } from "./enrollment-cleanup.js";
 import {
   headerValue,
   CREDITS_REMAINING_HEADER,
@@ -125,7 +117,7 @@ import {
 } from "./credits.js";
 import { successEnvelope, type ProblemNext, type Warning } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
-import { CliError, configError, fileError, makeProblem, networkError, notEnrolledError, timeoutError, unexpectedResponseError, usageError } from "./problems.js";
+import { CliError, configError, fileError, makeProblem, networkError, notEnrolledError, unexpectedResponseError, usageError } from "./problems.js";
 import type { HttpMethod, Transport } from "./transport/types.js";
 import { packDirectory } from "./pack/index.js";
 import type { CliRuntime } from "./runtime.js";
@@ -185,17 +177,7 @@ import {
   type TranscodeOptions,
 } from "./media/transcode.js";
 import { exportPlaylistBundle, importPlaylistBundle } from "./playlist-bundle.js";
-import {
-  agentPlatform,
-  decryptAgentCredential,
-  generateAgentConnectionKey,
-  publicAgentConnectionKey,
-  validateAgent,
-  validateAgentSelfStatus,
-  validateAgentConnectionEvent,
-  validateAgentConnectionStart,
-  type AgentConnectionConfig,
-} from "./agent-identity.js";
+import { agentPlatform, validateAgent, validateAgentSelfStatus } from "./agent-identity.js";
 import { CLI_VERSION } from "./version.js";
 
 export { CLI_VERSION };
@@ -475,7 +457,7 @@ function transportFor(runtime: CliRuntime, apiUrl: string, token?: string): Tran
   return loggingTransport(base, loggerOf(runtime));
 }
 
-/** The invocation's OAuth session: access-token renewal, the legacy exchange, logout. */
+/** The invocation's OAuth session: access-token renewal and logout. */
 const oauthSessions = new WeakMap<CliRuntime, OAuthSession>();
 
 function sessionRuntime(runtime: CliRuntime): SessionRuntime {
@@ -501,10 +483,21 @@ async function streamToken(runtime: CliRuntime, token: string): Promise<string> 
 
 /**
  * Commands that read credentials without requiring a project credential up
- * front. They renew (or first exchange) credentials like authenticated ones;
- * local commands never touch the network for it.
+ * front. They renew credentials like authenticated ones; local commands never
+ * touch the network for it.
  */
 const CREDENTIAL_COMMANDS = new Set(["project list", "project use", "agent status"]);
+
+/** Commands that send a stored credential, besides authenticated and credential commands. */
+const STORED_CREDENTIAL_COMMANDS = new Set(["logout", "agent enroll", "agent disconnect", "agent revoke-identity"]);
+
+/** A config that holds only a token from before sign-in: no request accepts it, so nothing is sent. */
+function credentialRetiredError(): CliError {
+  return new CliError(makeProblem("credential_retired", "Credential retired", 401,
+    "This installation's stored credential is no longer accepted. Run screenrig login to sign it in; a person approves it in the dashboard. Nothing was sent.", {
+      next: { command: "screenrig login", reason: "Signs this installation in; a person approves it in the dashboard." },
+    }), ExitCode.Auth);
+}
 
 /** Commands that act on the identity rather than the selected project. */
 const IDENTITY_COMMANDS = new Set(["project list", "project use", "project create"]);
@@ -606,6 +599,30 @@ function withServiceClient(run: CommandHandler): CommandHandler {
   };
 }
 
+/** The next step for an installation without a credential: sign in, enroll, or resume a pending enrollment. */
+function missingCredentialError(resolved: ResolvedCommandConfig): CliError {
+  if (resolved.signedOut) {
+    return notEnrolledError("This installation is signed out.", {
+      command: "screenrig login",
+      reason: "Sign this installation in again; a person approves it in the dashboard.",
+    });
+  }
+  if (resolved.lastAgent) {
+    return notEnrolledError("This installation is disconnected and cannot run project commands.", {
+      command: "screenrig agent enroll --email ADDRESS --organization NAME",
+      reason: "Ask the user for their contact email, then create a new project agent. Use screenrig login only when the user asked to join an existing project.",
+    });
+  }
+  return notEnrolledError("This installation is not enrolled. Enrollment is an explicit step and is never a side effect of another command.", {
+    command: resolved.enrollment
+      ? "screenrig agent enroll"
+      : "screenrig agent enroll --email ADDRESS --organization NAME",
+    reason: resolved.enrollment
+      ? "Resume the exact pending enrollment before running pairing or another project command."
+      : "Create the first agent with unverified contact metadata, then retry the original command.",
+  });
+}
+
 /** Prepare configuration, logging and credential guidance once for a bound leaf. */
 function commandHandler(
   handler: (args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig) => Promise<CommandResult>,
@@ -622,10 +639,15 @@ function commandHandler(
       }
     }
     await attachOperationLogger(runtime, args, resolved);
+    const commandName = args.command.slice(0, 2).join(" ");
+    if (resolved.retiredCredential && (authenticated || CREDENTIAL_COMMANDS.has(commandName)
+      || STORED_CREDENTIAL_COMMANDS.has(commandName) || STORED_CREDENTIAL_COMMANDS.has(args.command[0] ?? ""))) {
+      throw credentialRetiredError();
+    }
     const session = oauthSessionFor(runtime, resolved);
-    if (authenticated || CREDENTIAL_COMMANDS.has(args.command.slice(0, 2).join(" "))) {
+    if (authenticated || CREDENTIAL_COMMANDS.has(commandName)) {
       try {
-        resolved = await session.prepare(resolved, { identity: IDENTITY_COMMANDS.has(args.command.slice(0, 2).join(" ")) });
+        resolved = await session.prepare(resolved, { identity: IDENTITY_COMMANDS.has(commandName) });
       } catch (error) {
         oauthSessions.delete(runtime);
         throw error;
@@ -635,32 +657,7 @@ function commandHandler(
     setResultContext(runtime, resolved);
     if (authenticated && !resolved.token) {
       oauthSessions.delete(runtime);
-      if (resolved.signedOut) {
-        throw notEnrolledError("This installation is signed out.", {
-          command: "screenrig login",
-          reason: "Sign this installation in again; a person approves it in the dashboard.",
-        });
-      }
-      if (resolved.agentConnection) {
-        throw notEnrolledError("This installation has a pending agent connection and no active credential.", {
-          command: "screenrig agent connect",
-          reason: "Resume the intentional existing-project connection before running project commands.",
-        });
-      }
-      if (resolved.lastAgent) {
-        throw notEnrolledError("This installation is disconnected and cannot run project commands.", {
-          command: "screenrig agent enroll --email ADDRESS --organization NAME",
-          reason: "Ask the user for their contact email, then create a new project agent. Use agent connect only for an intentional existing-project reconnect.",
-        });
-      }
-      throw notEnrolledError("This installation is not enrolled. Enrollment is an explicit step and is never a side effect of another command.", {
-        command: resolved.enrollment
-          ? "screenrig agent enroll"
-          : "screenrig agent enroll --email ADDRESS --organization NAME",
-        reason: resolved.enrollment
-          ? "Resume the exact pending enrollment before running pairing or another project command."
-          : "Create the first agent with unverified contact metadata, then retry the original command.",
-      });
+      throw missingCredentialError(resolved);
     }
     // Specialized enrollment, generation, upload/bundle, and handoff flows own
     // their recovery. Ordinary mutations share the durable request ledger.
@@ -723,10 +720,6 @@ function commandHandler(
       invocationRequestIds.delete(runtime);
       invocationTargets.delete(runtime);
       oauthSessions.delete(runtime);
-      // Dropping a replaced legacy secret is housekeeping: it never changes the command's result.
-      await session.finish().catch((err: unknown) => {
-        if (loggerOf(runtime).enabled) loggerOf(runtime).startLocal({ op: "oauth.legacy_cleanup" }).error(err);
-      });
     }
   };
   return withServiceClient(run);
@@ -839,31 +832,28 @@ const AGENT_CONNECT_ALIAS: Warning = {
 
 export const handleAgentConnect = commandHandler(async (args, runtime, resolved) => {
   return loggerOf(runtime).withLocal({ op: "agent.connect", message: "agent connect" }, async () => {
-    const stored = await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir });
-    // A connection request this installation already started finishes the way it began.
-    const legacy = Boolean(resolved.agentConnection || stored?.enrollment_cleanup)
-      || (flagBool(args.flags, "cancel") && !stored?.login);
-    let result: CommandResult;
-    if (legacy) {
-      result = await agentConnect(args, runtime, resolved);
-    } else if (flagBool(args.flags, "cancel")) {
-      await new DeviceLogin(oauthSessionFor(runtime, resolved), resolved.configPath, sessionRuntime(runtime)).clear(stored!.login!.id);
-      result = { envelope: successEnvelope({ status: "cancelled" }), exitCode: ExitCode.Success, human: "Pending sign-in cancelled." };
-    } else {
-      const warnings: Warning[] = [AGENT_CONNECT_ALIAS];
-      if (flagString(args.flags, "capability") !== undefined) {
-        warnings.push({ code: "capability_chosen_at_approval", message: "The person approving the sign-in chooses its capabilities; --capability was not sent." });
+    if (flagBool(args.flags, "cancel")) {
+      const stored = await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir });
+      if (!stored?.login) {
+        throw usageError("This installation has no pending sign-in to cancel; nothing was sent.", {
+          command: "screenrig agent status", reason: "Shows this installation's credential state.",
+        });
       }
-      result = await login(args, runtime, resolved, {
-        project: flagString(args.flags, "target-project-id"),
-        access: "manage",
-        // agent connect returns pending by default; --wait waits for approval.
-        wait: flagBool(args.flags, "wait"),
-        warnings,
-      });
-      return result;
+      await new DeviceLogin(oauthSessionFor(runtime, resolved), resolved.configPath, sessionRuntime(runtime)).clear(stored.login.id);
+      const result: CommandResult = { envelope: successEnvelope({ status: "cancelled" }), exitCode: ExitCode.Success, human: "Pending sign-in cancelled." };
+      return { ...result, envelope: { ...result.envelope, warnings: [AGENT_CONNECT_ALIAS] } };
     }
-    return { ...result, envelope: { ...result.envelope, warnings: [...(result.envelope.warnings ?? []), AGENT_CONNECT_ALIAS] } };
+    const warnings: Warning[] = [AGENT_CONNECT_ALIAS];
+    if (flagString(args.flags, "capability") !== undefined) {
+      warnings.push({ code: "capability_chosen_at_approval", message: "The person approving the sign-in chooses its capabilities; --capability was not sent." });
+    }
+    return login(args, runtime, resolved, {
+      project: flagString(args.flags, "target-project-id"),
+      access: "manage",
+      // agent connect returns pending by default; --wait waits for approval.
+      wait: flagBool(args.flags, "wait"),
+      warnings,
+    });
   });
 }, false);
 
@@ -1038,11 +1028,7 @@ export const handleServiceClientRevoke = commandHandler(async (args, runtime, re
   return serviceClientWrite(args, runtime, resolved, { path: `/api/service-clients/${id}/revoke`, title: "Service client revoked" });
 });
 
-/**
- * The device sign-in. A server that issues no OAuth tokens gets the
- * existing-project connection request instead, so this command works
- * against every API version.
- */
+/** The device sign-in. */
 async function login(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig,
   request: { project?: string; access: AccessLevel; wait: boolean; resume?: string; warnings: Warning[] }): Promise<CommandResult> {
   if (request.project !== undefined && !isResourceID(request.project, "project")) throw usageError("login --project must be a project ID (prj_...).");
@@ -1050,31 +1036,17 @@ async function login(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCo
   if (name && name.length > 80) throw usageError("login --name is at most 80 characters.");
   const session = oauthSessionFor(runtime, resolved);
   const device = new DeviceLogin(session, resolved.configPath, sessionRuntime(runtime));
-  let outcome: LoginOutcome;
-  try {
-    outcome = await device.run({
-      access: request.access,
-      ...(request.project ? { project: request.project } : {}),
-      ...(name ? { name } : {}),
-      platform: agentPlatform(),
-      version: CLI_VERSION,
-      wait: request.wait,
-      ...(request.resume !== undefined ? { resume: request.resume } : {}),
-    }, (pending, resumed) => {
-      runtime.stderr.write(`${resumed ? "Still waiting" : "Sign-in started"}: open ${pending.verification_uri_complete} and confirm the code ${pending.user_code}. It expires at ${pending.expires_at}.\n`);
-    });
-  } catch (err) {
-    if (!isOAuthUnavailable(err) || request.resume !== undefined) throw err;
-    if (request.access === "read") {
-      throw usageError("This API offers no Read only sign-in. Run screenrig login without --access read.");
-    }
-    const flags: Record<string, string | boolean> = { ...args.flags };
-    for (const key of ["project", "access", "no-wait", "resume"]) delete flags[key];
-    if (request.project) flags["target-project-id"] = request.project;
-    if (request.wait) flags.wait = true;
-    const connected = await agentConnect({ ...args, flags }, runtime, resolved);
-    return { ...connected, envelope: { ...connected.envelope, warnings: [...(connected.envelope.warnings ?? []), ...request.warnings] } };
-  }
+  const outcome: LoginOutcome = await device.run({
+    access: request.access,
+    ...(request.project ? { project: request.project } : {}),
+    ...(name ? { name } : {}),
+    platform: agentPlatform(),
+    version: CLI_VERSION,
+    wait: request.wait,
+    ...(request.resume !== undefined ? { resume: request.resume } : {}),
+  }, (pending, resumed) => {
+    runtime.stderr.write(`${resumed ? "Still waiting" : "Sign-in started"}: open ${pending.verification_uri_complete} and confirm the code ${pending.user_code}. It expires at ${pending.expires_at}.\n`);
+  });
   const pending = outcome.login;
   if (outcome.status === "pending") {
     const resume = ["login", "--resume", pending.id];
@@ -1124,14 +1096,7 @@ async function login(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCo
   };
 }
 
-async function logout(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
-  const stored = await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir });
-  if (!stored?.oauth && (stored?.token || stored?.identity_token || Object.values(stored?.projects ?? {}).some((slot) => slot?.token))) {
-    throw usageError("This installation holds an agent credential that logout does not end; nothing was sent.", {
-      command: "screenrig agent disconnect --yes",
-      reason: "Ends this project's membership. agent revoke-identity --yes ends every membership.",
-    });
-  }
+async function logout(_args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
   const { revoked } = await oauthSessionFor(runtime, resolved).logout();
   return {
     envelope: successEnvelope({ status: "signed_out", revoked }),
@@ -1163,7 +1128,7 @@ export const handleProjectCapabilities = commandHandler(projectCapabilities);
 
 export const handleProjectRename = commandHandler(projectRename);
 export const handleOrganizationList = commandHandler(async (args, runtime, resolved) => {
-  const identity = await identityForCommand(args, runtime, resolved);
+  const identity = await identityForCommand(runtime, resolved);
   const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
   const response = await client.call({ method: "GET", path: "/api/organizations" });
   const body = response.body as { organizations?: Array<{ id: string; name: string; admin: boolean }> };
@@ -1175,7 +1140,7 @@ export const handleOrganizationRename = commandHandler(async (args, runtime, res
   const id = args.positionals[2];
   if (!id || !/^(?:(?:stage|qa|development)_)?org_[A-Za-z0-9_-]+$/.test(id)) throw usageError("organization rename requires an organization ID.");
   const name = validateDisplayName(args.positionals[3], "Organization name");
-  const identity = await identityForCommand(args, runtime, resolved);
+  const identity = await identityForCommand(runtime, resolved);
   const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
   const response = await client.call({ method: "PATCH", path: `/api/organizations/${encodeURIComponent(id)}`, body: { name } });
   const organization = response.body as { id: string; name: string };
@@ -1269,29 +1234,6 @@ async function agentStatus(
   runtime: CliRuntime,
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<CommandResult> {
-
-  if (resolved.agentConnection) {
-    const connection = resolved.agentConnection;
-    const data = {
-      status: "connecting",
-      path: "reconnect_existing",
-      phase: (connection.pending_token || resolved.token) && connection.pending_agent_id ? "activating" : connection.connection_id ? "approval" : "starting",
-      ...(connection.connection_id ? { connection_id: connection.connection_id } : {}),
-      ...(connection.expires_at ? { expires_at: connection.expires_at } : {}),
-      capabilities: connection.capabilities,
-    };
-    return {
-      envelope: successEnvelope(data),
-      exitCode: ExitCode.Success,
-      human: humanLines("Agent connection", [
-        ["status", "connecting"],
-        ["phase", data.phase],
-        ["connection_id", connection.connection_id],
-        ["expires_at", connection.expires_at],
-        ["capabilities", connection.capabilities.join(", ")],
-      ]),
-    };
-  }
   if (!resolved.token) {
     const local = resolved.lastAgent;
     const status = local ? "disconnected" : "not_enrolled";
@@ -1364,19 +1306,13 @@ async function agentEnroll(
   if (name && name.length > 80) throw usageError("agent enroll --name is at most 80 characters.");
   const enrollIntent = enrollmentPurpose(flagString(args.flags, "intent"));
   let enrollmentConfig = resolved;
-  if (resolved.agentConnection || (resolved.enrollment && flagBool(args.flags, "force"))) {
-    if (!flagBool(args.flags, "force")) {
-      throw usageError("A different agent connection is already pending in this config.", {
-        command: "screenrig agent enroll --force --email ADDRESS",
-        reason: "Use --force only to discard the unwanted existing-project connection and enroll a new project.",
-      });
-    }
+  if (resolved.enrollment && flagBool(args.flags, "force")) {
     const forceEmail = flagString(args.flags, "email");
     const forceClaim = flagString(args.flags, "agentid-claim");
     if (forceEmail !== undefined) enrollmentEmail(forceEmail);
     else if (forceClaim !== undefined) agentidClaim(forceClaim);
     else throw usageError("agent enroll --force requires --email ADDRESS or --agentid-claim CODE.");
-    await clearPendingStateForEnrollment(runtime, resolved);
+    await clearPendingEnrollment(runtime, resolved);
     enrollmentConfig = await resolveConfig({
       flags: args.flags,
       fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir },
@@ -1423,639 +1359,17 @@ async function agentEnroll(
   };
 }
 
-function emitAgentApprovalUrl(args: ParsedArgs, runtime: CliRuntime, approvalUrl: string): void {
-  if (!flagBool(args.flags, "human")) {
-    runtime.stderr.write(`${JSON.stringify({ type: "agent_connection_approval", approval_url: approvalUrl })}\n`);
-    return;
-  }
-  runtime.stderr.write(`approval_url: ${approvalUrl}\n`);
-}
-
-async function currentAgentConnectionConfig(
-  resolved: Awaited<ReturnType<typeof resolveConfig>>,
-  runtime: CliRuntime,
-): Promise<ScreenRigConfig | undefined> {
-  return readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir });
-}
-
-async function startOrResumeAgentConnection(
-  args: ParsedArgs,
-  runtime: CliRuntime,
-  resolved: Awaited<ReturnType<typeof resolveConfig>>,
-  requestedName: string | undefined,
-  requestedCapabilities: Agent["capabilities"] | undefined,
-): Promise<AgentConnectionConfig> {
-  const fsLike = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
-  return withConfigLock(
-    resolved.configPath,
-    fsLike,
-    { sleep: runtime.sleep, now: () => runtime.now().getTime() },
-    async () => {
-      let current = await readConfigFile(resolved.configPath, fsLike);
-      if (current?.identity_token !== resolved.identityToken) throw configError("Identity changed before starting the connection request.");
-      const requestedProject = flagString(args.flags, "target-project-id");
-      if (requestedProject !== undefined && !isResourceID(requestedProject, "project")) throw usageError("--target-project-id must be a project ID.");
-      // Approval can extend expiry while this installation is offline. Keep the
-      // recipient key until the server confirms this connection is terminal.
-      let pending = current?.agent_connection;
-      if (pending && requestedProject !== undefined && pending.project_id !== requestedProject) throw usageError("The pending request is bound to a different project. Resume without changing --target-project-id.");
-      if (!pending && requestedProject !== undefined && !resolved.identityToken) {
-        throw usageError("--target-project-id needs this installation's identity credential, which agent enroll or an earlier approved agent connect saves. This installation has none; nothing was sent.", {
-          command: "screenrig agent connect",
-          reason: "Without --target-project-id, approve the request in the dashboard for the project this agent should join.",
-        });
-      }
-      const identityHash = resolved.identityToken ? createHash("sha256").update(resolved.identityToken).digest("hex") : undefined;
-      if (pending && pending.identity_hash !== identityHash) throw configError("The pending connection's identity credential changed.");
-      if (pending?.name && requestedName && pending.name !== requestedName) {
-        throw usageError("The pending agent connection has a different --name. Resume it without changing the name.");
-      }
-      if (pending && requestedCapabilities && JSON.stringify(pending.capabilities) !== JSON.stringify(requestedCapabilities)) {
-        throw usageError("The pending connection has different capabilities. Resume without --capability; capabilities cannot change on an existing request.");
-      }
-      if (!pending) {
-        pending = { private_jwk: generateAgentConnectionKey(), capabilities: requestedCapabilities ?? [...AGENT_CAPABILITIES], ...(requestedName ? { name: requestedName } : {}),
-          ...(requestedProject ? { project_id: requestedProject } : {}), ...(identityHash ? { identity_hash: identityHash } : {}) };
-        await writeConfigAtomic(resolved.configPath, {
-          ...(current ?? {}),
-          api_url: resolved.apiUrl,
-          agent_connection: pending,
-          updated_at: runtime.now().toISOString(),
-        }, fsLike);
-      }
-      publicAgentConnectionKey(pending.private_jwk);
-      if (pending.connection_id && pending.connection_token && pending.approval_url && pending.expires_at) {
-        const checked = validateAgentConnectionStart({
-          connection_id: pending.connection_id,
-          connection_token: pending.connection_token,
-          approval_url: pending.approval_url,
-          expires_at: pending.expires_at,
-        }, resolved.apiUrl);
-        return { ...pending, approval_url: checked.approval_url };
-      }
-
-      const client = clientFor(runtime, args, resolved.apiUrl, resolved.identityToken);
-      const request: AgentConnectionRequest = {
-        ...(pending.name ? { name: pending.name } : {}),
-        agent_type: "cli",
-        capabilities: pending.capabilities,
-        platform: agentPlatform(),
-        version: CLI_VERSION,
-        recipient_public_key: publicAgentConnectionKey(pending.private_jwk),
-        ...(pending.project_id ? { project_id: pending.project_id } : {}),
-      };
-      const response = await client.call({ method: "POST", path: "/api/agent-connections", body: request });
-      requirePrivateNoStore(response.headers, "Agent connection start response");
-      if (response.headers["referrer-policy"] !== "no-referrer") {
-        throw configError("Agent connection start response did not return Referrer-Policy: no-referrer.");
-      }
-      const start = validateAgentConnectionStart(response.body, resolved.apiUrl);
-      const complete: AgentConnectionConfig = {
-        ...pending,
-        connection_id: start.connection_id,
-        connection_token: start.connection_token,
-        approval_url: start.approval_url,
-        expires_at: start.expires_at,
-      };
-      const latest = await readConfigFile(resolved.configPath, fsLike);
-      await writeConfigAtomic(resolved.configPath, {
-        ...(latest ?? {}),
-        api_url: resolved.apiUrl,
-        agent_connection: complete,
-        updated_at: runtime.now().toISOString(),
-      }, fsLike);
-      return complete;
-    },
-  );
-}
-
-async function waitForAgentConnectionApproval(
-  args: ParsedArgs,
-  runtime: CliRuntime,
-  resolved: Awaited<ReturnType<typeof resolveConfig>>,
-  connection: AgentConnectionConfig,
-  timeoutMs: number,
-  returnPending = false,
-): Promise<AgentConnection | undefined> {
-  if (!connection.connection_id || !connection.connection_token) throw configError("Pending agent connection authority is incomplete.");
-  const transport = transportFor(runtime, resolved.apiUrl);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let buffer = "";
-  let latest: AgentConnection | undefined;
-  try {
-    const stream = await transport.stream({
-      method: "GET",
-      path: `/stream/agent-connections/${connection.connection_id}`,
-      headers: {
-        authorization: `ScreenRig-Agent-Connect ${connection.connection_token}`,
-        "x-request-id": requestIdsFor(runtime, args).next(),
-      },
-      signal: controller.signal,
-    });
-    for await (const chunk of stream) {
-      buffer += chunk;
-      if (Buffer.byteLength(buffer, "utf8") > 64 * 1024) {
-        throw configError("Agent connection SSE exceeded the bounded status buffer.");
-      }
-      const parsed = parseSse(buffer);
-      buffer = parsed.rest;
-      for (const event of parsed.events) {
-        // Skip event types a newer server adds; only agent.connection carries status.
-        if (event.event !== "agent.connection" || !event.data) continue;
-        let decoded: unknown;
-        try {
-          decoded = JSON.parse(event.data) as unknown;
-        } catch {
-          throw configError("Agent connection SSE emitted invalid JSON.");
-        }
-        latest = validateAgentConnectionEvent(decoded, connection.connection_id);
-        if (returnPending || latest.status !== "pending") return latest;
-      }
-    }
-  } catch (err) {
-    if ((err as Error).name === "AbortError") {
-      if (controller.signal.aborted || returnPending) return latest;
-      throw timeoutError("Timed out waiting for dashboard approval. Retry agent connect to resume the same request.", undefined, "Ask the user to approve the connection in the dashboard, then run the same screenrig agent connect command again; it resumes the pending request instead of starting a new one.");
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-  if (latest?.status === "pending" || !latest) {
-    if (returnPending || latest || controller.signal.aborted) return latest;
-    throw timeoutError("Agent connection stream ended before approval. Retry agent connect to resume the same request.", undefined, "Ask the user to approve the connection in the dashboard, then run the same screenrig agent connect command again; it resumes the pending request instead of starting a new one.");
-  }
-  return latest;
-}
-
-async function clearAgentConnection(
-  runtime: CliRuntime,
-  resolved: Awaited<ReturnType<typeof resolveConfig>>,
-  connectionId: string,
-  clearPendingToken: boolean,
-): Promise<void> {
-  const fsLike = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
-  await withConfigLock(resolved.configPath, fsLike, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
-    const current = await readConfigFile(resolved.configPath, fsLike);
-    if (current?.agent_connection?.connection_id !== connectionId) return;
-    const { agent_connection: _connection, ...rest } = current;
-    if (clearPendingToken && current.agent_connection.pending_agent_id && !current.agent_connection.pending_token) {
-      const { token: _token, agent_id: _agent, ...withoutPending } = rest;
-      await writeConfigAtomic(resolved.configPath, { ...withoutPending, updated_at: runtime.now().toISOString() }, fsLike);
-      return;
-    }
-    await writeConfigAtomic(resolved.configPath, { ...rest, updated_at: runtime.now().toISOString() }, fsLike);
-  });
-}
-
-async function clearPendingStateForEnrollment(
+async function clearPendingEnrollment(
   runtime: CliRuntime,
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<void> {
   const fsLike = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
   await withConfigLock(resolved.configPath, fsLike, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
     const current = await readConfigFile(resolved.configPath, fsLike);
-    if (!current?.agent_connection && !current?.enrollment) return;
-    const { agent_connection: connection, enrollment, ...rest } = current;
-    let cleaned = rest;
-    if ((connection?.pending_agent_id && !connection.pending_token) || enrollment) {
-      const { token: _token, project_id: _project, project_name: _projectName, agent_id: _agent, ...withoutPendingCredential } = rest;
-      cleaned = withoutPendingCredential;
-    }
-    await writeConfigAtomic(resolved.configPath, {
-      ...cleaned,
-      updated_at: runtime.now().toISOString(),
-    }, fsLike);
-  });
-}
-
-async function clearDefinitivePendingAgentFailure(
-  runtime: CliRuntime,
-  resolved: Awaited<ReturnType<typeof resolveConfig>>,
-  connection: AgentConnectionConfig,
-  err: CliError,
-  detail: string,
-): Promise<never> {
-  if (!connection.connection_id) throw err;
-  await clearAgentConnection(runtime, resolved, connection.connection_id, true);
-  throw new CliError({
-    ...err.problem,
-    detail,
-    next: {
-      command: "screenrig agent connect",
-      reason: "The unusable pending bearer, private connection key, and transient connection state were removed. Start a fresh passkey approval.",
-    },
-  }, err.exitCode, err.warnings);
-}
-
-async function activateCollectedAgent(
-  args: ParsedArgs,
-  runtime: CliRuntime,
-  resolved: Awaited<ReturnType<typeof resolveConfig>>,
-  connection: AgentConnectionConfig,
-  pendingToken: string,
-  agentId: string,
-): Promise<{ agent: Agent; requestId: string }> {
-  if (!connection.connection_id) throw configError("Pending agent connection identifier is unavailable.");
-  const client = clientFor(runtime, args, resolved.apiUrl, pendingToken);
-  const verifyActiveAgent = async (): Promise<Agent> => {
-    const verification = await client.call({ method: "GET", path: "/api/agents/self" });
-    requirePrivateNoStore(verification.headers, "Agent verification response");
-    const verified = validateAgentSelfStatus(verification.body, "active").agent;
-    if (verified.id !== agentId) throw configError("Persisted agent credential did not verify against its agent.");
-    return verified;
-  };
-  const persistActiveProject = async (): Promise<void> => {
-    const projectResponse = await client.call({ method: "GET", path: "/api/project" });
-    const context = contextFromProject(projectResponse.body as Project);
-    if (connection.project_id && context.project.id !== connection.project_id) throw configError("Connection activated a different project from its approved request.");
-    await cacheProjectContexts(runtime, resolved, [context], { select: context.project.id, token: pendingToken, agentId, connectionId: connection.connection_id });
-  };
-
-  let activation;
-  try {
-    activation = await client.call({ method: "POST", path: "/api/agents/self/activate" });
-  } catch (err) {
-    if (!(err instanceof CliError)) throw err;
-    if (err.problem.code === "agent_connection_invalid") {
-      try {
-        const verified = await verifyActiveAgent();
-        await persistActiveProject();
-        return { agent: verified, requestId: client.requestId };
-      } catch (verificationError) {
-        if (verificationError instanceof CliError && verificationError.problem.code === "unauthorized") {
-          return clearDefinitivePendingAgentFailure(
-            runtime,
-            resolved,
-            connection,
-            verificationError,
-            "The pending agent credential was rejected or revoked after the activation connection was cleaned up.",
-          );
-        }
-        throw verificationError;
-      }
-    }
-    if (err.problem.code === "unauthorized") {
-      return clearDefinitivePendingAgentFailure(
-        runtime,
-        resolved,
-        connection,
-        err,
-        "The pending agent credential was cryptographically rejected or revoked before activation.",
-      );
-    }
-    if (err.problem.code === "agent_connection_cancelled" || err.problem.code === "agent_connection_expired") {
-      return clearDefinitivePendingAgentFailure(
-        runtime,
-        resolved,
-        connection,
-        err,
-        err.problem.code === "agent_connection_cancelled"
-          ? "The pending agent connection was cancelled before activation."
-          : "The pending agent connection expired before activation.",
-      );
-    }
-    throw err;
-  }
-  requirePrivateNoStore(activation.headers, "Agent activation response");
-  const active = validateAgent(activation.body, "active");
-  if (active.id !== agentId) throw configError("Activated agent does not match the collected credential.");
-  let verified: Agent;
-  try {
-    verified = await verifyActiveAgent();
-  } catch (err) {
-    if (err instanceof CliError && err.problem.code === "unauthorized") {
-      return clearDefinitivePendingAgentFailure(
-        runtime,
-        resolved,
-        connection,
-        err,
-        "The collected agent credential was revoked before post-activation verification.",
-      );
-    }
-    throw err;
-  }
-  await persistActiveProject();
-  return { agent: verified, requestId: client.requestId };
-}
-
-/**
- * Withdraw this installation's pending connection request. The connection
- * bearer authenticates it, as for credential collection. Cancelled, denied and
- * expired requests answer 200 unchanged, so the local state is cleared on any
- * 200; an approved request (409) keeps it so agent connect can still finish.
- */
-async function agentConnectCancel(
-  args: ParsedArgs,
-  runtime: CliRuntime,
-  resolved: Awaited<ReturnType<typeof resolveConfig>>,
-): Promise<CommandResult> {
-  const pending = (await currentAgentConnectionConfig(resolved, runtime))?.agent_connection;
-  if (!pending) {
-    throw usageError("This installation has no pending agent connection to cancel; nothing was sent.", {
-      command: "screenrig agent status", reason: "Shows this installation's credential and connection state.",
-    });
-  }
-  if (!pending.connection_id || !pending.connection_token) {
-    // The request never reached the server, so only the local key and inputs remain.
-    await clearUnsentAgentConnection(runtime, resolved);
-    return {
-      envelope: successEnvelope({ status: "cancelled", request_submitted: false, local_state_cleared: true }),
-      exitCode: ExitCode.Success,
-      human: humanLines("Agent connection cancelled", [["status", "cancelled"], ["request_submitted", "false"]]),
-    };
-  }
-  const client = clientFor(runtime, args, resolved.apiUrl);
-  let response;
-  try {
-    response = await client.call({
-      method: "POST",
-      path: `/api/agent-connections/${pending.connection_id}/cancel`,
-      headers: { authorization: `ScreenRig-Agent-Connect ${pending.connection_token}` },
-    });
-  } catch (err) {
-    if (err instanceof CliError && err.problem.code === "agent_connection_invalid") {
-      return clearDefinitivePendingAgentFailure(runtime, resolved, pending, err,
-        "The server does not recognize this installation's connection request, so nothing remains to cancel.");
-    }
-    if (err instanceof CliError && err.problem.code === "agent_connection_conflict") {
-      throw new CliError({ ...err.problem, hint: err.problem.hint ?? "The request was already approved, so it can no longer be cancelled.",
-        next: { command: "screenrig agent connect", reason: "Finish the approved connection, then end that membership with screenrig agent disconnect." } }, err.exitCode, err.warnings);
-    }
-    throw err;
-  }
-  requirePrivateNoStore(response.headers, "Agent connection cancel response");
-  const connection = validateAgentConnectionEvent(response.body, pending.connection_id);
-  if (connection.status !== "cancelled" && connection.status !== "denied" && connection.status !== "expired") {
-    throw unexpectedResponseError(`Cancel answered status ${connection.status} for a request it should have ended.`, client.requestId,
-      "Run screenrig agent connect to see the request's current state.");
-  }
-  await clearAgentConnection(runtime, resolved, pending.connection_id, true);
-  return {
-    envelope: successEnvelope({ status: connection.status, connection_id: pending.connection_id, request_submitted: true, local_state_cleared: true }, { request_id: client.requestId }),
-    exitCode: ExitCode.Success,
-    human: humanLines("Agent connection cancelled", [["status", connection.status], ["connection_id", pending.connection_id]]),
-  };
-}
-
-async function clearUnsentAgentConnection(runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>): Promise<void> {
-  const fsLike = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
-  await withConfigLock(resolved.configPath, fsLike, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
-    const current = await readConfigFile(resolved.configPath, fsLike);
-    if (!current?.agent_connection || current.agent_connection.connection_id) return;
-    const { agent_connection: _unsent, ...rest } = current;
+    if (!current?.enrollment) return;
+    const { enrollment: _pending, token: _token, project_id: _project, project_name: _projectName, agent_id: _agent, ...rest } = current;
     await writeConfigAtomic(resolved.configPath, { ...rest, updated_at: runtime.now().toISOString() }, fsLike);
   });
-}
-
-async function agentConnect(
-  args: ParsedArgs,
-  runtime: CliRuntime,
-  resolved: Awaited<ReturnType<typeof resolveConfig>>,
-): Promise<CommandResult> {
-  if (flagBool(args.flags, "cancel")) return agentConnectCancel(args, runtime, resolved);
-
-  requireFlagValue(args, "name", "Office MacBook Codex");
-  requireFlagValue(args, "timeout", "86400000");
-  const name = flagString(args.flags, "name");
-  if (name && name.length > 80) throw usageError("agent connect --name is at most 80 characters.");
-  const capabilityFlag = flagString(args.flags, "capability");
-  const requestedCapabilities = capabilityFlag === undefined ? undefined
-    : AGENT_CAPABILITIES.filter((name) => capabilityFlag.split(",").includes(name));
-  const requestedTimeout = flagNumber(args.flags, "timeout");
-  if (flagString(args.flags, "timeout") !== undefined && requestedTimeout === undefined) {
-    throw usageError("agent connect --timeout must be an integer from 1 to 86400000 milliseconds.");
-  }
-  if (requestedTimeout !== undefined && (!Number.isInteger(requestedTimeout) || requestedTimeout <= 0 || requestedTimeout > 86_400_000)) {
-    throw usageError("agent connect --timeout must be an integer from 1 to 86400000 milliseconds.");
-  }
-  const saved = await currentAgentConnectionConfig(resolved, runtime);
-  if (saved?.enrollment_cleanup && !saved.agent_connection) {
-    const cleanup = await finishEnrollmentCleanup(args, runtime, resolved);
-    if (cleanup && (!flagString(args.flags, "target-project-id") || flagString(args.flags, "target-project-id") === cleanup.destination_project_id)) {
-      const updated = await currentAgentConnectionConfig(resolved, runtime);
-      if (!updated) throw configError("Stored identity disappeared during cleanup.");
-      const target = projectConfigFor(updated, { ...resolved, projectId: cleanup.destination_project_id });
-      const token = target.token ?? updated.identity_token;
-      const client = fixedProjectClient(runtime, args, resolved.apiUrl, requireToken(token), cleanup.destination_project_id);
-      const verification = await client.call({ method: "GET", path: "/api/agents/self" });
-      requirePrivateNoStore(verification.headers, "Agent verification response");
-      const agent = validateAgentSelfStatus(verification.body, "active").agent;
-      if (agent.id !== updated.agent_id) throw configError("Cleanup destination credential belongs to a different identity.");
-      setResultContext(runtime, { ...resolved, projectId: cleanup.destination_project_id, projectName: target.project_name, organizationId: target.organization_id, organizationName: target.organization_name });
-      return { envelope: successEnvelope({ status: "active", request_submitted: true, connection_complete: true, agent: safeAgentSummary(agent), connection_id: cleanup.connection_id, enrollment_cleanup: cleanup }, { request_id: client.requestId, warnings: cleanupWarnings(cleanup) }),
-        exitCode: ExitCode.Success, human: "Agent connected; enrollment cleanup " + cleanup.status };
-    }
-  }
-  if (resolved.token && !resolved.agentConnection) resolved = await identityForCommand(args, runtime, resolved);
-  let current = await currentAgentConnectionConfig(resolved, runtime);
-  let connection: AgentConnectionConfig;
-  if ((current?.agent_connection?.pending_token || current?.token) && current?.agent_connection?.pending_agent_id) {
-    const pending = current.agent_connection;
-    const requestedProject = flagString(args.flags, "target-project-id");
-    if (requestedProject !== undefined && requestedProject !== pending.project_id) throw usageError("The pending request is bound to a different project. Resume without changing --target-project-id.");
-    if (pending.identity_hash && pending.identity_hash !== createHash("sha256").update(current.identity_token ?? "").digest("hex")) throw configError("The pending connection's identity credential changed.");
-    if (requestedCapabilities && JSON.stringify(pending.capabilities) !== JSON.stringify(requestedCapabilities)) {
-      throw usageError("The pending connection has different capabilities. Resume without --capability; capabilities cannot change on an existing request.");
-    }
-    publicAgentConnectionKey(pending.private_jwk);
-    if (!pending.connection_id || !pending.connection_token || !pending.approval_url || !pending.expires_at) {
-      throw configError("Persisted pending agent activation state is incomplete.");
-    }
-    const checked = validateAgentConnectionStart({
-      connection_id: pending.connection_id,
-      connection_token: pending.connection_token,
-      approval_url: pending.approval_url,
-      expires_at: pending.expires_at,
-    }, resolved.apiUrl);
-    connection = { ...pending, approval_url: checked.approval_url };
-  } else {
-    const target = flagString(args.flags, "target-project-id");
-    if (target !== undefined && resolved.identityToken && !current?.agent_connection && isResourceID(target, "project")) {
-      // A membership this identity already holds needs no approval: select it instead of asking again.
-      // The check is best effort; without the list the request goes ahead as before.
-      const listed = await accessibleProjects(args, runtime, resolved).catch(() => undefined);
-      const member = listed?.projects.find((item) => item.project.id === target);
-      if (listed && member) {
-        const next = { command: `screenrig project use ${target}`, argv: ["project", "use", target], reason: "Selects this project; no new approval is needed." };
-        return {
-          envelope: successEnvelope({ status: "already_member", request_submitted: false, project_id: target, project_name: member.project.name, next }, { request_id: listed.requestId }),
-          exitCode: ExitCode.Success,
-          human: humanLines("Already a member of this project", [["project_id", target], ["project_name", member.project.name], ["next", next.command]]),
-        };
-      }
-    }
-    connection = await startOrResumeAgentConnection(args, runtime, resolved, name, requestedCapabilities);
-    current = await currentAgentConnectionConfig(resolved, runtime);
-  }
-  let pendingToken = connection.pending_token ?? (connection.pending_agent_id ? current?.token : undefined);
-  let pendingAgentId = connection.pending_agent_id;
-
-  const noWait = !flagBool(args.flags, "wait");
-  let opened = false;
-  let printed = false;
-  if (!(pendingToken && pendingAgentId)) {
-    if (!connection.approval_url || !connection.connection_id || !connection.connection_token) {
-      throw configError("Pending agent connection is incomplete.");
-    }
-    const handoff = async () => {
-      if (flagBool(args.flags, "print-url")) {
-        if (!noWait) emitAgentApprovalUrl(args, runtime, connection.approval_url!);
-        printed = true;
-      } else {
-        opened = await (runtime.openUrl?.(connection.approval_url!) ?? Promise.resolve(false));
-        if (!opened) {
-          if (!noWait) emitAgentApprovalUrl(args, runtime, connection.approval_url!);
-          printed = true;
-        }
-      }
-    };
-    if (!noWait) await handoff();
-    const timeoutMs = noWait ? Math.min(requestedTimeout ?? 1000, 1000) : requestedTimeout ?? 30_000;
-    let status: AgentConnection | undefined;
-    try {
-      status = await waitForAgentConnectionApproval(args, runtime, resolved, connection, timeoutMs, noWait);
-    } catch (err) {
-      if (err instanceof CliError && ["agent_connection_cancelled", "agent_connection_expired", "agent_connection_invalid"].includes(err.problem.code)) {
-        return clearDefinitivePendingAgentFailure(
-          runtime,
-          resolved,
-          connection,
-          err,
-          "The server reports that this pending agent connection is no longer available.",
-        );
-      }
-      throw err;
-    }
-    if (!status || status.status === "pending") {
-      if (!opened && !printed) await handoff();
-      const next = {
-        command: "screenrig agent connect --no-wait",
-        argv: ["agent", "connect", "--no-wait", "--config", resolved.configPath, "--api-url", resolved.apiUrl],
-        reason: "Complete dashboard approval, then resume. Use argv to preserve this configuration and API origin.",
-      };
-      return {
-        envelope: successEnvelope({ status: "pending", request_submitted: true, connection_complete: false, status_checked: status !== undefined, connection_id: connection.connection_id,
-          expires_at: status?.expires_at ?? connection.expires_at, opened, approval_url_printed: printed,
-          ...(printed ? { approval_url: connection.approval_url } : {}), next }),
-        exitCode: ExitCode.Success,
-        human: humanLines("Agent approval pending", [["status", "pending"], ["connection_complete", "false"], ["connection_id", connection.connection_id],
-          ["approval_url", printed ? connection.approval_url : undefined], ["next", next.command]]),
-      };
-    }
-    if (status.status === "denied" || status.status === "expired" || status.status === "cancelled") {
-      await clearAgentConnection(runtime, resolved, connection.connection_id, true);
-      const code = status.status === "denied"
-        ? "agent_connection_denied"
-        : status.status === "cancelled"
-          ? "agent_connection_cancelled"
-          : "agent_connection_expired";
-      const detail = status.status === "denied"
-        ? "The dashboard user denied this agent connection."
-        : status.status === "cancelled"
-          ? "The pending agent connection was cancelled and its local private state was removed."
-          : "The agent connection expired before approval.";
-      throw new CliError(makeProblem(code, "Agent connection did not complete", status.status === "denied" ? 403 : 410, detail, {
-        next: {
-          command: "screenrig agent connect",
-          reason: "Start a fresh passkey approval when another agent should be connected.",
-        },
-      }));
-    }
-    if (status.status === "connected") {
-      throw configError("The server reports this connection as connected, but no durable local agent credential exists.");
-    }
-    if (status.status !== "approved") throw configError("Agent connection did not reach an approved state.");
-
-    const collector = clientFor(runtime, args, resolved.apiUrl);
-    let collectedResponse;
-    try {
-      collectedResponse = await collector.call({
-        method: "POST",
-        path: `/api/agent-connections/${connection.connection_id}/credential`,
-        headers: { authorization: `ScreenRig-Agent-Connect ${connection.connection_token}` },
-      });
-    } catch (err) {
-      if (err instanceof CliError && ["agent_connection_cancelled", "agent_connection_expired", "agent_connection_invalid"].includes(err.problem.code)) {
-        return clearDefinitivePendingAgentFailure(
-          runtime,
-          resolved,
-          connection,
-          err,
-          err.problem.code === "agent_connection_cancelled"
-            ? "The approved pending agent was cancelled before its credential could be collected."
-            : "The pending connection can no longer deliver an agent credential.",
-        );
-      }
-      throw err;
-    }
-    requirePrivateNoStore(collectedResponse.headers, "Agent credential collection response");
-    const collected = collectedResponse.body as AgentCredentialCollection;
-    const decrypted = decryptAgentCredential(collected, connection);
-    if (resolved.agentId && decrypted.agentId !== resolved.agentId) throw configError("Connection delivered a different identity from the requesting agent.");
-    pendingToken = decrypted.token;
-    pendingAgentId = decrypted.agentId;
-    const fsLike = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
-    await withConfigLock(resolved.configPath, fsLike, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
-      current = await readConfigFile(resolved.configPath, fsLike);
-      if (!current?.agent_connection || current.agent_connection.connection_id !== connection.connection_id) {
-        throw configError("Pending agent connection changed before credential persistence.");
-      }
-      if (current.agent_id && current.agent_id !== decrypted.agentId) throw configError("Stored agent identity changed before connection credential persistence.");
-      connection = { ...current.agent_connection, pending_agent_id: decrypted.agentId, pending_token: decrypted.token };
-      await writeConfigAtomic(resolved.configPath, {
-        ...current,
-        api_url: current.api_url || resolved.apiUrl,
-        ...(decrypted.identityToken ? { identity_token: decrypted.identityToken, agent_id: decrypted.agentId } : {}),
-        agent_connection: connection,
-        updated_at: runtime.now().toISOString(),
-      }, fsLike);
-    });
-  }
-
-  if (!pendingToken || !pendingAgentId) throw configError("Pending agent credential is unavailable for activation.");
-  let activated: { agent: Agent; requestId: string };
-  activated = await activateCollectedAgent(args, runtime, resolved, connection, pendingToken, pendingAgentId);
-  const agent = activated.agent;
-  const cleanup = await finishEnrollmentCleanup(args, runtime, resolved);
-  return {
-    envelope: successEnvelope({
-      status: "active",
-      request_submitted: true,
-      connection_complete: true,
-      agent: safeAgentSummary(agent),
-      connection_id: connection.connection_id,
-      opened,
-      approval_url_printed: printed,
-      ...(cleanup ? { enrollment_cleanup: cleanup } : {}),
-    }, { request_id: activated.requestId, warnings: cleanupWarnings(cleanup) }),
-    exitCode: ExitCode.Success,
-    human: humanLines("Agent connected", [
-      ["status", "active"],
-      ["id", agent.id],
-      ["name", agent.name],
-      ["capabilities", agent.capabilities.join(", ")],
-      ["opened", opened ? "true" : "false"],
-      ["approval_url_printed", printed ? "true" : "false"],
-    ]),
-  };
-}
-
-function fixedProjectClient(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token: string, projectId: string): ApiClient {
-  return new ApiClient({ transport: transportFor(runtime, apiUrl, token), token, projectId,
-    requestIds: requestIdsFor(runtime, args), timeoutMs: flagNumber(args.flags, "timeout"),
-    creditsOwner: runtime, logger: loggerOf(runtime) });
-}
-
-function finishEnrollmentCleanup(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig) {
-  return cleanupEnrollmentProject(runtime, resolved, (token, projectId) => fixedProjectClient(runtime, args, resolved.apiUrl, token, projectId));
-}
-
-function cleanupWarnings(cleanup: EnrollmentCleanupResult | undefined): Warning[] {
-  if (cleanup?.status === "pending") return [{ code: "enrollment_cleanup_pending", message: "Connection completed. The enrollment project cleanup is saved; rerun agent connect to inspect and resume it without another approval." }];
-  if (cleanup?.status === "retained") return [{ code: "enrollment_project_retained", message: "Connection completed. Its original enrollment project was retained because automatic cleanup could not confirm an eligible empty project." }];
-  return [];
 }
 
 async function removeLocalAgentCredential(
@@ -2110,7 +1424,6 @@ async function agentDisconnect(
     });
   }
   if (!resolved.token) throw usageError("No stored ScreenRig agent credential exists; nothing was changed.");
-  if (resolved.agentConnection) throw usageError("Finish or let the pending agent connection expire before disconnecting it.");
   const token = resolved.token;
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   let agent: Agent | undefined;
@@ -2187,14 +1500,14 @@ async function agentDisconnect(
     human: humanLines("Agent disconnected", [
       ["local_credential", "removed"],
       ["project_screens_and_other_agents", "preserved"],
-      ["next", "screenrig agent enroll --email ADDRESS --organization NAME creates a new project; screenrig agent connect joins an existing one only when the user asks"],
+      ["next", "screenrig agent enroll --email ADDRESS --organization NAME creates a new project; screenrig login joins an existing one only when the user asks"],
     ]),
   };
 }
 
 async function agentRevokeIdentity(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
   if (!flagBool(args.flags, "yes")) throw usageError("agent revoke-identity requires --yes. It revokes this identity and all of its project memberships.");
-  const identity = await identityForCommand(args, runtime, resolved);
+  const identity = await identityForCommand(runtime, resolved);
   const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
   let alreadyRejected = false;
   try {
@@ -2214,8 +1527,7 @@ async function agentRevokeIdentity(args: ParsedArgs, runtime: CliRuntime, resolv
       return rest;
     };
     // Revoking the identity revokes every grant it holds, so the session goes too.
-    const { identity_token: _identity, identity_exchange: _exchange, identity_writes: _writes, enrollment_project: _source, enrollment_cleanup: _cleanup, agent_connection: _connection, enrollment: _enrollment,
-      oauth: _grant, oauth_exchange: _pendingExchange, login: _login, ...rest } = scrub(current);
+    const { identity_token: _identity, identity_writes: _writes, enrollment: _enrollment, oauth: _grant, login: _login, ...rest } = scrub(current);
     const projects = current.projects ? Object.fromEntries(Object.entries(current.projects).map(([id, value]) => [id, scrub({ api_url: current.api_url, ...value })])) : undefined;
     if (projects) for (const slot of Object.values(projects)) delete (slot as Partial<ScreenRigConfig>).api_url;
     await writeConfigAtomic(resolved.configPath, { ...rest, ...(projects ? { projects } : {}), updated_at: runtime.now().toISOString() }, fs);
@@ -2336,12 +1648,6 @@ async function enrollForCommand(
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
   options: { name?: string; explicit?: boolean; intent?: EnrollmentIntent } = {},
 ): Promise<Awaited<ReturnType<typeof resolveConfig>>> {
-  if (resolved.agentConnection) {
-    throw configError("An agent connection is pending in this config.", {
-      command: "screenrig agent connect",
-      reason: "Resume and activate that agent credential before running project commands.",
-    });
-  }
   const suppliedEmail = flagString(args.flags, "email");
   const suppliedClaim = flagString(args.flags, "agentid-claim");
   const alreadyEnrolled = Boolean(resolved.token && !resolved.enrollment);
@@ -2393,7 +1699,7 @@ async function enrollForCommand(
         const client = clientFor(runtime, args, resolved.apiUrl);
         const request: CLIEnrollmentRequest = {
           client_id: state.clientId,
-          ...(state.credentialFormat ? { credential_format: state.credentialFormat } : {}),
+          credential_format: state.credentialFormat,
           ...(state.email !== undefined ? { email: state.email } : {}),
           ...(state.agentidClaim !== undefined ? { agentid_claim: state.agentidClaim } : {}),
           ...(state.projectName !== undefined ? { project_name: state.projectName } : {}),
@@ -2431,8 +1737,8 @@ async function enrollForCommand(
               throw new CliError({
                 ...err.problem,
                 next: {
-                  command: "screenrig agent connect",
-                  reason: "This AgentID already holds an enrolled agent. Connect this installation to the existing project instead of enrolling a second agent.",
+                  command: "screenrig login",
+                  reason: "This AgentID already holds an enrolled agent. Sign this installation in to the existing project instead of enrolling a second agent.",
                 },
               }, err.exitCode, err.warnings);
             }
@@ -2440,47 +1746,28 @@ async function enrollForCommand(
           throw err;
         }
         requirePrivateNoStore(response.headers, "Enrollment response");
-        // A server that issues OAuth tokens answers the token pair; one that does not answers the legacy shape.
-        const delivered = response.body as CLIEnrollment | CLIEnrollmentOAuth;
-        if ("access_token" in delivered) {
-          const agent = validateAgent(delivered.agent, "active");
-          if (!delivered.project?.id || !delivered.project.name || !delivered.invitation?.id
-            || delivered.connection_ready !== false || !isSessionJwt(delivered.access_token) || !isSessionJwt(delivered.refresh_token)
-            || delivered.token_type !== "Bearer" || typeof delivered.scope !== "string"
-            || !delivered.issuance_id || !delivered.issuance_expires_at) {
-            throw usageError("Enrollment response does not match the generated CLIEnrollmentOAuth contract.");
-          }
-          const identity = delivered.scope.split(" ").includes(SCOPE_IDENTITY);
-          return {
-            token: delivered.access_token,
-            projectId: delivered.project.id,
-            projectName: delivered.project.name,
-            agentId: agent.id,
-            ...(identity ? { identityToken: delivered.access_token } : {}),
-            organizationId: delivered.project.organization_id,
-            organizationName: delivered.project.organization_name,
-            oauth: {
-              refreshToken: delivered.refresh_token,
-              ...(typeof delivered.refresh_expires_at === "number" ? { refreshExpiresAt: delivered.refresh_expires_at } : {}),
-              identity,
-            },
-          };
+        const delivered = response.body as CLIEnrollmentOAuth;
+        const agent = validateAgent(delivered.agent, "active");
+        if (!delivered.project?.id || !delivered.project.name || !delivered.invitation?.id
+          || delivered.connection_ready !== false || !isSessionJwt(delivered.access_token) || !isSessionJwt(delivered.refresh_token)
+          || delivered.token_type !== "Bearer" || typeof delivered.scope !== "string"
+          || !delivered.issuance_id || !delivered.issuance_expires_at) {
+          throw usageError("Enrollment response does not match the generated CLIEnrollmentOAuth contract.");
         }
-        const enrollment = delivered;
-        const agent = validateAgent(enrollment.agent, "active");
-        if (!enrollment.project?.id || !enrollment.project.name || !enrollment.invitation?.id
-          || enrollment.connection_ready !== false || !enrollment.token
-          || !enrollment.issuance_id || !enrollment.issuance_expires_at) {
-          throw usageError("Enrollment response does not match the generated CLIEnrollment contract.");
-        }
+        const identity = delivered.scope.split(" ").includes(SCOPE_IDENTITY);
         return {
-          token: enrollment.token,
-          projectId: enrollment.project.id,
-          projectName: enrollment.project.name,
+          token: delivered.access_token,
+          projectId: delivered.project.id,
+          projectName: delivered.project.name,
           agentId: agent.id,
-          ...(enrollment.identity_token ? { identityToken: validateIdentityToken(enrollment.identity_token) } : {}),
-          organizationId: enrollment.project.organization_id,
-          organizationName: enrollment.project.organization_name,
+          ...(identity ? { identityToken: delivered.access_token } : {}),
+          organizationId: delivered.project.organization_id,
+          organizationName: delivered.project.organization_name,
+          oauth: {
+            refreshToken: delivered.refresh_token,
+            ...(typeof delivered.refresh_expires_at === "number" ? { refreshExpiresAt: delivered.refresh_expires_at } : {}),
+            identity,
+          },
         };
       },
       verify: async (token, projectId) => {
@@ -2522,32 +1809,25 @@ async function projectShow(args: ParsedArgs, runtime: CliRuntime, resolved: Awai
   };
 }
 
-async function identityForCommand(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<ResolvedCommandConfig> {
+/** Identity is a scope of the sign-in's access token, renewed like any other. */
+async function identityForCommand(runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<ResolvedCommandConfig> {
+  const session = oauthSessionFor(runtime, resolved);
   const stored = await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir });
-  if (stored?.oauth) {
-    // Under a grant, identity is a scope of the access token, renewed like any other.
-    const identityToken = await oauthSessionFor(runtime, resolved).identityToken();
-    if (!identityToken) {
-      throw new CliError(makeProblem("insufficient_access", "Insufficient access", 403,
-        "This sign-in covers one project and has no identity access, so it cannot list or create projects.", {
-          next: { command: "screenrig login", reason: "Sign in again; the approval grants identity access with the project capability." },
-        }), ExitCode.Auth);
-    }
-    return { ...resolved, identityToken };
+  if (!stored?.oauth && !session.serviceMode) throw missingCredentialError(resolved);
+  const identityToken = await session.identityToken();
+  if (!identityToken) {
+    throw new CliError(makeProblem("insufficient_access", "Insufficient access", 403,
+      session.serviceMode
+        ? "A service client acts on its own project and has no identity access, so it cannot list, select or create projects."
+        : "This sign-in covers one project and has no identity access, so it cannot list or create projects.", {
+        next: { command: "screenrig login", reason: "Sign in again; the approval grants identity access with the project capability." },
+      }), ExitCode.Auth);
   }
-  return ensureIdentityCredential({ resolved,
-    runtime: { fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir }, now: runtime.now, sleep: runtime.sleep },
-    exchange: async (key) => {
-      const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-      const response = await client.call({ method: "POST", path: "/api/agent-identity/exchange", idempotent: true, idempotencyKey: key });
-      requirePrivateNoStore(response.headers, "Identity credential response");
-      return response.body as AgentIdentityCredential;
-    },
-  });
+  return { ...resolved, identityToken };
 }
 
 async function accessibleProjects(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<{ resolved: ResolvedCommandConfig; projects: ProjectContextList["projects"]; requestId: string }> {
-  const identity = await identityForCommand(args, runtime, resolved);
+  const identity = await identityForCommand(runtime, resolved);
   const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
   const response = await client.call({ method: "GET", path: "/api/projects" });
   const body = response.body as ProjectContextList;
@@ -2571,7 +1851,7 @@ async function projectUse(args: ParsedArgs, runtime: CliRuntime, resolved: Resol
   const selected = listed.projects.find(item => item.project.id === id);
   if (!selected) {
     throw new CliError(makeProblem("not_found", "Project not available", 404, `${id} is not a project this identity belongs to.`, {
-      hint: "Pick an ID from project list; to join another project, request approval with agent connect --target-project-id ID.",
+      hint: "Pick an ID from project list; to join another project, sign in to it with screenrig login --project ID.",
       next: { command: "screenrig project list", reason: "Lists the projects this identity can select." },
     }));
   }
@@ -2586,26 +1866,18 @@ async function projectCreate(args: ParsedArgs, runtime: CliRuntime, resolved: Re
   const organizationName = flagString(args.flags, "organization");
   if (organizationId && organizationName) throw usageError("Use one of --organization-id or --organization.");
   if (resolved.identityWriteScope && !organizationId && !organizationName) throw usageError("Creating without a current project requires --organization-id or --organization.");
-  const identity = await identityForCommand(args, runtime, resolved);
+  const identity = await identityForCommand(runtime, resolved);
   const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
   const body: ProjectCreate = { name, ...(organizationId ? { organization_id: organizationId } : {}),
     ...(organizationName !== undefined ? { organization_name: validateDisplayName(organizationName, "Organization name") } : {}) };
   const response = await client.call({ method: "POST", path: "/api/projects", body, idempotent: true,
     ...(resolved.projectId ? { headers: { "screenrig-project": resolved.projectId } } : {}) });
   if (!(headerValue(response.headers, "cache-control") ?? "").split(",").map(value => value.trim().toLowerCase()).includes("no-store")) {
-    throw configError("Project credential delivery response did not prohibit storage.");
+    throw configError("The project create response did not prohibit storage.");
   }
-  const created = response.body as CreatedProject;
-  const context = validateProjectContext(created);
-  // Under a grant the new project joins the grant's consent and delivers no token: the next command renews one for it.
-  const granted = isSessionJwt(identity.identityToken);
-  if (!granted && (typeof created.token !== "string" || !/^sr_live_(?!idt_)[A-Za-z0-9_-]+_[A-Za-z0-9_-]+$/.test(created.token)
-    || !created.issuance_expires_at || !Number.isFinite(Date.parse(created.issuance_expires_at)))) {
-    throw configError("The new project did not deliver its membership credential. Local selection was retained; retry the exact create request.");
-  }
-  await cacheProjectContexts(runtime, identity, [context], { identityToken: identity.identityToken, select: context.project.id,
-    ...(granted ? {} : { token: created.token }) });
-  // The private credential is stored before returning the public result.
+  const context = validateProjectContext(response.body as CreatedProject);
+  // The new project joins the grant's consent and delivers no token: the next command renews one for it.
+  await cacheProjectContexts(runtime, identity, [context], { identityToken: identity.identityToken, select: context.project.id });
   return { envelope: successEnvelope({ project: context.project, organization: context.organization, ...(context.owner_user_id ? { owner_user_id: context.owner_user_id } : {}) }, { request_id: client.requestId }),
     exitCode: ExitCode.Success, human: `Created ${context.organization.name} / ${context.project.name} (${context.project.id})` };
 }
@@ -4942,7 +4214,7 @@ function previewPlaceholderWarning(placeholders: PreviewPlaceholder[], online: b
   const what = ids.length > 0 ? ` (${ids.slice(0, 5).join(", ")}${ids.length > 5 ? ", ..." : ""})` : "";
   const fix = online
     ? "The project could not supply those pixels; check the media IDs with media show."
-    : "Log in (agent enroll or agent connect) to fetch project media, or save each file beside the playlist as <media_id>.png, .jpg, .webp, .gif, .mp4 or .webm.";
+    : "Sign in (screenrig login or agent enroll) to fetch project media, or save each file beside the playlist as <media_id>.png, .jpg, .webp, .gif, .mp4 or .webm.";
   return {
     code: "preview_media_placeholder",
     message: `${placeholders.length} media primitive(s) were drawn as labelled placeholder boxes, not their real pixels${what}. ${fix}`,
@@ -7191,16 +6463,13 @@ function credentialCheck(resolved: Awaited<ReturnType<typeof resolveConfig>>): D
       next: { command: "screenrig login", reason: "Sign this installation in again; a person approves it in the dashboard." },
     };
   }
-  if (resolved.agentConnection) {
+  if (resolved.retiredCredential) {
     return {
       name: "token",
       status: "warn",
-      detail: `${detail}; an agent connection is pending dashboard approval`,
+      detail: `${detail}; the stored credential is no longer accepted`,
       path: "reconnect_existing",
-      next: {
-        command: "screenrig agent connect",
-        reason: "Resume the intentional existing-project connection, then rerun doctor.",
-      },
+      next: { command: "screenrig login", reason: "Sign this installation in; a person approves it in the dashboard. Then rerun doctor." },
     };
   }
   if (resolved.lastAgent) {
@@ -7211,7 +6480,7 @@ function credentialCheck(resolved: Awaited<ReturnType<typeof resolveConfig>>): D
       path: "first_run_enroll",
       next: {
         command: "screenrig agent enroll --email ADDRESS --organization NAME",
-        reason: "Ask the user for their contact email, enroll a new project agent, then rerun doctor. Use agent connect only for an intentional existing-project reconnect.",
+        reason: "Ask the user for their contact email, enroll a new project agent, then rerun doctor. Use screenrig login only when the user asked to join an existing project.",
       },
     };
   }
@@ -7488,8 +6757,8 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
   const remote = () => preparedClient ??= (async () => {
     const client = existingClient ??= clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
     // Purely local preparation remains offline. Once this invocation reads
-    // a screen/media or uploads a file, bind legacy token-only configs to
-    // their authenticated project before performing that remote work.
+    // a screen/media or uploads a file, bind a config without cached project
+    // names to its authenticated project before performing that remote work.
     if (!resolved.projectId || !resolved.projectName || !resolved.organizationName) {
       const response = await client.call({ method: "GET", path: "/api/project" });
       const context = contextFromProject(response.body as Project);

@@ -12,13 +12,8 @@ import { isResourceID } from "./generated/resource-ids.js";
       token?: string;
       /** Global identity; never used as an implicit project credential. */
       identity_token?: string;
-      identity_exchange?: { idempotency_key: string; project_id?: string; credential_hash: string; started_at: string };
       /** Identity-scoped creates made without a current project. */
       identity_writes?: ScreenRigConfig["pending_writes"];
-      /** Enrollment provenance, saved only from a successful Screens delivery. */
-      enrollment_project?: { project_id: string; agent_id: string };
-      /** Cleanup is independent of a completed connection and can be resumed. */
-      enrollment_cleanup?: { project_id: string; destination_project_id: string; agent_id: string; connection_id: string };
       /** Credentials and retry state scoped by verified project ID. */
       projects?: Record<string, StoredProjectState>;
       organization_id?: string;
@@ -35,25 +30,6 @@ import { isResourceID } from "./generated/resource-ids.js";
         capabilities: AgentCapability[];
         state: "revoked";
         revoked_at?: string;
-      };
-      agent_connection?: {
-        /** Exact requested project and identity, fixed until this request ends. */
-        project_id?: string;
-        identity_hash?: string;
-        pending_token?: string;
-        private_jwk: {
-          kty: "OKP";
-          crv: "X25519";
-          x: string;
-          d: string;
-        };
-        name?: string;
-        capabilities: AgentCapability[];
-        connection_id?: string;
-        connection_token?: string;
-        approval_url?: string;
-        expires_at?: string;
-        pending_agent_id?: string;
       };
       enrollment?: {
         client_id: string;
@@ -75,8 +51,8 @@ import { isResourceID } from "./generated/resource-ids.js";
         intent?: "advertising" | "signage";
         /**
          * The credential format this enrollment asked for, fixed with its
-         * idempotency key. An enrollment an older CLI started has none and
-         * resumes with the identical body.
+         * idempotency key. A pending enrollment without it starts again under
+         * a new key.
          */
         credential_format?: "oauth";
       };
@@ -103,13 +79,9 @@ import { isResourceID } from "./generated/resource-ids.js";
       /**
        * The OAuth grant: the rotating refresh token of this installation's
        * session. Access tokens live in the project slots' `token` and in
-       * `identity_token`, like the legacy credentials they replace.
+       * `identity_token`.
        */
       oauth?: OAuthGrantState;
-      /** A legacy-credential exchange in flight: its request_id is reused for every retry within 10 minutes. */
-      oauth_exchange?: { request_id: string; source: string; started_at: string };
-      /** The server issued no OAuth tokens when last asked; the legacy credential stays in use until then. */
-      oauth_unavailable_until?: string;
       /** A device login waiting for approval. The device code is a secret: it is sent only to the token endpoint. */
       login?: PendingLogin;
       /** Set by logout, so the next command names screenrig login. */
@@ -128,8 +100,6 @@ import { isResourceID } from "./generated/resource-ids.js";
       identity?: boolean;
       /** A refresh in flight: a retry of the same refresh within 60 s reuses its request_id. */
       refresh_request?: { request_id: string; from: string; started_at: string };
-      /** Legacy credentials an exchange replaced, kept until the first request a new access token authenticates. */
-      legacy?: { token?: string; identity_token?: string; projects?: Record<string, string> };
     }
 
     export interface PendingLogin {
@@ -516,10 +486,11 @@ import { isResourceID } from "./generated/resource-ids.js";
       identityWriteScope?: boolean;
       agentId?: string;
       enrollment?: ScreenRigConfig["enrollment"];
-      agentConnection?: ScreenRigConfig["agent_connection"];
       lastAgent?: ScreenRigConfig["last_agent"];
       /** Logout or an ended session left no credential: the next step is screenrig login. */
       signedOut?: boolean;
+      /** The config holds only a project or identity token from before sign-in: the next step is screenrig login. */
+      retiredCredential?: boolean;
       configPath: string;
       logSocket?: string;
       source: {
@@ -557,9 +528,17 @@ import { isResourceID } from "./generated/resource-ids.js";
     }
 
     function holdsCredential(file: ScreenRigConfig): boolean {
-      return Boolean(file.token || file.identity_token || file.agent_connection?.pending_token || file.agent_connection?.connection_token
-        || file.oauth?.refresh_token || file.login?.device_code
+      return Boolean(file.token || file.identity_token || file.oauth?.refresh_token || file.login?.device_code
         || Object.values(file.projects ?? {}).some((project) => project?.token));
+    }
+
+    /** A project or identity token from before sign-in. The API refuses it, so it is never sent. */
+    export function isRetiredCredential(token: string | undefined): boolean {
+      return typeof token === "string" && token.startsWith("sr_live_");
+    }
+
+    function holdsRetiredCredential(file: ScreenRigConfig): boolean {
+      return [file.token, file.identity_token, ...Object.values(file.projects ?? {}).map((project) => project?.token)].some(isRetiredCredential);
     }
 
     function parsedOrigin(value: string): URL {
@@ -622,7 +601,7 @@ import { isResourceID } from "./generated/resource-ids.js";
       const envToken = options.fs.env.SCREENRIG_TOKEN;
       if (flagToken !== undefined || envToken) {
         throw configError(
-          "Token flags and SCREENRIG_TOKEN are not supported. ScreenRig enrollment or passkey-approved agent connection stores a distinct credential in the user config.",
+          "Token flags and SCREENRIG_TOKEN are not supported. screenrig login and agent enroll store this installation's sign-in in the user config.",
         );
       }
 
@@ -653,8 +632,11 @@ import { isResourceID } from "./generated/resource-ids.js";
       if (options.flags["project-id"] !== undefined && !isResourceID(selectedId, "project")) throw configError("--project-id must be a project ID from project list.");
       const selected = selectedId && selectedId !== file?.project_id ? file?.projects?.[selectedId] : file;
       if (selectedId && !selected) throw configError("This project is not cached. Run project use ID to select an accessible project.");
-      if (selected?.token || (selectedId && file?.identity_token)) {
-        token = selected?.token ?? file?.identity_token;
+      const usable = (value: string | undefined) => isRetiredCredential(value) ? undefined : value;
+      const selectedToken = usable(selected?.token);
+      const identityToken = usable(file?.identity_token);
+      if (selectedToken || (selectedId && identityToken)) {
+        token = selectedToken ?? identityToken;
         tokenSource = "config";
       }
       const logSocket = await validateLogSocketPath(file?.log_socket, options.fs);
@@ -665,12 +647,12 @@ import { isResourceID } from "./generated/resource-ids.js";
         projectName: selected?.project_name,
         organizationId: selected?.organization_id,
         organizationName: selected?.organization_name,
-        identityToken: file?.identity_token,
+        identityToken,
         agentId: file?.agent_id,
         enrollment: file?.enrollment,
-        agentConnection: file?.agent_connection,
         lastAgent: file?.last_agent,
         ...(file?.signed_out_at ? { signedOut: true } : {}),
+        ...(file && !file.oauth && holdsRetiredCredential(file) ? { retiredCredential: true } : {}),
         configPath,
         logSocket,
         source: { apiUrl: apiSource, token: tokenSource },
@@ -678,10 +660,10 @@ import { isResourceID } from "./generated/resource-ids.js";
     }
 
     /**
-     * Whether two stored credentials are the same authority. A legacy
-     * credential is its exact value; an access token is its grant (sid) and,
-     * for a project credential, its project, so a refresh by another process
-     * is not a change of credential.
+     * Whether two stored credentials are the same authority. An access token
+     * is its grant (sid) and, for a project credential, its project, so a
+     * refresh by another process is not a change of credential; any other
+     * value is its exact self.
      */
     export function sameCredential(a: string | undefined, b: string | undefined, kind: "project" | "identity" = "project"): boolean {
       if (a === b) return true;

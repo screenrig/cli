@@ -161,14 +161,15 @@ test("normalizeProblem carries hint, next.argv, retryable, trace_id, and errors 
 test("the server's next wins over the local missing-capability guidance", () => {
   const detail = "This agent credential lacks the screens capability.";
   const local = normalizeProblem({ status: 403, code: "forbidden", title: "Request is not allowed", detail });
-  assert.match(local.next?.command ?? "", /agent connect --capability screens/);
+  assert.equal(local.next?.command, "screenrig login");
+  assert.match(local.next?.reason ?? "", /grant screens/);
   const served = normalizeProblem({ status: 403, code: "forbidden", title: "Request is not allowed", detail, hint: "Server hint.", next: { command: "screenrig agent status", reason: "Check." } });
   assert.equal(served.next?.command, "screenrig agent status");
   assert.equal(served.hint, "Server hint.");
 });
 
 test("a non-problem error body keeps status, request_id, and a bounded redacted excerpt", () => {
-  const html = `<html><body><h1>502 Bad Gateway</h1>${"x".repeat(1000)} Bearer sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr</body></html>`;
+  const html = `<html><body><h1>502 Bad Gateway</h1>${"x".repeat(1000)} Bearer eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr</body></html>`;
   const problem = normalizeProblem(html, { status: 502, request_id: "req_proxy", bodyText: html });
   assert.equal(problem.status, 502);
   assert.equal(problem.request_id, "req_proxy");

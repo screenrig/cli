@@ -1,6 +1,6 @@
 import { commandHelp, CREDIT_HELP } from "./help.js";
 import assert from "node:assert/strict";
-import { createCipheriv, createHash, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync } from "node:crypto";
+import { createHash } from "node:crypto";
 import { PassThrough } from "node:stream";
 import { readFileSync } from "node:fs";
 import { mkdir, open, readFile, readdir, rename, chmod, stat, writeFile, rm } from "node:fs/promises";
@@ -20,7 +20,6 @@ import { AGENT_CAPABILITIES } from "./adapters/protocol.js";
 import { SDK_PROTOCOL_VERSION } from "./adapters/sdk-injection.js";
 import { testTemp } from "./test-temp.js";
 import { resetFfmpegToolchainCache } from "./media/ffmpeg.js";
-import { generateAgentConnectionKey } from "./agent-identity.js";
 import { createMemoryLogger } from "./log/logger.js";
 
 const TEST_AGENT = {
@@ -113,7 +112,7 @@ async function withAuthenticatedRuntime(
     await writeConfigAtomic(configPath, {
       ...(existing ?? {}),
       api_url: existing?.api_url ?? "https://api.screenrig.ai",
-      token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
       agent_id: TEST_AGENT.id,
       project_name: "Screens",
@@ -171,7 +170,7 @@ test("pairing requires explicit enrollment and then preserves the original pairi
   const next = (envelope.data as unknown as { next?: { command: string; reason: string } }).next;
   assert.equal(next?.command, "screenrig screen show scr_PAIRINGAAAAAAAAAAAAAAAA", "a pending pairing names how to watch it finish");
   assert.match(next?.reason ?? "", /state active and online true/);
-  assert.ok(!paired.stdout.includes("sr_live_tokidAAAAAAAAAAAAAAAA_AAAA"));
+  assert.ok(!paired.stdout.includes("eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAA"));
   const methods = transport.calls.map((call) => `${call.method} ${call.path}`);
   assert.deepEqual(methods, [
     "POST /api/enrollments",
@@ -186,7 +185,7 @@ test("pairing requires explicit enrollment and then preserves the original pairi
   assert.equal(enrollBody.email, "Owner@example.com");
   assert.deepEqual(Object.keys(enrollBody).sort(), ["agent_type", "client_id", "credential_format", "email", "organization", "platform", "version"]);
   const verification = transport.calls.find((call) => call.path === "/api/project");
-  assert.match(verification?.headers?.authorization ?? "", /^Bearer sr_live_/);
+  assert.match(verification?.headers?.authorization ?? "", /^Bearer eyJ/);
   const pairing = transport.calls.find((call) => call.path === "/api/screens/pair");
   assert.deepEqual(pairing?.body, { code: "ABC234", label: "Lobby" });
   for (const call of transport.calls) {
@@ -301,7 +300,7 @@ test("a pending AgentID claim enrollment resumes without flags and reuses the sa
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
-    enrollment: { client_id: `cli_${"S".repeat(43)}`, idempotency_key: "enroll-agentid-resume", agentid_claim: claim },
+    enrollment: { client_id: `cli_${"S".repeat(43)}`, idempotency_key: "enroll-agentid-resume", credential_format: "oauth", agentid_claim: claim },
   }, fsLike);
   const result = await withRuntime(["--json", "agent", "enroll"], transport, { fs: fsLike });
   assert.equal(result.code, 0, result.stdout);
@@ -309,6 +308,7 @@ test("a pending AgentID claim enrollment resumes without flags and reuses the sa
   assert.equal(enroll?.headers?.["idempotency-key"], "enroll-agentid-resume");
   assert.deepEqual(enroll?.body, {
     client_id: `cli_${"S".repeat(43)}`,
+    credential_format: "oauth",
     agentid_claim: claim,
     agent_type: "cli",
     platform: `${process.platform}/${process.arch}`,
@@ -359,7 +359,7 @@ test("an AgentID enrollment refused as feature_unavailable leaves no pending cla
   }
 });
 
-test("agentid_already_enrolled names agent connect", async () => {
+test("agentid_already_enrolled names screenrig login", async () => {
   const claim = `agid_${"E".repeat(43)}`;
   const transport = memoryBackend({ agentidClaims: { [claim]: "already_enrolled" } });
   const { code, stdout, configDir } = await withRuntime(
@@ -373,7 +373,7 @@ test("agentid_already_enrolled names agent connect", async () => {
   };
   assert.equal(envelope.ok, false);
   assert.equal(envelope.error.code, "agentid_already_enrolled");
-  assert.equal(envelope.error.next?.command, "screenrig agent connect");
+  assert.equal(envelope.error.next?.command, "screenrig login");
   assert.match(envelope.error.next?.reason ?? "", /existing project/i);
   assert.ok(!stdout.includes(claim));
   await rm(configDir, { recursive: true, force: true });
@@ -426,7 +426,7 @@ test("agent enroll names the organization independently of its agent and reports
     "/api/project",
     "/api/agents/self",
   ]);
-  assert.doesNotMatch(result.stdout, /sr_live_|issuance|client_id|Owner@example\.com/);
+  assert.doesNotMatch(result.stdout, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_|issuance|client_id|Owner@example\.com/);
   await rm(result.configDir, { recursive: true, force: true });
 });
 
@@ -450,54 +450,6 @@ test("agent enroll rejects missing or malformed contact email before the network
   await rm(missing.configDir, { recursive: true, force: true });
   await rm(malformed.configDir, { recursive: true, force: true });
 });
-
-test("agent enroll --force discards an unwanted pending connection before enrolling", async () => {
-  const configDir = await testTemp("enroll-force-pending-connect-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
-  const configPath = path.join(configDir, "screenrig", "config.json");
-  await writeConfigAtomic(configPath, {
-    api_url: "https://api.screenrig.ai",
-    token: `sr_live_pending_${"P".repeat(43)}`,
-    project_id: "prj_PENDINGAAAAAAAAAAAAAAAA",
-    agent_id: "agt_PENDINGAAAAAAAAAAAAAAAA",
-    agent_connection: {
-      capabilities: [...AGENT_CAPABILITIES],
-      private_jwk: { kty: "OKP", crv: "X25519", x: "pending-public", d: "pending-private" },
-      connection_id: "acn_UNWANTED",
-      connection_token: "private-connection-token",
-      approval_url: "https://app.screenrig.ai/agent-connections/acn_UNWANTED",
-      expires_at: "2099-01-01T00:00:00Z",
-      pending_agent_id: "agt_PENDINGAAAAAAAAAAAAAAAA",
-    },
-  }, fsLike);
-
-  const blocked = await withRuntime(
-    ["--json", "agent", "enroll", "--organization", "Example organization", "--email", "owner@example.com"],
-    new FakeTransport(),
-    { fs: fsLike },
-  );
-  assert.equal(blocked.code, ExitCode.Usage, blocked.stdout);
-  assert.equal(
-    JSON.parse(blocked.stdout).error.next.command,
-    "screenrig agent enroll --force --email ADDRESS",
-  );
-
-  const transport = memoryBackend();
-  const enrolled = await withRuntime(
-    ["--json", "agent", "enroll", "--organization", "Example organization", "--force", "--email", "owner@example.com"],
-    transport,
-    { fs: fsLike },
-  );
-  assert.equal(enrolled.code, ExitCode.Success, enrolled.stdout);
-  assert.equal(JSON.parse(enrolled.stdout).data.status, "active");
-  const config = await readConfigFile(configPath, fsLike);
-  assert.equal(config?.agent_connection, undefined);
-  assert.ok(config?.token);
-  assert.doesNotMatch(JSON.stringify(config), /acn_UNWANTED|private-connection-token|pending-private|sr_live_pending|prj_PENDING|agt_PENDING/);
-  assert.equal(transport.calls.some((call) => call.path === "/api/agent-connections"), false);
-  await rm(configDir, { recursive: true, force: true });
-});
-
 
 test("every authenticated command reports not_enrolled instead of enrolling", async () => {
   for (const argv of [
@@ -573,7 +525,7 @@ test("agent status reports whether a persisted passkey can authorize another age
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
-    token: `sr_live_status_${"S".repeat(43)}`,
+    token: `eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_status_${"S".repeat(43)}`,
     project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
     agent_id: TEST_AGENT.id,
   }, fsLike);
@@ -587,193 +539,6 @@ test("agent status reports whether a persisted passkey can authorize another age
   assert.equal(JSON.parse(result.stdout).data.connection_ready, true);
   assert.deepEqual(transport.calls.map((call) => call.path), ["/api/agents/self"]);
   await rm(configDir, { recursive: true, force: true });
-});
-
-function agentConnectionEnvelope(recipient: { kty: "OKP"; crv: "X25519"; x: string }) {
-  const connectionId = "acn_AAAAAAAAAAAAAAAAAAAAAAAA";
-  const agentId = "agt_CONNECTEDAAAAAAAAAAAAAAAA";
-  const pendingToken = `sr_live_connected_${"P".repeat(43)}`;
-  const ephemeral = generateKeyPairSync("x25519");
-  const ephemeralJwk = ephemeral.publicKey.export({ format: "jwk" });
-  const shared = diffieHellman({
-    privateKey: ephemeral.privateKey,
-    publicKey: createPublicKey({ key: recipient as unknown as import("node:crypto").JsonWebKey, format: "jwk" }),
-  });
-  const salt = createHash("sha256").update(`screenrig/agent-credential-envelope/salt/v1\0${connectionId}`).digest();
-  const key = Buffer.from(hkdfSync("sha256", shared, salt, Buffer.from("screenrig/agent-credential-envelope/key/v1"), 32));
-  const nonce = Buffer.alloc(12, 3);
-  const cipher = createCipheriv("aes-256-gcm", key, nonce);
-  cipher.setAAD(Buffer.from(`screenrig/agent-credential-envelope/aad/v1\0${connectionId}\0${agentId}`));
-  const plaintext = Buffer.from(JSON.stringify({ token: pendingToken, agent_id: agentId, connection_id: connectionId }));
-  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final(), cipher.getAuthTag()]);
-  const pendingAgent = {
-    id: agentId,
-    name: "Office Codex",
-    agent_type: "cli",
-    capabilities: [...AGENT_CAPABILITIES],
-    platform: `${process.platform}/${process.arch}`,
-    version: "0.1.0",
-    state: "pending" as const,
-    authenticated_requests: 0,
-    metered_credits: 0,
-    created_at: "2026-08-14T17:00:00.000Z",
-  };
-  return {
-    connectionId,
-    agentId,
-    pendingToken,
-    pendingAgent,
-    collection: {
-      agent: pendingAgent,
-      credential_envelope: {
-        algorithm: "X25519-HKDF-SHA256-A256GCM",
-        ephemeral_public_key: { kty: "OKP", crv: "X25519", x: ephemeralJwk.x },
-        nonce: nonce.toString("base64url"),
-        ciphertext: ciphertext.toString("base64url"),
-      },
-      issuance_expires_at: "2026-08-14T17:10:00.000Z",
-    },
-  };
-}
-
-async function pendingConnectionConfig(prefix: string) {
-  const configDir = await testTemp(prefix);
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
-  const configPath = path.join(configDir, "screenrig", "config.json");
-  await writeConfigAtomic(configPath, {
-    api_url: "https://api.screenrig.ai",
-    agent_connection: {
-      capabilities: [...AGENT_CAPABILITIES],
-      private_jwk: generateAgentConnectionKey(),
-      connection_id: "acn_CANCELAAAAAAAAAAAAAAAA",
-      connection_token: `sac_${"C".repeat(43)}`,
-      approval_url: "https://screenrig.ai/dashboard/agents/connect/acn_CANCELAAAAAAAAAAAAAAAA",
-      expires_at: "2026-08-15T17:00:00.000Z",
-    },
-  }, fsLike);
-  return { configDir, fsLike, configPath };
-}
-
-function cancelledConnection(status: string) {
-  return { connection_id: "acn_CANCELAAAAAAAAAAAAAAAA", name: "cli", agent_type: "cli", status, capabilities: [...AGENT_CAPABILITIES],
-    expires_at: "2026-08-15T17:00:00.000Z", created_at: "2026-08-14T17:00:00.000Z" };
-}
-
-test("agent connect --cancel withdraws the pending request with its connection bearer and clears local state", async () => {
-  for (const status of ["cancelled", "expired"]) {
-    const { configDir, fsLike, configPath } = await pendingConnectionConfig("agent-cancel-");
-    const transport = new FakeTransport().on("POST", "/api/agent-connections/acn_CANCELAAAAAAAAAAAAAAAA/cancel", () => ({
-      status: 200, headers: { "cache-control": "private, no-store" }, body: cancelledConnection(status),
-    }));
-    try {
-      const result = await withRuntime(["--json", "agent", "connect", "--cancel"], transport, { fs: fsLike });
-      assert.equal(result.code, 0, result.stdout);
-      assert.equal(JSON.parse(result.stdout).data.status, status);
-      const call = transport.calls[0]!;
-      assert.equal(call.headers?.authorization, `ScreenRig-Agent-Connect sac_${"C".repeat(43)}`);
-      assert.equal(call.body, undefined);
-      assert.equal((await readConfigFile(configPath, fsLike))?.agent_connection, undefined);
-      assert.doesNotMatch(result.stdout, /sac_|private_jwk/);
-    } finally {
-      await rm(configDir, { recursive: true, force: true });
-    }
-  }
-});
-
-test("agent connect --cancel keeps an approved request and points at finishing it, and needs a pending request", async () => {
-  const { configDir, fsLike, configPath } = await pendingConnectionConfig("agent-cancel-approved-");
-  const transport = new FakeTransport().on("POST", "/api/agent-connections/acn_CANCELAAAAAAAAAAAAAAAA/cancel", () => ({
-    status: 409, headers: { "content-type": "application/problem+json" },
-    body: { status: 409, code: "agent_connection_conflict", title: "Agent connection is already resolved", detail: "This request was already approved; use agent disconnect." },
-  }));
-  try {
-    const refused = await withRuntime(["--json", "agent", "connect", "--cancel"], transport, { fs: fsLike });
-    assert.equal(refused.code, ExitCode.Conflict, refused.stdout);
-    assert.equal(JSON.parse(refused.stdout).error.next.command, "screenrig agent connect");
-    assert.ok((await readConfigFile(configPath, fsLike))?.agent_connection, "an approved request stays resumable");
-  } finally {
-    await rm(configDir, { recursive: true, force: true });
-  }
-  const none = new FakeTransport();
-  const empty = await withRuntime(["--json", "agent", "connect", "--cancel"], none);
-  try {
-    assert.equal(empty.code, ExitCode.Usage, empty.stdout);
-    assert.equal(none.calls.length, 0);
-  } finally {
-    await rm(empty.configDir, { recursive: true, force: true });
-  }
-  const conflicting = await withRuntime(["--json", "agent", "connect", "--cancel", "--wait"], new FakeTransport());
-  try {
-    assert.match(JSON.parse(conflicting.stdout).error.detail, /--cancel cannot be used with --wait|--wait cannot be used with --cancel/);
-  } finally {
-    await rm(conflicting.configDir, { recursive: true, force: true });
-  }
-});
-
-test("agent connect validates capability flags before network access", async () => {
-  for (const flags of [["--capability", "unknown"], ["--capability", ""], ["--capability"], ["--capability", "screens", "--capability", "screens"]]) {
-    const transport = new FakeTransport();
-    const result = await withRuntime(["agent", "connect", ...flags], transport);
-    assert.equal(result.code, ExitCode.Usage, result.stdout);
-    assert.equal(transport.calls.length, 0);
-    await rm(result.configDir, { recursive: true, force: true });
-  }
-});
-
-test("agent connect --target-project-id on a fresh install explains the identity precondition before network access", async () => {
-  const transport = new FakeTransport();
-  const result = await withRuntime(["--json", "agent", "connect", "--target-project-id", "prj_AAAAAAAAAAAAAAAAAAAAAAAA", "--print-url"], transport);
-  try {
-    assert.equal(result.code, ExitCode.Usage, result.stdout);
-    const envelope = JSON.parse(result.stdout) as { error: { detail: string; next: { command: string; reason: string } } };
-    assert.match(envelope.error.detail, /needs this installation's identity credential/);
-    assert.equal(envelope.error.next.command, "screenrig agent connect");
-    assert.match(envelope.error.next.reason, /approve the request in the dashboard/);
-    assert.equal(transport.calls.length, 0);
-    // Nothing pending was saved, so a plain agent connect starts cleanly.
-    const config = await readConfigFile(path.join(result.configDir, "screenrig", "config.json"), {
-      mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir, env: { XDG_CONFIG_HOME: result.configDir },
-    });
-    assert.equal(config?.agent_connection, undefined);
-  } finally {
-    await rm(result.configDir, { recursive: true, force: true });
-  }
-});
-
-test("agent connect requests canonical capabilities and preserves them across resume", async () => {
-  for (const flags of [[], ["--capability", "advertising", "--capability", "content"]]) {
-    const expected = flags.length ? ["content", "advertising"] : [...AGENT_CAPABILITIES];
-    const transport = new FakeTransport().on("POST", "/api/agent-connections", () => ({
-      status: 201,
-      headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
-      body: {
-        connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA",
-        connection_token: `sac_${"C".repeat(43)}`,
-        approval_url: "https://screenrig.ai/dashboard/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA",
-        expires_at: "2026-08-15T17:00:00.000Z",
-      },
-    }));
-    const snapshot = `event: agent.connection\ndata: ${JSON.stringify({
-      connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Buyer", agent_type: "cli",
-      capabilities: expected, status: "pending", expires_at: "2026-08-15T17:00:00.000Z", created_at: "2026-08-14T17:00:00.000Z",
-    })}\n\n`;
-    transport.queueStream({ chunks: [snapshot] });
-    const result = await withRuntime(["agent", "connect", "--print-url", ...flags], transport);
-    assert.equal(result.code, ExitCode.Success, result.stdout);
-    const body = transport.calls[0]?.body;
-    assert.ok(body && typeof body === "object" && "capabilities" in body);
-    assert.deepEqual(body.capabilities, expected);
-    const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir, env: { XDG_CONFIG_HOME: result.configDir } };
-    const stored = await readConfigFile(path.join(result.configDir, "screenrig", "config.json"), fsLike);
-    assert.deepEqual(stored?.agent_connection?.capabilities, expected);
-    const changed = await withRuntime(["agent", "connect", "--capability", "reports"], transport, { fs: fsLike });
-    assert.equal(changed.code, ExitCode.Usage, changed.stdout);
-    transport.queueStream({ chunks: [snapshot] });
-    const resumed = await withRuntime(["agent", "connect", "--print-url"], transport, { fs: fsLike });
-    assert.equal(resumed.code, ExitCode.Success, resumed.stdout);
-    assert.equal(transport.calls.filter((call) => call.method === "POST").length, 1);
-    await rm(result.configDir, { recursive: true, force: true });
-  }
 });
 
 test("agent status reports granted capabilities and capability denials give replacement guidance", async () => {
@@ -795,206 +560,9 @@ test("agent status reports granted capabilities and capability denials give repl
   const problem = JSON.parse(denied.stdout).error;
   assert.equal(problem.code, "forbidden");
   assert.equal(problem.detail, "This agent credential lacks the screens capability.");
-  assert.match(problem.next.command, /agent connect --capability screens/);
-  assert.match(problem.next.reason, /Connect a new agent/);
+  assert.equal(problem.next.command, "screenrig login");
+  assert.match(problem.next.reason, /grant screens/);
   for (const result of [status, human, denied]) await rm(result.configDir, { recursive: true, force: true });
-});
-
-test("agent connect rejects waits beyond one day before network access", async () => {
-  const result = await withRuntime(["--json", "agent", "connect", "--timeout", "86400001"], new FakeTransport());
-  assert.notEqual(result.code, 0);
-  assert.match(JSON.parse(result.stdout).error.detail, /1 to 86400000/);
-  await rm(result.configDir, { recursive: true, force: true });
-});
-
-for (const waitFlags of [[], ["--no-wait", "--timeout", "30000"], ["--wait", "--timeout", "10"]]) {
-  test(`agent connect ${waitFlags.join(" ")} returns resumable pending when the snapshot stalls`, async () => {
-    const transport = new FakeTransport();
-    transport.on("POST", "/api/agent-connections", () => ({
-      status: 201,
-      headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
-      body: {
-        connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA",
-        connection_token: `sac_${"C".repeat(43)}`,
-        approval_url: "https://screenrig.ai/dashboard/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA",
-        expires_at: "2026-08-15T17:00:00.000Z",
-      },
-    }));
-    transport.streamHandler = async (req) => {
-      const started = Date.now();
-      await new Promise<void>((resolve) => req.signal!.addEventListener("abort", () => resolve(), { once: true }));
-      assert.ok(Date.now() - started < 2500, "snapshot must not inherit a 30-second wait");
-      throw Object.assign(new Error("Aborted"), { name: "AbortError" });
-    };
-    const result = await withRuntime(["agent", "connect", "--print-url", ...waitFlags], transport);
-    assert.equal(result.code, 0, result.stdout);
-    const data = JSON.parse(result.stdout).data;
-    assert.equal(data.status, "pending");
-    assert.equal(data.request_submitted, true);
-    assert.equal(data.connection_complete, false);
-    assert.equal(data.status_checked, false);
-    assert.ok(data.next.argv.includes("--config"));
-    assert.equal(transport.calls.filter(call => call.method === "POST").length, 1);
-    await rm(result.configDir, { recursive: true, force: true });
-  });
-}
-
-test("agent connect resumes after its cached approval expiry when approved while offline", async () => {
-  const transport = new FakeTransport();
-  let sealed: ReturnType<typeof agentConnectionEnvelope> | undefined;
-  const connectionToken = `sac_${"C".repeat(43)}`;
-  transport.on("POST", "/api/agent-connections", (req) => {
-    const input = req.body as { recipient_public_key: { kty: "OKP"; crv: "X25519"; x: string } };
-    sealed = agentConnectionEnvelope(input.recipient_public_key);
-    sealed.collection.issuance_expires_at = "2026-08-16T16:00:00.000Z";
-    return {
-      status: 201,
-      headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
-      body: {
-        connection_id: sealed.connectionId,
-        connection_token: connectionToken,
-        approval_url: `https://screenrig.ai/dashboard/agents/connect/${sealed.connectionId}`,
-        expires_at: "2026-08-15T17:00:00.000Z",
-      },
-    };
-  });
-  // A newer server's extra event type and field must not stop approval.
-  transport.pushStream(`event: agent.connection.future\ndata: {}\n\nevent: agent.connection\ndata: ${JSON.stringify({
-    connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA",
-    name: "Office Codex",
-    agent_type: "cli",
-    capabilities: [...AGENT_CAPABILITIES],
-    status: "approved",
-    expires_at: "2026-08-15T17:00:00.000Z",
-    created_at: "2026-08-14T17:00:00.000Z",
-    field_from_a_newer_server: true,
-  })}\n\n`);
-  transport.on("POST", /\/api\/agent-connections\/acn_.*\/credential/, (req) => {
-    assert.equal(req.headers?.authorization, `ScreenRig-Agent-Connect ${connectionToken}`);
-    return { status: 200, headers: { "cache-control": "private, no-store" }, body: sealed!.collection };
-  });
-  transport.on("POST", "/api/agents/self/activate", (req) => {
-    assert.equal(req.headers?.authorization, `Bearer ${sealed!.pendingToken}`);
-    return { status: 200, headers: { "cache-control": "private, no-store" }, body: { ...sealed!.pendingAgent, state: "active", connected_at: "2026-08-14T17:00:01.000Z" } };
-  });
-  transport.on("GET", "/api/agents/self", () => ({
-    status: 200,
-    headers: { "cache-control": "private, no-store" },
-    body: { agent: { ...sealed!.pendingAgent, state: "active", connected_at: "2026-08-14T17:00:01.000Z" }, connection_ready: true },
-  }));
-  transport.queueStream(Object.assign(new Error("Interrupted"), { name: "AbortError" }));
-  const interrupted = await withRuntime(["--json", "agent", "connect", "--wait"], transport, { openUrl: async () => true });
-  assert.equal(JSON.parse(interrupted.stdout).error.code, "timeout");
-  const resumedFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => interrupted.configDir, env: { XDG_CONFIG_HOME: interrupted.configDir } };
-  const opened: string[] = [];
-  const resumed = await withRuntime(["--json", "agent", "connect", "--name", "Office Codex", "--wait", "--timeout", "86400000"], transport, {
-    fs: resumedFs,
-    now: () => new Date("2026-08-16T05:00:00.000Z"),
-    openUrl: async (url) => { opened.push(url); return true; },
-  });
-  const result = { ...resumed, configDir: interrupted.configDir };
-  assert.equal(transport.calls.filter(call => call.method === "POST" && call.path === "/api/agent-connections").length, 1);
-  assert.equal(result.code, 0, result.stdout);
-  assert.deepEqual(opened, ["https://screenrig.ai/dashboard/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA"]);
-  assert.equal(JSON.parse(result.stdout).data.status, "active");
-  assert.equal(JSON.parse(result.stdout).data.connection_complete, true);
-  assert.equal(result.stderr, "");
-  assert.doesNotMatch(result.stdout, /sr_live_|sac_|ciphertext|nonce|private|authorization/i);
-  const configPath = path.join(result.configDir, "screenrig", "config.json");
-  const config = await readConfigFile(configPath, {
-    mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir, env: { XDG_CONFIG_HOME: result.configDir },
-  });
-  assert.equal(config?.token, sealed?.pendingToken);
-  assert.equal(config?.agent_id, sealed?.agentId);
-  assert.equal(config?.agent_connection, undefined);
-  assert.equal((await stat(configPath)).mode & 0o777, 0o600);
-  await rm(result.configDir, { recursive: true, force: true });
-});
-
-test("agent connect defaults to a snapshot, returns a pending handoff and resumes the same approved connection", async () => {
-  const transport = new FakeTransport();
-  let sealed: ReturnType<typeof agentConnectionEnvelope> | undefined;
-  const connectionToken = `sac_${"C".repeat(43)}`;
-  transport.on("POST", "/api/agent-connections", (req) => {
-    const input = req.body as { recipient_public_key: { kty: "OKP"; crv: "X25519"; x: string } };
-    sealed = agentConnectionEnvelope(input.recipient_public_key);
-    sealed.collection.issuance_expires_at = "2026-08-16T16:00:00.000Z";
-    return {
-      status: 201,
-      headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
-      body: {
-        connection_id: sealed.connectionId,
-        connection_token: connectionToken,
-        approval_url: `https://screenrig.ai/dashboard/agents/connect/${sealed.connectionId}`,
-        expires_at: "2026-08-15T17:00:00.000Z",
-      },
-    };
-  });
-  transport.pushStream(`event: agent.connection\ndata: ${JSON.stringify({
-    connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA",
-    name: "Office Codex",
-    agent_type: "cli",
-    capabilities: [...AGENT_CAPABILITIES],
-    status: "approved",
-    expires_at: "2026-08-15T17:00:00.000Z",
-    created_at: "2026-08-14T17:00:00.000Z",
-  })}\n\n`);
-  transport.on("POST", /\/api\/agent-connections\/acn_.*\/credential/, (req) => {
-    assert.equal(req.headers?.authorization, `ScreenRig-Agent-Connect ${connectionToken}`);
-    return { status: 200, headers: { "cache-control": "private, no-store" }, body: sealed!.collection };
-  });
-  transport.on("POST", "/api/agents/self/activate", (req) => {
-    assert.equal(req.headers?.authorization, `Bearer ${sealed!.pendingToken}`);
-    return { status: 200, headers: { "cache-control": "private, no-store" }, body: { ...sealed!.pendingAgent, state: "active", connected_at: "2026-08-14T17:00:01.000Z" } };
-  });
-  transport.on("GET", "/api/agents/self", () => ({
-    status: 200,
-    headers: { "cache-control": "private, no-store" },
-    body: { agent: { ...sealed!.pendingAgent, state: "active", connected_at: "2026-08-14T17:00:01.000Z" }, connection_ready: true },
-  }));
-  transport.queueStream({ chunks: [`event: agent.connection\ndata: ${JSON.stringify({
-    connection_id: "acn_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Office Codex", agent_type: "cli",
-    capabilities: [...AGENT_CAPABILITIES],
-    status: "pending", expires_at: "2026-08-15T17:00:00.000Z", created_at: "2026-08-14T17:00:00.000Z",
-  })}\n\n`] });
-  const interrupted = await withRuntime(["agent", "connect", "--print-url"], transport, { openUrl: async () => { throw new Error("print-url must not open browser"); } });
-  assert.equal(interrupted.code, 0, interrupted.stdout);
-  const pending = JSON.parse(interrupted.stdout).data;
-  assert.equal(pending.status, "pending");
-  assert.equal(pending.request_submitted, true);
-  assert.equal(pending.connection_complete, false);
-  assert.equal(pending.status_checked, true);
-  assert.equal(pending.approval_url, "https://screenrig.ai/dashboard/agents/connect/acn_AAAAAAAAAAAAAAAAAAAAAAAA");
-  assert.equal(pending.next.command, "screenrig agent connect --no-wait");
-  assert.deepEqual(pending.next.argv, ["agent", "connect", "--no-wait", "--config",
-    path.join(interrupted.configDir, "screenrig", "config.json"), "--api-url", "https://api.screenrig.ai"]);
-  assert.equal(interrupted.stderr, "");
-  assert.equal(transport.calls.filter(call => call.method === "POST").length, 1);
-  assert.doesNotMatch(interrupted.stdout, /sr_live_|sac_|ciphertext|nonce|private_jwk/);
-  const resumedFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => interrupted.configDir, env: { XDG_CONFIG_HOME: interrupted.configDir } };
-  const opened: string[] = [];
-  const resumed = await withRuntime(["agent", "connect", "--no-wait", "--name", "Office Codex"], transport, {
-    fs: resumedFs,
-    now: () => new Date("2026-08-16T05:00:00.000Z"),
-    openUrl: async (url) => { opened.push(url); return true; },
-  });
-  const result = { ...resumed, configDir: interrupted.configDir };
-  assert.equal(transport.calls.filter(call => call.method === "POST" && call.path === "/api/agent-connections").length, 1);
-  assert.equal(result.code, 0, result.stdout);
-  assert.deepEqual(opened, [], "approved snapshots must not reopen the approval page");
-  assert.equal(JSON.parse(result.stdout).data.status, "active");
-  assert.equal(JSON.parse(result.stdout).data.connection_complete, true);
-  assert.equal(result.stderr, "");
-  assert.doesNotMatch(result.stdout, /sr_live_|sac_|ciphertext|nonce|private|authorization/i);
-  const configPath = path.join(result.configDir, "screenrig", "config.json");
-  const config = await readConfigFile(configPath, {
-    mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir, env: { XDG_CONFIG_HOME: result.configDir },
-  });
-  assert.equal(config?.token, sealed?.pendingToken);
-  assert.equal(config?.agent_id, sealed?.agentId);
-  assert.equal(config?.agent_connection, undefined);
-  assert.equal((await stat(configPath)).mode & 0o777, 0o600);
-  await rm(result.configDir, { recursive: true, force: true });
 });
 
 test("agent disconnect locally cleans an unauthorized credential without retrying revoke", async () => {
@@ -1015,7 +583,7 @@ test("agent disconnect locally cleans an unauthorized credential without retryin
   const configPath = path.join(configDir, "screenrig", "config.json");
   await writeConfigAtomic(configPath, {
     api_url: "https://api.screenrig.ai",
-    token: `sr_live_rejected_${"R".repeat(43)}`,
+    token: `eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_rejected_${"R".repeat(43)}`,
     project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
     agent_id: TEST_AGENT.id,
   }, fsLike);
@@ -1026,7 +594,7 @@ test("agent disconnect locally cleans an unauthorized credential without retryin
   assert.equal(JSON.parse(result.stdout).data.credential_accepted, false);
   assert.equal(transport.calls.length, 1);
   assert.equal(transport.calls[0]?.path, "/api/agents/self");
-  assert.doesNotMatch(result.stdout, /sr_live_|project_id|token/i);
+  assert.doesNotMatch(result.stdout, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_|project_id|token/i);
   const local = await readConfigFile(configPath, fsLike);
   assert.equal(local?.token, undefined);
   assert.equal(local?.project_id, undefined);
@@ -1056,7 +624,7 @@ test("agent status names disconnect --yes when the stored credential is rejected
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
-    token: `sr_live_rejected_${"S".repeat(43)}`,
+    token: `eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_rejected_${"S".repeat(43)}`,
     project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
   }, fsLike);
   const result = await withRuntime(["--json", "agent", "status"], transport, { fs: fsLike });
@@ -1071,7 +639,7 @@ test("agent status names disconnect --yes when the stored credential is rejected
   assert.equal(data.credential_accepted, false);
   assert.equal(data.local_cleanup_required, true);
   assert.equal(data.next.command, "screenrig agent disconnect --yes");
-  assert.doesNotMatch(result.stdout, /sr_live_|token/i);
+  assert.doesNotMatch(result.stdout, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_|token/i);
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -1091,7 +659,7 @@ test("agent disconnect revokes only this installation and preserves safe disconn
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
-    token: `sr_live_disconnect_${"D".repeat(43)}`,
+    token: `eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_disconnect_${"D".repeat(43)}`,
     project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
     agent_id: active.id,
   }, fsLike);
@@ -1104,7 +672,7 @@ test("agent disconnect revokes only this installation and preserves safe disconn
     screens_preserved: true,
     other_agents_preserved: true,
   });
-  assert.doesNotMatch(result.stdout, /sr_live_|project_id|token/i);
+  assert.doesNotMatch(result.stdout, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_|project_id|token/i);
   const local = await readConfigFile(path.join(configDir, "screenrig", "config.json"), fsLike);
   assert.equal(local?.token, undefined);
   assert.equal(local?.project_id, undefined);
@@ -1112,245 +680,6 @@ test("agent disconnect revokes only this installation and preserves safe disconn
   const status = await withRuntime(["--json", "agent", "status"], new FakeTransport(), { fs: fsLike });
   assert.equal(JSON.parse(status.stdout).data.status, "disconnected");
   assert.equal(JSON.parse(status.stdout).data.path, "first_run_enroll");
-  await rm(configDir, { recursive: true, force: true });
-});
-
-test("agent connect resumes activation after the pending bearer was durably stored", async () => {
-  const transport = new FakeTransport();
-  const token = `sr_live_resume_${"R".repeat(43)}`;
-  const active = { ...TEST_AGENT, id: "agt_RESUMEAAAAAAAAAAAAAAAAA", name: "Resume agent" };
-  transport.on("POST", "/api/agents/self/activate", (req) => {
-    assert.equal(req.headers?.authorization, `Bearer ${token}`);
-    return { status: 200, headers: { "cache-control": "private, no-store" }, body: active };
-  });
-  transport.on("GET", "/api/agents/self", () => ({
-    status: 200,
-    headers: { "cache-control": "private, no-store" },
-    body: { agent: active, connection_ready: true },
-  }));
-  const configDir = await testTemp("agent-connect-resume-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
-  const configPath = path.join(configDir, "screenrig", "config.json");
-  await writeConfigAtomic(configPath, {
-    api_url: "https://api.screenrig.ai",
-    token,
-    agent_id: active.id,
-    agent_connection: {
-      capabilities: [...AGENT_CAPABILITIES],
-      private_jwk: generateAgentConnectionKey(),
-      connection_id: "acn_RESUMEAAAAAAAAAAAAAAAA",
-      connection_token: `sac_${"S".repeat(43)}`,
-      approval_url: "https://screenrig.ai/dashboard/agents/connect/acn_RESUMEAAAAAAAAAAAAAAAA",
-      expires_at: "2026-08-14T16:10:00.000Z",
-      pending_agent_id: active.id,
-    },
-  }, fsLike);
-  let opened = false;
-  const result = await withRuntime(["--json", "agent", "connect"], transport, {
-    fs: fsLike,
-    openUrl: async () => { opened = true; return true; },
-  });
-  assert.equal(result.code, 0, result.stdout);
-  assert.equal(opened, false);
-  assert.deepEqual(transport.calls.map((call) => call.path), [
-    "/api/agents/self/activate",
-    "/api/agents/self",
-    "/api/project",
-  ]);
-  assert.equal((await readConfigFile(configPath, fsLike))?.agent_connection, undefined);
-  assert.doesNotMatch(result.stdout, /sr_live_|sac_|private|authorization/i);
-  await rm(configDir, { recursive: true, force: true });
-});
-
-for (const waitFlags of [[], ["--no-wait"]]) test(`agent connect ${waitFlags.join(" ")} clears private state when the dashboard cancels`, async () => {
-  const transport = new FakeTransport();
-  const connectionId = "acn_CANCELAAAAAAAAAAAAAAAA";
-  transport.on("POST", "/api/agent-connections", () => ({
-    status: 201,
-    headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
-    body: {
-      connection_id: connectionId,
-      connection_token: `sac_${"C".repeat(43)}`,
-      approval_url: `https://screenrig.ai/dashboard/agents/connect/${connectionId}`,
-      expires_at: "2026-08-14T17:10:00.000Z",
-    },
-  }));
-  transport.pushStream(`event: agent.connection\ndata: ${JSON.stringify({
-    connection_id: connectionId,
-    name: "Cancelled agent",
-    agent_type: "cli",
-    capabilities: [...AGENT_CAPABILITIES],
-    status: "cancelled",
-    expires_at: "2026-08-14T17:10:00.000Z",
-    created_at: "2026-08-14T17:00:00.000Z",
-  })}\n\n`);
-  const result = await withRuntime(["--json", "agent", "connect", ...waitFlags], transport, { openUrl: async () => true });
-  assert.equal(result.code, ExitCode.Client);
-  const envelope = JSON.parse(result.stdout) as { error: { code: string; next: { command: string } } };
-  assert.equal(envelope.error.code, "agent_connection_cancelled");
-  assert.equal(envelope.error.next.command, "screenrig agent connect");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir, env: { XDG_CONFIG_HOME: result.configDir } };
-  const local = await readConfigFile(path.join(result.configDir, "screenrig", "config.json"), fsLike);
-  assert.equal(local?.agent_connection, undefined);
-  assert.equal(local?.token, undefined);
-  assert.doesNotMatch(result.stdout, /sac_|private_jwk|connection_token/);
-  await rm(result.configDir, { recursive: true, force: true });
-});
-
-test("agent connect clears private state when credential collection reports cancellation", async () => {
-  const transport = new FakeTransport();
-  const connectionId = "acn_CANCELPROBLEMAAAAAAAAA";
-  transport.on("POST", "/api/agent-connections", () => ({
-    status: 201,
-    headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
-    body: {
-      connection_id: connectionId,
-      connection_token: `sac_${"P".repeat(43)}`,
-      approval_url: `https://screenrig.ai/dashboard/agents/connect/${connectionId}`,
-      expires_at: "2026-08-14T17:10:00.000Z",
-    },
-  }));
-  transport.pushStream(`event: agent.connection\ndata: ${JSON.stringify({
-    connection_id: connectionId,
-    name: "Cancelled after approval",
-    agent_type: "cli",
-    capabilities: [...AGENT_CAPABILITIES],
-    status: "approved",
-    expires_at: "2026-08-14T17:10:00.000Z",
-    created_at: "2026-08-14T17:00:00.000Z",
-  })}\n\n`);
-  transport.on("POST", `/api/agent-connections/${connectionId}/credential`, () => ({
-    status: 410,
-    headers: { "content-type": "application/problem+json" },
-    body: { status: 410, code: "agent_connection_cancelled", title: "Cancelled", detail: "Pending agent was disconnected." },
-  }));
-  const result = await withRuntime(["--json", "agent", "connect"], transport, { openUrl: async () => true });
-  assert.equal(result.code, ExitCode.Client);
-  assert.equal((JSON.parse(result.stdout) as { error: { code: string } }).error.code, "agent_connection_cancelled");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir, env: { XDG_CONFIG_HOME: result.configDir } };
-  const local = await readConfigFile(path.join(result.configDir, "screenrig", "config.json"), fsLike);
-  assert.equal(local?.agent_connection, undefined);
-  assert.equal(local?.token, undefined);
-  await rm(result.configDir, { recursive: true, force: true });
-});
-
-test("agent connect clears private state when the SSE endpoint reports cancellation", async () => {
-  const transport = new FakeTransport();
-  const connectionId = "acn_CANCELSSEPROBLEMAAAAAA";
-  transport.on("POST", "/api/agent-connections", () => ({
-    status: 201,
-    headers: { "cache-control": "private, no-store", "referrer-policy": "no-referrer" },
-    body: {
-      connection_id: connectionId,
-      connection_token: `sac_${"Q".repeat(43)}`,
-      approval_url: `https://screenrig.ai/dashboard/agents/connect/${connectionId}`,
-      expires_at: "2026-08-14T17:10:00.000Z",
-    },
-  }));
-  transport.streamHandler = async () => {
-    throw new CliError(makeProblem(
-      "agent_connection_cancelled",
-      "Cancelled",
-      410,
-      "Pending agent was disconnected.",
-    ));
-  };
-  const result = await withRuntime(["--json", "agent", "connect"], transport, { openUrl: async () => true });
-  assert.equal(result.code, ExitCode.Client);
-  assert.equal((JSON.parse(result.stdout) as { error: { code: string } }).error.code, "agent_connection_cancelled");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => result.configDir, env: { XDG_CONFIG_HOME: result.configDir } };
-  const local = await readConfigFile(path.join(result.configDir, "screenrig", "config.json"), fsLike);
-  assert.equal(local?.agent_connection, undefined);
-  assert.equal(local?.token, undefined);
-  assert.doesNotMatch(result.stdout, /sac_|private_jwk|connection_token/);
-  await rm(result.configDir, { recursive: true, force: true });
-});
-
-async function writePendingActivationConfig(
-  configDir: string,
-  token: string,
-  active: typeof TEST_AGENT,
-) {
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
-  const configPath = path.join(configDir, "screenrig", "config.json");
-  await writeConfigAtomic(configPath, {
-    api_url: "https://api.screenrig.ai",
-    token,
-    agent_id: active.id,
-    agent_connection: {
-      capabilities: [...AGENT_CAPABILITIES],
-      private_jwk: generateAgentConnectionKey(),
-      connection_id: "acn_HARDENAAAAAAAAAAAAAAAA",
-      connection_token: `sac_${"H".repeat(43)}`,
-      approval_url: "https://screenrig.ai/dashboard/agents/connect/acn_HARDENAAAAAAAAAAAAAAAA",
-      expires_at: "2026-08-14T17:10:00.000Z",
-      pending_agent_id: active.id,
-    },
-  }, fsLike);
-  return { fsLike, configPath };
-}
-
-test("agent connect removes a cryptographically rejected pending credential", async () => {
-  const transport = new FakeTransport();
-  transport.on("POST", "/api/agents/self/activate", () => ({
-    status: 401,
-    headers: { "content-type": "application/problem+json" },
-    body: { status: 401, code: "unauthorized", title: "Unauthorized", detail: "Pending bearer revoked." },
-  }));
-  const configDir = await testTemp("agent-connect-revoked-");
-  const token = `sr_live_revoked_${"R".repeat(43)}`;
-  const { fsLike, configPath } = await writePendingActivationConfig(configDir, token, TEST_AGENT);
-  const result = await withRuntime(["--json", "agent", "connect"], transport, { fs: fsLike });
-  assert.equal(result.code, ExitCode.Auth);
-  const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string; next: { command: string } } };
-  assert.equal(envelope.error.code, "unauthorized");
-  assert.match(envelope.error.detail, /rejected or revoked/);
-  assert.equal(envelope.error.next.command, "screenrig agent connect");
-  const local = await readConfigFile(configPath, fsLike);
-  assert.equal(local?.token, undefined);
-  assert.equal(local?.agent_id, undefined);
-  assert.equal(local?.agent_connection, undefined);
-  assert.doesNotMatch(result.stdout, /sr_live_|sac_|private_jwk/);
-  await rm(configDir, { recursive: true, force: true });
-});
-
-test("agent connect recovers an activation committed before connection cleanup", async () => {
-  const transport = new FakeTransport();
-  transport.on("POST", "/api/agents/self/activate", () => ({
-    status: 404,
-    headers: { "content-type": "application/problem+json" },
-    body: { status: 404, code: "agent_connection_invalid", title: "Invalid", detail: "Connection cleanup completed." },
-  }));
-  transport.on("GET", "/api/agents/self", () => ({
-    status: 200,
-    headers: { "cache-control": "private, no-store" },
-    body: { agent: TEST_AGENT, connection_ready: true },
-  }));
-  const configDir = await testTemp("agent-connect-committed-");
-  const token = `sr_live_committed_${"K".repeat(43)}`;
-  const { fsLike, configPath } = await writePendingActivationConfig(configDir, token, TEST_AGENT);
-  const result = await withRuntime(["--json", "agent", "connect"], transport, { fs: fsLike });
-  assert.equal(result.code, 0, result.stdout);
-  assert.deepEqual(transport.calls.map((call) => call.path), ["/api/agents/self/activate", "/api/agents/self", "/api/project"]);
-  const local = await readConfigFile(configPath, fsLike);
-  assert.equal(local?.token, token);
-  assert.equal(local?.agent_id, TEST_AGENT.id);
-  assert.equal(local?.agent_connection, undefined);
-  await rm(configDir, { recursive: true, force: true });
-});
-
-test("agent connect retains pending activation state after an ambiguous transport failure", async () => {
-  const transport = new FakeTransport();
-  transport.on("POST", "/api/agents/self/activate", () => { throw networkError("ambiguous activation response"); });
-  const configDir = await testTemp("agent-connect-ambiguous-");
-  const token = `sr_live_ambiguous_${"A".repeat(43)}`;
-  const { fsLike, configPath } = await writePendingActivationConfig(configDir, token, TEST_AGENT);
-  const before = await readConfigFile(configPath, fsLike);
-  const result = await withRuntime(["--json", "agent", "connect"], transport, { fs: fsLike });
-  assert.equal(result.code, ExitCode.Network);
-  assert.equal((JSON.parse(result.stdout) as { error: { code: string } }).error.code, "transport_error");
-  assert.deepEqual(await readConfigFile(configPath, fsLike), before);
-  assert.doesNotMatch(result.stdout, /sr_live_|sac_|private_jwk/);
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -1373,7 +702,7 @@ test("agent disconnect keeps the credential on lockout risk and names the explic
   }));
   const configDir = await testTemp("agent-lockout-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
-  const token = `sr_live_lockout_${"L".repeat(43)}`;
+  const token = `eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_lockout_${"L".repeat(43)}`;
   await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
     api_url: "https://api.screenrig.ai",
     token,
@@ -1383,7 +712,7 @@ test("agent disconnect keeps the credential on lockout risk and names the explic
   assert.equal(result.code, ExitCode.Conflict);
   assert.equal(JSON.parse(result.stdout).error.next.command, "screenrig agent disconnect --yes --allow-lockout");
   assert.equal((await readConfigFile(path.join(configDir, "screenrig", "config.json"), fsLike))?.token, token);
-  assert.doesNotMatch(result.stdout, /sr_live_/);
+  assert.doesNotMatch(result.stdout, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_/);
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -1393,7 +722,7 @@ test("existing credential skips enrollment and directly runs the original comman
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
     fsLike,
   );
   const result = await withRuntime(["--json", "screen", "list"], transport, { fs: fsLike });
@@ -1408,7 +737,7 @@ test("agent disconnect requires explicit confirmation and never auto-enrolls", a
   const configDir = await testTemp("revoke-confirm-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
-  const original = { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_current_private_secret" };
+  const original = { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_current_private_secret" };
   await writeConfigAtomic(configPath, original, fsLike);
 
   let result = await withRuntime(["--json", "agent", "disconnect"], transport, { fs: fsLike });
@@ -1440,7 +769,7 @@ test("agent disconnect confirms server success before atomically removing all lo
   const configDir = await testTemp("revoke-success-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
-  const token = "sr_live_current_private_secret";
+  const token = "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_current_private_secret";
   await writeConfigAtomic(configPath, {
     api_url: "https://api.screenrig.ai",
     token,
@@ -1496,7 +825,7 @@ test("agent disconnect retains local state on a server failure and gives a safe 
   const configPath = path.join(configDir, "screenrig", "config.json");
   const original = {
     api_url: "https://api.screenrig.ai",
-    token: "sr_live_current_private_secret",
+    token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_current_private_secret",
     project_id: "prj_current",
     browser_setup: { idempotency_key: "browser-setup-key", code: "ABC234" },
   };
@@ -1530,7 +859,7 @@ test("agent disconnect retries the exact revoked bearer after cleanup failure an
   const realFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   const original = {
     api_url: "https://api.screenrig.ai",
-    token: "sr_live_current_private_secret",
+    token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_current_private_secret",
     project_id: "prj_current",
   };
   await writeConfigAtomic(configPath, original, realFs);
@@ -1538,7 +867,7 @@ test("agent disconnect retries the exact revoked bearer after cleanup failure an
     ...realFs,
     rename: async (from, to) => {
       if (to === configPath) {
-        throw new Error("simulated cleanup failure sr_live_current_private_secret");
+        throw new Error("simulated cleanup failure eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_current_private_secret");
       }
       await rename(from, to);
     },
@@ -1582,7 +911,7 @@ test("agent disconnect shares the last-agent guard and explicit allow-lockout ov
   const configDir = await testTemp("auth-revoke-lockout-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
-  const token = `sr_live_auth_lockout_${"L".repeat(43)}`;
+  const token = `eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_auth_lockout_${"L".repeat(43)}`;
   await writeConfigAtomic(configPath, { api_url: "https://api.screenrig.ai", token, agent_id: TEST_AGENT.id }, fsLike);
   const guarded = await withRuntime(["--json", "agent", "disconnect", "--yes"], transport, { fs: fsLike });
   assert.equal(guarded.code, ExitCode.Conflict);
@@ -1843,7 +1172,7 @@ test("a stored credential is never sent to another --api-url or SCREENRIG_API_UR
       assert.equal(envelope.error.code, "config_error");
       assert.match(envelope.error.detail, /issued for https:\/\/api\.screenrig\.ai; it is never sent to /);
       assert.equal(transport.calls.length, 0, "nothing reaches the other origin");
-      assert.doesNotMatch(result.stdout, /sr_live_/);
+      assert.doesNotMatch(result.stdout, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_/);
     }
     // The same origin with a trailing slash is the same origin.
     const same = await withAuthenticatedRuntime(["--json", "project", "show", "--api-url", "https://api.screenrig.ai/"], memoryBackend(), { fs: fsLike });
@@ -1858,7 +1187,7 @@ test("a config without api_url binds its credential to the default origin", asyn
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
   await mkdir(path.dirname(configPath), { recursive: true, mode: 0o700 });
-  await writeFile(configPath, JSON.stringify({ token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" }), { mode: 0o600 });
+  await writeFile(configPath, JSON.stringify({ token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" }), { mode: 0o600 });
   const transport = new FakeTransport();
   try {
     const result = await withRuntime(["--json", "project", "show", "--api-url", "https://example.com"], transport, { fs: fsLike });
@@ -1980,7 +1309,7 @@ function browserSetupClaimTransport(body: unknown): FakeTransport {
       project: { id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" },
       agent: TEST_AGENT,
       connection_ready: false,
-      token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       issuance_id: "iss_AAAAAAAAAAAAAAAAAAAAAAAA",
       issuance_expires_at: "2026-08-14T17:10:00.000Z",
     },
@@ -2069,7 +1398,7 @@ test("browser setup rejects malformed codes before claim and keeps exact ambiguo
       project: { id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" },
       agent: TEST_AGENT,
       connection_ready: false,
-      token: "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       issuance_id: "iss_AAAAAAAAAAAAAAAAAAAAAAAA",
       issuance_expires_at: "2026-08-14T17:10:00.000Z",
     },
@@ -2112,6 +1441,7 @@ test("expired enrollment replay surfaces 410 and reuses the persisted identity w
   const retryState = {
     client_id: `cli_${"E".repeat(43)}`,
     idempotency_key: "enroll-expired-exact-retry",
+    credential_format: "oauth" as const,
     email: "owner@example.com",
   };
   await writeConfigAtomic(configPath, {
@@ -2125,6 +1455,7 @@ test("expired enrollment replay surfaces 410 and reuses the persisted identity w
   assert.equal(transport.calls[0]?.headers?.["idempotency-key"], retryState.idempotency_key);
   assert.deepEqual(transport.calls[0]?.body, {
     client_id: retryState.client_id,
+    credential_format: "oauth",
     email: retryState.email,
     agent_type: "cli",
     platform: `${process.platform}/${process.arch}`,
@@ -2138,7 +1469,7 @@ test("refuses group-readable config unless repairing", async () => {
   const configDir = await testTemp("insecure-");
   const cfgPath = path.join(configDir, "screenrig", "config.json");
   await mkdir(path.dirname(cfgPath), { recursive: true });
-  await writeFile(cfgPath, JSON.stringify({ api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_abc_def" }), { mode: 0o644 });
+  await writeFile(cfgPath, JSON.stringify({ api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_abc_def" }), { mode: 0o644 });
   await chmod(cfgPath, 0o644);
   const transport = memoryBackend();
   const { code, stdout } = await withRuntime(["--json", "project", "show"], transport, {
@@ -2182,7 +1513,7 @@ test("normalizes RFC 9457 problems and maps exit codes", async () => {
   const configDir = await testTemp("prob-");
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } },
   );
   const { code, stdout } = await withRuntime(["--json", "project", "show"], transport, {
@@ -2213,7 +1544,7 @@ test("operations wait polls until a terminal success", async () => {
   const configDir = await testTemp("op-");
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } },
   );
   const { code, stdout } = await withRuntime(["--json", "operations", "wait", "op_wait", "--poll-ms", "1"], transport, {
@@ -2232,7 +1563,7 @@ test("events list sends after and limit when the user supplies them", async () =
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
 
@@ -2262,7 +1593,7 @@ test("events list treats a null next_cursor as the end of history and surfaces t
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   try {
@@ -2390,7 +1721,7 @@ test("formatEventLine prints logfmt, never canned messages", () => {
       resource: { type: "screen", id: "scr_1" },
       details: {
         capture_id: "shot_1",
-        token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr",
+        token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr",
         authorization: "Bearer secret",
         pixels: "data:image/webp;base64,AAAA",
       },
@@ -2477,7 +1808,7 @@ test("formatEventLine prints logfmt, never canned messages", () => {
       severity: "info",
       message: "Doors open",
       details: {
-        extra_token: "sr_live_identifier_secret",
+        extra_token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_identifier_secret",
         object_key: "projects/acc/objects/obj",
         upload_url: "https://example.invalid/put?X-Amz-Signature=abc",
         completion_nonce: "nonce-value",
@@ -2486,7 +1817,7 @@ test("formatEventLine prints logfmt, never canned messages", () => {
         cookie: "session=abc",
         password: "secret-material",
         secret: "secret-material",
-        note: "use sr_live_identifier_secret now",
+        note: "use eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_identifier_secret now",
         header: "Bearer secret-material",
         preview: "data:image/webp;base64,AAAA",
         code: "cta.pressed",
@@ -2538,7 +1869,7 @@ test("events list prints data or silence", async () => {
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const printed = await withRuntime(["--human", "events", "list"], transport, { fs: fsLike });
@@ -2574,7 +1905,7 @@ test("events follow parses SSE frames from the transport stream", async () => {
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const { code, stdout } = await withRuntime(
@@ -2622,7 +1953,7 @@ test("events follow writes a human line before the stream closes", async () => {
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const stdout = new PassThrough();
@@ -2655,7 +1986,7 @@ test("events follow is silent when no events arrive", async () => {
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const human = await withRuntime(["--human", "events", "follow", "--timeout", "50"], transport, { fs: fsLike });
@@ -2671,7 +2002,7 @@ test("events follow is silent when no events arrive", async () => {
 });
 
 test("events --json omits tokens, pixels, authorization, and object keys", async () => {
-  const leakedToken = "sr_live_evtAAAAAAAAAAAAAAAA_eventsecreeventsecreeventsecreeve";
+  const leakedToken = "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_evtAAAAAAAAAAAAAAAA_eventsecreeventsecreeventsecreeve";
   const leakedPixels = "data:image/webp;base64,QUFBQQ";
   const leakedAuth = "Bearer event-secret-material";
   const leakedObjectKey = "projects/acc/objects/obj_eventsecret";
@@ -2703,7 +2034,7 @@ test("events --json omits tokens, pixels, authorization, and object keys", async
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const listed = await withRuntime(["--json", "events", "list"], transport, { fs: fsLike });
@@ -2752,7 +2083,7 @@ test("events follow prints scalar details and skips empty frames", async () => {
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const { code, stdout } = await withRuntime(["--human", "events", "follow", "--timeout", "50"], transport, { fs: fsLike });
@@ -2782,7 +2113,7 @@ test("events follow reconnects after the stream ends and prints both connections
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const { code, stdout, stderr } = await withRuntime(
@@ -2816,7 +2147,7 @@ test("events follow reconnects after a mid-stream network error", async () => {
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const { code, stdout, stderr } = await withRuntime(
@@ -2848,7 +2179,7 @@ test("events follow resumes with after equal to the last SSE id", async () => {
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const { code, stdout } = await withRuntime(
@@ -2873,7 +2204,7 @@ test("events follow does not retry a persistent 401", async () => {
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const { code, stdout, stderr } = await withRuntime(
@@ -2900,7 +2231,7 @@ test("events follow --timeout exits during backoff without hanging", async () =>
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const started = Date.now();
@@ -3050,7 +2381,7 @@ async function doctorWithToolchain(
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const { code, stdout } = await withRuntime(["--json", "doctor"], transport, {
@@ -3233,7 +2564,7 @@ test("doctor reports a configured credential as presence only", async () => {
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const probe = fakeToolchainProbe({
@@ -3250,13 +2581,13 @@ test("doctor reports a configured credential as presence only", async () => {
     assert.ok(token, json.stdout);
     assert.equal(token.status, "pass");
     assert.equal(token.detail, "present");
-    for (const pattern of [/sr_live_/, /tokidAAAA/, /secretsecret/]) {
+    for (const pattern of [/eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_/, /tokidAAAA/, /secretsecret/]) {
       assert.doesNotMatch(json.stdout, pattern);
     }
 
     const human = await withRuntime(["--human", "doctor"], memoryBackend(), { fs: fsLike, runProcess: probe });
     assert.match(human.stdout, /^PASS token: present$/m);
-    for (const pattern of [/sr_live_/, /tokidAAAA/, /secretsecret/]) {
+    for (const pattern of [/eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_/, /tokidAAAA/, /secretsecret/]) {
       assert.doesNotMatch(human.stdout, pattern);
     }
   } finally {
@@ -3285,38 +2616,7 @@ test("doctor warns, exits 0, and names agent enroll when a fresh install has no 
   assert.equal(envelope.data.next?.command, "screenrig agent enroll --email ADDRESS --organization NAME");
   assert.match(envelope.data.next?.reason ?? "", /not_enrolled/);
   assert.equal(envelope.data.checks.some((check) => check.status === "fail" && check.name === "token"), false);
-  assert.doesNotMatch(stdout, /sr_live_/);
-  await rm(configDir, { recursive: true, force: true });
-});
-
-test("doctor points a pending agent connection at agent connect instead of enroll", async () => {
-  resetFfmpegToolchainCache();
-  const configDir = await testTemp("doctor-connecting-");
-  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
-  await writeConfigAtomic(
-    path.join(configDir, "screenrig", "config.json"),
-    {
-      api_url: "https://api.screenrig.ai",
-      agent_connection: {
-        capabilities: [...AGENT_CAPABILITIES],
-        private_jwk: { kty: "OKP", crv: "X25519", x: "x", d: "d" },
-        connection_id: "acn_PENDING",
-        expires_at: "2099-01-01T00:00:00Z",
-      },
-    },
-    fsLike,
-  );
-  const { code, stdout } = await withRuntime(["--json", "doctor"], memoryBackend(), { fs: fsLike, runProcess: fullToolchainProbe() });
-  assert.equal(code, ExitCode.Success, stdout);
-  const envelope = JSON.parse(stdout) as {
-    data: { next?: { command: string }; checks: Array<{ name: string; status: string; path?: string; next?: { command: string } }> };
-  };
-  const token = envelope.data.checks.find((check) => check.name === "token");
-  assert.equal(token?.status, "warn");
-  assert.equal(token?.path, "reconnect_existing");
-  assert.equal(token?.next?.command, "screenrig agent connect");
-  assert.equal(envelope.data.next?.command, "screenrig agent connect");
-  assert.doesNotMatch(stdout, /acn_PENDING/);
+  assert.doesNotMatch(stdout, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_/);
   await rm(configDir, { recursive: true, force: true });
 });
 
@@ -3347,13 +2647,36 @@ test("doctor treats revoked agent history without a pending reconnect as first-r
   await rm(configDir, { recursive: true, force: true });
 });
 
+test("doctor points a config holding only a retired credential at screenrig login", async () => {
+  resetFfmpegToolchainCache();
+  const configDir = await testTemp("doctor-retired-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
+    api_url: "https://api.screenrig.ai",
+    project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA",
+    token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr",
+  }, fsLike);
+  const result = await withRuntime(["--json", "doctor"], memoryBackend(), { fs: fsLike, runProcess: fullToolchainProbe() });
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  const envelope = JSON.parse(result.stdout) as {
+    data: { next?: { command: string }; checks: Array<{ name: string; status: string; path?: string; detail: string; next?: { command: string } }> };
+  };
+  const token = envelope.data.checks.find((check) => check.name === "token");
+  assert.equal(token?.status, "warn");
+  assert.match(token?.detail ?? "", /no longer accepted/);
+  assert.equal(token?.next?.command, "screenrig login");
+  assert.equal(envelope.data.next?.command, "screenrig login");
+  assert.ok(!result.stdout.includes("sr_live_tokid"));
+  await rm(configDir, { recursive: true, force: true });
+});
+
 test("control-plane payloads and mutation idempotency match the v0.2 architecture", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("contract-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const appDir = path.join(configDir, "app");
@@ -3425,7 +2748,7 @@ test("media upload returns usage error and makes no /media/uploads call", async 
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const result = await withRuntime(["--json", "media", "upload", "hello.txt"], transport, { fs: fsLike });
@@ -3442,7 +2765,7 @@ test("media upload refuses lossless WebP before declare", async () => {
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const file = path.join(configDir, "mark.webp");
@@ -3468,7 +2791,7 @@ test("media upload transcodes before declaring, and uploads only the transcoded 
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const source = path.join(configDir, "poster.png");
@@ -3589,7 +2912,7 @@ test("media upload refuses a --content-type the bytes contradict before ffprobe,
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const source = path.join(configDir, "photo.png");
@@ -3666,7 +2989,7 @@ test("media download writes the verified original rendition to --output or ./<id
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const workDir = path.join(configDir, "work");
@@ -3735,7 +3058,7 @@ test("feedback takes its kind from the route, carries no argv, and stays idempot
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
 
@@ -3799,7 +3122,7 @@ test("feedback refuses a --command that could carry an argument value", async ()
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   try {
@@ -3807,7 +3130,7 @@ test("feedback refuses a --command that could carry an argument value", async ()
       "media upload ./poster.png",
       "screen pair ABC234",
       "media show med_AAAAAAAAAAAAAAAAAAAAAAAA",
-      "auth revoke --token=sr_live_a_b",
+      "auth revoke --token=eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_a_b",
     ]) {
       const result = await withRuntime(
         ["--json", "feedback", "bug", "Title", "--body", "Body", `--command=${value}`],
@@ -3864,7 +3187,7 @@ test("a rate-limited submission surfaces Retry-After instead of a bare 429", asy
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   try {
@@ -3898,7 +3221,7 @@ async function withTokenConfig(
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   try {
@@ -3957,7 +3280,7 @@ test("project show reports integer credit_remaining and warns when remaining is 
   assert.equal(envelope.data.credit_remaining, 0);
   // ENG-5821: the credential is reported as presence, never as a token shape.
   assert.equal(envelope.data.token_present, true);
-  assert.doesNotMatch(json.stdout, /sr_live_|tokidAAAA/);
+  assert.doesNotMatch(json.stdout, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_|tokidAAAA/);
   const warning = envelope.warnings.find((item) => item.code === "credits_low");
   assert.ok(warning, json.stdout);
   assert.match(warning.message, /\b0\b/);
@@ -3968,7 +3291,7 @@ test("project show reports integer credit_remaining and warns when remaining is 
   assert.equal(human.code, 0, human.stdout);
   assert.match(human.stdout, /credit_remaining: 0/);
   assert.match(human.stdout, /^token: present$/m);
-  assert.doesNotMatch(human.stdout, /sr_live_|tokidAAAA/);
+  assert.doesNotMatch(human.stdout, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_|tokidAAAA/);
   assert.match(human.stdout, /warning: Remaining prepaid credit is 0, below 1000 credits\./);
   assert.doesNotMatch(human.stdout, /kCr|stripe|x402|mcr|millicredit|\$/i);
 });
@@ -4151,13 +3474,13 @@ test("invitations create posts an idempotent request for the current project and
     const sent = transport.calls.at(-1);
     assert.equal(sent?.method, "POST");
     assert.equal(sent?.path, "/api/invitations");
-    assert.match(sent?.headers?.authorization ?? "", /^Bearer sr_live_/);
+    assert.match(sent?.headers?.authorization ?? "", /^Bearer eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_/);
     assert.ok(sent?.headers?.["idempotency-key"], "invite must carry an Idempotency-Key");
     assert.deepEqual(sent?.body, { kind: "project_member", delivery: "email", emails: ["guest@example.com"] });
     const envelope = JSON.parse(json.stdout) as { ok: boolean; data: Record<string, unknown> };
     assert.equal(envelope.ok, true);
     assert.deepEqual(envelope.data, { invitations: [invitationRecord()] });
-    assert.doesNotMatch(json.stdout, /guest@example\.com|sr_live_/);
+    assert.doesNotMatch(json.stdout, /guest@example\.com|eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_/);
 
   } finally {
     await rm(configDir, { recursive: true, force: true });
@@ -4269,7 +3592,7 @@ test("dashboard reset-sign-in posts an unauthenticated idempotent request and re
     assert.equal(envelope.ok, true);
     assert.deepEqual(envelope.data, { status: "accepted" });
     assert.equal(envelope.request_id, "req_recover");
-    assert.doesNotMatch(json.stdout, /owner@example\.com|sr_live_|https?:\/\//);
+    assert.doesNotMatch(json.stdout, /owner@example\.com|eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_|https?:\/\//);
   } finally {
     await rm(json.configDir, { recursive: true, force: true });
   }
@@ -4281,7 +3604,7 @@ test("dashboard reset-sign-in posts an unauthenticated idempotent request and re
       assert.equal(human.code, ExitCode.Success);
       outputs.push(human.stdout.replace(/^request_id:.*(?:\n|$)/gm, ""));
       assert.equal(human.stdout.includes(email), false);
-      assert.doesNotMatch(human.stdout, /sr_live_|https?:\/\//);
+      assert.doesNotMatch(human.stdout, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_|https?:\/\//);
     } finally {
       await rm(human.configDir, { recursive: true, force: true });
     }
@@ -4293,7 +3616,7 @@ test("dashboard reset-sign-in never sends a stored credential and leaves credent
   const configDir = await testTemp("recover-credential-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   const configPath = path.join(configDir, "screenrig", "config.json");
-  const token = "sr_live_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const token = "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
   await writeConfigAtomic(configPath, {
     api_url: "https://api.screenrig.ai",
     token,
@@ -4498,7 +3821,7 @@ test("an project quota rejection explains itself and points at the remaining all
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const file = path.join(configDir, "pixel.png");
@@ -4539,7 +3862,7 @@ test("a payment_required rejection points at remaining prepaid credit", async ()
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const file = path.join(configDir, "pixel.png");
@@ -4587,7 +3910,7 @@ test("a 402 with remaining header 0 includes payment_required and credits_low", 
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const file = path.join(configDir, "pixel.png");
@@ -4628,7 +3951,7 @@ test("media upload validates transcode flags even when transcoding is off", asyn
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const file = path.join(configDir, "pixel.png");
@@ -4654,7 +3977,7 @@ test("media upload warns on a low-information filename without blocking the uplo
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const file = path.join(configDir, "video.mp4");
@@ -4693,7 +4016,7 @@ test("media upload rerun returns the existing media instead of uploading again, 
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const file = path.join(configDir, "lobby-loop.mp4");
@@ -4759,7 +4082,7 @@ test("credits_low appends beside generic_filename instead of replacing it", asyn
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const file = path.join(configDir, "video.mp4");
@@ -4789,7 +4112,7 @@ test("control-plane KV writes use binary-safe OpenAPI payloads and idempotency",
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const file = path.join(configDir, "kv.bin");
@@ -4852,7 +4175,7 @@ test("comment show, set, and delete bind word commands to /api/comment routes", 
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const commentsFile = path.join(configDir, "comments.json");
@@ -4969,7 +4292,7 @@ test("comment set rejects non-objects, oversize payloads, and last-write-wins fl
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const commentCalls = () => transport.calls.filter((call) => String(call.path).startsWith("/api/comment/"));
@@ -5003,7 +4326,7 @@ test("screen toast posts the closed write body and does not echo the text", asyn
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   try {
@@ -5061,7 +4384,7 @@ test("screen toast posts the closed write body and does not echo the text", asyn
     // The CLI does not scrub toast text. Credential-shaped content is sent
     // verbatim so the server can reject it; the accepted envelope still
     // returns only expires_at.
-    const credentialText = "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr";
+    const credentialText = "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr";
     const forwarded = await withRuntime(
       ["--json", "screen", "toast", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--level", "info", "--text", credentialText],
       transport,
@@ -5082,7 +4405,7 @@ test("screen toast defaults omitted --level to info", async () => {
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   try {
@@ -5118,7 +4441,7 @@ test("screen toast rejects invalid level, text, and duration before calling the 
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const toastCalls = () => transport.calls.filter((call) => String(call.path).endsWith("/toast"));
@@ -5173,7 +4496,7 @@ test("media, operation, screen credential, and K/V revision commands bind the fr
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   const file = path.join(configDir, "pixel.png");
@@ -5254,7 +4577,7 @@ test("screen archive, unarchive, archived list, and retired unbind drive the rea
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" },
     fsLike,
   );
   try {
@@ -5407,7 +4730,7 @@ async function scheduledPlaylistFixture(scheduled: boolean, dir: string) {
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
     fsLike,
   );
   const page = (id: string, visibility?: unknown) => ({
@@ -5519,7 +4842,7 @@ test("a page disabled outright still counts as scheduled", async () => {
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
     fsLike,
   );
   const basePage = {
@@ -5734,7 +5057,7 @@ test("screen show prints optional player-reported observation", async () => {
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
     fsLike,
   );
 
@@ -5833,7 +5156,7 @@ test("screen show includes online and optional last_online_at and last_ip", asyn
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
     fsLike,
   );
 
@@ -5898,7 +5221,7 @@ test("screen show still works when last_online_at and last_ip are absent", async
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
     fsLike,
   );
 
@@ -5983,7 +5306,7 @@ async function hostConfigFs(prefix: string) {
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
     fsLike,
   );
   return { configDir, fsLike };
@@ -6771,7 +6094,7 @@ test("app upload given a packed archive or a missing path is a usage error namin
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
     fsLike,
   );
   const archive = path.join(configDir, "qa-app.zip");
@@ -6802,7 +6125,7 @@ test("app upload reports the release id an application primitive needs", async (
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
     fsLike,
   );
   const appDir = path.join(configDir, "app");
@@ -6872,7 +6195,7 @@ test("app update publishes to the existing application with revision and release
   });
   const configDir = await testTemp("app-update-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
-  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret" }, fsLike);
+  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" }, fsLike);
   const appDir = path.join(configDir, "app");
   await mkdir(appDir);
   await writeFile(path.join(appDir, "index.html"), "<!doctype html><html><head></head><body>updated</body></html>");
@@ -6948,7 +6271,7 @@ test("playlist create expands a picture template and forwards a full page unchan
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
     fsLike,
   );
   const fullPage = {
@@ -7007,7 +6330,7 @@ test("playlist create forwards swipe transition and object enter on a full page"
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
     fsLike,
   );
   const fullPage = {
@@ -7051,7 +6374,7 @@ test("playlist create refuses a templated page that would emit text", async () =
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
     fsLike,
   );
   const file = path.join(configDir, "playlist.json");
@@ -7078,7 +6401,7 @@ test("playlist create accepts a linear canvas.background on a picture template a
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
     fsLike,
   );
   const wash = {
@@ -7143,7 +6466,7 @@ test("playback list, media filters, media update, and app --name bind the consum
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
     fsLike,
   );
   const appDir = path.join(configDir, "app");
@@ -7290,7 +6613,7 @@ test("playlist create refuses a mixed template-and-primitives page before the wr
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
     path.join(configDir, "screenrig", "config.json"),
-    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret" },
+    { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
     fsLike,
   );
   const file = path.join(configDir, "playlist.json");
@@ -7322,7 +6645,7 @@ for (const argv of [
  const transport = new FakeTransport();
  const configDir = await testTemp("optional-revision-");
  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
- await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "sr_live_existing_secret"}, fsLike);
+ await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret"}, fsLike);
  const mutations: any[] = [];
  const paths = ["/api/screens/scr_TEST", "/api/screens/scr_TEST/archive", "/api/screens/scr_TEST/unarchive", "/api/screens/scr_TEST/public-id/rotate", "/api/media/med_TEST", "/api/playlists/pl_TEST", "/api/applications/app_TEST/kv/key"];
  for (const method of ["PATCH", "POST", "PUT", "DELETE"] as const) for (const target of paths) transport.on(method, target, request => {
@@ -7361,7 +6684,7 @@ for (const prefix of ["development_", "qa_", "stage_"]) test(`enrollment and pai
     const paired = await withRuntime(["screen", "pair", "abc234", "--label", "Lobby"], transport, { fs: fsLike });
     assert.equal(paired.code, 0, paired.stdout);
     assert.ok(JSON.parse(paired.stdout).data.screen.id.startsWith(prefix + "scr_"));
-    assert.doesNotMatch(enrolled.stdout + paired.stdout, /sr_live_/);
+    assert.doesNotMatch(enrolled.stdout + paired.stdout, /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_/);
   } finally { await rm(configDir, { recursive: true, force: true }); }
 });
 

@@ -47,7 +47,7 @@ test("atomic config writes preserve the prior credential when replacement is int
   const fsLike = realFs(home);
   await writeConfigAtomic(
     configPath,
-    { api_url: "https://api.screenrig.ai", token: "sr_live_existing_secret" },
+    { api_url: "https://api.screenrig.ai", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret" },
     fsLike,
   );
   const interrupted: ConfigFs = {
@@ -64,12 +64,12 @@ test("atomic config writes preserve the prior credential when replacement is int
   await assert.rejects(
     writeConfigAtomic(
       configPath,
-      { api_url: "https://api.screenrig.ai", token: "sr_live_replacement_secret" },
+      { api_url: "https://api.screenrig.ai", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_replacement_secret" },
       interrupted,
     ),
     /simulated rename interruption/,
   );
-  assert.match(await readFile(configPath, "utf8"), /sr_live_existing_secret/);
+  assert.match(await readFile(configPath, "utf8"), /eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret/);
   assert.deepEqual((await readdir(path.dirname(configPath))).sort(), ["config.json"]);
   await rm(home, { recursive: true, force: true });
 });
@@ -117,13 +117,13 @@ test("default credential location survives replacement of a plugin cache", async
   const configPath = await defaultConfigPath(fsLike);
   await writeConfigAtomic(
     configPath,
-    { api_url: "https://api.screenrig.ai", token: "sr_live_persisted_secret" },
+    { api_url: "https://api.screenrig.ai", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_persisted_secret" },
     fsLike,
   );
   await rm(firstPlugin, { recursive: true, force: true });
   await mkdir(replacementPlugin, { recursive: true });
   assert.equal(await defaultConfigPath(fsLike), configPath);
-  assert.equal((await readConfigFile(configPath, fsLike))?.token, "sr_live_persisted_secret");
+  assert.equal((await readConfigFile(configPath, fsLike))?.token, "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_persisted_secret");
   assert.equal(configPath.startsWith(path.join(home, ".cache")), false);
   await rm(home, { recursive: true, force: true });
 });
@@ -154,7 +154,7 @@ test("log_socket is resolved from the user config and rejected when it is a dire
 
 test("token paste branches are rejected instead of overriding durable credentials", async () => {
   const home = await testTemp("config-token-branch-");
-  const fsLike = realFs(home, { XDG_CONFIG_HOME: home, SCREENRIG_TOKEN: "sr_live_pasted_secret" });
+  const fsLike = realFs(home, { XDG_CONFIG_HOME: home, SCREENRIG_TOKEN: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_pasted_secret" });
   await assert.rejects(
     resolveConfig({ flags: {}, fs: fsLike }),
     /Token flags and SCREENRIG_TOKEN are not supported/,

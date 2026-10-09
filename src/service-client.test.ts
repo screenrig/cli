@@ -68,7 +68,7 @@ test("a SCREENRIG_CLIENT_SECRET run uses HTTP Basic, keeps its token in memory a
   const dir = await testTemp("service-secret-");
   const configPath = path.join(dir, "screenrig", "config.json");
   try {
-    await writeConfigAtomic(configPath, { api_url: API, project_id: "prj_OTHERAAAAAAAAAAAAAAAAAAA", token: "sr_live_stored_other_secret" },
+    await writeConfigAtomic(configPath, { api_url: API, project_id: "prj_OTHERAAAAAAAAAAAAAAAAAAA", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_stored_other_secret" },
       { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: {} });
     const before = await readFile(configPath, "utf8");
     const beforeStat = await stat(configPath);
@@ -199,9 +199,9 @@ test("service-client create sends only a public key and writes a generated secre
   const dir = await testTemp("service-manage-");
   const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: {} };
   try {
-    const agentToken = "sr_live_agent_manage_secret";
+    const agentToken = "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_agent_manage_secret";
     await writeConfigAtomic(path.join(dir, "screenrig", "config.json"), { api_url: API, project_id: PROJECT, project_name: "Screens",
-      organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: agentToken, oauth_unavailable_until: new Date(NOW.getTime() + 3600_000).toISOString() }, fs);
+      organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: agentToken }, fs);
     const { privateKey } = generateKeyPairSync("ed25519");
     await writeFile(path.join(dir, "key.jwk"), JSON.stringify(privateKey.export({ format: "jwk" })), { mode: 0o600 });
     const view = { id: CLIENT, project_id: PROJECT, name: "CI", capabilities: ["screens"], access: "read", state: "active", created_by: "agent:agt_X",

@@ -7,6 +7,10 @@ import { readConfigFile, resolveConfig, writeConfigAtomic, type ConfigFs, type R
 import { testTemp } from "./test-temp.js";
 import { CliError } from "./problems.js";
 
+const REFRESH = "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_refresh_secret";
+const OAUTH = { refreshToken: REFRESH, identity: false };
+const GRANT = { issuer: "https://api.screenrig.ai", client_id: "screenrig-cli", refresh_token: REFRESH, identity: false };
+
 function fixture(home: string): { fs: ConfigFs; resolved: ResolvedConfig } {
   const fs = {
     mkdir,
@@ -40,11 +44,12 @@ test("explicit enrollment atomically persists email, verifies, and completes out
     enrollmentEmail: "Owner@example.com",
     enrollmentProjectName: "Lobby displays",
     verify: async (token, projectId) => {
-      assert.equal(token, "sr_live_enrollment_secret");
+      assert.equal(token, "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_enrollment_secret");
       assert.equal(projectId, "prj_enrollment");
       assert.deepEqual(await readConfigFile(resolved.configPath, fs), {
         api_url: "https://api.screenrig.ai",
-        token: "sr_live_enrollment_secret",
+        token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_enrollment_secret",
+        oauth: GRANT,
         project_id: "prj_enrollment",
         project_name: "Lobby displays",
         enrollment: {
@@ -77,16 +82,17 @@ test("explicit enrollment atomically persists email, verifies, and completes out
         },
         updated_at: "2026-08-14T20:00:00.000Z",
       });
-      return { token: "sr_live_enrollment_secret", projectId: "prj_enrollment", projectName: "Lobby displays" };
+      return { token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_enrollment_secret", projectId: "prj_enrollment", projectName: "Lobby displays", oauth: OAUTH };
     },
   });
   assert.equal(enrollments, 1);
-  assert.equal(result.token, "sr_live_enrollment_secret");
+  assert.equal(result.token, "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_enrollment_secret");
   assert.equal(result.source.token, "config");
   assert.equal(result.projectName, "Lobby displays");
   assert.deepEqual(await readConfigFile(resolved.configPath, fs), {
     api_url: "https://api.screenrig.ai",
-    token: "sr_live_enrollment_secret",
+    token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_enrollment_secret",
+    oauth: GRANT,
     project_id: "prj_enrollment",
     project_name: "Lobby displays",
     updated_at: "2026-08-14T20:00:00.000Z",
@@ -97,7 +103,7 @@ test("explicit enrollment atomically persists email, verifies, and completes out
 test("existing credential bypasses enrollment and remains unchanged", async () => {
   const home = await testTemp("enrollment-existing-");
   const { fs, resolved } = fixture(home);
-  const existing = { ...resolved, token: "sr_live_existing_secret", source: { ...resolved.source, token: "config" as const } };
+  const existing = { ...resolved, token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret", source: { ...resolved.source, token: "config" as const } };
   const result = await ensureCredential({
     resolved: existing,
     runtime: { fs, now: () => new Date(), sleep: async () => undefined },
@@ -122,7 +128,7 @@ test("concurrent explicit enrollment calls perform one enrollment and share the 
   const enroll = async () => {
     enrollments += 1;
     await gate;
-    return { token: "sr_live_shared_secret", projectId: "prj_shared" };
+    return { token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_shared_secret", projectId: "prj_shared", oauth: OAUTH };
   };
   const generators = {
     generateClientId: () => `cli_${"B".repeat(43)}`,
@@ -138,8 +144,8 @@ test("concurrent explicit enrollment calls perform one enrollment and share the 
   release?.();
   const [one, two] = await Promise.all([first, second]);
   assert.equal(enrollments, 1);
-  assert.equal(one.token, "sr_live_shared_secret");
-  assert.equal(two.token, "sr_live_shared_secret");
+  assert.equal(one.token, "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_shared_secret");
+  assert.equal(two.token, "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_shared_secret");
   await rm(home, { recursive: true, force: true });
 });
 
@@ -190,11 +196,11 @@ test("ambiguous enrollment retries reuse the persisted client, contact email, an
     generateIdempotencyKey: () => { throw new Error("must reuse idempotency key"); },
     enroll: async (state) => {
       seen.push(state);
-      return { token: "sr_live_replayed_secret", projectId: "prj_replayed" };
+      return { token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_replayed_secret", projectId: "prj_replayed", oauth: OAUTH };
     },
     verify: async () => undefined,
   });
-  assert.equal(result.token, "sr_live_replayed_secret");
+  assert.equal(result.token, "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_replayed_secret");
   assert.deepEqual(seen[0], seen[1]);
   assert.equal((await readConfigFile(resolved.configPath, fs))?.enrollment, undefined);
   await rm(home, { recursive: true, force: true });
@@ -210,12 +216,13 @@ test("verification failure preserves the permanent token and exact enrollment re
     generateClientId: () => `cli_${"D".repeat(43)}`,
     generateIdempotencyKey: () => "enroll-verify-retry",
     enrollmentEmail: "owner@example.com",
-    enroll: async () => ({ token: "sr_live_verify_secret", projectId: "prj_verify" }),
+    enroll: async () => ({ token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_verify_secret", projectId: "prj_verify", oauth: OAUTH }),
     verify: async () => { throw new Error("verification temporarily unavailable"); },
   }), /verification temporarily unavailable/);
   assert.deepEqual(await readConfigFile(resolved.configPath, fs), {
     api_url: "https://api.screenrig.ai",
-    token: "sr_live_verify_secret",
+    token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_verify_secret",
+    oauth: GRANT,
     project_id: "prj_verify",
     enrollment: {
       client_id: `cli_${"D".repeat(43)}`,
@@ -234,11 +241,11 @@ test("verification failure preserves the permanent token and exact enrollment re
     enroll: async () => { throw new Error("must not enroll twice"); },
     verify: async (token, projectId) => {
       verifications += 1;
-      assert.equal(token, "sr_live_verify_secret");
+      assert.equal(token, "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_verify_secret");
       assert.equal(projectId, "prj_verify");
     },
   });
-  assert.equal(second.token, "sr_live_verify_secret");
+  assert.equal(second.token, "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_verify_secret");
   assert.equal(verifications, 1);
   assert.equal((await readConfigFile(resolved.configPath, fs))?.enrollment, undefined);
   await rm(home, { recursive: true, force: true });
@@ -256,7 +263,7 @@ test("AgentID claim enrollment persists the claim, verifies, and completes", asy
     generateIdempotencyKey: () => "enroll-agentid-idempotency",
     enrollmentAgentIdClaim: claim,
     verify: async (token, projectId) => {
-      assert.equal(token, "sr_live_agentid_secret");
+      assert.equal(token, "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_agentid_secret");
       assert.equal(projectId, "prj_agentid");
       assert.deepEqual((await readConfigFile(resolved.configPath, fs))?.enrollment, {
         client_id: `cli_${"K".repeat(43)}`,
@@ -267,7 +274,7 @@ test("AgentID claim enrollment persists the claim, verifies, and completes", asy
     },
     enroll: async (state) => {
       seen.push(state);
-      return { token: "sr_live_agentid_secret", projectId: "prj_agentid" };
+      return { token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_agentid_secret", projectId: "prj_agentid", oauth: OAUTH };
     },
   });
   assert.deepEqual(seen, [{
@@ -276,13 +283,13 @@ test("AgentID claim enrollment persists the claim, verifies, and completes", asy
     credentialFormat: "oauth",
     agentidClaim: claim,
   }]);
-  assert.equal(result.token, "sr_live_agentid_secret");
+  assert.equal(result.token, "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_agentid_secret");
   assert.equal(result.source.token, "config");
   assert.equal((await readConfigFile(resolved.configPath, fs))?.enrollment, undefined);
   await rm(home, { recursive: true, force: true });
 });
 
-test("a pending AgentID claim enrollment rejects a different claim or an email switch, then resumes the bound claim", async () => {
+test("a pending AgentID claim enrollment rejects a different claim or an email switch, then redeems the bound claim in the oauth format", async () => {
   const home = await testTemp("enrollment-agentid-bound-");
   const { fs, resolved } = fixture(home);
   const claim = `agid_${"L".repeat(43)}`;
@@ -312,18 +319,21 @@ test("a pending AgentID claim enrollment rejects a different claim or an email s
   assert.deepEqual((await readConfigFile(resolved.configPath, fs))?.enrollment,
     { client_id: `cli_${"L".repeat(43)}`, idempotency_key: "enroll-agentid-bound", agentid_claim: claim });
 
+  // This pending enrollment never asked for the oauth format, so it starts again under a new key.
   const seen: Array<{ agentidClaim?: string; email?: string }> = [];
   const resumed = await ensureCredential({
     resolved,
     runtime,
+    generateClientId: () => `cli_${"N".repeat(43)}`,
+    generateIdempotencyKey: () => "enroll-agentid-oauth",
     enroll: async (state) => {
       seen.push(state);
-      return { token: "sr_live_agentid_resume", projectId: "prj_agentid_resume" };
+      return { token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_agentid_resume", projectId: "prj_agentid_resume", oauth: OAUTH };
     },
     verify: async () => undefined,
   });
-  assert.equal(resumed.token, "sr_live_agentid_resume");
-  assert.deepEqual(seen, [{ clientId: `cli_${"L".repeat(43)}`, idempotencyKey: "enroll-agentid-bound", agentidClaim: claim }]);
+  assert.equal(resumed.token, "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_agentid_resume");
+  assert.deepEqual(seen, [{ clientId: `cli_${"N".repeat(43)}`, idempotencyKey: "enroll-agentid-oauth", credentialFormat: "oauth", agentidClaim: claim }]);
   await rm(home, { recursive: true, force: true });
 });
 

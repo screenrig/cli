@@ -12,7 +12,7 @@ import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 
 const API_URL = "https://api.screenrig.ai";
-const TOKEN = "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr";
+const TOKEN = "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr";
 const PROMPT = "A dusk lobby photograph, warm tungsten, no people";
 
 const GENERATED_MEDIA = {

@@ -14,7 +14,7 @@ for (const action of ["upload", "update"] as const) {
     t.after(() => rm(configDir, { recursive: true, force: true }));
     const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
     await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {
-      api_url: "https://api.screenrig.ai", token: "sr_live_existing_secret",
+      api_url: "https://api.screenrig.ai", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret",
     }, fs);
     const appDir = path.join(configDir, "app");
     await mkdir(appDir);

@@ -29,7 +29,7 @@ import type { TransportRequest, TransportResponse } from "./transport/types.js";
 
 const PROJECT_ID = "prj_AAAAAAAAAAAAAAAAAAAAAAAA";
 const API_URL = "https://api.screenrig.ai";
-const TOKEN = "sr_live_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr";
+const TOKEN = "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr";
 
 const DEFAULT_TRANSCODE = {
   codec: DEFAULT_CODEC,
@@ -678,7 +678,7 @@ test("operation log emits batch and per-item local pairs without signed material
     const itemFinish = events.find((event) => event.tag === "media_upload_batch_item" && event.phase === "finish");
     assert.ok(itemFinish?.id?.startsWith("med_"));
     const serialized = JSON.stringify(events);
-    assert.doesNotMatch(serialized, /storage\.example\.invalid|signature=|sr_live_tokid|Bearer /i);
+    assert.doesNotMatch(serialized, /storage\.example\.invalid|signature=|eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokid|Bearer /i);
     const key = backend.declareKeys()[0];
     assert.equal(key, deriveBatchIdempotencyKey(createHash("sha256").update("log-bytes").digest("hex")));
   } finally {

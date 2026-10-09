@@ -21,8 +21,9 @@ const NOW_S = NOW.getTime() / 1000;
 const PROJECT = "prj_AAAAAAAAAAAAAAAAAAAAAAAA";
 const OTHER_PROJECT = "prj_BBBBBBBBBBBBBBBBBBBBBBBB";
 const AGENT = "agt_AAAAAAAAAAAAAAAAAAAAAAAA";
-const LEGACY_IDENTITY = `sr_live_idt_lookup_${"a".repeat(64)}`;
-const LEGACY_PROJECT = "sr_live_project_private_secret";
+/** Tokens from before sign-in: the API refuses them, so the CLI never sends them. */
+const RETIRED_IDENTITY = `sr_live_idt_lookup_${"a".repeat(64)}`;
+const RETIRED_PROJECT = "sr_live_project_private_secret";
 
 let serial = 0;
 /** A token shaped like the server's JWTs. The CLI reads its claims and never verifies it. */
@@ -69,7 +70,7 @@ function withDiscovery(transport: FakeTransport, metadata: Record<string, unknow
     token_endpoint: `${API}/oauth/token`,
     revocation_endpoint: `${API}/oauth/revoke`,
     device_authorization_endpoint: `${API}/oauth/device_authorization`,
-    grant_types_supported: ["refresh_token", "urn:ietf:params:oauth:grant-type:device_code", "urn:ietf:params:oauth:grant-type:token-exchange"],
+    grant_types_supported: ["refresh_token", "urn:ietf:params:oauth:grant-type:device_code"],
     ...metadata,
   }, { "cache-control": "public, max-age=300" }));
 }
@@ -258,7 +259,6 @@ test("every OAuth error code maps to its CLI problem and exit code", async () =>
     ["unauthorized_client", 400, "client_not_allowed", ExitCode.Auth],
     ["access_denied", 400, "login_denied", ExitCode.Auth],
     ["expired_token", 400, "login_expired", ExitCode.Timeout],
-    ["unsupported_token_type", 400, "credential_retired", ExitCode.Auth],
     ["temporarily_unavailable", 503, "service_unavailable", ExitCode.Server],
     ["rate_limited", 429, "rate_limited", ExitCode.RateLimited],
   ];
@@ -277,96 +277,54 @@ test("every OAuth error code maps to its CLI problem and exit code", async () =>
   assert.deepEqual(await new OAuthClient(API, slow).pollDevice("d".repeat(43)), { status: "slow_down" });
 });
 
-test("a legacy identity credential is exchanged transparently and its secret dropped after the first JWT request", async () => {
+test("a config holding only a retired credential names screenrig login, sends nothing, and exits 3", async () => {
   const h = await harness({
-    api_url: API, project_id: PROJECT, project_name: "Screens", token: LEGACY_PROJECT, identity_token: LEGACY_IDENTITY, agent_id: AGENT,
+    api_url: API, project_id: PROJECT, project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization",
+    token: RETIRED_PROJECT, identity_token: RETIRED_IDENTITY, agent_id: AGENT, log_socket: "/tmp/screenrig.sock",
   });
-  const exchanged = access();
-  const transport = withDiscovery(new FakeTransport())
-    .on("POST", "/oauth/token", (req) => {
-      const body = form(req);
-      assert.equal(body.get("grant_type"), "urn:ietf:params:oauth:grant-type:token-exchange");
-      assert.equal(body.get("subject_token"), LEGACY_IDENTITY);
-      assert.equal(body.get("subject_token_type"), "urn:screenrig:token-type:identity-credential");
-      assert.equal(body.get("client_id"), "screenrig-cli");
-      assert.ok((body.get("request_id") ?? "").length >= 16);
-      assert.ok(body.get("client_version"));
-      assert.equal(body.get("scope"), null);
-      return { ...tokenResponse(exchanged, refresh(1)), body: { ...(tokenResponse(exchanged, refresh(1)).body as object), issued_token_type: "urn:ietf:params:oauth:token-type:access_token" } };
-    })
-    .on("GET", "/api/project", (req) => {
-      assert.equal(req.headers?.authorization, `Bearer ${exchanged}`);
-      return projectBody();
-    });
+  const transport = withDiscovery(new FakeTransport());
   try {
-    const result = await h.cli(["--json", "project", "show"], transport);
-    assert.equal(result.code, 0, result.stdout);
-    assert.ok(!result.stdout.includes(exchanged) && !result.stdout.includes(LEGACY_IDENTITY) && !result.stdout.includes("eyJ"));
+    for (const argv of [["screen", "list"], ["project", "list"], ["project", "use", PROJECT], ["agent", "status"], ["logout"],
+      ["agent", "disconnect", "--yes"], ["agent", "revoke-identity", "--yes"], ["agent", "enroll", "--email", "owner@example.com", "--organization", "Acme"]]) {
+      const result = await h.cli(["--json", ...argv], transport);
+      assert.equal(result.code, ExitCode.Auth, `${argv.join(" ")}: ${result.stdout}`);
+      const error = (JSON.parse(result.stdout) as { error: { code: string; detail: string; next: { command: string } } }).error;
+      assert.equal(error.code, "credential_retired");
+      assert.match(error.detail, /Run screenrig login/);
+      assert.equal(error.next.command, "screenrig login");
+      assert.ok(!result.stdout.includes(RETIRED_PROJECT) && !result.stdout.includes(RETIRED_IDENTITY));
+    }
+    assert.equal(transport.calls.length + transport.oauthCalls.length, 0, "a retired credential is never sent and never exchanged");
     const stored = await h.read();
-    assert.equal(stored?.token, exchanged);
-    assert.equal(stored?.identity_token, exchanged);
-    assert.ok(stored?.oauth?.refresh_token);
-    assert.equal(stored?.oauth?.identity, true);
-    assert.equal(stored?.oauth?.legacy, undefined, "the legacy secret is gone after a JWT request succeeded");
-    assert.equal(stored?.oauth_exchange, undefined);
-    assert.equal(JSON.stringify(stored).includes("sr_live_"), false);
+    assert.equal(stored?.token, RETIRED_PROJECT, "nothing is rewritten until screenrig login");
+    assert.equal(stored?.oauth, undefined);
   } finally {
     await h.done();
   }
 });
 
-test("an exchange retry reuses its request_id, and the legacy credential keeps working meanwhile", async () => {
-  const h = await harness({ api_url: API, project_id: PROJECT, project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: LEGACY_PROJECT });
-  const ids: string[] = [];
-  const scopes: Array<string | null> = [];
-  let attempt = 0;
+test("screenrig login from a config holding a retired credential starts a new installation and drops it", async () => {
+  const h = await harness({
+    api_url: API, project_id: PROJECT, project_name: "Screens", token: RETIRED_PROJECT, identity_token: RETIRED_IDENTITY,
+    projects: { [OTHER_PROJECT]: { token: RETIRED_PROJECT, project_name: "Lobby" } }, agent_id: AGENT, log_socket: "/tmp/screenrig.sock",
+  });
   const transport = withDiscovery(new FakeTransport())
-    .on("POST", "/oauth/token", (req) => {
-      ids.push(form(req).get("request_id") ?? "");
-      scopes.push(form(req).get("scope"));
-      attempt += 1;
-      if (attempt === 1) throw networkError("fetch failed (ECONNRESET)");
-      if (attempt === 2) return oauthError("invalid_scope");
-      return tokenResponse(access({ scope: "access:manage screens" }), refresh(1), "access:manage screens");
+    .on("POST", "/oauth/device_authorization", (req) => {
+      assert.equal(req.headers?.authorization, undefined, "the retired credential is not sent with the sign-in");
+      return json(200, { device_code: "F".repeat(43), user_code: "BCDF-GHJK", verification_uri: "https://screenrig.ai/dashboard/connect",
+        verification_uri_complete: "https://screenrig.ai/dashboard/connect?code=BCDF-GHJK", expires_in: 600, interval: 5 });
     })
+    .on("POST", "/oauth/token", () => tokenResponse(access(), refresh(1)))
     .on("GET", "/api/project", () => projectBody());
   try {
-    const first = await h.cli(["--json", "project", "show"], transport);
-    assert.equal(first.code, 0, first.stdout);
-    assert.equal(transport.calls[0]?.headers?.authorization, `Bearer ${LEGACY_PROJECT}`);
-    assert.ok((await h.read())?.oauth_exchange?.request_id);
-    const second = await h.cli(["--json", "project", "show"], transport);
-    assert.equal(second.code, 0, second.stdout);
-    assert.equal(ids.length, 3);
-    assert.equal(new Set(ids).size, 1);
-    // A project token asks for identity, and without the project capability stays confined to its project.
-    assert.deepEqual(scopes, ["identity", "identity", null]);
+    const result = await h.cli(["--json", "login"], transport);
+    assert.equal(result.code, 0, result.stdout);
     const stored = await h.read();
-    assert.equal(stored?.oauth?.identity, false);
-    assert.equal(stored?.identity_token, undefined);
-    assert.ok(stored?.token?.startsWith("eyJ"));
-  } finally {
-    await h.done();
-  }
-});
-
-test("a server that issues no tokens leaves the legacy credential in use and is not asked again for an hour", async () => {
-  const h = await harness({ api_url: API, project_id: PROJECT, project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: LEGACY_PROJECT, identity_token: LEGACY_IDENTITY });
-  const transport = withDiscovery(new FakeTransport())
-    .on("POST", "/oauth/token", () => oauthError("temporarily_unavailable", 503))
-    .on("GET", "/api/project", (req) => {
-      assert.equal(req.headers?.authorization, `Bearer ${LEGACY_PROJECT}`);
-      return projectBody();
-    });
-  try {
-    assert.equal((await h.cli(["--json", "project", "show"], transport)).code, 0);
-    const stored = await h.read();
-    assert.equal(stored?.token, LEGACY_PROJECT);
-    assert.equal(stored?.oauth, undefined);
-    assert.equal(stored?.oauth_unavailable_until, "2026-08-14T18:00:00.000Z");
-    const before = transport.oauthCalls.length;
-    assert.equal((await h.cli(["--json", "project", "show"], transport)).code, 0);
-    assert.equal(transport.oauthCalls.length, before);
+    assert.ok(stored?.oauth?.refresh_token);
+    assert.equal(stored?.log_socket, "/tmp/screenrig.sock");
+    assert.equal(JSON.stringify(stored).includes("sr_live_"), false);
+    assert.equal(stored?.project_id, PROJECT);
+    assert.equal(stored?.projects?.[OTHER_PROJECT], undefined);
   } finally {
     await h.done();
   }
@@ -634,35 +592,6 @@ test("commands and doctor warn when the session ends within 30 days", async () =
     assert.equal(result.code, 0, result.stdout);
     const warnings = (JSON.parse(result.stdout) as { warnings: Array<{ code: string; message: string }> }).warnings;
     assert.ok(warnings.some((warning) => warning.code === "sign_in_expiring" && warning.message.includes("5 days")));
-  } finally {
-    await h.done();
-  }
-});
-
-test("an exchanged session the API refuses before it ever worked gives way to the legacy credential", async () => {
-  const h = await harness({
-    api_url: API, project_id: PROJECT, project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization",
-    token: LEGACY_PROJECT, identity_token: LEGACY_IDENTITY, agent_id: AGENT,
-  });
-  const exchanged = access();
-  const granted = refresh(1);
-  const revoked: string[] = [];
-  const transport = withDiscovery(new FakeTransport())
-    .on("POST", "/oauth/token", () => tokenResponse(exchanged, granted))
-    .on("POST", "/oauth/revoke", (req) => { revoked.push(form(req).get("token") ?? ""); return { status: 200, headers: {}, body: undefined }; })
-    .on("GET", "/api/project", (req) => req.headers?.authorization === `Bearer ${LEGACY_PROJECT}`
-      ? projectBody()
-      : { status: 401, headers: { "content-type": "application/problem+json" }, body: { status: 401, code: "unauthorized", title: "Authentication is required", detail: "Credential refused: malformed." } });
-  try {
-    const result = await h.cli(["--json", "project", "show"], transport);
-    assert.equal(result.code, 0, result.stdout);
-    const stored = await h.read();
-    assert.equal(stored?.oauth, undefined);
-    assert.equal(stored?.token, LEGACY_PROJECT);
-    assert.equal(stored?.identity_token, LEGACY_IDENTITY);
-    assert.equal(stored?.oauth_unavailable_until, "2026-08-14T18:00:00.000Z");
-    assert.deepEqual(revoked, [granted], "the unused grant is revoked");
-    assert.deepEqual(transport.calls.map((call) => call.headers?.authorization), [`Bearer ${exchanged}`, `Bearer ${LEGACY_PROJECT}`]);
   } finally {
     await h.done();
   }

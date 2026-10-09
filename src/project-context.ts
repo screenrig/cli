@@ -55,7 +55,7 @@ export function contextFromProject(project: Project): ProjectContext {
 /** Cache server-verified names; select only when that is this command's purpose. */
 export async function cacheProjectContexts(
   runtime: CliRuntime, resolved: ResolvedConfig, values: ProjectContext[],
-  options: { select?: string; token?: string; credential?: string; identityToken?: string; agentId?: string; connectionId?: string } = {},
+  options: { select?: string; credential?: string; identityToken?: string } = {},
 ): Promise<ResolvedConfig> {
   const verified = values.map(validateProjectContext);
   const fs = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
@@ -63,8 +63,6 @@ export async function cacheProjectContexts(
     let current = await readConfigFile(resolved.configPath, fs);
     if (!current || current.api_url.replace(/\/+$/, "") !== resolved.apiUrl) throw configError("Stored API configuration changed before project context persistence.");
     if (options.identityToken && !sameCredential(current.identity_token, options.identityToken, "identity")) throw configError("Identity credential changed before project selection.");
-    if (options.agentId && current.agent_id && current.agent_id !== options.agentId) throw configError("Stored identity changed before credential persistence.");
-    if (options.connectionId && current.agent_connection?.connection_id !== options.connectionId) throw configError("Pending agent connection changed before activation persistence.");
     if (options.credential && !sameCredential(projectConfigFor(current, resolved).token ?? current.identity_token, options.credential)) {
       throw configError("Project credential changed before its context was stored.");
     }
@@ -77,29 +75,18 @@ export async function cacheProjectContexts(
         project_name: context.project.name,
         organization_id: context.organization.id,
         organization_name: context.organization.name,
-        ...(options.select === id && options.token ? { token: options.token } : {}),
         updated_at: runtime.now().toISOString(),
       });
     }
     if (options.select) current = selectProject(current, options.select);
     else if (!current.project_id && options.credential && verified.length === 1) current = selectProject(current, verified[0]!.project.id);
-    if (options.agentId) current.agent_id = options.agentId;
-    if (options.connectionId && options.select && options.token) {
-      if (current.agent_connection?.pending_token && current.agent_connection.pending_token !== options.token) throw configError("Pending credential changed before activation persistence.");
-      const enrollment = current.enrollment_project;
-      if (enrollment && enrollment.agent_id === options.agentId && enrollment.project_id !== options.select) {
-        current.enrollment_cleanup = { ...enrollment, destination_project_id: options.select, connection_id: options.connectionId };
-      }
-      delete current.agent_connection;
-    }
     await writeConfigAtomic(resolved.configPath, current as ScreenRigConfig, fs);
   });
   const selected = verified.find(context => context.project.id === (options.select ?? resolved.projectId))
     ?? (!resolved.projectId && options.credential && verified.length === 1 ? verified[0] : undefined);
   if (!selected) return resolved;
   const updated = { ...resolved, projectId: selected.project.id, projectName: selected.project.name,
-    organizationId: selected.organization.id, organizationName: selected.organization.name,
-    ...(options.token ? { token: options.token } : {}), ...(options.agentId ? { agentId: options.agentId } : {}) };
+    organizationId: selected.organization.id, organizationName: selected.organization.name };
   setResultContext(runtime, updated);
   return updated;
 }

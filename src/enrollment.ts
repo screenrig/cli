@@ -16,10 +16,9 @@ import { CliError, configError } from "./problems.js";
 const DEFINITE_ENROLL_REFUSALS = new Set([400, 403, 404, 422]);
 
 export interface EnrollmentCredential {
-  /** The project credential: a legacy bearer, or the grant's first access token. */
+  /** The grant's first access token. */
   token: string;
-  /** Present when the server enrolled in the oauth credential format. */
-  oauth?: { refreshToken: string; refreshExpiresAt?: number; identity: boolean };
+  oauth: { refreshToken: string; refreshExpiresAt?: number; identity: boolean };
   projectId?: string;
   projectName?: string;
   agentId?: string;
@@ -39,8 +38,7 @@ export interface EnrollmentState {
   organization?: string;
   /** Enrollment purpose, fixed for the lifetime of one pending enrollment. */
   intent?: EnrollmentIntent;
-  /** Sent only when this enrollment started with it, so a resume repeats the exact body. */
-  credentialFormat?: "oauth";
+  credentialFormat: "oauth";
 }
 
 export interface EnrollmentRuntime {
@@ -95,7 +93,6 @@ export async function ensureCredential(options: {
           identityToken: current.identity_token,
           agentId: current.agent_id,
           enrollment: current.enrollment,
-          agentConnection: current.agent_connection,
           lastAgent: current.last_agent,
           source: { ...resolved.source, token: "config" as const },
         };
@@ -135,12 +132,13 @@ export async function ensureCredential(options: {
       const intent = existingEnrollment?.intent ?? options.enrollmentIntent;
       const projectName = existingEnrollment ? existingEnrollment.project_name : options.enrollmentProjectName;
       const organization = existingEnrollment ? existingEnrollment.organization : options.enrollmentOrganization;
+      // Only the oauth format is issued: a pending enrollment that did not ask for it starts again under a new key.
       const enrollment = {
-        ...(existingEnrollment ?? {
+        ...(existingEnrollment?.credential_format === "oauth" ? existingEnrollment : {
           client_id: (options.generateClientId ?? (() => randomPrefixedId("cli", 32)))(),
           idempotency_key: (options.generateIdempotencyKey ?? newIdempotencyKey)(),
-          credential_format: "oauth" as const,
         }),
+        credential_format: "oauth" as const,
         ...(email !== undefined ? { email } : {}),
         ...(agentidClaim !== undefined ? { agentid_claim: agentidClaim } : {}),
         ...(projectName !== undefined ? { project_name: projectName } : {}),
@@ -169,7 +167,7 @@ export async function ensureCredential(options: {
         ...(enrollment.project_name !== undefined ? { projectName: enrollment.project_name } : {}),
         ...(enrollment.organization !== undefined ? { organization: enrollment.organization } : {}),
         ...(enrollment.intent ? { intent: enrollment.intent } : {}),
-        ...(enrollment.credential_format ? { credentialFormat: enrollment.credential_format } : {}),
+        credentialFormat: enrollment.credential_format,
         });
       } catch (error) {
         // A definite refusal (the feature is off, the claim or input is invalid)
@@ -192,15 +190,13 @@ export async function ensureCredential(options: {
         ...(credential.identityToken ? { identity_token: credential.identityToken } : {}),
         ...(credential.organizationId ? { organization_id: credential.organizationId } : {}),
         ...(credential.organizationName ? { organization_name: credential.organizationName } : {}),
-        ...(credential.oauth ? { oauth: {
+        oauth: {
           issuer: new URL(resolved.apiUrl).origin,
           client_id: OAUTH_CLIENT_ID,
           refresh_token: credential.oauth.refreshToken,
           ...(credential.oauth.refreshExpiresAt !== undefined ? { refresh_expires_at: credential.oauth.refreshExpiresAt } : {}),
           identity: credential.oauth.identity,
-        } } : {}),
-        ...(credential.projectId && credential.projectName === "Screens" && credential.agentId
-          ? { enrollment_project: { project_id: credential.projectId, agent_id: credential.agentId } } : {}),
+        },
         enrollment,
         updated_at: runtime.now().toISOString(),
       });
