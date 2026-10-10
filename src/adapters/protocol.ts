@@ -757,6 +757,10 @@ export interface ScreenActionResult {
   succeeded: number;
   failed: number;
   results: ScreenActionScreenResult[];
+  /** Continuation metadata from the backend-owned ScreenActionResult contract. */
+  offset?: number;
+  total?: number;
+  next_cursor?: string;
 }
 
 /** PUT /api/comment/... body. Compact UTF-8 JSON of comments must be ≤ 1024 bytes. */

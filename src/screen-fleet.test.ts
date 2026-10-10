@@ -377,7 +377,7 @@ test("fleet actions: no match warns, a malformed answer is refused, and an older
     status: 200, headers: {}, body: { action: "reload", matched: 2, succeeded: 2, failed: 0, results: [{ screen_id: A, status: "ok" }] },
   }));
   const refused = await cli(["--json", "screen", "reload", A, B], malformed, env);
-  assert.equal(refused.code, ExitCode.Usage);
+  assert.equal(refused.code, ExitCode.Unexpected);
   assert.match(refused.envelope.error!.detail, /ScreenActionResult contract/);
 
   const older = new FakeTransport().on("POST", "/api/screens/actions", () => ({ status: 405, headers: {}, body: "" }));
@@ -595,20 +595,66 @@ test("screen screenshot fan-out keeps each capture's own exit code and stops on 
   assert.equal(broken.calls.filter((call) => call.path.includes(C)).length, 0, "no new capture starts after an unexpected failure");
 });
 
-test("screen screenshot caps --tag at 500 screens and validates ids before any request", async () => {
+test("screen screenshot has no tag count cap and validates ids before any request", async () => {
   const env = await enrolled();
   const many = new FakeTransport().on("GET", "/api/screens", () => ({
     status: 200, headers: {},
-    body: { items: Array.from({ length: 501 }, (_, index) => screen(`scr_${String(index).padStart(24, "A")}`, { tags: ["Lobby"] })) },
+    body: { items: Array.from({ length: 1001 }, (_, index) => screen(`scr_${String(index).padStart(24, "A")}`, { tags: ["Lobby"], online: false })) },
   }));
-  const capped = await cli(["--json", "screen", "screenshot", "--tag", "Lobby", "--output", "cap"], many, env);
-  assert.equal(capped.code, ExitCode.Usage, capped.stdout);
-  assert.match(capped.envelope.error!.detail, /matches 501 active screens; screen screenshot captures at most 500/);
-  assert.equal(many.calls.length, 1, "only the list request was sent");
+  const all = await cli(["--json", "screen", "screenshot", "--tag", "Lobby", "--output", "large"], many, env);
+  assert.equal(all.envelope.data.matched, 1001, all.stdout);
+  assert.equal(all.envelope.data.results.length, 1001);
+  assert.equal(many.calls.length, 1, "offline screens need no capture request");
 
   const ids = new FakeTransport();
   const invalid = await cli(["--json", "screen", "screenshot", A, "not-a-screen", "--output", "ids"], ids, env);
   assert.equal(invalid.code, ExitCode.Usage);
   assert.match(invalid.envelope.error!.detail, /takes screen ids/);
   assert.equal(ids.calls.length, 0);
+});
+
+test("a fleet across more than 50 pages follows every result page and project-budget pause under one key", async () => {
+ const env = await enrolled();
+ const ids = Array.from({length:6001},(_,i)=>`scr_${String(i).padStart(24,"A")}`);
+ let paused = false;
+ const transport = new FakeTransport().on("POST","/api/screens/actions",(request): TransportResponse =>{
+  const offset = Number(request.query?.after ?? 0);
+  assert.equal((request.body as any).selector.screen_ids.length,6001);
+  if(offset===400 && !paused) { paused=true; return {status:202,headers:{"retry-after":"1"},body:{action:"reload",matched:0,succeeded:0,failed:0,results:[],offset,total:6001,next_cursor:"400"}}; }
+  const results = ids.slice(offset,offset+100).map((screen_id,i)=>offset+i===602
+   ? {screen_id,status:"failed",problem:problem(404,"not_found","Screen not found.")}
+   : {screen_id,status:"ok"});
+  const failed = results.filter(r=>r.status==="failed").length;
+  const next = offset+results.length;
+  return {status:next<6001?202:200,headers:{},body:{action:"reload",matched:results.length,succeeded:results.length-failed,failed,results,offset,total:6001,...(next<6001?{next_cursor:String(next)}:{})}};
+ });
+ const result = await cli(["--json","screen","reload",...ids],transport,env);
+ assert.equal(result.code,ExitCode.NotFound,result.stdout);
+ assert.equal(result.envelope.data.matched,6001);
+ assert.equal(result.envelope.data.succeeded,6000);
+ assert.equal(result.envelope.data.failed,1);
+ assert.deepEqual(result.envelope.data.results.map((r:any)=>r.screen_id),ids);
+ assert.equal(new Set(transport.calls.map(c=>c.headers?.["idempotency-key"])).size,1);
+ assert.ok(paused);
+});
+
+test("an interrupted continuation keeps the original fleet key and rebuilds earlier pages", async () => {
+ const env = await enrolled();
+ const ids=Array.from({length:701},(_,i)=>`scr_${String(i).padStart(24,"B")}`);
+ let dropped=false;
+ const transport = new FakeTransport().on("POST","/api/screens/actions",(request): TransportResponse =>{
+  const offset=Number(request.query?.after??0);
+  if(offset===200 && !dropped){dropped=true;throw networkError("connection lost");}
+  const results=ids.slice(offset,offset+100).map(screen_id=>({screen_id,status:"ok"}));
+  const next=offset+results.length;
+  return {status:next<701?202:200,headers:{},body:{action:"set_tags",matched:results.length,succeeded:results.length,failed:0,results,offset,total:701,...(next<701?{next_cursor:String(next)}:{})}};
+ });
+ const args=["--json","screen","tag",...ids,"--set","Lobby"];
+ const first=await cli(args,transport,env);
+ assert.equal(first.envelope.ok,false);
+ assert.ok(first.envelope.warnings?.some(w=>w.code==="write_recovery_saved"));
+ const again=await cli(args,transport,env);
+ assert.equal(again.code,0,again.stdout);
+ assert.equal(again.envelope.data.matched,701);
+ assert.equal(new Set(transport.calls.map(c=>c.headers?.["idempotency-key"])).size,1);
 });

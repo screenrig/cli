@@ -5,7 +5,7 @@ import { apexHost } from "./apex-origin.js";
 import { replacePlaylistRelease } from "./playlist-release.js";
 import { assertOutputAvailable, readAuthoringJson, readAuthoringText, writeAuthoringJson, writeOutputFile } from "./authoring-input.js";
 import { publishScreen } from "./screen-publish.js";
-import { fleetHumanLines, fleetOutcome, rejectFleetRevision, screenActionResult, screenTag, screenTagList, screenTarget, SCREEN_TAGS_MAX, FLEET_SCREENS_MAX, type FleetItem } from "./screen-fleet.js";
+import { fleetHumanLines, fleetOutcome, rejectFleetRevision, screenActionResult, screenTag, screenTagList, screenTarget, SCREEN_TAGS_MAX, type FleetItem } from "./screen-fleet.js";
 import { canonicalPairingCode } from "./pairing-code.js";
 import { editablePlaylist, isAdSlotPage, preparePlaylist, targetDimensions } from "./playlist-authoring.js";
 import { callPlaylist } from "./playlist-api.js";
@@ -4991,7 +4991,7 @@ export const handleScreenAssign = commandHandler(async (args, runtime, resolved)
     rejectFleetRevision(args, "screen assign");
     // Each screen runs the single-screen PATCH on the server, including its
     // timezone rule for scheduled playlists; a refusal is that screen's result.
-    return screenFleetAction(client, "Fleet assign", target.selector, { type: "assign", playlist_id: playlistId });
+    return screenFleetAction(client, runtime, "Fleet assign", target.selector, { type: "assign", playlist_id: playlistId });
   }
   const id = target.id;
   const playlist = await assertScheduledPlaylistHasZone(client, id, playlistId);
@@ -5161,7 +5161,7 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
   const target = screenTarget(args, "screen reload");
   if (target.kind === "fleet") {
     rejectFleetRevision(args, "screen reload");
-    return screenFleetAction(client, "Fleet reload", target.selector, { type: "reload" });
+    return screenFleetAction(client, runtime, "Fleet reload", target.selector, { type: "reload" });
   }
   const id = target.id;
   const revision = flagString(args.flags, "if-match");
@@ -5213,9 +5213,9 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
 }, true);
 
 /**
- * One POST /api/screens/actions request for several screens: one metered
- * request regardless of fan-out. The server answers 200 with a result per
- * screen; partial success keeps `ok: true` and moves the exit code (see
+ * One fleet action for any number of screens: one metered action across
+ * bounded continuations, paced against control budgets. Aggregate every
+ * result page; partial success keeps `ok: true` and moves the exit code (see
  * fleetOutcome). An Idempotency-Key is always sent. The command's write
  * recovery keeps it only while the outcome is unknown: rerunning the
  * identical command after an interrupted or ambiguous request replays
@@ -5223,23 +5223,56 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
  * including a partial failure, completes the write, so a later rerun is a new
  * request.
  */
-async function screenFleetAction(client: ApiClient, title: string, selector: ScreenActionSelector, action: ScreenAction, recoverySupersede?: string): Promise<CommandResult> {
+async function screenFleetAction(client: ApiClient, runtime: CliRuntime, title: string, selector: ScreenActionSelector, action: ScreenAction, recoverySupersede?: string): Promise<CommandResult> {
   const body: ScreenActionRequest = { selector, action };
   let response;
-  try {
-    response = await client.call({ method: "POST", path: "/api/screens/actions", idempotent: true, body, ...(recoverySupersede ? { recoverySupersede } : {}) });
-  } catch (error) {
-    if (error instanceof CliError && !error.problem.next
-      && ((error.problem.status === 404 && error.problem.code === "http_error") || error.problem.status === 405)) {
-      throw new CliError({
-        ...error.problem,
-        detail: "This API server does not offer fleet screen actions. No screen was changed.",
-        next: { command: "screenrig screen --help", reason: "Target one screen id at a time, or use a server that offers POST /api/screens/actions." },
-      }, error.exitCode, error.warnings);
+  let after: string | undefined;
+  const result: import("./adapters/protocol.js").ScreenActionResult = { action: action.type, matched: 0, succeeded: 0, failed: 0, results: [] };
+  let total: number | undefined;
+  while (true) {
+    try {
+      response = await client.call({ method: "POST", path: "/api/screens/actions", idempotent: true, body,
+        ...(after === undefined ? {} : { query: { after } }), recoveryQuery: {}, retainRecoveryOnRefusal: true,
+        ...(recoverySupersede ? { recoverySupersede } : {}) });
+    } catch (error) {
+      if (error instanceof CliError && error.problem.status === 429 && error.problem.retry_after_seconds) {
+        await runtime.sleep(error.problem.retry_after_seconds * 1000);
+        continue;
+      }
+      if (error instanceof CliError && !error.problem.next
+        && ((error.problem.status === 404 && error.problem.code === "http_error") || error.problem.status === 405)) {
+        throw new CliError({ ...error.problem,
+          detail: "This API server does not offer fleet screen actions. No screen was changed.",
+          next: { command: "screenrig screen --help", reason: "Target one screen id at a time, or use a server that offers POST /api/screens/actions." },
+        }, error.exitCode, error.warnings);
+      }
+      throw error;
     }
-    throw error;
+    const page = screenActionResult(response.body, action.type);
+    if ((page.offset ?? 0) !== result.matched || (total !== undefined && page.total !== total)) {
+      throw unexpectedResponseError("Fleet continuation does not match the selected screens; rerun the identical command to resume safely.");
+    }
+    if (page.total !== undefined) total = page.total;
+    result.matched += page.matched;
+    result.succeeded += page.succeeded;
+    result.failed += page.failed;
+    result.results.push(...page.results);
+    if (page.next_cursor === undefined) {
+      if (response.status !== 200 || (total !== undefined && result.matched !== total)) {
+        throw unexpectedResponseError("Fleet action ended without all selected screens; rerun the identical command to resume safely.");
+      }
+      break;
+    }
+    if (response.status !== 202 || page.next_cursor !== String(result.matched)) {
+      throw unexpectedResponseError("Fleet continuation cursor does not match its results.");
+    }
+    after = page.next_cursor;
+    const wait = Number(response.headers["retry-after"] ?? 0);
+    if (!page.matched && (!Number.isFinite(wait) || wait <= 0)) {
+      throw unexpectedResponseError("Fleet action made no progress and supplied no Retry-After; rerun the identical command to resume safely.");
+    }
+    if (wait > 0 && Number.isFinite(wait)) await runtime.sleep(wait * 1000);
   }
-  const result = screenActionResult(response.body, action.type);
   const outcome = fleetOutcome(result);
   return {
     envelope: jsonBody({ ...response, body: result }, client.requestId, undefined, outcome.warnings),
@@ -5254,6 +5287,7 @@ async function screenFleetAction(client: ApiClient, title: string, selector: Scr
       }),
       ...outcome.warnings.map((warning) => `warning: ${warning.message}`),
     ].join("\n"),
+    keepRecoveryUntilOutput: true,
   };
 }
 
@@ -5292,7 +5326,7 @@ export const handleScreenTag = commandHandler(async (args, runtime, resolved) =>
     const action: ScreenAction = add !== undefined ? { type: "add_tags", tags }
       : remove !== undefined ? { type: "remove_tags", tags }
       : { type: "set_tags", tags };
-    return screenFleetAction(client, "Fleet tag", target.selector, action);
+    return screenFleetAction(client, runtime, "Fleet tag", target.selector, action);
   }
   const id = target.id;
   let ifMatch = flagString(args.flags, "if-match");
@@ -5336,7 +5370,7 @@ export const handleScreenToast = commandHandler(async (args, runtime, resolved) 
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
 
-  return screenToast(args, client);
+  return screenToast(args, runtime, client);
 }, true);
 
 export const handleScreenScreenshot = commandHandler(async (args, runtime, resolved) => {
@@ -5348,11 +5382,11 @@ export const handleScreenScreenshot = commandHandler(async (args, runtime, resol
   );
 }, true);
 
-async function screenToast(args: ParsedArgs, client: ApiClient): Promise<CommandResult> {
+async function screenToast(args: ParsedArgs, runtime: CliRuntime, client: ApiClient): Promise<CommandResult> {
   const body = toastWriteFromArgs(args);
   const target = screenTarget(args, "screen toast");
   if (target.kind === "fleet") {
-    return screenFleetAction(client, "Fleet toast", target.selector, { type: "toast", ...body });
+    return screenFleetAction(client, runtime, "Fleet toast", target.selector, { type: "toast", ...body });
   }
   const id = target.id;
   const response = await client.call({
@@ -5857,7 +5891,7 @@ async function screenScreenshotFleet(args: ParsedArgs, runtime: CliRuntime, clie
   let ids: string[];
   const offline = new Map<string, string | undefined>();
   if (selector.by === "tag") {
-    const listed = await client.listAll("/api/screens", { tag: selector.tag });
+    const listed = await client.listAll("/api/screens", { tag: selector.tag }, { uncapped: true });
     const items = (listed.body as { items?: Screen[] } | undefined)?.items;
     if (!Array.isArray(items)) throw usageError("Screen list response does not match the generated ScreenList contract.");
     const active = items.filter((screen) => screen?.state === "active" && typeof screen.id === "string");
@@ -5865,9 +5899,6 @@ async function screenScreenshotFleet(args: ParsedArgs, runtime: CliRuntime, clie
     // The list already says which screens are offline; do not wait out their captures.
     for (const screen of active) if (screen.online === false) offline.set(screen.id, screen.last_online_at);
     if (ids.some((id) => !isScreenId(id))) throw usageError("Screen list response does not match the generated ScreenList contract.");
-    if (ids.length > FLEET_SCREENS_MAX) {
-      throw usageError(`--tag ${selector.tag} matches ${ids.length} active screens; screen screenshot captures at most ${FLEET_SCREENS_MAX}. Narrow the tag or pass screen ids.`);
-    }
   } else {
     ids = selector.screen_ids;
   }
@@ -7147,7 +7178,7 @@ export const handleScreenScheduleSet = commandHandler(async (args, runtime, reso
   if (target.kind === "fleet") {
     // Entries are normalized once on the server so every screen stores the
     // same ids; a screen without a timezone fails alone with invalid_request.
-    return screenFleetAction(client, "Fleet schedule set", target.selector, { type: "set_playlist_schedule", entries });
+    return screenFleetAction(client, runtime, "Fleet schedule set", target.selector, { type: "set_playlist_schedule", entries });
   }
   const id = target.id;
   const body: ScreenPlaylistScheduleWrite = { entries };
@@ -7168,7 +7199,7 @@ export const handleScreenScheduleClear = commandHandler(async (args, runtime, re
   if (target.kind === "fleet") rejectFleetRevision(args, "screen schedule clear");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") {
-    return screenFleetAction(client, "Fleet schedule clear", target.selector, { type: "clear_playlist_schedule" });
+    return screenFleetAction(client, runtime, "Fleet schedule clear", target.selector, { type: "clear_playlist_schedule" });
   }
   const id = target.id;
   const revision = flagString(args.flags, "if-match");
@@ -7203,7 +7234,7 @@ export const handleScreenTakeover = commandHandler(async (args, runtime, resolve
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") {
     try {
-      return await screenFleetAction(client, "Fleet takeover", target.selector, { type: "takeover", ...write }, supersede);
+      return await screenFleetAction(client, runtime, "Fleet takeover", target.selector, { type: "takeover", ...write }, supersede);
     } catch (error) {
       throw forValue !== undefined ? takeoverForProblem(error) : error;
     }
@@ -7232,7 +7263,7 @@ export const handleScreenTakeoverClear = commandHandler(async (args, runtime, re
   if (target.kind === "fleet") rejectFleetRevision(args, "screen takeover clear");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") {
-    return screenFleetAction(client, "Fleet takeover clear", target.selector, { type: "takeover_clear" });
+    return screenFleetAction(client, runtime, "Fleet takeover clear", target.selector, { type: "takeover_clear" });
   }
   const id = target.id;
   const revision = flagString(args.flags, "if-match");
@@ -7263,7 +7294,7 @@ export const handleScreenReboot = commandHandler(async (args, runtime, resolved)
     }
   }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  if (target.kind === "fleet") return screenFleetAction(client, "Fleet reboot", target.selector, { type: "reboot" });
+  if (target.kind === "fleet") return screenFleetAction(client, runtime, "Fleet reboot", target.selector, { type: "reboot" });
   const id = target.id;
   const revision = flagString(args.flags, "if-match");
   let response;
@@ -7307,7 +7338,7 @@ export const handleScreenDisplay = commandHandler(async (args, runtime, resolved
   const until = displayUntil(flagString(args.flags, "until"), flagString(args.flags, "for"), runtime.now());
   const write = { power, ...(until !== undefined ? { until } : {}) };
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  if (target.kind === "fleet") return screenFleetAction(client, `Fleet display ${power}`, target.selector, { type: "display", ...write });
+  if (target.kind === "fleet") return screenFleetAction(client, runtime, `Fleet display ${power}`, target.selector, { type: "display", ...write });
   const id = target.id;
   const revision = flagString(args.flags, "if-match");
   let response;
@@ -7356,7 +7387,7 @@ export const handleScreenDisplayScheduleSet = commandHandler(async (args, runtim
   if (target.kind === "fleet") rejectFleetRevision(args, "screen display-schedule set");
   const write = displayScheduleWrite(await readAuthoringJson(file, runtime));
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  if (target.kind === "fleet") return screenFleetAction(client, "Fleet display schedule set", target.selector, { type: "set_display_schedule", ...write });
+  if (target.kind === "fleet") return screenFleetAction(client, runtime, "Fleet display schedule set", target.selector, { type: "set_display_schedule", ...write });
   const id = target.id;
   const revision = flagString(args.flags, "if-match");
   const response = await screenControlCall(client, id, {
@@ -7374,7 +7405,7 @@ export const handleScreenDisplayScheduleClear = commandHandler(async (args, runt
   const target = nestedScreenTarget(args, "screen display-schedule clear");
   if (target.kind === "fleet") rejectFleetRevision(args, "screen display-schedule clear");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  if (target.kind === "fleet") return screenFleetAction(client, "Fleet display schedule clear", target.selector, { type: "clear_display_schedule" });
+  if (target.kind === "fleet") return screenFleetAction(client, runtime, "Fleet display schedule clear", target.selector, { type: "clear_display_schedule" });
   const id = target.id;
   const revision = flagString(args.flags, "if-match");
   const response = await screenControlCall(client, id, {
@@ -7392,7 +7423,7 @@ export const handleScreenDisplayClear = commandHandler(async (args, runtime, res
   const target = nestedScreenTarget(args, "screen display clear");
   if (target.kind === "fleet") rejectFleetRevision(args, "screen display clear");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  if (target.kind === "fleet") return screenFleetAction(client, "Fleet display clear", target.selector, { type: "display_clear" });
+  if (target.kind === "fleet") return screenFleetAction(client, runtime, "Fleet display clear", target.selector, { type: "display_clear" });
   const id = target.id;
   const revision = flagString(args.flags, "if-match");
   let response;

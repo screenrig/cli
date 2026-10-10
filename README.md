@@ -344,8 +344,9 @@ omitted, by the revision just read, so a concurrent change fails with
 
 `screen assign`, `screen reload`, `screen toast`, and `screen tag` accept
 several screen ids or `--tag TAG` (not both) as one
-`POST /api/screens/actions` request: one metered request for up to 500
-screens. `--tag` selects active screens only. One screen id keeps the
+`POST /api/screens/actions` action: one metered action with no screen-count
+cap. The CLI follows bounded result pages automatically and waits for control
+budgets to reset, retaining the same key throughout. `--tag` selects active screens only. One screen id keeps the
 single-screen route and its envelope. Fleet requests take no `--expect-rev`
 because revision guards are per screen. They always send an Idempotency-Key.
 After an interrupted or ambiguous request, rerunning the identical command
@@ -387,7 +388,7 @@ malformed selector or action fails the whole request before any screen changes.
 `screen screenshot` with several ids or `--tag` fans out on the client
 (screenshots are unbilled, so there is no fleet screenshot action). `--tag`
 resolves through `screen list --tag`, one billed request per page, and keeps
-active screens, at most 500. Several ids must all be screen ids (`scr_…`).
+active screens, with no screen-count cap. Several ids must all be screen ids (`scr_…`).
 An unexpected local failure stops new captures; unstarted screens report
 `not_attempted` and the exit code is 1. `--output` is
 then a directory, the current directory by default, created if missing. Each

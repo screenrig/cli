@@ -59,6 +59,11 @@ does not require that file for standalone contribution.
 
 ## CLI vocabulary and help
 
+Fleet commands accept any number of screen ids or tag matches. Follow the
+backend's bounded continuations automatically under one action key, honor
+budget pauses, and return all per-screen results. Screenshot tag resolution
+follows every list page. Never add a screen-count or fleet-page cap.
+
 Follow the canonical vocabulary in README.md: `show` inspects resources, `list`
 reads collections, K/V uses `get`/`set`, display names use `--name`, and resource
 selectors use `--screen-id`, `--app-id`, `--playlist-id`, or `--release-id`.

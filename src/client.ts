@@ -211,13 +211,13 @@ export class ApiClient {
     return headers;
   }
 
-  async call(req: Omit<TransportRequest, "headers"> & { headers?: Record<string, string>; idempotent?: boolean; idempotencyKey?: string; recoverySupersede?: string }): Promise<TransportResponse> {
-    const { idempotent, idempotencyKey, recoverySupersede, ...transportRequest } = req;
+  async call(req: Omit<TransportRequest, "headers"> & { headers?: Record<string, string>; idempotent?: boolean; idempotencyKey?: string; recoverySupersede?: string; recoveryQuery?: Record<string, string>; retainRecoveryOnRefusal?: boolean }): Promise<TransportResponse> {
+    const { idempotent, idempotencyKey, recoverySupersede, recoveryQuery, retainRecoveryOnRefusal, ...transportRequest } = req;
     if (idempotencyKey !== undefined && !isValidIdempotencyKey(idempotencyKey)) {
       throw usageError("Invalid per-request idempotency key.");
     }
     const recovery = idempotent === true && idempotencyKey === undefined ? this.writeRecovery : undefined;
-    const pending = await recovery?.prepare(transportRequest, this.requestedKey, recoverySupersede);
+    const pending = await recovery?.prepare(recoveryQuery === undefined ? transportRequest : { ...transportRequest, query: recoveryQuery }, this.requestedKey, recoverySupersede);
     const headers = this.headers(idempotent === true, req.headers, pending?.key ?? idempotencyKey);
     const extraType = req.headers?.["content-type"];
     const hideBodies = privateBodies(req.method, req.path);
@@ -264,7 +264,7 @@ export class ApiClient {
     }
     // A 4xx is a definite refusal: the server did not do the work, so a rerun
     // must send it afresh rather than reuse this key. Only a timeout keeps it.
-    if (pending && response.status >= 400 && response.status < 500 && response.status !== 408) {
+    if (pending && !retainRecoveryOnRefusal && response.status >= 400 && response.status < 500 && response.status !== 408) {
       await recovery!.clear(pending);
     }
     const remaining = this.token ? parseCreditsHeaders(response.headers) : undefined;
@@ -409,8 +409,9 @@ export class ApiClient {
    * not a list, or a list still offering pages after LIST_MAX_PAGES, is an
    * error: the caller never receives a truncated list.
    */
-  async listAll(path: string, query?: Record<string, string | undefined>): Promise<TransportResponse> {
+  async listAll(path: string, query?: Record<string, string | undefined>, options?: { uncapped?: boolean }): Promise<TransportResponse> {
     const items: unknown[] = [];
+    const cursors = new Set<string>();
     let after: string | undefined;
     for (let page = 1; ; page += 1) {
       const response = await this.call({ method: "GET", path, query: after === undefined ? query : { ...query, after } });
@@ -428,13 +429,15 @@ export class ApiClient {
       if (typeof next !== "string" || next === "") {
         return { status: response.status, headers: response.headers, body: { ...body, items, next_cursor: null } };
       }
-      if (page >= LIST_MAX_PAGES) {
+      if (!options?.uncapped && page >= LIST_MAX_PAGES) {
         throw unexpectedResponseError(
           `GET ${path} still offered another page after ${LIST_MAX_PAGES} pages (${items.length} rows), so the list was not read completely.`,
           this.requestId,
           "Narrow the list with a filter where the command has one, or report the request_id with screenrig feedback bug.",
         );
       }
+      if (cursors.has(next)) throw unexpectedResponseError(`GET ${path} repeated a list cursor, so the list was not read completely.`, this.requestId);
+      cursors.add(next);
       after = next;
     }
   }

@@ -1189,6 +1189,11 @@ paths:
         schema:
           type: string
           maxLength: 200
+      - { name: project, in: query, schema: { type: string, maxLength: 256 } }
+      - { name: actor, in: query, schema: { type: string, maxLength: 256 } }
+      - { name: outcome, in: query, schema: { type: string, enum: [ok, blocked, failed, unknown] }, description: Recorded audit outcome. Admitted writes are unknown; blocked approvals never became changes. }
+      - { name: since, in: query, schema: { type: string, format: date-time } }
+      - { name: until, in: query, schema: { type: string, format: date-time } }
       - name: exclude_system
         in: query
         description: true leaves out the changes the backend made on its own, recorded with user_id system (an orphaned
@@ -1202,6 +1207,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DashboardStaffAuditPage'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/staff/reports/catalog:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: getDashboardStaffReportCatalog
+      security:
+      - dashboardSession: []
+      description: Staff-only catalog of approved operational datasets and query fields. Uses dashboard cookie authentication.
+      responses:
+        '200':
+          description: Available read-only datasets and enforced limits.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffReportCatalog'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/staff/reports:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    post:
+      operationId: runDashboardStaffReport
+      security:
+      - dashboardSession: []
+      description: Staff-only bounded report or Rig-style query. Accepts a closed read-only grammar, not SQL. Requires dashboard cookie authentication and CSRF proof. Personal fields and free text are excluded.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardStaffReportRequest'
+      responses:
+        '200':
+          description: Reports with time window, source, freshness and sampling metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffReportResponse'
         default:
           $ref: '#/components/responses/Problem'
   /api/staff/feedback:
@@ -1289,6 +1336,134 @@ paths:
                 $ref: '#/components/schemas/DashboardStaffUserDetail'
         default:
           $ref: '#/components/responses/Problem'
+  /api/staff/demos:
+    servers:
+    - url: https://screenrig.ai
+    get:
+      operationId: listDashboardStaffDemos
+      description: Staff-only inclusion-only demo queue. Server scopes precede newest-first 50-row cursor pages. Contains contact metadata, never session material or provider links. Does not switch projects.
+      security:
+      - dashboardSession: []
+      parameters:
+      - { name: q, in: query, schema: { type: string, maxLength: 256 } }
+      - { name: route, in: query, schema: { type: string, enum: [human, automated, awaiting_review] } }
+      - { name: booking, in: query, schema: { type: string, enum: [not_booked, pending, booked, cancelled] } }
+      - { name: attendance, in: query, schema: { type: string, enum: [unrecorded, attended, no_show] } }
+      - { name: outcome, in: query, schema: { type: string, enum: [unrecorded, interested, converted, not_fit, closed] } }
+      - { name: followup, in: query, schema: { type: string, enum: [unrecorded, pending, scheduled, done, not_needed] } }
+      - { name: owner, in: query, schema: { type: string }, description: Dashboard staff person ID or mine/unassigned. Slack ownership is separate. }
+      - { name: due, in: query, schema: { type: boolean }, description: Pending follow-up or scheduled follow-up whose time has arrived. }
+      - { name: after, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Up to 50 matching demo requests and next-page cursor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardStaffDemoPage' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/staff/demos/{id}:
+    servers:
+    - url: https://screenrig.ai
+    get:
+      operationId: getDashboardStaffDemo
+      security:
+      - dashboardSession: []
+      parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Safe contact, routing, booking and staff-tracking metadata; no visitor cookie or provider URLs.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardStaffDemo' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/staff/journeys:
+    servers:
+    - url: https://screenrig.ai
+    get:
+      operationId: getDashboardStaffJourneys
+      description: Read-only creation-cohort evidence for live signage-enabled projects. At most 1000 newest projects are evaluated; total and truncation make bounded coverage explicit. Missing older retained history is unknown. No project switch or write lease.
+      security:
+      - dashboardSession: []
+      parameters:
+      - { name: since, in: query, schema: { type: string, format: date-time }, description: Creation cohort start inclusive. Defaults to seven days ago. }
+      - { name: until, in: query, schema: { type: string, format: date-time }, description: Creation cohort end exclusive. Defaults to now. Range at most 90 days. }
+      responses:
+        '200':
+          description: Recorded milestones and coverage; transition medians use exact first-recorded adjacent timestamps only. Return timing is latest observed use, not first-return time.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardStaffJourneys' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/staff/activity:
+    servers:
+    - url: https://screenrig.ai
+    get:
+      operationId: listDashboardStaffActivity
+      description: Staff-only global customer events in the common logical retention window. No payloads or delivery material. Timestamp and ObjectID keyset pagination is independent of project sequence numbers. Missing attribution or outcomes are explicit.
+      security:
+      - dashboardSession: []
+      parameters:
+      - { name: project, in: query, schema: { type: string, maxLength: 256 } }
+      - { name: actor, in: query, schema: { type: string, maxLength: 256 }, description: Exact person or agent ID. }
+      - { name: outcome, in: query, schema: { type: string, enum: [ok, blocked, failed, unknown] } }
+      - { name: type, in: query, schema: { type: string, maxLength: 80 }, description: Exact type or dotted family prefix. }
+      - { name: severity, in: query, schema: { type: string, enum: [info, warning, error] }, description: Minimum severity. }
+      - { name: since, in: query, schema: { type: string, format: date-time }, description: Inclusive start. Defaults to 24 hours ago; clipped to the common retention floor. }
+      - { name: until, in: query, schema: { type: string, format: date-time }, description: Exclusive end. Defaults to now. }
+      - { name: after, in: query, schema: { type: string }, description: next_cursor from the previous page. }
+      responses:
+        '200':
+          description: Up to 100 events with coverage and an opaque next cursor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardStaffActivityPage' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/staff/screens:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: listDashboardStaffScreens
+      description: Staff-only complete fleet directory, newest first in cursor pages. Filters search all matching screens before paging. Reads do not switch the session project or grant a write lease.
+      security:
+      - dashboardSession: []
+      parameters:
+      - { name: q, in: query, schema: { type: string, maxLength: 256 }, description: "Literal case-insensitive search of label, ID, project, organization and reported Player kind/version." }
+      - { name: project, in: query, schema: { type: string, maxLength: 256 } }
+      - { name: organization, in: query, schema: { type: string, maxLength: 256 } }
+      - { name: state, in: query, schema: { type: string, enum: [archived, all] }, description: Omitted lists active and pairing-pending screens. }
+      - { name: presence, in: query, schema: { type: string, enum: [online, offline] } }
+      - { name: after, in: query, schema: { type: string }, description: The next_cursor from the previous page. }
+      responses:
+        '200':
+          description: Up to fifty matching screens and an opaque next-page position.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardStaffScreenPage' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/staff/screens/{id}:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: getDashboardStaffScreen
+      description: Staff-only read of one screen's fleet metadata, including archived screens. Screen IDs are never authorization; the current staff flag is reread for each request.
+      security:
+      - dashboardSession: []
+      parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Inclusion-only metadata without pairing credentials, recovery offers, addresses or content paths.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardStaffScreen' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/staff/projects:
     servers:
     - url: https://screenrig.ai
@@ -1794,9 +1969,9 @@ paths:
       description: >-
         OAuth 2.0 token endpoint (RFC 6749 §3.2) for agent JWTs. grant_type refresh_token rotates a refresh JWT (RFC 9700): every use returns a new pair;
         a request_id (16 to 200 characters) makes a retry within 60 seconds return the same response, and any other reuse of a superseded refresh token
-        revokes the whole family (invalid_grant). grant_type urn:ietf:params:oauth:grant-type:token-exchange (RFC 8693) exchanges a legacy credential
-        (subject_token_type urn:screenrig:token-type:identity-credential or urn:screenrig:token-type:project-token) for a grant; the legacy credential keeps
-        working. resource (RFC 8707) is https://api.<domain>/api or absent; project_id selects the project of a multi-project grant. A connected
+        revokes the whole family (invalid_grant). grant_type urn:ietf:params:oauth:grant-type:token-exchange (RFC 8693) with
+        subject_token_type urn:screenrig:token-type:identity-credential or urn:screenrig:token-type:project-token answers unsupported_token_type: legacy
+        credentials are retired, and the installation signs in again with screenrig login. resource (RFC 8707) is https://api.<domain>/api or absent; project_id selects the project of a multi-project grant. A connected
         app's grant has the single resource https://api.<domain>/mcp, which a refresh may omit. Clients are public (client_id only), or a connected
         app whose metadata declares private_key_jwt authenticates with client_assertion_type
         urn:ietf:params:oauth:client-assertion-type:jwt-bearer and a client_assertion (iss and sub its client_id, aud the issuer or this endpoint as
@@ -2084,9 +2259,7 @@ paths:
           content:
             application/json:
               schema:
-                oneOf:
-                - $ref: '#/components/schemas/CLIEnrollment'
-                - $ref: '#/components/schemas/CLIEnrollmentOAuth'
+                $ref: '#/components/schemas/CLIEnrollmentOAuth'
         '400':
           $ref: '#/components/responses/Problem'
         '409':
@@ -2170,27 +2343,12 @@ paths:
     post:
       x-screenrig-access: write
       operationId: exchangeAgentIdentity
-      description: Exchanges an active project credential with the project capability for a global identity credential, preserving
-        the original project token. Exact retries recheck authority and return the same encrypted delivery for ten minutes.
-        After delivery expiry, use a new Idempotency-Key. No cookie, Origin, query or body is accepted. This route does not
-        debit the API meter.
+      description: Retired with the legacy agent credentials (project tokens and identity credentials). Always answers 401 credential_retired with next screenrig login; an installation signs in with the device grant (POST /oauth/device_authorization).
       security:
       - projectBearer: []
-      parameters:
-      - $ref: '#/components/parameters/IdempotencyKey'
       responses:
-        '200':
-          description: Identity credential delivery.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                enum:
-                - private, no-store
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AgentIdentityCredential'
+        '401':
+          $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
   /api/agent-identity/revoke:
@@ -2220,77 +2378,26 @@ paths:
     post:
       x-screenrig-access: write
       operationId: startAgentConnection
-      description: Starts a request to connect an agent to an existing project. An existing agent presents its identity bearer,
-        optionally binding project_id to the exact target; a new agent sends no existing authority. Access is granted only when
-        a project member explicitly approves this specific request. The human has 24 hours to approve it. The caller supplies
-        an X25519 public JWK and receives a temporary connection credential separately from the browser approval URL. A project
-        bearer, cookie, Origin header or query credential is refused. The connection id is descriptive and never authority.
+      description: Retired with the legacy agent credentials. Always answers 410 client_update_required; an agent signs in with the device grant (POST /oauth/device_authorization, screenrig login).
       security:
       - {}
       - agentIdentityBearer: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AgentConnectionRequest'
       responses:
-        '201':
-          description: Temporary connection authority and safe dashboard approval URL. The temporary credential is never placed
-            in the URL.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                enum:
-                - private, no-store
-            Referrer-Policy:
-              schema:
-                type: string
-                enum:
-                - no-referrer
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AgentConnectionStart'
-        '400':
+        '410':
           $ref: '#/components/responses/Problem'
-        '403':
-          $ref: '#/components/responses/Problem'
-        '429':
-          $ref: '#/components/responses/RateLimitedProblem'
         default:
           $ref: '#/components/responses/Problem'
   /stream/agent-connections/{id}:
     get:
       x-screenrig-access: read
       operationId: streamAgentConnectionEvents
-      description: Status-only SSE authenticated by the temporary ScreenRig-Agent-Connect credential in Authorization. Data
-        contains only AgentConnection metadata and closes on approved, denied, connected, expired, or cancelled. It never contains
-        a bearer, credential envelope, nonce, cookie, or project identifier.
+      description: Retired with the legacy agent connection. Always answers 410 client_update_required.
       security:
       - agentConnectionAuthorization: []
       parameters:
       - $ref: '#/components/parameters/ResourceID'
       responses:
-        '200':
-          description: Status-only connection SSE.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                enum:
-                - no-cache, no-store, no-transform
-            X-Accel-Buffering:
-              schema:
-                type: string
-                enum:
-                - false
-          content:
-            text/event-stream:
-              schema:
-                type: string
-        '401':
+        '410':
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
@@ -2298,33 +2405,12 @@ paths:
     post:
       x-screenrig-access: write
       operationId: collectAgentCredential
-      description: Collects the exact replay-safe credential envelope after approval. The temporary connection bearer authenticates
-        the request, while X25519, HKDF-SHA-256, and AES-256-GCM bind the envelope to the recipient key supplied at connection
-        creation. No plaintext project bearer is returned by this route. Approval starts a fresh 24-hour delivery window so
-        the recipient can resume after being offline. For a new identity the optional identity_credential_envelope uses the
-        same algorithm with connection_id suffixed by :identity as its binding. An existing identity receives only the membership
-        envelope. The envelopes are deleted on activation, cancellation, or expiry.
+      description: Retired with the legacy agent connection. Always answers 410 client_update_required.
       security:
       - agentConnectionAuthorization: []
       parameters:
       - $ref: '#/components/parameters/ResourceID'
       responses:
-        '200':
-          description: Recipient-bound credential envelope.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                enum:
-                - private, no-store
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AgentCredentialCollection'
-        '401':
-          $ref: '#/components/responses/Problem'
-        '409':
-          $ref: '#/components/responses/Problem'
         '410':
           $ref: '#/components/responses/Problem'
         default:
@@ -2333,30 +2419,13 @@ paths:
     post:
       x-screenrig-access: write
       operationId: cancelAgentConnection
-      description: Withdraws the caller's own connection request. The temporary connection bearer from POST /api/agent-connections
-        authenticates the request; no body is sent. A pending request becomes cancelled, so it can no longer be approved,
-        denied or collected. A request that is already cancelled, denied or expired is returned unchanged, so a retry is
-        safe. A request already approved answers 409 agent_connection_conflict; end that membership with agent disconnect.
+      description: Retired with the legacy agent connection. Always answers 410 client_update_required.
       security:
       - agentConnectionAuthorization: []
       parameters:
       - $ref: '#/components/parameters/ResourceID'
       responses:
-        '200':
-          description: The connection request as it now stands.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                enum:
-                - private, no-store
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AgentConnection'
-        '401':
-          $ref: '#/components/responses/Problem'
-        '409':
+        '410':
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
@@ -2366,29 +2435,11 @@ paths:
     post:
       x-screenrig-access: write
       operationId: activateCurrentAgent
-      description: Proves successful envelope decryption and durable local storage by presenting the pending bearer. Atomically
-        activates the project membership and its token, deletes the delivery envelope, and is replay-safe with the now-active
-        bearer. It takes no body and does not debit the API meter.
+      description: Retired with the legacy project tokens, so no pending bearer is issued any more. Always answers 401 credential_retired with next screenrig login.
       security:
       - pendingAgentBearer: []
       responses:
-        '200':
-          description: Active agent.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                enum:
-                - private, no-store
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Agent'
         '401':
-          $ref: '#/components/responses/Problem'
-        '409':
-          $ref: '#/components/responses/Problem'
-        '410':
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
@@ -3316,38 +3367,39 @@ paths:
       x-rate-limit-admitted-response-headers:
       - RateLimit-Policy
       - RateLimit
-      description: 'Applies one action to many screens in one request. The selector is either by ids (1 to 500 unique screen
-        ids, any state; each id is resolved like its single-screen route) or by tag (every active screen whose tags contain
-        the exact tag, at most 500, else invalid_request). Each screen runs the same code path as its single-screen route, so
-        revisions, events, and runtime signalling are identical: assign is PATCH /api/screens/{id} with playlist_id, reload
-        is POST /api/screens/{id}/reload, toast is POST /api/screens/{id}/toast, and set_tags, add_tags, and remove_tags edit
-        Screen.tags (add then remove, applied against the stored set inside the screen transaction). The answer is 200 with
-        one result per selected screen in selector order; a failed screen carries the problem its single-screen request would
-        have answered, so partial success is normal and not an error. A malformed selector or action fails the whole request
-        before any screen is touched. The request is one metered API request regardless of fan-out. reload and toast share the
-        single-screen budgets: the fan-out is charged all at once against reload-project or toast-project (600 per minute per
-        project), and a fan-out larger than what remains in the window is refused whole with 429 rate_limited before any screen
-        is touched; each screen then spends its own reload-screen (6 per minute) or toast-screen (20 per minute) unit, and a
-        screen over it fails alone with a per-screen rate_limited problem. Idempotency-Key is optional. The resolved screen
-        list is pinned under the key before fan-out, so a retry after an interrupted request fans out to the same screens even
-        when a tag edit changed what the selector matches, replays finished screens without repeating their side effects or
-        spending budget, and completes the rest; an exact retry of a completed request returns the recorded answer for twenty-four
-        hours. The action object is discriminated by type; new action types are additive. takeover is POST /api/screens/{id}/takeover
-        (playlist_id, until, reason; until is validated once against the request clock before fan-out), takeover_clear is DELETE
-        /api/screens/{id}/takeover, and set_playlist_schedule is PUT /api/screens/{id}/playlist-schedule with the entries normalized
-        once before fan-out (so every screen stores the same entry ids), and clear_playlist_schedule is DELETE /api/screens/{id}/playlist-schedule.
-        A takeover''s until is checked against the clock only when the Idempotency-Key has no fleet record, so an exact retry
-        replays after until has passed. These four share the single-screen screen-control budgets the way reload and toast share
-        theirs: the fan-out is charged all at once against screen-control-project (600 per minute per project), refused whole
-        with 429 rate_limited when larger than what remains, and each screen spends its own screen-control-screen unit (20 per
-        minute), failing alone with rate_limited when over it. reboot, display, display_clear, set_display_schedule, and clear_display_schedule
-        run DELETE /api/screens/{id}/display for display_clear and POST /api/screens/{id}/reboot, POST /api/screens/{id}/display,
-        and PUT and DELETE /api/screens/{id}/display-schedule, charging reboot-project (600 per minute) with reboot-screen (2
-        per 10 minutes), or display-project (600 per minute) with display-screen (10 per minute), the same way.'
+      description: >-
+        Applies one action to a selected fleet with no screen-count cap. Select
+        unique screen_ids or a tag matching active screens in creation order.
+        The resolved selection is pinned before any mutation, stored in bounded
+        chunks, and kept for twenty-four hours under Idempotency-Key. Each step
+        uses its single-screen mutation path, preserving revisions, events,
+        runtime signals and per-screen limits. A response contains one bounded
+        page of results; matched, succeeded and failed describe that page.
+        HTTP 202 includes total, offset and next_cursor. Continue with the same
+        selector, action and Idempotency-Key, passing next_cursor as after.
+        Honor Retry-After when present, including a page with zero results.
+        The response echoes Idempotency-Key, including a generated key when the
+        caller omitted it; retain this key for continuations. HTTP 200 finishes
+        the selection. Answered pages replay exactly, including
+        per-screen failures; interrupted steps replay without repeating their
+        effects. Large actions are paced against the existing 600-per-minute
+        project budgets for reload, toast, takeover, playlist schedules, reboot,
+        display and display schedules; project exhaustion pauses the action
+        instead of refusing the fleet. Per-screen exhaustion fails that screen
+        alone. Assign and tag changes have no message budget. Partial failure is
+        a normal result. All pages and retries under one key are one metered
+        action. Requests use a bounded byte payload; use a tag for a selection
+        larger than the transport payload. A malformed selector or action is
+        refused before any screen is touched.
       security:
       - projectBearer: []
       parameters:
       - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      - name: after
+        in: query
+        required: false
+        description: next_cursor from the preceding result page. Reuse the original Idempotency-Key and request body.
+        schema: { type: string, pattern: "^[0-9]+$" }
       requestBody:
         required: true
         content:
@@ -3358,11 +3410,32 @@ paths:
         '200':
           description: Per-screen results. Partial success is a normal answer.
           headers:
+            Idempotency-Key:
+              description: Retain this key for every continuation and exact retry.
+              schema: { type: string }
             Cache-Control:
               schema:
                 type: string
                 enum:
                 - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenActionResult'
+        '202':
+          description: More screens remain. Continue with next_cursor and the same Idempotency-Key and body, honoring Retry-After.
+          headers:
+            Idempotency-Key:
+              description: Retain this key for every continuation and exact retry.
+              schema: { type: string }
+            Retry-After:
+              schema: { type: integer, minimum: 1 }
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
             RateLimit-Policy:
               $ref: '#/components/headers/RateLimitPolicy'
             RateLimit:
@@ -11949,7 +12022,7 @@ components:
     pendingAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Pending agent bearer accepted only for its own activation, plus the same active bearer for exact acknowledgement replay." }
     revocableAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active agent bearer, or the same cryptographically verified revoked bearer for an idempotent self-disconnect replay." }
     agentIdentityBearer: { type: http, scheme: bearer, bearerFormat: sr_live_idt, description: "Global agent identity bearer. Project routes also require ScreenRig-Project and the target membership capabilities; it grants no global project permissions. Identity self-revocation accepts its same verified revoked credential for an exact replay. The identity-wide routes (GET and POST /api/projects, GET /api/organizations, PATCH /api/organizations/{org_id}) also accept an agent access JWT carrying the identity scope: listing needs identity access Read only or Manage, a change needs access:manage (else 403 insufficient_access), and its grant is rechecked inside the action. Under a JWT the project list holds only the projects the grant was approved for, and a created project joins the grant instead of delivering a project token; refresh with its project_id for a token. A JWT without the identity scope is 403 forbidden." }
-    projectBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active project bearer, or identity bearer with ScreenRig-Project and an active target membership. Use revocableAgentBearer for self-disconnect retries after revocation. Every bearer route requires its area AgentCapability; GET reads in an area also accept reports, except the webhook list and get reads (GET /api/webhooks, GET /api/webhooks/{id}), which need the project capability because they return receiver URLs, and the project reads, agents/self, operations reads, feedback routes, and support routes accept any active credential. A credential lacking the route capability is refused 403 forbidden with detail 'This agent credential lacks the <name> capability.' after the command is recorded and before any credit is metered, so refusals are attributed and never billed. An agent access JWT (a session JWT of profile agent, audience screenrig:api:<env>, from /oauth/token or an enrollment in the oauth credential format) is accepted on the same routes: prj is its project, its scope carries the access level (access:read or access:manage) and the capabilities. An expired, revoked or foreign JWT is 401 with WWW-Authenticate Bearer error=invalid_token, which a client answers by refreshing once; a JWT whose revocation state cannot be read is 500 revocation_unavailable with Retry-After 5." }
+    projectBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active project bearer, or identity bearer with ScreenRig-Project and an active target membership. Use revocableAgentBearer for self-disconnect retries after revocation. Every bearer route requires its area AgentCapability; GET reads in an area also accept reports, except the webhook list and get reads (GET /api/webhooks, GET /api/webhooks/{id}), which need the project capability because they return receiver URLs, and the project reads, agents/self, operations reads, feedback routes, and support routes accept any active credential. A credential lacking the route capability is refused 403 forbidden with detail 'This agent credential lacks the <name> capability.' after the command is recorded and before any credit is metered, so refusals are attributed and never billed. An agent access JWT (a session JWT of profile agent, audience screenrig:api:<env>, from /oauth/token or an enrollment in the oauth credential format) is accepted on the same routes: prj is its project, its scope carries the access level (access:read or access:manage) and the capabilities. An expired, revoked or foreign JWT is 401 with WWW-Authenticate Bearer error=invalid_token, which a client answers by refreshing once; a JWT whose revocation state cannot be read is 500 revocation_unavailable with Retry-After 5. The legacy sr_live_ project and identity bearers are retired: every one answers 401 credential_retired with next screenrig login, on these routes, on /mcp and on /adcp/mcp; the legacy enrollment shape and the legacy connection routes (POST /api/agent-connections, its stream, credential and cancel) answer 410 client_update_required." }
     nativePairingAuthorization:
       type: http
       scheme: ScreenRig-Pairing
@@ -12691,11 +12764,11 @@ components:
       type: object
       additionalProperties: false
       required: [action]
-      description: Only fields required by the selected action are accepted. project.write-mode requires a reason and the current session project; it grants ten minutes of staff write access, ending on a project switch, logout, staff revoke or unshadow. Every admitted project write has a permanent audit. project.write, project.write-mode-end, project.shadow, project.unshadow, project.member and project.member-remove are audit-only actions and cannot be proposed; project.member records a membership granted, and project.member-remove one ended, by the screenrig-admin org apply command, whose rows carry its reason. staff.grant and staff.revoke appoint an existing verified person by ID. person.free-cap with no free_limit restores the normal cap; organization.domain with no domain removes the claim; a domain set pulls in, after the approved change commits, the projects its verified people hold alone in their personal organizations, as domain verification does. project.owner explicitly appoints the person and adds their project membership. Admin and owner targets must be existing verified people. organization.plan with no plan_id schedules removal; project.plan-to-organization with no plan_id moves the existing plan; the organization's other projects holding plans of their own roll up into it, each paying for itself until the next UTC month boundary or the organization plan's start, whichever is later. An organization holds premium, enterprise or the staff-assigned staff plan. Organization billing must be enabled for both; the result names the actual effective time and grant. After the billing cutover, project.plan upgrades immediately and grants the monthly difference; downgrades wait for the next UTC month and refuse excess occupancy. Before the cutover, the retained provisioning path sets the project plan immediately and the existing monthly worker grants included credit. Project-held Enterprise is accepted only before organization billing is enabled. person.reset-sign-in emails a one-hour sign-in reset link to the person's verified email address only; the link is never returned to staff, and the result names only the delivery and expiry. With revoke_passkeys it also removes every passkey of the person, ends every dashboard session and cuts off every token already issued to them, in the same approved action.
+      description: Only fields required by the selected action are accepted. project.write-mode requires a reason and the current session project; it grants ten minutes of staff write access, ending on a project switch, logout, staff revoke or unshadow. Every admitted project write has a permanent audit. project.write, project.write-mode-end, project.shadow, project.unshadow, project.member and project.member-remove are audit-only actions and cannot be proposed; project.member records a membership granted, and project.member-remove one ended, by the screenrig-admin org apply command, whose rows carry its reason. staff.grant and staff.revoke appoint an existing verified person by ID. person.free-cap with no free_limit restores the normal cap; organization.domain with no domain removes the claim; a domain set pulls in, after the approved change commits, the projects its verified people hold alone in their personal organizations, as domain verification does. project.owner explicitly appoints the person and adds their project membership. Admin and owner targets must be existing verified people. organization.plan with no plan_id schedules removal; project.plan-to-organization with no plan_id moves the existing plan; the organization's other projects holding plans of their own roll up into it, each paying for itself until the next UTC month boundary or the organization plan's start, whichever is later. An organization holds premium, enterprise or the staff-assigned staff plan. Organization billing must be enabled for both; the result names the actual effective time and grant. After the billing cutover, project.plan upgrades immediately and grants the monthly difference; downgrades wait for the next UTC month and refuse excess occupancy. Before the cutover, the retained provisioning path sets the project plan immediately and the existing monthly worker grants included credit. Project-held Enterprise is accepted only before organization billing is enabled. person.reset-sign-in emails a one-hour sign-in reset link to the person's verified email address only; the link is never returned to staff, and the result names only the delivery and expiry. Demo actions bind the exact demo_version and demo_revision. Attendance, staff-reported outcomes and follow-up decisions are separate; completed booking never implies attendance or conversion. Offer-live and booking-link actions queue existing durable notification jobs only after approval. With revoke_passkeys it also removes every passkey of the person, ends every dashboard session and cuts off every token already issued to them, in the same approved action.
       properties:
         action:
           type: string
-          enum: [organization.create, organization.rename, organization.admins, organization.domain, project.rename, project.move, project.owner, person.deactivate, person.reinstate, person.free-cap, person.reset-sign-in, organization.plan, project.plan-to-organization, project.plan, project.delete, organization.delete, organization.merge, staff.grant, staff.revoke, project.write-mode, project.write-mode-end, project.write, project.shadow, project.unshadow, project.member, project.member-remove]
+          enum: [organization.create, organization.rename, organization.admins, organization.domain, project.rename, project.move, project.owner, person.deactivate, person.reinstate, person.free-cap, person.reset-sign-in, organization.plan, project.plan-to-organization, project.plan, project.delete, organization.delete, organization.merge, staff.grant, staff.revoke, project.write-mode, project.write-mode-end, project.write, project.shadow, project.unshadow, project.member, project.member-remove, demo.claim, demo.release, demo.offer-live, demo.send-booking-link, demo.record-outcome]
         organization_id: { type: string }
         project_id: { type: string }
         user_id: { type: string }
@@ -12710,6 +12783,13 @@ components:
         target_organization_id: { type: string }
         target_revision: { type: integer, minimum: 1 }
         project_ids: { type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: { type: string } }
+        demo_request_id: { type: string }
+        demo_version: { type: string, format: date-time, description: Exact saved updated_at from the demo read. }
+        demo_revision: { type: integer, minimum: 0, description: Exact staff tracking revision from the demo read. }
+        demo_attendance: { type: string, enum: [unrecorded, attended, no_show] }
+        demo_outcome: { type: string, enum: [unrecorded, interested, converted, not_fit, closed] }
+        demo_followup: { type: string, enum: [unrecorded, pending, scheduled, done, not_needed] }
+        demo_followup_at: { type: string, format: date-time }
         revoke_passkeys: { type: boolean, default: false, description: "person.reset-sign-in only: also remove every passkey and end every session at once." }
     DashboardStaffSignInReset:
       type: object
@@ -12750,6 +12830,151 @@ components:
         state: { type: string, enum: [pending, completed] }
         created_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
+    DashboardStaffDemoBooking:
+      type: object
+      additionalProperties: false
+      required: [state]
+      properties:
+        state: { type: string }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        timezone: { type: string }
+    DashboardStaffDemoTracking:
+      type: object
+      additionalProperties: false
+      required: [revision, attendance, outcome, followup]
+      properties:
+        revision: { type: integer, minimum: 0 }
+        owner_user_id: { type: string }
+        attendance: { type: string, enum: [unrecorded, attended, no_show] }
+        outcome: { type: string, enum: [unrecorded, interested, converted, not_fit, closed] }
+        followup: { type: string, enum: [unrecorded, pending, scheduled, done, not_needed] }
+        followup_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        updated_by: { type: string }
+    DashboardStaffDemo:
+      type: object
+      additionalProperties: false
+      required: [id, email, organization, country, screen_range, budget, timezone, source, route, review_requested, confidence, created_at, updated_at, booking, tracking, notifications_enabled]
+      properties:
+        id: { type: string }
+        email: { type: string }
+        organization: { type: string }
+        country: { type: string }
+        screen_range: { type: string }
+        budget: { type: string }
+        timezone: { type: string }
+        source: { type: string }
+        route: { type: string }
+        review_requested: { type: boolean }
+        confidence: { type: number }
+        slack_owner: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        booking: { $ref: '#/components/schemas/DashboardStaffDemoBooking' }
+        notifications_enabled: { type: boolean }
+        delivery_pending: { type: integer }
+        delivery_retrying: { type: integer }
+        tracking: { $ref: '#/components/schemas/DashboardStaffDemoTracking' }
+    DashboardStaffDemoPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/DashboardStaffDemo' } }
+        next_cursor: { type: string, nullable: true }
+    DashboardStaffJourneyStage:
+      type: object
+      additionalProperties: false
+      required: [key, state, source, timing]
+      properties:
+        key: { type: string, enum: [created, agent_connected, screen_paired, playback, returning] }
+        state: { type: string, enum: [observed, unknown, not_observed, waiting] }
+        at: { type: string, format: date-time }
+        source: { type: string }
+        timing: { type: string, enum: [first_recorded, first_retained, latest_observation, unavailable] }
+    DashboardStaffJourney:
+      type: object
+      additionalProperties: false
+      required: [id, name, created_at, stages, progress, stalled]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+        stages: { type: array, items: { $ref: '#/components/schemas/DashboardStaffJourneyStage' } }
+        progress: { type: integer, minimum: 0, maximum: 5 }
+        stalled: { type: boolean }
+    DashboardStaffJourneyCount:
+      type: object
+      additionalProperties: false
+      required: [key, label, observed, ordered, unknown, not_observed, waiting, covered_gap]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        observed: { type: integer }
+        ordered: { type: integer }
+        unknown: { type: integer }
+        not_observed: { type: integer }
+        waiting: { type: integer }
+        covered_gap: { type: integer }
+    DashboardStaffJourneyTransition:
+      type: object
+      additionalProperties: false
+      required: [from, to, samples]
+      properties:
+        from: { type: string }
+        to: { type: string }
+        samples: { type: integer }
+        median_seconds: { type: number }
+    DashboardStaffJourneys:
+      type: object
+      additionalProperties: false
+      required: [as_of, since, until, event_history_since, playback_history_since, total, scanned, truncated, stalled, counts, transitions, items]
+      properties:
+        as_of: { type: string, format: date-time }
+        since: { type: string, format: date-time }
+        until: { type: string, format: date-time }
+        event_history_since: { type: string, format: date-time }
+        playback_history_since: { type: string, format: date-time }
+        total: { type: integer }
+        scanned: { type: integer }
+        truncated: { type: boolean }
+        stalled: { type: integer }
+        counts: { type: array, items: { $ref: '#/components/schemas/DashboardStaffJourneyCount' } }
+        transitions: { type: array, items: { $ref: '#/components/schemas/DashboardStaffJourneyTransition' } }
+        items: { type: array, items: { $ref: '#/components/schemas/DashboardStaffJourney' } }
+    DashboardStaffActivity:
+      type: object
+      additionalProperties: false
+      required: [id, project_id, sequence, at, type, severity, outcome, actor_kind]
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        sequence: { type: integer }
+        at: { type: string, format: date-time }
+        type: { type: string }
+        severity: { type: string }
+        outcome: { type: string, enum: [ok, blocked, failed, unknown] }
+        actor_kind: { type: string, enum: [person, agent, unrecorded] }
+        actor_id: { type: string }
+        actor_name: { type: string }
+        resource_id: { type: string }
+        resource_type: { type: string }
+        command: { type: string }
+        request_id: { type: string }
+        operation_id: { type: string }
+        problem_code: { type: string }
+    DashboardStaffActivityPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor, since, until, retention_seconds]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/DashboardStaffActivity' } }
+        next_cursor: { type: string, nullable: true }
+        since: { type: string, format: date-time }
+        until: { type: string, format: date-time }
+        retention_seconds: { type: integer }
     DashboardStaffAudit:
       type: object
       additionalProperties: false
@@ -12840,6 +13065,78 @@ components:
         last_seen_at:
           type: string
           format: date-time
+    DashboardStaffReportRequest:
+      type: object
+      additionalProperties: false
+      required: [words]
+      properties:
+        words:
+          type: array
+          minItems: 1
+          maxItems: 48
+          items:
+            type: string
+            maxLength: 256
+    DashboardStaffReportDataset:
+      type: object
+      required: [name, fields, sums, defaults]
+      properties:
+        name:
+          type: string
+        fields:
+          type: array
+          items:
+            type: string
+        sums:
+          type: array
+          items:
+            type: string
+        defaults:
+          type: array
+          items:
+            type: string
+    DashboardStaffReportCatalog:
+      type: object
+      required: [datasets, environment, max_rows, max_window, active_window]
+      properties:
+        datasets:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardStaffReportDataset'
+        environment:
+          type: string
+        max_rows:
+          type: integer
+        max_window:
+          type: string
+        active_window:
+          type: string
+    DashboardStaffReport:
+      type: object
+      required: [report, columns, metadata, rows]
+      properties:
+        report:
+          type: string
+        columns:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        rows:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    DashboardStaffReportResponse:
+      type: object
+      required: [reports]
+      properties:
+        reports:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardStaffReport'
     DashboardStaffMemberList:
       type: object
       additionalProperties: false
@@ -13153,6 +13450,42 @@ components:
         next_cursor:
           anyOf: [{ type: string }, { type: 'null' }]
           description: Pass as before for the next page; null at the end.
+    DashboardStaffPlayer:
+      type: object
+      additionalProperties: false
+      required: [legacy, seen_at]
+      properties:
+        kind: { type: string }
+        version: { type: string }
+        legacy: { type: boolean }
+        seen_at: { type: string, format: date-time }
+    DashboardStaffScreen:
+      type: object
+      additionalProperties: false
+      required: [id, label, state, project_id, project_name, online, created_at]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        state: { type: string, enum: [active, pairing_pending, archived] }
+        project_id: { type: string }
+        project_name: { type: string }
+        organization_id: { type: string }
+        organization_name: { type: string }
+        online: { type: boolean }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        last_online_at: { type: string, format: date-time }
+        player: { $ref: '#/components/schemas/DashboardStaffPlayer' }
+        health: { $ref: '#/components/schemas/ScreenHealth' }
+    DashboardStaffScreenPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: { type: array, maxItems: 50, items: { $ref: '#/components/schemas/DashboardStaffScreen' } }
+        next_cursor:
+          anyOf: [{ type: string }, { type: 'null' }]
+          description: Pass as after to load the next page; null at the end.
     DashboardStaffProjectList:
       type: object
       additionalProperties: false
@@ -14122,8 +14455,8 @@ components:
           enum:
           - oauth
           - legacy
-          description: oauth asks for the agent JWT pair (CLIEnrollmentOAuth) instead of the permanent bearers. While the server does not issue agent JWTs it
-            answers the legacy shape (CLIEnrollment), which the client keeps using. Omitted is legacy.
+          description: Must be oauth, which answers the agent JWT pair (CLIEnrollmentOAuth). legacy, or omitting it, answers 410 client_update_required, because
+            the legacy permanent bearers are retired. A server that is not issuing agent JWTs answers not_ready.
         intent:
           type: string
           enum:
@@ -15882,12 +16215,12 @@ components:
       required: [by, screen_ids]
       properties:
         by: { type: string, enum: [ids] }
-        screen_ids: { type: array, minItems: 1, maxItems: 500, uniqueItems: true, items: { type: string, minLength: 1, maxLength: 200 } }
+        screen_ids: { type: array, minItems: 1, uniqueItems: true, items: { type: string, minLength: 1, maxLength: 200 } }
     ScreenActionSelectorTag:
       type: object
       additionalProperties: false
       required: [by, tag]
-      description: Every active screen whose tags contain tag, in creation order. More than 500 matches is invalid_request.
+      description: Every active screen whose tags contain tag, in creation order. There is no screen-count cap.
       properties:
         by: { type: string, enum: [tag] }
         tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }
@@ -16037,10 +16370,13 @@ components:
       required: [action, matched, succeeded, failed, results]
       properties:
         action: { type: string, enum: [assign, reload, toast, set_tags, add_tags, remove_tags, takeover, takeover_clear, set_playlist_schedule, clear_playlist_schedule, reboot, display, display_clear, set_display_schedule, clear_display_schedule] }
-        matched: { type: integer, minimum: 0, maximum: 500 }
-        succeeded: { type: integer, minimum: 0, maximum: 500 }
-        failed: { type: integer, minimum: 0, maximum: 500 }
-        results: { type: array, maxItems: 500, items: { $ref: "#/components/schemas/ScreenActionScreenResult" } }
+        matched: { type: integer, minimum: 0 }
+        succeeded: { type: integer, minimum: 0 }
+        failed: { type: integer, minimum: 0 }
+        results: { type: array, items: { $ref: "#/components/schemas/ScreenActionScreenResult" } }
+        offset: { type: integer, minimum: 0, description: Number of results preceding this page. }
+        total: { type: integer, minimum: 0, description: Size of the pinned fleet. }
+        next_cursor: { type: string, pattern: "^[0-9]+$", description: Continue with this value as after and the same request body and Idempotency-Key. Absent when complete. }
     ScreenActionScreenResult:
       type: object
       additionalProperties: false
@@ -18208,6 +18544,8 @@ x-problem-codes:
 - internal_error
 - invalid_request
 - unauthorized
+- credential_retired
+- client_update_required
 - forbidden
 - insufficient_access
 - not_found

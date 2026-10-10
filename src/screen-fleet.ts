@@ -3,13 +3,11 @@ import { flagString } from "./command-input.js";
 import type { Warning } from "./envelope.js";
 import { ExitCode, exitCodeForStatus } from "./exit-codes.js";
 import type { ScreenActionResult, ScreenActionScreenResult, ScreenActionSelector, ScreenActionType } from "./adapters/protocol.js";
-import { normalizeProblem, usageError } from "./problems.js";
+import { normalizeProblem, usageError, unexpectedResponseError } from "./problems.js";
 
 /** Screen tags share the media tag grammar. */
 export const SCREEN_TAG_PATTERN = /^[A-Za-z0-9]{1,32}$/;
 export const SCREEN_TAGS_MAX = 16;
-/** Server bound for both selector forms. */
-export const FLEET_SCREENS_MAX = 500;
 
 export type ScreenTarget =
   | { kind: "single"; id: string }
@@ -45,7 +43,6 @@ export function screenTarget(args: ParsedArgs, command: string): ScreenTarget {
   if (!ids.length) throw usageError(`${command} requires <id> or --tag TAG.`);
   if (ids.some((id) => id.length < 1 || id.length > 200)) throw usageError(`${command} screen ids must be 1 to 200 characters.`);
   if (new Set(ids).size !== ids.length) throw usageError(`${command} lists a screen id more than once.`);
-  if (ids.length > FLEET_SCREENS_MAX) throw usageError(`${command} accepts at most ${FLEET_SCREENS_MAX} screen ids; use --tag for a larger fleet.`);
   if (ids.length === 1) return { kind: "single", id: ids[0]! };
   return { kind: "fleet", selector: { by: "ids", screen_ids: ids } };
 }
@@ -58,7 +55,7 @@ export function rejectFleetRevision(args: ParsedArgs, command: string): void {
 }
 
 function isCount(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= FLEET_SCREENS_MAX;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 /** Validate a POST /api/screens/actions answer against the generated ScreenActionResult contract. */
@@ -68,12 +65,15 @@ export function screenActionResult(body: unknown, action: ScreenActionType): Scr
   const valid = result !== undefined && result !== null && typeof result === "object"
     && result.action === action
     && isCount(result.matched) && isCount(result.succeeded) && isCount(result.failed)
+    && (result.offset === undefined || isCount(result.offset))
+    && (result.total === undefined || isCount(result.total))
+    && (result.next_cursor === undefined || (typeof result.next_cursor === "string" && /^\d+$/.test(result.next_cursor)))
     && Array.isArray(results)
     && results.length === result.matched
     && result.succeeded + result.failed === result.matched
     && results.every((item: ScreenActionScreenResult) => item && typeof item.screen_id === "string" && (item.status === "ok" || item.status === "failed"))
     && results.filter((item) => item.status === "failed").length === result.failed;
-  if (!valid) throw usageError("Screen actions response does not match the generated ScreenActionResult contract.");
+  if (!valid) throw unexpectedResponseError("Screen actions response does not match the generated ScreenActionResult contract.");
   // Each failed screen carries the problem document its single-screen request
   // would have answered; the envelope reports it the way a single-screen error
   // envelope does, so data.results[].problem.code reads the same either way.
@@ -138,7 +138,7 @@ export function fleetHumanLines<T extends FleetItem>(title: string, summary: Fle
     item.status,
     item.status === "failed" ? problemLabel(item.problem) : (detail?.(item) ?? ""),
   ]);
-  const widths = [0, 1].map((index) => Math.max(0, ...rows.map((row) => row[index]!.length)));
+  const widths = [0, 1].map((index) => rows.reduce((width, row) => Math.max(width, row[index]!.length), 0));
   return [
     `${title}: matched ${summary.matched}, succeeded ${summary.succeeded}, failed ${summary.failed}`,
     ...rows.map((row) => row.map((cell, index) => index < widths.length ? cell.padEnd(widths[index]!) : cell).join("  ").trimEnd()),
