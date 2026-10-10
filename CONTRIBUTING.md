@@ -9,7 +9,7 @@ keep installed customer plugins independent of this checkout.
 When `config.local-dev.json`
 exists in the normal config directory (`$XDG_CONFIG_HOME/screenrig` or
 `~/.config/screenrig` on Unix; `%APPDATA%\screenrig` on Windows), the CLI uses
-`http://api.screenrig.localhost:8088` by default. Otherwise the production
+`http://api.screenrig.localhost:18880` (the local edge) by default. Otherwise the production
 default is `https://api.screenrig.ai`. `SCREENRIG_API_URL` and `--api-url`
 remain explicit overrides.
 

@@ -111,7 +111,7 @@ async function main(): Promise<void> {
     screenRevision = Number(pairedScreen?.revision);
     assert.ok(screenId && Number.isInteger(screenRevision));
     const publicUrl = String(pairing.data?.public_url ?? "");
-    assert.match(publicUrl, /^http:\/\/play\.screenrig\.localhost:8088\/player\/s\/[A-Za-z0-9_-]+$/);
+    assert.match(publicUrl, /^http:\/\/play\.screenrig\.localhost:(?:8088|18880)\/player\/s\/[A-Za-z0-9_-]+$/);
     assert.equal(new URL(publicUrl).origin, new URL(playUrl).origin);
     await run(["agent", "status"]);
     await run(["doctor"]);

@@ -17,7 +17,7 @@ const screen = {
 };
 
 test("validates /s/ and /player/s/ provisioning URLs on production, stage and localhost", () => {
-  for (const origin of ["https://play.screenrig.ai", "https://play.stage.screenrig.ai", "http://play.screenrig.localhost:8088"]) {
+  for (const origin of ["https://play.screenrig.ai", "https://play.stage.screenrig.ai", "http://play.screenrig.localhost:8088", "http://play.screenrig.localhost:18880"]) {
     assert.deepEqual(validateProvisioningUrls({
       screen,
       public_url: `${origin}/s/public-test`,

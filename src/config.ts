@@ -123,7 +123,7 @@ import { isResourceID } from "./generated/resource-ids.js";
       "screen_provision" | "browser_setup" | "media_generate" | "pending_writes">;
 
     export const DEFAULT_API_URL = "https://api.screenrig.ai";
-    export const LOCAL_DEV_API_URL = "http://api.screenrig.localhost:8088";
+    export const LOCAL_DEV_API_URL = "http://api.screenrig.localhost:18880";
 
     export interface ConfigFs {
       mkdir: typeof mkdir;
