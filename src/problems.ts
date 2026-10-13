@@ -392,6 +392,8 @@ const DEFAULT_HINTS: Record<string, string> = {
   application_in_use: "A playlist still uses this application. Remove it from those playlists, then retry.",
   rate_limited: "Too many requests. Wait before retrying; retry_after_seconds says how long when the server sent it.",
   quota_exceeded: "The project is at a limit. Free space or use a smaller input, then retry.",
+  free_organization_limit: "This person already holds their free Standard organization, which takes any number of projects. Create the project there: screenrig organization list shows it, then screenrig project create NAME --organization-id ID. A second organization needs Premium or Enterprise; the user asks sales@screenrig.ai.",
+  organization_plan_required: "This organization admits no new screens until a Premium or Enterprise plan pays for it. Move the project into the person's free organization with screenrig project moves and screenrig project move --organization-id ID, or the user asks sales@screenrig.ai for a plan.",
   feature_unavailable: "This project cannot use this feature. Do not retry; tell the user.",
   not_ready: "The resource is still being prepared. Wait a few seconds and retry, or follow its operation with screenrig operations wait OPERATION_ID.",
   internal_error: "The server failed while handling the request. If retryable is true, wait a moment and retry; otherwise report the request_id with screenrig feedback bug.",

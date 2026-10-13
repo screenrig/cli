@@ -83,9 +83,12 @@ test("organization administration uses explicit IDs and preserves concurrent pro
   const id = context(A, "Screens").organization.id;
   f.transport.on("GET", "/api/organizations", req => {
     assert.equal(req.headers?.authorization, "Bearer " + IDENTITY);
-    return { status: 200, headers: {}, body: { organizations: [{ id, name: "Acme", admin: true, revision: 1 }, { id: "org_BBBBBBBBBBBBBBBBBBBBBBBB", name: "Acme", admin: false, revision: 1 }] } };
+    return { status: 200, headers: {}, body: { organizations: [{ id, name: "Acme", admin: true, free: true, plan_required: false, revision: 1 }, { id: "org_BBBBBBBBBBBBBBBBBBBBBBBB", name: "Acme", admin: false, revision: 1 }], new_organization_allowed: false } };
   });
-  assert.equal((await f.invoke("organization", "list")).result.data.organizations.length, 2);
+  const listed = await f.invoke("organization", "list");
+  assert.equal(listed.result.data.organizations.length, 2);
+  assert.equal(listed.result.data.organizations[0].free, true);
+  assert.equal(listed.result.data.new_organization_allowed, false);
   assert.equal((await f.saved())?.project_id, A);
   f.transport.on("PATCH", `/api/organizations/${id}`, async req => {
     assert.deepEqual(req.body, { name: "North" });
@@ -210,6 +213,35 @@ test("a captured create retry stays in A while another process selects B", async
   assert.doesNotMatch(retried.out, /eyJ/);
 });
 
+test("identity without a current project lets the server place the project and passes its free organization refusal through", async t => {
+  const config: ScreenRigConfig = { api_url: API, identity_token: IDENTITY, agent_id: AGENT.id, oauth: GRANT,
+    projects: { [B]: { project_name: "Lobby", organization_id: initial().organization_id, organization_name: "Acme" } } };
+  const f = await fixture(t, config);
+  const hint = "Add the project to Acme: screenrig project create NAME --organization-id org_AAAAAAAAAAAAAAAAAAAAAAAA.";
+  const bodies: unknown[] = [];
+  f.transport.on("POST", "/api/projects", req => {
+    assert.equal(req.headers?.authorization, "Bearer " + IDENTITY);
+    assert.equal(req.headers?.["screenrig-project"], undefined);
+    bodies.push(req.body);
+    const refusal = { status: 409, code: "free_organization_limit", detail: "You already hold the free organization Acme (org_AAAAAAAAAAAAAAAAAAAAAAAA)." };
+    const problem: Record<string, string> = { "content-type": "application/problem+json" };
+    if (bodies.length === 1) return { status: 409, headers: problem, body: { ...refusal, hint } };
+    if (bodies.length === 2) return { status: 409, headers: problem, body: refusal };
+    return { status: 201, headers: { "cache-control": "no-store" }, body: context(C, "Menu") };
+  });
+  const named = await f.invoke("project", "create", "Menu", "--organization", "Second");
+  assert.equal(named.result.error.code, "free_organization_limit");
+  assert.equal(named.result.error.hint, hint);
+  const fallback = await f.invoke("project", "create", "Menu", "--organization", "Third");
+  assert.equal(fallback.result.error.code, "free_organization_limit");
+  assert.match(fallback.result.error.hint, /organization list.*--organization-id ID.*Premium or Enterprise/);
+  const placed = await f.invoke("project", "create", "Menu");
+  assert.equal(placed.code, 0, placed.out);
+  assert.deepEqual(bodies, [{ name: "Menu", organization_name: "Second" }, { name: "Menu", organization_name: "Third" }, { name: "Menu" }]);
+  assert.equal(placed.result.data.organization.name, "Acme");
+  assert.equal((await f.saved())?.project_id, C);
+});
+
 test("project deletion sends only exact confirmation and never archives screens on refusal", async t => {
   const f = await fixture(t, initial());
   f.transport.on("DELETE", "/api/project", req => {
@@ -322,9 +354,6 @@ test("identity without a current project creates in an explicit organization and
   const config: ScreenRigConfig = { api_url: API, identity_token: IDENTITY, agent_id: AGENT.id, oauth: GRANT,
     projects: { [B]: { project_name: "Lobby", organization_id: initial().organization_id, organization_name: "Acme" } } };
   const f = await fixture(t, config);
-  const missing = await f.invoke("project", "create", "Menu");
-  assert.equal(missing.result.error.code, "usage_error");
-  assert.equal(f.transport.calls.length, 0);
   let attempts = 0, key: string | undefined;
   f.transport.on("POST", "/api/projects", async req => {
     assert.equal(req.headers?.authorization, "Bearer " + IDENTITY);

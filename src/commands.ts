@@ -1132,10 +1132,13 @@ export const handleOrganizationList = commandHandler(async (args, runtime, resol
   const identity = await identityForCommand(runtime, resolved);
   const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
   const response = await client.call({ method: "GET", path: "/api/organizations" });
-  const body = response.body as { organizations?: Array<{ id: string; name: string; admin: boolean }> };
+  const body = response.body as { organizations?: Array<{ id: string; name: string; admin: boolean; free?: boolean; plan_required?: boolean }>; new_organization_allowed?: boolean };
   if (!Array.isArray(body?.organizations) || body.organizations.some(org => !org || !/^(?:(?:stage|qa|development)_)?org_[A-Za-z0-9_-]+$/.test(org.id) || typeof org.name !== "string" || typeof org.admin !== "boolean")) throw configError("Organization list does not match the contract.");
+  const tags = (org: { admin: boolean; free?: boolean; plan_required?: boolean }) => [org.admin && "admin", org.free === true && "free", org.plan_required === true && "plan required"].filter(Boolean).join(", ");
+  const lines = body.organizations.map(org => `${validateDisplayName(org.name, "Organization name")}: ${org.id}${tags(org) ? ` (${tags(org)})` : ""}`);
+  if (body.new_organization_allowed === false) lines.push("New organization: add projects to an existing organization; another needs Premium or Enterprise.");
   return { envelope: successEnvelope(body, { request_id: client.requestId }), exitCode: ExitCode.Success,
-    human: body.organizations.map(org => `${validateDisplayName(org.name, "Organization name")}: ${org.id}${org.admin ? " (admin)" : ""}`).join("\n") || "No visible organizations." };
+    human: lines.join("\n") || "No visible organizations." };
 }, false);
 export const handleOrganizationRename = commandHandler(async (args, runtime, resolved) => {
   const id = args.positionals[2];
@@ -1866,7 +1869,6 @@ async function projectCreate(args: ParsedArgs, runtime: CliRuntime, resolved: Re
   const organizationId = flagString(args.flags, "organization-id");
   const organizationName = flagString(args.flags, "organization");
   if (organizationId && organizationName) throw usageError("Use one of --organization-id or --organization.");
-  if (resolved.identityWriteScope && !organizationId && !organizationName) throw usageError("Creating without a current project requires --organization-id or --organization.");
   const identity = await identityForCommand(runtime, resolved);
   const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
   const body: ProjectCreate = { name, ...(organizationId ? { organization_id: organizationId } : {}),

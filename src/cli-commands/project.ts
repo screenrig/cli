@@ -8,10 +8,10 @@ import { CREDIT_HELP } from "../help-text.js";
 export function registerProjectCommands(root: Command, bind: CommandActionBinder): void {
   const project = root.command("project").description("Create, select, and manage projects");
   project.command("list").description("List this identity's accessible projects by organization").action(bind(handleProjectList));
-  project.command("create").description("Create and select a named project; defaults to the current organization")
+  project.command("create").description("Create and select a named project; defaults to the current or administered organization")
     .argument("<NAME>", "Project name, unique within its organization")
     .addOption(new Option("--organization-id <ID>", "Create in an organization you administer").conflicts("organization"))
-    .option("--organization <NAME>", "Use an accessible organization by name or create it")
+    .option("--organization <NAME>", "Use an accessible organization by name, or create one when you hold no free organization")
     .action(bind(handleProjectCreate));
   project.command("use").description("Select an accessible project as the last-used project")
     .argument("<ID>", "Project ID from project list").action(bind(handleProjectUse));

@@ -209,7 +209,7 @@ test("human rendering shows the hint, field errors, argv, and retryable", () => 
 });
 
 test("every problem that reaches the output boundary has a hint", () => {
-  for (const code of ["usage_error", "not_enrolled", "config_error", "file_error", "unexpected_response", "transport_error", "timeout", "unexpected_error", "not_found", "revision_conflict", "forbidden", "some_future_code"]) {
+  for (const code of ["usage_error", "not_enrolled", "config_error", "file_error", "unexpected_response", "transport_error", "timeout", "unexpected_error", "not_found", "revision_conflict", "forbidden", "free_organization_limit", "organization_plan_required", "some_future_code"]) {
     const hint = withDefaultHint({ ...PAYMENT_BASE, status: 400, code }).hint;
     assert.ok(hint && hint.length > 20, code);
   }

@@ -161,16 +161,21 @@ Enrollment creates an organization with the requested name and a project named
 and confirms that a member invitation was requested,
 without exposing a credential or invitation URL. The invitation is the human's
 dashboard login; nothing waits on it, and the agent can pair screens and publish
-right away. Other authenticated commands never enroll automatically. If the
-server rejects the stored credential, `agent disconnect --yes` clears it locally
-for that project. `agent revoke-identity --yes` separately revokes the global
-identity and all its project memberships. Both retain local credentials after
-an ambiguous server failure so the original operation can be reconciled.
+right away. When that person already holds a free Standard organization, their
+acceptance moves the project into it, renamed on a name clash. Other
+authenticated commands never enroll automatically. If the server rejects the
+stored credential, `agent disconnect --yes` clears it locally for that project.
+`agent revoke-identity --yes` separately revokes the global identity and all
+its project memberships. Both retain local credentials after an ambiguous
+server failure so the original operation can be reconciled.
 
-`project create` defaults to the current organization. Names are unique within
-an organization; an agent's responsible person becomes owner. The server
-enforces the ten-free-Standard-project creation cap and payer coverage. With no
-current project, specify an organization. A successful create adds the new
+`project create` adds a project to the current project's organization,
+otherwise to the organization you administer. Names are unique within an
+organization, and an organization holds any number of projects; an agent's
+responsible person becomes owner. Each person has one free Standard
+organization; the server refuses a second (`free_organization_limit`) and its
+hint names the organization to add the project to. Another organization needs
+Premium or Enterprise from sales@screenrig.ai. A successful create adds the new
 project to this sign-in and selects it; the next command renews an access token
 for it.
 
@@ -183,6 +188,11 @@ Projects reached through the sign-in's identity access still require membership.
 
 `organization list` shows organizations visible to this identity. Organization
 names can repeat; use the ID when renaming an organization you administer.
+`free` marks a free Standard organization, `plan_required` one that admits no
+new screens until a plan pays (`organization_plan_required`), and
+`new_organization_allowed` says whether `project create` may still start a new
+organization. Organization admins are its billing admins; they invite other
+admins by email from the dashboard.
 Renaming an organization updates cached project labels without selecting a
 different project.
 
@@ -837,7 +847,7 @@ accepted fields (`data.id`, `data.release_id`, `data.operation_id`) and
 
 ## Support conversations
 
-Standard (free) projects resolve issues through the documentation and their
+On Standard (free), resolve issues through the documentation and the
 operating agent, with `feedback bug` and `feedback feature` for reports.
 Premium and Enterprise include persistent support conversations:
 
