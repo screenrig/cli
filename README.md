@@ -202,8 +202,8 @@ Only the owner can move a project to a destination returned by `project moves`,
 or transfer ownership to an existing verified member. Moves carry its screens
 and check the destination payer's limit. Charges remain with their original
 payer. Deletion requires the exact current name and revision from its preview,
-the project's own Standard plan, no active screens, no wallet obligations and
-no live advertising. It emails members and uses the retained tombstone.
+no plan of the project's own, no active screens, no wallet obligations and no
+live advertising. It emails members and uses the retained tombstone.
 
 ## Invitations
 
