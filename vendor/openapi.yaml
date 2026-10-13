@@ -261,9 +261,9 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createAgentProject
-      description: Creates a named project owned by the verified responsible person. Defaults to the current project's organization,
-        then the person's verified-domain organization, then the organization the person used most recently among those they
-        administer or hold as their free one, then a new organization. An organization name selects exactly one visible match,
+      description: Creates a named project owned by the verified responsible person. With no organization named, it goes to the person's
+        verified-domain organization, else the current project's organization, else the organization the person used most recently
+        among those they administer or hold as their free one, else a new organization. An organization name selects exactly one visible match,
         otherwise creates a new organization. A person holds one free Standard organization; a new organization beyond it is
         free_organization_limit, naming the one they hold. Projects inside an organization are not limited. An exact idempotent
         retry redelivers its sealed membership credential for ten minutes. Enrollment is exempt from the limit. Under an agent access
@@ -672,8 +672,8 @@ paths:
         and expires after one hour. With or without a person, the request also re-sends at most ten invitations addressed to
         the email, and any one invitation at most once an hour. Of the ten most recent non-deleted projects whose contact address
         matches, each active project with zero members and a catalog plan gets its enrollment invitation back, even when it
-        expired. Pending emailed member and ad-buyer invitations to active projects with a catalog plan fill the rest, newest
-        first. A re-sent invitation keeps its ID and gets a new link and expiry; the old link stops working and the project's
+        expired. Pending emailed member and ad-buyer invitations to active projects with a catalog plan, and pending organization
+        admin invitations to live organizations, fill the rest, newest first. A re-sent invitation keeps its ID and gets a new link and expiry; the old link stops working and the project's
         outstanding invitation count is unchanged. An expired enrollment returns as a new invitation that takes an invitation
         slot again, so the count rises by one, and it is skipped when the project is full. Other expired invitations, and revoked,
         accepted and link invitations, are not re-sent.
@@ -869,7 +869,9 @@ paths:
       description: Accepts an invitation transactionally and mints a fresh person session, deleting the old session when present.
         Link create_login requires the verified __Host-screenrig-signup cookie for this invitation. signed_in requires a dashboard
         session and recent sign-in or fresh proof; email delivery requires a matching verified email. An already-registered
-        create_login address returns resource_conflict.
+        create_login address returns resource_conflict. An organization_admin invitation adds the person to the organization's
+        admins and opens no project; it returns organization_admin_limit when the organization already has 20 admins and
+        stays outstanding, and resource_conflict when the organization was deleted.
       security:
       - {}
       - invitationSignup: []
@@ -12183,6 +12185,124 @@ paths:
                 $ref: '#/components/schemas/OrganizationPeople'
         default:
           $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/admin-invitations:
+    servers:
+    - url: https://screenrig.ai
+    parameters:
+    - name: org_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+    post:
+      operationId: dashboardOrganizationsCreateAdminInvitations
+      description: A designated admin invites people by email to become admins. Accepting adds the person to the organization's
+        admins and creates their login if they have none; it grants no project membership. At most 20 admins counting pending
+        admin invitations (organization_admin_limit); an address whose person already administers the organization is
+        invalid_request. Email invitations expire after seven days; an outstanding invitation to the same address is reused.
+        The organization and inviter names must be fit for email. People only; agents and bearer credentials have no admin
+        route.
+      security:
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationAdminInvitationCreate'
+      responses:
+        '201':
+          description: The organization admin invitations, one per distinct address.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationAdminInvitationCreated'
+        default:
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+      x-rate-limit-policies:
+      - name: invitation-create-organization
+        quota: 20
+        windowSeconds: 3600
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
+    get:
+      operationId: dashboardOrganizationsListAdminInvitations
+      description: A designated admin lists the organization's admin invitations by id, 50 at a time, after expiring those
+        whose time has passed. Recipient addresses are visible to the organization's admins, who supplied them. Tokens and
+        credential URLs are never listed. People only; agents and bearer credentials have no admin route.
+      security:
+      - dashboardSession: []
+      parameters:
+      - name: status
+        in: query
+        schema:
+          $ref: '#/components/schemas/InvitationStatus'
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: The organization's admin invitations.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationAdminInvitationList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/admin-invitations/{invitation_id}/revoke:
+    servers:
+    - url: https://screenrig.ai
+    parameters:
+    - name: org_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+    - name: invitation_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+    post:
+      operationId: dashboardOrganizationsRevokeAdminInvitation
+      description: A designated admin revokes an outstanding admin invitation and frees its admin slot. An already revoked
+        invitation returns 204; an accepted one returns invitation_consumed; an id the organization does not hold is not_found.
+        People only; agents and bearer credentials have no admin route.
+      security:
+      - dashboardSession: []
+      responses:
+        '204':
+          description: The invitation is revoked.
+        default:
+          $ref: '#/components/responses/Problem'
   /api/organizations/{org_id}/domain:
     servers:
     - url: https://screenrig.ai
@@ -14568,6 +14688,7 @@ components:
       - project_member
       - ad_buyer
       - sign_in_reset
+      - organization_admin
     InvitationStatus:
       type: string
       enum:
@@ -14787,6 +14908,85 @@ components:
             $ref: '#/components/schemas/Invitation'
         next_cursor:
           type: string
+    OrganizationAdminInvitationCreate:
+      type: object
+      additionalProperties: false
+      required:
+      - emails
+      properties:
+        emails:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: string
+            format: email
+            minLength: 3
+            maxLength: 254
+    OrganizationAdminInvitation:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - kind
+      - delivery
+      - status
+      - recipient_email
+      - organization_id
+      - created_at
+      - expires_at
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum:
+          - organization_admin
+        delivery:
+          type: string
+          enum:
+          - email
+        status:
+          $ref: '#/components/schemas/InvitationStatus'
+        recipient_email:
+          type: string
+          format: email
+          minLength: 3
+          maxLength: 254
+          description: Visible to the organization's admins, who supplied it.
+        organization_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    OrganizationAdminInvitationCreated:
+      type: object
+      additionalProperties: false
+      required:
+      - invitations
+      properties:
+        invitations:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationAdminInvitation'
+          minItems: 1
+          maxItems: 20
+    OrganizationAdminInvitationList:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrganizationAdminInvitation'
+        next_cursor:
+          type: string
     EnrollmentInvitation:
       type: object
       additionalProperties: false
@@ -14900,7 +15100,17 @@ components:
               name:
                 $ref: '#/components/schemas/ProjectName'
           - type: 'null'
-          description: Null for sign-in reset; other invitation kinds identify their target project.
+          description: Null for sign-in resets and organization admin invitations; other invitation kinds identify their target
+            project.
+        organization:
+          type: object
+          additionalProperties: false
+          required:
+          - name
+          properties:
+            name:
+              $ref: '#/components/schemas/ProjectName'
+          description: Only for organization_admin, the organization the person is invited to administer.
         network:
           type: object
           additionalProperties: false
@@ -15144,15 +15354,22 @@ components:
           $ref: '#/components/schemas/InvitationKind'
         project_id:
           oneOf: [{ type: string, minLength: 1 }, { type: 'null' }]
-          description: Current project after acceptance. Null only when a sign-in reset leaves the person without any project memberships.
+          description: Current project after acceptance. Null only when a sign-in reset or an organization admin invitation leaves the person without any project memberships.
+        organization_id:
+          type: string
+          minLength: 1
+          description: Only for organization_admin, the organization the person now administers.
         next:
           type: string
           enum:
           - project
           - network
+          - organization
       allOf:
       - if: { properties: { kind: { enum: [project_member, ad_buyer] } }, required: [kind] }
         then: { properties: { project_id: { type: string, minLength: 1 } } }
+      - if: { properties: { kind: { const: organization_admin } }, required: [kind] }
+        then: { required: [organization_id], properties: { next: { const: organization } } }
     HealthResponse: { type: object, additionalProperties: false, required: [status], properties: { status: { type: string, enum: [alive] } } }
     ReadyResponse:
       type: object
@@ -19421,6 +19638,7 @@ x-problem-codes:
 - recovery_expired
 - recovery_not_offered
 - invitation_limit_reached
+- organization_admin_limit
 - version_required
 - price_change_pending
 - quote_stale
