@@ -8,6 +8,12 @@ The supported customer distribution is the CLI bundled by
 `screenrig/cli` `main`. Agent workflows must keep using that plugin-relative
 launcher.
 
+`version` and `doctor` report the executable's package distribution and agent
+setup guidance. A plugin bundle reports its bootstrap helper; agents verify
+that package in their current runtime's plugin registry before using its
+launcher. A standalone CLI points them to official plugin installation while
+preserving any saved screenRIG connection.
+
 Drawing commands (`compose` and `playlist preview`) use a native renderer. The
 plugin bundle does not carry it: the first render on a machine downloads the
 renderer for that platform from the npm registry once, checks it against the
