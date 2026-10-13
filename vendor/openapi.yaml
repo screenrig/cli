@@ -261,9 +261,12 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createAgentProject
-      description: Creates a named project owned by the verified responsible person. Defaults to the current project organization;
-        an organization name selects exactly one visible match, otherwise creates a new organization. An exact idempotent retry
-        redelivers its sealed membership credential for ten minutes. Enrollment is exempt from the owner cap. Under an agent access
+      description: Creates a named project owned by the verified responsible person. Defaults to the current project's organization,
+        then the person's verified-domain organization, then the organization the person used most recently among those they
+        administer or hold as their free one, then a new organization. An organization name selects exactly one visible match,
+        otherwise creates a new organization. A person holds one free Standard organization; a new organization beyond it is
+        free_organization_limit, naming the one they hold. Projects inside an organization are not limited. An exact idempotent
+        retry redelivers its sealed membership credential for ten minutes. Enrollment is exempt from the limit. Under an agent access
         JWT (identity scope, access:manage, a grant with identity access Manage) no project token is delivered; the project joins
         the grant with Manage and every capability, and a refresh with its project_id returns a token for it.
       security:
@@ -1128,6 +1131,33 @@ paths:
                 $ref: '#/components/schemas/DashboardStaffOrganizationPage'
         default:
           $ref: '#/components/responses/Problem'
+  /api/staff/organizations/{id}:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      operationId: getDashboardStaffOrganization
+      description: Staff-cookie only; the staff flag is reread for each request. One live organization in the shape of an
+        item of GET /api/staff/organizations. An unknown or deleted organization answers 404 not_found.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: The organization.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffOrganization'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/staff/organizations/{id}/projects:
     servers:
     - url: https://screenrig.ai
@@ -1190,6 +1220,7 @@ paths:
           type: string
           maxLength: 200
       - { name: project, in: query, schema: { type: string, maxLength: 256 } }
+      - { name: organization, in: query, schema: { type: string, maxLength: 256 }, description: "Organization ID. Selects changes to the organization (change.organization_id, or change.target_organization_id of a merge into it) and changes to any of its current live projects (change.project_id). Combines with the other scopes." }
       - { name: actor, in: query, schema: { type: string, maxLength: 256 } }
       - { name: outcome, in: query, schema: { type: string, enum: [ok, blocked, failed, unknown] }, description: Recorded audit outcome. Admitted writes are unknown; blocked approvals never became changes. }
       - { name: since, in: query, schema: { type: string, format: date-time } }
@@ -1207,6 +1238,51 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DashboardStaffAuditPage'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/staff/operations/live:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: getDashboardStaffOperationsLive
+      security:
+      - dashboardSession: []
+      description: Staff-cookie only; the staff flag is reread for each request. Live edge rates from the proxy nodes'
+        10-second counters, over the last 60 seconds of complete buckets, and the last 15 minutes as a series. At most
+        5 seconds old. Answers 500 dependency_unavailable when the counters cannot be read.
+      responses:
+        '200':
+          description: Live edge rates, per lane, status, traffic class, cache outcome, limit and proxy node.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffOperationsLive'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/staff/operations/insights:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: getDashboardStaffOperationsInsights
+      security:
+      - dashboardSession: []
+      description: Staff-cookie only; the staff flag is reread for each request. Fixed read-only reports over the edge,
+        service log and usage records, at most 60 seconds old. Each section is null when its read failed or its source
+        is missing. Answers not_ready when the report data source is unavailable.
+      responses:
+        '200':
+          description: Top downloaders, recent errors, latency, top routes and clients, the 24-hour trend, open streams
+            and ingest lag.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffOperationsInsights'
         default:
           $ref: '#/components/responses/Problem'
   /api/staff/reports/catalog:
@@ -1268,6 +1344,12 @@ paths:
           type: string
           maxLength: 256
         description: Opaque cursor from the previous page.
+      - name: kind
+        in: query
+        schema:
+          type: string
+          enum: [bug, feature]
+        description: Only bug reports or only feature requests. Pass the same kind with before for the next page.
       responses:
         '200':
           description: At most 100 feedback submissions, newest first.
@@ -1405,6 +1487,7 @@ paths:
       - dashboardSession: []
       parameters:
       - { name: project, in: query, schema: { type: string, maxLength: 256 } }
+      - { name: organization, in: query, schema: { type: string, maxLength: 256 }, description: "Organization ID. Selects events of the organization's current live projects; an organization without projects returns an empty page with the usual since, until and retention_seconds. Combines with project." }
       - { name: actor, in: query, schema: { type: string, maxLength: 256 }, description: Exact person or agent ID. }
       - { name: outcome, in: query, schema: { type: string, enum: [ok, blocked, failed, unknown] } }
       - { name: type, in: query, schema: { type: string, maxLength: 80 }, description: Exact type or dotted family prefix. }
@@ -1660,6 +1743,196 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SupportMessageList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/staff/support/conversations:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: listDashboardStaffSupportInbox
+      description: Staff-cookie only; the staff flag is reread for each request. Every project's support conversations, most
+        recent activity first (updated_at, then id), 50 per page, with project and organization names, message facts and
+        the reader's own unread count. counts covers the project, organization and q scopes, not the folder. Reading moves
+        no read receipt.
+      security:
+      - dashboardSession: []
+      parameters:
+      - name: folder
+        in: query
+        schema:
+          type: string
+          enum: [open, waiting, closed, all]
+          default: open
+        description: open is every conversation not closed; waiting is open and waiting for staff (human_requested).
+      - { name: project, in: query, schema: { type: string, maxLength: 256 }, description: Project ID. }
+      - { name: organization, in: query, schema: { type: string, maxLength: 256 }, description: "Organization ID: conversations of its current live projects. Combines with project." }
+      - { name: q, in: query, schema: { type: string, maxLength: 100 }, description: "Literal, case-insensitive search of the subject." }
+      - { name: before, in: query, schema: { type: string, maxLength: 256 }, description: "next from the previous page, a conversation ID." }
+      responses:
+        '200':
+          description: One page of conversations and the scope's folder counts.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffSupportInbox'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/staff/support/conversations/{id}:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      operationId: getDashboardStaffSupportConversation
+      description: Staff-cookie only. One conversation of any project, as an inbox row. An unknown conversation answers 404
+        not_found.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: The conversation.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffSupportConversation'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/staff/support/conversations/{id}/messages:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      operationId: listDashboardStaffSupportMessages
+      description: Staff-cookie only. The conversation's messages after a sequence, ascending, at most 100, with each message's
+        author_id and origin where they were recorded. Reading moves no read receipt.
+      security:
+      - dashboardSession: []
+      parameters:
+      - name: after
+        in: query
+        schema:
+          type: string
+          pattern: ^[0-9]+$
+        description: Project support message sequence; resumes strictly after this position.
+      responses:
+        '200':
+          description: Conversation messages.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffSupportMessageList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: replyDashboardStaffSupportConversation
+      description: Staff-cookie only, with the dashboard's same-origin mutation guard. Adds a staff reply under the staff
+        member's first name. The customer sees it as any staff reply (role staff, counted in unread_staff, sent on
+        /stream/support), any pending Luna answer is cancelled, and the reply is posted into the conversation's Slack thread
+        as "Name (dashboard)". A closed conversation answers 409 support_conversation_closed until it is reopened; a
+        conversation whose project is not active answers 409 resource_conflict. ScreenRig credential material answers
+        invalid_request; other credential-shaped text is replaced with [redacted]. A retry with the same key returns the
+        original message for 24 hours; a different body under that key is idempotency_mismatch. At most 300 replies per
+        staff member per hour.
+      security:
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardStaffSupportReply'
+      responses:
+        '201':
+          description: The reply and the conversation after it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffSupportReplyResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/staff/support/conversations/{id}/read:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    put:
+      operationId: readDashboardStaffSupportConversation
+      description: Staff-cookie only, with the dashboard's same-origin mutation guard. Monotonically acknowledges the
+        conversation's messages through sequence for this staff member alone; customer receipts never move. Cannot
+        acknowledge beyond last_sequence.
+      security:
+      - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupportRead'
+      responses:
+        '200':
+          description: The acknowledged sequence.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportRead'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/staff/support/conversations/{id}/state:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      operationId: changeDashboardStaffSupportState
+      description: Staff-cookie only, with the dashboard's same-origin mutation guard. Takes over (pauses Luna), resolves
+        (closes) or reopens (leaves Luna paused for staff follow-up) a conversation, exactly as the Slack buttons do. Each
+        change adds one lifecycle notice to the customer's history and the Slack thread; a repeat that changes nothing adds
+        none. A conversation whose project is not active answers 409 resource_conflict.
+      security:
+      - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardStaffSupportStateChange'
+      responses:
+        '200':
+          description: The conversation after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffSupportConversation'
         default:
           $ref: '#/components/responses/Problem'
   /api/staff/projects/{id}/shadow:
@@ -4843,6 +5116,51 @@ paths:
                 $ref: '#/components/schemas/BillingStatement'
         '400':
           description: invalid_request - limit is out of range.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+  /api/billing/usage:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: getBillingUsage
+      description: The calling project's use of its monthly allowance (10 GB bandwidth, 1 GB-month storage, and 10,000 API
+        requests, billed project stream events and webhook delivery attempts) for one UTC month. A project paying for itself
+        reads its own pool. A project another payer pays for shares that payer's pool with the payer's other projects; it
+        reads its own share, and payer names the payer. The payer's pool total stays on the payer's billing reads.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      parameters:
+      - name: period
+        in: query
+        required: false
+        schema:
+          type: string
+          pattern: ^[0-9]{4}-[0-9]{2}$
+        description: UTC month in YYYY-MM form; defaults to the current month.
+      responses:
+        '200':
+          description: Project allowance usage.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectBillingUsage'
+        '400':
+          description: invalid_request - period is not a UTC month in YYYY-MM form.
           content:
             application/problem+json:
               schema:
@@ -8807,12 +9125,20 @@ paths:
       responses:
         '202':
           description: Accepted after durable persistence. A telemetry batch is accepted or refused as a unit. It returns 202
-            only after its raw observations are durable and its stream watermark, latest health and observation state, page-failure
-            slot and project events have committed together; it returns stream_id, sequence, accepted (report count), and duplicate.
-            A refused batch (sequence gap, conflicting replay, full stream capacity, retired authority) stores nothing. A batch
+            only after its raw observations are durable and then its stream watermark has moved; it returns stream_id, sequence,
+            accepted (report count), and duplicate. A batch that changes the latest health or observation state or the page-failure
+            slot, or appends project events, commits its watermark with that state in one screen write, and appends its events
+            in the same transaction. A batch that changes none of them, such as a steady batch of plays and condition reports,
+            moves only its watermark, held in Valkey for 25 hours; while Valkey is unavailable or out of memory the screen write
+            holds it instead. A refused batch (conflicting replay, full stream capacity, retired authority) stores nothing, except
+            a new stream that loses the screen's last stream place to a concurrent new stream, which is refused after its raw
+            observations are stored. A batch
             that was not acknowledged because of a server error or a lost connection can have stored some of its raw observations;
             replaying the same bytes stores each missing observation once, never stores one twice, and then acknowledges. A
-            replay of an acknowledged batch returns 202 with duplicate true and changes nothing. Individual reports retain their
+            replay of an acknowledged batch returns 202 with duplicate true and changes nothing. A watermark held in Valkey can
+            be lost or fall behind in a failover, never move ahead, so a sequence past the stream's watermark is accepted as the
+            stream's next without a gap refusal, and a replay whose watermark was lost is accepted again with duplicate false;
+            its plays are still stored once and its Player log records collapse on their identities. Individual reports retain their
             existing response. A runtime condition report (any other report code, such as player.page_skipped) is recorded in
             the Player log (GET /api/events?source=log), not in the project's events, and is acknowledged when the Player log
             queue accepts it; it is not on the event stream and not delivered to webhooks. manifest.activated is committed before
@@ -11668,7 +11994,11 @@ paths:
     - url: https://screenrig.ai
     post:
       operationId: dashboardOrganizationsStartDomain
-      description: Replace this organization's 24-hour DNS TXT challenge. Put its exact value at its returned DNS name.
+      description: Open a 7-day DNS TXT challenge for one domain, replacing that domain's pending challenge; the
+        organization's other domains are unchanged. Put its exact value at its returned DNS name and keep it there. An
+        organization holds at most 20 domains, verified and pending together (resource_conflict). A domain another
+        organization holds is resource_conflict. A domain this organization already holds may be proved again, which
+        records the new value for the daily DNS check.
       security:
       - dashboardSession: []
       responses:
@@ -11705,8 +12035,10 @@ paths:
     - url: https://screenrig.ai
     post:
       operationId: dashboardOrganizationsVerifyDomain
-      description: Verify the current unexpired challenge against DNS. Claims are unique per exact domain and organization.
-        A proof rotated during lookup is refused. Once the claim commits, and in the background after this response, each
+      description: Verify one unexpired challenge against DNS and add its domain to the organization, beside the domains it
+        already holds. Each exact domain belongs to one organization. A proof rotated during lookup is refused. Keep the
+        TXT record in place; a daily check removes a domain whose record stays missing for seven days. Once the claim
+        commits, and in the background after this response, each
         project whose owner is a verified person at exactly the domain and which sits alone in that owner's personal
         organization is moved into this organization (renamed "<name> (<owner>)" on a name conflict). Projects in any other
         organization, projects holding a customer-paid plan of their own, and projects their owner or staff moved out of a
@@ -11856,7 +12188,8 @@ paths:
     - url: https://screenrig.ai
     delete:
       operationId: dashboardOrganizationsRemoveDomain
-      description: Remove the verified domain and pending challenge; future placement and domain discovery stop.
+      description: Remove every verified domain and pending challenge the organization holds; future placement and domain
+        discovery stop. DELETE /api/organizations/{org_id}/domains/{domain} removes one.
       security:
       - dashboardSession: []
       responses:
@@ -11882,6 +12215,46 @@ paths:
           type: string
           minLength: 1
           maxLength: 200
+  /api/organizations/{org_id}/domains/{domain}:
+    servers:
+    - url: https://screenrig.ai
+    delete:
+      operationId: dashboardOrganizationsRemoveOneDomain
+      description: Remove one domain, verified or pending, and leave the organization's other domains. Future placement and
+        discovery for it stop, and another organization may verify it. Projects already in the organization stay. A domain
+        the organization neither holds nor is proving is not_found.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Organization result.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationDomainRemoved'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      - name: domain
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 3
+          maxLength: 253
 components:
   # Anonymous demos have their own cookie, independent of project/dashboard auth.
   headers:
@@ -12306,6 +12679,22 @@ components:
         verified_at:
           type: string
           format: date-time
+        method:
+          type: string
+          enum:
+          - dns
+          - staff_override
+          description: How the domain was verified. A DNS domain is checked again daily; a staff domain is not.
+        checked_at:
+          type: string
+          format: date-time
+          description: When the daily DNS check last looked up the TXT record.
+        missing_since:
+          type: string
+          format: date-time
+          description: The first daily check that found the TXT record missing; absent while it is in place. A domain whose
+            record stays missing for seven days is removed from the organization, and its admins are emailed when the record
+            goes missing and when the domain is removed.
     OrganizationView:
       type: object
       additionalProperties: false
@@ -12316,6 +12705,9 @@ components:
       - revision
       - admin
       - project_count
+      - plan_id
+      - free
+      - plan_required
       properties:
         id:
           type: string
@@ -12329,15 +12721,39 @@ components:
           type: boolean
         verified_domain:
           $ref: '#/components/schemas/VerifiedOrganizationDomain'
+          description: The first of verified_domains.
+        verified_domains:
+          type: array
+          maxItems: 20
+          description: Every domain the organization holds, ordered by domain. An organization holds at most 20 domains,
+            verified and pending together.
+          items:
+            $ref: '#/components/schemas/VerifiedOrganizationDomain'
+        pending_domains:
+          type: array
+          maxItems: 20
+          description: The organization's open DNS challenges, ordered by domain, with the TXT name and value to publish.
+            Admins only; absent for anyone else.
+          items:
+            $ref: '#/components/schemas/OrganizationDomainChallenge'
         project_count:
           type: integer
           minimum: 0
           description: The organization's live projects.
         plan_id:
           type: string
-          description: The plan the organization holds now (a scheduled plan counts from its effective time); absent when it
-            holds none. Read-only display; customers do not change organization plans. The staff organization view reports
-            the stored plan_id with previous_plan_id and plan_effective_at instead.
+          description: The plan the organization holds now (a scheduled plan counts from its effective time), "standard"
+            when it holds no other. Always present. Read-only display; customers do not change organization plans. The
+            staff organization view reports the stored plan_id with previous_plan_id and plan_effective_at instead.
+        free:
+          type: boolean
+          description: The organization is a person's, or an unaccepted agent's, one free Standard organization. A plan attached to
+            it leaves it their free one.
+        plan_required:
+          type: boolean
+          description: The organization admits no new screens until it holds a plan (organization_plan_required). Set when an
+            enrollment's person already held their free organization and the project could not join it. Running screens keep
+            running.
     OrganizationPersonal:
       type: boolean
       description: "The organization is only its one project's wrapper: exactly one live project, no verified domain, no organization
@@ -12474,11 +12890,16 @@ components:
       additionalProperties: false
       required:
       - organizations
+      - new_organization_allowed
       properties:
         organizations:
           type: array
           items:
             $ref: '#/components/schemas/OrganizationView'
+        new_organization_allowed:
+          type: boolean
+          description: The person (an agent's responsible person) may open a new free organization. False once they hold their
+            one; creating with a new organization name is then free_organization_limit.
     OrganizationProject:
       type: object
       additionalProperties: false
@@ -12764,7 +13185,7 @@ components:
       type: object
       additionalProperties: false
       required: [action]
-      description: Only fields required by the selected action are accepted. project.write-mode requires a reason and the current session project; it grants ten minutes of staff write access, ending on a project switch, logout, staff revoke or unshadow. Every admitted project write has a permanent audit. project.write, project.write-mode-end, project.shadow, project.unshadow, project.member and project.member-remove are audit-only actions and cannot be proposed; project.member records a membership granted, and project.member-remove one ended, by the screenrig-admin org apply command, whose rows carry its reason. staff.grant and staff.revoke appoint an existing verified person by ID. person.free-cap with no free_limit restores the normal cap; organization.domain with no domain removes the claim; a domain set pulls in, after the approved change commits, the projects its verified people hold alone in their personal organizations, as domain verification does. project.owner explicitly appoints the person and adds their project membership. Admin and owner targets must be existing verified people. organization.plan with no plan_id schedules removal; project.plan-to-organization with no plan_id moves the existing plan; the organization's other projects holding plans of their own roll up into it, each paying for itself until the next UTC month boundary or the organization plan's start, whichever is later. An organization holds premium, enterprise or the staff-assigned staff plan. Organization billing must be enabled for both; the result names the actual effective time and grant. After the billing cutover, project.plan upgrades immediately and grants the monthly difference; downgrades wait for the next UTC month and refuse excess occupancy. Before the cutover, the retained provisioning path sets the project plan immediately and the existing monthly worker grants included credit. Project-held Enterprise is accepted only before organization billing is enabled. person.reset-sign-in emails a one-hour sign-in reset link to the person's verified email address only; the link is never returned to staff, and the result names only the delivery and expiry. Demo actions bind the exact demo_version and demo_revision. Attendance, staff-reported outcomes and follow-up decisions are separate; completed booking never implies attendance or conversion. Offer-live and booking-link actions queue existing durable notification jobs only after approval. With revoke_passkeys it also removes every passkey of the person, ends every dashboard session and cuts off every token already issued to them, in the same approved action.
+      description: Only fields required by the selected action are accepted. project.write-mode requires a reason and the current session project; it grants ten minutes of staff write access, ending on a project switch, logout, staff revoke or unshadow. Every admitted project write has a permanent audit. project.write, project.write-mode-end, project.shadow, project.unshadow, project.member and project.member-remove are audit-only actions and cannot be proposed; project.member records a membership granted, and project.member-remove one ended, by the screenrig-admin org apply command, whose rows carry its reason. staff.grant and staff.revoke appoint an existing verified person by ID. person.free-cap sets how many free Standard organizations the person may open (free_limit; none restores one) and changes no organization they hold; organization.domain with no domain removes the claim; a domain set pulls in, after the approved change commits, the projects its verified people hold alone in their personal organizations, as domain verification does. project.owner explicitly appoints the person and adds their project membership. Admin and owner targets must be existing verified people. organization.plan with no plan_id schedules removal; project.plan-to-organization with no plan_id moves the existing plan; the organization's other projects holding plans of their own roll up into it, each paying for itself until the next UTC month boundary or the organization plan's start, whichever is later. An organization holds premium, enterprise, promo or the staff-assigned staff plan; every organization without one pays on Standard, so organization.plan standard removes the plan as no plan_id does, and project.plan-to-organization refuses standard. Organization billing must be enabled for both; the result names the actual effective time and grant. project.plan takes standard, which ends a plan the project still holds of its own at the next UTC month boundary and refuses occupancy above Standard's limits. Project-held Enterprise is accepted only before organization billing is enabled, through the retained provisioning path. person.reset-sign-in emails a one-hour sign-in reset link to the person's verified email address only; the link is never returned to staff, and the result names only the delivery and expiry. Demo actions bind the exact demo_version and demo_revision. Attendance, staff-reported outcomes and follow-up decisions are separate; completed booking never implies attendance or conversion. Offer-live and booking-link actions queue existing durable notification jobs only after approval. With revoke_passkeys it also removes every passkey of the person, ends every dashboard session and cuts off every token already issued to them, in the same approved action.
       properties:
         action:
           type: string
@@ -13033,6 +13454,15 @@ components:
           federation_issuer: { type: string }
           policy_revision: { type: integer }
           federation_enforced: { type: boolean }
+          free_holder:
+            type: object
+            additionalProperties: false
+            required: [kind]
+            description: Whose free Standard organization this is; absent until the backfill decides it. none is nobody's (staff,
+              the AdCP harness, held a plan when decided, or refused at enrollment acceptance).
+            properties:
+              kind: { type: string, enum: [person, agent, none] }
+              id: { type: string }
     DashboardStaffOrganizationPage:
       type: object
       additionalProperties: false
@@ -13137,6 +13567,219 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DashboardStaffReport'
+    DashboardStaffOperationsLive:
+      type: object
+      required: [generated_at, through, bucket_seconds, window_seconds, total, lanes, ads, statuses, traffic, cache, limited, nodes, series, screens_online]
+      description: Rates are per second over window_seconds of complete buckets ending at through. Every list is sorted by
+        its rate, descending.
+      properties:
+        generated_at: { type: string, format: date-time }
+        through: { type: string, format: date-time, description: End of the newest complete counter bucket. }
+        bucket_seconds: { type: integer }
+        window_seconds: { type: integer }
+        total: { $ref: '#/components/schemas/DashboardStaffOperationsRates' }
+        lanes: { type: array, items: { $ref: '#/components/schemas/DashboardStaffOperationsLane' } }
+        ads: { $ref: '#/components/schemas/DashboardStaffOperationsAds' }
+        statuses: { type: array, items: { $ref: '#/components/schemas/DashboardStaffOperationsStatusRate' } }
+        traffic: { type: array, items: { $ref: '#/components/schemas/DashboardStaffOperationsNamedRate' } }
+        cache: { type: array, items: { $ref: '#/components/schemas/DashboardStaffOperationsNamedRate' } }
+        limited: { type: array, items: { $ref: '#/components/schemas/DashboardStaffOperationsNamedRate' } }
+        nodes: { type: array, items: { $ref: '#/components/schemas/DashboardStaffOperationsNode' } }
+        series: { type: array, description: "The last 90 complete buckets, oldest first. A bucket no node wrote is all zeros.", items: { $ref: '#/components/schemas/DashboardStaffOperationsSeriesPoint' } }
+        screens_online: { anyOf: [{ type: integer }, { type: 'null' }], description: Screens holding a live presence lease; null when the count could not be read. }
+    DashboardStaffOperationsRates:
+      type: object
+      required: [requests_per_second, bits_per_second, ingress_bits_per_second, client_errors_per_second, server_errors_per_second, mean_duration_ms]
+      properties:
+        requests_per_second: { type: number }
+        bits_per_second: { type: number, description: Response bytes times eight. }
+        ingress_bits_per_second: { type: number, description: Request bytes times eight. }
+        client_errors_per_second: { type: number, description: Status 400 to 499. }
+        server_errors_per_second: { type: number, description: "Status 500 and up, or no response." }
+        mean_duration_ms: { type: number }
+    DashboardStaffOperationsLane:
+      type: object
+      required: [lane, requests_per_second, bits_per_second, ingress_bits_per_second, client_errors_per_second, server_errors_per_second, mean_duration_ms]
+      properties:
+        lane: { type: string, description: "The edge upstream (backend, stream, media, static, ...), or none." }
+        requests_per_second: { type: number }
+        bits_per_second: { type: number }
+        ingress_bits_per_second: { type: number }
+        client_errors_per_second: { type: number }
+        server_errors_per_second: { type: number }
+        mean_duration_ms: { type: number }
+    DashboardStaffOperationsAds:
+      type: object
+      required: [requests_per_second, bits_per_second]
+      properties:
+        requests_per_second: { type: number }
+        bits_per_second: { type: number }
+    DashboardStaffOperationsStatusRate:
+      type: object
+      required: [status, per_second]
+      properties:
+        status: { type: integer, description: HTTP status; 0 is no response. }
+        per_second: { type: number }
+    DashboardStaffOperationsNamedRate:
+      type: object
+      required: [name, per_second]
+      properties:
+        name: { type: string, description: "The traffic class, cache outcome or limit reason; other counts values past the edge's bound." }
+        per_second: { type: number }
+    DashboardStaffOperationsNode:
+      type: object
+      required: [node, requests_per_second, bits_per_second, reporting, last_flush]
+      properties:
+        node: { type: string }
+        requests_per_second: { type: number }
+        bits_per_second: { type: number }
+        reporting: { type: boolean, description: The node wrote one of the last 3 complete buckets. }
+        last_flush: { anyOf: [{ type: string, format: date-time }, { type: 'null' }], description: End of the newest series bucket the node wrote. }
+    DashboardStaffOperationsSeriesPoint:
+      type: object
+      required: [at, requests, bytes, client_errors, server_errors, nodes]
+      properties:
+        at: { type: string, format: date-time, description: Bucket start. }
+        requests: { type: integer }
+        bytes: { type: integer }
+        client_errors: { type: integer }
+        server_errors: { type: integer }
+        nodes: { type: integer, description: Proxy nodes that wrote the bucket. }
+    DashboardStaffOperationsInsights:
+      type: object
+      required: [generated_at, top_downloaders, server_errors, client_errors, service_errors, latency, top_routes, top_clients, trend, streams_open, ingest_lag]
+      description: Each section is null when its read failed or its source is missing. Every list is sorted by its count,
+        descending, except trend, which is by time.
+      properties:
+        generated_at: { type: string, format: date-time }
+        top_downloaders: { anyOf: [{ type: array, items: { $ref: '#/components/schemas/DashboardStaffOperationsDownloaders' } }, { type: 'null' }] }
+        server_errors: { anyOf: [{ $ref: '#/components/schemas/DashboardStaffOperationsEdgeErrors' }, { type: 'null' }] }
+        client_errors: { anyOf: [{ $ref: '#/components/schemas/DashboardStaffOperationsEdgeErrors' }, { type: 'null' }] }
+        service_errors: { anyOf: [{ $ref: '#/components/schemas/DashboardStaffOperationsServiceErrors' }, { type: 'null' }] }
+        latency: { anyOf: [{ $ref: '#/components/schemas/DashboardStaffOperationsLatency' }, { type: 'null' }] }
+        top_routes: { anyOf: [{ $ref: '#/components/schemas/DashboardStaffOperationsRoutes' }, { type: 'null' }] }
+        top_clients: { anyOf: [{ $ref: '#/components/schemas/DashboardStaffOperationsClients' }, { type: 'null' }] }
+        trend: { anyOf: [{ $ref: '#/components/schemas/DashboardStaffOperationsTrend' }, { type: 'null' }] }
+        streams_open: { anyOf: [{ type: integer }, { type: 'null' }], description: Open event streams across the stream nodes that reported in the last 2 minutes. }
+        ingest_lag: { anyOf: [{ $ref: '#/components/schemas/DashboardStaffOperationsIngestLag' }, { type: 'null' }] }
+    DashboardStaffOperationsDownloaders:
+      type: object
+      required: [window, projects]
+      properties:
+        window: { type: string, enum: [1h, 24h, 7d] }
+        projects: { anyOf: [{ type: array, maxItems: 10, items: { $ref: '#/components/schemas/DashboardStaffOperationsDownloader' } }, { type: 'null' }], description: "The window's top media downloaders, as the usage top projects report counts them; null when the window's read failed." }
+    DashboardStaffOperationsDownloader:
+      type: object
+      required: [project_id, project_name, bytes, requests]
+      properties:
+        project_id: { type: string, description: The project id; unattributed for usage with no project. }
+        project_name: { anyOf: [{ type: string }, { type: 'null' }], description: Null when the project is deleted or its name could not be read. }
+        bytes: { type: integer }
+        requests: { type: integer }
+    DashboardStaffOperationsEdgeErrors:
+      type: object
+      required: [window_seconds, rows]
+      properties:
+        window_seconds: { type: integer }
+        rows: { type: array, maxItems: 10, items: { $ref: '#/components/schemas/DashboardStaffOperationsEdgeErrorRow' } }
+    DashboardStaffOperationsEdgeErrorRow:
+      type: object
+      required: [status, route, lane, term, requests, last_seen]
+      properties:
+        status: { type: integer, description: HTTP status; 0 is no response. }
+        route: { type: string }
+        lane: { type: string }
+        term: { type: string, description: The proxy's termination state. }
+        requests: { type: integer }
+        last_seen: { type: string, format: date-time }
+    DashboardStaffOperationsServiceErrors:
+      type: object
+      required: [window_seconds, rows]
+      properties:
+        window_seconds: { type: integer }
+        rows: { type: array, maxItems: 10, items: { $ref: '#/components/schemas/DashboardStaffOperationsServiceErrorRow' } }
+    DashboardStaffOperationsServiceErrorRow:
+      type: object
+      required: [service, severity, message, exception_type, count, hosts, last_seen]
+      properties:
+        service: { type: string }
+        severity: { type: integer, description: The highest OpenTelemetry severity number in the group. }
+        message: { type: string, maxLength: 300, description: "The log message, cut to 300 characters." }
+        exception_type: { type: string }
+        count: { type: integer }
+        hosts: { type: integer }
+        last_seen: { type: string, format: date-time }
+    DashboardStaffOperationsLatency:
+      type: object
+      required: [window_seconds, rows]
+      properties:
+        window_seconds: { type: integer }
+        rows: { type: array, items: { $ref: '#/components/schemas/DashboardStaffOperationsLatencyRow' } }
+    DashboardStaffOperationsLatencyRow:
+      type: object
+      required: [lane, requests, p50_ms, p95_ms, p99_ms]
+      properties:
+        lane: { type: string }
+        requests: { type: integer }
+        p50_ms: { type: number }
+        p95_ms: { type: number }
+        p99_ms: { type: number }
+    DashboardStaffOperationsRoutes:
+      type: object
+      required: [window_seconds, rows]
+      properties:
+        window_seconds: { type: integer }
+        rows: { type: array, maxItems: 10, items: { $ref: '#/components/schemas/DashboardStaffOperationsRouteRow' } }
+    DashboardStaffOperationsRouteRow:
+      type: object
+      required: [route, lane, requests, bytes, server_errors, p95_ms]
+      properties:
+        route: { type: string }
+        lane: { type: string }
+        requests: { type: integer }
+        bytes: { type: integer }
+        server_errors: { type: integer }
+        p95_ms: { type: number }
+    DashboardStaffOperationsClients:
+      type: object
+      required: [window_seconds, rows]
+      properties:
+        window_seconds: { type: integer }
+        rows: { type: array, maxItems: 10, items: { $ref: '#/components/schemas/DashboardStaffOperationsClientRow' } }
+    DashboardStaffOperationsClientRow:
+      type: object
+      required: [client, requests, errors, bytes, client_kind, bot_name]
+      properties:
+        client: { type: string, description: A stable pseudonym of the client address; the address itself is never shown. }
+        requests: { type: integer }
+        errors: { type: integer }
+        bytes: { type: integer }
+        client_kind: { type: string }
+        bot_name: { type: string }
+    DashboardStaffOperationsTrend:
+      type: object
+      required: [window_seconds, bucket_seconds, rows]
+      properties:
+        window_seconds: { type: integer }
+        bucket_seconds: { type: integer }
+        rows: { type: array, description: "One row per bucket and lane, oldest first.", items: { $ref: '#/components/schemas/DashboardStaffOperationsTrendRow' } }
+    DashboardStaffOperationsTrendRow:
+      type: object
+      required: [at, lane, requests, bytes, server_errors, p95_ms]
+      properties:
+        at: { type: string, format: date-time, description: Bucket start. }
+        lane: { type: string }
+        requests: { type: integer }
+        bytes: { type: integer }
+        server_errors: { type: integer }
+        p95_ms: { type: number }
+    DashboardStaffOperationsIngestLag:
+      type: object
+      required: [window_seconds, p50_ms, p95_ms]
+      properties:
+        window_seconds: { type: integer }
+        p50_ms: { type: number, description: Time from the edge request to its record being received. }
+        p95_ms: { type: number }
     DashboardStaffMemberList:
       type: object
       additionalProperties: false
@@ -13202,7 +13845,7 @@ components:
       - created_at
       - projects
       properties:
-        free_project_limit: { type: integer, minimum: 0, maximum: 10000, description: An explicit free-project admission cap; absence uses ten. }
+        free_organization_limit: { type: integer, minimum: 0, maximum: 10000, description: How many free Standard organizations the person may open; absence uses one. }
         user_id:
           type: string
         display_name:
@@ -13258,7 +13901,7 @@ components:
       - projects
       - active_sessions
       properties:
-        free_project_limit: { type: integer, minimum: 0, maximum: 10000, description: An explicit free-project admission cap; absence uses ten. }
+        free_organization_limit: { type: integer, minimum: 0, maximum: 10000, description: How many free Standard organizations the person may open; absence uses one. }
         user_id:
           type: string
         display_name:
@@ -13486,6 +14129,113 @@ components:
         next_cursor:
           anyOf: [{ type: string }, { type: 'null' }]
           description: Pass as after to load the next page; null at the end.
+    DashboardStaffSupportLastMessage:
+      type: object
+      additionalProperties: false
+      required: [role, author, preview, created_at]
+      properties:
+        role: { type: string, enum: [customer, staff, ai, system] }
+        author: { type: string }
+        preview: { type: string, maxLength: 160, description: "The body on one line, whitespace runs collapsed to single spaces, cut to at most 160 characters." }
+        created_at: { type: string, format: date-time }
+    DashboardStaffSupportConversation:
+      type: object
+      additionalProperties: false
+      required: [id, project_id, project_name, subject, created_at, updated_at, last_sequence, human_requested, closed, message_count, customer_names, awaiting_reply, unread]
+      description: A support conversation as the staff inbox shows it.
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        project_name: { type: string, description: Empty once the project is no longer live. }
+        organization_id: { type: string }
+        organization_name: { type: string }
+        subject: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time, description: The latest message's time; the inbox orders by it. }
+        last_sequence: { type: integer, minimum: 0 }
+        human_requested: { type: boolean, description: Waiting for staff; Luna is paused for the conversation. }
+        closed: { type: boolean }
+        message_count: { type: integer, minimum: 0 }
+        customer_names:
+          type: array
+          maxItems: 5
+          items: { type: string }
+          description: Distinct authors of the customer messages, in first-seen order, at most five.
+        awaiting_reply: { type: boolean, description: The latest message other than a lifecycle notice is the customer's. }
+        unread: { type: integer, minimum: 0, description: Customer messages after this staff member's own read receipt. }
+        last_message: { $ref: '#/components/schemas/DashboardStaffSupportLastMessage' }
+    DashboardStaffSupportCounts:
+      type: object
+      additionalProperties: false
+      required: [open, waiting, closed]
+      description: Conversations in the inbox's project, organization and q scope, whatever the folder.
+      properties:
+        open: { type: integer, minimum: 0, description: Not closed. }
+        waiting: { type: integer, minimum: 0, description: Not closed and waiting for staff. }
+        closed: { type: integer, minimum: 0 }
+    DashboardStaffSupportInbox:
+      type: object
+      additionalProperties: false
+      required: [items, next, counts]
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/DashboardStaffSupportConversation' }
+        next:
+          anyOf: [{ type: string }, { type: 'null' }]
+          description: Pass as before for the next page; null at the end.
+        counts: { $ref: '#/components/schemas/DashboardStaffSupportCounts' }
+    DashboardStaffSupportMessage:
+      type: object
+      additionalProperties: false
+      required: [id, conversation_id, sequence, role, author, body, created_at]
+      description: A support message with who wrote it and where, for staff.
+      properties:
+        id: { type: string }
+        conversation_id: { type: string }
+        sequence: { type: integer, minimum: 0 }
+        role: { type: string, enum: [customer, staff, ai, system] }
+        author: { type: string }
+        avatar_url: { type: string, format: uri, description: Optional trusted Slack avatar for a staff reply. }
+        body: { type: string }
+        created_at: { type: string, format: date-time }
+        author_id:
+          type: string
+          description: Who wrote it, as user:usr_…, agent:agt_… or staff:usr_…. Absent where not recorded, including Slack
+            replies and Luna.
+        origin:
+          type: string
+          enum: [customer, slack, dashboard, luna, system]
+          description: Where it was written. Absent only for a staff reply recorded before origins were.
+    DashboardStaffSupportMessageList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/DashboardStaffSupportMessage' }
+    DashboardStaffSupportReply:
+      type: object
+      additionalProperties: false
+      required: [body]
+      properties:
+        body: { type: string, minLength: 1, maxLength: 4000, description: 1 to 4000 characters after surrounding whitespace is trimmed. }
+    DashboardStaffSupportReplyResult:
+      type: object
+      additionalProperties: false
+      required: [conversation, message]
+      properties:
+        conversation: { $ref: '#/components/schemas/DashboardStaffSupportConversation' }
+        message: { $ref: '#/components/schemas/DashboardStaffSupportMessage' }
+    DashboardStaffSupportStateChange:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        action: { type: string, enum: [takeover, resolve, reopen] }
     DashboardStaffProjectList:
       type: object
       additionalProperties: false
@@ -15025,21 +15775,91 @@ components:
     OrganizationBillingUsage:
       type: object
       additionalProperties: false
-      required: [org_id, period, pool, projects, next_cursor]
+      required: [org_id, period, pool, allowance, screens, projects, next_cursor]
       properties:
         org_id: { type: string }
         period: { type: string }
-        pool: { $ref: "#/components/schemas/BillingUsageAmounts" }
+        pool:
+          $ref: "#/components/schemas/BillingUsageAmounts"
+          description: The organization's allowance pool this month, shared by every project it pays for.
+        allowance:
+          $ref: "#/components/schemas/BillingUsageAllowance"
+          description: The monthly allowance the pool waives, one per organization however many projects it has.
+        screens:
+          type: object
+          additionalProperties: false
+          required: [count, limit]
+          description: The screens of all the organization's live projects and its plan's limit on them.
+          properties:
+            count: { type: integer, minimum: 0 }
+            limit:
+              oneOf:
+              - type: integer
+                minimum: 0
+              - type: 'null'
+              description: The plan's screen limit across the organization; null when unlimited or while each project still
+                has its own limit.
+        edge_media_bytes:
+          $ref: "#/components/schemas/McrString"
+          description: Media bytes the edge delivered this month for every project the organization paid for, refreshed
+            about once a minute. Add it to pool.bandwidth_bytes for the organization's total bandwidth. Absent when the
+            edge usage source is unavailable.
         projects:
           type: array
           items:
             type: object
             additionalProperties: false
-            required: [project_id, usage]
+            required: [project_id, name, usage, charges_mcr]
             properties:
               project_id: { type: string }
-              usage: { $ref: "#/components/schemas/BillingUsageAmounts" }
+              name:
+                type: string
+                description: The project's name, a deleted project's included.
+              usage:
+                $ref: "#/components/schemas/BillingUsageAmounts"
+                description: The project's share of the pool this month.
+              charges_mcr:
+                $ref: "#/components/schemas/McrString"
+                description: What the organization was charged for this project this month, in millicredits, net of
+                  refunds. Grants and earned credit are not charges.
         next_cursor: { type: string, description: Exclusive project ID; empty at the end. }
+    ProjectBillingUsage:
+      type: object
+      additionalProperties: false
+      required: [period, usage, allowance]
+      properties:
+        period: { type: string, description: UTC month in YYYY-MM form. }
+        payer:
+          $ref: "#/components/schemas/BillingPayer"
+          description: Present when an organization or reseller pays for the project. Its allowance pool is shared across
+            the projects it pays for, and usage is this project's share of it. Absent when the project pays for itself.
+        usage:
+          $ref: "#/components/schemas/BillingUsageAmounts"
+          description: Usage counted against the pool this month. bandwidth_bytes counts the bytes the control plane
+            served or received (uploads and downloads it served itself), not media the edge delivers; total bandwidth is
+            usage.bandwidth_bytes plus edge_media_bytes. bandwidth_bytes and storage_mcr count settled hours, each closed
+            hour once it settles; waived_bandwidth_bytes and waived_storage_mcr are the parts the allowance waived.
+            api_events counts each metered API request, billed project stream event and webhook delivery attempt as it is
+            metered, including those billed after the allowance is spent, so it can exceed allowance.api_events.
+        edge_media_bytes:
+          $ref: "#/components/schemas/McrString"
+          description: Media bytes the edge delivered for this project this month, across every payer that paid for it,
+            refreshed about once a minute. Add it to usage.bandwidth_bytes for the project's total bandwidth. Absent when
+            the edge usage source is unavailable.
+        allowance: { $ref: "#/components/schemas/BillingUsageAllowance" }
+    BillingUsageAllowance:
+      type: object
+      additionalProperties: false
+      description: The monthly allowance one payer's pool waives, as canonical decimal strings. Unused allowance does not
+        roll over.
+      required: [bandwidth_bytes, storage_mcr, api_events, storage_mcr_per_gb_month]
+      properties:
+        bandwidth_bytes: { $ref: "#/components/schemas/McrString" }
+        storage_mcr: { $ref: "#/components/schemas/McrString" }
+        api_events: { $ref: "#/components/schemas/McrString" }
+        storage_mcr_per_gb_month:
+          $ref: "#/components/schemas/McrString"
+          description: Millicredits one GB of storage costs for a month; storage_mcr divided by it is GB-months.
     BillingUsageAmounts:
       type: object
       additionalProperties: false
@@ -17789,7 +18609,7 @@ components:
       type: object
       additionalProperties: true
       required: [telemetry_epoch, stream_id, sequence, created_at, reports]
-      description: "A durable FIFO Player queue sends at most one ordinary batch per minute with a randomized phase, or earlier when full. Total JSON body is at most 256 KiB; at most 64 reports, each at most 32 KiB. Every report retains its occurrence timestamp and stable play_id. Keep one immutable in-flight batch on disk until 202, increment sequence only after acknowledgement, and retry the same bytes after lost replies or restarts. Sequence starts at 1 and has no gaps. Dedupe retains at most eight streams per screen for seven days; keep the same stream through credential renewal. Records expire locally after 24 hours with explicit accounting. manifest.activated and manifest.upgrade stay individual and immediate. Interactive writes, ad resolution, content fetches, screenshots, and SDK emitConfirmed() also stay immediate. Health sampling retains its fifteen-minute cadence; urgent display/health transitions are sent immediately. Observation and ordinary health snapshots are latest-wins with original occurrence times. Health requires health.write. Existing individual reports remain accepted. Report item abuse limits apply per new item rather than per HTTP envelope; committed replay consumes only request admission."
+      description: "A durable FIFO Player queue sends at most one ordinary batch per minute with a randomized phase, or earlier when full. Total JSON body is at most 256 KiB; at most 64 reports, each at most 32 KiB. Every report retains its occurrence timestamp and stable play_id. Keep one immutable in-flight batch on disk until 202, increment sequence only after acknowledgement, and retry the same bytes after lost replies or restarts. Sequence starts at 1 and has no gaps. Dedupe retains at most eight live streams per screen, each watermark for at least the 24 hours in which its batch can still be replayed; keep the same stream through credential renewal. Records expire locally after 24 hours with explicit accounting. manifest.activated and manifest.upgrade stay individual and immediate. Interactive writes, ad resolution, content fetches, screenshots, and SDK emitConfirmed() also stay immediate. Health sampling retains its fifteen-minute cadence; urgent display/health transitions are sent immediately. Observation and ordinary health snapshots are latest-wins with original occurrence times. Health requires health.write. Existing individual reports remain accepted. Report item abuse limits apply per new item rather than per HTTP envelope; committed replay consumes only request admission."
       properties:
         telemetry_epoch: { type: string, pattern: "^[0-9a-f]{64}$" }
         stream_id: { type: string, pattern: "^[A-Za-z0-9_-]{16,64}$" }
@@ -18536,7 +19356,8 @@ components:
         hint: { type: string, description: "What the caller should do next to fix or work around this problem, in one or two plain sentences. The server sends the problem registry's default for the code (api/problems.yaml) unless the handler has a more specific one for this case. Advisory text for agents; Players ignore it." }
 x-problem-registry: ./problems.yaml
 x-problem-codes:
-- free_project_limit
+- free_organization_limit
+- organization_plan_required
 - project_name_conflict
 - project_delete_blocked
 - owner_required
