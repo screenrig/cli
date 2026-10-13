@@ -170,7 +170,9 @@ its project memberships. Both retain local credentials after an ambiguous
 server failure so the original operation can be reconciled.
 
 `project create` adds a project to the current project's organization,
-otherwise to the organization you administer. Names are unique within an
+otherwise to the organization you administer or hold free, most recently used
+first. When no organization is named, the organization holding the owner's
+verified email domain overrides those defaults. Names are unique within an
 organization, and an organization holds any number of projects; an agent's
 responsible person becomes owner. Each person has one free Standard
 organization; the server refuses a second (`free_organization_limit`) and its
