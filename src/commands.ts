@@ -178,7 +178,7 @@ import {
 } from "./media/transcode.js";
 import { exportPlaylistBundle, importPlaylistBundle } from "./playlist-bundle.js";
 import { agentPlatform, validateAgent, validateAgentSelfStatus } from "./agent-identity.js";
-import { CLI_VERSION } from "./version.js";
+import { CLI_VERSION, cliDistribution } from "./version.js";
 
 export { CLI_VERSION };
 
@@ -726,10 +726,11 @@ function commandHandler(
 }
 
 export const handleVersion: CommandHandler = async () => {
+  const distribution = cliDistribution();
   return {
-    envelope: successEnvelope({ version: CLI_VERSION, protocol_adapter: TEMPORARY_PROTOCOL_VERSION }),
+    envelope: successEnvelope({ version: CLI_VERSION, protocol_adapter: TEMPORARY_PROTOCOL_VERSION, distribution }),
     exitCode: ExitCode.Success,
-    human: `screenrig ${CLI_VERSION}`,
+    human: `screenrig ${CLI_VERSION}\nDistribution: ${distribution.kind}\n${distribution.agent_setup}`,
   };
 
 };
@@ -6567,6 +6568,8 @@ async function doctor(
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
 ): Promise<CommandResult> {
   const checks: DoctorCheck[] = [];
+  const distribution = cliDistribution();
+  checks.push({ name: "distribution", status: "pass", detail: `${distribution.kind}; ${distribution.agent_setup}` });
   const [nodeMajor = 0, nodeMinor = 0] = process.versions.node.split(".").map(Number);
   checks.push({
     name: "node",
@@ -6767,7 +6770,7 @@ async function doctor(
   const next = checks.find((check) => check.status === "fail" && check.next)?.next
     ?? checks.find((check) => check.status === "warn" && check.next)?.next;
   return {
-    envelope: successEnvelope({ status, checks, version: CLI_VERSION, ...(next ? { next } : {}) }),
+    envelope: successEnvelope({ status, checks, version: CLI_VERSION, distribution, ...(next ? { next } : {}) }),
     exitCode: failed ? ExitCode.Unexpected : ExitCode.Success,
     human: checks.map((check) => `${check.status.toUpperCase()} ${check.name}: ${check.detail}${check.next ? `\n  next: ${check.next.command}` : ""}`).join("\n"),
   };

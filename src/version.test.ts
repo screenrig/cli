@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   CLI_VERSION,
+  cliDistribution,
   PLACEHOLDER_VERSION,
   isDevVersion,
   isProductVersion,
@@ -15,6 +16,23 @@ import {
   untaggedDevVersion,
   versionFromTag,
 } from "./version.js";
+
+test("distribution distinguishes a standalone install from an enclosing screenRIG bundle", async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "screenrig-distribution-"));
+  try {
+    const url = pathToFileURL(path.join(temporary, "cli", "dist", "bin.js")).href;
+    assert.equal(cliDistribution(url).kind, "standalone");
+    assert.match(cliDistribution(url).agent_setup, /plugin list/);
+    await mkdir(path.join(temporary, ".claude-plugin"));
+    await writeFile(path.join(temporary, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "unrelated", version: "26.10.1" }));
+    assert.equal(cliDistribution(url).kind, "standalone");
+    await writeFile(path.join(temporary, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "screenrig", version: "26.10.1" }));
+    const distribution = cliDistribution(url);
+    assert.equal(distribution.kind, "plugin_bundle");
+    assert.equal(distribution.plugin_version, "26.10.1");
+    assert.match(distribution.bootstrap!, /screenrig-plugin-freshness.*--bootstrap --json$/);
+  } finally { await rm(temporary, { recursive: true, force: true }); }
+});
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const calver = path.join(root, "scripts", "calver.mjs");

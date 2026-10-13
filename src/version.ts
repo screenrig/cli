@@ -63,3 +63,28 @@ export function resolveCliVersion(input: {
 }
 
 export const CLI_VERSION = resolveCliVersion();
+
+export const AGENT_PLUGIN_SETUP = "Agent workflows use the official screenRIG plugin from https://github.com/screenrig/plugin. Check this runtime's plugin list and install screenrig@screenrig when absent, preserving saved screenRIG credentials. Then run the installed plugin's bootstrap helper before enrollment, pairing or publishing.";
+
+/** Package origin is diagnostic information; host registration is checked by bootstrap. */
+export function cliDistribution(moduleUrl: string = import.meta.url): {
+  kind: "plugin_bundle" | "standalone";
+  plugin_version?: string;
+  bootstrap?: string;
+  agent_setup: string;
+} {
+  const root = path.resolve(path.dirname(fileURLToPath(moduleUrl)), "..", "..");
+  for (const relative of ["plugin.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json"]) {
+    try {
+      const plugin = JSON.parse(readFileSync(path.join(root, relative), "utf8")) as { name?: string; version?: string };
+      if (plugin.name === "screenrig" && typeof plugin.version === "string" && isProductVersion(plugin.version)) {
+        return {
+          kind: "plugin_bundle", plugin_version: plugin.version,
+          bootstrap: `${path.join(root, "skills", "screenrig", "scripts", "screenrig-plugin-freshness")} --bootstrap --json`,
+          agent_setup: "Run the bundled bootstrap helper to verify registration, installation and the saved connection. Its reported launcher is the executable for subsequent commands.",
+        };
+      }
+    } catch { /* Ordinary standalone packages have no enclosing plugin manifest. */ }
+  }
+  return { kind: "standalone", agent_setup: AGENT_PLUGIN_SETUP };
+}
