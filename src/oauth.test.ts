@@ -524,7 +524,7 @@ test("login --no-wait prints a resume handle with no secret, and --resume finish
   }
 });
 
-test("a completed login names the agent's new and due project notes in a notes_to_read warning", async () => {
+test("a completed login names the agent's new and due project notes in a notes_waiting warning", async () => {
   const self = { agent: { id: AGENT, name: "ScreenRig CLI", agent_type: "cli", capabilities: ["screens"], state: "active",
     authenticated_requests: 0, metered_credits: 0, created_at: NOW.toISOString() }, connection_ready: true, notes: { open: 4, new: 3, due: 1 } };
   const signIn = () => withDiscovery(new FakeTransport())
@@ -548,7 +548,7 @@ test("a completed login names the agent's new and due project notes in a notes_t
       } else {
         const envelope = JSON.parse(result.stdout);
         assert.equal(envelope.data.status, "signed_in");
-        assert.deepEqual(envelope.warnings, [{ code: "notes_to_read", message: hint }]);
+        assert.deepEqual(envelope.warnings, [{ code: "notes_waiting", message: "3 new project notes, 1 due for review: run screenrig notes" }]);
       }
     } finally {
       await h.done();

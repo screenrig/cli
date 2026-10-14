@@ -189,6 +189,7 @@ import {
   noteId,
   noteListLines,
   noteReason,
+  notesHint,
   notesHintWarning,
   parseNoteAbout,
   parseNoteTtl,
@@ -1259,14 +1260,15 @@ function safeAgentSummary(agent: Agent) {
   };
 }
 
-/** New and due project notes: a notes_to_read warning in the envelope, and the same line after human output. */
+/** New and due project notes: a notes_waiting warning in the envelope, and one line after human output. */
 function withNotesHint(result: CommandResult, counts: NoteCounts | undefined): CommandResult {
   const warning = notesHintWarning(counts);
-  if (!warning) return result;
+  const hint = notesHint(counts);
+  if (!warning || !hint) return result;
   return {
     ...result,
     envelope: { ...result.envelope, warnings: [...result.envelope.warnings, warning] },
-    human: result.human ? `${result.human}\n${warning.message}` : warning.message,
+    human: result.human ? `${result.human}\n${hint}` : hint,
   };
 }
 
@@ -1909,11 +1911,8 @@ async function projectUse(args: ParsedArgs, runtime: CliRuntime, resolved: Resol
     }));
   }
   await cacheProjectContexts(runtime, listed.resolved, [selected], { identityToken: listed.resolved.identityToken, select: id });
-  // The selected project's own access token reads its note counts; the identity token cannot.
-  const projectToken = await oauthSessionFor(runtime, resolved).accessFor(id).catch(() => undefined);
-  const counts = await selfNoteCountsFor(runtime, args, resolved.apiUrl, projectToken);
-  return withNotesHint({ envelope: successEnvelope(selected, { request_id: listed.requestId }), exitCode: ExitCode.Success,
-    human: `Selected ${selected.organization.name} / ${selected.project.name} (${id})` }, counts);
+  return { envelope: successEnvelope(selected, { request_id: listed.requestId }), exitCode: ExitCode.Success,
+    human: `Selected ${selected.organization.name} / ${selected.project.name} (${id})` };
 }
 
 async function projectCreate(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {

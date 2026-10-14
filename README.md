@@ -893,11 +893,12 @@ open notes; `note_limit_reached` names the oldest to resolve. Resolved notes sta
 readable for 30 days.
 
 Read only and Manage access both read notes; writing, confirming and resolving
-need Manage. When there is something to read, `agent status`, `project use`
-and a completed `login` add warning `notes_to_read`, such as
-`3 new project notes, 1 due for review: screenrig notes`, and `--human` prints
-the same line after the result; `agent status` data also carries the API's
-`notes` counts. `screen show` and plain `playlist show` read the open notes about
+need Manage. When there is something to read, `agent status` and a completed
+`login` add warning `notes_waiting`, such as
+`3 new project notes, 1 due for review: run screenrig notes`, and `--human`
+prints the same line after the result; `agent status` data also carries the
+API's `notes` counts. After `project use`, run `screenrig notes` to read the
+selected project's notes. `screen show` and plain `playlist show` read the open notes about
 that screen or playlist: warning `notes_about_resource` counts them and names
 `screenrig notes --about ID`, `data` stays the resource, and `--human` lists up
 to five under a Notes heading.

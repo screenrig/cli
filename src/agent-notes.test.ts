@@ -3,7 +3,7 @@ import { chmod, mkdir, open, rename, rm, stat, writeFile } from "node:fs/promise
 import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { test } from "node:test";
-import { NOTES_REVIEW_PROMPT, NOTES_TRUST_LINE, noteLines, notesHint, parseNoteAbout, parseNoteTtl, resourceNotesWarning, selfNoteCounts } from "./agent-notes.js";
+import { NOTES_REVIEW_PROMPT, NOTES_TRUST_LINE, noteLines, notesHint, notesHintWarning, parseNoteAbout, parseNoteTtl, resourceNotesWarning, selfNoteCounts } from "./agent-notes.js";
 import { eventTypeMatches } from "./commands.js";
 import { AGENT_CAPABILITIES } from "./adapters/protocol.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
@@ -86,6 +86,9 @@ test("the notes hint names new and due notes and stays silent otherwise", () => 
   assert.equal(notesHint({ due: 1 }), "1 project note due for review: screenrig notes");
   assert.equal(notesHint({ open: 4, new: 0, due: 0 }), undefined);
   assert.equal(notesHint(undefined), undefined);
+  assert.deepEqual(notesHintWarning({ open: 9, new: 3, due: 1 }), { code: "notes_waiting", message: "3 new project notes, 1 due for review: run screenrig notes" });
+  assert.deepEqual(notesHintWarning({ due: 1 }), { code: "notes_waiting", message: "1 project note due for review: run screenrig notes" });
+  assert.equal(notesHintWarning({ open: 4, new: 0, due: 0 }), undefined);
   assert.deepEqual(selfNoteCounts({ agent: AGENT, notes: { open: 2, new: 1, due: "x" } }), { open: 2, new: 1, due: 0 });
   assert.equal(selfNoteCounts({ agent: AGENT }), undefined);
   assert.equal(selfNoteCounts({ notes: [1] }), undefined);
@@ -300,7 +303,7 @@ test("events list sends --type and events follow filters the stream by it", asyn
   assert.equal(stream.calls.at(-1)!.query?.after, "ev1_4", "filtered events still advance the cursor");
 });
 
-test("agent status carries the notes counts and a notes_to_read warning, and human output prints the line", async () => {
+test("agent status carries the notes counts and a notes_waiting warning, and human output prints the line", async () => {
   const self = (notes?: unknown) => new FakeTransport().on("GET", "/api/agents/self", () => ({
     status: 200, headers: { "cache-control": "private, no-store" }, body: { agent: AGENT, connection_ready: true, ...(notes ? { notes } : {}) },
   }));
@@ -309,7 +312,7 @@ test("agent status carries the notes counts and a notes_to_read warning, and hum
   const envelope = JSON.parse(json.stdout);
   assert.equal(envelope.data.status, "active");
   assert.deepEqual(envelope.data.notes, { open: 5, new: 3, due: 1 });
-  assert.deepEqual(envelope.warnings, [{ code: "notes_to_read", message: "3 new project notes, 1 due for review: screenrig notes" }]);
+  assert.deepEqual(envelope.warnings, [{ code: "notes_waiting", message: "3 new project notes, 1 due for review: run screenrig notes" }]);
   assert.equal(json.stderr, "");
 
   const human = await invoke(["agent", "status", "--human"], self({ open: 5, new: 0, due: 2 }));
@@ -331,11 +334,11 @@ test("agent status carries the notes counts and a notes_to_read warning, and hum
 
 test("open notes about a screen or playlist travel as one warning; data stays the resource", () => {
   assert.deepEqual(resourceNotesWarning({ items: [note()], next_cursor: "" }, "screen", "scr_AAAA"),
-    { code: "notes_about_resource", message: "1 open note about this screen: screenrig notes --about scr_AAAA" });
+    { code: "notes_about_resource", message: "1 open note about this screen: run screenrig notes --about scr_AAAA" });
   assert.deepEqual(resourceNotesWarning({ items: [note(), note()], next_cursor: null }, "playlist", "pl_AAAA"),
-    { code: "notes_about_resource", message: "2 open notes about this playlist: screenrig notes --about pl_AAAA" });
+    { code: "notes_about_resource", message: "2 open notes about this playlist: run screenrig notes --about pl_AAAA" });
   assert.equal(resourceNotesWarning({ items: Array(5).fill(note()), next_cursor: "nc_2" }, "screen", "scr_AAAA")?.message,
-    "More than 5 open notes about this screen: screenrig notes --about scr_AAAA");
+    "More than 5 open notes about this screen: run screenrig notes --about scr_AAAA");
   assert.equal(resourceNotesWarning({ items: [], next_cursor: "" }, "screen", "scr_AAAA"), undefined);
   assert.equal(resourceNotesWarning({}, "screen", "scr_AAAA"), undefined);
 });
@@ -355,7 +358,7 @@ test("screen show and playlist show name open notes in warnings and list them in
   assert.deepEqual(notesCall.query, { state: undefined, about_id: "scr_AAAAAAAAAAAAAAAAAAAAAAAA", author_id: undefined, after: undefined, limit: "5" });
   const envelope = JSON.parse(json.stdout);
   assert.deepEqual(envelope.data, screen);
-  assert.deepEqual(envelope.warnings, [{ code: "notes_about_resource", message: "More than 2 open notes about this screen: screenrig notes --about scr_AAAAAAAAAAAAAAAAAAAAAAAA" }]);
+  assert.deepEqual(envelope.warnings, [{ code: "notes_about_resource", message: "More than 2 open notes about this screen: run screenrig notes --about scr_AAAAAAAAAAAAAAAAAAAAAAAA" }]);
 
   const shown = await invoke(["screen", "show", "scr_AAAAAAAAAAAAAAAAAAAAAAAA", "--human"], transport);
   assert.equal(shown.code, 0, shown.stdout);
