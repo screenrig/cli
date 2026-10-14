@@ -1,10 +1,10 @@
 import { positiveInteger, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleAppPack, handleAppUpload, handleAppUpdate, handleAppList, handleAppShow, handleAppRename } from "../commands.js";
+import { handleAppPack, handleAppUpload, handleAppUpdate, handleAppList, handleAppShow, handleAppRename, handleAppDelete } from "../commands.js";
 import type { Command } from "commander";
 
 export function registerAppCommands(root: Command, bind: CommandActionBinder): void {
-  const app = root.command("app").description("Pack, upload, rename, and inspect applications");
+  const app = root.command("app").description("Pack, upload, rename, inspect, and delete applications");
 
   app.command("pack").description("Pack a local application directory")
     .argument("<directory>", "Local directory")
@@ -38,4 +38,9 @@ export function registerAppCommands(root: Command, bind: CommandActionBinder): v
   app.command("show").description("Inspect an application")
     .argument("<id>", "Application identifier")
     .action(bind(handleAppShow));
+
+  app.command("delete").description("Delete an application and all of its releases")
+    .argument("<id>", "Application identifier")
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .action(bind(handleAppDelete));
 }

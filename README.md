@@ -516,7 +516,7 @@ playlist fails with `invalid_request`. The whole fan-out is refused with
 `rate_limited` when it exceeds what remains of the project budget. A `--for` rerun after an ambiguous failure computes a new end and is
 sent as a new request.
 
-Deleting a playlist that a live screen can still show fails with
+Deleting a playlist that any screen, archived ones included, can still show fails with
 `resource_conflict` (exit 5). A screen can still show it if the playlist is
 assigned, named by a schedule entry, held by a takeover, or effective. `next`
 points at `screen list`, and `screen show ID` shows the screen's reference. `events list` and
@@ -833,6 +833,13 @@ keep their identities. No directory or upload is required. The response contains
 the application metadata in `data`, including `id`, `name`, and `revision`.
 Pass `--expect-rev REVISION` to guard against concurrent changes. Renaming to the
 current name leaves the revision unchanged.
+
+`screenrig app delete app_APP` deletes an application and all of its releases;
+there is no per-release delete. The server refuses with `application_in_use`
+while a screen shows one of its releases: assign those screens other content
+first. It does not check playlists that pin a release without showing it, so
+update or delete those too.
+`--expect-rev` optionally guards against concurrent changes.
 
 `app upload` and `app update` return the same JSON data paths with or without
 `--no-wait`: `data.application` contains the accepted application `id`,

@@ -3216,8 +3216,12 @@ paths:
     delete:
       x-screenrig-access: write
       operationId: deletePlaylistV2
+      description: Tombstones one playlist owned by the authenticated project. Refused with resource_conflict (409) while any
+        screen, archived or pending included, has it as its default, in its playlist schedule, or as its takeover. The
+        dashboard session may delete as well; it never creates or edits a playlist.
       security:
       - projectBearer: []
+      - dashboardSession: []
       parameters:
       - $ref: '#/components/parameters/ResourceID'
       - $ref: '#/components/parameters/IfMatch'
@@ -3225,6 +3229,8 @@ paths:
       responses:
         '204':
           description: Playlist tombstoned.
+        '409':
+          $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -17268,6 +17274,7 @@ components:
         manifest_revision: { type: integer }
         content_access_generation: { type: integer }
         state: { type: string, enum: [pairing_pending, active, archived] }
+        deletable: { type: boolean, description: "True when DELETE removes this screen: no native Player key is bound to it (a browser Player's screen, paired or still pending). False means archive is the only removal: a native Player's key stays bound to its screen, archived or not (docs/player-compatibility.md §5.7). Descriptive only: the delete itself decides. Absent from older servers; treat absent as false." }
         storage: { $ref: "#/components/schemas/ScreenStorage" }
         storage_shortfall: { $ref: "#/components/schemas/ScreenStorageShortfall" }
         storage_forecast: { $ref: "#/components/schemas/ScreenStorageForecast" }

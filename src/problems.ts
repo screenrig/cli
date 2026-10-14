@@ -389,7 +389,7 @@ const DEFAULT_HINTS: Record<string, string> = {
   resource_conflict: "The resource is not in a state that allows this change. Inspect it with its show command, then retry only once its state allows the change.",
   revision_conflict: "The resource changed since you read it. Show it again, reconcile your change with the current state, and retry with --expect-rev set to the new revision.",
   screen_archived: "This screen is archived. Run screenrig screen unarchive ID first if it should be used again.",
-  application_in_use: "A playlist still uses this application. Remove it from those playlists, then retry.",
+  application_in_use: "A screen is showing one of this application's releases. Assign those screens other content, then retry.",
   rate_limited: "Too many requests. Wait before retrying; retry_after_seconds says how long when the server sent it.",
   quota_exceeded: "The project is at a limit. Free space or use a smaller input, then retry.",
   free_organization_limit: "This person already holds their free Standard organization, which takes any number of projects. Create the project there: screenrig organization list shows it, then screenrig project create NAME --organization-id ID. A second organization needs Premium or Enterprise; the user asks sales@screenrig.ai.",
