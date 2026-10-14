@@ -6650,6 +6650,174 @@ paths:
     servers:
     - url: https://screenrig.ai
       description: Backend-owned project dashboard origin
+  /api/media-folders:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listMediaFolders
+      description: Lists every media folder in the project, at most 1000, ordered by name. Folders organize the media library,
+        and a playlist selector by:folder plays the files directly inside one folder. A folder's parent_id is null at the library
+        root. Build the tree from parent_id; a file's folder is Media.folder_id.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Media folders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaFolderList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createMediaFolder
+      description: Creates one media folder at the library root (parent_id null or absent) or inside parent_id. Names are trimmed,
+        hold 1 to 100 Unicode characters with no controls, are not "." or "..", and may repeat. A project holds at most 1000
+        folders (quota_exceeded) nested at most 10 deep (invalid_request). Emits media.folder_created.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaFolderCreate'
+      responses:
+        '201':
+          description: Created folder.
+          headers:
+            ETag:
+              description: Quoted folder revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaFolder'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+  /api/media-folders/{id}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getMediaFolder
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      responses:
+        '200':
+          description: One media folder.
+          headers:
+            ETag:
+              description: Quoted folder revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaFolder'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      x-screenrig-access: write
+      operationId: updateMediaFolder
+      description: Renames a folder (name) or moves it with everything inside (parent_id, null for the library root). A folder
+        cannot move into itself or a folder inside it, and the move must keep every folder within 10 levels (invalid_request).
+        A change advances the folder revision and emits media.folder_updated; the same values are a no-op. If-Match optionally
+        guards the revision.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/IfMatch'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaFolderPatch'
+      responses:
+        '200':
+          description: Updated folder.
+          headers:
+            ETag:
+              description: Quoted folder revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaFolder'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteMediaFolder
+      description: Deletes one folder. Nothing inside is deleted - its files and folders move up into the deleted folder's parent
+        (the library root when it had none), each moved file and folder advancing its revision. A playlist selector by:folder
+        that names the deleted folder then matches nothing; playing screens drop that primitive at their next selector resolve.
+        Emits media.folder_deleted. If-Match optionally guards the revision.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/IfMatch'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted; its contents now sit in its parent.
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+  /api/media/move:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: moveMedia
+      description: Moves files (media_ids) and folders (folder_ids) into one folder (folder_id), or to the library root when
+        folder_id is null, in one all-or-nothing request of at most 1000 ids. Every id must exist (not_found). A folder cannot
+        move into itself or a folder inside it, and the move must keep every folder within 10 levels (invalid_request). Items
+        already in the destination are left as they are; each moved file and folder advances its revision. Moving files
+        changes what the by:folder selectors of their old and new folders play, from each screen's next selector resolve;
+        moving a folder changes no folder's own files. Emits media.moved.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaMove'
+      responses:
+        '200':
+          description: How many files and folders moved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaMoveResult'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
   /api/media/uploads:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
@@ -15905,7 +16073,7 @@ components:
       required: [name, pages]
       properties:
         name: { type: string, minLength: 1, maxLength: 120 }
-        pages: { type: array, minItems: 1, maxItems: 100, description: "The pages of one playlist may resolve to at most 1024 media references in total. A by:ids selector counts its length; a by:all or by:tag definition reserves 32 references independently of catalog size. The actual loop snapshot is bounded at 1024 media references in total. Above either budget is 422 invalid at path pages.", items: { $ref: "#/components/schemas/PlaylistPageWrite" } }
+        pages: { type: array, minItems: 1, maxItems: 100, description: "The pages of one playlist may resolve to at most 1024 media references in total. A by:ids selector counts its length; a by:all, by:tag or by:folder definition reserves 32 references independently of catalog size. The actual loop snapshot is bounded at 1024 media references in total. Above either budget is 422 invalid at path pages.", items: { $ref: "#/components/schemas/PlaylistPageWrite" } }
         audio: { $ref: "#/components/schemas/PlaylistAudioWrite" }
     Playlist:
       type: object
@@ -15950,7 +16118,7 @@ components:
       required: [name, pages]
       properties:
         name: { type: string, minLength: 1, maxLength: 120 }
-        pages: { type: array, minItems: 1, maxItems: 100, description: "The pages of one playlist may resolve to at most 1024 media references in total. A by:ids selector counts its length; a by:all or by:tag definition reserves 32 references independently of catalog size. The actual loop snapshot is bounded at 1024 media references in total. Above either budget is 422 invalid at path pages.", items: { $ref: "#/components/schemas/PlaylistPageWriteV2" } }
+        pages: { type: array, minItems: 1, maxItems: 100, description: "The pages of one playlist may resolve to at most 1024 media references in total. A by:ids selector counts its length; a by:all, by:tag or by:folder definition reserves 32 references independently of catalog size. The actual loop snapshot is bounded at 1024 media references in total. Above either budget is 422 invalid at path pages.", items: { $ref: "#/components/schemas/PlaylistPageWriteV2" } }
         audio: { $ref: "#/components/schemas/PlaylistAudioWrite" }
     PlaylistPage:
       type: object
@@ -16866,11 +17034,11 @@ components:
     PlaylistVideoPrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, selector, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, muted: { type: boolean, enum: [true], default: true }, loop: { type: boolean, default: false }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
     PlaylistIframePrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [iframe] }, src: { type: string, format: uri, pattern: "^https://" }, title: { type: string, minLength: 1, maxLength: 200 }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
     PlaylistApplicationPrimitive: { allOf: [{ $ref: "#/components/schemas/PlaylistApplicationPrimitiveWrite" }] }
-    PlaylistImagePrimitive: { type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [image] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, resolved_media: { type: array, minItems: 0, maxItems: 1024, items: { $ref: "#/components/schemas/PlaylistResolvedMedia" }, description: Static ID matches; all/tag selectors carry an empty array and resolve at runtime. Clients must not send this field. }, alt: { type: string, maxLength: 300 }, dwell_ms: { type: integer, minimum: 1000, maximum: 86400000 }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
-    PlaylistVideoPrimitive: { type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, muted, loop, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, resolved_media: { type: array, minItems: 0, maxItems: 1024, items: { $ref: "#/components/schemas/PlaylistResolvedMedia" }, description: Static ID matches; all/tag selectors carry an empty array and resolve at runtime. Clients must not send this field. }, muted: { type: boolean, enum: [true] }, loop: { type: boolean }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
+    PlaylistImagePrimitive: { type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [image] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, resolved_media: { type: array, minItems: 0, maxItems: 1024, items: { $ref: "#/components/schemas/PlaylistResolvedMedia" }, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field. }, alt: { type: string, maxLength: 300 }, dwell_ms: { type: integer, minimum: 1000, maximum: 86400000 }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
+    PlaylistVideoPrimitive: { type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, muted, loop, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, resolved_media: { type: array, minItems: 0, maxItems: 1024, items: { $ref: "#/components/schemas/PlaylistResolvedMedia" }, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field. }, muted: { type: boolean, enum: [true] }, loop: { type: boolean }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
     PlaylistIframePrimitive: { type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit, controller], properties: { id: { type: string }, primitive: { type: string, enum: [iframe] }, src: { type: string, format: uri, pattern: "^https://" }, title: { type: string, minLength: 1, maxLength: 200 }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, enum: [false] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
     MediaSelectorTagFilter: { type: object, additionalProperties: false, minProperties: 1, properties: { all: { type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, any: { type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, none: { type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } } } }
-    SelectorPreviewInput: { type: object, additionalProperties: false, required: [primitive, selector], properties: { primitive: { type: string, enum: [image, video] }, selector: { oneOf: [{ $ref: "#/components/schemas/PlaylistMediaSelectorByAll" }, { $ref: "#/components/schemas/PlaylistMediaSelectorByTag" }] } } }
+    SelectorPreviewInput: { type: object, additionalProperties: false, required: [primitive, selector], properties: { primitive: { type: string, enum: [image, video] }, selector: { oneOf: [{ $ref: "#/components/schemas/PlaylistMediaSelectorByAll" }, { $ref: "#/components/schemas/PlaylistMediaSelectorByTag" }, { $ref: "#/components/schemas/PlaylistMediaSelectorByFolder" }] } } }
     SelectorPreviewMedia: { type: object, required: [media_id, filename, tags], properties: { media_id: { type: string }, filename: { type: string }, tags: { type: array, items: { type: string } } } }
     SelectorPreview: { type: object, required: [primitive, selector, matched_count, candidates], properties: { primitive: { type: string, enum: [image, video] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, matched_count: { type: integer, minimum: 0, maximum: 1024 }, candidates: { type: array, maxItems: 1024, items: { $ref: "#/components/schemas/SelectorPreviewMedia" } } } }
     PlaylistMediaSelector:
@@ -16879,11 +17047,13 @@ components:
         - { $ref: "#/components/schemas/PlaylistMediaSelectorByIDs" }
         - { $ref: "#/components/schemas/PlaylistMediaSelectorByAll" }
         - { $ref: "#/components/schemas/PlaylistMediaSelectorByTag" }
+        - { $ref: "#/components/schemas/PlaylistMediaSelectorByFolder" }
       discriminator: { propertyName: by }
     PlaylistMediaSelectorByID: { type: object, additionalProperties: false, required: [by, media_id], properties: { by: { type: string, enum: [id] }, media_id: { type: string, pattern: "^med_" }, one_at_a_time: { type: boolean, enum: [false], default: false } } }
     PlaylistMediaSelectorByIDs: { type: object, additionalProperties: false, required: [by, media_ids], properties: { by: { type: string, enum: [ids] }, media_ids: { type: array, minItems: 1, maxItems: 1024, uniqueItems: true, items: { type: string, pattern: "^med_" } }, one_at_a_time: { type: boolean, default: false } } }
     PlaylistMediaSelectorByAll: { type: object, additionalProperties: false, required: [by], properties: { batch_size: { type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1. }, by: { type: string, enum: [all] }, one_at_a_time: { type: boolean, default: false }, order: { type: string, enum: [filename, random], default: filename } } }
     PlaylistMediaSelectorByTag: { type: object, additionalProperties: false, required: [by], oneOf: [{ type: object, required: [tag], properties: { tag: { type: string } } }, { type: object, required: [tags], properties: { tags: { $ref: "#/components/schemas/MediaSelectorTagFilter" } } }], properties: { tags: { $ref: "#/components/schemas/MediaSelectorTagFilter" }, batch_size: { type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1. }, by: { type: string, enum: [tag] }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, one_at_a_time: { type: boolean, default: false }, order: { type: string, enum: [filename, random], default: filename } } }
+    PlaylistMediaSelectorByFolder: { type: object, additionalProperties: false, required: [by, folder_id], description: "The ready files of the primitive directly inside one media folder (GET /api/media-folders), not those of its subfolders, ordered and paced like by:all. Like a tag, the folder is read again at every selector resolve, so moving files in or out changes what playing screens show from their next loop. Writing a playlist requires the folder to exist in the project; it may be empty. A folder that holds no ready file of the primitive, or is deleted later, matches nothing. Players receive it as by:all; the server resolves the folder.", properties: { batch_size: { type: integer, minimum: 1, maximum: 1024, description: Maximum media per visit; omitted plays the remaining pass. one_at_a_time requires 1. }, by: { type: string, enum: [folder] }, folder_id: { type: string, pattern: "^([a-z]+_)?mfd_[A-Za-z0-9]{1,64}$" }, one_at_a_time: { type: boolean, default: false }, order: { type: string, enum: [filename, random], default: filename } } }
     PlaylistResolvedMedia: { type: object, additionalProperties: false, required: [media_id, intrinsic_size], properties: { media_id: { type: string, pattern: "^med_" }, intrinsic_size: { $ref: "#/components/schemas/PlaylistIntrinsicSize" } } }
     CanvasColor: { type: string, pattern: "^#[0-9A-F]{8}$", description: Canonical uppercase sRGB RRGGBBAA. }
     LinearGradientStop:
@@ -18023,6 +18193,12 @@ components:
         credits: { type: integer, minimum: 1 }
         usd: { type: string }
     MediaUploadDeclaration: { type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: declaration never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. Remaining prepaid credit of zero rejects declare and commit with payment_required. An audio/mpeg (MP3) declaration is bounded at 209715200 bytes, 200 MiB, and a larger one is rejected the same way; read media_audio_bytes to preflight it. Read media_image_bytes from the capabilities document to preflight the image bound, and project_content_bytes there, or content_limit_bytes on the project, to know any custom storage ceiling. An optional tag is stored on the ready media object and is not redeclared at commit. An optional source_filename records the caller's original file name when the client transcoded the bytes before upload; the ready object's filename is then derived from it so distinct sources never collide (photo.png uploaded as photo.webp is stored as photo.png.webp, photo.jpg as photo.jpg.webp, and a source photo.webp stays photo.webp).", properties: { filename: { type: string, minLength: 1, maxLength: 255, description: "Name of the bytes being uploaded, as they will be sent." }, source_filename: { type: string, minLength: 1, maxLength: 255, description: "Caller's original file name before any client-side transcode. Bare file name only. Stored verbatim on the ready media as source_filename and used to derive filename." }, content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } } }
+    MediaFolder: { type: object, additionalProperties: false, required: [id, name, parent_id, revision, created_at, updated_at], description: "One media library folder. A playlist selector by:folder plays the ready files directly inside it, not those of its subfolders.", properties: { id: { type: string }, name: { type: string, minLength: 1, maxLength: 100 }, parent_id: { anyOf: [{ type: string }, { type: "null" }], description: "The folder holding this one; null at the library root." }, revision: { type: integer }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    MediaFolderList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/MediaFolder" } } } }
+    MediaFolderCreate: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string, minLength: 1, maxLength: 100, description: "Trimmed; 1 to 100 Unicode characters, no controls, not . or .." }, parent_id: { anyOf: [{ type: string }, { type: "null" }], description: "The folder to create it in; null or absent for the library root." } } }
+    MediaFolderPatch: { type: object, additionalProperties: false, minProperties: 1, properties: { name: { type: string, minLength: 1, maxLength: 100, description: "Trimmed; 1 to 100 Unicode characters, no controls, not . or .." }, parent_id: { anyOf: [{ type: string }, { type: "null" }], description: "Move the folder into this one; null for the library root." } } }
+    MediaMove: { type: object, additionalProperties: false, required: [folder_id], properties: { folder_id: { anyOf: [{ type: string }, { type: "null" }], description: "Destination folder; null for the library root." }, media_ids: { type: array, maxItems: 1000, uniqueItems: true, items: { type: string } }, folder_ids: { type: array, maxItems: 1000, uniqueItems: true, items: { type: string } } }, description: "At least one id across media_ids and folder_ids, at most 1000 in all." }
+    MediaMoveResult: { type: object, additionalProperties: false, required: [media, folders], properties: { media: { type: integer, minimum: 0, description: "Files that moved; files already in the destination are not counted." }, folders: { type: integer, minimum: 0, description: "Folders that moved." } } }
     MediaTagPatch:
       oneOf:
         - { $ref: "#/components/schemas/MediaSingleTagPatch" }
@@ -18032,7 +18208,7 @@ components:
     MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], description: "Declares only what the server can re-verify against the stored object byte for byte. Codec identity is not declared here: the server derives it from the container during asynchronous verification, so a client cannot assert a codec that drives player behaviour.", properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
     MediaUploadSession: { type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: { id: { type: string }, operation: { $ref: "#/components/schemas/Operation" }, upload_url: { type: string, format: uri }, method: { type: string, enum: [PUT] }, headers: { type: object, additionalProperties: { type: string }, description: Exact signed request headers; clients must send every field verbatim. }, expires_at: { type: string, format: date-time } } }
     MediaUploadSource: { type: object, additionalProperties: false, required: [filename, content_type, sha256, bytes], description: "Verified original upload identity when ingest normalized EXIF orientation. Read-only; use it to recognize retries. The ready media digest, size and type describe the normalized delivery bytes.", properties: { filename: { type: string }, source_filename: { type: string }, content_type: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer, minimum: 1 } } }
-    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { tags: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 14400000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
+    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { tags: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 14400000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, folder_id: { type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. Move files with POST /api/media/move." }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
     MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/Media" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     SupportHours: {"type": "object", "additionalProperties": false, "required": ["timezone", "start", "end", "weekdays", "excludes_bc_holidays"], "properties": {"timezone": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "weekdays": {"type": "array", "items": {"type": "string"}}, "excludes_bc_holidays": {"type": "boolean"}}}
     SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean", "description": "This project can start or continue a conversation now. False where support chat is switched off in this environment."}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0}, "docs_url": {"type": "string"}}}

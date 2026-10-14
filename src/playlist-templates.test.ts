@@ -274,7 +274,7 @@ test("only image and video primitives take selectors", () => {
   });
   assertUsage(
     () => expandPlaylistPage(page({ primitive: "image" })),
-    /image requires a selector with by id\|ids\|all\|tag/,
+    /image requires a selector with by id\|ids\|all\|tag\|folder\./,
   );
   assertUsage(
     () => expandPlaylistPage(page({ primitive: "video", media_id: "med_A" })),

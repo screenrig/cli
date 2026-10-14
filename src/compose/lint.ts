@@ -323,6 +323,7 @@ function primitiveContent(primitive: Record<string, unknown>): string {
     if (typeof record.media_id === "string") return `id:${record.media_id}`;
     if (Array.isArray(record.media_ids)) return `ids:${record.media_ids.filter((id) => typeof id === "string").sort().join(",")}`;
     if (typeof record.tag === "string") return `tag:${record.tag}`;
+    if (typeof record.folder_id === "string") return `folder:${record.folder_id}`;
     if (record.by === "all") return "all";
   }
   if (typeof primitive.src === "string") return `src:${primitive.src}`;

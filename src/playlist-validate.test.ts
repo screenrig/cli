@@ -17,6 +17,11 @@ test("local canonical validation accepts dynamic selectors and application/ifram
   p.pages[0]!.advance = { mode: "application", max_ms: 180000 } as any;
   assert.deepEqual(playlistIssues(p), []);
 });
+test("local canonical validation accepts a folder selector and plays it one at a time on a duration page", () => {
+  assert.deepEqual(playlistIssues(playlist({ selector: { by: "folder", folder_id: "mfd_Lobby1", order: "random", one_at_a_time: true } })), []);
+  assert.deepEqual(playlistIssues(playlist({ selector: { by: "folder", folder_id: "mfd_Lobby1" } })).map((issue) => issue.path), ["/pages/0/primitives/0/selector/one_at_a_time"]);
+  assert.notDeepEqual(playlistIssues(playlist({ selector: { by: "folder", folder_id: "med_Lobby1", one_at_a_time: true } })), []);
+});
 test("local entry diagnostics name only the invalid fields on the selected branch", () => {
   const issues = playlistIssues(playlist({ enter: { type: "fade-left", duration_ms: 500, delay_ms: 250 } }));
   assert.deepEqual(issues.map((issue) => issue.path), ["/pages/0/primitives/0/enter/duration_ms", "/pages/0/primitives/0/enter/delay_ms"]);
