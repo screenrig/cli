@@ -1130,6 +1130,86 @@ export interface FleetLinkPatch {
   max_screens?: number | null;
 }
 
+/** Exactly one of tag and screen_ids. */
+export interface TriggerTarget {
+  tag?: string;
+  screen_ids?: string[];
+}
+
+/** What the latest takeover change did; failed screens are retried. */
+export interface TriggerAlertScreens {
+  targeted: number;
+  taken_over: number;
+  cleared: number;
+  skipped: number;
+  failed: number;
+  pending: boolean;
+}
+
+/** The trigger's latest alert, from the CAP message fields. */
+export interface TriggerAlert {
+  id: string;
+  revision: number;
+  state: "active" | "ended";
+  ended_reason?: "cancelled" | "all_clear" | "cleared" | "expired";
+  status: "Actual" | "Exercise";
+  msg_type: "Alert" | "Update" | "Cancel";
+  sender: string;
+  identifier: string;
+  event?: string;
+  headline?: string;
+  severity?: "Extreme" | "Severe" | "Moderate" | "Minor" | "Unknown";
+  urgency?: string;
+  certainty?: string;
+  until: string;
+  media_id?: string;
+  screens: TriggerAlertScreens;
+  started_at: string;
+  updated_at: string;
+  ended_at?: string;
+}
+
+/**
+ * GET /api/triggers/{id}: a CAP alert trigger. url and username are not
+ * secret; the password is returned only by create and rotate-secret.
+ */
+export interface Trigger {
+  id: string;
+  kind: "cap";
+  label: string;
+  target: TriggerTarget;
+  default_for_seconds: number;
+  url: string;
+  username: string;
+  playlist_id?: string;
+  alert?: TriggerAlert;
+  last_received_at?: string;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TriggerWithPassword extends Trigger {
+  password: string;
+}
+
+export interface TriggerList {
+  items: Trigger[];
+}
+
+export interface TriggerWrite {
+  label: string;
+  target: TriggerTarget;
+  default_for_seconds?: number;
+}
+
+/** POST /api/triggers/{id}/test answers the receipt a CAP message gets. */
+export interface TriggerReceipt {
+  outcome: "shown" | "updated" | "ended" | "ignored" | "duplicate";
+  trigger_id: string;
+  alert?: TriggerAlert;
+}
+
 export type ScreenScheduleDay = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 
 /** screenrig.schedule/v1 window in the screen timezone; omit start and end for the whole day. */

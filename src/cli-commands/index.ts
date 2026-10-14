@@ -17,6 +17,7 @@ import { registerPlaylistCommands } from "./playlist.js";
 import { registerScreenCommands } from "./screen.js";
 import { registerBrowserCommands } from "./browser.js";
 import { registerFleetLinksCommands } from "./fleet-links.js";
+import { registerTriggersCommands } from "./triggers.js";
 import { registerKvCommands } from "./kv.js";
 import { registerCommentCommands } from "./comment.js";
 import { registerOperationsCommands } from "./operations.js";
@@ -48,6 +49,7 @@ export function registerCommands(root: Command, bind: CommandActionBinder): void
   registerScreenCommands(root, bind);
   registerBrowserCommands(root, bind);
   registerFleetLinksCommands(root, bind);
+  registerTriggersCommands(root, bind);
   registerKvCommands(root, bind);
   registerCommentCommands(root, bind);
   registerOperationsCommands(root, bind);

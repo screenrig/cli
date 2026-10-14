@@ -84,7 +84,8 @@ that command, for example `screenrig screen update ID --name Lobby`.
 Global options such as `--json` may appear before or after the command. Use
 `--name=VALUE` for a value starting with a dash, and `--` before option-like file
 names. Duplicate options are rejected, except the repeatable
-`service-client create --capability` and `fleet-links create|update --tag`.
+`service-client create --capability`, `fleet-links create|update --tag` and
+`triggers create --screen-id`.
 
 Choose by what the page is:
 
@@ -719,6 +720,49 @@ the revision (`revision_conflict`, exit 6). After an interrupted or ambiguous
 `create`, rerun the identical command within 24 hours. It reuses the saved
 Idempotency-Key, and the server returns the same link instead of creating
 another.
+
+## CAP alert triggers
+
+A trigger lets an emergency notification system, such as Everbridge, Rave,
+Alertus or an IPAWS relay, take screens over with CAP 1.2 alerts. A project
+has at most 20.
+
+```sh
+screenrig triggers create --name "Campus alerts" (--tag TAG | --screen-id scr_SCREEN...) [--for DURATION]
+screenrig triggers list
+screenrig triggers show trg_TRIGGER
+screenrig triggers test trg_TRIGGER
+screenrig triggers clear trg_TRIGGER
+screenrig triggers rotate-secret trg_TRIGGER [--expect-rev REVISION]
+screenrig triggers delete trg_TRIGGER [--expect-rev REVISION]
+```
+
+`create` returns `data.url` (`https://api.<domain>/api/triggers/<id>/cap`),
+`data.username` (the trigger id) and `data.password` (`srtg_…`). Enter all
+three in the sending system as its CAP HTTP POST destination with HTTP Basic
+authentication. The password is shown only by `create` and `rotate-secret`,
+with warning `trigger_password_shown_once`. The CLI keeps it out of its
+config, operation log and recovery state, and redacts `srtg_` values.
+
+`--tag` targets every active screen with that tag when each alert arrives.
+`--screen-id` names up to 500 screens. A screen needs a default playlist to be
+taken over; other screens are skipped. An Alert shows a full-screen card
+coloured by its severity, with its headline, description and instruction,
+until the alert's `<expires>`. An alert without `<expires>` holds for `--for`
+(1m to 7d, default 1h), and no alert holds past 7 days. An Update redraws the
+card, and a Cancel or AllClear gives the screens back. Test, System and Draft
+messages, Ack and Error messages and expired alerts are ignored. A repeated
+sender and identifier is a duplicate. A new Alert replaces the one showing.
+
+`show` reports the latest alert in `data.alert`: state `active` or `ended`
+(with `ended_reason` cancelled, all_clear, cleared or expired), `until`, and
+`screens` `{targeted, taken_over, cleared, skipped, failed, pending}`. `test`
+shows a 60-second Exercise alert with an EXERCISE banner, and `clear` ends the
+alert now. Only screens still showing the trigger's alert go back; a screen
+taken over by something else since is left alone. `test` and `delete` answer
+`resource_conflict` (exit 5) while an alert is active; `clear` it first.
+`rotate-secret` stops the old password at once. A 21st trigger is
+`trigger_limit_reached` (exit 5).
 
 ## Playback export
 

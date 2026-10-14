@@ -1761,5 +1761,92 @@ export function memoryBackend(options: {
     return { status: 200, headers: { etag: `"${link.revision}"`, "cache-control": "no-store" }, body: { ...link } };
   }));
 
+  // CAP triggers: at most 20 per project; the password is returned only by
+  // create and rotate-secret, test shows a 60-second Exercise alert, and an
+  // exact Idempotency-Key replay returns the same answer.
+  const triggers = new Map<string, Record<string, unknown>>();
+  const triggerReplays = new Map<string, { request: string; response: TransportResponse }>();
+  let triggerSequence = 0;
+  let triggerPasswordSequence = 0;
+  const triggerPassword = () => `srtg_${String(++triggerPasswordSequence).padStart(43, "T")}`;
+  const triggerReplay = (req: TransportRequest, work: () => TransportResponse): TransportResponse => {
+    const key = req.headers?.["idempotency-key"];
+    const request = JSON.stringify([req.method, req.path, req.body ?? null]);
+    const replay = key ? triggerReplays.get(key) : undefined;
+    if (replay) return replay.request === request ? replay.response : problem(409, "idempotency_mismatch", "idempotency key does not match original request");
+    const response = work();
+    if (key && response.status < 400) triggerReplays.set(key, { request, response });
+    return response;
+  };
+  const triggerFor = (req: TransportRequest): Record<string, unknown> | undefined => triggers.get(decodeURIComponent(req.path.split("/")[3] ?? ""));
+  const staleTrigger = (req: TransportRequest, trigger: Record<string, unknown>): TransportResponse | undefined => {
+    const ifMatch = req.headers?.["if-match"];
+    if (!ifMatch || ifMatch === `"${trigger.revision}"`) return undefined;
+    return { status: 412, headers: { "content-type": "application/problem+json" }, body: { status: 412, code: "revision_conflict", title: "Revision conflict", detail: "The trigger revision does not match If-Match.", current_revision: trigger.revision } };
+  };
+  const activeAlert = (trigger: Record<string, unknown>): boolean => (trigger.alert as { state?: string } | undefined)?.state === "active";
+  const alertActive = () => problem(409, "resource_conflict", "The trigger has an active alert.");
+  const publicTrigger = (trigger: Record<string, unknown>) => ({ ...trigger });
+  transport.on("GET", "/api/triggers", () => ({ status: 200, headers: { "cache-control": "no-store" }, body: { items: [...triggers.values()].map(publicTrigger) } }));
+  transport.on("POST", "/api/triggers", (req) => triggerReplay(req, () => {
+    const body = (req.body ?? {}) as { label?: string; target?: { tag?: string; screen_ids?: string[] }; default_for_seconds?: number };
+    if (triggers.size >= 20) return problem(409, "trigger_limit_reached", "The project has the maximum of 20 triggers.");
+    triggerSequence += 1;
+    const id = `trg_${String(triggerSequence).padStart(16, "A")}`;
+    const trigger: Record<string, unknown> = {
+      id, kind: "cap", label: body.label, target: body.target ?? {}, default_for_seconds: body.default_for_seconds ?? 3600,
+      url: `https://api.screenrig.ai/api/triggers/${id}/cap`, username: id, revision: 1,
+      created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
+    };
+    triggers.set(id, trigger);
+    return { status: 201, headers: { "cache-control": "no-store", etag: '"1"' }, body: { ...publicTrigger(trigger), password: triggerPassword() } };
+  }));
+  transport.on("GET", /^\/api\/triggers\/[^/]+$/, (req) => {
+    const trigger = triggerFor(req);
+    return trigger ? { status: 200, headers: { etag: `"${trigger.revision}"`, "cache-control": "no-store" }, body: publicTrigger(trigger) } : notFound("Resource was not found.");
+  });
+  transport.on("DELETE", /^\/api\/triggers\/[^/]+$/, (req) => triggerReplay(req, () => {
+    const trigger = triggerFor(req);
+    if (!trigger) return notFound("Resource was not found.");
+    const stale = staleTrigger(req, trigger);
+    if (stale) return stale;
+    if (activeAlert(trigger)) return alertActive();
+    triggers.delete(trigger.id as string);
+    return { status: 204, headers: {}, body: undefined };
+  }));
+  transport.on("POST", /^\/api\/triggers\/[^/]+\/rotate-secret$/, (req) => triggerReplay(req, () => {
+    const trigger = triggerFor(req);
+    if (!trigger) return notFound("Resource was not found.");
+    const stale = staleTrigger(req, trigger);
+    if (stale) return stale;
+    trigger.revision = (trigger.revision as number) + 1;
+    return { status: 200, headers: { etag: `"${trigger.revision}"`, "cache-control": "no-store" }, body: { ...publicTrigger(trigger), password: triggerPassword() } };
+  }));
+  transport.on("POST", /^\/api\/triggers\/[^/]+\/test$/, (req) => triggerReplay(req, () => {
+    const trigger = triggerFor(req);
+    if (!trigger) return notFound("Resource was not found.");
+    if (activeAlert(trigger)) return alertActive();
+    const targeted = (trigger.target as { screen_ids?: string[] }).screen_ids?.length ?? 0;
+    trigger.alert = {
+      id: `alr_${trigger.revision}`, revision: 1, state: "active", status: "Exercise", msg_type: "Alert", sender: "screenrig", identifier: `test-${trigger.revision}`,
+      event: "Test alert", headline: "This is a test of the alert system", severity: "Minor", until: "2026-08-14T17:01:00.000Z",
+      screens: { targeted, taken_over: 0, cleared: 0, skipped: 0, failed: 0, pending: true },
+      started_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
+    };
+    trigger.playlist_id = `pl_TRIGGER${String(triggerSequence).padStart(8, "A")}`;
+    trigger.revision = (trigger.revision as number) + 1;
+    return { status: 200, headers: {}, body: { outcome: "shown", trigger_id: trigger.id, alert: { ...(trigger.alert as object) } } };
+  }));
+  transport.on("POST", /^\/api\/triggers\/[^/]+\/clear$/, (req) => {
+    const trigger = triggerFor(req);
+    if (!trigger) return notFound("Resource was not found.");
+    if (activeAlert(trigger)) {
+      const alert = trigger.alert as Record<string, unknown>;
+      trigger.alert = { ...alert, state: "ended", ended_reason: "cleared", ended_at: "2026-08-14T17:00:30.000Z", screens: { ...(alert.screens as object), pending: true } };
+      trigger.revision = (trigger.revision as number) + 1;
+    }
+    return { status: 200, headers: { etag: `"${trigger.revision}"` }, body: publicTrigger(trigger) };
+  });
+
   return transport;
 }
