@@ -147,6 +147,9 @@ test("--note is checked locally: at most 280 characters and no control character
     assert.equal(fits.envelope.warnings?.length ?? 0, 0, "a write that applies is unchanged");
     assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], "%C3%A9".repeat(280));
 
+    assert.equal((await cli(["--json", "playlist", "create", "lobby.json", "--note", "Café menu — new prices"], transport, env)).code, ExitCode.Success);
+    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], "Caf%C3%A9%20menu%20%E2%80%94%20new%20prices");
+
     const mixed = "Café menu: 50% off, 🍕 & 朝食";
     assert.equal((await cli(["--json", "playlist", "create", "lobby.json", "--note", mixed], transport, env)).code, ExitCode.Success);
     const header = transport.calls.at(-1)!.headers?.[NOTE_HEADER]!;
