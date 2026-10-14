@@ -3533,7 +3533,8 @@ paths:
       - RateLimit
       description: Claims one fleet-global six-character Player pairing session. Exact Idempotency-Key retries return the durable
         original result without consuming quota again. The dashboard session claims into its current project with the same
-        body, Idempotency-Key, budgets and problems; it is a state change, so it follows the dashboard mutation rules, a shadow
+        body, Idempotency-Key, budgets and problems, except that its not_found for an unknown or already-claimed code names no CLI
+        command; it is a state change, so it follows the dashboard mutation rules, a shadow
         session without staff write mode is refused, and the events the claim appends name the dashboard user.
       security:
       - projectBearer: []
@@ -6897,6 +6898,215 @@ paths:
           description: Deleted
         default:
           $ref: '#/components/responses/Problem'
+  /api/applications/{application_id}/kv-webhooks:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ApplicationID'
+    get:
+      x-screenrig-access: read
+      operationId: listKVWebhooks
+      description: Lists the application's incoming key/value webhooks, oldest first (at most 20), each with the key it writes,
+        its ingest url and last_used_at once it has written. The secret is never returned here.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: The application's key/value webhooks.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KVWebhookList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createKVWebhook
+      description: 'Creates an incoming key/value webhook: one URL that writes one key of this application, so an outside system
+        (Zapier, Make, a point of sale, a cron job, curl) pushes data to screens with one HTTP POST; see POST
+        /api/applications/{application_id}/kv-webhooks/{webhook_id}/write. The key need not exist yet. The answer is the only
+        place the secret appears (with the rotate answer): store it in the sending system at once; the server keeps a digest.
+        An application has at most 20 webhooks (kv_webhook_limit_reached). Appends kv_webhook.created. An exact retry with
+        the same Idempotency-Key returns this same answer, secret included, for twenty-four hours.'
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KVWebhookCreate'
+      responses:
+        '201':
+          description: Created, with its url and secret.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KVWebhookWithSecret'
+        '400':
+          description: invalid_request, including a malformed key or a description that holds a credential.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: not_found — the application is not in this project.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: kv_webhook_limit_reached or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/applications/{application_id}/kv-webhooks/{webhook_id}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ApplicationID'
+    - $ref: '#/components/parameters/KVWebhookID'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteKVWebhook
+      description: Deletes the webhook. Its URL stops working at once; the key it wrote keeps its value. Appends kv_webhook.deleted.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted.
+        '404':
+          description: not_found — the webhook is not on this application.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/applications/{application_id}/kv-webhooks/{webhook_id}/rotate-secret:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ApplicationID'
+    - $ref: '#/components/parameters/KVWebhookID'
+    post:
+      x-screenrig-access: write
+      operationId: rotateKVWebhookSecret
+      description: Replaces the webhook's secret and returns the new one, once. The old secret stops working at once; update
+        the sending system. Appends kv_webhook.secret_rotated. An exact retry with the same Idempotency-Key returns this same
+        answer, secret included, for twenty-four hours.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The webhook with its new secret.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KVWebhookWithSecret'
+        '404':
+          description: not_found — the webhook is not on this application.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/applications/{application_id}/kv-webhooks/{webhook_id}/write:
+    parameters:
+    - $ref: '#/components/parameters/ApplicationID'
+    - $ref: '#/components/parameters/KVWebhookID'
+    post:
+      operationId: receiveKVWebhook
+      description: 'The URL an outside system posts one key''s new value to. It authenticates with the webhook''s own secret
+        in the Authorization header only: Bearer <secret>, or HTTP Basic with the webhook id as the username and the secret
+        as the password. A secret in the URL or query is never accepted. An unknown webhook, one of another application and
+        a wrong secret all answer the same 401. The raw body, at most 1 MiB, becomes the value of the webhook''s key, and the
+        Content-Type header its content_type (application/octet-stream when absent; a header that is not one media type is
+        invalid_request). The write is PUT /api/applications/{application_id}/kv/{key} without If-Match: it replaces the value,
+        increments the revision, is metered and quota-checked like any K/V write, and appends kv.updated. Idempotency-Key (8
+        to 200 characters) deduplicates a sender''s retries of one write for twenty-four hours, and the same key with another
+        body or content type is idempotency_mismatch; without it every post is a new write. The answer is the key''s new metadata,
+        never its value. At most 120 writes per minute per webhook.'
+      security:
+      - kvWebhookBearer: []
+      - kvWebhookBasic: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          '*/*':
+            schema:
+              type: string
+              format: binary
+              maxLength: 1048576
+      responses:
+        '200':
+          description: The key's new metadata.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KVWebhookWriteResult'
+        '400':
+          description: invalid_request — the body is larger than 1 MiB, the Content-Type is not one media type, or the Idempotency-Key
+            is malformed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          description: unauthorized — missing or wrong credentials, or an unknown webhook. WWW-Authenticate names the Bearer and
+            Basic realms.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: idempotency_mismatch — the Idempotency-Key was used for another body or content type.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-rate-limit-policies:
+      - name: kv-webhook-write
+        quota: 120
+        windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
   /api/media:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
@@ -7600,6 +7810,106 @@ paths:
     servers:
     - url: https://screenrig.ai
       description: Backend-owned project dashboard origin
+  /api/media/{id}/thumbnail:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - $ref: '#/components/parameters/ResourceID'
+    - name: If-None-Match
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Thumbnail ETag returned by this route.
+    get:
+      operationId: getDashboardMediaThumbnail
+      description: 'Returns a small lossy WebP of a ready image owned by the session''s project, so the dashboard''s grids
+        never decode originals. There is one size: it fits inside 512 x 512 with the aspect kept and is never upscaled, and
+        an animated image shows its first frame. The first request generates it and stores it beside the original; later
+        requests stream the stored copy, and deleting the media removes it with the original. Another project''s identifier,
+        video, audio, and media that is not ready return not_found. Range is not accepted. The ETag is strong and names the
+        original and the thumbnail generator, so it is the same on every request and host. The response is private, no-cache,
+        and an If-None-Match that matches, checked after the media resolves in the session''s project, returns 304 without
+        reading the thumbnail. Completed bytes are recorded as dashboard_media egress.'
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: The WebP thumbnail.
+          headers:
+            Content-Length:
+              schema:
+                type: integer
+            Content-Disposition:
+              schema:
+                type: string
+                pattern: ^inline; filename="med_[A-Za-z0-9_-]+\.webp"$
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              $ref: '#/components/headers/ProjectBytesCacheControl'
+            X-Content-Type-Options:
+              schema:
+                type: string
+                enum:
+                - nosniff
+          content:
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        '304':
+          description: The thumbnail ETag matches If-None-Match. No body or egress increment is produced.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              $ref: '#/components/headers/ProjectBytesCacheControl'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    head:
+      operationId: headDashboardMediaThumbnail
+      description: Applies the same ownership, conditional and generation rules as getDashboardMediaThumbnail and returns its
+        headers without the body. No egress is recorded.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Thumbnail metadata with no body.
+          headers:
+            Content-Length:
+              schema:
+                type: integer
+            Content-Disposition:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              $ref: '#/components/headers/ProjectBytesCacheControl'
+            X-Content-Type-Options:
+              schema:
+                type: string
+                enum:
+                - nosniff
+        '304':
+          description: The thumbnail ETag matches If-None-Match. No egress increment is produced.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              $ref: '#/components/headers/ProjectBytesCacheControl'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/advertising/reviews/{id}:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
@@ -13463,6 +13773,7 @@ components:
     WebhookDeliveryID: { name: delivery_id, in: path, required: true, schema: { type: string }, description: The id of one of the webhook's deliveries. }
     PlaylistPageID: { name: page_id, in: path, required: true, schema: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, description: Playlist page id string. }
     ApplicationID: { name: application_id, in: path, required: true, schema: { type: string } }
+    KVWebhookID: { name: webhook_id, in: path, required: true, schema: { type: string, pattern: "^(?:(?:stage|qa|development)_)?kvw_[A-Za-z0-9_-]+$" }, description: The id of one of the application's key/value webhooks. }
     IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 8, maxLength: 200 } }
     OptionalIdempotencyKey: { name: Idempotency-Key, in: header, required: false, schema: { type: string, minLength: 8, maxLength: 200 }, description: "Omit for a fresh operation. Supply and reuse a key to deduplicate retries; the CLI manages keys automatically." }
     WebhookDeliveriesBefore: { name: before, in: query, required: false, schema: { type: string, pattern: "^whc1_[0-9a-z]{1,16}$" }, description: next_cursor of the previous deliveries page. }
@@ -13560,6 +13871,8 @@ components:
     revocableAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active agent bearer, or the same cryptographically verified revoked bearer for an idempotent self-disconnect replay." }
     agentIdentityBearer: { type: http, scheme: bearer, bearerFormat: sr_live_idt, description: "Global agent identity bearer. Project routes also require ScreenRig-Project and the target membership capabilities; it grants no global project permissions. Identity self-revocation accepts its same verified revoked credential for an exact replay. The identity-wide routes (GET and POST /api/projects, GET /api/organizations, PATCH /api/organizations/{org_id}) also accept an agent access JWT carrying the identity scope: listing needs identity access Read only or Manage, a change needs access:manage (else 403 insufficient_access), and its grant is rechecked inside the action. Under a JWT the project list holds only the projects the grant was approved for, and a created project joins the grant instead of delivering a project token; refresh with its project_id for a token. A JWT without the identity scope is 403 forbidden." }
     projectBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active project bearer, or identity bearer with ScreenRig-Project and an active target membership. Use revocableAgentBearer for self-disconnect retries after revocation. Every bearer route requires its area AgentCapability; GET reads in an area also accept reports, except the webhook list and get reads (GET /api/webhooks, GET /api/webhooks/{id}), which need the project capability because they return receiver URLs, and the project reads, agents/self, operations reads, feedback routes, and support routes accept any active credential. A credential lacking the route capability is refused 403 forbidden with detail 'This agent credential lacks the <name> capability.' after the command is recorded and before any credit is metered, so refusals are attributed and never billed. An agent access JWT (a session JWT of profile agent, audience screenrig:api:<env>, from /oauth/token or an enrollment in the oauth credential format) is accepted on the same routes: prj is its project, its scope carries the access level (access:read or access:manage) and the capabilities. An expired, revoked or foreign JWT is 401 with WWW-Authenticate Bearer error=invalid_token, which a client answers by refreshing once; a JWT whose revocation state cannot be read is 500 revocation_unavailable with Retry-After 5. The legacy sr_live_ project and identity bearers are retired: every one answers 401 credential_retired with next screenrig login, on these routes, on /mcp and on /adcp/mcp; the legacy enrollment shape and the legacy connection routes (POST /api/agent-connections, its stream, credential and cancel) answer 410 client_update_required." }
+    kvWebhookBearer: { type: http, scheme: bearer, bearerFormat: srkw, description: "A key/value webhook's own secret, the srkw_ secret create or rotate-secret returned. Accepted only by POST /api/applications/{application_id}/kv-webhooks/{webhook_id}/write; never a project credential." }
+    kvWebhookBasic: { type: http, scheme: basic, description: "A key/value webhook's own credentials: username is the webhook id, password its srkw_ secret. Accepted only by POST /api/applications/{application_id}/kv-webhooks/{webhook_id}/write; never a project credential." }
     triggerBasic: { type: http, scheme: basic, description: "A CAP trigger's own credentials: username is the trigger id, password the srtg_ password create or rotate-secret returned. Accepted only by POST /api/triggers/{id}/cap; never a project credential." }
     nativePairingAuthorization:
       type: http
@@ -18728,7 +19041,9 @@ components:
       required: [at, fit, required_bytes, capacity_bytes, excluded_page_count]
       description: >-
         Present while the player's reported fit is partial, transition_blocked,
-        or none_fit. at is when the condition began. It is set once when the
+        or none_fit, except a transition_blocked plan whose only blocking
+        reason is anchor_unavailable: that is a failed download on a device
+        with room, not a shortfall. at is when the condition began. It is set once when the
         condition begins and removed when it ends, each transition appending
         one project-only event, screen.storage_shortfall or
         screen.storage_shortfall_cleared. Those events are not delivered on
@@ -19020,6 +19335,45 @@ components:
     KVEntry: { type: object, additionalProperties: false, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, value_base64: { type: string, contentEncoding: base64 }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer } } }
     KVSummary: { type: object, additionalProperties: false, required: [application_id, key, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string }, updated_at: { type: string } } }
     KVList: { type: object, additionalProperties: false, required: [items, next_cursor], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/KVSummary" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }] } } }
+    KVWebhook:
+      type: object
+      additionalProperties: false
+      required: [id, application_id, key, description, url, created_at]
+      description: An incoming key/value webhook. Its secret is returned only by create and rotate-secret.
+      properties:
+        id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?kvw_[A-Za-z0-9_-]+$" }
+        application_id: { type: string }
+        key: { type: string, minLength: 1, maxLength: 256, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$", description: The key every post writes. }
+        description: { type: string, maxLength: 200 }
+        url: { type: string, description: "Where the outside system posts the value: https://api.<domain>/api/applications/<application_id>/kv-webhooks/<id>/write. Not a credential: the secret is." }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time, description: "The last write, recorded at most once a minute; absent until the first." }
+    KVWebhookWithSecret:
+      allOf:
+      - $ref: "#/components/schemas/KVWebhook"
+      - type: object
+        required: [secret]
+        properties:
+          secret: { type: string, pattern: "^srkw_[A-Za-z0-9_-]{43}$", description: "The webhook secret: send it as Authorization Bearer, or as the HTTP Basic password with the webhook id as the username. Returned only here; the server keeps a digest." }
+    KVWebhookList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/KVWebhook" } } } }
+    KVWebhookCreate:
+      type: object
+      additionalProperties: false
+      required: [key]
+      properties:
+        key: { type: string, minLength: 1, maxLength: 256, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$" }
+        description: { type: string, maxLength: 200, description: "What sends to it, for the people reading the list. Trimmed; it must not hold a credential." }
+    KVWebhookWriteResult:
+      type: object
+      additionalProperties: false
+      required: [key, revision, bytes, sha256, content_type, updated_at]
+      properties:
+        key: { type: string }
+        revision: { type: integer, minimum: 1 }
+        bytes: { type: integer, minimum: 0 }
+        sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        content_type: { type: string }
+        updated_at: { type: string, format: date-time }
     RuntimeKVWrite: { type: object, additionalProperties: true, required: [value_base64], properties: { value_base64: { type: string, contentEncoding: base64, maxLength: 1398104 }, content_type: { type: string, minLength: 1, maxLength: 127, default: application/octet-stream } } }
     RuntimeKVEntry: { type: object, additionalProperties: true, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, value_base64: { type: string, contentEncoding: base64 }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer } } }
     RuntimeKVSummary: { type: object, additionalProperties: true, required: [application_id, key, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string }, updated_at: { type: string } } }
@@ -20928,6 +21282,7 @@ x-problem-codes:
 - recovery_not_offered
 - invitation_limit_reached
 - trigger_limit_reached
+- kv_webhook_limit_reached
 - organization_admin_limit
 - version_required
 - price_change_pending

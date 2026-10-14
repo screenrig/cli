@@ -1848,5 +1848,69 @@ export function memoryBackend(options: {
     return { status: 200, headers: { etag: `"${trigger.revision}"` }, body: publicTrigger(trigger) };
   });
 
+  // Incoming K/V webhooks: at most 20 per application; the secret is returned
+  // only by create and rotate-secret, and an exact Idempotency-Key replay
+  // returns the same answer. An application id starting app_MISSING is not in
+  // the project.
+  const kvWebhooks = new Map<string, Record<string, unknown>>();
+  const kvWebhookReplays = new Map<string, { request: string; response: TransportResponse }>();
+  let kvWebhookSequence = 0;
+  let kvWebhookSecretSequence = 0;
+  const kvWebhookSecret = () => `srkw_${String(++kvWebhookSecretSequence).padStart(43, "K")}`;
+  const kvWebhookReplay = (req: TransportRequest, work: () => TransportResponse): TransportResponse => {
+    const key = req.headers?.["idempotency-key"];
+    const request = JSON.stringify([req.method, req.path, req.body ?? null]);
+    const replay = key ? kvWebhookReplays.get(key) : undefined;
+    if (replay) return replay.request === request ? replay.response : problem(409, "idempotency_mismatch", "idempotency key does not match original request");
+    const response = work();
+    if (key && response.status < 400) kvWebhookReplays.set(key, { request, response });
+    return response;
+  };
+  const kvWebhookApplication = (req: TransportRequest): string | undefined => {
+    const applicationId = decodeURIComponent(req.path.split("/")[3] ?? "");
+    return applicationId.startsWith("app_MISSING") ? undefined : applicationId;
+  };
+  const kvWebhookFor = (req: TransportRequest): Record<string, unknown> | undefined => {
+    const webhook = kvWebhooks.get(decodeURIComponent(req.path.split("/")[5] ?? ""));
+    return webhook && webhook.application_id === kvWebhookApplication(req) ? webhook : undefined;
+  };
+  const applicationMissing = () => notFound("The application was not found in this project.");
+  const kvWebhookMissing = () => notFound("The key/value webhook was not found on this application.");
+  transport.on("GET", /^\/api\/applications\/[^/]+\/kv-webhooks$/, (req) => {
+    const applicationId = kvWebhookApplication(req);
+    if (!applicationId) return applicationMissing();
+    return { status: 200, headers: {}, body: { items: [...kvWebhooks.values()].filter((webhook) => webhook.application_id === applicationId).map((webhook) => ({ ...webhook })) } };
+  });
+  transport.on("POST", /^\/api\/applications\/[^/]+\/kv-webhooks$/, (req) => kvWebhookReplay(req, () => {
+    const applicationId = kvWebhookApplication(req);
+    if (!applicationId) return applicationMissing();
+    const body = (req.body ?? {}) as { key?: string; description?: string };
+    if ([...kvWebhooks.values()].filter((webhook) => webhook.application_id === applicationId).length >= 20) {
+      return problem(409, "kv_webhook_limit_reached", "The application already has the maximum of 20 key/value webhooks.");
+    }
+    kvWebhookSequence += 1;
+    const id = `kvw_${String(kvWebhookSequence).padStart(22, "A")}`;
+    const webhook: Record<string, unknown> = {
+      id, application_id: applicationId, key: body.key, description: body.description ?? "",
+      url: `https://api.screenrig.ai/api/applications/${applicationId}/kv-webhooks/${id}/write`,
+      created_at: "2026-08-14T17:00:00.000Z",
+    };
+    kvWebhooks.set(id, webhook);
+    return { status: 201, headers: { "cache-control": "no-store" }, body: { ...webhook, secret: kvWebhookSecret() } };
+  }));
+  transport.on("DELETE", /^\/api\/applications\/[^/]+\/kv-webhooks\/[^/]+$/, (req) => kvWebhookReplay(req, () => {
+    if (!kvWebhookApplication(req)) return applicationMissing();
+    const webhook = kvWebhookFor(req);
+    if (!webhook) return kvWebhookMissing();
+    kvWebhooks.delete(webhook.id as string);
+    return { status: 204, headers: {}, body: undefined };
+  }));
+  transport.on("POST", /^\/api\/applications\/[^/]+\/kv-webhooks\/[^/]+\/rotate-secret$/, (req) => kvWebhookReplay(req, () => {
+    if (!kvWebhookApplication(req)) return applicationMissing();
+    const webhook = kvWebhookFor(req);
+    if (!webhook) return kvWebhookMissing();
+    return { status: 200, headers: { "cache-control": "no-store" }, body: { ...webhook, secret: kvWebhookSecret() } };
+  }));
+
   return transport;
 }

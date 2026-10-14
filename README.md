@@ -764,6 +764,47 @@ taken over by something else since is left alone. `test` and `delete` answer
 `rotate-secret` stops the old password at once. A 21st trigger is
 `trigger_limit_reached` (exit 5).
 
+## K/V webhooks
+
+A K/V webhook lets an outside system, such as Zapier, Make, a point of sale or
+a cron job, write one key of an application with one HTTP POST. Apps read the
+key with `screenrig.kv.get` and see each change with `screenrig.kv.onChange`.
+An application has at most 20.
+
+```sh
+screenrig kv webhook create KEY --app-id app_APP [--description TEXT]
+screenrig kv webhook list --app-id app_APP
+screenrig kv webhook rotate-secret kvw_WEBHOOK --app-id app_APP
+screenrig kv webhook delete kvw_WEBHOOK --app-id app_APP
+```
+
+`create` returns `data.url`
+(`https://api.<domain>/api/applications/<app>/kv-webhooks/<id>/write`) and
+`data.secret` (`srkw_…`); the key need not exist yet. The sending system posts
+the new value to that URL with `Authorization: Bearer <secret>`, or HTTP Basic
+with the webhook id as the username and the secret as the password:
+
+```sh
+curl -X POST "$URL" -H "Authorization: Bearer $SECRET" \
+  -H "Content-Type: application/json" --data '{"message":"Hello"}'
+```
+
+The raw body, at most 1 MiB, becomes the value and its `Content-Type` the
+value's content type (`application/octet-stream` when absent). Each post
+replaces the value, increments its revision and is metered like `kv set`. The
+secret is never accepted in the URL. A sender's `Idempotency-Key` header
+deduplicates its retries for 24 hours, and a webhook accepts at most 120 posts
+a minute. Human output prints the secret and a ready `curl` line built from the
+URL.
+
+The secret is shown only by `create` and `rotate-secret`, with warning
+`kv_webhook_secret_shown_once`. The CLI keeps it out of its config, operation
+log and recovery state, and redacts `srkw_` values. `list` reports each
+webhook's key, URL and `last_used_at`, never a secret. `rotate-secret` stops
+the old secret at once. `delete` stops the URL; the key keeps its value. A 21st
+webhook is `kv_webhook_limit_reached` (exit 5). `list` works with Read only
+access; `create`, `rotate-secret` and `delete` need Manage.
+
 ## Playback export
 
 `playback plays` reads one row per visible start of an image or video,

@@ -18,6 +18,7 @@ import { displayLines, displayPower, displayProblem, displayScheduleWrite, displ
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
 import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "./screen-manifest-upgrade.js";
 import { openTempFile, removeOnSignal, shellQuote, tempPathFor } from "./temp-file.js";
+import { KV_WEBHOOK_ID_PATTERN, KV_WEBHOOK_SECRET_PATTERN, kvWebhookDescription, kvWebhookExample, kvWebhookId, kvWebhookKey, kvWebhookLines, kvWebhookProblem, kvWebhookSecretWarning, kvWebhookTableLines } from "./kv-webhooks.js";
 import { TRIGGER_ID_PATTERN, TRIGGER_PASSWORD_PATTERN, alertLines, triggerHoldSeconds, triggerId, triggerLines, triggerName, triggerPasswordWarning, triggerProblem, triggerScreenIds, triggerTableLines, triggerTag } from "./triggers.js";
 import { fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
@@ -93,6 +94,9 @@ import {
   type TriggerReceipt,
   type TriggerWithPassword,
   type TriggerWrite,
+  type KVWebhookCreate,
+  type KVWebhookList,
+  type KVWebhookWithSecret,
   type Webhook,
   type WebhookDelivery,
   type WebhookDeliveryList,
@@ -6143,6 +6147,115 @@ export const handleKvDelete = commandHandler(async (args, runtime, resolved) => 
     headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
   });
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted ${key}` };
+}, true);
+
+// Incoming K/V webhooks: /api/applications/{id}/kv-webhooks. url is not
+// secret; the secret is returned only by create and rotate-secret, printed
+// once, and kept out of the operation log (client.ts privateBodies).
+function kvWebhookApplication(args: ParsedArgs): string {
+  const applicationId = flagString(args.flags, "application-id");
+  if (!applicationId) throw usageError("kv commands require --app-id.");
+  return applicationId;
+}
+
+function kvWebhooksPath(applicationId: string): string {
+  return `/api/applications/${encodeURIComponent(applicationId)}/kv-webhooks`;
+}
+
+async function kvWebhookCall(
+  client: ApiClient,
+  request: Parameters<ApiClient["call"]>[0],
+  applicationId: string,
+  id?: string,
+): Promise<Awaited<ReturnType<ApiClient["call"]>>> {
+  try {
+    return await client.call(request);
+  } catch (error) {
+    throw kvWebhookProblem(error, applicationId, id);
+  }
+}
+
+async function kvWebhookWithSecret(body: unknown, action: "create" | "rotate", applicationId: string, runtime: CliRuntime): Promise<KVWebhookWithSecret> {
+  const webhook = body as KVWebhookWithSecret | undefined;
+  if (!webhook || typeof webhook.id !== "string" || typeof webhook.secret !== "string" || !KV_WEBHOOK_SECRET_PATTERN.test(webhook.secret)) {
+    await writeRecoveries.get(runtime)?.finish();
+    const id = webhook && typeof webhook.id === "string" && KV_WEBHOOK_ID_PATTERN.test(webhook.id) ? webhook.id : undefined;
+    throw new CliError(makeProblem("unexpected_response", "Unexpected response", 502,
+      `The ${action === "create" ? "kv webhook create" : "rotate-secret"} request completed, but its answer did not carry a secret. Do not rerun it.`, {
+        next: id
+          ? { command: `screenrig kv webhook rotate-secret ${id} --app-id ${applicationId}`, reason: "Issue a new secret; it is shown once in data.secret." }
+          : { command: `screenrig kv webhook list --app-id ${applicationId}`, reason: "Find the webhook, then run screenrig kv webhook rotate-secret ID to receive a new secret." },
+      }), ExitCode.Unexpected);
+  }
+  return webhook;
+}
+
+async function kvWebhookSecretResult(
+  response: Awaited<ReturnType<ApiClient["call"]>>, client: ApiClient, action: "create" | "rotate", applicationId: string, runtime: CliRuntime,
+): Promise<CommandResult> {
+  const webhook = await kvWebhookWithSecret(response.body, action, applicationId, runtime);
+  const warning = kvWebhookSecretWarning(webhook.id, applicationId, action);
+  return {
+    envelope: jsonBody(response, client.requestId, undefined, [warning]),
+    exitCode: ExitCode.Success,
+    human: [
+      action === "create" ? `Created K/V webhook ${webhook.id}` : `Rotated the secret of K/V webhook ${webhook.id}`,
+      ...kvWebhookLines(webhook),
+      "",
+      "Sensitive webhook secret (store it only in the system that posts to the url above)",
+      `secret: ${webhook.secret}`,
+      `example: ${kvWebhookExample(webhook.url, webhook.secret)}`,
+      `warning: ${warning.message}`,
+    ].join("\n"),
+    keepRecoveryUntilOutput: true,
+  };
+}
+
+export const handleKvWebhookCreate = commandHandler(async (args, runtime, resolved) => {
+  const applicationId = kvWebhookApplication(args);
+  const key = kvWebhookKey(args.positionals[3]);
+  const description = flagString(args.flags, "description");
+  const body: KVWebhookCreate = { key, ...(description !== undefined ? { description: kvWebhookDescription(description) } : {}) };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await kvWebhookCall(client, { method: "POST", path: kvWebhooksPath(applicationId), idempotent: true, body }, applicationId);
+  return kvWebhookSecretResult(response, client, "create", applicationId, runtime);
+}, true);
+
+export const handleKvWebhookList = commandHandler(async (args, runtime, resolved) => {
+  const applicationId = kvWebhookApplication(args);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await kvWebhookCall(client, { method: "GET", path: kvWebhooksPath(applicationId) }, applicationId);
+  const items = (response.body as KVWebhookList | undefined)?.items;
+  const list = Array.isArray(items) ? items : [];
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`K/V webhooks (${list.length})`, ...kvWebhookTableLines(list)].join("\n"),
+  };
+}, true);
+
+export const handleKvWebhookRotateSecret = commandHandler(async (args, runtime, resolved) => {
+  const applicationId = kvWebhookApplication(args);
+  const id = kvWebhookId(args.positionals[3], "rotate-secret", applicationId);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await kvWebhookCall(client, {
+    method: "POST", path: `${kvWebhooksPath(applicationId)}/${id}/rotate-secret`, idempotent: true,
+  }, applicationId, id);
+  return kvWebhookSecretResult(response, client, "rotate", applicationId, runtime);
+}, true);
+
+export const handleKvWebhookDelete = commandHandler(async (args, runtime, resolved) => {
+  const applicationId = kvWebhookApplication(args);
+  const id = kvWebhookId(args.positionals[3], "delete", applicationId);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await kvWebhookCall(client, {
+    method: "DELETE", path: `${kvWebhooksPath(applicationId)}/${id}`, idempotent: true,
+  }, applicationId, id);
+  return {
+    envelope: successEnvelope({ id, deleted: true }, { request_id: response.headers["x-request-id"] ?? client.requestId }),
+    exitCode: ExitCode.Success,
+    human: `Deleted K/V webhook ${id}. Its URL stopped working; the key it wrote keeps its value.`,
+  };
 }, true);
 
 function commentPath(target: "screen" | "playlist", id: string, pageId: string | undefined): string {

@@ -964,6 +964,34 @@ export interface KVEntry extends KVMetadata {
   value_base64: string;
 }
 
+/**
+ * GET /api/applications/{application_id}/kv-webhooks: an incoming K/V
+ * webhook. url is not secret; the secret is returned only by create and
+ * rotate-secret.
+ */
+export interface KVWebhook {
+  id: string;
+  application_id: string;
+  key: string;
+  description: string;
+  url: string;
+  created_at: string;
+  last_used_at?: string;
+}
+
+export interface KVWebhookWithSecret extends KVWebhook {
+  secret: string;
+}
+
+export interface KVWebhookList {
+  items: KVWebhook[];
+}
+
+export interface KVWebhookCreate {
+  key: string;
+  description?: string;
+}
+
 export type FeedbackKind = "bug" | "feature";
 
 /**
