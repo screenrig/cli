@@ -5281,6 +5281,8 @@ const SAMPLE_HOST = {
     model: "QB65",
     firmware: "T-KTM2ELAKUC-1200.1",
     manufacturer: "Samsung",
+    asset_id: "LOBBY-07",
+    location: "Building 2, Lobby",
   },
   capabilities: ["autostart", "network_standby_off"],
 };
@@ -5330,7 +5332,7 @@ test("screen show prints the Host block and recovery deadline when the screen re
   assert.equal(humanResult.code, ExitCode.Success, humanResult.stdout);
   assert.match(projectHumanBody(humanResult.stdout), /^Screen\n/);
   const hostBlock = humanResult.stdout.slice(humanResult.stdout.indexOf("\nHost\n") + 1);
-  assert.match(hostBlock, /^Host\nplatform: tizen\nhost_version: 26\.09\.1\nmodel: QB65\nmanufacturer: Samsung\nfirmware: T-KTM2ELAKUC-1200\.1\nserial: SERIAL0001\nduid: DUID-TEST-000001\nmac: 00:11:22:33:44:55\ncapabilities: autostart, network_standby_off\nupdated_at: 2026-09-10T08:00:00Z\n/);
+  assert.match(hostBlock, /^Host\nplatform: tizen\nasset_id: LOBBY-07\nlocation: Building 2, Lobby\nhost_version: 26\.09\.1\nmodel: QB65\nmanufacturer: Samsung\nfirmware: T-KTM2ELAKUC-1200\.1\nserial: SERIAL0001\nduid: DUID-TEST-000001\nmac: 00:11:22:33:44:55\ncapabilities: autostart, network_standby_off\nupdated_at: 2026-09-10T08:00:00Z\n/);
   assert.match(hostBlock, /\nRecovery pending until 2026-09-13T08:00:00Z\n/);
   await rm(configDir, { recursive: true, force: true });
 });

@@ -1995,7 +1995,8 @@ paths:
       description: 'Tombstones the signed-in person. Proof-protected: the body carries a fresh sign-in proof verified against
         a reauthentication bound to this session with kind account_delete and subject_id equal to the signed-in person''s user
         id (start it with POST /api/me/reauthentications). Without a current reauthentication the answer is reauthentication_required.
-        On success the response is 204 and the dashboard session cookie is cleared.'
+        On success the response is 204, the dashboard session cookie is cleared, and the browser''s HTTP cache for the dashboard
+        origin is cleared as on sign-out.'
       security:
       - dashboardSession: []
       requestBody:
@@ -2006,7 +2007,14 @@ paths:
               $ref: '#/components/schemas/DashboardProofRequest'
       responses:
         '204':
-          description: Person deleted and dashboard session cookie cleared.
+          description: Person deleted, dashboard session cookie cleared and the browser's HTTP cache for this origin cleared.
+          headers:
+            Clear-Site-Data:
+              description: Clears only the HTTP cache, never storage or cookies. Sent only on this response and a successful sign-out.
+              schema:
+                type: string
+                enum:
+                - '"cache"'
         default:
           $ref: '#/components/responses/Problem'
   /api/me/reauthentications:
@@ -3524,9 +3532,12 @@ paths:
       - RateLimit-Policy
       - RateLimit
       description: Claims one fleet-global six-character Player pairing session. Exact Idempotency-Key retries return the durable
-        original result without consuming quota again.
+        original result without consuming quota again. The dashboard session claims into its current project with the same
+        body, Idempotency-Key, budgets and problems; it is a state change, so it follows the dashboard mutation rules, a shadow
+        session without staff write mode is refused, and the events the claim appends name the dashboard user.
       security:
       - projectBearer: []
+      - dashboardSession: []
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -3568,6 +3579,9 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
   /api/screens/provision:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
@@ -4855,13 +4869,22 @@ paths:
       description: Returns the current ready still WebP for the named screen. Optional capture_id must match that ready slot.
         A named capture_id that expired with no upload is screenshot_unavailable. A named capture_id replaced by a later request
         is resource_conflict. Image bytes are never a signed URL or object key. Range is not accepted. Screen messages are exempt
-        from the 1-credit API meter.
+        from the 1-credit API meter. The ETag is the strong SHA-256 of the stored WebP. A dashboard session response is private,
+        no-cache, and a dashboard If-None-Match that matches the current image, checked after the screen and capture resolve
+        in the session's project, returns 304 without opening the stored bytes. A project bearer response stays private,
+        no-store.
       security:
       - projectBearer: []
       - dashboardSession: []
       parameters:
       - $ref: '#/components/parameters/ResourceID'
       - $ref: '#/components/parameters/ScreenshotCaptureID'
+      - name: If-None-Match
+        in: header
+        required: false
+        schema:
+          type: string
+        description: Strong ETag of a screenshot this route returned. Honored for a dashboard session.
       responses:
         '200':
           description: Current ready still WebP.
@@ -4885,10 +4908,7 @@ paths:
                 type: string
                 format: date-time
             Cache-Control:
-              schema:
-                type: string
-                enum:
-                - private, no-store
+              $ref: '#/components/headers/ProjectBytesCacheControl'
             Content-Disposition:
               schema:
                 type: string
@@ -4897,6 +4917,23 @@ paths:
               schema:
                 type: string
                 format: binary
+        '304':
+          description: Dashboard session only. The current image's ETag matches If-None-Match. No body is produced and object
+            storage is not read. The capture headers name the current capture, which can differ from the stored response's
+            when a later capture encoded to the same bytes.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              $ref: '#/components/headers/ProjectBytesCacheControl'
+            X-ScreenRig-Capture-ID:
+              schema:
+                $ref: '#/components/schemas/ScreenshotCaptureID'
+            X-ScreenRig-Captured-At:
+              schema:
+                type: string
+                format: date-time
         '400':
           $ref: '#/components/responses/Problem'
         '401':
@@ -7016,7 +7053,10 @@ paths:
         The media identifier is never authority: another project''s identifier returns not_found. The API streams from private
         storage and never publishes an object key, storage URL, or signed GET. The attachment filename is the media identifier
         plus the canonical extension for the verified content type. Remaining at or below the intro floor (negative 1,000,000
-        credits until 2027-01-01, then zero) returns payment_required before the media is read or any byte is transferred.'
+        credits until 2027-01-01, then zero) returns payment_required before the media is read or any byte is transferred.
+        A dashboard session views the same bytes inline: it is not prepaid-gated, completed bytes are recorded as dashboard_media
+        egress, and the response is private, no-cache so the browser keeps one copy and revalidates it with If-None-Match. A
+        project bearer response stays private, no-store.'
       security:
       - projectBearer: []
       - dashboardSession: []
@@ -7043,10 +7083,7 @@ paths:
               schema:
                 type: string
             Cache-Control:
-              schema:
-                type: string
-                enum:
-                - private, no-store
+              $ref: '#/components/headers/ProjectBytesCacheControl'
             X-Content-Type-Options:
               schema:
                 type: string
@@ -7105,10 +7142,7 @@ paths:
               schema:
                 type: string
             Cache-Control:
-              schema:
-                type: string
-                enum:
-                - private, no-store
+              $ref: '#/components/headers/ProjectBytesCacheControl'
             X-Content-Type-Options:
               schema:
                 type: string
@@ -7150,10 +7184,7 @@ paths:
               schema:
                 type: string
             Cache-Control:
-              schema:
-                type: string
-                enum:
-                - private, no-store
+              $ref: '#/components/headers/ProjectBytesCacheControl'
         '402':
           $ref: '#/components/responses/Problem'
         '416':
@@ -7203,10 +7234,7 @@ paths:
               schema:
                 type: string
             Cache-Control:
-              schema:
-                type: string
-                enum:
-                - private, no-store
+              $ref: '#/components/headers/ProjectBytesCacheControl'
             X-Content-Type-Options:
               schema:
                 type: string
@@ -7236,10 +7264,7 @@ paths:
               schema:
                 type: string
             Cache-Control:
-              schema:
-                type: string
-                enum:
-                - private, no-store
+              $ref: '#/components/headers/ProjectBytesCacheControl'
             X-Content-Type-Options:
               schema:
                 type: string
@@ -7252,10 +7277,7 @@ paths:
               schema:
                 type: string
             Cache-Control:
-              schema:
-                type: string
-                enum:
-                - private, no-store
+              $ref: '#/components/headers/ProjectBytesCacheControl'
         '402':
           description: Prepaid remaining is below the floor. A HEAD response carries no problem body.
         '416':
@@ -7316,13 +7338,21 @@ paths:
       x-screenrig-access: read
       operationId: getAdvertisingReviewContent
       description: Streams only the exact creative revision this seller's own review refers to. Ownership stays with the buyer
-        project; no object key or signed location is published, and no other buyer media is reachable.
+        project; no object key or signed location is published, and no other buyer media is reachable. The ETag is the creative's
+        strong SHA-256 and never changes for a review. A dashboard session response is private, no-cache, so the browser keeps
+        one copy and revalidates it; a project bearer response stays private, no-store.
       security:
       - projectBearer: []
       - dashboardSession: []
       parameters:
       - $ref: '#/components/parameters/ResourceID'
       - $ref: '#/components/parameters/Range'
+      - name: If-None-Match
+        in: header
+        required: false
+        schema:
+          type: string
+        description: Strong creative SHA-256 ETag returned by this route.
       responses:
         '200':
           description: The review's exact creative bytes.
@@ -7338,12 +7368,28 @@ paths:
             ETag:
               schema:
                 type: string
+            Cache-Control:
+              $ref: '#/components/headers/ProjectBytesCacheControl'
         '206':
           description: One standards-correct byte range.
           headers:
             Content-Range:
               schema:
                 type: string
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              $ref: '#/components/headers/ProjectBytesCacheControl'
+        '304':
+          description: The creative's ETag matches If-None-Match, checked after the review resolves in the seller project. No
+            body or egress increment is produced.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              $ref: '#/components/headers/ProjectBytesCacheControl'
         default:
           $ref: '#/components/responses/Problem'
     head:
@@ -7759,6 +7805,218 @@ paths:
                 $ref: '#/components/schemas/ServiceClientResult'
         default:
           $ref: '#/components/responses/Problem'
+  /api/fleet-links:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listFleetLinks
+      description: Lists the project's fleet links, oldest first (at most 50). For a Read only credential each url is empty
+        and url_redacted is true, since the URL creates screens.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      responses:
+        '200':
+          description: The project's fleet links.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FleetLinkList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createFleetLink
+      description: 'Creates a fleet link: one Player URL (https://play.<domain>/player/#fleet=<secret>) that turns every device
+        opening it into its own screen in this project, without a pairing code. Put it in a device manager, such as a Google
+        Admin console kiosk app. Each new screen gets the link''s tags and playlist, and a label from the device (its administrator
+        asset ID, then location), else the next default label. A Player that already holds a screen never makes another:
+        its key stays the screen''s identity across reloads and relaunches. After a powerwash or reinstall, a device that
+        reports the serial or DUID of a screen a fleet link of this project created recovers that screen (screen.recovered)
+        instead of creating a new one, once the old key has been silent for ten minutes. The secret travels in the URL fragment,
+        which browsers never send to a server. max_screens caps the screens the link creates; the project''s screen limit
+        applies as for any screen. A project has at most 50 fleet links (fleet_link_limit_reached). Appends fleet_link.created.
+        An exact retry with the same Idempotency-Key returns this same answer for twenty-four hours.'
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FleetLinkWrite'
+      responses:
+        '201':
+          description: Created, with its url.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FleetLink'
+        '400':
+          description: invalid_request, including an unknown playlist_id or a malformed tag.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: fleet_link_limit_reached or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/fleet-links/{id}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getFleetLink
+      description: One fleet link. For a Read only credential url is empty and url_redacted is true.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      responses:
+        '200':
+          description: One fleet link.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FleetLink'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      x-screenrig-access: write
+      operationId: updateFleetLink
+      description: Changes any of label, enabled, tags, playlist_id and max_screens; null clears playlist_id or max_screens.
+        A disabled link creates and recovers no screens; a device opening it shows its pairing code instead. Changes apply
+        to screens the link creates from now on, never to screens it already created. Appends fleet_link.updated. If-Match
+        guards the revision.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/IfMatch'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FleetLinkPatch'
+      responses:
+        '200':
+          description: Updated fleet link.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FleetLink'
+        '400':
+          description: invalid_request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteFleetLink
+      description: Deletes the fleet link. Its URL stops working at once; screens it created stay, with their playlists and
+        tags. Appends fleet_link.deleted. If-Match guards the revision.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/IfMatch'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted.
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/fleet-links/{id}/rotate:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: rotateFleetLink
+      description: Replaces the link's secret and returns the new url. The old URL stops working at once; screens already created
+        keep playing, since a paired Player never presents the link again. Appends fleet_link.updated with details.rotated
+        true. If-Match guards the revision.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/IfMatch'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The fleet link with its new url.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FleetLink'
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/webhooks:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
@@ -8079,8 +8337,9 @@ paths:
         the read marker to now (later pages of the same listing keep the earlier marker). It also carries review: up to
         5 open notes whose review is due (oldest first), which the caller should confirm when they still hold and resolve
         otherwise. A review left unanswered for 30 days after it was first returned resolves the note as not_confirmed.
-        Every other page or filter returns an empty review and moves nothing. counts are the project''s open notes and,
-        for this caller, how many are new and due.'
+        Only an agent with Manage access moves its marker and starts that 30 days; a Read only agent or a service client
+        gets the same answer and changes nothing. Every other page or filter returns an empty review and moves nothing.
+        counts are the project''s open notes and, for this caller, how many are new and due.'
       security:
       - projectBearer: []
       parameters:
@@ -11150,12 +11409,14 @@ paths:
     post:
       operationId: logoutDashboardSession
       description: Deletes the server-side session row and expires the session cookie. It does not delete the user and does
-        not remove any credential. It is intrinsically idempotent and takes no Idempotency-Key.
+        not remove any credential. It is intrinsically idempotent and takes no Idempotency-Key. A successful sign-out also
+        clears the browser's HTTP cache for the dashboard origin, dropping the private, no-cache media, screenshot and ad review
+        bytes the session viewed; a session that only expires leaves them until the browser evicts them.
       security:
       - dashboardSession: []
       responses:
         '204':
-          description: Session row deleted and session cookie expired.
+          description: Session row deleted, session cookie expired and the browser's HTTP cache for this origin cleared.
           headers:
             Cache-Control:
               schema:
@@ -11165,6 +11426,13 @@ paths:
             Set-Cookie:
               schema:
                 type: string
+            Clear-Site-Data:
+              description: Clears only the HTTP cache, never storage or cookies. Sent only on this response and a successful account
+                deletion.
+              schema:
+                type: string
+                enum:
+                - '"cache"'
         '401':
           $ref: '#/components/responses/Problem'
         default:
@@ -12843,6 +13111,16 @@ paths:
 components:
   # Anonymous demos have their own cookie, independent of project/dashboard auth.
   headers:
+    ProjectBytesCacheControl:
+      description: >-
+        Set by the credential. A project bearer gets private, no-store, and
+        nothing is stored. A dashboard session gets private, no-cache: the bytes
+        behind a media ID, a capture or a review never change, so the browser
+        keeps one copy and revalidates it with If-None-Match on every use.
+        Authorization runs before the ETag is compared, so a revalidation never
+        reaches bytes the session cannot read, and a 304 carries no body and
+        records no egress. Problems are no-store.
+      schema: { type: string, enum: ["private, no-store", "private, no-cache"] }
     RateLimitPolicy:
       description: >-
         One or more public fixed-window policy list members using the Structured
@@ -14753,12 +15031,13 @@ components:
     DashboardStaffSupportCounts:
       type: object
       additionalProperties: false
-      required: [open, waiting, closed]
+      required: [open, waiting, closed, unread]
       description: Conversations in the inbox's project, organization and q scope, whatever the folder.
       properties:
         open: { type: integer, minimum: 0, description: Not closed. }
         waiting: { type: integer, minimum: 0, description: Not closed and waiting for staff. }
         closed: { type: integer, minimum: 0 }
+        unread: { type: integer, minimum: 0, description: Customer messages in the open conversations that the reading staff member has not read; the rows' unread summed over the whole scope. }
     DashboardStaffSupportInbox:
       type: object
       additionalProperties: false
@@ -15869,7 +16148,7 @@ components:
         application_path_depth: { type: integer, enum: [16] }
         application_path_bytes: { type: integer, enum: [255] }
         media_image_bytes: { type: integer, enum: [20971520], description: "Maximum declared byte size of one image upload, 20 MiB. It is a byte-only gate rejected with invalid_request before any byte is transferred; declaration does not decode the image, and the bound applies to animated GIF and animated WebP exactly as it applies to a still. Commit verifies dimensions up to 8192 pixels per axis and normalizes non-default EXIF orientation. A video declaration is bounded only by the plan-independent transport ceiling." }
-        media_audio_bytes: { type: integer, enum: [209715200], description: "Maximum declared byte size of one audio/mpeg (MP3) upload, 200 MiB. It is a byte-only gate rejected with invalid_request before any byte is transferred. Audio media is the playlist soundtrack (docs/playlist-audio.md)." }
+        media_audio_bytes: { type: integer, enum: [178257920], description: "Maximum declared byte size of one audio/mpeg (MP3) upload, 170 MiB: the three-hour maximum at 128 kbit/s, with room for tags. It is a byte-only gate rejected with invalid_request before any byte is transferred. Audio media is the playlist soundtrack (docs/playlist-audio.md)." }
         playlist_max_pages: { type: integer, enum: [100] }
         playlist_max_items_per_page: { type: integer, enum: [24] }
         playlist_max_media_per_selector: { type: integer, enum: [1024], description: Maximum ready media objects one image or video selector may resolve to. }
@@ -17525,6 +17804,7 @@ components:
         display: { $ref: "#/components/schemas/ScreenDisplay" }
         timezone: { type: string, description: "IANA time zone identifier. Absent until it is set. Page visibility rules are evaluated in this zone." }
         tags: { $ref: "#/components/schemas/ScreenTags" }
+        fleet_link_id: { type: string, description: "The fleet link that created this screen. Read-only; it stays after the link is deleted." }
         observation: { $ref: "#/components/schemas/ScreenObservation" }
         last_page_failure: { $ref: "#/components/schemas/PageFailure" }
         manifest_upgrade: { $ref: "#/components/schemas/ScreenManifestUpgrade" }
@@ -17661,7 +17941,7 @@ components:
         platform: { type: string, pattern: "^[a-z][a-z0-9-]{0,31}$", description: "Registered values: tizen, android, windows, qt, apple, chromeos, browser, brightsign. Another value matching the pattern is stored as the player reported it." }
         host_version: { type: string, minLength: 1, maxLength: 40, description: "Shell or container product version, CalVer or vendor form." }
         device: { $ref: "#/components/schemas/HostDevice" }
-        capabilities: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40 }, description: "Host capability tokens, optionally dotted into a family. Documented values: reboot (the Player reboots the device on player.reboot), display_power.cec, display_power.ddc, display_power.backlight, display_power.scrim (display power methods the Player can use, docs/player-compatibility.md §6.5). Legacy cec_power_on reads as display_power.cec; reboot_daily and other values are stored as reported." }
+        capabilities: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40 }, description: "Host capability tokens, optionally dotted into a family. Documented values: reboot (the Player reboots the device on player.reboot), display_power.serial, display_power.cec, display_power.ddc, display_power.backlight, display_power.scrim (display power methods the Player can use, docs/player-compatibility.md §6.5). Legacy cec_power_on reads as display_power.cec; reboot_daily and other values are stored as reported." }
     HostDevice:
       type: object
       additionalProperties: false
@@ -17673,6 +17953,8 @@ components:
         model: { type: string, minLength: 1, maxLength: 80 }
         firmware: { type: string, minLength: 1, maxLength: 80 }
         manufacturer: { type: string, minLength: 1, maxLength: 80 }
+        asset_id: { type: string, minLength: 1, maxLength: 120, description: "The asset ID the device's administrator gave it in its management console (ChromeOS annotated asset ID). Trimmed text of at most 120 UTF-8 bytes without control characters. Descriptive; never matched." }
+        location: { type: string, minLength: 1, maxLength: 120, description: "The location the device's administrator gave it in its management console (ChromeOS annotated location). Same limits as asset_id. Descriptive; never matched." }
     RuntimeHostHint:
       type: object
       additionalProperties: true
@@ -17703,6 +17985,8 @@ components:
         model: { type: string, minLength: 1, maxLength: 80 }
         firmware: { type: string, minLength: 1, maxLength: 80 }
         manufacturer: { type: string, minLength: 1, maxLength: 80 }
+        asset_id: { type: string, minLength: 1, maxLength: 120, description: "Administrator's asset ID for the device (ChromeOS annotated asset ID): trimmed, at most 120 UTF-8 bytes, no control characters." }
+        location: { type: string, minLength: 1, maxLength: 120, description: "Administrator's location for the device (ChromeOS annotated location): same limits as asset_id." }
     ScreenActionRequest:
       type: object
       additionalProperties: false
@@ -18491,7 +18775,7 @@ components:
         quality: { type: string, enum: [low, medium, high] }
         credits: { type: integer, minimum: 1 }
         usd: { type: string }
-    MediaUploadDeclaration: { type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: declaration never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. Remaining prepaid credit of zero rejects declare and commit with payment_required. An audio/mpeg (MP3) declaration is bounded at 209715200 bytes, 200 MiB, and a larger one is rejected the same way; read media_audio_bytes to preflight it. Read media_image_bytes from the capabilities document to preflight the image bound, and project_content_bytes there, or content_limit_bytes on the project, to know any custom storage ceiling. An optional tag is stored on the ready media object and is not redeclared at commit. An optional source_filename records the caller's original file name when the client transcoded the bytes before upload; the ready object's filename is then derived from it so distinct sources never collide (photo.png uploaded as photo.webp is stored as photo.png.webp, photo.jpg as photo.jpg.webp, and a source photo.webp stays photo.webp).", properties: { filename: { type: string, minLength: 1, maxLength: 255, description: "Name of the bytes being uploaded, as they will be sent." }, source_filename: { type: string, minLength: 1, maxLength: 255, description: "Caller's original file name before any client-side transcode. Bare file name only. Stored verbatim on the ready media as source_filename and used to derive filename." }, content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } } }
+    MediaUploadDeclaration: { type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: declaration never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. Remaining prepaid credit of zero rejects declare and commit with payment_required. An audio/mpeg (MP3) declaration is bounded at 178257920 bytes, 170 MiB, and a larger one is rejected the same way; read media_audio_bytes to preflight it. Read media_image_bytes from the capabilities document to preflight the image bound, and project_content_bytes there, or content_limit_bytes on the project, to know any custom storage ceiling. An optional tag is stored on the ready media object and is not redeclared at commit. An optional source_filename records the caller's original file name when the client transcoded the bytes before upload; the ready object's filename is then derived from it so distinct sources never collide (photo.png uploaded as photo.webp is stored as photo.png.webp, photo.jpg as photo.jpg.webp, and a source photo.webp stays photo.webp).", properties: { filename: { type: string, minLength: 1, maxLength: 255, description: "Name of the bytes being uploaded, as they will be sent." }, source_filename: { type: string, minLength: 1, maxLength: 255, description: "Caller's original file name before any client-side transcode. Bare file name only. Stored verbatim on the ready media as source_filename and used to derive filename." }, content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } } }
     MediaFolder: { type: object, additionalProperties: false, required: [id, name, parent_id, revision, created_at, updated_at], description: "One media library folder. A playlist selector by:folder plays the ready files directly inside it, not those of its subfolders.", properties: { id: { type: string }, name: { type: string, minLength: 1, maxLength: 100 }, parent_id: { anyOf: [{ type: string }, { type: "null" }], description: "The folder holding this one; null at the library root." }, revision: { type: integer }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     MediaFolderList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/MediaFolder" } } } }
     MediaFolderCreate: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string, minLength: 1, maxLength: 100, description: "Trimmed; 1 to 100 Unicode characters, no controls, not . or .." }, parent_id: { anyOf: [{ type: string }, { type: "null" }], description: "The folder to create it in; null or absent for the library root." } } }
@@ -18507,7 +18791,7 @@ components:
     MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], description: "Declares only what the server can re-verify against the stored object byte for byte. Codec identity is not declared here: the server derives it from the container during asynchronous verification, so a client cannot assert a codec that drives player behaviour.", properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
     MediaUploadSession: { type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: { id: { type: string }, operation: { $ref: "#/components/schemas/Operation" }, upload_url: { type: string, format: uri }, method: { type: string, enum: [PUT] }, headers: { type: object, additionalProperties: { type: string }, description: Exact signed request headers; clients must send every field verbatim. }, expires_at: { type: string, format: date-time } } }
     MediaUploadSource: { type: object, additionalProperties: false, required: [filename, content_type, sha256, bytes], description: "Verified original upload identity when ingest normalized EXIF orientation. Read-only; use it to recognize retries. The ready media digest, size and type describe the normalized delivery bytes.", properties: { filename: { type: string }, source_filename: { type: string }, content_type: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer, minimum: 1 } } }
-    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { tags: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 14400000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, folder_id: { type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. Move files with POST /api/media/move." }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
+    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { tags: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 10800000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, folder_id: { type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. Move files with POST /api/media/move." }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
     MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/Media" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     SupportHours: {"type": "object", "additionalProperties": false, "required": ["timezone", "start", "end", "weekdays", "excludes_bc_holidays"], "properties": {"timezone": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "weekdays": {"type": "array", "items": {"type": "string"}}, "excludes_bc_holidays": {"type": "boolean"}}}
     SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean", "description": "This project can start or continue a conversation now. False where support chat is switched off in this environment."}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0}, "docs_url": {"type": "string"}}}
@@ -18650,6 +18934,53 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         secret: { type: string, pattern: "^whsec_[A-Za-z0-9_-]{43}$", description: The signing secret. Store it; it is not shown again. }
+    FleetLink:
+      type: object
+      additionalProperties: false
+      required: [id, label, enabled, tags, screens_created, revision, created_at, updated_at]
+      description: A Player URL that turns every device opening it into its own screen in this project.
+      properties:
+        id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?flk_[A-Za-z0-9_-]+$" }
+        label: { type: string, minLength: 1, maxLength: 80 }
+        enabled: { type: boolean }
+        url: { type: string, maxLength: 512, description: "The Player URL to put in a device manager: https://play.<domain>/player/#fleet=<secret>. Empty, with url_redacted true, for a Read only credential. It is a credential that creates screens: share it only with the device manager." }
+        url_redacted: { type: boolean, description: "Present and true when url was withheld from a Read only credential." }
+        tags: { $ref: "#/components/schemas/ScreenTags" }
+        playlist_id: { type: string, description: Playlist assigned to each screen the link creates. }
+        max_screens: { type: integer, minimum: 1, maximum: 10000, description: Most screens this link creates. Absent means only the project's screen limit applies. }
+        screens_created: { type: integer, minimum: 0, description: Screens this link has created; recoveries are not counted. }
+        last_used_at: { type: string, format: date-time, description: Last time the link created or recovered a screen. }
+        revision: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    FleetLinkList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/FleetLink" } } } }
+    FleetLinkWrite:
+      type: object
+      additionalProperties: false
+      required: [label]
+      properties:
+        label: { type: string, minLength: 1, maxLength: 80 }
+        enabled: { type: boolean, description: Defaults to true. }
+        tags: { $ref: "#/components/schemas/ScreenTags" }
+        playlist_id: { type: string }
+        max_screens: { type: integer, minimum: 1, maximum: 10000 }
+    FleetLinkPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        label: { type: string, minLength: 1, maxLength: 80 }
+        enabled: { type: boolean }
+        tags: { $ref: "#/components/schemas/ScreenTags" }
+        playlist_id: { type: string, nullable: true, description: null clears the playlist. }
+        max_screens: { type: integer, nullable: true, minimum: 1, maximum: 10000, description: null removes the cap. }
+    NativePairingFleetLink:
+      type: object
+      additionalProperties: true
+      required: [status]
+      description: What the presented fleet link did for this pairing session. claimed and recovered mean the screen is already chosen, and the Player completes pairing without showing its code. Any other status leaves the code on the glass for an ordinary claim.
+      properties:
+        status: { type: string, enum: [claimed, recovered, invalid, disabled, limit_reached, screen_limit_reached], description: "claimed: a new screen was created for this device. recovered: the device's earlier screen was recovered onto its new key. invalid: no link has this secret (deleted or rotated). disabled: the link is turned off. limit_reached: the link created its max_screens. screen_limit_reached: the project is at its screen limit. Readers treat an unknown status like invalid." }
     WebhookList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 10, items: { $ref: "#/components/schemas/Webhook" } } } }
     WebhookDelivery:
       type: object
@@ -18800,7 +19131,7 @@ components:
         created_at: { type: string, format: date-time }
     FeedbackList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/FeedbackSubmission" } } } }
     PairingSession: { type: object, additionalProperties: true, required: [code, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, expires_at: { type: string, format: date-time } } }
-    NativePairingSession: { type: object, additionalProperties: true, required: [code, pairing_credential, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, pairing_credential: { type: string, pattern: "^srp_[A-Za-z0-9_-]{43}$" }, expires_at: { type: string, format: date-time, description: Unclaimed native pairing deadline; seventy-two hours after issuance. After claim this deadline does not expire native delivery or device identity. }, recovery: { $ref: "#/components/schemas/NativePairingRecovery" } } }
+    NativePairingSession: { type: object, additionalProperties: true, required: [code, pairing_credential, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, pairing_credential: { type: string, pattern: "^srp_[A-Za-z0-9_-]{43}$" }, expires_at: { type: string, format: date-time, description: Unclaimed native pairing deadline; seventy-two hours after issuance. After claim this deadline does not expire native delivery or device identity. }, recovery: { $ref: "#/components/schemas/NativePairingRecovery" }, fleet_link: { $ref: "#/components/schemas/NativePairingFleetLink" } } }
     NativePairingRecovery:
       type: object
       additionalProperties: false
@@ -18841,6 +19172,7 @@ components:
         public_key: { $ref: "#/components/schemas/PlayerPublicKey" }
         signature: { type: string, minLength: 80, maxLength: 4096 }
         host: { $ref: "#/components/schemas/RuntimeHostHint" }
+        fleet_link: { type: string, pattern: "^srfl_[A-Za-z0-9_-]{43}$", description: "Optional fleet link secret from the Player URL fragment (#fleet=). A valid, enabled link claims this pairing session for its project at once, or recovers the device's earlier screen; the answer's fleet_link reports which. Like host, it is read tolerantly: a malformed or unknown value never refuses the start." }
     NativePairingComplete:
       type: object
       additionalProperties: true
@@ -20232,6 +20564,7 @@ x-problem-codes:
 - upgrade_required
 - reboot_unsupported
 - webhook_limit_reached
+- fleet_link_limit_reached
 - webhook_url_rejected
 - note_contains_credential
 - note_rejected

@@ -3,6 +3,8 @@ const AGENT_CONNECTION_TOKEN_RE = /\bsac_[A-Za-z0-9_-]{43}\b/g;
 const BEARER_RE = /Bearer\s+\S+/gi;
 /** Customer webhook signing secrets (whsec_ + 43 URL-safe characters). */
 const WEBHOOK_SECRET_RE = /\bwhsec_[A-Za-z0-9_-]{8,}/g;
+/** Fleet link secrets (srfl_ + 43 URL-safe characters), carried in a Player URL's #fleet= fragment. */
+const FLEET_LINK_SECRET_RE = /\bsrfl_[A-Za-z0-9_-]{8,}/g;
 const AGENT_CONNECTION_AUTH_RE = /ScreenRig-Agent-Connect\s+\S+/gi;
 /** Single-use AgentID claim codes redeemed at enrollment. */
 const AGENTID_CLAIM_RE = /\bagid_[A-Za-z0-9_-]{8,}\b/g;
@@ -14,12 +16,12 @@ const JWT_RE = /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{16,}
  * credential, so a link that reaches an error detail, an event, or a message
  * must lose its fragment rather than be echoed back.
  */
-const URL_FRAGMENT_TOKEN_RE = /#(token|link|provision)=[A-Za-z0-9_-]{8,}/gi;
+const URL_FRAGMENT_TOKEN_RE = /#(token|link|provision|fleet)=[A-Za-z0-9_-]{8,}/gi;
 
 const SENSITIVE_KEY_RE =
   /(authorization|access_token|token|password|secret|private|ciphertext|nonce|cookie|object_key|signed_url|completion_nonce|upload_url|image_bytes|pixels|prompt|agentid_claim|claim_code|client_id|idempotency|beta_key|device_code|assertion)/i;
 const SENSITIVE_VALUE_RE =
-  /(sr_live_|sac_|whsec_|agid_|Bearer\s|ScreenRig-Agent-Connect\s|data:image\/|#(token|link|provision)=|[?&](X-Amz-Signature|X-Goog-Signature|signature)=|\beyJ[A-Za-z0-9_-]{8,}\.eyJ)/i;
+  /(sr_live_|sac_|whsec_|srfl_|agid_|Bearer\s|ScreenRig-Agent-Connect\s|data:image\/|#(token|link|provision|fleet)=|[?&](X-Amz-Signature|X-Goog-Signature|signature)=|\beyJ[A-Za-z0-9_-]{8,}\.eyJ)/i;
 
 /**
  * Lookup segment of a credential, for internal correlation only. A redacted
@@ -52,6 +54,7 @@ export function redactText(value: string): string {
     .replace(AGENTID_CLAIM_RE, "agid_***")
     .replace(WEBHOOK_SECRET_RE, "whsec_***")
     .replace(URL_FRAGMENT_TOKEN_RE, (_match, name: string) => `#${name.toLowerCase()}=***`)
+    .replace(FLEET_LINK_SECRET_RE, "srfl_***")
     .replace(EMAIL_RE, "[redacted-email]");
 }
 

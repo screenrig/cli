@@ -83,7 +83,8 @@ help runs without configuration or authentication. Command-specific options foll
 that command, for example `screenrig screen update ID --name Lobby`.
 Global options such as `--json` may appear before or after the command. Use
 `--name=VALUE` for a value starting with a dash, and `--` before option-like file
-names. Duplicate options are rejected.
+names. Duplicate options are rejected, except the repeatable
+`service-client create --capability` and `fleet-links create|update --tag`.
 
 Choose by what the page is:
 
@@ -657,6 +658,64 @@ function verify(rawBody, signatureHeader, secret, toleranceSeconds = 300) {
 }
 ```
 
+## Fleet links
+
+A fleet link is one Player URL for a device manager, such as a kiosk app in
+the Google Admin console. Every device that opens it becomes its own screen in
+this project, with no pairing code. A project has at most 50.
+
+```sh
+screenrig fleet-links create --name "Lobby displays" [--tag Lobby]... [--playlist-id pl_PLAYLIST] [--max-screens N] [--disabled]
+screenrig fleet-links list
+screenrig fleet-links show flk_LINK
+screenrig fleet-links update flk_LINK [--name NAME] [--enable | --disable] [--tag TAG]... [--clear-tags] [--playlist-id pl_PLAYLIST | --clear-playlist] [--max-screens N | --clear-max-screens] [--expect-rev REVISION]
+screenrig fleet-links rotate flk_LINK [--expect-rev REVISION]
+screenrig fleet-links delete flk_LINK [--expect-rev REVISION]
+```
+
+`create`, `show` and `rotate` return the link with `data.url`,
+`https://play.<domain>/player/#fleet=<secret>`. Put that URL in the device
+manager. The URL is a credential that creates screens, so give it only to the
+device manager. The secret travels in the URL fragment, which browsers never
+send to a server. A Read only credential receives `data.url` empty with
+`url_redacted: true`, and human output then says
+`URL: withheld from a Read only credential`. Otherwise human output prints the
+URL under a `Sensitive fleet link URL` label, and `list --human` never prints
+it. The CLI checks a returned URL before
+printing it (HTTPS, the `/player/` path, the secret only in `#fleet=`). It
+withholds a URL that fails, with warning `fleet_link_url_withheld`. It keeps
+fleet link answers out of its operation log.
+
+Each new screen gets the link's tags (`--tag`, repeatable or comma-separated,
+at most 16) and playlist (`--playlist-id`), and a label from the device: its
+administrator asset ID, then its location, else the next default label.
+`screen show` prints `Created by fleet link: flk_…` and returns
+`fleet_link_id`, which stays after the link is deleted. A device keeps its one
+screen across reloads and relaunches. After a powerwash or reinstall, a device
+that reports the serial or DUID of a screen a fleet link of this project
+created recovers that screen instead of creating another, once the old key has
+been silent for ten minutes. `--max-screens` caps the screens the link
+creates; the project's screen limit applies as for any screen. `list` shows
+screens created, or created/max, in its `SCREENS` column; recoveries are not
+counted.
+
+`update` changes only the fields you pass, and only for screens the link
+creates from now on. Screens it already created keep their tags, playlist and
+label. `--tag` replaces the whole set. `--clear-tags`, `--clear-playlist` and
+`--clear-max-screens` remove them. A disabled link (`--disable`, or `create
+--disabled`) creates and recovers no screens: a device opening it shows its
+pairing code instead. `rotate` replaces the secret, and `delete` removes the
+link. Either way the old URL stops working at once. Screens the link already
+created keep playing, because a paired Player never presents the link again.
+After a rotation, put the new URL in the device manager.
+
+A 51st link is `fleet_link_limit_reached` (exit 5); delete one first. An
+unknown `--playlist-id` is `invalid_request` (exit 8). `--expect-rev` guards
+the revision (`revision_conflict`, exit 6). After an interrupted or ambiguous
+`create`, rerun the identical command within 24 hours. It reuses the saved
+Idempotency-Key, and the server returns the same link instead of creating
+another.
+
 ## Playback export
 
 `playback plays` reads one row per visible start of an image or video,
@@ -1044,7 +1103,7 @@ broaden permissions without authorization.
 
 Ordinary application uploads/updates, playlist creates/updates/deletes, screen
 mutations other than provisioning, media tag updates/deletes, K/V and comment
-writes, webhook writes, note writes, feedback and support submissions, and operation cancellation persist
+writes, webhook and fleet link writes, note writes, feedback and support submissions, and operation cancellation persist
 an idempotency key before sending the request. After an ambiguous network failure or server
 error, rerun the same command with unchanged input. The CLI reuses the saved key;
 it does not automatically send another request within the failed invocation.

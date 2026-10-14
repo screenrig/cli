@@ -18,6 +18,7 @@ import { displayLines, displayPower, displayProblem, displayScheduleWrite, displ
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
 import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "./screen-manifest-upgrade.js";
 import { openTempFile, removeOnSignal, shellQuote, tempPathFor } from "./temp-file.js";
+import { fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
 import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -82,6 +83,10 @@ import {
   type ScreenDisplayScheduleView,
   type ScreenRebootAccepted,
   type PlaybackPlayList,
+  type FleetLink,
+  type FleetLinkList,
+  type FleetLinkPatch,
+  type FleetLinkWrite,
   type Webhook,
   type WebhookDelivery,
   type WebhookDeliveryList,
@@ -697,7 +702,7 @@ function commandHandler(
         (group === "media" && ["update", "delete"].includes(action ?? "")) ||
         // A screenshot is an observation: every run requests a new capture.
         (group === "screen" && !["provision", "publish", "screenshot"].includes(action ?? "")) ||
-        group === "invitations" || group === "webhooks" || (group === "project" && ["rename", "create"].includes(action ?? ""))
+        group === "invitations" || group === "webhooks" || group === "fleet-links" || (group === "project" && ["rename", "create"].includes(action ?? ""))
       ));
     let recovery: WriteRecovery | undefined;
     try {
@@ -4721,6 +4726,8 @@ function hostLines(host: HostContext | undefined, updatedAt: string | undefined)
   const device = host.device ?? {};
   return humanLines("Host", [
     ["platform", host.platform],
+    ["asset_id", device.asset_id],
+    ["location", device.location],
     ["host_version", host.host_version],
     ["model", device.model],
     ["manufacturer", device.manufacturer],
@@ -4973,6 +4980,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       "Screen",
       JSON.stringify(response.body, null, 2),
       ...(screenTags(screen).length ? [`Tags: ${screenTags(screen).join(", ")}`] : []),
+      ...(screen?.fleet_link_id ? [`Created by fleet link: ${screen.fleet_link_id}`] : []),
       ...assignmentLine(screen?.effective_playlist, screen?.takeover, screen?.timezone),
       ...takeoverLine(screen?.takeover, screen?.timezone),
       ...(screen?.playlist_schedule?.entries?.length
@@ -7297,6 +7305,135 @@ export const handleWebhooksDeliveries = commandHandler(async (args, runtime, res
       ...deliveryTableLines(items),
       ...(next ? [`next: screenrig webhooks deliveries ${id} --before ${next}${limit ? ` --limit ${limit}` : ""}`] : []),
     ].join("\n"),
+  };
+});
+
+// Fleet links: /api/fleet-links. url is a credential that creates screens; it
+// is checked before it is printed, never shown in the human list, and kept out
+// of the operation log (client.ts privateBodies).
+const FLEET_LINKS_PATH = "/api/fleet-links";
+
+async function fleetLinkCall(
+  client: ApiClient,
+  request: Parameters<ApiClient["call"]>[0],
+  id?: string,
+): Promise<Awaited<ReturnType<ApiClient["call"]>>> {
+  try {
+    return await client.call(request);
+  } catch (error) {
+    throw fleetLinkProblem(error, id);
+  }
+}
+
+function fleetLinkRevisionHeaders(args: ParsedArgs): Record<string, string> | undefined {
+  const revision = flagString(args.flags, "if-match");
+  return revision ? { "if-match": quotedRevision(revision) } : undefined;
+}
+
+function fleetLinkTagList(args: ParsedArgs): string[] | undefined {
+  const tags = flagString(args.flags, "tag");
+  return tags === undefined ? undefined : tags.split(",");
+}
+
+function fleetLinkResult(response: Awaited<ReturnType<ApiClient["call"]>>, client: ApiClient, title: string, withUrl: boolean): CommandResult {
+  const answered = response.body as FleetLink | undefined;
+  const { link, warnings } = answered && typeof answered === "object" ? guardFleetLink(answered) : { link: answered, warnings: [] };
+  return {
+    envelope: jsonBody({ ...response, body: link }, client.requestId, undefined, warnings),
+    exitCode: ExitCode.Success,
+    human: [
+      title,
+      ...fleetLinkLines(link),
+      ...(withUrl ? fleetLinkUrlLines(link, warnings.length > 0) : []),
+      ...warnings.map((warning) => `warning: ${warning.message}`),
+    ].join("\n"),
+  };
+}
+
+export const handleFleetLinksCreate = commandHandler(async (args, runtime, resolved) => {
+  const label = fleetLinkName(flagString(args.flags, "name") ?? "");
+  const tags = fleetLinkTagList(args);
+  const playlistId = flagString(args.flags, "playlist-id");
+  const maxScreens = flagString(args.flags, "max-screens");
+  const body: FleetLinkWrite = {
+    label,
+    ...(flagBool(args.flags, "disabled") ? { enabled: false } : {}),
+    ...(tags !== undefined ? { tags } : {}),
+    ...(playlistId !== undefined ? { playlist_id: fleetLinkPlaylistId(playlistId) } : {}),
+    ...(maxScreens !== undefined ? { max_screens: Number(fleetLinkMaxScreens(maxScreens)) } : {}),
+  };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await fleetLinkCall(client, { method: "POST", path: FLEET_LINKS_PATH, idempotent: true, body });
+  const id = (response.body as FleetLink | undefined)?.id;
+  return fleetLinkResult(response, client, `Created fleet link ${id ?? ""}`.trimEnd(), true);
+});
+
+export const handleFleetLinksList = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await fleetLinkCall(client, { method: "GET", path: FLEET_LINKS_PATH });
+  const listed = (response.body as FleetLinkList | undefined)?.items;
+  const { items, warnings } = guardFleetLinks(Array.isArray(listed) ? listed : []);
+  return {
+    envelope: jsonBody({ ...response, body: { ...(response.body as object | undefined), items } }, client.requestId, undefined, warnings),
+    exitCode: ExitCode.Success,
+    human: [`Fleet links (${items.length})`, ...fleetLinkTableLines(items), ...fleetLinkRedactedNote(items), ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
+  };
+});
+
+export const handleFleetLinksShow = commandHandler(async (args, runtime, resolved) => {
+  const id = fleetLinkId(args.positionals[2], "show");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await fleetLinkCall(client, { method: "GET", path: `${FLEET_LINKS_PATH}/${id}` }, id);
+  return fleetLinkResult(response, client, "Fleet link", true);
+});
+
+export const handleFleetLinksUpdate = commandHandler(async (args, runtime, resolved) => {
+  const id = fleetLinkId(args.positionals[2], "update");
+  const name = flagString(args.flags, "name");
+  const tags = fleetLinkTagList(args);
+  const playlistId = flagString(args.flags, "playlist-id");
+  const maxScreens = flagString(args.flags, "max-screens");
+  const patch: FleetLinkPatch = {
+    ...(name !== undefined ? { label: fleetLinkName(name) } : {}),
+    ...(flagBool(args.flags, "enable") ? { enabled: true } : {}),
+    ...(flagBool(args.flags, "disable") ? { enabled: false } : {}),
+    ...(tags !== undefined ? { tags } : {}),
+    ...(flagBool(args.flags, "clear-tags") ? { tags: [] } : {}),
+    ...(playlistId !== undefined ? { playlist_id: fleetLinkPlaylistId(playlistId) } : {}),
+    ...(flagBool(args.flags, "clear-playlist") ? { playlist_id: null } : {}),
+    ...(maxScreens !== undefined ? { max_screens: Number(fleetLinkMaxScreens(maxScreens)) } : {}),
+    ...(flagBool(args.flags, "clear-max-screens") ? { max_screens: null } : {}),
+  };
+  if (!Object.keys(patch).length) {
+    throw usageError("fleet-links update requires at least one of --name, --enable, --disable, --tag, --clear-tags, --playlist-id, --clear-playlist, --max-screens, or --clear-max-screens.");
+  }
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await fleetLinkCall(client, {
+    method: "PATCH", path: `${FLEET_LINKS_PATH}/${id}`, idempotent: true, body: patch, headers: fleetLinkRevisionHeaders(args),
+  }, id);
+  return fleetLinkResult(response, client, `Updated fleet link ${id}. Screens it already created are unchanged.`, false);
+});
+
+export const handleFleetLinksRotate = commandHandler(async (args, runtime, resolved) => {
+  const id = fleetLinkId(args.positionals[2], "rotate");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await fleetLinkCall(client, {
+    method: "POST", path: `${FLEET_LINKS_PATH}/${id}/rotate`, idempotent: true, headers: fleetLinkRevisionHeaders(args),
+  }, id);
+  return fleetLinkResult(response, client,
+    `Rotated fleet link ${id}. The old URL stopped working; screens it already created keep playing. Put the new URL in your device manager.`, true);
+});
+
+export const handleFleetLinksDelete = commandHandler(async (args, runtime, resolved) => {
+  const id = fleetLinkId(args.positionals[2], "delete");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await fleetLinkCall(client, {
+    method: "DELETE", path: `${FLEET_LINKS_PATH}/${id}`, idempotent: true, headers: fleetLinkRevisionHeaders(args),
+  }, id);
+  return {
+    envelope: successEnvelope({ id, deleted: true }, { request_id: response.headers["x-request-id"] ?? client.requestId }),
+    exitCode: ExitCode.Success,
+    human: `Deleted fleet link ${id}. Its URL stopped working; screens it created stay, with their playlists and tags.`,
   };
 });
 

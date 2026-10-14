@@ -1675,5 +1675,91 @@ export function memoryBackend(options: {
     return { status: 200, headers: {}, body: { items, next_cursor: next } };
   });
 
+  // Fleet links: at most 50 per project; url carries the secret in the
+  // #fleet= fragment, rotate replaces it, and an exact Idempotency-Key replay
+  // returns the same answer.
+  const fleetLinks = new Map<string, Record<string, unknown>>();
+  const fleetLinkReplays = new Map<string, { request: string; response: TransportResponse }>();
+  let fleetLinkSequence = 0;
+  let fleetLinkSecretSequence = 0;
+  const fleetLinkUrl = () => `https://play.screenrig.ai/player/#fleet=srfl_${String(++fleetLinkSecretSequence).padStart(43, "F")}`;
+  const fleetLinkReplay = (req: TransportRequest, work: () => TransportResponse): TransportResponse => {
+    const key = req.headers?.["idempotency-key"];
+    const request = JSON.stringify([req.method, req.path, req.body ?? null]);
+    const replay = key ? fleetLinkReplays.get(key) : undefined;
+    if (replay) return replay.request === request ? replay.response : problem(409, "idempotency_mismatch", "idempotency key does not match original request");
+    const response = work();
+    if (key && response.status < 400) fleetLinkReplays.set(key, { request, response });
+    return response;
+  };
+  const fleetLinkFor = (req: TransportRequest): Record<string, unknown> | undefined => fleetLinks.get(decodeURIComponent(req.path.split("/")[3] ?? ""));
+  const staleFleetLink = (req: TransportRequest, link: Record<string, unknown>): TransportResponse | undefined => {
+    const ifMatch = req.headers?.["if-match"];
+    if (!ifMatch || ifMatch === `"${link.revision}"`) return undefined;
+    return { status: 412, headers: { "content-type": "application/problem+json" }, body: { status: 412, code: "revision_conflict", title: "Revision conflict", detail: "The fleet link revision does not match If-Match.", current_revision: link.revision } };
+  };
+  const unknownPlaylist = (value: unknown): TransportResponse | undefined => value === undefined || value === null || playlists.has(String(value)) ? undefined : {
+    status: 400,
+    headers: { "content-type": "application/problem+json" },
+    body: { status: 400, code: "invalid_request", title: "Invalid request", detail: "playlist_id does not name a playlist in this project.", errors: [{ field: "playlist_id", code: "unknown", detail: "playlist_id does not name a playlist in this project." }] },
+  };
+  transport.on("GET", "/api/fleet-links", () => ({ status: 200, headers: { "cache-control": "no-store" }, body: { items: [...fleetLinks.values()].map((link) => ({ ...link })) } }));
+  transport.on("POST", "/api/fleet-links", (req) => fleetLinkReplay(req, () => {
+    const body = (req.body ?? {}) as { label?: string; enabled?: boolean; tags?: string[]; playlist_id?: string; max_screens?: number };
+    const unknown = unknownPlaylist(body.playlist_id);
+    if (unknown) return unknown;
+    if (fleetLinks.size >= 50) return problem(409, "fleet_link_limit_reached", "The project has the maximum of 50 fleet links.");
+    fleetLinkSequence += 1;
+    const link: Record<string, unknown> = {
+      id: `flk_${String(fleetLinkSequence).padStart(16, "A")}`,
+      label: body.label, enabled: body.enabled ?? true, url: fleetLinkUrl(), tags: body.tags ?? [],
+      ...(body.playlist_id ? { playlist_id: body.playlist_id } : {}),
+      ...(body.max_screens !== undefined ? { max_screens: body.max_screens } : {}),
+      screens_created: 0, revision: 1,
+      created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
+    };
+    fleetLinks.set(link.id as string, link);
+    return { status: 201, headers: { "cache-control": "no-store" }, body: { ...link } };
+  }));
+  transport.on("GET", /^\/api\/fleet-links\/[^/]+$/, (req) => {
+    const link = fleetLinkFor(req);
+    return link ? { status: 200, headers: { etag: `"${link.revision}"`, "cache-control": "no-store" }, body: { ...link } } : notFound("Resource was not found.");
+  });
+  transport.on("PATCH", /^\/api\/fleet-links\/[^/]+$/, (req) => fleetLinkReplay(req, () => {
+    const link = fleetLinkFor(req);
+    if (!link) return notFound("Resource was not found.");
+    const stale = staleFleetLink(req, link);
+    if (stale) return stale;
+    const body = (req.body ?? {}) as { label?: string; enabled?: boolean; tags?: string[]; playlist_id?: string | null; max_screens?: number | null };
+    const unknown = unknownPlaylist(body.playlist_id);
+    if (unknown) return unknown;
+    if (body.label !== undefined) link.label = body.label;
+    if (body.enabled !== undefined) link.enabled = body.enabled;
+    if (body.tags !== undefined) link.tags = body.tags;
+    if (body.playlist_id === null) delete link.playlist_id;
+    else if (body.playlist_id !== undefined) link.playlist_id = body.playlist_id;
+    if (body.max_screens === null) delete link.max_screens;
+    else if (body.max_screens !== undefined) link.max_screens = body.max_screens;
+    link.revision = (link.revision as number) + 1;
+    return { status: 200, headers: { etag: `"${link.revision}"` }, body: { ...link } };
+  }));
+  transport.on("DELETE", /^\/api\/fleet-links\/[^/]+$/, (req) => fleetLinkReplay(req, () => {
+    const link = fleetLinkFor(req);
+    if (!link) return notFound("Resource was not found.");
+    const stale = staleFleetLink(req, link);
+    if (stale) return stale;
+    fleetLinks.delete(link.id as string);
+    return { status: 204, headers: {}, body: undefined };
+  }));
+  transport.on("POST", /^\/api\/fleet-links\/[^/]+\/rotate$/, (req) => fleetLinkReplay(req, () => {
+    const link = fleetLinkFor(req);
+    if (!link) return notFound("Resource was not found.");
+    const stale = staleFleetLink(req, link);
+    if (stale) return stale;
+    link.url = fleetLinkUrl();
+    link.revision = (link.revision as number) + 1;
+    return { status: 200, headers: { etag: `"${link.revision}"`, "cache-control": "no-store" }, body: { ...link } };
+  }));
+
   return transport;
 }

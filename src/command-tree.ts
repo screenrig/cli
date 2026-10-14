@@ -40,8 +40,9 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
     });
   }
   command.on(`option:${option.name()}`, () => {
-    const repeatable = name === "capability" && ((command.name() === "connect" && command.parent?.name() === "agent")
-      || (command.name() === "create" && command.parent?.name() === "service-client"));
+    const repeatable = (name === "capability" && ((command.name() === "connect" && command.parent?.name() === "agent")
+      || (command.name() === "create" && command.parent?.name() === "service-client")))
+      || (name === "tag" && command.parent?.name() === "fleet-links" && ["create", "update"].includes(command.name()));
     if (seen.has(handlerOptionName(option)) && !repeatable) throw usageError(`--${name} may be supplied only once.`);
     seen.add(handlerOptionName(option));
   });

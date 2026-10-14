@@ -25,10 +25,11 @@ import type { OperationLogger } from "./log/types.js";
  * Bodies that must not reach the operation log even after redaction: an
  * invitation create can carry a one-time credential URL, a webhook answer can
  * carry its signing secret, and a webhook URL path may itself embed a
- * receiver token. Support history is private customer correspondence.
+ * receiver token. A fleet link answer carries the URL that creates screens.
+ * Support history is private customer correspondence.
  */
 function privateBodies(method: string, path: string): boolean {
-  return (method === "POST" && path === "/api/invitations") || /^\/api\/(?:webhooks|support)(?:\/|$)/.test(path);
+  return (method === "POST" && path === "/api/invitations") || /^\/api\/(?:webhooks|support|fleet-links)(?:\/|$)/.test(path);
 }
 
 /** The error body as text, for a response that is not a problem document. Transports without raw text get the decoded body. */

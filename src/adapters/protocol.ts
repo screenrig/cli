@@ -352,6 +352,9 @@ export interface HostDevice {
   model?: string;
   firmware?: string;
   manufacturer?: string;
+  /** Administrator labels from device management (ChromeOS Admin console); display only. */
+  asset_id?: string;
+  location?: string;
 }
 
 /**
@@ -635,6 +638,8 @@ export interface Screen {
    * it. Not on the runtime manifest and never authorization.
    */
   comments?: Record<string, unknown>;
+  /** The fleet link that created this screen. Read-only; it stays after the link is deleted. */
+  fleet_link_id?: string;
   public_id: string;
   /** Read-only recovery offer awaiting confirmation. Absent once confirmed, lapsed, or claimed as a new screen. */
   recovery_pending?: ScreenRecoveryPending;
@@ -1077,6 +1082,50 @@ export interface WebhookDelivery {
 export interface WebhookDeliveryList {
   items: WebhookDelivery[];
   next_cursor: string | null;
+}
+
+/**
+ * GET/PATCH /api/fleet-links/{id}. url is a credential that creates screens;
+ * a Read only credential receives it empty with url_redacted true.
+ */
+export interface FleetLink {
+  created_at: string;
+  enabled: boolean;
+  id: string;
+  label: string;
+  last_used_at?: string;
+  max_screens?: number;
+  playlist_id?: string;
+  revision: number;
+  /** Screens this link has created; recoveries are not counted. */
+  screens_created: number;
+  tags: ScreenTags;
+  updated_at: string;
+  url?: string;
+  /** Present and true when url was withheld from a Read only credential. */
+  url_redacted?: boolean;
+}
+
+export interface FleetLinkList {
+  items: FleetLink[];
+}
+
+export interface FleetLinkWrite {
+  label: string;
+  enabled?: boolean;
+  tags?: ScreenTags;
+  playlist_id?: string;
+  max_screens?: number;
+}
+
+export interface FleetLinkPatch {
+  label?: string;
+  enabled?: boolean;
+  tags?: ScreenTags;
+  /** null clears the playlist. */
+  playlist_id?: string | null;
+  /** null removes the cap. */
+  max_screens?: number | null;
 }
 
 export type ScreenScheduleDay = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
