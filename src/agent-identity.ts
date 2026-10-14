@@ -1,5 +1,5 @@
 import { RESOURCE_ID_PATTERNS } from "./generated/resource-ids.js";
-import type { Agent, AgentSelfStatus } from "./adapters/protocol.js";
+import type { AccessLevel, Agent, AgentSelfStatus } from "./adapters/protocol.js";
 import { usageError } from "./problems.js";
 
 const AGENT_ID = RESOURCE_ID_PATTERNS.agent;
@@ -35,5 +35,15 @@ export function validateAgentSelfStatus(value: unknown, expectedState?: Agent["s
   if (typeof status.connection_ready !== "boolean") {
     throw usageError("Agent self status does not match the generated AgentSelfStatus contract.");
   }
-  return { agent: validateAgent(status.agent, expectedState), connection_ready: status.connection_ready };
+  const level = (value: unknown) => ["read", "propose", "manage"].includes(value as string) ? value as AccessLevel : undefined;
+  const access = level(status.access);
+  const effective = level(status.effective_access);
+  const limitedBy = status.access_limited_by === "project" || status.access_limited_by === "person" ? status.access_limited_by : undefined;
+  return {
+    agent: validateAgent(status.agent, expectedState),
+    connection_ready: status.connection_ready,
+    ...(access ? { access } : {}),
+    ...(effective ? { effective_access: effective } : {}),
+    ...(limitedBy ? { access_limited_by: limitedBy } : {}),
+  };
 }

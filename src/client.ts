@@ -88,10 +88,13 @@ function refusedSession(response: { status: number }, token: string | undefined)
   return response.status === 401 && typeof token === "string" && token.startsWith("eyJ");
 }
 
-/** Read only refusals name the sign-in that grants Manage. */
+/**
+ * Read only and Propose refusals name the sign-in that grants Manage. The
+ * command layer refines this when a project or person cap set the level.
+ */
 function withAccessGuidance(problem: NormalizedProblem): NormalizedProblem {
   if (problem.code !== "insufficient_access" || problem.next) return problem;
-  return { ...problem, next: { command: "screenrig login --access manage", reason: "This sign-in is Read only for the project. A person approves Manage access in the dashboard." } };
+  return { ...problem, next: { command: "screenrig login --access manage", reason: "This sign-in's access level cannot do this. A person approves Manage access in the dashboard." } };
 }
 
 /** A renewed token that is refused again means the session ended. */

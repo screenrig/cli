@@ -112,7 +112,7 @@ import { isResourceID } from "./generated/resource-ids.js";
       verification_uri_complete: string;
       expires_at: string;
       interval: number;
-      access: "read" | "manage";
+      access: "read" | "propose" | "manage";
       project_id?: string;
       /** The login adds a project to this installation's existing grant. */
       extends_grant?: boolean;

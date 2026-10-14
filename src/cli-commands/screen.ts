@@ -1,6 +1,6 @@
 import { addValueAlias } from "./aliases.js";
 import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes.js";
-import { positiveInteger, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
+import { NOTE_HELP, positiveInteger, reviewNoteOption, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear } from "../commands.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
@@ -17,6 +17,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--no-wait", "Return after assignment without waiting for the Player to show the playlist")
     .option("--poll-ms <MS>", "Set the screen polling interval while waiting", positiveInteger("poll-ms"))
     .option("--no-progress", "Suppress stderr progress")
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleScreenPublish));
 
   screen.command("pair").description("Claim a Player pairing code")
@@ -56,6 +57,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .requiredOption("--playlist-id <ID>", "Select the playlist to assign (required)")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleScreenAssign));
 
   addCommandNotes(screen.command("set-timezone").description("Set a screen's timezone")
@@ -133,11 +135,13 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .requiredOption("--file <FILE>", "Schedule JSON {\"entries\": [...]}, or - for stdin (required)")
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleScreenScheduleSet));
   schedule.command("clear").description("Remove the playlist schedule from a screen or a fleet of screens")
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleScreenScheduleClear));
 
   const takeover = screen.command("takeover").description("Put a playlist ahead of the schedule and assignment, or clear it");
@@ -149,11 +153,13 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .addOption(new Option("--for <DURATION>", "End after this duration, such as 30m, 2h, or 3d (at most 7d)").argParser(durationOption).conflicts(["until"]))
     .option("--reason <TEXT>", "Operator note carried on the takeover and its events (at most 120 characters)", takeoverReason)
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleScreenTakeover));
   takeover.command("clear").description("End the takeover on a screen or a fleet of screens")
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleScreenTakeoverClear));
   addCommandExamples(schedule.commands.find((command) => command.name() === "show")!, "screenrig screen schedule show scr_LOBBY");
   addCommandExamples(schedule.commands.find((command) => command.name() === "set")!,

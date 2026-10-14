@@ -94,6 +94,11 @@ import {
   type WebhookPatch,
   type WebhookWithSecret,
   type WebhookWrite,
+  type AdvertisingCreativeReview,
+  type Review,
+  type ReviewDecisionResult,
+  type ReviewList,
+  type ReviewPending,
 } from "./adapters/protocol.js";
 import { SDK_PROTOCOL_VERSION } from "./adapters/sdk-injection.js";
 import { flagBool, flagNumber, flagString, type ParsedArgs } from "./command-input.js";
@@ -110,7 +115,20 @@ import {
   type ScreenRigConfig,
 } from "./config.js";
 import { attachOperationLogger, loggerOf, loggingTransport } from "./log/index.js";
-import { accessClaims, isServiceClientId, isSessionJwt, readKeyFile, SCOPE_IDENTITY, serviceCredentialsFromEnv, type AccessLevel, type ServiceClientCredentials } from "./oauth.js";
+import { accessClaims, accessFromScope, accessLabel, ACCESS_LEVELS, isServiceClientId, isSessionJwt, readKeyFile, SCOPE_IDENTITY, serviceCredentialsFromEnv, type AccessLevel, type ServiceClientCredentials } from "./oauth.js";
+import {
+  accessFields,
+  insufficientAccessGuidance,
+  PENDING_REVIEW_SENTENCE,
+  pendingReviewLines,
+  pendingReviewOf,
+  pendingReviewWarning,
+  plainText,
+  reviewDetailLines,
+  reviewListLines,
+  reviewNext,
+  reviewNoteHeaders,
+} from "./reviews.js";
 import { OAuthSession, refreshExpiryDays, type SessionRuntime } from "./oauth-session.js";
 import { DeviceLogin, type LoginOutcome } from "./login.js";
 import { ensureCredential } from "./enrollment.js";
@@ -580,6 +598,23 @@ function jsonBody(
   );
 }
 
+/** The --note of a review-class write as its request header. */
+function reviewNoteFrom(args: ParsedArgs): Record<string, string> {
+  return reviewNoteHeaders(flagString(args.flags, "note"));
+}
+
+/**
+ * A review-class write that became a review under Propose access (HTTP 202
+ * pending_review): a success, exit 0, data is the answer plus next.
+ */
+function pendingReviewResult(response: { body: unknown; headers: Record<string, string> }, pending: ReviewPending, requestId: string, extra?: Record<string, unknown>): CommandResult {
+  return {
+    envelope: jsonBody(response, requestId, { ...extra, next: reviewNext(pending.review.id) }, [pendingReviewWarning(pending.review)]),
+    exitCode: ExitCode.Success,
+    human: pendingReviewLines(pending.review).join("\n"),
+  };
+}
+
 function humanLines(title: string, fields: Array<[string, string | undefined]>): string {
   const lines = [title];
   for (const [key, value] of fields) {
@@ -699,6 +734,7 @@ function commandHandler(
         ["kv", "comment", "feedback", "support", "operations", "notes"].includes(group ?? "") ||
         (group === "app" && ["upload", "update"].includes(action ?? "")) ||
         (group === "playlist" && ["create", "update", "delete"].includes(action ?? "")) ||
+        (group === "reviews" && action === "withdraw") ||
         (group === "media" && ["update", "delete"].includes(action ?? "")) ||
         // A screenshot is an observation: every run requests a new capture.
         (group === "screen" && !["provision", "publish", "screenshot"].includes(action ?? "")) ||
@@ -731,7 +767,10 @@ function commandHandler(
       }
       await recovery?.finish();
       return contextual;
-    } catch (error) {
+    } catch (caught) {
+      const error = caught instanceof CliError && caught.problem.code === "insufficient_access" && authenticated && resolved.token
+        ? await explainedAccessRefusal(caught, runtime, args, resolved)
+        : caught;
       if (recovery?.hasPending && error instanceof CliError) {
         // Only an unknown outcome (timeout, network, 5xx) keeps a replayable key.
         // A refusal or a local validation error means a rerun must start afresh.
@@ -754,6 +793,24 @@ function commandHandler(
     }
   };
   return withServiceClient(run);
+}
+
+/**
+ * 403 insufficient_access: why this credential's level is too low decides
+ * what helps. A project or person cap is not lifted by signing in again, so
+ * ask the server which applies (GET /api/agents/self) and say so.
+ */
+async function explainedAccessRefusal(error: CliError, runtime: CliRuntime, args: ParsedArgs, resolved: ResolvedCommandConfig): Promise<CliError> {
+  if (error.problem.status !== 403) return error;
+  if (serviceCredentials.get(runtime)) {
+    const { next: _login, ...problem } = error.problem;
+    return new CliError({ ...problem, hint: "This service client's access level cannot do this. Its access is chosen when it is created (service-client create --access manage). A project that requires review for agent changes holds every service client to Propose." }, error.exitCode, error.warnings);
+  }
+  const self = await selfStatusFor(runtime, args, resolved.apiUrl, resolved.token);
+  const guidance = self ? insufficientAccessGuidance(self) : undefined;
+  if (!guidance) return error;
+  const { next: _generic, ...problem } = error.problem;
+  return new CliError({ ...problem, hint: guidance.hint, ...(guidance.next ? { next: guidance.next } : {}) }, error.exitCode, error.warnings);
 }
 
 export const handleVersion: CommandHandler = async () => {
@@ -891,8 +948,8 @@ export const handleAgentConnect = commandHandler(async (args, runtime, resolved)
 
 export const handleLogin = commandHandler(async (args, runtime, resolved) => {
   return loggerOf(runtime).withLocal({ op: "login", message: "login" }, () => {
-    const access = flagString(args.flags, "access") ?? "manage";
-    if (access !== "read" && access !== "manage") throw usageError("login --access must be read or manage.");
+    const access = (flagString(args.flags, "access") ?? "manage") as AccessLevel;
+    if (!ACCESS_LEVELS.includes(access)) throw usageError("login --access must be read, propose or manage.");
     return login(args, runtime, resolved, {
       project: flagString(args.flags, "project"),
       access,
@@ -908,7 +965,9 @@ export const handleLogout = commandHandler(logout, false);
 interface ServiceClientView {
   id: string;
   name: string;
-  access: "read" | "manage";
+  access: AccessLevel;
+  effective_access?: AccessLevel;
+  access_limited_by?: "project" | "person";
   state: "active" | "revoked";
   capabilities: string[];
   keys: Array<{ kid: string; alg: string }>;
@@ -926,7 +985,7 @@ function serviceClientLines(client: ServiceClientView): Array<[string, string | 
   return [
     ["id", client.id],
     ["name", client.name],
-    ["access", client.access === "manage" ? "Manage" : "Read only"],
+    ...accessFields(client).lines,
     ["state", client.state],
     ["capabilities", client.capabilities.join(", ")],
     ["keys", client.keys.map((key) => `${key.kid} (${key.alg})`).join(", ") || undefined],
@@ -1000,7 +1059,7 @@ export const handleServiceClientList = commandHandler(async (args, runtime, reso
   const response = await client.call({ method: "GET", path: "/api/service-clients" });
   const items = (response.body as { items?: ServiceClientView[] }).items ?? [];
   return { envelope: successEnvelope({ items }, { request_id: client.requestId }), exitCode: ExitCode.Success,
-    human: items.map((item) => `${item.id}  ${item.name}  ${item.access === "manage" ? "Manage" : "Read only"}  ${item.state}`).join("\n") || "No service clients." };
+    human: items.map((item) => `${item.id}  ${item.name}  ${accessLabel(item.access)}${item.effective_access && item.effective_access !== item.access ? ` (acts as ${accessLabel(item.effective_access)})` : ""}  ${item.state}`).join("\n") || "No service clients." };
 });
 
 export const handleServiceClientShow = commandHandler(async (args, runtime, resolved) => {
@@ -1110,23 +1169,25 @@ async function login(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCo
   const response = await client.call({ method: "GET", path: "/api/project" });
   const context = contextFromProject(response.body as Project);
   await cacheProjectContexts(runtime, signedIn, [context], { credential: token });
-  const access = outcome.scope.includes("access:manage") ? "manage" : "read";
-  const counts = await selfNoteCountsFor(runtime, args, signedIn.apiUrl, token);
+  const access = accessFromScope(outcome.scope);
+  const self = await selfStatusFor(runtime, args, signedIn.apiUrl, token);
+  // The grant's scope names the level; the server reports what caps it now.
+  const levels = accessFields({ access, effective_access: self?.effective_access, access_limited_by: self?.access_limited_by });
   return withNotesHint({
     envelope: successEnvelope({
       status: "signed_in",
       project: context.project,
       organization: context.organization,
-      access,
+      ...levels.data,
       identity: outcome.scope.includes(SCOPE_IDENTITY),
       ...(outcome.agentId ? { agent_id: outcome.agentId } : {}),
     }, { request_id: client.requestId, warnings: request.warnings }),
     exitCode: ExitCode.Success,
     human: humanLines("Signed in", [
       ["project", `${context.organization.name} / ${context.project.name} (${context.project.id})`],
-      ["access", access === "manage" ? "Manage" : "Read only"],
+      ...levels.lines,
     ]),
-  }, counts);
+  }, self ? selfNoteCounts(self) : undefined);
 }
 
 async function logout(_args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
@@ -1289,12 +1350,17 @@ function withNotesHint(result: CommandResult, counts: NoteCounts | undefined): C
   };
 }
 
-/** The calling agent's note counts in a project. Any failure means no hint. */
-async function selfNoteCountsFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token: string | undefined): Promise<NoteCounts | undefined> {
+/** The calling agent's self status (note counts, access levels). Any failure means none. */
+async function selfStatusFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token: string | undefined): Promise<Record<string, unknown> & { access?: AccessLevel; effective_access?: AccessLevel; access_limited_by?: "project" | "person" } | undefined> {
   if (!token) return undefined;
   try {
     const response = await clientFor(runtime, args, apiUrl, token).call({ method: "GET", path: AGENT_SELF_PATH });
-    return selfNoteCounts(response.body);
+    const body = response.body;
+    if (!body || typeof body !== "object" || Array.isArray(body)) return undefined;
+    const level = (value: unknown) => ACCESS_LEVELS.includes(value as AccessLevel) ? value as AccessLevel : undefined;
+    const record = body as Record<string, unknown>;
+    const limitedBy = record.access_limited_by === "project" || record.access_limited_by === "person" ? record.access_limited_by : undefined;
+    return { ...record, access: level(record.access), effective_access: level(record.effective_access), access_limited_by: limitedBy };
   } catch {
     return undefined;
   }
@@ -1328,14 +1394,16 @@ async function agentStatus(
     const agent = self.agent;
     const status = agent.state === "active" ? "active" : agent.state === "revoked" ? "disconnected" : "connecting";
     const notes = selfNotesField(response.body);
+    const levels = accessFields(self);
     return withNotesHint({
-      envelope: successEnvelope({ status, connection_ready: self.connection_ready, agent: safeAgentSummary(agent), ...(notes ? { notes } : {}) }, { request_id: client.requestId }),
+      envelope: successEnvelope({ status, connection_ready: self.connection_ready, ...levels.data, agent: safeAgentSummary(agent), ...(notes ? { notes } : {}) }, { request_id: client.requestId }),
       exitCode: ExitCode.Success,
       human: humanLines("Agent", [
         ["status", status],
         ["id", agent.id],
         ["name", agent.name],
         ["agent_type", agent.agent_type],
+        ...levels.lines,
         ["capabilities", agent.capabilities.join(", ")],
         ["platform", agent.platform],
         ["version", agent.version],
@@ -2511,7 +2579,19 @@ export const handleAdsCreativesCreate = commandHandler(async (args, runtime, res
 export const handleAdsCreativesShow = commandHandler(async (args, runtime, resolved) => {
   const id = args.positionals[3];
   if (!id) throw usageError("ads creatives show requires <creative-id>.");
-  return simpleGet(args, runtime, resolved, `/api/advertising/creatives/${encodeURIComponent(id)}`, "Creative");
+  const result = await simpleGet(args, runtime, resolved, `/api/advertising/creatives/${encodeURIComponent(id)}`, "Creative");
+  // Each seller's review of this creative, with the reason a seller gave for
+  // a rejection or the changes it asked for.
+  const reviews = (result.envelope.data as { reviews?: AdvertisingCreativeReview[] } | undefined)?.reviews;
+  if (!Array.isArray(reviews) || reviews.length === 0) return result;
+  const lines = reviews.map((review) => [
+    `review ${review.id} ${review.state}`,
+    `seller ${review.seller_project_id}`,
+    `revision ${review.creative_revision}`,
+    ...(review.campaign_id ? [`campaign ${review.campaign_id}`] : []),
+  ].join(" ") + (review.reason ? `: ${plainText(review.reason)}` : ""));
+  const [title, ...rest] = (result.human ?? "").split("\n");
+  return { ...result, human: [title, ...lines, ...rest].join("\n") };
 });
 
 export const handleAdsCampaignsList = commandHandler((args, runtime, resolved) =>
@@ -2639,6 +2719,19 @@ export const handleAdsReviewsApprove = commandHandler(async (args, runtime, reso
   });
 });
 
+export const handleAdsReviewsRequestChanges = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("ads reviews request-changes requires <review-id>.");
+  const note = flagString(args.flags, "note");
+  if (!note) throw usageError("ads reviews request-changes requires --note TEXT naming the changes.");
+  return adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: `/api/advertising/reviews/${encodeURIComponent(id)}/request-changes`,
+    body: { note },
+    human: `Asked the buyer for changes on review ${id}; the buyer reads the note on the creative and resubmits.`,
+  });
+});
+
 export const handleAdsReviewsReject = commandHandler(async (args, runtime, resolved) => {
   const id = args.positionals[3];
   if (!id) throw usageError("ads reviews reject requires <review-id>.");
@@ -2648,6 +2741,53 @@ export const handleAdsReviewsReject = commandHandler(async (args, runtime, resol
     body: { reason: flagString(args.flags, "reason") },
     human: `Rejected review ${id}; the buyer sees the supplied reason.`,
   });
+});
+
+// Reviews of proposed changes: /api/reviews. Agents read them and withdraw
+// their own proposals; only a person approves, rejects or asks for changes.
+const REVIEW_LIST_MAX = 100;
+
+export const handleReviewsList = commandHandler(async (args, runtime, resolved) => {
+  const limit = flagString(args.flags, "limit");
+  if (limit !== undefined && Number(limit) > REVIEW_LIST_MAX) throw usageError(`--limit must be at most ${REVIEW_LIST_MAX}.`);
+  const state = flagString(args.flags, "state");
+  const kind = flagString(args.flags, "kind");
+  const cursor = flagString(args.flags, "cursor");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: "/api/reviews", query: { state, kind, limit, cursor } });
+  const page = (response.body ?? {}) as ReviewList;
+  const next = typeof page.next_cursor === "string" && page.next_cursor ? page.next_cursor : undefined;
+  const nextArgv = next ? ["reviews", "list", ...(state ? ["--state", state] : []), ...(kind ? ["--kind", kind] : []), ...(limit ? ["--limit", limit] : []), "--cursor", next] : undefined;
+  return {
+    envelope: jsonBody(response, client.requestId, nextArgv ? { next: { command: `screenrig ${nextArgv.join(" ")}`, argv: nextArgv, reason: "Read the next page of reviews." } } : undefined),
+    exitCode: ExitCode.Success,
+    human: [...reviewListLines(page), ...(nextArgv ? [`next: screenrig ${nextArgv.join(" ")}`] : [])].join("\n"),
+  };
+});
+
+export const handleReviewsShow = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[2];
+  if (!id) throw usageError("reviews show requires <review-id>.");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: `/api/reviews/${encodeURIComponent(id)}` });
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: reviewDetailLines(response.body as Review).join("\n"),
+  };
+});
+
+export const handleReviewsWithdraw = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[2];
+  if (!id) throw usageError("reviews withdraw requires <review-id>.");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "POST", path: `/api/reviews/${encodeURIComponent(id)}/withdraw`, idempotent: true });
+  const result = response.body as ReviewDecisionResult | undefined;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Withdrew review ${id}; nothing it proposed reaches the screens.`, ...(result?.review ? reviewDetailLines(result.review).slice(1) : [])].join("\n"),
+  };
 });
 
 /**
@@ -4442,19 +4582,28 @@ export const handlePlaylistImport = commandHandler(async (args, runtime, resolve
     name,
     timeoutMs: flagNumber(args.flags, "timeout"),
     pollMs: flagNumber(args.flags, "poll-ms"),
+    note: flagString(args.flags, "note"),
     beforePlaylistWrite: async (playlist, targetId) => {
       if (targetId) await assertAssignedScreensHaveZone(client, targetId, playlist.pages);
     },
   });
+  const media: Array<[string, string]> = [
+    ["source_playlist_id", result.source_playlist_id],
+    ["directory", result.directory],
+    ["media_reused", String(result.media.reused)],
+    ["media_uploaded", String(result.media.uploaded)],
+  ];
+  if (result.review) {
+    return {
+      envelope: successEnvelope({ ...result, next: reviewNext(result.review.id) }, { request_id: client.requestId, warnings: [pendingReviewWarning(result.review)] }),
+      exitCode: ExitCode.Success,
+      human: [...pendingReviewLines(result.review), ...media.map(([key, value]) => `${key}: ${value}`)].join("\n"),
+    };
+  }
   return {
     envelope: successEnvelope(result, { request_id: client.requestId }),
     exitCode: ExitCode.Success,
-    human: humanLines(`Playlist ${result.mode === "create" ? "imported" : "updated from bundle"}`, [
-      ["source_playlist_id", result.source_playlist_id],
-      ["directory", result.directory],
-      ["media_reused", String(result.media.reused)],
-      ["media_uploaded", String(result.media.uploaded)],
-    ]),
+    human: humanLines(`Playlist ${result.mode === "create" ? "imported" : "updated from bundle"}`, media),
   };
 }, true);
 
@@ -4496,14 +4645,17 @@ async function playlistCreateUpdateAction(args: ParsedArgs, runtime: CliRuntime,
   if (action === "update" && id) {
     await assertAssignedScreensHaveZone(client, id, pages);
   }
+  const note = reviewNoteFrom(args);
   const response = action === "create"
-    ? await client.call({ method: "POST", path: "/api/playlists", idempotent: true, body })
+    ? await client.call({ method: "POST", path: "/api/playlists", idempotent: true, body, headers: note })
     : await callPlaylist(client, {
       method: "PUT",
       id: id!,
       body,
-      ...(ifMatch ? { headers: { "if-match": quotedRevision(ifMatch) } } : {}),
+      headers: { ...note, ...(ifMatch ? { "if-match": quotedRevision(ifMatch) } : {}) },
     });
+  const pending = pendingReviewOf(response);
+  if (pending) return pendingReviewResult(response, pending, client.requestId);
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Playlist ${action}d.` };
 
 }
@@ -4522,8 +4674,15 @@ export const handlePlaylistReplaceRelease = commandHandler(async (args, runtime,
     playlistId: args.positionals[2]!, pageId: flagString(args.flags, "page")!,
     primitiveId: flagString(args.flags, "primitive")!, releaseId: flagString(args.flags, "release-id")!,
     apply: flagBool(args.flags, "apply"), revision: flagString(args.flags, "if-match"),
-    impact: flagString(args.flags, "expect-impact"),
+    impact: flagString(args.flags, "expect-impact"), note: flagString(args.flags, "note"),
   });
+  if ("review" in result && result.review) {
+    return {
+      envelope: successEnvelope({ ...result, next: reviewNext(result.review.id) }, { request_id: client.requestId, warnings: [pendingReviewWarning(result.review)] }),
+      exitCode: ExitCode.Success,
+      human: pendingReviewLines(result.review).join("\n"),
+    };
+  }
   return { envelope: successEnvelope(result, { request_id: client.requestId }), exitCode: ExitCode.Success, human: JSON.stringify(result, null, 2) };
 }, true);
 
@@ -5068,6 +5227,9 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
     ...(timezone ? { timezone } : {}),
   };
   const response = await client.call({ method: "PATCH", path: `/api/screens/${id}`, idempotent: true, headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined, body });
+  // A playlist-only change under Propose access waits for review.
+  const pending = pendingReviewOf(response);
+  if (pending) return pendingReviewResult(response, pending, client.requestId);
   const warnings = playlistId ? aspectMismatchWarnings(id, response.body, playlist) : [];
   return {
     envelope: jsonBody(response, client.requestId, undefined, warnings),
@@ -5088,7 +5250,7 @@ export const handleScreenAssign = commandHandler(async (args, runtime, resolved)
     rejectFleetRevision(args, "screen assign");
     // Each screen runs the single-screen PATCH on the server, including its
     // timezone rule for scheduled playlists; a refusal is that screen's result.
-    return screenFleetAction(client, runtime, "Fleet assign", target.selector, { type: "assign", playlist_id: playlistId });
+    return screenFleetAction(client, runtime, "Fleet assign", target.selector, { type: "assign", playlist_id: playlistId }, undefined, reviewNoteFrom(args));
   }
   const id = target.id;
   const playlist = await assertScheduledPlaylistHasZone(client, id, playlistId);
@@ -5097,9 +5259,11 @@ export const handleScreenAssign = commandHandler(async (args, runtime, resolved)
     method: "PATCH",
     path: `/api/screens/${id}`,
     idempotent: true,
-    headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
+    headers: { ...reviewNoteFrom(args), ...(ifMatch ? { "if-match": quotedRevision(ifMatch) } : {}) },
     body,
   });
+  const pending = pendingReviewOf(response);
+  if (pending) return pendingReviewResult(response, pending, client.requestId);
   const warnings = aspectMismatchWarnings(id, response.body, playlist);
   return {
     envelope: jsonBody(response, client.requestId, undefined, warnings),
@@ -5320,7 +5484,7 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
  * including a partial failure, completes the write, so a later rerun is a new
  * request.
  */
-async function screenFleetAction(client: ApiClient, runtime: CliRuntime, title: string, selector: ScreenActionSelector, action: ScreenAction, recoverySupersede?: string): Promise<CommandResult> {
+async function screenFleetAction(client: ApiClient, runtime: CliRuntime, title: string, selector: ScreenActionSelector, action: ScreenAction, recoverySupersede?: string, headers?: Record<string, string>): Promise<CommandResult> {
   const body: ScreenActionRequest = { selector, action };
   let response;
   let after: string | undefined;
@@ -5330,7 +5494,7 @@ async function screenFleetAction(client: ApiClient, runtime: CliRuntime, title: 
     try {
       response = await client.call({ method: "POST", path: "/api/screens/actions", idempotent: true, body,
         ...(after === undefined ? {} : { query: { after } }), recoveryQuery: {}, retainRecoveryOnRefusal: true,
-        ...(recoverySupersede ? { recoverySupersede } : {}) });
+        ...(recoverySupersede ? { recoverySupersede } : {}), ...(headers && Object.keys(headers).length ? { headers } : {}) });
     } catch (error) {
       if (error instanceof CliError && error.problem.status === 429 && error.problem.retry_after_seconds) {
         await runtime.sleep(error.problem.retry_after_seconds * 1000);
@@ -5344,6 +5508,13 @@ async function screenFleetAction(client: ApiClient, runtime: CliRuntime, title: 
         }, error.exitCode, error.warnings);
       }
       throw error;
+    }
+    // Under Propose access the whole fleet change is one review; a 202 is
+    // otherwise a continuation page.
+    const pending = pendingReviewOf(response);
+    if (pending) {
+      if (after !== undefined) throw unexpectedResponseError("A fleet continuation answered pending_review after screens already changed; rerun the identical command to resume safely.");
+      return { ...pendingReviewResult(response, pending, client.requestId), keepRecoveryUntilOutput: true };
     }
     const page = screenActionResult(response.body, action.type);
     if ((page.offset ?? 0) !== result.matched || (total !== undefined && page.total !== total)) {
@@ -7082,8 +7253,26 @@ export const handleScreenPublish = commandHandler(async (args, runtime, resolved
   const progress = flagBool(args.flags, "no-progress") ? undefined : (stage: string, state?: string) =>
     runtime.stderr.write(json ? `${JSON.stringify({ event: "publish_stage", stage, ...(state ? { state } : {}) })}\n` : `screenrig: ${stage}${state ? ` (${state})` : ""}\n`);
   const result = await publishScreen({ client, runtime, configPath: resolved.configPath, apiUrl: resolved.apiUrl, screenId: args.positionals[2]!, revision: flagString(args.flags, "if-match")!, document, requestedKey: flagString(args.flags, "idempotency-key"),
+    note: flagString(args.flags, "note"),
     wait: flagBool(args.flags, "no-wait") ? undefined : { timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000, pollMs: flagNumber(args.flags, "poll-ms") ?? 2000 },
     progress });
+  if (result.stage === "pending_review") {
+    // The playlist review decides the content (approving it can approve the
+    // assignment too), so it is the one to check first.
+    const first = result.reviews.find((review) => review.kind === "playlist_change") ?? result.reviews[0]!;
+    return {
+      envelope: successEnvelope({ ...result, next: reviewNext(first.id) }, { request_id: client.requestId, warnings: result.reviews.map(pendingReviewWarning) }),
+      exitCode: ExitCode.Success,
+      human: [
+        "Publish waiting for review",
+        `playlist_id: ${result.playlist_id}`,
+        `screen_id: ${result.screen_id}`,
+        ...result.reviews.map((review) => `review: ${review.id} ${review.kind} ${review.state} ${review.url}`),
+        `next: screenrig reviews show ${first.id}`,
+        PENDING_REVIEW_SENTENCE,
+      ].join("\n"),
+    };
+  }
   const warning = publishPlaybackWarning(result);
   return {
     envelope: successEnvelope(result, { request_id: client.requestId, warnings: warning ? [warning] : [] }),
@@ -7099,7 +7288,7 @@ export const handleScreenPublish = commandHandler(async (args, runtime, resolved
 });
 
 /** Why a publish is not visibly playing yet, and what to do about it. */
-function publishPlaybackWarning(result: Awaited<ReturnType<typeof publishScreen>>): Warning | undefined {
+function publishPlaybackWarning(result: Extract<Awaited<ReturnType<typeof publishScreen>>, { playback: unknown }>): Warning | undefined {
   const { playback, screen_id: screen } = result;
   const rerun = "Rerun the identical publish command to wait again; it does not create another playlist.";
   switch (playback.reason) {
@@ -7453,6 +7642,11 @@ async function screenControlCall(client: ApiClient, id: string, request: Paramet
   }
 }
 
+/** The review note and revision guard of a single-screen control write. */
+function screenControlHeaders(args: ParsedArgs, revision: string | undefined): Record<string, string> {
+  return { ...reviewNoteFrom(args), ...(revision ? { "if-match": quotedRevision(revision) } : {}) };
+}
+
 function screenControlHuman(title: string, screen: Screen | undefined): string {
   return [
     title,
@@ -7502,15 +7696,17 @@ export const handleScreenScheduleSet = commandHandler(async (args, runtime, reso
   if (target.kind === "fleet") {
     // Entries are normalized once on the server so every screen stores the
     // same ids; a screen without a timezone fails alone with invalid_request.
-    return screenFleetAction(client, runtime, "Fleet schedule set", target.selector, { type: "set_playlist_schedule", entries });
+    return screenFleetAction(client, runtime, "Fleet schedule set", target.selector, { type: "set_playlist_schedule", entries }, undefined, reviewNoteFrom(args));
   }
   const id = target.id;
   const body: ScreenPlaylistScheduleWrite = { entries };
   const revision = flagString(args.flags, "if-match");
   const response = await screenControlCall(client, id, {
     method: "PUT", path: `/api/screens/${encodeURIComponent(id)}/playlist-schedule`, idempotent: true, body,
-    ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+    headers: screenControlHeaders(args, revision),
   });
+  const pending = pendingReviewOf(response);
+  if (pending) return pendingReviewResult(response, pending, client.requestId);
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
@@ -7523,14 +7719,16 @@ export const handleScreenScheduleClear = commandHandler(async (args, runtime, re
   if (target.kind === "fleet") rejectFleetRevision(args, "screen schedule clear");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") {
-    return screenFleetAction(client, runtime, "Fleet schedule clear", target.selector, { type: "clear_playlist_schedule" });
+    return screenFleetAction(client, runtime, "Fleet schedule clear", target.selector, { type: "clear_playlist_schedule" }, undefined, reviewNoteFrom(args));
   }
   const id = target.id;
   const revision = flagString(args.flags, "if-match");
   const response = await screenControlCall(client, id, {
     method: "DELETE", path: `/api/screens/${encodeURIComponent(id)}/playlist-schedule`, idempotent: true,
-    ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+    headers: screenControlHeaders(args, revision),
   });
+  const pending = pendingReviewOf(response);
+  if (pending) return pendingReviewResult(response, pending, client.requestId);
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
@@ -7558,7 +7756,7 @@ export const handleScreenTakeover = commandHandler(async (args, runtime, resolve
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") {
     try {
-      return await screenFleetAction(client, runtime, "Fleet takeover", target.selector, { type: "takeover", ...write }, supersede);
+      return await screenFleetAction(client, runtime, "Fleet takeover", target.selector, { type: "takeover", ...write }, supersede, reviewNoteFrom(args));
     } catch (error) {
       throw forValue !== undefined ? takeoverForProblem(error) : error;
     }
@@ -7569,12 +7767,14 @@ export const handleScreenTakeover = commandHandler(async (args, runtime, resolve
   try {
     response = await screenControlCall(client, id, {
       method: "POST", path: `/api/screens/${encodeURIComponent(id)}/takeover`, idempotent: true, body: write,
-      ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+      headers: screenControlHeaders(args, revision),
       ...(supersede ? { recoverySupersede: supersede } : {}),
     });
   } catch (error) {
     throw forValue !== undefined ? takeoverForProblem(error) : error;
   }
+  const pending = pendingReviewOf(response);
+  if (pending) return pendingReviewResult(response, pending, client.requestId);
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
@@ -7587,14 +7787,16 @@ export const handleScreenTakeoverClear = commandHandler(async (args, runtime, re
   if (target.kind === "fleet") rejectFleetRevision(args, "screen takeover clear");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (target.kind === "fleet") {
-    return screenFleetAction(client, runtime, "Fleet takeover clear", target.selector, { type: "takeover_clear" });
+    return screenFleetAction(client, runtime, "Fleet takeover clear", target.selector, { type: "takeover_clear" }, undefined, reviewNoteFrom(args));
   }
   const id = target.id;
   const revision = flagString(args.flags, "if-match");
   const response = await screenControlCall(client, id, {
     method: "DELETE", path: `/api/screens/${encodeURIComponent(id)}/takeover`, idempotent: true,
-    ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+    headers: screenControlHeaders(args, revision),
   });
+  const pending = pendingReviewOf(response);
+  if (pending) return pendingReviewResult(response, pending, client.requestId);
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,

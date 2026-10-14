@@ -27,6 +27,7 @@ import {
   handleAdsReviewsApprove,
   handleAdsReviewsList,
   handleAdsReviewsReject,
+  handleAdsReviewsRequestChanges,
   handleAdsReviewsShow,
   handleAdsSlotsCreate,
   handleAdsSlotsList,
@@ -34,7 +35,7 @@ import {
 } from "../commands.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
-import { positiveInteger, revision } from "./options.js";
+import { decisionNoteOption, positiveInteger, revision } from "./options.js";
 
 /**
  * Advertising commands. Buyer operations act through invited memberships;
@@ -135,9 +136,10 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     .requiredOption("--media-id <ID>", "Ready media identifier owned by this project")
     .requiredOption("--copy <TEXT>", "Approved copy shown with the creative")
     .action(bind(handleAdsCreativesCreate));
-  creatives.command("show").description("Inspect one creative and its review state")
+  const creativeShow = creatives.command("show").description("Inspect one creative and its review state")
     .argument("<creative-id>", "Creative identifier")
     .action(bind(handleAdsCreativesShow));
+  addCommandNotes(creativeShow, "reviews lists each seller network's decision on a revision of this creative (pending, approved, rejected or changes_requested) with the seller's reason for a rejection or a change request. Human output prints one line per review.");
   addCommandNotes(creativeCreate, "Binding a creative neither charges nor uploads the media again. An approved creative never changes pixels in place: edit the source media and bind a new creative version.");
 
   const campaigns = ads.command("campaigns").description("Draft, price, activate, and operate buyer campaigns");
@@ -197,9 +199,14 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     .argument("<review-id>", "Review identifier")
     .requiredOption("--reason <TEXT>", "Reason shown to the buyer")
     .action(bind(handleAdsReviewsReject));
-  for (const command of [reviewApprove, reviewReject]) {
+  const reviewRequestChanges = reviews.command("request-changes").description("Ask the buyer for changes to one exact creative version")
+    .argument("<review-id>", "Review identifier")
+    .requiredOption("--note <TEXT>", "The changes the buyer should make, at most 500 characters (required)", decisionNoteOption)
+    .action(bind(handleAdsReviewsRequestChanges));
+  for (const command of [reviewApprove, reviewReject, reviewRequestChanges]) {
     addCommandNotes(command, "Approval covers the exact submitted version only. It does not choose the buyer's budget or grant access to its media library; editing the pixels requires a new version and a new decision.");
   }
+  addCommandNotes(reviewRequestChanges, "The review becomes changes_requested with the note in reason. The buyer reads it on the creative (ads creatives show), and the campaign's next submission to this network opens a new review that links previous_review_id. Deciding needs Manage, and a person deciding in the dashboard needs to be an approver.");
 
   const reports = ads.command("reports").description("Read delivery and spend for this project");
   const reportSpend = reports.command("spend").description("Read buyer ad spend for one campaign")

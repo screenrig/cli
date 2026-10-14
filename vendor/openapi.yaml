@@ -12,11 +12,19 @@ info:
     remains bound to its project; a supplied target must match it.
 
     Every bearer operation names its access class in x-screenrig-access: read
-    (GET, HEAD, and POSTs that only compute), write (anything that changes
-    state, signs, publishes, commands a screen or writes K/V) or costly (an
-    explicit command that spends or reserves credit beyond request metering).
-    A Read only credential passes read operations only and is refused 403
-    insufficient_access on the others; Manage passes all three. On read
+    (GET, HEAD, and POSTs that only compute), contribute (media upload and
+    edit, notes, comments, support, feedback, screenshot capture, ad drafts
+    and quotes, review withdraw), review (playlist create and update, screen
+    assign, playlist schedules and takeovers), write (anything else that
+    changes state, signs, publishes, commands a screen or writes K/V) or
+    costly (an explicit command that spends or reserves credit beyond request
+    metering). A Read only credential passes read operations only. A Propose
+    credential passes read and contribute, and a review operation answers 202
+    pending_review with a review instead of applying (docs/reviews.md). Manage
+    passes all five. The others are refused 403 insufficient_access. The
+    level that counts is the effective access: the credential's level, held
+    to Propose while the project requires review for agent changes or while
+    the agent's responsible person cannot approve. On read
     operations a Read only credential receives each credential-bearing string,
     such as a webhook receiver URL, empty, with a sibling <name>_redacted: true
     (url_redacted), so the response keeps its types.
@@ -2313,7 +2321,7 @@ paths:
     post:
       operationId: oauthDeviceAuthorization
       description: >-
-        RFC 8628 §3.1 device authorization for `screenrig login`. scope is access:manage (the default) or access:read; project_id suggests the
+        RFC 8628 §3.1 device authorization for `screenrig login`. scope is access:manage (the default), access:propose or access:read; project_id suggests the
         project the person approves; name, agent_type, platform and version describe the installation and are shown to the approver as reported by
         the device. Without Authorization it starts a new installation. With Authorization: Bearer and an agent access token carrying identity scope
         it asks to add a project to that installation's grant, or to raise a Read only project to Manage. The person enters user_code at
@@ -2331,7 +2339,7 @@ paths:
               required: [client_id]
               properties:
                 client_id: { type: string }
-                scope: { type: string, enum: ["access:manage", "access:read"] }
+                scope: { type: string, enum: ["access:manage", "access:propose", "access:read"] }
                 project_id: { type: string, maxLength: 200 }
                 name: { type: string, maxLength: 80 }
                 agent_type: { type: string, maxLength: 32 }
@@ -2367,9 +2375,9 @@ paths:
         fetched with no redirects, 64 KiB and 5 seconds at most, public addresses only) or a registered client id. The request is validated in order:
         the client, the exact redirect_uri (an http loopback redirect of 127.0.0.1, [::1] or localhost matches on any port), response_type code,
         code_challenge with code_challenge_method S256, resource (https://api.<domain>/mcp, or absent), then scope (access:read, the default,
-        access:manage and capability names). An unknown client or redirect_uri answers an HTML error page and never redirects; any later error
+        access:propose, access:manage and capability names). An unknown client or redirect_uri answers an HTML error page and never redirects; any later error
         redirects to the redirect_uri with error, error_description, state and iss (RFC 9207). Success answers 303 to the dashboard consent page,
-        where a person chooses the project, the access level (Read only by default) and the capabilities; approval redirects with code, state
+        where a person chooses the project, the access level (Read only by default, Propose or Manage) and the capabilities; approval redirects with code, state
         and iss. 30 requests per client address per minute.
       security: []
       parameters:
@@ -3150,7 +3158,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: review
       operationId: createPlaylistV2
       description: Authoring entry for the adslot page union. At most 16 adslot pages, at least one ordinary page with no visibility,
         and the reuse of one slot definition on different pages remain server checks. Reference resolution and DNS stay server
@@ -3158,6 +3166,7 @@ paths:
       security:
       - projectBearer: []
       parameters:
+      - $ref: '#/components/parameters/ReviewNote'
       - $ref: '#/components/parameters/OptionalIdempotencyKey'
       requestBody:
         required: true
@@ -3166,6 +3175,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PlaylistWriteV2'
       responses:
+        '202':
+          $ref: '#/components/responses/PendingReview'
         '201':
           description: Playlist with its adslot pages.
           content:
@@ -3198,12 +3209,13 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     put:
-      x-screenrig-access: write
+      x-screenrig-access: review
       operationId: updatePlaylistV2
       description: Versioned update accepting the adslot page union. If-Match carries the playlist revision.
       security:
       - projectBearer: []
       parameters:
+      - $ref: '#/components/parameters/ReviewNote'
       - $ref: '#/components/parameters/ResourceID'
       - $ref: '#/components/parameters/IfMatch'
       - $ref: '#/components/parameters/OptionalIdempotencyKey'
@@ -3214,6 +3226,8 @@ paths:
             schema:
               $ref: '#/components/schemas/PlaylistWriteV2'
       responses:
+        '202':
+          $ref: '#/components/responses/PendingReview'
         '200':
           description: Updated playlist.
           content:
@@ -3267,7 +3281,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     put:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: putScreenComments
       description: Replaces opaque agent comments on the named screen. The comments value must be a JSON object whose compact
         UTF-8 form is at most 1024 bytes. Last-write-wins on the comments field only; revision, updated_at, and the runtime
@@ -3292,7 +3306,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     delete:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: deleteScreenComments
       description: Unsets screen comments. Idempotent if already unset. Does not bump revision or remint the runtime manifest.
       security:
@@ -3325,7 +3339,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     put:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: putPlaylistComments
       description: Replaces opaque agent comments on the named playlist. Compact UTF-8 JSON of the comments object must be at
         most 1024 bytes. Last-write-wins on the comments field only; revision and the runtime manifest are unchanged.
@@ -3349,7 +3363,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     delete:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: deletePlaylistComments
       description: Unsets playlist comments. Idempotent if already unset. Does not bump revision or remint the runtime manifest.
       security:
@@ -3383,7 +3397,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     put:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: putPlaylistPageComments
       description: Replaces opaque agent comments on one playlist page. Compact UTF-8 JSON of the comments object must be at
         most 1024 bytes. Last-write-wins on that page's comments field only; playlist revision and the runtime manifest are
@@ -3408,7 +3422,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     delete:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: deletePlaylistPageComments
       description: Unsets comments on one playlist page. Idempotent if already unset. Does not bump revision or remint the runtime
         manifest.
@@ -3651,7 +3665,7 @@ paths:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: review
       operationId: applyScreenActions
       x-rate-limit-policies:
       - name: screen-actions-project
@@ -3690,6 +3704,7 @@ paths:
       security:
       - projectBearer: []
       parameters:
+      - $ref: '#/components/parameters/ReviewNote'
       - $ref: '#/components/parameters/OptionalIdempotencyKey'
       - name: after
         in: query
@@ -3723,7 +3738,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/ScreenActionResult'
         '202':
-          description: More screens remain. Continue with next_cursor and the same Idempotency-Key and body, honoring Retry-After.
+          description: More screens remain (continue with next_cursor and the same Idempotency-Key and body, honoring Retry-After),
+            or, with status pending_review, the action became a review under Propose access (docs/reviews.md). Only assign,
+            takeover, takeover_clear, set_playlist_schedule and clear_playlist_schedule become reviews; every other action is
+            insufficient_access for Propose.
           headers:
             Idempotency-Key:
               description: Retain this key for every continuation and exact retry.
@@ -3739,7 +3757,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ScreenActionResult'
+                oneOf:
+                - $ref: '#/components/schemas/ScreenActionResult'
+                - $ref: '#/components/schemas/ReviewPending'
         '400':
           $ref: '#/components/responses/Problem'
         '401':
@@ -3775,11 +3795,15 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     patch:
-      x-screenrig-access: write
+      x-screenrig-access: review
       operationId: updateScreen
+      description: Updates the screen's name, playlist_id, timezone or tags. Under Propose access a patch of playlist_id alone
+        becomes a review (202 pending_review); any other field is insufficient_access. A playlist with no approved version is
+        playlist_not_approved.
       security:
       - projectBearer: []
       parameters:
+      - $ref: '#/components/parameters/ReviewNote'
       - $ref: '#/components/parameters/IfMatch'
       - $ref: '#/components/parameters/OptionalIdempotencyKey'
       requestBody:
@@ -3789,6 +3813,8 @@ paths:
             schema:
               $ref: '#/components/schemas/ScreenPatch'
       responses:
+        '202':
+          $ref: '#/components/responses/PendingReview'
         '200':
           description: Screen
           content:
@@ -4081,7 +4107,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     put:
-      x-screenrig-access: write
+      x-screenrig-access: review
       operationId: setScreenPlaylistSchedule
       x-rate-limit-policies:
       - name: screen-control-project
@@ -4114,6 +4140,7 @@ paths:
       security:
       - projectBearer: []
       parameters:
+      - $ref: '#/components/parameters/ReviewNote'
       - $ref: '#/components/parameters/IfMatch'
       - $ref: '#/components/parameters/OptionalIdempotencyKey'
       requestBody:
@@ -4123,6 +4150,17 @@ paths:
             schema:
               $ref: '#/components/schemas/ScreenPlaylistScheduleWrite'
       responses:
+        '202':
+          description: The write became a review under Propose access and is not live (docs/reviews.md). An Idempotency-Key replay answers the same body.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewPending'
         '200':
           description: Screen with the stored schedule and its effective_playlist. The ETag is the new revision.
           headers:
@@ -4152,7 +4190,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     delete:
-      x-screenrig-access: write
+      x-screenrig-access: review
       operationId: clearScreenPlaylistSchedule
       x-rate-limit-policies:
       - name: screen-control-project
@@ -4172,9 +4210,21 @@ paths:
       security:
       - projectBearer: []
       parameters:
+      - $ref: '#/components/parameters/ReviewNote'
       - $ref: '#/components/parameters/IfMatch'
       - $ref: '#/components/parameters/OptionalIdempotencyKey'
       responses:
+        '202':
+          description: The write became a review under Propose access and is not live (docs/reviews.md). An Idempotency-Key replay answers the same body.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewPending'
         '200':
           description: Screen without a playlist schedule.
           headers:
@@ -4206,7 +4256,7 @@ paths:
     - $ref: '#/components/parameters/ProjectTarget'
     - $ref: '#/components/parameters/ResourceID'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: review
       operationId: setScreenTakeover
       x-rate-limit-policies:
       - name: screen-control-project
@@ -4234,6 +4284,7 @@ paths:
       security:
       - projectBearer: []
       parameters:
+      - $ref: '#/components/parameters/ReviewNote'
       - $ref: '#/components/parameters/IfMatch'
       - $ref: '#/components/parameters/OptionalIdempotencyKey'
       requestBody:
@@ -4243,6 +4294,17 @@ paths:
             schema:
               $ref: '#/components/schemas/ScreenTakeoverWrite'
       responses:
+        '202':
+          description: The write became a review under Propose access and is not live (docs/reviews.md). An Idempotency-Key replay answers the same body.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewPending'
         '200':
           description: Screen with the takeover and its effective_playlist. The ETag is the new revision.
           headers:
@@ -4272,7 +4334,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     delete:
-      x-screenrig-access: write
+      x-screenrig-access: review
       operationId: clearScreenTakeover
       x-rate-limit-policies:
       - name: screen-control-project
@@ -4293,9 +4355,21 @@ paths:
       security:
       - projectBearer: []
       parameters:
+      - $ref: '#/components/parameters/ReviewNote'
       - $ref: '#/components/parameters/IfMatch'
       - $ref: '#/components/parameters/OptionalIdempotencyKey'
       responses:
+        '202':
+          description: The write became a review under Propose access and is not live (docs/reviews.md). An Idempotency-Key replay answers the same body.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewPending'
         '200':
           description: Screen without a takeover.
           headers:
@@ -4804,7 +4878,7 @@ paths:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: requestScreenScreenshot
       x-rate-limit-policies:
       - name: screenshot-screen
@@ -5644,7 +5718,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: createAdvertisingCreative
       description: Binds one ready owned media revision to an immutable creative. Does not copy bytes, re-upload, or re-charge
         generation. Unknown or non-ready media is rejected.
@@ -5713,7 +5787,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: createAdvertisingCampaign
       description: Creates a draft campaign. Drafts hold no money, reserve nothing, and authorize no delivery. Activation requires
         an explicitly accepted quote.
@@ -5759,7 +5833,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: updateAdvertisingCampaign
       description: Updates a draft campaign. If-Match carries the campaign revision. A budget reduction below already spent
         plus committed reservations is rejected with the minimum permitted value.
@@ -5797,7 +5871,7 @@ paths:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: quoteAdvertisingCampaign
       description: Prices the campaign's current effective rates, formats, durations, flight and caps before activation. The
         quote is time-bounded and becomes stale when any pricing generation or effective rate changes.
@@ -5991,7 +6065,8 @@ paths:
       x-screenrig-access: write
       operationId: approveAdvertisingReview
       description: Approves one exact submitted creative revision. Approval does not choose the buyer's budget or grant access
-        to its media library.
+        to its media library. A person must be able to approve reviews (approver_required). The same review is also reachable
+        as kind ad_creative under /api/reviews.
       security:
       - projectBearer: []
       - dashboardSession: []
@@ -6015,6 +6090,8 @@ paths:
     post:
       x-screenrig-access: write
       operationId: rejectAdvertisingReview
+      description: Rejects one exact submitted creative revision with a reason the buyer reads on the creative. A person must be
+        able to approve reviews (approver_required).
       security:
       - projectBearer: []
       - dashboardSession: []
@@ -6716,7 +6793,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: createMediaFolder
       description: Creates one media folder at the library root (parent_id null or absent) or inside parent_id. Names are trimmed,
         hold 1 to 100 Unicode characters with no controls, are not "." or "..", and may repeat. A project holds at most 1000
@@ -6774,7 +6851,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     patch:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: updateMediaFolder
       description: Renames a folder (name) or moves it with everything inside (parent_id, null for the library root). A folder
         cannot move into itself or a folder inside it, and the move must keep every folder within 10 levels (invalid_request).
@@ -6831,7 +6908,7 @@ paths:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: moveMedia
       description: Moves files (media_ids) and folders (folder_ids) into one folder (folder_id), or to the library root when
         folder_id is null, in one all-or-nothing request of at most 1000 ids. Every id must exist (not_found). A folder cannot
@@ -6866,7 +6943,7 @@ paths:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: createMediaUpload
       x-rate-limit-policies:
       - name: media-upload-admission
@@ -6913,7 +6990,7 @@ paths:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: commitMediaUpload
       security:
       - projectBearer: []
@@ -6990,7 +7067,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     patch:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: patchMedia
       security:
       - projectBearer: []
@@ -7434,7 +7511,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: reportBug
       x-rate-limit-policies:
       - name: feedback-submit-project
@@ -7511,7 +7588,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: requestFeature
       x-rate-limit-policies:
       - name: feedback-submit-project
@@ -8373,7 +8450,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: addNote
       description: 'Adds a note for the project''s agents: a fact another agent would act on, never a progress report, chat
         or a secret. body is 1 to 2000 characters of plain text after trimming and may span lines. Text holding a
@@ -8456,7 +8533,7 @@ paths:
     - $ref: '#/components/parameters/ProjectTarget'
     - $ref: '#/components/parameters/ResourceID'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: confirmNote
       description: Says an open note still holds. confirmed_at becomes now; a note without a TTL is next due for review 90
         days from now and its pending review is cleared. Any agent of the project may confirm any open note. A resolved
@@ -8483,7 +8560,7 @@ paths:
     - $ref: '#/components/parameters/ProjectTarget'
     - $ref: '#/components/parameters/ResourceID'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: resolveNote
       description: Resolves an open note that no longer holds, with a reason of 1 to 500 characters, screened like a note
         body (note_contains_credential, note_rejected). Any agent of the project may resolve any open note. A resolved
@@ -12355,7 +12432,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: createSupportConversation
       security:
       - projectBearer: []
@@ -12429,7 +12506,7 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: replySupportConversation
       description: Adds a customer message to an open conversation. A follow-up has no minimum length and is never refused
         as unclear on its own ("thanks", "yes"); it is screened for safety, prompt injection and link spam, refused with
@@ -12476,7 +12553,7 @@ paths:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
     put:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: readSupportConversation
       security:
       - projectBearer: []
@@ -12511,7 +12588,7 @@ paths:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
     post:
-      x-screenrig-access: write
+      x-screenrig-access: contribute
       operationId: closeSupportConversation
       security:
       - projectBearer: []
@@ -13108,6 +13185,325 @@ paths:
           type: string
           minLength: 3
           maxLength: 253
+  /api/reviews:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listReviews
+      description: >-
+        The project's reviews (docs/reviews.md): playlist and screen changes
+        proposed under Propose access, and for an ad network the creatives
+        buyers submitted (kind ad_creative). Newest first, at most limit
+        (default 50, at most 100) per page; pass next_cursor back as cursor
+        with the same filters. state pending (the default), decided (every
+        other state) or all; kind narrows to one kind. A dashboard session
+        reads every kind; a bearer reads the kinds its capabilities cover
+        (playlists for playlist_change, screens for screen_change,
+        advertising for ad_creative), and a kind it cannot read is an empty
+        page. pending_count counts the pending reviews of every kind the
+        caller sees.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      parameters:
+      - { name: state, in: query, required: false, schema: { type: string, enum: [pending, decided, all] } }
+      - { name: kind, in: query, required: false, schema: { type: string, enum: [playlist_change, screen_change, ad_creative] } }
+      - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100 } }
+      - { name: cursor, in: query, required: false, schema: { type: string, maxLength: 200 } }
+      responses:
+        '200':
+          description: One page of reviews.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewList'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+  /api/reviews/{id}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getReview
+      description: >-
+        One review. A playlist change adds preview: the live and the proposed
+        playlist in the stored shape (pages with resolved_media); live is
+        null for a create. A bearer that cannot read the review's kind (see
+        listReviews) gets not_found.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      responses:
+        '200':
+          description: The review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+  /api/reviews/{id}/locate:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: locateReview
+      description: >-
+        The project a review belongs to, for the email link: a signed-in
+        person who is a member of that project gets its id and name and
+        switches to it (PUT /api/session/project) before reading the review.
+        Anyone else gets not_found. Works whatever project the session has
+        selected.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: The review's project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewLocation'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/reviews/{id}/approve:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: approveReview
+      description: >-
+        Approves a pending review as a person who can approve (the project
+        owner or a member with can_approve; else approver_required). Staff
+        shadow sessions cannot decide. A playlist update is applied with the
+        base revision as If-Match; when the live playlist moved on the review
+        becomes stale and the call answers review_stale. A screen change
+        replays its stored request (a tag resolves now); a screen change
+        waiting on a pending playlist review answers review_blocked naming
+        it. include_dependents also approves, in order, the screen changes
+        waiting on this playlist review. Events of the applied change carry
+        the person as actor and the proposing agent as agent. A decided review
+        is review_not_pending; repeating the same decision replays.
+      security:
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewApproveRequest'
+      responses:
+        '200':
+          description: The approved review, and the dependents' outcomes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewDecisionResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/reviews/{id}/reject:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: rejectReview
+      description: Rejects a pending review with a reason the proposer reads. Approver only, as approveReview. Nothing changes on glass;
+        a rejected playlist create stays unapproved.
+      security:
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewRejectRequest'
+      responses:
+        '200':
+          description: The rejected review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewDecisionResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/reviews/{id}/request-changes:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: requestReviewChanges
+      description: Asks the proposer for changes with a note they read; the proposer proposes again. Approver only, as approveReview.
+        For an ad creative the buyer reads the note on the creative.
+      security:
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewChangesRequest'
+      responses:
+        '200':
+          description: The review, state changes_requested.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewDecisionResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/reviews/{id}/withdraw:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: contribute
+      operationId: withdrawReview
+      description: Withdraws a pending playlist or screen review. A bearer withdraws only what its own agent or service client proposed
+        (forbidden otherwise); a person withdraws as an approver or as the proposer's responsible person. A withdrawn playlist create
+        stays unapproved.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The withdrawn review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewDecisionResult'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+  /api/project/review-policy:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    put:
+      operationId: setProjectReviewPolicy
+      description: >-
+        Turns Require review for agent changes on or off. While on, every
+        agent and service client on the project is held to Propose access on
+        every request, whatever its credential carries. The project owner or
+        an admin of the project's organization only (forbidden otherwise);
+        staff shadow sessions cannot change it. If-Match carries
+        review_policy_revision (0 allowed) and is required; a stale value is
+        revision_conflict. Turning it off requires proof, the fresh passkey or
+        password proof agent connection approval uses; turning it on does
+        not. Open reviews stay decidable either way. Appends
+        project.review_policy_changed.
+      security:
+      - dashboardSession: []
+      parameters:
+      - { name: If-Match, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewPolicyUpdate'
+      responses:
+        '200':
+          description: The policy now in force.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewPolicy'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/members/{user_id}/approver:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - name: user_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+    put:
+      operationId: setDashboardMemberApprover
+      description: >-
+        Sets whether a member can approve: decide reviews and grant agents
+        Manage access. A member who cannot approve has their agents held to
+        Propose. The project owner only (forbidden otherwise); the owner's own
+        row is fixed (resource_conflict); a non-member is not_found. Appends
+        project.member_approver_changed (details user_id, can_approve).
+      security:
+      - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberApproverUpdate'
+      responses:
+        '200':
+          description: The member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardMember'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/advertising/reviews/{id}/request-changes:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: requestAdvertisingReviewChanges
+      description: The seller asks the buyer for changes to one submitted creative revision. The review becomes changes_requested with
+        the note in reason; the buyer reads it on the creative, and the next review the campaign opens for this seller links
+        previous_review_id. A person must be able to approve reviews (approver_required).
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewChangesRequest'
+      responses:
+        '200':
+          description: The review, state changes_requested.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingReview'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
 components:
   # Anonymous demos have their own cookie, independent of project/dashboard auth.
   headers:
@@ -13157,6 +13553,7 @@ components:
         alone.
       schema: { type: string, enum: ["true", "false"] }
   parameters:
+    ReviewNote: { name: Screenrig-Review-Note, in: header, required: false, schema: { type: string, maxLength: 280 }, description: "Optional proposer note on a review-class write: plain text, at most 280 characters after trimming, no control characters (else 400 validation_failed). Stored on the review when the write becomes one; ignored when it applies live." }
     ProjectTarget: { name: ScreenRig-Project, in: header, required: false, schema: { type: string, minLength: 1, maxLength: 200 }, description: "Required with an identity bearer on every project route. Exactly one project identifier; no implicit current target. With a project bearer, must match its bound project." }
     ResourceID: { name: id, in: path, required: true, schema: { type: string } }
     NoteID: { name: note_id, in: path, required: true, schema: { type: string, pattern: "^(?:(?:stage|qa|development)_)?nte_[A-Za-z0-9_-]{16,24}$" }, description: The id of one of the agent's notes. }
@@ -13282,6 +13679,10 @@ components:
     releaseLaunchTicket: { type: apiKey, in: query, name: ticket, description: Random single-use 30-second ticket consumed only on its exact release host. }
     operatorBearer: { type: http, scheme: bearer }
   responses:
+    PendingReview:
+      description: The write became a review under Propose access and is not live (docs/reviews.md). A person approves, rejects or
+        requests changes in the dashboard at review.url. An Idempotency-Key replay answers the same body.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ReviewPending" } } }
     Problem:
       description: Stable RFC 9457 problem response. A 421 server_draining carries Retry-After of 1 second, a 500 not_ready or dependency_unavailable carries 5, and a 500 manifest_degraded carries 60, unless the handler set a more specific value.
       content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } }
@@ -13303,6 +13704,266 @@ components:
         RateLimit: { $ref: "#/components/headers/RateLimit" }
       content: { application/problem+json: { schema: { $ref: "#/components/schemas/RuntimeProblem" } } }
   schemas:
+    AccessLevel:
+      type: string
+      enum: [read, propose, manage]
+      description: read (Read only) < propose < manage. Propose reads, contributes (media, notes, comments, support, feedback,
+        screenshots, ad drafts) and turns playlist and screen changes into reviews (docs/reviews.md).
+    AccessLimitedBy:
+      type: string
+      enum: [project, person]
+      description: Why effective_access is lower than the credential's access. project - the project requires review for agent
+        changes. person - the agent's responsible person is a member who cannot approve reviews.
+    PlaylistApproval:
+      type: object
+      additionalProperties: false
+      required: [state, review_id]
+      description: Present while a review of this playlist is pending. The playlist itself is the live (approved) version.
+      properties:
+        state: { type: string, enum: [pending] }
+        review_id: { type: string }
+    ReviewPolicy:
+      type: object
+      additionalProperties: false
+      required: [agent_changes_require_review, review_policy_revision]
+      properties:
+        agent_changes_require_review: { type: boolean }
+        review_policy_revision: { type: integer, minimum: 0 }
+    ReviewPolicyUpdate:
+      type: object
+      additionalProperties: false
+      required: [agent_changes_require_review]
+      properties:
+        agent_changes_require_review: { type: boolean }
+        proof: { $ref: "#/components/schemas/DashboardProof", description: "Required to turn the setting off: a fresh passkey or password proof of kind review_policy_change for the project id." }
+    MemberApproverUpdate:
+      type: object
+      additionalProperties: false
+      required: [can_approve]
+      properties:
+        can_approve: { type: boolean }
+        project_id: { type: string, minLength: 1, maxLength: 200, description: "The project the caller means; a session whose selection has changed is refused with resource_conflict." }
+    ReviewPerson:
+      type: object
+      additionalProperties: false
+      required: [user_id, name]
+      properties:
+        user_id: { type: string }
+        name: { type: string }
+    ReviewProposer:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [agent, client, buyer] }
+        agent_id: { type: string }
+        agent_name: { type: string }
+        client_id: { type: string }
+        client_name: { type: string }
+        project_id: { type: string, description: "The buyer project of an ad creative review." }
+        organization_name: { type: string, description: "The buyer's organization of an ad creative review." }
+        person: { $ref: "#/components/schemas/ReviewPerson" }
+    ReviewDecider:
+      type: object
+      additionalProperties: false
+      properties:
+        user_id: { type: string }
+        name: { type: string }
+        agent_id: { type: string }
+        agent_name: { type: string }
+    ReviewSubject:
+      type: object
+      additionalProperties: false
+      required: [type, id, name]
+      properties:
+        type: { type: string, enum: [playlist, screen, creative] }
+        id: { type: string }
+        name: { type: string, description: "The playlist or screen name, or for several screens a summary such as '4 screens' or 'tag lobby'." }
+    ReviewImpact:
+      type: object
+      additionalProperties: false
+      required: [screens]
+      properties:
+        screens: { type: integer, minimum: 0, description: "Screens whose playback changes when the review is approved (as of the last read)." }
+    ReviewPlaylistDiff:
+      type: object
+      additionalProperties: false
+      required: [name_changed, pages_added, pages_removed, pages_changed, soundtrack_changed, media_added, media_removed]
+      properties:
+        name_changed: { type: boolean }
+        pages_added: { type: array, items: { type: string } }
+        pages_removed: { type: array, items: { type: string } }
+        pages_changed: { type: array, items: { type: string } }
+        soundtrack_changed: { type: boolean }
+        media_added: { type: array, items: { type: string } }
+        media_removed: { type: array, items: { type: string } }
+    ReviewPlaylistChange:
+      type: object
+      additionalProperties: false
+      required: [operation, base_revision, proposed, diff]
+      properties:
+        operation: { type: string, enum: [create, update, selector_refresh] }
+        base_revision: { type: integer, minimum: 0, description: "The live revision when proposed; 0 for a create." }
+        applied_revision: { type: integer, minimum: 1 }
+        proposed:
+          type: object
+          additionalProperties: false
+          required: [name, pages]
+          description: The write body as the proposer sent it (PlaylistWriteV2).
+          properties:
+            name: { type: string }
+            pages: { type: array, items: { type: object, additionalProperties: true } }
+            audio: { type: object, additionalProperties: true }
+        diff: { $ref: "#/components/schemas/ReviewPlaylistDiff" }
+    ReviewScreenChange:
+      type: object
+      additionalProperties: false
+      required: [action, screens, request, playlist_ids]
+      properties:
+        action: { type: string, enum: [assign, set_playlist_schedule, clear_playlist_schedule, takeover, takeover_clear] }
+        screens:
+          type: object
+          additionalProperties: false
+          required: [count_at_request]
+          properties:
+            ids: { type: array, items: { type: string } }
+            tag: { type: string, description: "A tag selector, resolved again at approval." }
+            count_at_request: { type: integer, minimum: 0 }
+        request: { type: object, additionalProperties: true, description: "The POST /api/screens/actions body this change replays on approval." }
+        playlist_ids: { type: array, items: { type: string } }
+        result:
+          type: object
+          additionalProperties: false
+          required: [matched, succeeded, failed]
+          description: Present after approval. Per-screen failures are a normal result, as for a fleet action.
+          properties:
+            matched: { type: integer, minimum: 0 }
+            succeeded: { type: integer, minimum: 0 }
+            failed: { type: integer, minimum: 0 }
+    ReviewAdCreative:
+      type: object
+      additionalProperties: false
+      required: [creative_id, creative_revision, content_path]
+      properties:
+        creative_id: { type: string }
+        creative_revision: { type: integer }
+        campaign_id: { type: string }
+        buyer_project_id: { type: string }
+        content_path: { type: string, description: "GET this path for the submitted pixels (/api/advertising/reviews/{id}/content)." }
+    ReviewPreview:
+      type: object
+      additionalProperties: false
+      required: [live, proposed]
+      description: Live and proposed playlists in the stored shape GET /api/playlists/{id} returns (pages with resolved_media).
+      properties:
+        live: { anyOf: [{ $ref: "#/components/schemas/PlaylistV2" }, { type: "null" }] }
+        proposed: { $ref: "#/components/schemas/PlaylistV2" }
+    Review:
+      type: object
+      additionalProperties: false
+      required: [id, kind, state, subject, proposer, url, created_at, updated_at, impact]
+      properties:
+        id: { type: string, description: "rvw_ for playlist and screen changes; the ad review id (arv_) for an ad creative." }
+        kind: { type: string, enum: [playlist_change, screen_change, ad_creative] }
+        state: { type: string, enum: [pending, approved, rejected, changes_requested, withdrawn, superseded, stale] }
+        subject: { $ref: "#/components/schemas/ReviewSubject" }
+        proposer: { $ref: "#/components/schemas/ReviewProposer" }
+        note: { type: string, maxLength: 280, description: "The proposer's note, plain text. Show it literally." }
+        url: { type: string, format: uri, description: "The dashboard page of this review. It carries no authority." }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        decided_at: { type: string, format: date-time }
+        decided_by: { $ref: "#/components/schemas/ReviewDecider" }
+        decision_note: { type: string, maxLength: 500, description: "The reject reason or the requested changes, plain text." }
+        previous_review_id: { type: string }
+        superseded_by: { type: string }
+        blocked_by: { type: array, items: { type: string }, description: "Pending playlist reviews this screen change waits on." }
+        dependents: { type: array, items: { type: string }, description: "Screen changes waiting on this playlist review." }
+        impact: { $ref: "#/components/schemas/ReviewImpact" }
+        playlist_change: { $ref: "#/components/schemas/ReviewPlaylistChange" }
+        screen_change: { $ref: "#/components/schemas/ReviewScreenChange" }
+        ad_creative: { $ref: "#/components/schemas/ReviewAdCreative" }
+        preview: { $ref: "#/components/schemas/ReviewPreview" }
+    ReviewList:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor, pending_count]
+      properties:
+        items: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/Review" } }
+        next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Pass back as cursor, with the same filters, for the next page; null on the last page." }
+        pending_count: { type: integer, minimum: 0, description: "Pending reviews of every kind the caller may see, whatever the filters." }
+    ReviewSummary:
+      type: object
+      additionalProperties: false
+      required: [id, kind, state, url, subject, impact]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [playlist_change, screen_change] }
+        state: { type: string, enum: [pending] }
+        url: { type: string, format: uri }
+        subject: { $ref: "#/components/schemas/ReviewSubject" }
+        impact: { $ref: "#/components/schemas/ReviewImpact" }
+    ReviewPending:
+      type: object
+      additionalProperties: false
+      required: [status, review]
+      description: A review-class write under Propose access. The change is not on glass until a person approves the review.
+      properties:
+        status: { type: string, enum: [pending_review] }
+        review: { $ref: "#/components/schemas/ReviewSummary" }
+        playlist: { $ref: "#/components/schemas/PlaylistV2", description: "The playlist resource as GET returns it: for a create the new playlist (approved_revision 0), for an update the live version with approval set." }
+    ReviewApproveRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        include_dependents: { type: boolean, description: "Also approve, in order, the screen changes waiting on this playlist review." }
+    ReviewRejectRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 500 }
+    ReviewChangesRequest:
+      type: object
+      additionalProperties: false
+      required: [note]
+      properties:
+        note: { type: string, minLength: 1, maxLength: 500 }
+    ReviewDependentResult:
+      type: object
+      additionalProperties: false
+      required: [id, state]
+      properties:
+        id: { type: string }
+        state: { type: string, enum: [pending, approved, rejected, changes_requested, withdrawn, superseded, stale] }
+        problem: { $ref: "#/components/schemas/Problem" }
+    ReviewDecisionResult:
+      type: object
+      additionalProperties: false
+      required: [review]
+      properties:
+        review: { $ref: "#/components/schemas/Review" }
+        dependents: { type: array, items: { $ref: "#/components/schemas/ReviewDependentResult" } }
+    ReviewLocation:
+      type: object
+      additionalProperties: false
+      required: [project_id, project_name]
+      properties:
+        project_id: { type: string }
+        project_name: { type: string }
+    AdvertisingCreativeReview:
+      type: object
+      additionalProperties: false
+      required: [id, seller_project_id, creative_revision, state, created_at]
+      properties:
+        id: { type: string }
+        seller_project_id: { type: string }
+        creative_revision: { type: integer }
+        campaign_id: { type: string }
+        state: { type: string, enum: [pending, approved, rejected, changes_requested] }
+        reason: { type: string, maxLength: 500 }
+        created_at: { type: string, format: date-time }
+        decided_at: { type: string, format: date-time }
     ProjectMoveDestinations:
       type: object
       additionalProperties: false
@@ -14026,6 +14687,10 @@ components:
         owner:
           type: boolean
           description: This member owns the project. The owner removes other members and cannot leave.
+        can_approve:
+          type: boolean
+          description: This member decides reviews and may grant agents Manage access. Always true for the owner. A member who
+            cannot approve has their agents held to Propose.
     DashboardMemberList:
       type: object
       additionalProperties: false
@@ -14045,6 +14710,9 @@ components:
         viewer_is_owner:
           type: boolean
           description: The signed-in person owns the project and may remove other members.
+        viewer_can_approve:
+          type: boolean
+          description: The signed-in person may decide reviews.
     DashboardStaffChange:
       type: object
       additionalProperties: false
@@ -15302,10 +15970,11 @@ components:
           - oauth_authorization_approval
           - oauth_authorization_denial
           - service_client_change
+          - review_policy_change
         subject_id:
           type: string
           minLength: 1
-          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id. kind staff_grant is staff only and requires the added person's email address. kind staff_action requires the specific prepared request_id. kinds oauth_authorization_approval and oauth_authorization_denial require the authorization id (oaz_...). kind service_client_change requires the service client id, or the project id when creating a client."
+          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id. kind staff_grant is staff only and requires the added person's email address. kind staff_action requires the specific prepared request_id. kinds oauth_authorization_approval and oauth_authorization_denial require the authorization id (oaz_...). kind service_client_change requires the service client id, or the project id when creating a client. kind review_policy_change requires the project id (turning Require review for agent changes off)."
     DashboardReauthentication:
       type: object
       additionalProperties: false
@@ -15422,11 +16091,12 @@ components:
             (agent_connection_expired). Ignored otherwise.
         access:
           type: string
-          enum: [read, manage]
+          enum: [read, propose, manage]
           description: >-
             The access level a device sign-in or a connected app is approved
-            with (Read only or Manage); omitted keeps the level asked for.
-            Ignored for other connections.
+            with (Read only, Propose or Manage); omitted keeps the level asked
+            for. Ignored for other connections. A person who cannot approve
+            reviews may not approve Manage (403 approver_required).
     InvitationKind:
       type: string
       enum:
@@ -16308,6 +16978,13 @@ components:
           maxLength: 60
         owner_user_id:
           type: string
+        agent_changes_require_review:
+          type: boolean
+          description: While true every agent and service client on the project is held to Propose access (docs/reviews.md).
+        review_policy_revision:
+          type: integer
+          minimum: 0
+          description: Revision of agent_changes_require_review; PUT /api/project/review-policy takes it as If-Match.
     RuntimeChrome:
       type: object
       additionalProperties: true
@@ -16355,7 +17032,7 @@ components:
         client_domain: { type: string, description: "The host the client's metadata was fetched from, or a registered client's domain." }
         client_registered: { type: boolean, description: "A client registered by screenRIG rather than identified by a metadata document." }
         redirect_host: { type: string }
-        access: { type: string, enum: [read, manage], description: "The level the application asked for." }
+        access: { type: string, enum: [read, propose, manage], description: "The level the application asked for." }
         capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, minItems: 1, uniqueItems: true }
         requested_from: { type: string }
         created_at: { type: string, format: date-time }
@@ -16393,7 +17070,9 @@ components:
         project_id: { type: string }
         name: { type: string }
         capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, uniqueItems: true }
-        access: { type: string, enum: [read, manage] }
+        access: { type: string, enum: [read, propose, manage] }
+        effective_access: { $ref: "#/components/schemas/AccessLevel" }
+        access_limited_by: { type: string, enum: [project], description: "Present when effective_access is lower than access: the project requires review for agent changes." }
         state: { type: string, enum: [active, revoked] }
         created_by: { type: string, description: "user:<id> or agent:<id>; the client belongs to the project, not to its creator." }
         keys: { type: array, items: { $ref: "#/components/schemas/ServiceClientKey" }, maxItems: 2 }
@@ -16427,7 +17106,7 @@ components:
         proof: { $ref: "#/components/schemas/DashboardProof" }
         name: { type: string, minLength: 1, maxLength: 80 }
         capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, minItems: 1, uniqueItems: true }
-        access: { type: string, enum: [read, manage] }
+        access: { type: string, enum: [read, propose, manage], description: "Manage needs a person who can approve reviews (403 approver_required)." }
         key: { type: object, additionalProperties: true, description: "A public JWK: OKP Ed25519, EC P-256 or RSA of at least 2048 bits." }
         secret: { type: boolean, description: "Generate a secret (creation only)." }
     OAuthError:
@@ -16569,8 +17248,12 @@ components:
           description: The installation's type. mcp_client is stable and marks a connected app (an MCP client approved through OAuth).
         access:
           type: string
-          enum: [read, manage]
-          description: The access level of the agent's OAuth consent for this project (Read only or Manage). Absent for a legacy credential.
+          enum: [read, propose, manage]
+          description: The access level of the agent's OAuth consent for this project (Read only, Propose or Manage). Absent for a legacy credential.
+        effective_access:
+          $ref: '#/components/schemas/AccessLevel'
+        access_limited_by:
+          $ref: '#/components/schemas/AccessLimitedBy'
         source:
           type: string
           enum: [enroll, device, authorization_code, legacy_exchange, connect]
@@ -16631,11 +17314,11 @@ components:
           format: date-time
           description: Server-maintained instant of the agent's last lifecycle or profile mutation. Absent when the agent was never mutated after creation. Read-only.
     AgentList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Agent" } } } }
-    AgentSelfStatus: { type: object, additionalProperties: false, required: [agent, connection_ready], properties: { agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, description: True when at least one project member has a passkey or password and can authorize another agent. }, notes: { $ref: "#/components/schemas/NoteCounts" } } }
+    AgentSelfStatus: { type: object, additionalProperties: false, required: [agent, connection_ready], properties: { access: { $ref: "#/components/schemas/AccessLevel" }, effective_access: { $ref: "#/components/schemas/AccessLevel" }, access_limited_by: { $ref: "#/components/schemas/AccessLimitedBy" }, agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, description: True when at least one project member has a passkey or password and can authorize another agent. }, notes: { $ref: "#/components/schemas/NoteCounts" } } }
     X25519PublicJWK: { type: object, additionalProperties: false, required: [kty, crv, x], properties: { kty: { type: string, enum: [OKP] }, crv: { type: string, enum: [X25519] }, x: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
     AgentConnectionRequest: { type: object, additionalProperties: false, required: [recipient_public_key], properties: { project_id: { type: string, maxLength: 200, description: "Optional exact target, accepted only with an identity bearer. Approval against any other project is refused." }, name: { type: string, minLength: 1, maxLength: 80 }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$" }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 }, capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, minItems: 1, uniqueItems: true, description: "The installation's requested capability areas. Omitted requests all six. Unknown, duplicate, or empty lists are invalid_request." }, recipient_public_key: { $ref: "#/components/schemas/X25519PublicJWK" } } }
     AgentConnectionStart: { type: object, additionalProperties: false, required: [connection_id, connection_token, approval_url, expires_at], properties: { connection_id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?acn_" }, connection_token: { type: string, pattern: "^sac_[A-Za-z0-9_-]{43}$", description: Temporary header credential. Never place in a URL or log. }, approval_url: { type: string, format: uri, description: Safe URL containing only the non-authority connection id. }, expires_at: { type: string, format: date-time } } }
-    AgentConnection: { type: object, additionalProperties: false, required: [connection_id, name, agent_type, status, capabilities, expires_at, created_at], properties: { connection_id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?acn_" }, name: { type: string }, agent_type: { type: string }, platform: { type: string }, version: { type: string }, status: { type: string, enum: [pending, approved, connected, denied, expired, cancelled] }, capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, minItems: 1, uniqueItems: true, description: "Capability areas the installation requested at connection start. A reviewer may approve a subset of these." }, expires_at: { type: string, format: date-time }, created_at: { type: string, format: date-time }, flow: { type: string, enum: [device], description: "device for a screenrig login sign-in, whose approval confirms the user code and chooses the access level; absent otherwise." }, access: { type: string, enum: [read, manage], description: "The access level a device sign-in asked for." }, client_name: { type: string, description: "The OAuth client of a device sign-in." }, project_hint: { type: string, description: "The project a device sign-in suggested; the approver chooses." }, requested_from: { type: string, description: "The client address that started a device sign-in." }, existing_identity: { type: boolean, description: "A device sign-in by an installation that already exists, adding this project or raising its access." } } }
+    AgentConnection: { type: object, additionalProperties: false, required: [connection_id, name, agent_type, status, capabilities, expires_at, created_at], properties: { connection_id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?acn_" }, name: { type: string }, agent_type: { type: string }, platform: { type: string }, version: { type: string }, status: { type: string, enum: [pending, approved, connected, denied, expired, cancelled] }, capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, minItems: 1, uniqueItems: true, description: "Capability areas the installation requested at connection start. A reviewer may approve a subset of these." }, expires_at: { type: string, format: date-time }, created_at: { type: string, format: date-time }, flow: { type: string, enum: [device], description: "device for a screenrig login sign-in, whose approval confirms the user code and chooses the access level; absent otherwise." }, access: { type: string, enum: [read, propose, manage], description: "The access level a device sign-in asked for." }, client_name: { type: string, description: "The OAuth client of a device sign-in." }, project_hint: { type: string, description: "The project a device sign-in suggested; the approver chooses." }, requested_from: { type: string, description: "The client address that started a device sign-in." }, existing_identity: { type: boolean, description: "A device sign-in by an installation that already exists, adding this project or raising its access." } } }
     AgentCredentialEnvelope: { type: object, additionalProperties: false, required: [algorithm, ephemeral_public_key, nonce, ciphertext], properties: { algorithm: { type: string, enum: [X25519-HKDF-SHA256-A256GCM] }, ephemeral_public_key: { $ref: "#/components/schemas/X25519PublicJWK" }, nonce: { type: string, description: Unpadded base64url AES-GCM nonce. }, ciphertext: { type: string, description: Unpadded base64url ciphertext and authentication tag. Decrypt with AAD screenrig/agent-credential-envelope/aad/v1 NUL connection_id NUL agent_id. } } }
     AgentCredentialCollection: { type: object, additionalProperties: false, required: [agent, credential_envelope, issuance_expires_at], properties: { agent: { $ref: "#/components/schemas/Agent" }, credential_envelope: { $ref: "#/components/schemas/AgentCredentialEnvelope" }, identity_credential_envelope: { $ref: "#/components/schemas/AgentCredentialEnvelope" }, issuance_expires_at: { type: string, format: date-time } } }
     AgentDisconnectRequest: { type: object, additionalProperties: false, properties: { allow_last_agent: { type: boolean, default: false, description: Explicitly accept loss of the last active agent bearer. A registered dashboard passkey remains independent administrative authority. } } }
@@ -17085,6 +17768,7 @@ components:
         copy: { type: string }
         state: { type: string, enum: [ready] }
         created_at: { type: string, format: date-time }
+        reviews: { type: array, items: { $ref: "#/components/schemas/AdvertisingCreativeReview" }, description: "The latest seller review of this creative per network, so the buyer reads a rejection or requested changes." }
     AdvertisingCreativeList: { type: object, additionalProperties: false, required: [creatives], properties: { creatives: { type: array, items: { $ref: "#/components/schemas/AdvertisingCreative" } } } }
     AdvertisingReviewRejection: { type: object, additionalProperties: false, required: [reason], properties: { reason: { type: string, minLength: 1, maxLength: 500 } } }
     AdvertisingReview:
@@ -17096,10 +17780,11 @@ components:
         creative_id: { type: string }
         creative_revision: { type: integer }
         campaign_id: { type: string }
-        state: { type: string, enum: [pending, approved, rejected] }
+        state: { type: string, enum: [pending, approved, rejected, changes_requested] }
         created_at: { type: string, format: date-time }
         decided_at: { type: string, format: date-time }
-        reason: { type: string, maxLength: 500 }
+        reason: { type: string, maxLength: 500, description: "The reject reason, or the changes the seller requested." }
+        previous_review_id: { type: string, description: "The review this one follows: the seller's earlier review of the same campaign that requested changes." }
     AdvertisingReviewList: { type: object, additionalProperties: false, required: [reviews], properties: { reviews: { type: array, items: { $ref: "#/components/schemas/AdvertisingReview" } } } }
     AdvertisingDaypart:
       type: object
@@ -17411,6 +18096,8 @@ components:
         revision: { type: integer }
         pages: { type: array, minItems: 1, maxItems: 100, items: { $ref: "#/components/schemas/PlaylistPageV2" } }
         audio: { $ref: "#/components/schemas/PlaylistAudio" }
+        approved_revision: { type: integer, minimum: 0, description: "The revision a person approved; it equals revision for every playlist that can reach a screen. 0: proposed by a Propose credential and never approved, so no screen can use it (playlist_not_approved) and the runtime treats it as missing." }
+        approval: { $ref: "#/components/schemas/PlaylistApproval" }
     PlaylistV2List: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/PlaylistV2" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     PlaylistAudioWrite:
       type: object
@@ -18791,7 +19478,7 @@ components:
     MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], description: "Declares only what the server can re-verify against the stored object byte for byte. Codec identity is not declared here: the server derives it from the container during asynchronous verification, so a client cannot assert a codec that drives player behaviour.", properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
     MediaUploadSession: { type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: { id: { type: string }, operation: { $ref: "#/components/schemas/Operation" }, upload_url: { type: string, format: uri }, method: { type: string, enum: [PUT] }, headers: { type: object, additionalProperties: { type: string }, description: Exact signed request headers; clients must send every field verbatim. }, expires_at: { type: string, format: date-time } } }
     MediaUploadSource: { type: object, additionalProperties: false, required: [filename, content_type, sha256, bytes], description: "Verified original upload identity when ingest normalized EXIF orientation. Read-only; use it to recognize retries. The ready media digest, size and type describe the normalized delivery bytes.", properties: { filename: { type: string }, source_filename: { type: string }, content_type: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer, minimum: 1 } } }
-    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { tags: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 10800000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, folder_id: { type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. Move files with POST /api/media/move." }, revision: { type: integer }, state: { type: string, enum: [ready] }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
+    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { tags: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 10800000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, folder_id: { type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. Move files with POST /api/media/move." }, revision: { type: integer }, state: { type: string, enum: [ready] }, review_state: { type: string, enum: [pending], description: "pending: uploaded or changed by a Propose credential and not yet approved. Tag, folder and all selectors of approved playlists skip it until a person approves a review that uses it. Absent means approved." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
     MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/Media" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     SupportHours: {"type": "object", "additionalProperties": false, "required": ["timezone", "start", "end", "weekdays", "excludes_bc_holidays"], "properties": {"timezone": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "weekdays": {"type": "array", "items": {"type": "string"}}, "excludes_bc_holidays": {"type": "boolean"}}}
     SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean", "description": "This project can start or continue a conversation now. False where support chat is switched off in this environment."}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0}, "docs_url": {"type": "string"}}}
@@ -20361,6 +21048,18 @@ components:
           format: date-time
         name:
           $ref: '#/components/schemas/ProjectName'
+        agent_changes_require_review:
+          type: boolean
+          description: While true every agent and service client on the project is held to Propose access.
+        review_policy_revision:
+          type: integer
+          minimum: 0
+        review_policy_editable:
+          type: boolean
+          description: The signed-in person may change agent_changes_require_review (the project owner or an admin of its organization).
+        viewer_can_approve:
+          type: boolean
+          description: The signed-in person may decide reviews and grant Manage access.
     DashboardBalance:
       type: object
       additionalProperties: false
@@ -20487,6 +21186,11 @@ x-problem-codes:
 - client_update_required
 - forbidden
 - insufficient_access
+- approver_required
+- review_not_pending
+- review_stale
+- review_blocked
+- playlist_not_approved
 - not_found
 - method_not_allowed
 - idempotency_mismatch

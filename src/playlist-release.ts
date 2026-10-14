@@ -5,12 +5,15 @@ import { assertPlaylistValid } from "./playlist-validate.js";
 import { quotedRevision } from "./if-match.js";
 import { CliError, makeProblem, usageError } from "./problems.js";
 import type { Screen } from "./adapters/protocol.js";
+import { pendingReviewOf, reviewNoteHeaders } from "./reviews.js";
 
 /** Review is a snapshot; the existing API atomically guards playlist revision only. */
 export async function replacePlaylistRelease(options: {
   client: ApiClient; apiUrl: string; playlistId: string; pageId: string;
   primitiveId: string; releaseId: string; apply: boolean;
   revision?: string; impact?: string;
+  /** The proposer's note when the write becomes a review. */
+  note?: string;
 }) {
   const { client, playlistId, pageId, primitiveId, releaseId } = options;
   if (!options.apply && (options.revision || options.impact)) {
@@ -61,7 +64,10 @@ export async function replacePlaylistRelease(options: {
   }
   if (unchanged) return { ...review, impact, applied: true, unchanged: true, playlist: response.body };
   const updated = await client.call({ method: "PUT", path: `/api/playlists/${playlistId}`, idempotent: true,
-    headers: options.revision ? { "if-match": quotedRevision(options.revision) } : undefined, body: document });
+    headers: { ...reviewNoteHeaders(options.note), ...(options.revision ? { "if-match": quotedRevision(options.revision) } : {}) }, body: document });
+  // Under Propose access the replacement waits for a person: nothing changed on glass.
+  const pending = pendingReviewOf(updated);
+  if (pending) return { ...review, impact, applied: false, status: "pending_review", review: pending.review, playlist: pending.playlist };
   // The top-level revision is the playlist's revision now; the reviewed one stays as previous_revision.
   const written = (updated.body as { revision?: unknown } | undefined)?.revision;
   return { ...review, ...(Number.isSafeInteger(written) ? { revision: written as number, previous_revision: review.revision } : {}), impact, applied: true, playlist: updated.body };

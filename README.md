@@ -139,9 +139,9 @@ the verified AgentID owner becomes the contact address and invitation recipient.
 ```sh
 screenrig agent enroll --email ADDRESS --organization NAME [--name NAME] [--intent signage|advertising] [--force]
 screenrig agent enroll --agentid-claim CODE --organization NAME [--name NAME] [--intent signage|advertising] [--force]
-screenrig login [--project ID] [--access read|manage] [--no-wait] [--resume ID]
+screenrig login [--project ID] [--access read|propose|manage] [--no-wait] [--resume ID]
 screenrig logout
-screenrig service-client create --name NAME [--key-file PATH] [--secret-file PATH] [--access read|manage] [--capability NAME]...
+screenrig service-client create --name NAME [--key-file PATH] [--secret-file PATH] [--access read|propose|manage] [--capability NAME]...
 screenrig project list
 screenrig project use ID
 screenrig project create NAME [--organization-id ID | --organization NAME]
@@ -974,6 +974,57 @@ prefix ending in a dot: `--type note.` shows `note.added` and `note.resolved`,
 which carry ids and never note text. `events follow` filters what it prints and
 always passes `stream.*` frames.
 
+## Reviews
+
+Under Propose access, or in a project that requires review for agent changes,
+changes to what plays wait for a person: playlist create and update (including
+`playlist import --update` and `playlist replace-release --apply`), `screen
+assign`, `screen schedule set|clear` and `screen takeover set|clear`, for one
+screen or a fleet. The write answers HTTP 202 `pending_review`, which the CLI
+reports as success (`ok: true`, exit 0): `data` is the server's answer with
+`data.review` (id, kind, state, dashboard url, subject and impact),
+`data.next` is `screenrig reviews show ID`, and warning `pending_review` reads
+`Waiting for a person to approve: URL`.
+
+Nothing changes on glass until a person approves the change in the dashboard;
+they can also reject it or ask for changes. Tell the person it is waiting and
+give them the URL. Do not repeat the write or poll for the decision. `playlist
+show` keeps returning the live version, not the proposal.
+
+```sh
+screenrig playlist update pl_LOBBY lobby.json --note "Adds the weekend opening hours"
+screenrig reviews list [--state pending|decided|all] [--kind playlist_change|screen_change|ad_creative] [--limit N] [--cursor CURSOR]
+screenrig reviews show rvw_REVIEW
+screenrig reviews withdraw rvw_REVIEW
+screenrig ads reviews request-changes rev_REVIEW --note TEXT
+```
+
+`--note TEXT` on those writes and on `screen publish` sends the
+`Screenrig-Review-Note` header: plain text of at most 280 characters, without
+control characters, shown to the person who reviews the change. It is ignored
+when the change applies directly.
+
+`reviews list` returns one page, pending reviews by default, with
+`pending_count`; pass `data.next_cursor` back as `--cursor`. `reviews show`
+reports `state`: `pending`, `approved`, `rejected`, `changes_requested`,
+`withdrawn`, `superseded` (a newer proposal replaced it) or `stale` (the live
+playlist changed before approval). A rejection or change request carries the
+person's note in `decision_note`: fix the change and propose it again, with
+`--note` explaining what changed. `reviews withdraw` withdraws a pending change
+this credential proposed. Agents cannot approve playlist or screen reviews.
+
+`screen publish` under review returns `stage: "pending_review"` with
+`reviews` (the new playlist's review and the assignment's), one warning per
+review, and `data.next` naming the playlist review; it does not wait for
+playback. While the reviews wait, the identical command reports them again
+without writing; once the assignment is approved it verifies playback like
+any publish, and after a rejection or withdrawal it proposes afresh.
+
+Advertising sellers ask a buyer for changes to a creative with `ads reviews
+request-changes ID --note TEXT` (1 to 500 characters). That review's state
+becomes `changes_requested`; the buyer reads the note in the creative's
+`reviews` (`ads creatives show`) and submits a new version.
+
 ## Support conversations
 
 On Standard (free), resolve issues through the documentation and the
@@ -1018,8 +1069,8 @@ the API URL does not transfer credentials between environments.
 
 `screenrig login` signs this installation in with a person's approval. It
 prints a dashboard URL and a code; the person opens the URL, checks that the
-code matches the terminal, chooses the project, Read only or Manage, and the
-capabilities, and approves. The CLI then stores the session and selects that
+code matches the terminal, chooses the project, Read only, Propose or Manage,
+and the capabilities, and approves. The CLI then stores the session and selects that
 project. The code lasts 10 minutes.
 
 ```sh
@@ -1033,8 +1084,19 @@ screenrig logout
 `--no-wait` returns at once with `data.login_id`, `data.user_code` and
 `data.verification_uri_complete`; `data.next.argv` resumes the wait. The handle
 holds no secret. Read only lists and reads, and cannot change, publish or buy;
-metered reads still bill. Asking for Manage on a Read only project is how
+metered reads still bill. Propose also uploads media and writes notes, and every
+change to what plays becomes a review a person approves (see [Reviews](#reviews)).
+Manage applies changes directly. Asking for a higher level on a project is how
 access is raised, and a person approves it.
+
+`agent status` and `login` report `access`, the level the sign-in holds, and
+`effective_access`, the level it acts with now. A project that requires review
+for agent changes holds every agent and service client to Propose
+(`access_limited_by: "project"`), and so does a responsible person who cannot
+approve reviews (`access_limited_by: "person"`). A new sign-in does not lift
+either limit; a person changes the project setting or Can approve in the
+dashboard. A refusal for access is HTTP 403 `insufficient_access` (exit 3), and
+its hint names which of these applies.
 
 A session is a 15-minute access token and a rotating refresh token, stored in
 the 0600 config. The CLI renews the access token when it is about to expire,
@@ -1072,7 +1134,9 @@ commands (`login`, `logout`, `agent ...`) refuse to run in it.
 
 `service-client create|list|show|add-key|add-secret|remove-key|remove-secret|revoke`
 manages the project's clients and needs the project capability and Manage; a
-service client cannot manage clients. A generated secret is shown once, so it
+service client cannot manage clients. `--access` sets the client's level (Read
+only, Propose or Manage); a Propose client's changes become reviews like an
+agent's. A generated secret is shown once, so it
 is written only to the new 0600 file `--secret-file` names, never to stdout.
 A second key or secret allows rotation without downtime; removing one ends its
 tokens within seconds, and `revoke --yes` ends the client permanently.
@@ -1273,7 +1337,8 @@ Unknown or multiple reported surfaces require explicit dimensions. Output files 
 `screen publish <screen-id> <file>` creates a new playlist, assigns it with an optional **screen** revision guard, reads back the assignment, and waits for the Player to show it. It does not update an
 existing playlist by name. Display names may repeat; use the playlist ID for an explicit `playlist update`. Its JSON result reports `playlist_id`,
 `playlist_revision`, `screen_id`, `screen_revision`, `stage`,
-`assignment_verified`, `playback_verified`, and `playback`.
+`assignment_verified`, `playback_verified`, and `playback`. When the change
+waits for a person, `stage` is `pending_review` instead (see [Reviews](#reviews)).
 
 The wait is bounded by `--timeout` (default 120000 ms) and polls the screen every
 `--poll-ms` (default 2000). It ends as soon as the Player acknowledges this

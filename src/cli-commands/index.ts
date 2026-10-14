@@ -15,6 +15,7 @@ import { registerMediaCommands } from "./media.js";
 import { registerComposeCommands } from "./compose.js";
 import { registerPlaylistCommands } from "./playlist.js";
 import { registerScreenCommands } from "./screen.js";
+import { registerReviewsCommands } from "./reviews.js";
 import { registerBrowserCommands } from "./browser.js";
 import { registerFleetLinksCommands } from "./fleet-links.js";
 import { registerKvCommands } from "./kv.js";
@@ -46,6 +47,7 @@ export function registerCommands(root: Command, bind: CommandActionBinder): void
   registerComposeCommands(root, bind);
   registerPlaylistCommands(root, bind);
   registerScreenCommands(root, bind);
+  registerReviewsCommands(root, bind);
   registerBrowserCommands(root, bind);
   registerFleetLinksCommands(root, bind);
   registerKvCommands(root, bind);

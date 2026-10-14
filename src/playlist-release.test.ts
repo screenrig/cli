@@ -15,6 +15,7 @@ function fixture(pageSize?: number) {
   let revision = 4;
   let failure = false;
   let malformed = false;
+  let proposal = false;
   const screens = [ { id: "scr_A", label: "Lobby", state: "active", revision: 3, playlist_id: "pl_BOARD" }, { id: "scr_B", label: "Stored", state: "archived", revision: 7, playlist_id: "pl_BOARD" }, { id: "scr_C", label: "Other", state: "active", revision: 2, playlist_id: "pl_OTHER" } ];
   const transport = new FakeTransport()
     .on("GET", "/api/playlists/pl_BOARD", () => response({ ...document, id: "pl_BOARD", revision }))
@@ -22,9 +23,11 @@ function fixture(pageSize?: number) {
       const listed = screens.filter(s => (s.state === "archived") === (req.query?.state === "archived"));
       return malformed ? response({}) : pageSize === undefined ? response({ items: listed }) : listPage(req, listed, pageSize);
     })
-    .on("PUT", "/api/playlists/pl_BOARD", req => failure ? { status: 409, headers: {}, body: { code: "revision_conflict", title: "Conflict", status: 409, detail: "Playlist changed", current_revision: 5 } } : response({ ...(req.body as object), id: "pl_BOARD", revision: 5 }));
+    .on("PUT", "/api/playlists/pl_BOARD", req => proposal ? { status: 202, headers: {}, body: { status: "pending_review",
+      review: { id: "rvw_BOARD", kind: "playlist_change", state: "pending", url: "https://screenrig.ai/dashboard/reviews/rvw_BOARD", subject: { type: "playlist", id: "pl_BOARD", name: "Board" }, impact: { screens: 1 } },
+      playlist: { ...document, id: "pl_BOARD", revision } } } : failure ? { status: 409, headers: {}, body: { code: "revision_conflict", title: "Conflict", status: 409, detail: "Playlist changed", current_revision: 5 } } : response({ ...(req.body as object), id: "pl_BOARD", revision: 5 }));
   const options = { client: new ApiClient({ transport }), apiUrl: "https://api.screenrig.ai", playlistId: "pl_BOARD", pageId: "page_1", primitiveId: "content", releaseId: "rel_NEW", apply: false };
-  return { document, transport, options, screens, changeRevision: () => revision++, failWrite: () => failure = true, malformedList: () => malformed = true };
+  return { document, transport, options, screens, changeRevision: () => revision++, failWrite: () => failure = true, malformedList: () => malformed = true, proposeWrite: () => proposal = true };
 }
 
 test("preview is read-only and apply changes only the explicitly scoped pin", async () => {
@@ -122,4 +125,17 @@ test("direct apply needs no preview or screen inventory, and a no-op succeeds", 
  const result = await replacePlaylistRelease({...noOp.options, apply:true, releaseId:"rel_OLD"});
  assert.equal(result.applied,true);
  assert.deepEqual(noOp.transport.calls.map(c=>c.method),["GET"]);
+});
+
+test("an apply that waits for review sends the note and reports the review without applying", async () => {
+  const f = fixture();
+  f.proposeWrite();
+  const preview = await replacePlaylistRelease(f.options);
+  const result = await replacePlaylistRelease({ ...f.options, apply: true, revision: String(preview.revision), impact: preview.impact, note: "Board release with the new menu" });
+  assert.equal(result.applied, false);
+  assert.equal((result as { status?: string }).status, "pending_review");
+  assert.equal((result as { review?: { id: string } }).review?.id, "rvw_BOARD");
+  const write = f.transport.calls.find(c => c.method === "PUT")!;
+  assert.equal(write.headers?.["screenrig-review-note"], "Board release with the new menu");
+  assert.equal(write.headers?.["if-match"], `"${preview.revision}"`);
 });

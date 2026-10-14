@@ -524,6 +524,37 @@ test("login --no-wait prints a resume handle with no secret, and --resume finish
   }
 });
 
+test("login --access propose asks for access:propose and reports the level the project allows", async () => {
+  const scope = "access:propose screens content playlists";
+  const self = { agent: { id: AGENT, name: "ScreenRig CLI", agent_type: "cli", capabilities: ["screens"], state: "active",
+    authenticated_requests: 0, metered_credits: 0, created_at: NOW.toISOString() }, connection_ready: true, access: "propose", effective_access: "propose" };
+  const h = await harness({ api_url: API });
+  const transport = withDiscovery(new FakeTransport())
+    .on("POST", "/oauth/device_authorization", (req) => {
+      assert.equal(form(req).get("scope"), "access:propose");
+      return json(200, { device_code: "D".repeat(43), user_code: "BCDF-GHJK", verification_uri: "https://screenrig.ai/dashboard/connect",
+        verification_uri_complete: "https://screenrig.ai/dashboard/connect?code=BCDF-GHJK", expires_in: 600, interval: 5 });
+    })
+    .on("POST", "/oauth/token", () => tokenResponse(access({ scope }), refresh(1), scope))
+    .on("GET", "/api/project", () => projectBody())
+    .on("GET", "/api/agents/self", () => json(200, self, { "cache-control": "private, no-store" }));
+  try {
+    const refused = await h.cli(["--json", "login", "--access", "contribute"], transport);
+    assert.equal(refused.code, ExitCode.Usage, refused.stdout);
+    const result = await h.cli(["--json", "login", "--access", "propose"], transport);
+    assert.equal(result.code, 0, result.stdout);
+    const data = (JSON.parse(result.stdout) as { data: { status: string; access: string; effective_access: string; access_limited_by?: string } }).data;
+    assert.equal(data.status, "signed_in");
+    assert.equal(data.access, "propose");
+    assert.equal(data.effective_access, "propose");
+    assert.equal(data.access_limited_by, undefined);
+    const human = await h.cli(["--human", "agent", "status"], transport);
+    assert.match(human.stdout, /access: Propose/);
+  } finally {
+    await h.done();
+  }
+});
+
 test("a completed login names the agent's new and due project notes in a notes_waiting warning", async () => {
   const self = { agent: { id: AGENT, name: "ScreenRig CLI", agent_type: "cli", capabilities: ["screens"], state: "active",
     authenticated_requests: 0, metered_credits: 0, created_at: NOW.toISOString() }, connection_ready: true, notes: { open: 4, new: 3, due: 1 } };

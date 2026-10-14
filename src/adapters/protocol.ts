@@ -166,9 +166,19 @@ export interface Agent {
   version?: string;
 }
 
+/** read (Read only) < propose < manage. */
+export type AccessLevel = "read" | "propose" | "manage";
+/** Why effective_access is lower than the credential's access. */
+export type AccessLimitedBy = "project" | "person";
+
 export interface AgentSelfStatus {
   agent: Agent;
   connection_ready: boolean;
+  /** The credential's access level. */
+  access?: AccessLevel;
+  /** The level this credential acts with now, after the project and person caps. */
+  effective_access?: AccessLevel;
+  access_limited_by?: AccessLimitedBy;
 }
 
 export interface AgentDisconnectRequest {
@@ -1190,3 +1200,83 @@ export interface ProjectContext { organization: OrganizationSummary; project: Pr
 export interface ProjectContextList { projects: ProjectContext[] }
 export interface ProjectCreate { name: string; organization_id?: string; organization_name?: string }
 export type CreatedProject = ProjectContext;
+
+/** Reviews: playlist and screen changes proposed under Propose access, and ad creatives. */
+export type ReviewKind = "playlist_change" | "screen_change" | "ad_creative";
+export type ReviewState = "pending" | "approved" | "rejected" | "changes_requested" | "withdrawn" | "superseded" | "stale";
+export interface ReviewSubject { type: "playlist" | "screen" | "creative"; id: string; name: string }
+export interface ReviewImpact { screens: number }
+export interface ReviewPerson { user_id: string; name: string }
+export interface ReviewProposer {
+  kind: "agent" | "client" | "buyer";
+  agent_id?: string;
+  agent_name?: string;
+  client_id?: string;
+  client_name?: string;
+  project_id?: string;
+  organization_name?: string;
+  person?: ReviewPerson;
+}
+export interface ReviewDecider { user_id?: string; name?: string; agent_id?: string; agent_name?: string }
+export interface ReviewPlaylistDiff {
+  name_changed: boolean;
+  pages_added: string[];
+  pages_removed: string[];
+  pages_changed: string[];
+  soundtrack_changed: boolean;
+  media_added: string[];
+  media_removed: string[];
+}
+export interface ReviewPlaylistChange {
+  operation: "create" | "update" | "selector_refresh";
+  base_revision: number;
+  applied_revision?: number;
+  proposed: Record<string, unknown>;
+  diff: ReviewPlaylistDiff;
+}
+export interface ReviewScreenChange {
+  action: "assign" | "set_playlist_schedule" | "clear_playlist_schedule" | "takeover" | "takeover_clear";
+  screens: { ids?: string[]; tag?: string; count_at_request: number };
+  request: Record<string, unknown>;
+  playlist_ids: string[];
+  result?: { matched: number; succeeded: number; failed: number };
+}
+export interface Review {
+  id: string;
+  kind: ReviewKind;
+  state: ReviewState;
+  subject: ReviewSubject;
+  proposer: ReviewProposer;
+  note?: string;
+  url: string;
+  created_at: string;
+  updated_at: string;
+  decided_at?: string;
+  decided_by?: ReviewDecider;
+  decision_note?: string;
+  previous_review_id?: string;
+  superseded_by?: string;
+  blocked_by?: string[];
+  dependents?: string[];
+  impact: ReviewImpact;
+  playlist_change?: ReviewPlaylistChange;
+  screen_change?: ReviewScreenChange;
+  ad_creative?: { creative_id: string; creative_revision: number; campaign_id?: string; buyer_project_id?: string; content_path: string };
+  preview?: { live: Record<string, unknown> | null; proposed: Record<string, unknown> };
+}
+export interface ReviewList { items: Review[]; next_cursor: string | null; pending_count: number }
+export interface ReviewSummary { id: string; kind: "playlist_change" | "screen_change"; state: "pending"; url: string; subject: ReviewSubject; impact: ReviewImpact }
+/** HTTP 202 from a review-class write under Propose access: the change is not on glass. */
+export interface ReviewPending { status: "pending_review"; review: ReviewSummary; playlist?: Record<string, unknown> }
+export interface ReviewDecisionResult { review: Review; dependents?: Array<{ id: string; state: ReviewState; problem?: Record<string, unknown> }> }
+/** One seller's decision on one creative revision, as the buyer reads it on the creative. */
+export interface AdvertisingCreativeReview {
+  id: string;
+  seller_project_id: string;
+  creative_revision: number;
+  campaign_id?: string;
+  state: "pending" | "approved" | "rejected" | "changes_requested";
+  reason?: string;
+  created_at: string;
+  decided_at?: string;
+}

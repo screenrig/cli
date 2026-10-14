@@ -11,7 +11,19 @@ export const SCOPE_IDENTITY = "identity";
 /** One HTTP attempt. A refresh holds the config lock for at most 15 s: this plus I/O. */
 export const OAUTH_TIMEOUT_MS = 10_000;
 
-export type AccessLevel = "read" | "manage";
+/** read (Read only) < propose < manage; each includes everything below it. */
+export const ACCESS_LEVELS = ["read", "propose", "manage"] as const;
+export type AccessLevel = typeof ACCESS_LEVELS[number];
+
+/** The dashboard's name for an access level. */
+export function accessLabel(level: AccessLevel): string {
+  return level === "manage" ? "Manage" : level === "propose" ? "Propose" : "Read only";
+}
+
+/** The access level a granted scope carries; a grant names exactly one. */
+export function accessFromScope(scope: readonly string[]): AccessLevel {
+  return ACCESS_LEVELS.find((level) => scope.includes(`access:${level}`)) ?? "read";
+}
 
 export interface TokenSet {
   accessToken: string;

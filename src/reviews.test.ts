@@ -1,0 +1,437 @@
+import assert from "node:assert/strict";
+import { chmod, mkdir, open, rename, rm, stat, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { PassThrough } from "node:stream";
+import { test } from "node:test";
+import { writeConfigAtomic, type ConfigFs } from "./config.js";
+import { ExitCode } from "./exit-codes.js";
+import { run, type CliRuntime } from "./main.js";
+import { initializePlaylist } from "./playlist-authoring.js";
+import { testTemp } from "./test-temp.js";
+import { FakeTransport } from "./transport/fake.js";
+import type { TransportRequest, TransportResponse } from "./transport/types.js";
+
+const SCREEN = "scr_AAAAAAAAAAAAAAAAAAAAAAAA";
+const PLAYLIST = "pl_LOBBY";
+const AGENT = "agt_AAAAAAAAAAAAAAAAAAAAAAAA";
+const NOW = new Date("2026-08-14T17:00:00.000Z");
+const NOTE_HEADER = "screenrig-review-note";
+
+interface Envelope {
+  ok: boolean;
+  data?: any;
+  error?: { code: string; status: number; hint?: string; next?: { command: string; argv: string[] } };
+  warnings?: Array<{ code: string; message: string }>;
+}
+interface Env { fs: ConfigFs; cwd: string; configPath: string; dir: string }
+
+function json(status: number, body: unknown, headers: Record<string, string> = {}): TransportResponse {
+  return { status, headers: { "content-type": "application/json", ...headers }, body };
+}
+
+function privateJson(status: number, body: unknown): TransportResponse {
+  return json(status, body, { "cache-control": "private, no-store" });
+}
+
+function problem(status: number, code: string): TransportResponse {
+  return { status, headers: { "content-type": "application/problem+json" }, body: { type: `https://screenrig.ai/problems/${code}`, title: code, status, detail: code, code } };
+}
+
+function summary(id: string, kind: "playlist_change" | "screen_change", subject: { type: "playlist" | "screen"; id: string; name: string }, screens = 1) {
+  return { id, kind, state: "pending" as const, url: `https://screenrig.ai/dashboard/reviews/${id}`, subject, impact: { screens } };
+}
+
+function pending(review: ReturnType<typeof summary>, playlist?: Record<string, unknown>): TransportResponse {
+  return json(202, { status: "pending_review", review, ...(playlist ? { playlist } : {}) });
+}
+
+function collect(stream: PassThrough): Promise<string> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    stream.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    stream.on("finish", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    stream.resume();
+  });
+}
+
+async function enrolled(): Promise<Env> {
+  const dir = await testTemp("reviews-");
+  const configDir = path.join(dir, "config");
+  const cwd = path.join(dir, "cwd");
+  await mkdir(cwd, { recursive: true });
+  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const configPath = path.join(configDir, "screenrig", "config.json");
+  await writeConfigAtomic(configPath, { api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" }, fs);
+  const document = initializePlaylist({ name: "Lobby", media: [{ id: "med_IMAGE", primitive: "image", state: "ready" }], width: 1920, height: 1080, durationMs: 8000, fit: "contain" });
+  await writeFile(path.join(cwd, "lobby.json"), JSON.stringify(document));
+  return { fs, cwd, configPath, dir };
+}
+
+async function cli(argv: string[], transport: FakeTransport, env: Env): Promise<{ code: number; stdout: string; stderr: string; envelope: Envelope }> {
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const outP = collect(stdout);
+  const errP = collect(stderr);
+  const runtime: CliRuntime = {
+    argv, env: env.fs.env, stdout, stderr, now: () => NOW, sleep: async () => undefined,
+    homedir: env.fs.homedir, cwd: () => env.cwd, fs: env.fs, transport,
+  };
+  const code = await run(runtime);
+  stdout.end();
+  stderr.end();
+  const text = await outP;
+  const err = await errP;
+  let envelope: Envelope = { ok: false };
+  try { envelope = JSON.parse(text) as Envelope; } catch { /* human */ }
+  return { code, stdout: text, stderr: err, envelope };
+}
+
+function writes(transport: FakeTransport): TransportRequest[] {
+  return transport.calls.filter((call) => call.method !== "GET");
+}
+
+function assertPending(result: Awaited<ReturnType<typeof cli>>, id: string): void {
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  assert.equal(result.envelope.ok, true);
+  assert.equal(result.envelope.data.status, "pending_review");
+  assert.equal(result.envelope.data.review.id, id);
+  assert.deepEqual(result.envelope.data.next.argv, ["reviews", "show", id]);
+  assert.equal(result.envelope.data.next.command, `screenrig reviews show ${id}`);
+  assert.deepEqual(result.envelope.warnings, [{ code: "pending_review", message: `Waiting for a person to approve: https://screenrig.ai/dashboard/reviews/${id}` }]);
+}
+
+test("playlist create and update that wait for review are a success with the review, a warning and next", async () => {
+  const env = await enrolled();
+  try {
+    const playlist = { id: PLAYLIST, revision: 1, name: "Lobby", approved_revision: 0, approval: { state: "pending", review_id: "rvw_CREATE" } };
+    const transport = new FakeTransport()
+      .on("POST", "/api/playlists", () => pending(summary("rvw_CREATE", "playlist_change", { type: "playlist", id: PLAYLIST, name: "Lobby" }, 0), playlist))
+      .on("PUT", `/api/playlists/${PLAYLIST}`, () => pending(summary("rvw_UPDATE", "playlist_change", { type: "playlist", id: PLAYLIST, name: "Lobby" }, 3), playlist));
+
+    const created = await cli(["--json", "playlist", "create", "lobby.json", "--note", "  New lobby loop  "], transport, env);
+    assertPending(created, "rvw_CREATE");
+    assert.equal(created.envelope.data.playlist.id, PLAYLIST);
+    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], "New lobby loop");
+
+    const updated = await cli(["--json", "playlist", "update", PLAYLIST, "lobby.json", "--expect-rev", "1"], transport, env);
+    assertPending(updated, "rvw_UPDATE");
+    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], undefined, "no --note sends no header");
+    assert.equal(transport.calls.at(-1)!.headers?.["if-match"], "\"1\"");
+
+    const human = await cli(["--human", "playlist", "update", PLAYLIST, "lobby.json", "--note", "Adds the weekend hours"], transport, env);
+    assert.equal(human.code, ExitCode.Success, human.stdout);
+    assert.match(human.stdout, /Playlist change waiting for review/);
+    assert.match(human.stdout, /impact: approving changes 3 screens/);
+    assert.match(human.stdout, /url: https:\/\/screenrig\.ai\/dashboard\/reviews\/rvw_UPDATE/);
+    assert.match(human.stdout, /next: screenrig reviews show rvw_UPDATE/);
+    assert.match(human.stdout, /Nothing changes on glass until a person approves it/);
+  } finally {
+    await rm(env.dir, { recursive: true, force: true });
+  }
+});
+
+test("--note is checked locally: at most 280 characters and no control characters; other text travels as UTF-8 bytes", async () => {
+  const env = await enrolled();
+  try {
+    const transport = new FakeTransport()
+      .on("POST", "/api/playlists", () => json(201, { id: PLAYLIST, revision: 1, name: "Lobby" }));
+    for (const note of ["x".repeat(281), "two\nlines", "   "]) {
+      const refused = await cli(["--json", "playlist", "create", "lobby.json", "--note", note], transport, env);
+      assert.equal(refused.code, ExitCode.Usage, refused.stdout);
+      assert.equal(refused.envelope.error?.code, "usage_error");
+    }
+    assert.equal(writes(transport).length, 0, "a refused note sends nothing");
+
+    const fits = await cli(["--json", "playlist", "create", "lobby.json", "--note", "é".repeat(280)], transport, env);
+    assert.equal(fits.code, ExitCode.Success, fits.stdout);
+    assert.equal(fits.envelope.warnings?.length ?? 0, 0, "a write that applies is unchanged");
+    const header = transport.calls.at(-1)!.headers?.[NOTE_HEADER]!;
+    assert.equal(Buffer.from(header, "latin1").toString("utf8"), "é".repeat(280));
+  } finally {
+    await rm(env.dir, { recursive: true, force: true });
+  }
+});
+
+test("screen assign, schedule and takeover writes send --note and report a review for one screen", async () => {
+  const env = await enrolled();
+  try {
+    const screenReview = (id: string) => summary(id, "screen_change", { type: "screen", id: SCREEN, name: "Lobby" });
+    const transport = new FakeTransport()
+      .on("GET", `/api/playlists/${PLAYLIST}`, () => json(200, { id: PLAYLIST, revision: 1, name: "Lobby", pages: [] }))
+      .on("PATCH", `/api/screens/${SCREEN}`, () => pending(screenReview("rvw_ASSIGN")))
+      .on("DELETE", `/api/screens/${SCREEN}/playlist-schedule`, () => pending(screenReview("rvw_SCHEDULE")))
+      .on("POST", `/api/screens/${SCREEN}/takeover`, () => pending(screenReview("rvw_TAKEOVER")))
+      .on("DELETE", `/api/screens/${SCREEN}/takeover`, () => pending(screenReview("rvw_TAKEOVER_CLEAR")));
+
+    const assigned = await cli(["--json", "screen", "assign", SCREEN, "--playlist-id", PLAYLIST, "--note", "Lobby loop for spring"], transport, env);
+    assertPending(assigned, "rvw_ASSIGN");
+    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], "Lobby loop for spring");
+    assert.equal(transport.calls.filter((call) => call.method === "GET" && call.path === `/api/screens/${SCREEN}`).length, 0, "no assignment readback for a proposal");
+
+    const cleared = await cli(["--json", "screen", "schedule", "clear", SCREEN, "--note", "Back to the default"], transport, env);
+    assertPending(cleared, "rvw_SCHEDULE");
+    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], "Back to the default");
+
+    const takeover = await cli(["--json", "screen", "takeover", "set", SCREEN, "--playlist-id", PLAYLIST, "--note", "Fire drill"], transport, env);
+    assertPending(takeover, "rvw_TAKEOVER");
+    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], "Fire drill");
+
+    const ended = await cli(["--json", "screen", "takeover", "clear", SCREEN], transport, env);
+    assertPending(ended, "rvw_TAKEOVER_CLEAR");
+  } finally {
+    await rm(env.dir, { recursive: true, force: true });
+  }
+});
+
+test("a fleet action that waits for review is one review; a 202 continuation page is still a fleet page", async () => {
+  const env = await enrolled();
+  try {
+    let proposals = true;
+    const transport = new FakeTransport()
+      .on("POST", "/api/screens/actions", (req) => {
+        if (proposals) return pending(summary("rvw_FLEET", "screen_change", { type: "screen", id: SCREEN, name: "tag Lobby" }, 12));
+        const after = req.query?.after;
+        return after === undefined
+          ? json(202, { action: "assign", matched: 1, succeeded: 1, failed: 0, offset: 0, total: 2, next_cursor: "1", results: [{ screen_id: SCREEN, status: "ok" }] })
+          : json(200, { action: "assign", matched: 1, succeeded: 1, failed: 0, offset: 1, total: 2, results: [{ screen_id: "scr_BBBBBBBBBBBBBBBBBBBBBBBB", status: "ok" }] });
+      });
+
+    const proposed = await cli(["--json", "screen", "assign", "--tag", "Lobby", "--playlist-id", PLAYLIST, "--note", "Spring loop on every lobby"], transport, env);
+    assertPending(proposed, "rvw_FLEET");
+    assert.equal(proposed.envelope.data.review.impact.screens, 12);
+    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], "Spring loop on every lobby");
+    assert.deepEqual(transport.calls.at(-1)!.body, { selector: { by: "tag", tag: "Lobby" }, action: { type: "assign", playlist_id: PLAYLIST } });
+
+    proposals = false;
+    const applied = await cli(["--json", "screen", "assign", "--tag", "Lobby", "--playlist-id", PLAYLIST], transport, env);
+    assert.equal(applied.code, ExitCode.Success, applied.stdout);
+    assert.equal(applied.envelope.data.status, undefined);
+    assert.equal(applied.envelope.data.succeeded, 2);
+    assert.equal((applied.envelope.warnings ?? []).some((warning) => warning.code === "pending_review"), false);
+  } finally {
+    await rm(env.dir, { recursive: true, force: true });
+  }
+});
+
+test("screen publish stops at pending_review with both reviews, reports them on rerun, and verifies once approved", async () => {
+  const env = await enrolled();
+  try {
+    let screen: Record<string, unknown> = { id: SCREEN, revision: 7, online: true };
+    const states: Record<string, string> = { rvw_PLAYLIST: "pending", rvw_ASSIGN: "pending" };
+    let created = 0;
+    const transport = new FakeTransport()
+      .on("GET", "/api/project", () => json(200, { id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" }))
+      .on("GET", `/api/screens/${SCREEN}`, () => json(200, screen))
+      .on("POST", "/api/playlists", () => {
+        created += 1;
+        return pending(summary("rvw_PLAYLIST", "playlist_change", { type: "playlist", id: PLAYLIST, name: "Lobby" }, 0),
+          { id: PLAYLIST, revision: 1, name: "Lobby", approved_revision: 0, approval: { state: "pending", review_id: "rvw_PLAYLIST" } });
+      })
+      .on("PATCH", `/api/screens/${SCREEN}`, () => pending(summary("rvw_ASSIGN", "screen_change", { type: "screen", id: SCREEN, name: "Lobby" })))
+      .on("GET", /^\/api\/reviews\/rvw_[A-Z]+$/, (req) => {
+        const id = req.path.split("/").at(-1)!;
+        return json(200, { id, kind: id === "rvw_PLAYLIST" ? "playlist_change" : "screen_change", state: states[id] });
+      });
+
+    const first = await cli(["--json", "screen", "publish", SCREEN, "lobby.json", "--note", "Spring menu"], transport, env);
+    assert.equal(first.code, ExitCode.Success, first.stdout);
+    assert.equal(first.envelope.data.stage, "pending_review");
+    assert.equal(first.envelope.data.playlist_id, PLAYLIST);
+    assert.equal(first.envelope.data.assignment_verified, false);
+    assert.equal(first.envelope.data.playback_verified, false);
+    assert.deepEqual(first.envelope.data.reviews.map((review: { id: string }) => review.id), ["rvw_PLAYLIST", "rvw_ASSIGN"]);
+    assert.deepEqual(first.envelope.data.next.argv, ["reviews", "show", "rvw_PLAYLIST"]);
+    assert.deepEqual(first.envelope.warnings?.map((warning) => warning.code), ["pending_review", "pending_review"]);
+    assert.match(first.stderr, /"stage":"pending_review"/);
+    for (const call of writes(transport)) assert.equal(call.headers?.[NOTE_HEADER], "Spring menu", `${call.method} ${call.path}`);
+    const afterAssign = transport.calls.slice(transport.calls.findIndex((call) => call.method === "PATCH") + 1);
+    assert.equal(afterAssign.length, 0, "no readback or playback wait for a proposal");
+
+    // While the reviews wait the rerun writes nothing and reports them again.
+    const waiting = await cli(["--json", "screen", "publish", SCREEN, "lobby.json", "--note", "Spring menu"], transport, env);
+    assert.equal(waiting.envelope.data.stage, "pending_review");
+    assert.equal(writes(transport).length, 2);
+
+    // The person approved the playlist and its assignment.
+    states.rvw_PLAYLIST = "approved";
+    states.rvw_ASSIGN = "approved";
+    screen = { id: SCREEN, revision: 8, online: true, playlist_id: PLAYLIST };
+    const approved = await cli(["--json", "screen", "publish", SCREEN, "lobby.json", "--no-wait", "--note", "Spring menu"], transport, env);
+    assert.equal(approved.code, ExitCode.Success, approved.stdout);
+    assert.equal(approved.envelope.data.stage, "assigned");
+    assert.equal(approved.envelope.data.assignment_verified, true);
+    assert.equal(writes(transport).length, 2);
+    assert.equal(created, 1);
+  } finally {
+    await rm(env.dir, { recursive: true, force: true });
+  }
+});
+
+test("a rejected publish proposal is history: the identical rerun proposes afresh", async () => {
+  const env = await enrolled();
+  try {
+    const states: Record<string, string> = {};
+    let created = 0;
+    const transport = new FakeTransport()
+      .on("GET", "/api/project", () => json(200, { id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" }))
+      .on("GET", `/api/screens/${SCREEN}`, () => json(200, { id: SCREEN, revision: 7 }))
+      .on("POST", "/api/playlists", () => {
+        created += 1;
+        states[`rvw_P${created}`] = "pending";
+        return pending(summary(`rvw_P${created}`, "playlist_change", { type: "playlist", id: `${PLAYLIST}${created}`, name: "Lobby" }, 0), { id: `${PLAYLIST}${created}`, revision: 1 });
+      })
+      .on("PATCH", `/api/screens/${SCREEN}`, () => {
+        states[`rvw_S${created}`] = "pending";
+        return pending(summary(`rvw_S${created}`, "screen_change", { type: "screen", id: SCREEN, name: "Lobby" }));
+      })
+      .on("GET", /^\/api\/reviews\//, (req) => json(200, { id: req.path.split("/").at(-1), state: states[req.path.split("/").at(-1)!] }));
+
+    const first = await cli(["--json", "screen", "publish", SCREEN, "lobby.json"], transport, env);
+    assert.equal(first.envelope.data.playlist_id, `${PLAYLIST}1`);
+    states.rvw_P1 = "rejected";
+    const again = await cli(["--json", "screen", "publish", SCREEN, "lobby.json"], transport, env);
+    assert.equal(again.code, ExitCode.Success, again.stdout);
+    assert.equal(again.envelope.data.stage, "pending_review");
+    assert.equal(again.envelope.data.playlist_id, `${PLAYLIST}2`);
+    assert.deepEqual(again.envelope.data.reviews.map((review: { id: string }) => review.id), ["rvw_P2", "rvw_S2"]);
+  } finally {
+    await rm(env.dir, { recursive: true, force: true });
+  }
+});
+
+test("reviews list, show and withdraw", async () => {
+  const env = await enrolled();
+  try {
+    const review = {
+      id: "rvw_ONE", kind: "playlist_change", state: "changes_requested", url: "https://screenrig.ai/dashboard/reviews/rvw_ONE",
+      subject: { type: "playlist", id: PLAYLIST, name: "Lobby" }, impact: { screens: 2 },
+      proposer: { kind: "agent", agent_id: AGENT, agent_name: "Menu agent", person: { user_id: "usr_PERSON", name: "Ada" } },
+      note: "Adds the weekend hours", decision_note: "Use the new logo\u001b[31m", decided_at: "2026-08-14T16:00:00Z",
+      decided_by: { user_id: "usr_OWNER", name: "Grace" }, created_at: "2026-08-14T15:00:00Z", updated_at: "2026-08-14T16:00:00Z",
+      playlist_change: { operation: "update", base_revision: 4, proposed: {}, diff: { name_changed: false, pages_added: ["p3"], pages_removed: [], pages_changed: ["p1", "p2"], soundtrack_changed: false, media_added: [], media_removed: [] } },
+    };
+    const transport = new FakeTransport()
+      .on("GET", "/api/reviews", () => json(200, { items: [review], next_cursor: "c2", pending_count: 3 }))
+      .on("GET", "/api/reviews/rvw_ONE", () => json(200, review))
+      .on("POST", "/api/reviews/rvw_ONE/withdraw", () => json(200, { review: { ...review, state: "withdrawn" } }));
+
+    const listed = await cli(["--json", "reviews", "list", "--state", "all", "--kind", "playlist_change", "--limit", "10"], transport, env);
+    assert.equal(listed.code, ExitCode.Success, listed.stdout);
+    assert.deepEqual(transport.calls.at(-1)!.query, { state: "all", kind: "playlist_change", limit: "10", cursor: undefined });
+    assert.equal(listed.envelope.data.pending_count, 3);
+    assert.deepEqual(listed.envelope.data.next.argv, ["reviews", "list", "--state", "all", "--kind", "playlist_change", "--limit", "10", "--cursor", "c2"]);
+
+    const tooMany = await cli(["--json", "reviews", "list", "--limit", "101"], transport, env);
+    assert.equal(tooMany.code, ExitCode.Usage);
+    const badState = await cli(["--json", "reviews", "list", "--state", "open"], transport, env);
+    assert.equal(badState.code, ExitCode.Usage);
+
+    const humanList = await cli(["--human", "reviews", "list"], transport, env);
+    assert.match(humanList.stdout, /Reviews \(1; 3 pending\)/);
+    assert.match(humanList.stdout, /rvw_ONE {2}playlist_change {2}changes_requested {2}playlist Lobby \(pl_LOBBY\)/);
+    assert.match(humanList.stdout, /next: screenrig reviews list --cursor c2/);
+
+    const shown = await cli(["--human", "reviews", "show", "rvw_ONE"], transport, env);
+    assert.equal(shown.code, ExitCode.Success, shown.stdout);
+    assert.match(shown.stdout, /Review rvw_ONE: Playlist change, changes_requested/);
+    assert.match(shown.stdout, /proposed_by: agent Menu agent, for Ada/);
+    assert.match(shown.stdout, /decision_note: Use the new logo \[31m/);
+    assert.doesNotMatch(shown.stdout, /\u001b/);
+    assert.match(shown.stdout, /change: update of revision 4; pages 2 changed, 1 added; soundtrack unchanged/);
+
+    const withdrawn = await cli(["--json", "reviews", "withdraw", "rvw_ONE"], transport, env);
+    assert.equal(withdrawn.code, ExitCode.Success, withdrawn.stdout);
+    assert.equal(withdrawn.envelope.data.review.state, "withdrawn");
+    assert.ok(transport.calls.at(-1)!.headers?.["idempotency-key"]);
+  } finally {
+    await rm(env.dir, { recursive: true, force: true });
+  }
+});
+
+test("ads reviews request-changes posts the note, and creative show prints each review with its reason", async () => {
+  const env = await enrolled();
+  try {
+    const transport = new FakeTransport()
+      .on("POST", "/api/advertising/reviews/arv_ONE/request-changes", () => privateJson(200, { id: "arv_ONE", state: "changes_requested", reason: "Bigger logo" }))
+      .on("GET", "/api/advertising/creatives/crv_ONE", () => privateJson(200, {
+        id: "crv_ONE", revision: 2, reviews: [
+          { id: "arv_ONE", seller_project_id: "prj_SELLER", creative_revision: 1, state: "changes_requested", reason: "Bigger logo", created_at: "2026-08-14T15:00:00Z" },
+          { id: "arv_TWO", seller_project_id: "prj_OTHER", creative_revision: 2, campaign_id: "cmp_ONE", state: "approved", created_at: "2026-08-14T16:00:00Z" },
+        ],
+      }));
+
+    const missing = await cli(["--json", "ads", "reviews", "request-changes", "arv_ONE"], transport, env);
+    assert.equal(missing.code, ExitCode.Usage);
+    const asked = await cli(["--json", "ads", "reviews", "request-changes", "arv_ONE", "--note", "Bigger logo"], transport, env);
+    assert.equal(asked.code, ExitCode.Success, asked.stdout);
+    assert.deepEqual(transport.calls.at(-1)!.body, { note: "Bigger logo" });
+    assert.equal(asked.envelope.data.state, "changes_requested");
+
+    const shown = await cli(["--human", "ads", "creatives", "show", "crv_ONE"], transport, env);
+    assert.equal(shown.code, ExitCode.Success, shown.stdout);
+    assert.match(shown.stdout, /review arv_ONE changes_requested seller prj_SELLER revision 1: Bigger logo/);
+    assert.match(shown.stdout, /review arv_TWO approved seller prj_OTHER revision 2 campaign cmp_ONE/);
+  } finally {
+    await rm(env.dir, { recursive: true, force: true });
+  }
+});
+
+test("agent status reports access, effective_access and access_limited_by", async () => {
+  const env = await enrolled();
+  try {
+    const self = (extra: Record<string, unknown>) => ({
+      agent: { id: AGENT, name: "Menu agent", agent_type: "cli", capabilities: ["screens"], state: "active", authenticated_requests: 0, metered_credits: 0, created_at: NOW.toISOString() },
+      connection_ready: true, ...extra,
+    });
+    let body = self({ access: "manage", effective_access: "propose", access_limited_by: "project" });
+    const transport = new FakeTransport().on("GET", "/api/agents/self", () => privateJson(200, body));
+
+    const limited = await cli(["--json", "agent", "status"], transport, env);
+    assert.equal(limited.code, ExitCode.Success, limited.stdout);
+    assert.equal(limited.envelope.data.access, "manage");
+    assert.equal(limited.envelope.data.effective_access, "propose");
+    assert.equal(limited.envelope.data.access_limited_by, "project");
+    const human = await cli(["--human", "agent", "status"], transport, env);
+    assert.match(human.stdout, /access: Manage/);
+    assert.match(human.stdout, /effective_access: Propose \(the project requires review for agent changes\)/);
+
+    body = self({ access: "propose", effective_access: "propose" });
+    const plain = await cli(["--json", "agent", "status"], transport, env);
+    assert.equal(plain.envelope.data.access, "propose");
+    assert.equal(plain.envelope.data.effective_access, "propose");
+    assert.equal(plain.envelope.data.access_limited_by, undefined);
+  } finally {
+    await rm(env.dir, { recursive: true, force: true });
+  }
+});
+
+test("insufficient_access names Manage, or the project or person limit that holds the agent to Propose", async () => {
+  const env = await enrolled();
+  try {
+    let self: Record<string, unknown> = { access: "propose", effective_access: "propose" };
+    const transport = new FakeTransport()
+      .on("DELETE", `/api/playlists/${PLAYLIST}`, () => problem(403, "insufficient_access"))
+      .on("GET", "/api/agents/self", () => privateJson(200, {
+        agent: { id: AGENT, name: "Menu agent", agent_type: "cli", capabilities: ["playlists"], state: "active", authenticated_requests: 0, metered_credits: 0, created_at: NOW.toISOString() },
+        connection_ready: true, ...self,
+      }));
+
+    const propose = await cli(["--json", "playlist", "delete", PLAYLIST], transport, env);
+    assert.equal(propose.code, ExitCode.Auth, propose.stdout);
+    assert.equal(propose.envelope.error?.code, "insufficient_access");
+    assert.match(propose.envelope.error?.hint ?? "", /Propose access/);
+    assert.deepEqual(propose.envelope.error?.next?.argv, ["login", "--access", "manage"]);
+
+    self = { access: "manage", effective_access: "propose", access_limited_by: "project" };
+    const project = await cli(["--json", "playlist", "delete", PLAYLIST], transport, env);
+    assert.equal(project.code, ExitCode.Auth);
+    assert.match(project.envelope.error?.hint ?? "", /requires review for agent changes/);
+    assert.equal(project.envelope.error?.next, undefined, "a new sign-in does not lift a project limit");
+
+    self = { access: "manage", effective_access: "propose", access_limited_by: "person" };
+    const person = await cli(["--json", "playlist", "delete", PLAYLIST], transport, env);
+    assert.match(person.envelope.error?.hint ?? "", /Can approve/);
+  } finally {
+    await rm(env.dir, { recursive: true, force: true });
+  }
+});

@@ -17,7 +17,8 @@ import { callPlaylist } from "./playlist-api.js";
 import { isAdSlotPage } from "./playlist-authoring.js";
 import { CliError, makeProblem, usageError } from "./problems.js";
 import { fetchSignedRawPut, type CliRuntime } from "./runtime.js";
-import type { MediaUploadSession, Operation } from "./adapters/protocol.js";
+import type { MediaUploadSession, Operation, ReviewSummary } from "./adapters/protocol.js";
+import { pendingReviewOf, reviewNoteHeaders } from "./reviews.js";
 
 export const PLAYLIST_BUNDLE_SCHEMA = "screenrig.playlist-bundle/v1";
 export const PLAYLIST_BUNDLE_MANIFEST = "screenrig-bundle.json";
@@ -109,6 +110,9 @@ export interface PlaylistBundleImportResult {
     reused: number;
     uploaded: number;
   };
+  /** Present when the playlist write became a review under Propose access. */
+  status?: "pending_review";
+  review?: ReviewSummary;
 }
 
 function record(value: unknown, name: string): JsonRecord {
@@ -958,6 +962,8 @@ export async function importPlaylistBundle(options: {
   name?: string;
   timeoutMs?: number;
   pollMs?: number;
+  /** The proposer's note when the playlist write becomes a review. */
+  note?: string;
   beforePlaylistWrite?: (playlist: JsonRecord, updateId: string | undefined) => Promise<void>;
 }): Promise<PlaylistBundleImportResult> {
   if (options.name !== undefined) {
@@ -1078,7 +1084,7 @@ export async function importPlaylistBundle(options: {
         id: options.updateId,
         idempotencyKey: playlistKey,
         body: playlist,
-        ...(ifMatch ? { headers: { "if-match": ifMatch } } : {}),
+        headers: { ...reviewNoteHeaders(options.note), ...(ifMatch ? { "if-match": ifMatch } : {}) },
       })
       : await options.client.call({
         method: "POST",
@@ -1086,14 +1092,18 @@ export async function importPlaylistBundle(options: {
         idempotent: true,
         idempotencyKey: playlistKey,
         body: playlist,
+        headers: reviewNoteHeaders(options.note),
       });
+    // Under Propose access the write becomes a review: media is uploaded, the playlist change waits.
+    const pending = pendingReviewOf(response);
     return {
       schema: PLAYLIST_BUNDLE_SCHEMA,
       directory: bundle.root,
       source_playlist_id: bundle.manifest.playlist.source_id,
-      playlist: response.body,
+      playlist: pending ? pending.playlist : response.body,
       mode: options.updateId ? "update" : "create",
       media: { total: bundle.manifest.media.length, reused, uploaded: uploaded.length },
+      ...(pending ? { status: "pending_review" as const, review: pending.review } : {}),
     };
   } catch (error) {
     rethrowRateLimitedImport(error, { uploaded, mutationStarted, playlistWriteStarted });

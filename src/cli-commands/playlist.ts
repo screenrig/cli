@@ -1,5 +1,5 @@
 import { addValueAlias } from "./aliases.js";
-import { nonnegativeInteger, positiveInteger, revision } from "./options.js";
+import { NOTE_HELP, nonnegativeInteger, positiveInteger, reviewNoteOption, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import { handlePlaylistReplaceRelease, handlePlaylistInit, handlePlaylistValidate, handlePlaylistPreview, handlePlaylistTemplates, handlePlaylistCreate, handlePlaylistUpdate, handlePlaylistExport, handlePlaylistImport, handlePlaylistShow, handlePlaylistList, handlePlaylistDelete } from "../commands.js";
 import { type Command, Option } from "commander";
@@ -46,12 +46,14 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
 
   playlist.command("create").description("Create a playlist from a file")
     .argument("<file>", "Playlist JSON file, or - for stdin")
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handlePlaylistCreate));
 
   playlist.command("update").description("Update a playlist")
     .argument("<id>", "Playlist identifier")
     .argument("<file>", "Playlist JSON file, or - for stdin")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handlePlaylistUpdate));
 
   const replaceRelease = playlist.command("replace-release").description("Preview or apply one application release replacement and its shared-screen impact")
@@ -62,9 +64,11 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--apply", "Apply the reviewed replacement")
     .option("--expect-rev <REVISION>", "Playlist revision from the preview", revision)
     .option("--expect-impact <TOKEN>", "Impact token from the preview")
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handlePlaylistReplaceRelease));
   requireOptionGroup(replaceRelease, "requires", ["--expect-impact", "--apply"]);
   requireOptionGroup(replaceRelease, "requires", ["--expect-rev", "--apply"]);
+  requireOptionGroup(replaceRelease, "requires", ["--note", "--apply"]);
   addCommandNotes(replaceRelease, "Defaults to a read-only preview including active and archived assigned screens. Apply writes directly; --expect-impact and --expect-rev are optional guards. Changed impact requires a fresh review. Screen assignments are a snapshot; a supplied playlist revision is checked atomically. Server validates release availability and ownership on apply.");
   addCommandExamples(replaceRelease, 'screenrig playlist replace-release pl_PLAYLIST --page board-page --primitive board --release-id rel_NEW',
     'screenrig playlist replace-release pl_PLAYLIST --page board-page --primitive board --release-id rel_NEW --apply');
@@ -82,6 +86,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--update <ID>", "Update this playlist when importing")
     .option("--expect-rev <REVISION>", "Require the current resource revision", revision)
     .option("--poll-ms <MS>", "Set the operation polling interval", positiveInteger("poll-ms"))
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handlePlaylistImport));
   requireOptionGroup(importCommand, "requires", ["--expect-rev", "--update"]);
 

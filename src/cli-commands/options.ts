@@ -1,6 +1,7 @@
 import { quotedRevision } from "../if-match.js";
 import { usageError } from "../problems.js";
 import { screenTag, screenTagList } from "../screen-fleet.js";
+import { decisionNote, reviewNote } from "../reviews.js";
 
 export function nonnegativeInteger(name: string): (value: string) => string {
   return (value) => {
@@ -55,6 +56,19 @@ export function screenTagListOption(flag: string): (value: string) => string {
     screenTagList(value, flag);
     return value;
   };
+}
+
+/** --note help on every review-class write. */
+export const NOTE_HELP = "Note for the person who reviews this change when it waits for review (at most 280 characters)";
+
+/** --note on a review-class write: at most 280 characters, sent as Screenrig-Review-Note. */
+export function reviewNoteOption(value: string): string {
+  return reviewNote(value);
+}
+
+/** --note on a review decision: at most 500 characters. */
+export function decisionNoteOption(value: string): string {
+  return decisionNote(value);
 }
 
 /** GET /api/events `type`: an exact event type, or a family prefix ending in a dot. */

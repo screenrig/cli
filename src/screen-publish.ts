@@ -9,10 +9,18 @@ import { quotedRevision } from "./if-match.js";
 import { isAdSlotPage } from "./playlist-authoring.js";
 import { CliError, makeProblem, usageError } from "./problems.js";
 import { manifestUpgradeOf } from "./screen-manifest-upgrade.js";
+import { pendingReviewOf, reviewNoteHeaders } from "./reviews.js";
+import type { Review } from "./adapters/protocol.js";
 import type { CliRuntime } from "./runtime.js";
 
 type Resource = { id: string; revision: number; playlist_id?: string; timezone?: string };
-interface Journal { version: 1; created_at: number; fingerprint: string; create_key: string; assign_key: string; playlist?: Resource; assigned?: boolean }
+/** A review this publish opened: identity only, never the proposed content. */
+export interface PublishReview { id: string; kind: string; state: string; url: string }
+interface Journal {
+  version: 1; created_at: number; fingerprint: string; create_key: string; assign_key: string; playlist?: Resource; assigned?: boolean;
+  /** The assignment became a review: nothing is on glass until a person approves it. */
+  proposed?: boolean; reviews?: PublishReview[];
+}
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 function resource(value: unknown, kind: ResourceIDKind): Resource {
   const item = value as Resource;
@@ -88,6 +96,8 @@ async function awaitPlayback(options: {
 export async function publishScreen(options: {
   client: ApiClient; runtime: CliRuntime; configPath: string; apiUrl: string;
   screenId: string; revision?: string; document: any; requestedKey?: string;
+  /** Screenrig-Review-Note for the person who reviews a proposed publish. */
+  note?: string;
   /** Wait for the Player to show the playlist; omit to return after assignment. */
   wait?: { timeoutMs: number; pollMs: number };
   progress?: (stage: string, state?: string) => void;
@@ -144,7 +154,41 @@ export async function publishScreen(options: {
       state = JSON.parse(await readFile(journalPath, "utf8"));
       if (state?.version !== 1 || state.fingerprint !== fingerprint || !Number.isFinite(state.created_at) || !state.create_key || !state.assign_key) throw usageError("Publish journal is invalid.");
       if (state.playlist) resource(state.playlist, "playlist");
+      if (state.reviews !== undefined && (!Array.isArray(state.reviews) || state.reviews.some((review) => typeof review?.id !== "string" || typeof review.url !== "string"))) throw usageError("Publish journal is invalid.");
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    const noteHeaders = reviewNoteHeaders(options.note);
+    const pendingResult = (reviews: PublishReview[]) => {
+      options.progress?.("pending_review");
+      return { playlist_id: state!.playlist!.id, playlist_revision: state!.playlist!.revision, screen_id: screenId,
+        stage: "pending_review" as const, assignment_verified: false, playback_verified: false, reviews, journal: journalPath };
+    };
+    if (state?.proposed && state.playlist) {
+      // A proposed publish changes nothing until a person approves it. An
+      // approved assignment shows on the screen, so verify it like any other;
+      // a proposal still waiting answers the same; a declined, withdrawn or
+      // replaced one is history, so start a fresh proposal.
+      const current = resource((await client.call({ method: "GET", path: `/api/screens/${screenId}` })).body, "screen");
+      if (current.id === screenId && current.playlist_id === state.playlist.id) {
+        state.assigned = true;
+        state.proposed = undefined;
+        await save();
+      } else {
+        const reviews: PublishReview[] = [];
+        for (const review of state.reviews ?? []) {
+          const latest = (await client.call({ method: "GET", path: `/api/reviews/${encodeURIComponent(review.id)}` })).body as Partial<Review> | undefined;
+          reviews.push({ ...review, state: typeof latest?.state === "string" ? latest.state : review.state });
+        }
+        const waiting = reviews.some((review) => review.state === "pending")
+          && reviews.every((review) => review.state === "pending" || review.state === "approved");
+        if (waiting) {
+          state.reviews = reviews;
+          await save();
+          return pendingResult(reviews);
+        }
+        await rm(journalPath, { force: true });
+        state = undefined;
+      }
+    }
     const resumed = state !== undefined;
     let alreadyPublished = false;
     if (state?.assigned && state.playlist) {
@@ -178,18 +222,33 @@ export async function publishScreen(options: {
       state = { version: 1, created_at: options.runtime.now().getTime(), fingerprint, create_key: newIdempotencyKey(), assign_key: newIdempotencyKey() };
       await save();
     }
+    const proposal = (response: { status: number; body: unknown }) => {
+      const pending = pendingReviewOf(response);
+      if (!pending) return undefined;
+      const { id, kind, state: reviewState, url } = pending.review;
+      state!.reviews = [...(state!.reviews ?? []).filter((review) => review.id !== id), { id, kind, state: reviewState, url }];
+      return pending;
+    };
     if (!state.assigned && options.runtime.now().getTime() - state.created_at >= 24 * 60 * 60 * 1000) {
       throw usageError("The publish replay window has expired. Inspect the project and screen before reconciling; this command will not repeat an ambiguous write after server idempotency expiry.");
     }
     if (!state.playlist) {
-      const response = await client.call({ method: "POST", path: "/api/playlists", body: document, idempotent: true, idempotencyKey: state.create_key });
-      state.playlist = resource(response.body, "playlist");
+      const response = await client.call({ method: "POST", path: "/api/playlists", body: document, headers: noteHeaders, idempotent: true, idempotencyKey: state.create_key });
+      // Under Propose access the new playlist waits for approval; the assignment
+      // that follows waits on it, so both become reviews.
+      const pending = proposal(response);
+      state.playlist = resource(pending ? pending.playlist : response.body, "playlist");
       // Persist identity only, never the returned playlist or resolved media.
       state.playlist = { id: state.playlist.id, revision: state.playlist.revision };
       await save();
     }
     if (!state.assigned) {
-      await client.call({ method: "PATCH", path: `/api/screens/${screenId}`, body: { playlist_id: state.playlist.id }, headers: options.revision ? { "if-match": quotedRevision(options.revision) } : undefined, idempotent: true, idempotencyKey: state.assign_key });
+      const response = await client.call({ method: "PATCH", path: `/api/screens/${screenId}`, body: { playlist_id: state.playlist.id }, headers: { ...noteHeaders, ...(options.revision ? { "if-match": quotedRevision(options.revision) } : {}) }, idempotent: true, idempotencyKey: state.assign_key });
+      if (proposal(response)) {
+        state.proposed = true;
+        await save();
+        return pendingResult(state.reviews!);
+      }
       state.assigned = true;
       await save();
     }
@@ -200,7 +259,7 @@ export async function publishScreen(options: {
       : { playing: false, reason: "not_waited", online: (screen as { online?: unknown }).online === true, waited_ms: 0 };
     if (playback.playing) options.progress?.("playing", playback.state);
     return { playlist_id: state.playlist.id, playlist_revision: state.playlist.revision, screen_id: screenId, screen_revision: screen.revision,
-      stage: playback.playing ? "playing" : "assigned", assignment_verified: true, playback_verified: playback.playing, playback, journal: journalPath,
+      stage: (playback.playing ? "playing" : "assigned") as "playing" | "assigned", assignment_verified: true, playback_verified: playback.playing, playback, journal: journalPath,
       ...(alreadyPublished ? { already_published: true } : {}) };
   } catch (error) {
     if (error instanceof CliError) {

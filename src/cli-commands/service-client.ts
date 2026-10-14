@@ -7,6 +7,7 @@ import { type Command, Option } from "commander";
 import { addCommandNotes } from "./notes.js";
 import { AGENT_CAPABILITIES } from "../adapters/protocol.js";
 import { usageError } from "../problems.js";
+import { ACCESS_LEVELS } from "../oauth.js";
 
 export function registerServiceClientCommands(root: Command, bind: CommandActionBinder): void {
   const group = root.command("service-client").description("Create and manage this project's service clients");
@@ -26,11 +27,11 @@ export function registerServiceClientCommands(root: Command, bind: CommandAction
         if (requested.includes(value)) throw usageError(`Capability ${value} was supplied more than once.`);
         return [...requested, value].join(",");
       }))
-    .addOption(new Option("--access <LEVEL>", "Read only or Manage (default read)").choices(["read", "manage"]))
+    .addOption(new Option("--access <LEVEL>", "Read only, Propose or Manage (default read)").choices([...ACCESS_LEVELS]))
     .option("--key-file <PATH>", "Register this public key (a JWK or PEM; a private key file sends only its public half)")
     .option("--secret-file <PATH>", "Generate a secret and write it to this new 0600 file")
     .action(bind(handleServiceClientCreate)),
-  "Supply --key-file, --secret-file or both. Keys are Ed25519, EC P-256 or RSA of at least 2048 bits; a key without a kid is known by its RFC 7638 thumbprint. The secret is shown once, so it is written only to --secret-file, which must not exist yet. At most 50 live clients per project.");
+  "Propose access proposes playlist and screen changes for a person to review instead of applying them. Supply --key-file, --secret-file or both. Keys are Ed25519, EC P-256 or RSA of at least 2048 bits; a key without a kid is known by its RFC 7638 thumbprint. The secret is shown once, so it is written only to --secret-file, which must not exist yet. At most 50 live clients per project.");
 
   group.command("add-key").description("Register a second public key for rotation").argument("<id>", "Service client id")
     .requiredOption("--key-file <PATH>", "The public key (a JWK or PEM)").action(bind(handleServiceClientAddKey));

@@ -4,15 +4,16 @@ import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { AGENT_CAPABILITIES } from "../adapters/protocol.js";
 import { usageError } from "../problems.js";
+import { ACCESS_LEVELS } from "../oauth.js";
 
 export function registerAgentCommands(root: Command, bind: CommandActionBinder): void {
   addCommandNotes(root.command("login").description("Sign this installation in with a person's approval in the dashboard")
     .option("--project <ID>", "Suggest the project the person approves")
-    .addOption(new Option("--access <LEVEL>", "Ask for Read only or Manage access (default manage)").choices(["read", "manage"]))
+    .addOption(new Option("--access <LEVEL>", "Ask for Read only, Propose or Manage access (default manage)").choices([...ACCESS_LEVELS]))
     .option("--name <NAME>", "Set this agent installation name")
     .option("--no-wait", "Print the sign-in URL and code with a resume handle, and return")
     .option("--resume <ID>", "Continue a pending sign-in by the login_ handle --no-wait printed")
-    .action(bind(handleLogin)), "Prints a dashboard URL and a code. A person signed in to the dashboard opens it, checks that the code matches, chooses the project and Read only or Manage, and approves; the CLI then stores the session and selects that project. The code lasts 10 minutes. An installation that already holds identity access adds the approved project to its sign-in, which is also how a Read only project is raised to Manage. Read only lists and reads; it cannot change, publish or buy, and metered reads still bill. --no-wait returns at once with a login_ handle that holds no secret; screenrig login --resume ID waits for the approval later. When the signed-in agent has new project notes or notes due for review, warning notes_waiting names them and screenrig notes; human output prints the same line after the result.");
+    .action(bind(handleLogin)), "Prints a dashboard URL and a code. A person signed in to the dashboard opens it, checks that the code matches, chooses the project and Read only, Propose or Manage, and approves; the CLI then stores the session and selects that project. The code lasts 10 minutes. --access suggests a level; the person approving chooses it. An installation that already holds identity access adds the approved project to its sign-in, which is also how a project's access is raised. Read only lists and reads; it cannot change, publish or buy, and metered reads still bill. Propose also uploads media and writes notes, and every change to what plays (playlist create and update, screen assign, schedules, takeovers) becomes a review that a person approves in the dashboard before it reaches a screen. Manage applies changes directly. A project that requires review for agent changes, or a responsible person who cannot approve, holds the sign-in to Propose; agent status shows access, effective_access and access_limited_by. --no-wait returns at once with a login_ handle that holds no secret; screenrig login --resume ID waits for the approval later. When the signed-in agent has new project notes or notes due for review, warning notes_waiting names them and screenrig notes; human output prints the same line after the result.");
 
   addCommandNotes(root.command("logout").description("End this installation's sign-in and remove its tokens")
     .action(bind(handleLogout)), "Revokes the sign-in on the server, then removes the stored session and access tokens. A failure that might not have reached the server keeps them, so rerunning logout is safe. Run screenrig login to sign in again.");
@@ -50,9 +51,9 @@ export function registerAgentCommands(root: Command, bind: CommandActionBinder):
     .option("--no-wait", "Print the sign-in URL and code with a resume handle, and return (default)")
     .addOption(new Option("--cancel", "Clear this installation's pending sign-in")
       .conflicts(["targetProjectId", "name", "capability", "printUrl", "wait"]))
-    .action(bind(handleAgentConnect)), "Runs screenrig login and adds a command_renamed warning naming it. Without --wait it returns pending with a login_ resume handle; screenrig login --resume ID finishes it. The person approving the sign-in in the dashboard chooses the project, Read only or Manage, and the capabilities.");
+    .action(bind(handleAgentConnect)), "Runs screenrig login and adds a command_renamed warning naming it. Without --wait it returns pending with a login_ resume handle; screenrig login --resume ID finishes it. The person approving the sign-in in the dashboard chooses the project, Read only, Propose or Manage, and the capabilities.");
 
-  agent.command("status").description("Inspect this agent's connection")
+  agent.command("status").description("Inspect this agent's connection and access")
     .action(bind(handleAgentStatus));
 
   agent.command("disconnect").description("Revoke this agent's membership in the current project")
