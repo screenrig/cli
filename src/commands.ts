@@ -178,6 +178,26 @@ import {
 } from "./media/transcode.js";
 import { exportPlaylistBundle, importPlaylistBundle } from "./playlist-bundle.js";
 import { agentPlatform, validateAgent, validateAgentSelfStatus } from "./agent-identity.js";
+import {
+  AGENT_SELF_PATH,
+  NOTE_INPUT_MAX_BYTES,
+  NotesApi,
+  matchedOpenNote,
+  noteBody,
+  noteDetailLines,
+  noteId,
+  noteListLines,
+  noteReason,
+  notesHint,
+  parseNoteAbout,
+  parseNoteTtl,
+  resourceNoteLines,
+  selfNoteCounts,
+  type Note,
+  type NoteCounts,
+  type NoteList,
+  type NoteState,
+} from "./agent-notes.js";
 import { CLI_VERSION, cliDistribution } from "./version.js";
 
 export { CLI_VERSION };
@@ -665,7 +685,7 @@ function commandHandler(
     // Sign-in reset is unauthenticated but still retains a durable retry key.
     const ordinary = (group === "dashboard" && action === "reset-sign-in")
       || Boolean(authenticated && resolved.token && (
-        ["kv", "comment", "feedback", "support", "operations"].includes(group ?? "") ||
+        ["kv", "comment", "feedback", "support", "operations", "notes"].includes(group ?? "") ||
         (group === "app" && ["upload", "update"].includes(action ?? "")) ||
         (group === "playlist" && ["create", "update", "delete"].includes(action ?? "")) ||
         (group === "media" && ["update", "delete"].includes(action ?? "")) ||
@@ -1080,7 +1100,8 @@ async function login(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCo
   const context = contextFromProject(response.body as Project);
   await cacheProjectContexts(runtime, signedIn, [context], { credential: token });
   const access = outcome.scope.includes("access:manage") ? "manage" : "read";
-  return {
+  const counts = await selfNoteCountsFor(runtime, args, signedIn.apiUrl, token);
+  return withNotesHint({
     envelope: successEnvelope({
       status: "signed_in",
       project: context.project,
@@ -1094,7 +1115,7 @@ async function login(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCo
       ["project", `${context.organization.name} / ${context.project.name} (${context.project.id})`],
       ["access", access === "manage" ? "Manage" : "Read only"],
     ]),
-  };
+  }, args, runtime, counts);
 }
 
 async function logout(_args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
@@ -1233,6 +1254,33 @@ function safeAgentSummary(agent: Agent) {
   };
 }
 
+/**
+ * One line naming new and due project notes. Human output carries it after the
+ * result; JSON output keeps stdout to the envelope, so the line goes to stderr.
+ */
+function withNotesHint(result: CommandResult, args: ParsedArgs, runtime: CliRuntime, counts: NoteCounts | undefined): CommandResult {
+  const hint = notesHint(counts);
+  if (!hint) return result;
+  if (flagBool(args.flags, "human")) return { ...result, human: result.human ? `${result.human}\n${hint}` : hint };
+  try {
+    runtime.stderr.write(`${hint}\n`);
+  } catch {
+    // The hint never fails the command.
+  }
+  return result;
+}
+
+/** The calling agent's note counts in a project. Any failure means no hint. */
+async function selfNoteCountsFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token: string | undefined): Promise<NoteCounts | undefined> {
+  if (!token) return undefined;
+  try {
+    const response = await clientFor(runtime, args, apiUrl, token).call({ method: "GET", path: AGENT_SELF_PATH });
+    return selfNoteCounts(response.body);
+  } catch {
+    return undefined;
+  }
+}
+
 async function agentStatus(
   args: ParsedArgs,
   runtime: CliRuntime,
@@ -1255,12 +1303,12 @@ async function agentStatus(
 
   const client = clientFor(runtime, args, resolved.apiUrl, resolved.token);
   try {
-    const response = await client.call({ method: "GET", path: "/api/agents/self" });
+    const response = await client.call({ method: "GET", path: AGENT_SELF_PATH });
     requirePrivateNoStore(response.headers, "Agent status response");
     const self = validateAgentSelfStatus(response.body);
     const agent = self.agent;
     const status = agent.state === "active" ? "active" : agent.state === "revoked" ? "disconnected" : "connecting";
-    return {
+    return withNotesHint({
       envelope: successEnvelope({ status, connection_ready: self.connection_ready, agent: safeAgentSummary(agent) }, { request_id: client.requestId }),
       exitCode: ExitCode.Success,
       human: humanLines("Agent", [
@@ -1274,7 +1322,7 @@ async function agentStatus(
         ["connection_ready", self.connection_ready ? "true" : "false"],
         ["last_used_at", agent.last_used_at],
       ]),
-    };
+    }, args, runtime, selfNoteCounts(response.body));
   } catch (err) {
     if (!(err instanceof CliError) || err.problem.code !== "unauthorized") throw err;
     const next = {
@@ -1860,8 +1908,11 @@ async function projectUse(args: ParsedArgs, runtime: CliRuntime, resolved: Resol
     }));
   }
   await cacheProjectContexts(runtime, listed.resolved, [selected], { identityToken: listed.resolved.identityToken, select: id });
-  return { envelope: successEnvelope(selected, { request_id: listed.requestId }), exitCode: ExitCode.Success,
-    human: `Selected ${selected.organization.name} / ${selected.project.name} (${id})` };
+  // The selected project's own access token reads its note counts; the identity token cannot.
+  const projectToken = await oauthSessionFor(runtime, resolved).accessFor(id).catch(() => undefined);
+  const counts = await selfNoteCountsFor(runtime, args, resolved.apiUrl, projectToken);
+  return withNotesHint({ envelope: successEnvelope(selected, { request_id: listed.requestId }), exitCode: ExitCode.Success,
+    human: `Selected ${selected.organization.name} / ${selected.project.name} (${id})` }, args, runtime, counts);
 }
 
 async function projectCreate(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
@@ -4310,7 +4361,9 @@ export const handlePlaylistShow = commandHandler(async (args, runtime, resolved)
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await callPlaylist(client, { method: "GET", id });
   if (!output && !flagBool(args.flags, "editable")) {
-    return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Playlist\n${JSON.stringify(response.body, null, 2)}` };
+    const envelope = jsonBody(response, client.requestId);
+    const notes = await resourceNotes(args, runtime, client, id);
+    return { envelope, exitCode: ExitCode.Success, human: [`Playlist\n${JSON.stringify(response.body, null, 2)}`, ...notes].join("\n") };
   }
   const resource = response.body as { id: string; revision: number };
   if (resource.id !== id || !Number.isSafeInteger(resource.revision) || resource.revision < 1) throw usageError("Playlist response has invalid identity or revision.");
@@ -4873,6 +4926,21 @@ export const handleScreenPair = commandHandler(async (args, runtime, resolved) =
   };
 }, true);
 
+/**
+ * Human `screen show` and `playlist show`: the open notes about that resource,
+ * one extra read. JSON output never makes it, and a failed read prints nothing.
+ */
+async function resourceNotes(args: ParsedArgs, runtime: CliRuntime, client: ApiClient, id: string): Promise<string[]> {
+  if (!flagBool(args.flags, "human")) return [];
+  try {
+    const response = await new NotesApi(client).list({ aboutId: id, limit: "5" });
+    const lines = resourceNoteLines(response.body as NoteList, runtime.now(), id);
+    return lines.length ? ["", ...lines] : [];
+  } catch {
+    return [];
+  }
+}
+
 export const handleScreenShow = commandHandler(async (args, runtime, resolved) => {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
@@ -4881,8 +4949,10 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
   if (!id) throw usageError("screen show requires an id.");
   const response = await client.call({ method: "GET", path: `/api/screens/${id}` });
   const screen = response.body as Screen | undefined;
+  const envelope = jsonBody(response, client.requestId);
+  const notes = await resourceNotes(args, runtime, client, id);
   return {
-    envelope: jsonBody(response, client.requestId),
+    envelope,
     exitCode: ExitCode.Success,
     human: [
       "Screen",
@@ -4900,6 +4970,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...manifestUpgradeLines(screen, runtime.now()),
       ...displayLines(screen?.display, screen?.timezone),
       ...healthLines(screen?.health),
+      ...notes,
     ].join("\n"),
   };
 }, true);
@@ -6133,6 +6204,85 @@ async function deleteComment(args: ParsedArgs, runtime: CliRuntime, resolved: Re
 export const handleCommentDeleteScreen = commandHandler((args, runtime, resolved) => deleteComment(args, runtime, resolved, "screen"));
 export const handleCommentDeletePlaylist = commandHandler((args, runtime, resolved) => deleteComment(args, runtime, resolved, "playlist"));
 
+function notesFor(runtime: CliRuntime, args: ParsedArgs, resolved: ResolvedCommandConfig): { client: ApiClient; notes: NotesApi } {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  return { client, notes: new NotesApi(client) };
+}
+
+export const handleNotesList = commandHandler(async (args, runtime, resolved) => {
+  requireFlagValue(args, "limit", "50");
+  requireFlagValue(args, "after", "CURSOR");
+  const state: NoteState = flagBool(args.flags, "all") ? "all" : flagBool(args.flags, "resolved") ? "resolved" : "open";
+  const about = flagString(args.flags, "about");
+  const { client, notes } = notesFor(runtime, args, resolved);
+  const response = await notes.list({
+    // Open is the server's default.
+    ...(state === "open" ? {} : { state }),
+    aboutId: about === undefined ? undefined : parseNoteAbout(about).id,
+    authorId: flagString(args.flags, "author"),
+    after: flagString(args.flags, "after"),
+    limit: flagString(args.flags, "limit"),
+  });
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: noteListLines((response.body ?? {}) as NoteList, runtime.now(), state).join("\n"),
+  };
+});
+
+export const handleNotesShow = commandHandler(async (args, runtime, resolved) => {
+  const id = noteId(args.positionals[2], "show");
+  const { client, notes } = notesFor(runtime, args, resolved);
+  const response = await notes.show(id);
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: noteDetailLines(response.body as Note, runtime.now()).join("\n") };
+});
+
+export const handleNotesAdd = commandHandler(async (args, runtime, resolved) => {
+  const text = args.positionals[2];
+  const file = flagString(args.flags, "file");
+  if ((text === undefined) === (file === undefined)) {
+    throw usageError("notes add takes the note as TEXT, - for stdin, or --file FILE; supply exactly one.");
+  }
+  const source = file ?? (text === "-" ? "-" : undefined);
+  const body = noteBody(source === undefined ? text! : await readAuthoringText(source, runtime, NOTE_INPUT_MAX_BYTES));
+  const about = flagString(args.flags, "about");
+  const ttl = flagString(args.flags, "ttl");
+  const replaces = flagString(args.flags, "replaces");
+  const { client, notes } = notesFor(runtime, args, resolved);
+  const response = await notes.add({
+    body,
+    ...(about !== undefined ? { about: parseNoteAbout(about) } : {}),
+    ...(ttl !== undefined ? { ttlSeconds: parseNoteTtl(ttl) } : {}),
+    ...(replaces !== undefined ? { replaces } : {}),
+  });
+  const note = response.body as Note;
+  const matched = matchedOpenNote(response);
+  const message = matched
+    ? `Matched open note ${note.id}; confirmed it.`
+    : `Added note ${note.id}.${replaces ? ` ${replaces} is resolved as replaced.` : ""}`;
+  return {
+    envelope: jsonBody(response, client.requestId, undefined, matched ? [{ code: "note_matched_open", message }] : []),
+    exitCode: ExitCode.Success,
+    human: message,
+  };
+});
+
+export const handleNotesConfirm = commandHandler(async (args, runtime, resolved) => {
+  const id = noteId(args.positionals[2], "confirm");
+  const { client, notes } = notesFor(runtime, args, resolved);
+  const response = await notes.confirm(id);
+  const reviewAt = (response.body as Note | undefined)?.review_at;
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Confirmed ${id}.${reviewAt ? ` Next review ${reviewAt}.` : ""}` };
+});
+
+export const handleNotesResolve = commandHandler(async (args, runtime, resolved) => {
+  const id = noteId(args.positionals[2], "resolve");
+  const reason = noteReason(args.positionals.slice(3).join(" "));
+  const { client, notes } = notesFor(runtime, args, resolved);
+  const response = await notes.resolve(id, reason);
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Resolved ${id}.` };
+});
+
 async function operationsGet(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>): Promise<CommandResult> {
   const id = args.positionals[2];
   if (!id) throw usageError("operations show requires an id.");
@@ -6311,6 +6461,7 @@ async function eventsList(args: ParsedArgs, runtime: CliRuntime, resolved: Await
     query: {
       after: flagString(args.flags, "after") ?? flagString(args.flags, "cursor"),
       limit: flagString(args.flags, "limit"),
+      type: flagString(args.flags, "type"),
     },
   });
   const page = response.body as EventPage;
@@ -6369,8 +6520,21 @@ async function sleepWhileOpen(
   }
 }
 
+/**
+ * `events follow --type`: the project stream takes no type filter, so the CLI
+ * filters what it prints. An exact type, or a family prefix ending in a dot.
+ * stream.* frames describe the stream itself and always pass.
+ */
+export function eventTypeMatches(type: unknown, filter: string | undefined): boolean {
+  if (!filter) return true;
+  if (typeof type !== "string") return false;
+  if (type.startsWith("stream.")) return true;
+  return filter.endsWith(".") ? type.startsWith(filter) : type === filter;
+}
+
 async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>): Promise<CommandResult> {
   let token = requireToken(resolved.token);
+  const typeFilter = flagString(args.flags, "type");
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const transport = transportFor(runtime, resolved.apiUrl, token);
   const json = !flagBool(args.flags, "human");
@@ -6381,6 +6545,7 @@ async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awa
   const timeoutMs = flagNumber(args.flags, "timeout");
   const timer = timeoutMs && timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
   const emit = (event: ProjectEvent): void => {
+    if (!eventTypeMatches(event?.type, typeFilter)) return;
     if (json) {
       printed += 1;
       runtime.stdout.write(`${JSON.stringify(streamEnvelope(runtime, redactEvent(event), client.requestId))}\n`);

@@ -166,7 +166,8 @@ test("project list and project use under a sign-in preserve both project retries
   const used = await f.invoke("project", "use", B);
   assert.equal(used.code, 0, used.out);
   const saved = (await f.saved())!;
-  assert.equal(saved.project_id, B); assert.equal(saved.token, undefined);
+  // project use reads the selected project's note counts with that project's own access token.
+  assert.equal(saved.project_id, B); assert.equal(saved.token, TOKEN_B);
   assert.deepEqual(saved.projects?.[A]?.media_generate, config.media_generate);
   assert.equal(saved.projects?.[B]?.media_generate, undefined);
   f.transport.on("GET", "/api/project", req => {
@@ -178,6 +179,31 @@ test("project list and project use under a sign-in preserve both project retries
   assert.equal(shown.result.context.project.id, B);
   assert.equal((await f.saved())?.token, TOKEN_B);
   assert.doesNotMatch(listed.out + used.out + shown.out, /eyJ|identity_token/);
+});
+
+test("project use names the selected project's due notes with that project's token", async t => {
+  const f = await fixture(t, initial());
+  f.renews({ [B]: TOKEN_B });
+  f.transport.on("GET", "/api/projects", () => ({ status: 200, headers: {}, body: { projects: [context(A, "Screens"), context(B, "Lobby")] } }));
+  f.transport.on("GET", "/api/agents/self", req => {
+    assert.equal(req.headers?.authorization, "Bearer " + TOKEN_B);
+    return { status: 200, headers: { "cache-control": "private, no-store" }, body: { agent: AGENT, connection_ready: true, notes: { open: 2, new: 0, due: 2 } } };
+  });
+  const used = await f.invoke("project", "use", B);
+  assert.equal(used.code, 0, used.out);
+  assert.equal(used.result.data.project.id, B);
+  assert.equal(used.err, "2 project notes due for review: screenrig notes\n");
+  assert.doesNotMatch(used.out, /screenrig notes/);
+});
+
+test("project use succeeds without a hint when the notes counts cannot be read", async t => {
+  const f = await fixture(t, initial());
+  f.renews({ [B]: TOKEN_B });
+  f.transport.on("GET", "/api/projects", () => ({ status: 200, headers: {}, body: { projects: [context(A, "Screens"), context(B, "Lobby")] } }));
+  const used = await f.invoke("project", "use", B);
+  assert.equal(used.code, 0, used.out);
+  assert.equal((await f.saved())?.project_id, B);
+  assert.equal(used.err, "");
 });
 
 test("a captured create retry stays in A while another process selects B", async t => {

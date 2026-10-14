@@ -56,3 +56,13 @@ export function screenTagListOption(flag: string): (value: string) => string {
     return value;
   };
 }
+
+/** GET /api/events `type`: an exact event type, or a family prefix ending in a dot. */
+export const EVENT_TYPE_FILTER_PATTERN = /^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*\.?$/;
+
+export function eventTypeOption(value: string): string {
+  if (value.length > 80 || !EVENT_TYPE_FILTER_PATTERN.test(value)) {
+    throw usageError("--type takes an event type such as note.added, or a family prefix ending in a dot such as note.");
+  }
+  return value;
+}

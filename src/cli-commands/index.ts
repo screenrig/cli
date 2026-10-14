@@ -20,6 +20,7 @@ import { registerKvCommands } from "./kv.js";
 import { registerCommentCommands } from "./comment.js";
 import { registerOperationsCommands } from "./operations.js";
 import { registerEventsCommands } from "./events.js";
+import { registerAgentNotesCommands } from "./agent-notes.js";
 import { registerPlaybackCommands } from "./playback.js";
 import { registerFeedbackCommands } from "./feedback.js";
 import { registerSupportCommands } from "./support.js";
@@ -49,6 +50,7 @@ export function registerCommands(root: Command, bind: CommandActionBinder): void
   registerCommentCommands(root, bind);
   registerOperationsCommands(root, bind);
   registerEventsCommands(root, bind);
+  registerAgentNotesCommands(root, bind);
   registerPlaybackCommands(root, bind);
   registerWebhooksCommands(root, bind);
   registerFeedbackCommands(root, bind);
