@@ -7042,7 +7042,7 @@ paths:
         a wrong secret all answer the same 401. The raw body, at most 1 MiB, becomes the value of the webhook''s key, and the
         Content-Type header its content_type (application/octet-stream when absent; a header that is not one media type is
         invalid_request). The write is PUT /api/applications/{application_id}/kv/{key} without If-Match: it replaces the value,
-        increments the revision, is metered and quota-checked like any K/V write, and appends kv.updated. Idempotency-Key (8
+        increments the revision, is metered and quota-checked like any K/V write, is one billed API request (payment_required when no credit is left), and appends kv.updated. Idempotency-Key (8
         to 200 characters) deduplicates a sender''s retries of one write for twenty-four hours, and the same key with another
         body or content type is idempotency_mismatch; without it every post is a new write. The answer is the key''s new metadata,
         never its value. At most 120 writes per minute per webhook.'
