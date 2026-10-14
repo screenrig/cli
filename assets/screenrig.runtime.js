@@ -1455,10 +1455,25 @@
     "kv.list",
     "kv.set",
     "kv.delete",
+    "kv.watch",
+    "kv.changed",
     "response.ack",
     "response.problem"
   ];
-  var BASELINE_FEATURES = MESSAGE_KINDS;
+  var BASELINE_FEATURES = [
+    "context",
+    "ready",
+    "log",
+    "event.emit",
+    "page.advance",
+    "viewport.changed",
+    "kv.get",
+    "kv.list",
+    "kv.set",
+    "kv.delete",
+    "response.ack",
+    "response.problem"
+  ];
   var MAX_FEATURES = 64;
   var MAX_FEATURE_LENGTH = 64;
   var EMPTY_CAPABILITIES = {
@@ -2055,6 +2070,16 @@
     }
     return { request_message_id: requestMessageId, generation, nonce, result: payload.result };
   }
+  function parseKvChangedPayload(payload) {
+    const { key, revision, deleted, generation, nonce } = payload;
+    if (typeof key !== "string" || new TextEncoder().encode(key).length < 1 || new TextEncoder().encode(key).length > 256 || typeof deleted !== "boolean" || typeof generation !== "number" || !Number.isSafeInteger(generation) || typeof nonce !== "string" || !NONCE_RE.test(nonce)) {
+      throw new SdkValidationError("invalid_kv_change", "Invalid kv.changed payload");
+    }
+    if (revision !== void 0 && (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1)) {
+      throw new SdkValidationError("invalid_kv_change", "Invalid kv.changed revision");
+    }
+    return { key, deleted, generation, nonce, ...revision === void 0 || deleted ? {} : { revision } };
+  }
   function parseResponseProblemPayload(payload) {
     const requestMessageId = payload.request_message_id;
     const generation = payload.generation;
@@ -2154,6 +2179,9 @@
     pending = /* @__PURE__ */ new Map();
     resizeHandlers = /* @__PURE__ */ new Set();
     capabilityHandlers = /* @__PURE__ */ new Set();
+    kvChangeHandlers = /* @__PURE__ */ new Set();
+    /** The context (generation and nonce) kv.watch was last sent under; a new context sends it again. */
+    watchedContext = null;
     unsubscribe;
     advanced = false;
     reports = 0;
@@ -2165,7 +2193,8 @@
       get: (key) => this.kvGet(key),
       list: () => this.kvList(),
       set: (key, value, options) => this.kvSet(key, value, options),
-      delete: (key, expectedRevision, options) => this.kvDelete(key, expectedRevision, options)
+      delete: (key, expectedRevision, options) => this.kvDelete(key, expectedRevision, options),
+      onChange: (handler) => this.kvOnChange(handler)
     };
     destroy() {
       this.destroyed = true;
@@ -2180,6 +2209,8 @@
         waiter.reject(new SdkValidationError("destroyed", "SDK was destroyed before the parent acknowledged the request"));
       }
       this.pending.clear();
+      this.kvChangeHandlers.clear();
+      this.watchedContext = null;
       this.readyState = "inert";
       this.context = null;
       this.parentOrigin = null;
@@ -2253,6 +2284,19 @@
           }
           return;
         }
+        if (message.kind === "kv.changed") {
+          const change = parseKvChangedPayload(message.payload);
+          if (!this.matchesRuntime(change.generation, change.nonce)) return;
+          const delivered = { key: change.key, deleted: change.deleted, ...change.revision === void 0 ? {} : { revision: change.revision } };
+          for (const handler of [...this.kvChangeHandlers]) {
+            try {
+              handler({ ...delivered });
+            } catch {
+              this.report("warn", "kv_change_handler", "A kv.onChange handler threw");
+            }
+          }
+          return;
+        }
       } catch (err) {
         if (err instanceof SdkValidationError && err.code === "wildcard_origin") {
           this.readyState = "failed";
@@ -2312,6 +2356,7 @@
       for (const handler of this.capabilityHandlers) {
         handler(this.capabilities);
       }
+      this.watchKv();
     }
     supports(kind) {
       var _a2;
@@ -2514,6 +2559,37 @@
         nonce: context.nonce
       };
       return this.post({ protocol: PROTOCOL, message_id: this.idFactory(), kind: "kv.delete", primitive_id: context.primitive_id, payload: { ...payload } }, true);
+    }
+    kvOnChange(handler) {
+      if (typeof handler !== "function") {
+        throw new SdkValidationError("invalid_handler", "kv.onChange needs a function");
+      }
+      this.kvChangeHandlers.add(handler);
+      this.watchKv();
+      return () => {
+        this.kvChangeHandlers.delete(handler);
+      };
+    }
+    /**
+     * kv.watch is a notification sent once per context while a handler exists:
+     * the host then posts kv.changed for this application's keys to this frame.
+     */
+    watchKv() {
+      const context = this.context;
+      const bound = context ? `${context.generation}:${context.nonce}` : null;
+      if (this.readyState !== "active" || !context || this.kvChangeHandlers.size === 0 || this.watchedContext === bound) return;
+      if (!this.capabilities["kv.read"] || !this.supports("kv.watch")) return;
+      this.watchedContext = bound;
+      void this.post(
+        {
+          protocol: PROTOCOL,
+          message_id: this.idFactory(),
+          kind: "kv.watch",
+          primitive_id: context.primitive_id,
+          payload: { generation: context.generation, nonce: context.nonce }
+        },
+        false
+      );
     }
     onResize(handler) {
       this.resizeHandlers.add(handler);

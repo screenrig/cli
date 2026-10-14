@@ -21,6 +21,8 @@ export interface NormalizedProblem {
   trace_id?: string;
   operation_id?: string;
   current_revision?: number;
+  /** insufficient_access only: the cap that held the credential to Propose. */
+  access_limited_by?: "project" | "person";
   /** Server 5xx only: whether retrying the unchanged request may succeed. */
   retryable?: boolean;
   /** Present only on 429, taken from the server's Retry-After header. */

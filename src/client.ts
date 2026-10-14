@@ -1,5 +1,6 @@
 import type { WriteRecovery } from "./write-recovery.js";
 import type { NormalizedProblem } from "./envelope.js";
+import { accessLimitHint } from "./reviews.js";
 import { creditsLowWarnings, observeCreditsRemaining, parseCreditsHeaders } from "./credits.js";
 import { ExitCode } from "./exit-codes.js";
 import { REQUEST_ID_MAX, REQUEST_ID_MIN, isValidIdempotencyKey, isValidRequestId, newIdempotencyKey, newRequestId } from "./ids.js";
@@ -89,12 +90,14 @@ function refusedSession(response: { status: number }, token: string | undefined)
 }
 
 /**
- * Read only and Propose refusals name the sign-in that grants Manage. The
- * command layer refines this when a project or person cap set the level.
+ * A refusal by the credential's own level names the sign-in that grants
+ * Manage. A project or person cap (errors[0].access_limited_by) is not lifted
+ * by signing in again, so it says what a person changes instead.
  */
 function withAccessGuidance(problem: NormalizedProblem): NormalizedProblem {
   if (problem.code !== "insufficient_access" || problem.next) return problem;
-  return { ...problem, next: { command: "screenrig login --access manage", reason: "This sign-in's access level cannot do this. A person approves Manage access in the dashboard." } };
+  if (problem.access_limited_by) return { ...problem, hint: accessLimitHint(problem.access_limited_by) };
+  return { ...problem, next: { command: "screenrig login --access manage", argv: ["login", "--access", "manage"], reason: "This sign-in's access level cannot do this. A person approves Manage access in the dashboard." } };
 }
 
 /** A renewed token that is refused again means the session ended. */

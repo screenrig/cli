@@ -2650,7 +2650,7 @@ paths:
       description: Revokes the global identity, all its identity credentials and project tokens, and its pending connections.
         An exact replay with a revoked identity credential succeeds without another transition. Project ownership and content
         remain. No cookie, Origin, query or body is accepted. This route does not debit the API meter. An agent access JWT
-        carrying the identity scope, whose grant holds identity access (Read only or Manage, whatever the access level of the
+        carrying the identity scope, whose grant holds identity access (Read only, Propose or Manage, whatever the access level of the
         token's project), revokes the same and every OAuth grant of the identity; its tokens are refused within seconds. A retry with the same JWT after the revocation is a no-op
         success.
       security:
@@ -3547,7 +3547,8 @@ paths:
       - RateLimit
       description: Claims one fleet-global six-character Player pairing session. Exact Idempotency-Key retries return the durable
         original result without consuming quota again. The dashboard session claims into its current project with the same
-        body, Idempotency-Key, budgets and problems; it is a state change, so it follows the dashboard mutation rules, a shadow
+        body, Idempotency-Key, budgets and problems, except that its not_found for an unknown or already-claimed code names no CLI
+        command; it is a state change, so it follows the dashboard mutation rules, a shadow
         session without staff write mode is refused, and the events the claim appends name the dashboard user.
       security:
       - projectBearer: []
@@ -4151,7 +4152,7 @@ paths:
               $ref: '#/components/schemas/ScreenPlaylistScheduleWrite'
       responses:
         '202':
-          description: The write became a review under Propose access and is not live (docs/reviews.md). An Idempotency-Key replay answers the same body.
+          description: The write became a review under Propose access and waits for a person's approval (docs/reviews.md). An Idempotency-Key replay answers the same body.
           headers:
             RateLimit-Policy:
               $ref: '#/components/headers/RateLimitPolicy'
@@ -4215,7 +4216,7 @@ paths:
       - $ref: '#/components/parameters/OptionalIdempotencyKey'
       responses:
         '202':
-          description: The write became a review under Propose access and is not live (docs/reviews.md). An Idempotency-Key replay answers the same body.
+          description: The write became a review under Propose access and waits for a person's approval (docs/reviews.md). An Idempotency-Key replay answers the same body.
           headers:
             RateLimit-Policy:
               $ref: '#/components/headers/RateLimitPolicy'
@@ -4295,7 +4296,7 @@ paths:
               $ref: '#/components/schemas/ScreenTakeoverWrite'
       responses:
         '202':
-          description: The write became a review under Propose access and is not live (docs/reviews.md). An Idempotency-Key replay answers the same body.
+          description: The write became a review under Propose access and waits for a person's approval (docs/reviews.md). An Idempotency-Key replay answers the same body.
           headers:
             RateLimit-Policy:
               $ref: '#/components/headers/RateLimitPolicy'
@@ -4360,7 +4361,7 @@ paths:
       - $ref: '#/components/parameters/OptionalIdempotencyKey'
       responses:
         '202':
-          description: The write became a review under Propose access and is not live (docs/reviews.md). An Idempotency-Key replay answers the same body.
+          description: The write became a review under Propose access and waits for a person's approval (docs/reviews.md). An Idempotency-Key replay answers the same body.
           headers:
             RateLimit-Policy:
               $ref: '#/components/headers/RateLimitPolicy'
@@ -4874,6 +4875,306 @@ paths:
           $ref: '#/components/responses/RateLimitedProblem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/triggers:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listTriggers
+      description: Lists the project's CAP alert triggers, oldest first (at most 20), each with its ingest url, username and
+        latest alert. The password is never returned here.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      responses:
+        '200':
+          description: The project's triggers.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createTrigger
+      description: 'Creates a CAP alert trigger: one inbound URL an emergency notification system (Everbridge, Rave, Alertus,
+        IPAWS relays and other CAP 1.2 senders) posts alerts to, with HTTP Basic credentials. The answer is the only place
+        the password appears (with the rotate answer): store it in the sending system at once. target is a tag (every active
+        screen with it when the alert arrives) or up to 500 screen_ids. An alert takes every target screen with a default
+        playlist over until the alert''s <expires>, else for default_for_seconds (60 to 604800, default 3600); see POST
+        /api/triggers/{id}/cap. A project has at most 20 triggers (trigger_limit_reached). Appends trigger.created. An exact
+        retry with the same Idempotency-Key returns this same answer, password included, for twenty-four hours.'
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerWrite'
+      responses:
+        '201':
+          description: Created, with its url, username and password.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerWithPassword'
+        '400':
+          description: invalid_request, including a malformed tag or both tag and screen_ids.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: trigger_limit_reached or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/triggers/{id}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getTrigger
+      description: One trigger with its latest alert. An alert past its until reads as ended with ended_reason expired.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      responses:
+        '200':
+          description: One trigger.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Trigger'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteTrigger
+      description: Deletes the trigger. Its URL stops working at once, and its alert playlist and stills are deleted. A trigger
+        showing an alert, or still clearing one, is refused resource_conflict; clear it first. Appends trigger.deleted. If-Match
+        guards the revision.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/IfMatch'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted.
+        '409':
+          description: resource_conflict — the trigger is showing an alert.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/triggers/{id}/rotate-secret:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: rotateTriggerSecret
+      description: Replaces the trigger's password and returns the new one, once. The old password stops working at once; update
+        the sending system. Appends trigger.updated with details.rotated true. If-Match guards the revision.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/IfMatch'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The trigger with its new password.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerWithPassword'
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/triggers/{id}/test:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: testTrigger
+      description: Shows a one-minute Exercise alert (a blue card with a yellow EXERCISE banner) on the trigger's screens,
+        exactly as a received alert would, so the targeting and the screens can be checked without the sending system. Refused
+        resource_conflict while the trigger shows an alert, so a test never replaces a real one. An exact retry with the same
+        Idempotency-Key answers outcome duplicate.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: What the test alert did.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerReceipt'
+        '409':
+          description: resource_conflict — the trigger is showing an alert.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/triggers/{id}/clear:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: clearTrigger
+      description: Ends the trigger's alert (ended_reason cleared) and clears the takeovers it set. A screen another takeover
+        has replaced since is left alone. A trigger without an active alert answers unchanged. Appends trigger.alert_received
+        with outcome ended.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      responses:
+        '200':
+          description: The trigger. alert.screens.pending is true while the takeovers are being cleared.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Trigger'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/triggers/{id}/cap:
+    parameters:
+    - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: receiveTriggerCAP
+      description: 'The URL an emergency notification system posts one CAP 1.2 alert to (any XML content type, at most 256 KiB).
+        It authenticates with the trigger''s own HTTP Basic credentials: the username is the trigger id, the password the
+        one create or rotate returned. A message with status Actual or Exercise and msgType Alert shows a full-screen card
+        (headline, event, description, instruction and sender, red for Extreme, Severe or no severity, amber for Moderate, blue
+        for Minor; Exercise adds a yellow EXERCISE banner) on every target screen with a default playlist, until <expires>,
+        else for default_for_seconds, at most 7 days. An Update that references the shown alert redraws it in place and moves
+        the takeovers when <expires> changed. A Cancel that references it, or any message with responseType AllClear, ends
+        it and clears the takeovers it set. A trigger shows one alert: a new Alert replaces the shown one. Test, System and
+        Draft messages, Ack and Error, an alert already expired, and a Cancel of an alert not shown are ignored; the same
+        sender and identifier twice is a duplicate. The answer is a receipt naming the outcome; the screens are written right
+        after it (alert.screens.pending). The takeovers bypass the screen-control rate limits and are never metered or refused
+        for balance. Appends trigger.alert_received.'
+      security:
+      - triggerBasic: []
+      requestBody:
+        required: true
+        content:
+          application/xml:
+            schema:
+              type: string
+              maxLength: 262144
+      responses:
+        '200':
+          description: What the message did.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerReceipt'
+        '400':
+          description: invalid_request — the body is not a usable CAP 1.2 alert, or is larger than 256 KiB.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          description: unauthorized — missing or wrong credentials, or an unknown trigger. WWW-Authenticate names the Basic realm.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-rate-limit-policies:
+      - name: trigger-cap-ip
+        quota: 120
+        windowSeconds: 60
+      - name: trigger-cap-trigger
+        quota: 60
+        windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
   /api/screens/{id}/screenshot:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
@@ -7377,6 +7678,106 @@ paths:
     servers:
     - url: https://screenrig.ai
       description: Backend-owned project dashboard origin
+  /api/media/{id}/thumbnail:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - $ref: '#/components/parameters/ResourceID'
+    - name: If-None-Match
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Thumbnail ETag returned by this route.
+    get:
+      operationId: getDashboardMediaThumbnail
+      description: 'Returns a small lossy WebP of a ready image owned by the session''s project, so the dashboard''s grids
+        never decode originals. There is one size: it fits inside 512 x 512 with the aspect kept and is never upscaled, and
+        an animated image shows its first frame. The first request generates it and stores it beside the original; later
+        requests stream the stored copy, and deleting the media removes it with the original. Another project''s identifier,
+        video, audio, and media that is not ready return not_found. Range is not accepted. The ETag is strong and names the
+        original and the thumbnail generator, so it is the same on every request and host. The response is private, no-cache,
+        and an If-None-Match that matches, checked after the media resolves in the session''s project, returns 304 without
+        reading the thumbnail. Completed bytes are recorded as dashboard_media egress.'
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: The WebP thumbnail.
+          headers:
+            Content-Length:
+              schema:
+                type: integer
+            Content-Disposition:
+              schema:
+                type: string
+                pattern: ^inline; filename="med_[A-Za-z0-9_-]+\.webp"$
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              $ref: '#/components/headers/ProjectBytesCacheControl'
+            X-Content-Type-Options:
+              schema:
+                type: string
+                enum:
+                - nosniff
+          content:
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        '304':
+          description: The thumbnail ETag matches If-None-Match. No body or egress increment is produced.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              $ref: '#/components/headers/ProjectBytesCacheControl'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    head:
+      operationId: headDashboardMediaThumbnail
+      description: Applies the same ownership, conditional and generation rules as getDashboardMediaThumbnail and returns its
+        headers without the body. No egress is recorded.
+      security:
+      - dashboardSession: []
+      responses:
+        '200':
+          description: Thumbnail metadata with no body.
+          headers:
+            Content-Length:
+              schema:
+                type: integer
+            Content-Disposition:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              $ref: '#/components/headers/ProjectBytesCacheControl'
+            X-Content-Type-Options:
+              schema:
+                type: string
+                enum:
+                - nosniff
+        '304':
+          description: The thumbnail ETag matches If-None-Match. No egress increment is produced.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              $ref: '#/components/headers/ProjectBytesCacheControl'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/advertising/reviews/{id}:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
@@ -13553,7 +13954,7 @@ components:
         alone.
       schema: { type: string, enum: ["true", "false"] }
   parameters:
-    ReviewNote: { name: Screenrig-Review-Note, in: header, required: false, schema: { type: string, maxLength: 280 }, description: "Optional proposer note on a review-class write: plain text, at most 280 characters after trimming, no control characters (else 400 validation_failed). Stored on the review when the write becomes one; ignored when it applies live." }
+    ReviewNote: { name: Screenrig-Review-Note, in: header, required: false, schema: { type: string, maxLength: 280 }, description: "Optional proposer note on a review-class write, sent as percent-encoded UTF-8 (what JavaScript's encodeURIComponent writes). The server percent-decodes it (an invalid escape is 400 invalid_request); the decoded note is plain text, at most 280 characters after trimming, no control characters (else 400 invalid_request). Stored on the review when the write becomes one; ignored when it applies live." }
     ProjectTarget: { name: ScreenRig-Project, in: header, required: false, schema: { type: string, minLength: 1, maxLength: 200 }, description: "Required with an identity bearer on every project route. Exactly one project identifier; no implicit current target. With a project bearer, must match its bound project." }
     ResourceID: { name: id, in: path, required: true, schema: { type: string } }
     NoteID: { name: note_id, in: path, required: true, schema: { type: string, pattern: "^(?:(?:stage|qa|development)_)?nte_[A-Za-z0-9_-]{16,24}$" }, description: The id of one of the agent's notes. }
@@ -13655,8 +14056,9 @@ components:
       description: Temporary `ScreenRig-Agent-Connect <credential>` authority returned only by connection creation. It is never accepted as a project bearer, dashboard cookie, URL parameter, or runtime credential.
     pendingAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Pending agent bearer accepted only for its own activation, plus the same active bearer for exact acknowledgement replay." }
     revocableAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active agent bearer, or the same cryptographically verified revoked bearer for an idempotent self-disconnect replay." }
-    agentIdentityBearer: { type: http, scheme: bearer, bearerFormat: sr_live_idt, description: "Global agent identity bearer. Project routes also require ScreenRig-Project and the target membership capabilities; it grants no global project permissions. Identity self-revocation accepts its same verified revoked credential for an exact replay. The identity-wide routes (GET and POST /api/projects, GET /api/organizations, PATCH /api/organizations/{org_id}) also accept an agent access JWT carrying the identity scope: listing needs identity access Read only or Manage, a change needs access:manage (else 403 insufficient_access), and its grant is rechecked inside the action. Under a JWT the project list holds only the projects the grant was approved for, and a created project joins the grant instead of delivering a project token; refresh with its project_id for a token. A JWT without the identity scope is 403 forbidden." }
+    agentIdentityBearer: { type: http, scheme: bearer, bearerFormat: sr_live_idt, description: "Global agent identity bearer. Project routes also require ScreenRig-Project and the target membership capabilities; it grants no global project permissions. Identity self-revocation accepts its same verified revoked credential for an exact replay. The identity-wide routes (GET and POST /api/projects, GET /api/organizations, PATCH /api/organizations/{org_id}) also accept an agent access JWT carrying the identity scope: listing needs identity access Read only, Propose or Manage, a change needs access:manage (else 403 insufficient_access), and its grant is rechecked inside the action. Under a JWT the project list holds only the projects the grant was approved for, and a created project joins the grant instead of delivering a project token; refresh with its project_id for a token. A JWT without the identity scope is 403 forbidden." }
     projectBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active project bearer, or identity bearer with ScreenRig-Project and an active target membership. Use revocableAgentBearer for self-disconnect retries after revocation. Every bearer route requires its area AgentCapability; GET reads in an area also accept reports, except the webhook list and get reads (GET /api/webhooks, GET /api/webhooks/{id}), which need the project capability because they return receiver URLs, and the project reads, agents/self, operations reads, feedback routes, and support routes accept any active credential. A credential lacking the route capability is refused 403 forbidden with detail 'This agent credential lacks the <name> capability.' after the command is recorded and before any credit is metered, so refusals are attributed and never billed. An agent access JWT (a session JWT of profile agent, audience screenrig:api:<env>, from /oauth/token or an enrollment in the oauth credential format) is accepted on the same routes: prj is its project, its scope carries the access level (access:read or access:manage) and the capabilities. An expired, revoked or foreign JWT is 401 with WWW-Authenticate Bearer error=invalid_token, which a client answers by refreshing once; a JWT whose revocation state cannot be read is 500 revocation_unavailable with Retry-After 5. The legacy sr_live_ project and identity bearers are retired: every one answers 401 credential_retired with next screenrig login, on these routes, on /mcp and on /adcp/mcp; the legacy enrollment shape and the legacy connection routes (POST /api/agent-connections, its stream, credential and cancel) answer 410 client_update_required." }
+    triggerBasic: { type: http, scheme: basic, description: "A CAP trigger's own credentials: username is the trigger id, password the srtg_ password create or rotate-secret returned. Accepted only by POST /api/triggers/{id}/cap; never a project credential." }
     nativePairingAuthorization:
       type: http
       scheme: ScreenRig-Pairing
@@ -13680,7 +14082,7 @@ components:
     operatorBearer: { type: http, scheme: bearer }
   responses:
     PendingReview:
-      description: The write became a review under Propose access and is not live (docs/reviews.md). A person approves, rejects or
+      description: The write became a review under Propose access and waits for a person's approval (docs/reviews.md). A person approves, rejects or
         requests changes in the dashboard at review.url. An Idempotency-Key replay answers the same body.
       content: { application/json: { schema: { $ref: "#/components/schemas/ReviewPending" } } }
     Problem:
@@ -19114,7 +19516,9 @@ components:
       required: [at, fit, required_bytes, capacity_bytes, excluded_page_count]
       description: >-
         Present while the player's reported fit is partial, transition_blocked,
-        or none_fit. at is when the condition began. It is set once when the
+        or none_fit, except a transition_blocked plan whose only blocking
+        reason is anchor_unavailable: that is a failed download on a device
+        with room, not a shortfall. at is when the condition began. It is set once when the
         condition begins and removed when it ends, each transition appending
         one project-only event, screen.storage_shortfall or
         screen.storage_shortfall_cleared. Those events are not delivered on
@@ -19478,7 +19882,7 @@ components:
     MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], description: "Declares only what the server can re-verify against the stored object byte for byte. Codec identity is not declared here: the server derives it from the container during asynchronous verification, so a client cannot assert a codec that drives player behaviour.", properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
     MediaUploadSession: { type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: { id: { type: string }, operation: { $ref: "#/components/schemas/Operation" }, upload_url: { type: string, format: uri }, method: { type: string, enum: [PUT] }, headers: { type: object, additionalProperties: { type: string }, description: Exact signed request headers; clients must send every field verbatim. }, expires_at: { type: string, format: date-time } } }
     MediaUploadSource: { type: object, additionalProperties: false, required: [filename, content_type, sha256, bytes], description: "Verified original upload identity when ingest normalized EXIF orientation. Read-only; use it to recognize retries. The ready media digest, size and type describe the normalized delivery bytes.", properties: { filename: { type: string }, source_filename: { type: string }, content_type: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer, minimum: 1 } } }
-    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { tags: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 10800000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, folder_id: { type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. Move files with POST /api/media/move." }, revision: { type: integer }, state: { type: string, enum: [ready] }, review_state: { type: string, enum: [pending], description: "pending: uploaded or changed by a Propose credential and not yet approved. Tag, folder and all selectors of approved playlists skip it until a person approves a review that uses it. Absent means approved." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
+    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { tags: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 10800000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, folder_id: { type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. Move files with POST /api/media/move." }, revision: { type: integer }, state: { type: string, enum: [ready] }, review_state: { type: string, enum: [pending], description: "pending: uploaded or changed by a Propose credential and waiting for a person's approval. Tag, folder and all selectors of approved playlists skip it until a person approves a review that uses it. Absent means approved." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
     MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/Media" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     SupportHours: {"type": "object", "additionalProperties": false, "required": ["timezone", "start", "end", "weekdays", "excludes_bc_holidays"], "properties": {"timezone": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "weekdays": {"type": "array", "items": {"type": "string"}}, "excludes_bc_holidays": {"type": "boolean"}}}
     SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean", "description": "This project can start or continue a conversation now. False where support chat is switched off in this environment."}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0}, "docs_url": {"type": "string"}}}
@@ -19795,6 +20199,93 @@ components:
         next_cursor: { type: string, description: Pass back as after for the next page; empty on the last page. }
         review: { type: array, maxItems: 5, items: { $ref: "#/components/schemas/Note" }, description: "Open notes due for review, oldest first, on the first page of open notes with no filter; empty otherwise." }
         counts: { $ref: "#/components/schemas/NoteCounts" }
+    TriggerTarget:
+      type: object
+      additionalProperties: false
+      description: Exactly one of tag and screen_ids.
+      properties:
+        tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Every active screen with this tag when an alert arrives. }
+        screen_ids: { type: array, minItems: 1, maxItems: 500, items: { type: string } }
+    TriggerAlertScreens:
+      type: object
+      additionalProperties: false
+      required: [targeted, taken_over, cleared, skipped, failed, pending]
+      description: What the latest takeover change did. skipped counts screens without a default playlist, archived or gone, and, when clearing, screens another takeover has replaced since.
+      properties:
+        targeted: { type: integer, minimum: 0 }
+        taken_over: { type: integer, minimum: 0 }
+        cleared: { type: integer, minimum: 0 }
+        skipped: { type: integer, minimum: 0 }
+        failed: { type: integer, minimum: 0, description: Screens that could not be written; they are retried. }
+        pending: { type: boolean, description: True while the screens are still being written. }
+    TriggerAlert:
+      type: object
+      additionalProperties: false
+      required: [id, revision, state, status, msg_type, sender, identifier, until, screens, started_at, updated_at]
+      description: The trigger's latest alert, from the CAP message fields.
+      properties:
+        id: { type: string }
+        revision: { type: integer, minimum: 1, description: Grows with each Update shown. }
+        state: { type: string, enum: [active, ended] }
+        ended_reason: { type: string, enum: [cancelled, all_clear, cleared, expired] }
+        status: { type: string, enum: [Actual, Exercise] }
+        msg_type: { type: string, enum: [Alert, Update, Cancel] }
+        sender: { type: string }
+        identifier: { type: string }
+        event: { type: string }
+        headline: { type: string }
+        severity: { type: string, enum: [Extreme, Severe, Moderate, Minor, Unknown] }
+        urgency: { type: string }
+        certainty: { type: string }
+        until: { type: string, format: date-time, description: When the takeovers end on their own. }
+        media_id: { type: string, description: The alert card still. }
+        screens: { $ref: "#/components/schemas/TriggerAlertScreens" }
+        started_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+    Trigger:
+      type: object
+      additionalProperties: false
+      required: [id, kind, label, target, default_for_seconds, url, username, revision, created_at, updated_at]
+      description: A CAP alert trigger. Its password is returned only by create and rotate-secret.
+      properties:
+        id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?trg_[A-Za-z0-9_-]+$" }
+        kind: { type: string, enum: [cap] }
+        label: { type: string, minLength: 1, maxLength: 80 }
+        target: { $ref: "#/components/schemas/TriggerTarget" }
+        default_for_seconds: { type: integer, minimum: 60, maximum: 604800 }
+        url: { type: string, description: "Where the sending system posts CAP messages: https://api.<domain>/api/triggers/<id>/cap. Not a credential: the password is." }
+        username: { type: string, description: "The HTTP Basic username: the trigger id." }
+        playlist_id: { type: string, description: "The trigger's alert playlist, made on its first alert: one page showing the alert card." }
+        alert: { $ref: "#/components/schemas/TriggerAlert" }
+        last_received_at: { type: string, format: date-time, description: "The last CAP message received, whatever its outcome." }
+        revision: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    TriggerWithPassword:
+      allOf:
+      - $ref: "#/components/schemas/Trigger"
+      - type: object
+        required: [password]
+        properties:
+          password: { type: string, pattern: "^srtg_[A-Za-z0-9_-]{43}$", description: The HTTP Basic password. Returned only here; the server keeps a digest. }
+    TriggerList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/Trigger" } } } }
+    TriggerWrite:
+      type: object
+      additionalProperties: false
+      required: [label, target]
+      properties:
+        label: { type: string, minLength: 1, maxLength: 80 }
+        target: { $ref: "#/components/schemas/TriggerTarget" }
+        default_for_seconds: { type: integer, minimum: 60, maximum: 604800, description: How long an alert without <expires> holds the screens. Defaults to 3600. }
+    TriggerReceipt:
+      type: object
+      additionalProperties: false
+      required: [outcome, trigger_id]
+      properties:
+        outcome: { type: string, enum: [shown, updated, ended, ignored, duplicate], description: "shown: a new alert took the screens over. updated: the shown alert was redrawn. ended: a Cancel or AllClear ended it. ignored: nothing to show (Test, System or Draft status, Ack or Error, already expired, or a Cancel of an alert not shown). duplicate: this sender and identifier were already received." }
+        trigger_id: { type: string }
+        alert: { $ref: "#/components/schemas/TriggerAlert" }
     NotePage:
       type: object
       additionalProperties: false
@@ -21137,6 +21628,7 @@ components:
         field: { type: string, description: "The request member this error is about, when one is to blame." }
         retryable: { type: boolean, description: "Present on every 5xx error and absent below 500. True when retrying the same operation may succeed without changing the request; false when the unchanged request is not retryable." }
         current_revision: { type: integer, description: "The resource's current revision, on revision_conflict." }
+        access_limited_by: { type: string, enum: [project, person], description: "On insufficient_access when a cap lowered the credential to Propose (docs/reviews.md): project (the project requires review for agent changes) or person (the agent's responsible person cannot approve reviews). Absent when the credential's own level refused the request." }
         next: { $ref: "#/components/schemas/NextAction" }
     RuntimeProblem:
       type: object
@@ -21243,6 +21735,7 @@ x-problem-codes:
 - recovery_expired
 - recovery_not_offered
 - invitation_limit_reached
+- trigger_limit_reached
 - organization_admin_limit
 - version_required
 - price_change_pending

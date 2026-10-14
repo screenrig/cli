@@ -166,6 +166,7 @@ export function normalizeProblem(
   const hint = asString(rec?.hint) ?? (foreign ? foreignBodyHint(status) : undefined);
   const retryable = typeof rec?.retryable === "boolean" ? rec.retryable : undefined;
   const traceId = asString(rec?.trace_id);
+  const limitedBy = rec?.access_limited_by === "project" || rec?.access_limited_by === "person" ? rec.access_limited_by : undefined;
   return {
     type: asString(rec?.type) ?? problemType(code),
     title,
@@ -178,6 +179,7 @@ export function normalizeProblem(
     ...(traceId ? { trace_id: traceId } : {}),
     operation_id: asString(rec?.operation_id),
     current_revision: asNumber(rec?.current_revision),
+    ...(limitedBy ? { access_limited_by: limitedBy } : {}),
     ...(retryable !== undefined ? { retryable } : {}),
     errors,
     // The server's own next action always wins over local guidance.
@@ -236,6 +238,9 @@ export function renderProblem(problem: NormalizedProblem): string {
   }
   if (typeof problem.current_revision === "number") {
     lines.push(`current_revision: ${problem.current_revision}`);
+  }
+  if (problem.access_limited_by) {
+    lines.push(`access_limited_by: ${problem.access_limited_by}`);
   }
   if (typeof problem.retryable === "boolean") {
     lines.push(`retryable: ${problem.retryable}`);

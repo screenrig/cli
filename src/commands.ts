@@ -118,7 +118,6 @@ import { attachOperationLogger, loggerOf, loggingTransport } from "./log/index.j
 import { accessClaims, accessFromScope, accessLabel, ACCESS_LEVELS, isServiceClientId, isSessionJwt, readKeyFile, SCOPE_IDENTITY, serviceCredentialsFromEnv, type AccessLevel, type ServiceClientCredentials } from "./oauth.js";
 import {
   accessFields,
-  insufficientAccessGuidance,
   PENDING_REVIEW_SENTENCE,
   pendingReviewLines,
   pendingReviewOf,
@@ -768,8 +767,8 @@ function commandHandler(
       await recovery?.finish();
       return contextual;
     } catch (caught) {
-      const error = caught instanceof CliError && caught.problem.code === "insufficient_access" && authenticated && resolved.token
-        ? await explainedAccessRefusal(caught, runtime, args, resolved)
+      const error = caught instanceof CliError && caught.problem.code === "insufficient_access" && serviceCredentials.get(runtime)
+        ? serviceClientAccessRefusal(caught)
         : caught;
       if (recovery?.hasPending && error instanceof CliError) {
         // Only an unknown outcome (timeout, network, 5xx) keeps a replayable key.
@@ -796,21 +795,13 @@ function commandHandler(
 }
 
 /**
- * 403 insufficient_access: why this credential's level is too low decides
- * what helps. A project or person cap is not lifted by signing in again, so
- * ask the server which applies (GET /api/agents/self) and say so.
+ * 403 insufficient_access for a service client: it cannot sign in again, so
+ * the login next action does not apply. Its level is chosen when it is
+ * created; a project cap keeps the hint the client already gave.
  */
-async function explainedAccessRefusal(error: CliError, runtime: CliRuntime, args: ParsedArgs, resolved: ResolvedCommandConfig): Promise<CliError> {
-  if (error.problem.status !== 403) return error;
-  if (serviceCredentials.get(runtime)) {
-    const { next: _login, ...problem } = error.problem;
-    return new CliError({ ...problem, hint: "This service client's access level cannot do this. Its access is chosen when it is created (service-client create --access manage). A project that requires review for agent changes holds every service client to Propose." }, error.exitCode, error.warnings);
-  }
-  const self = await selfStatusFor(runtime, args, resolved.apiUrl, resolved.token);
-  const guidance = self ? insufficientAccessGuidance(self) : undefined;
-  if (!guidance) return error;
-  const { next: _generic, ...problem } = error.problem;
-  return new CliError({ ...problem, hint: guidance.hint, ...(guidance.next ? { next: guidance.next } : {}) }, error.exitCode, error.warnings);
+function serviceClientAccessRefusal(error: CliError): CliError {
+  const { next: _login, ...problem } = error.problem;
+  return new CliError(problem.access_limited_by ? problem : { ...problem, hint: "This service client's access level cannot do this. Its access is chosen when it is created (service-client create --access manage)." }, error.exitCode, error.warnings);
 }
 
 export const handleVersion: CommandHandler = async () => {

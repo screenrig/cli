@@ -33,10 +33,6 @@ function privateJson(status: number, body: unknown): TransportResponse {
   return json(status, body, { "cache-control": "private, no-store" });
 }
 
-function problem(status: number, code: string): TransportResponse {
-  return { status, headers: { "content-type": "application/problem+json" }, body: { type: `https://screenrig.ai/problems/${code}`, title: code, status, detail: code, code } };
-}
-
 function summary(id: string, kind: "playlist_change" | "screen_change", subject: { type: "playlist" | "screen"; id: string; name: string }, screens = 1) {
   return { id, kind, state: "pending" as const, url: `https://screenrig.ai/dashboard/reviews/${id}`, subject, impact: { screens } };
 }
@@ -414,32 +410,45 @@ test("agent status reports access, effective_access and access_limited_by", asyn
   }
 });
 
-test("insufficient_access names Manage, or the project or person limit that holds the agent to Propose", async () => {
+test("insufficient_access names Manage, or the project or person cap from errors[0].access_limited_by", async () => {
   const env = await enrolled();
   try {
-    let self: Record<string, unknown> = { access: "propose", effective_access: "propose" };
+    let limitedBy: string | undefined;
     const transport = new FakeTransport()
-      .on("DELETE", `/api/playlists/${PLAYLIST}`, () => problem(403, "insufficient_access"))
-      .on("GET", "/api/agents/self", () => privateJson(200, {
-        agent: { id: AGENT, name: "Menu agent", agent_type: "cli", capabilities: ["playlists"], state: "active", authenticated_requests: 0, metered_credits: 0, created_at: NOW.toISOString() },
-        connection_ready: true, ...self,
+      .on("DELETE", `/api/playlists/${PLAYLIST}`, () => ({
+        status: 403, headers: { "content-type": "application/problem+json" },
+        body: {
+          errors: [{
+            status: 403, code: "insufficient_access", type: "https://screenrig.ai/problems/insufficient-access", title: "This access level cannot do this",
+            detail: limitedBy ? "This credential acts with Propose access here." : "This credential has Propose access.",
+            hint: "Read only access changes nothing; Propose access uploads media, writes notes and proposes playlist and screen changes for review, but cannot delete, control screens or spend credit. Ask a person to approve Manage access (screenrig login --access manage), or leave the change to a credential that has it.",
+            ...(limitedBy ? { access_limited_by: limitedBy } : {}),
+          }],
+          instance: `/api/playlists/${PLAYLIST}`, request_id: "req_REFUSED",
+        },
       }));
 
-    const propose = await cli(["--json", "playlist", "delete", PLAYLIST], transport, env);
-    assert.equal(propose.code, ExitCode.Auth, propose.stdout);
-    assert.equal(propose.envelope.error?.code, "insufficient_access");
-    assert.match(propose.envelope.error?.hint ?? "", /Propose access/);
-    assert.deepEqual(propose.envelope.error?.next?.argv, ["login", "--access", "manage"]);
+    const own = await cli(["--json", "playlist", "delete", PLAYLIST], transport, env);
+    assert.equal(own.code, ExitCode.Auth, own.stdout);
+    assert.equal(own.envelope.error?.code, "insufficient_access");
+    assert.match(own.envelope.error?.hint ?? "", /Propose access/);
+    assert.deepEqual(own.envelope.error?.next?.argv, ["login", "--access", "manage"]);
 
-    self = { access: "manage", effective_access: "propose", access_limited_by: "project" };
+    limitedBy = "project";
     const project = await cli(["--json", "playlist", "delete", PLAYLIST], transport, env);
     assert.equal(project.code, ExitCode.Auth);
+    assert.equal((project.envelope.error as { access_limited_by?: string } | undefined)?.access_limited_by, "project");
     assert.match(project.envelope.error?.hint ?? "", /requires review for agent changes/);
-    assert.equal(project.envelope.error?.next, undefined, "a new sign-in does not lift a project limit");
+    assert.equal(project.envelope.error?.next, undefined, "a new sign-in does not lift a project cap");
 
-    self = { access: "manage", effective_access: "propose", access_limited_by: "person" };
-    const person = await cli(["--json", "playlist", "delete", PLAYLIST], transport, env);
-    assert.match(person.envelope.error?.hint ?? "", /Can approve/);
+    limitedBy = "person";
+    const person = await cli(["--human", "playlist", "delete", PLAYLIST], transport, env);
+    assert.equal(person.code, ExitCode.Auth);
+    assert.match(person.stdout + person.stderr, /Can approve/);
+    assert.match(person.stdout + person.stderr, /access_limited_by: person/);
+    assert.doesNotMatch(person.stdout + person.stderr, /next: screenrig login/);
+
+    assert.equal(transport.calls.filter((call) => call.path === "/api/agents/self").length, 0, "the refusal explains itself without a self read");
   } finally {
     await rm(env.dir, { recursive: true, force: true });
   }

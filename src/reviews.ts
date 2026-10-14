@@ -235,24 +235,9 @@ export function accessFields(self: { access?: AccessLevel; effective_access?: Ac
   };
 }
 
-/**
- * Local guidance for 403 insufficient_access once the CLI knows why the
- * effective level is low. A project or person cap is not lifted by a new
- * sign-in, so it names what a person changes instead.
- */
-export function insufficientAccessGuidance(self: { access?: AccessLevel; effective_access?: AccessLevel; access_limited_by?: AccessLimitedBy }): { hint: string; next?: ProblemNext } | undefined {
-  const effective = self.effective_access ?? self.access;
-  if (self.access_limited_by === "project" && effective !== self.access) {
-    return { hint: "This project requires review for agent changes, so this credential acts with Propose access whatever its sign-in grants: it proposes playlist and screen changes for review and cannot do this. A person does it in the dashboard, or turns off Require review for agent changes there." };
-  }
-  if (self.access_limited_by === "person" && effective !== self.access) {
-    return { hint: "The person responsible for this agent cannot approve reviews in this project, so the agent acts with Propose access: it proposes playlist and screen changes for review and cannot do this. The project owner can turn on Can approve for that person in the dashboard, or a person does it there." };
-  }
-  if (effective === "read" || effective === "propose") {
-    return {
-      hint: `This sign-in has ${accessLabel(effective)} access to the project, which cannot do this. Ask a person to approve Manage access, or leave the change to a credential that has it.`,
-      next: { command: "screenrig login --access manage", argv: ["login", "--access", "manage"], reason: `This sign-in is ${accessLabel(effective)} for the project. A person approves Manage access in the dashboard.` },
-    };
-  }
-  return undefined;
+/** Why a project or person cap refused a write, and what a person changes to allow it. */
+export function accessLimitHint(limitedBy: AccessLimitedBy): string {
+  return limitedBy === "project"
+    ? "This project requires review for agent changes, so this credential acts with Propose access whatever its sign-in grants: it proposes playlist and screen changes for review and cannot do this. A person does it in the dashboard, or turns off Require review for agent changes there."
+    : "The person responsible for this agent cannot approve reviews in this project, so the agent acts with Propose access: it proposes playlist and screen changes for review and cannot do this. The project owner can turn on Can approve for that person in the dashboard, or a person does it there.";
 }

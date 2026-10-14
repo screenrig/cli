@@ -1096,8 +1096,10 @@ for agent changes holds every agent and service client to Propose
 (`access_limited_by: "project"`), and so does a responsible person who cannot
 approve reviews (`access_limited_by: "person"`). A new sign-in does not lift
 either limit; a person changes the project setting or Can approve in the
-dashboard. A refusal for access is HTTP 403 `insufficient_access` (exit 3), and
-its hint names which of these applies.
+dashboard. A refusal for access is HTTP 403 `insufficient_access` (exit 3).
+When a cap refused it, `error.access_limited_by` is `project` or `person` and
+the hint says what a person changes; otherwise `error.next` is
+`screenrig login --access manage`.
 
 A session is a 15-minute access token and a rotating refresh token, stored in
 the 0600 config. The CLI renews the access token when it is about to expire,
