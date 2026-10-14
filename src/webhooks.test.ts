@@ -11,6 +11,8 @@ import { run, type CliRuntime } from "./main.js";
 import { networkError } from "./problems.js";
 import { redactText } from "./redact.js";
 import { testTemp } from "./test-temp.js";
+import { webhookLines, webhookTableLines } from "./webhooks.js";
+import type { Webhook } from "./adapters/protocol.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import type { TransportRequest } from "./transport/types.js";
 
@@ -452,4 +454,18 @@ test("problem answers on webhook routes keep their bodies out of the operation l
 
 test("redaction masks webhook secrets in free text", () => {
   assert.equal(redactText("secret whsec_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA end"), "secret whsec_*** end");
+});
+
+test("a webhook URL withheld from a Read only credential is said, never printed as the URL", () => {
+  const webhook: Webhook = {
+    id: "whk_WEBHOOKAAAAAAAAAAAA", url: "", url_redacted: true, event_types: ["screen.offline"], enabled: true,
+    status: "active", revision: 1, created_at: "2026-10-14T12:00:00Z", updated_at: "2026-10-14T12:00:00Z",
+  };
+  assert.ok(webhookLines(webhook).includes("url: withheld from a Read only credential. A Manage sign-in (screenrig login --access manage) receives it."));
+  const table = webhookTableLines([webhook, { ...webhook, id: "whk_WEBHOOKBBBBBBBBBBBB", url: "https://hooks.example.net/in", url_redacted: undefined }]);
+  assert.match(table[1]!, /\(withheld\)$/);
+  assert.match(table[2]!, /https:\/\/hooks\.example\.net\/in$/);
+  assert.equal(table.at(-1), "URLs: withheld from a Read only credential. A Manage sign-in (screenrig login --access manage) receives them.");
+  // A Manage credential's URL prints as before, with no note.
+  assert.deepEqual(webhookTableLines([{ ...webhook, url: "https://hooks.example.net/in", url_redacted: undefined }]).length, 2);
 });

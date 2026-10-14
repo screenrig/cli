@@ -612,6 +612,10 @@ An eleventh webhook is `webhook_limit_reached` (exit 5); delete one first.
 `--event-types` takes 1 to 32 exact types (`screen.online`) or prefixes ending
 in `.*` (`screen.*`), comma-separated.
 
+A receiver URL is often its only credential, so a Read only credential receives
+`data.url` empty with `url_redacted: true`. Human output then says the URL was
+withheld (`(withheld)` in the `list` table); a Manage sign-in receives it.
+
 `create` and `rotate-secret` return the webhook with its signing secret in
 `data.secret`, plus warning `webhook_secret_shown_once`. Store the secret
 right away. No other command returns it, and the CLI never writes it to its

@@ -1036,6 +1036,8 @@ export interface Webhook {
   status: "active" | "failing" | "disabled";
   updated_at: string;
   url: string;
+  /** True when url was withheld (empty) from a Read only credential: a receiver URL is often its only credential. */
+  url_redacted?: boolean;
 }
 
 /** Returned only by create and rotate-secret (and their exact idempotent replay for 24 hours). */

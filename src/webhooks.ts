@@ -123,11 +123,18 @@ function when(value: string | undefined, label: string): string[] {
   return value ? [`${label}: ${value}`] : [];
 }
 
+/** A receiver URL withheld from a Read only credential: said, never printed as the URL. */
+const READ_ONLY_URL = "withheld from a Read only credential. A Manage sign-in (screenrig login --access manage) receives it.";
+
+function withheld(webhook: Webhook): boolean {
+  return webhook.url_redacted === true && !webhook.url;
+}
+
 export function webhookLines(webhook: Webhook | undefined): string[] {
   if (!webhook) return [];
   return [
     `id: ${webhook.id}`,
-    `url: ${webhook.url}`,
+    `url: ${withheld(webhook) ? READ_ONLY_URL : webhook.url}`,
     `event_types: ${(webhook.event_types ?? []).join(", ")}`,
     `enabled: ${webhook.enabled}`,
     `status: ${webhook.status}`,
@@ -149,9 +156,12 @@ function table(header: string[], rows: string[][]): string[] {
 
 export function webhookTableLines(items: Webhook[]): string[] {
   if (!items.length) return ["No webhooks"];
-  return table(["ID", "STATUS", "ENABLED", "EVENT_TYPES", "URL"], items.map((item) => [
-    item.id ?? "", item.status ?? "", String(item.enabled), (item.event_types ?? []).join(","), item.url ?? "",
+  const lines = table(["ID", "STATUS", "ENABLED", "EVENT_TYPES", "URL"], items.map((item) => [
+    item.id ?? "", item.status ?? "", String(item.enabled), (item.event_types ?? []).join(","), withheld(item) ? "(withheld)" : item.url ?? "",
   ]));
+  return items.some(withheld)
+    ? [...lines, "", "URLs: withheld from a Read only credential. A Manage sign-in (screenrig login --access manage) receives them."]
+    : lines;
 }
 
 export function deliveryTableLines(items: WebhookDelivery[]): string[] {
