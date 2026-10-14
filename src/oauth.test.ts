@@ -524,7 +524,7 @@ test("login --no-wait prints a resume handle with no secret, and --resume finish
   }
 });
 
-test("a completed login names the agent's new and due project notes outside the JSON envelope", async () => {
+test("a completed login names the agent's new and due project notes in a notes_to_read warning", async () => {
   const self = { agent: { id: AGENT, name: "ScreenRig CLI", agent_type: "cli", capabilities: ["screens"], state: "active",
     authenticated_requests: 0, metered_credits: 0, created_at: NOW.toISOString() }, connection_ready: true, notes: { open: 4, new: 3, due: 1 } };
   const signIn = () => withDiscovery(new FakeTransport())
@@ -542,13 +542,13 @@ test("a completed login names the agent's new and due project notes outside the 
       assert.equal(result.code, 0, result.stdout);
       assert.equal(transport.calls.filter((call) => call.path === "/api/agents/self").length, 1);
       const hint = "3 new project notes, 1 due for review: screenrig notes";
+      assert.equal(result.stderr.includes(hint), false);
       if (human) {
         assert.match(result.stdout, new RegExp(`Signed in\n[^]*\n${hint}\n$`));
-        assert.equal(result.stderr.includes(hint), false);
       } else {
-        assert.equal(JSON.parse(result.stdout).data.status, "signed_in");
-        assert.equal(result.stdout.includes(hint), false);
-        assert.match(result.stderr, new RegExp(`^${hint}$`, "m"));
+        const envelope = JSON.parse(result.stdout);
+        assert.equal(envelope.data.status, "signed_in");
+        assert.deepEqual(envelope.warnings, [{ code: "notes_to_read", message: hint }]);
       }
     } finally {
       await h.done();

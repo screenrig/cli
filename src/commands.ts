@@ -181,6 +181,7 @@ import { agentPlatform, validateAgent, validateAgentSelfStatus } from "./agent-i
 import {
   AGENT_SELF_PATH,
   NOTE_INPUT_MAX_BYTES,
+  NOTE_MATCHED_OPEN,
   NotesApi,
   matchedOpenNote,
   noteBody,
@@ -188,12 +189,16 @@ import {
   noteId,
   noteListLines,
   noteReason,
-  notesHint,
+  notesHintWarning,
   parseNoteAbout,
   parseNoteTtl,
   resourceNoteLines,
+  resourceNotesWarning,
+  reviewWarning,
   selfNoteCounts,
+  selfNotesField,
   type Note,
+  type NoteAboutType,
   type NoteCounts,
   type NoteList,
   type NoteState,
@@ -1115,7 +1120,7 @@ async function login(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCo
       ["project", `${context.organization.name} / ${context.project.name} (${context.project.id})`],
       ["access", access === "manage" ? "Manage" : "Read only"],
     ]),
-  }, args, runtime, counts);
+  }, counts);
 }
 
 async function logout(_args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
@@ -1254,20 +1259,15 @@ function safeAgentSummary(agent: Agent) {
   };
 }
 
-/**
- * One line naming new and due project notes. Human output carries it after the
- * result; JSON output keeps stdout to the envelope, so the line goes to stderr.
- */
-function withNotesHint(result: CommandResult, args: ParsedArgs, runtime: CliRuntime, counts: NoteCounts | undefined): CommandResult {
-  const hint = notesHint(counts);
-  if (!hint) return result;
-  if (flagBool(args.flags, "human")) return { ...result, human: result.human ? `${result.human}\n${hint}` : hint };
-  try {
-    runtime.stderr.write(`${hint}\n`);
-  } catch {
-    // The hint never fails the command.
-  }
-  return result;
+/** New and due project notes: a notes_to_read warning in the envelope, and the same line after human output. */
+function withNotesHint(result: CommandResult, counts: NoteCounts | undefined): CommandResult {
+  const warning = notesHintWarning(counts);
+  if (!warning) return result;
+  return {
+    ...result,
+    envelope: { ...result.envelope, warnings: [...result.envelope.warnings, warning] },
+    human: result.human ? `${result.human}\n${warning.message}` : warning.message,
+  };
 }
 
 /** The calling agent's note counts in a project. Any failure means no hint. */
@@ -1308,8 +1308,9 @@ async function agentStatus(
     const self = validateAgentSelfStatus(response.body);
     const agent = self.agent;
     const status = agent.state === "active" ? "active" : agent.state === "revoked" ? "disconnected" : "connecting";
+    const notes = selfNotesField(response.body);
     return withNotesHint({
-      envelope: successEnvelope({ status, connection_ready: self.connection_ready, agent: safeAgentSummary(agent) }, { request_id: client.requestId }),
+      envelope: successEnvelope({ status, connection_ready: self.connection_ready, agent: safeAgentSummary(agent), ...(notes ? { notes } : {}) }, { request_id: client.requestId }),
       exitCode: ExitCode.Success,
       human: humanLines("Agent", [
         ["status", status],
@@ -1322,7 +1323,7 @@ async function agentStatus(
         ["connection_ready", self.connection_ready ? "true" : "false"],
         ["last_used_at", agent.last_used_at],
       ]),
-    }, args, runtime, selfNoteCounts(response.body));
+    }, selfNoteCounts(response.body));
   } catch (err) {
     if (!(err instanceof CliError) || err.problem.code !== "unauthorized") throw err;
     const next = {
@@ -1912,7 +1913,7 @@ async function projectUse(args: ParsedArgs, runtime: CliRuntime, resolved: Resol
   const projectToken = await oauthSessionFor(runtime, resolved).accessFor(id).catch(() => undefined);
   const counts = await selfNoteCountsFor(runtime, args, resolved.apiUrl, projectToken);
   return withNotesHint({ envelope: successEnvelope(selected, { request_id: listed.requestId }), exitCode: ExitCode.Success,
-    human: `Selected ${selected.organization.name} / ${selected.project.name} (${id})` }, args, runtime, counts);
+    human: `Selected ${selected.organization.name} / ${selected.project.name} (${id})` }, counts);
 }
 
 async function projectCreate(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
@@ -4361,9 +4362,10 @@ export const handlePlaylistShow = commandHandler(async (args, runtime, resolved)
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await callPlaylist(client, { method: "GET", id });
   if (!output && !flagBool(args.flags, "editable")) {
-    const envelope = jsonBody(response, client.requestId);
-    const notes = await resourceNotes(args, runtime, client, id);
-    return { envelope, exitCode: ExitCode.Success, human: [`Playlist\n${JSON.stringify(response.body, null, 2)}`, ...notes].join("\n") };
+    const requestId = client.requestId;
+    const notes = await resourceNotes(runtime, client, "playlist", id);
+    return { envelope: jsonBody(response, requestId, undefined, notes.warnings), exitCode: ExitCode.Success,
+      human: [`Playlist\n${JSON.stringify(response.body, null, 2)}`, ...notes.lines].join("\n") };
   }
   const resource = response.body as { id: string; revision: number };
   if (resource.id !== id || !Number.isSafeInteger(resource.revision) || resource.revision < 1) throw usageError("Playlist response has invalid identity or revision.");
@@ -4927,17 +4929,19 @@ export const handleScreenPair = commandHandler(async (args, runtime, resolved) =
 }, true);
 
 /**
- * Human `screen show` and `playlist show`: the open notes about that resource,
- * one extra read. JSON output never makes it, and a failed read prints nothing.
+ * `screen show` and `playlist show`: open notes about that resource, one extra
+ * read. The envelope gains a notes_about_resource warning naming them, data
+ * stays the resource, and human output lists them. A failed read adds nothing.
  */
-async function resourceNotes(args: ParsedArgs, runtime: CliRuntime, client: ApiClient, id: string): Promise<string[]> {
-  if (!flagBool(args.flags, "human")) return [];
+async function resourceNotes(runtime: CliRuntime, client: ApiClient, type: NoteAboutType, id: string): Promise<{ warnings: Warning[]; lines: string[] }> {
   try {
     const response = await new NotesApi(client).list({ aboutId: id, limit: "5" });
-    const lines = resourceNoteLines(response.body as NoteList, runtime.now(), id);
-    return lines.length ? ["", ...lines] : [];
+    const list = (response.body ?? {}) as NoteList;
+    const warning = resourceNotesWarning(list, type, id);
+    const lines = resourceNoteLines(list, runtime.now(), id);
+    return { warnings: warning ? [warning] : [], lines: lines.length ? ["", ...lines] : [] };
   } catch {
-    return [];
+    return { warnings: [], lines: [] };
   }
 }
 
@@ -4949,10 +4953,10 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
   if (!id) throw usageError("screen show requires an id.");
   const response = await client.call({ method: "GET", path: `/api/screens/${id}` });
   const screen = response.body as Screen | undefined;
-  const envelope = jsonBody(response, client.requestId);
-  const notes = await resourceNotes(args, runtime, client, id);
+  const requestId = client.requestId;
+  const notes = await resourceNotes(runtime, client, "screen", id);
   return {
-    envelope,
+    envelope: jsonBody(response, requestId, undefined, notes.warnings),
     exitCode: ExitCode.Success,
     human: [
       "Screen",
@@ -4970,7 +4974,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...manifestUpgradeLines(screen, runtime.now()),
       ...displayLines(screen?.display, screen?.timezone),
       ...healthLines(screen?.health),
-      ...notes,
+      ...notes.lines,
     ].join("\n"),
   };
 }, true);
@@ -6223,10 +6227,12 @@ export const handleNotesList = commandHandler(async (args, runtime, resolved) =>
     after: flagString(args.flags, "after"),
     limit: flagString(args.flags, "limit"),
   });
+  const list = (response.body ?? {}) as NoteList;
+  const review = reviewWarning(list);
   return {
-    envelope: jsonBody(response, client.requestId),
+    envelope: jsonBody(response, client.requestId, undefined, review ? [review] : []),
     exitCode: ExitCode.Success,
-    human: noteListLines((response.body ?? {}) as NoteList, runtime.now(), state).join("\n"),
+    human: noteListLines(list, runtime.now(), state).join("\n"),
   };
 });
 
@@ -6261,7 +6267,7 @@ export const handleNotesAdd = commandHandler(async (args, runtime, resolved) => 
     ? `Matched open note ${note.id}; confirmed it.`
     : `Added note ${note.id}.${replaces ? ` ${replaces} is resolved as replaced.` : ""}`;
   return {
-    envelope: jsonBody(response, client.requestId, undefined, matched ? [{ code: "note_matched_open", message }] : []),
+    envelope: jsonBody(response, client.requestId, undefined, matched ? [{ code: NOTE_MATCHED_OPEN, message }] : []),
     exitCode: ExitCode.Success,
     human: message,
   };

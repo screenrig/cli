@@ -3,7 +3,7 @@ import { chmod, mkdir, open, rename, rm, stat, writeFile } from "node:fs/promise
 import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { test } from "node:test";
-import { NOTES_REVIEW_PROMPT, NOTES_TRUST_LINE, noteLines, notesHint, parseNoteAbout, parseNoteTtl, selfNoteCounts } from "./agent-notes.js";
+import { NOTES_REVIEW_PROMPT, NOTES_TRUST_LINE, noteLines, notesHint, parseNoteAbout, parseNoteTtl, resourceNotesWarning, selfNoteCounts } from "./agent-notes.js";
 import { eventTypeMatches } from "./commands.js";
 import { AGENT_CAPABILITIES } from "./adapters/protocol.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
@@ -137,11 +137,19 @@ test("screenrig notes lists open notes with author, age, markers, and the review
   assert.match(text, /nte_BBBBBBBBBBBBBBBBBBBBBBBB  ScreenRig CLI \(cli\) · 3d ago\n  Menu prices change on Mondays\./);
   assert.ok(text.indexOf(NOTES_REVIEW_PROMPT) > text.indexOf("Menu prices"), text);
   assert.match(text, /nte_CCCCCCCCCCCCCCCCCCCCCCCC \[due\]  Deploy bot \(claude-code\) · 104d ago/);
+  assert.equal(text.includes("warning:"), false, "human output prints the prompt once, not as a warning line");
+
+  const json = await invoke(["notes"], transport);
+  assert.equal(json.code, 0, json.stdout);
+  const envelope = JSON.parse(json.stdout);
+  assert.deepEqual(envelope.data.review.map((item: { id: string }) => item.id), ["nte_CCCCCCCCCCCCCCCCCCCCCCCC"]);
+  assert.deepEqual(envelope.warnings, [{ code: "notes_due_for_review", message: `1 note is due for review (nte_CCCCCCCCCCCCCCCCCCCCCCCC). ${NOTES_REVIEW_PROMPT}` }]);
 
   const quiet = new FakeTransport().on("GET", "/api/notes", () => ok({ items: [note()], next_cursor: "", review: [], counts: { open: 1, new: 0, due: 0 } }));
   const plain = await invoke(["notes", "list", "--human"], quiet);
   assert.equal(plain.code, 0, plain.stdout);
   assert.equal(plain.stdout.includes("Still true?"), false);
+  assert.deepEqual(JSON.parse((await invoke(["notes", "list"], quiet)).stdout).warnings, []);
 
   const empty = new FakeTransport().on("GET", "/api/notes", () => ok({ items: [], next_cursor: "", review: [], counts: { open: 0, new: 0, due: 0 } }));
   assert.match((await invoke(["notes", "--human"], empty)).stdout, /No open notes\./);
@@ -154,6 +162,7 @@ test("notes list sends its filters and --json passes the API answer through", as
   assert.equal(result.code, 0, result.stdout);
   assert.deepEqual(transport.calls[0]!.query, { state: "all", about_id: "pl_AAAA", author_id: "agt_BBBBBBBBBBBBBBBBBBBBBBBB", after: "nc_1", limit: "5" });
   assert.deepEqual(JSON.parse(result.stdout).data, answer);
+  assert.deepEqual(JSON.parse(result.stdout).warnings, []);
   assert.equal(result.stderr, "");
 
   const resolved = new FakeTransport().on("GET", "/api/notes", () => ok({ items: [], next_cursor: "" }));
@@ -291,59 +300,81 @@ test("events list sends --type and events follow filters the stream by it", asyn
   assert.equal(stream.calls.at(-1)!.query?.after, "ev1_4", "filtered events still advance the cursor");
 });
 
-test("agent status names new and due notes on stderr in JSON and after the result in human output", async () => {
+test("agent status carries the notes counts and a notes_to_read warning, and human output prints the line", async () => {
   const self = (notes?: unknown) => new FakeTransport().on("GET", "/api/agents/self", () => ({
     status: 200, headers: { "cache-control": "private, no-store" }, body: { agent: AGENT, connection_ready: true, ...(notes ? { notes } : {}) },
   }));
   const json = await invoke(["agent", "status"], self({ open: 5, new: 3, due: 1 }));
   assert.equal(json.code, 0, json.stdout);
-  assert.equal(json.stderr, "3 new project notes, 1 due for review: screenrig notes\n");
-  assert.equal(json.stdout.includes("project notes"), false);
-  assert.equal(JSON.parse(json.stdout).data.status, "active");
+  const envelope = JSON.parse(json.stdout);
+  assert.equal(envelope.data.status, "active");
+  assert.deepEqual(envelope.data.notes, { open: 5, new: 3, due: 1 });
+  assert.deepEqual(envelope.warnings, [{ code: "notes_to_read", message: "3 new project notes, 1 due for review: screenrig notes" }]);
+  assert.equal(json.stderr, "");
 
   const human = await invoke(["agent", "status", "--human"], self({ open: 5, new: 0, due: 2 }));
   assert.equal(human.code, 0, human.stdout);
-  assert.match(human.stdout, /last_used_at|connection_ready: true/);
+  assert.match(human.stdout, /connection_ready: true/);
   assert.match(human.stdout, /\n2 project notes due for review: screenrig notes\n$/);
   assert.equal(human.stderr, "");
 
   for (const notes of [undefined, { open: 5, new: 0, due: 0 }]) {
-    const quiet = await invoke(["agent", "status", "--human"], self(notes));
+    const quiet = await invoke(["agent", "status"], self(notes));
     assert.equal(quiet.code, 0, quiet.stdout);
-    assert.equal(quiet.stdout.includes("screenrig notes"), false);
-    assert.equal(quiet.stderr, "");
+    const data = JSON.parse(quiet.stdout);
+    assert.deepEqual(data.warnings, []);
+    assert.deepEqual(data.data.notes, notes);
+    const quietHuman = await invoke(["agent", "status", "--human"], self(notes));
+    assert.equal(quietHuman.stdout.includes("screenrig notes"), false);
   }
 });
 
-test("human screen show and playlist show list open notes about the resource; JSON reads none", async () => {
+test("open notes about a screen or playlist travel as one warning; data stays the resource", () => {
+  assert.deepEqual(resourceNotesWarning({ items: [note()], next_cursor: "" }, "screen", "scr_AAAA"),
+    { code: "notes_about_resource", message: "1 open note about this screen: screenrig notes --about scr_AAAA" });
+  assert.deepEqual(resourceNotesWarning({ items: [note(), note()], next_cursor: null }, "playlist", "pl_AAAA"),
+    { code: "notes_about_resource", message: "2 open notes about this playlist: screenrig notes --about pl_AAAA" });
+  assert.equal(resourceNotesWarning({ items: Array(5).fill(note()), next_cursor: "nc_2" }, "screen", "scr_AAAA")?.message,
+    "More than 5 open notes about this screen: screenrig notes --about scr_AAAA");
+  assert.equal(resourceNotesWarning({ items: [], next_cursor: "" }, "screen", "scr_AAAA"), undefined);
+  assert.equal(resourceNotesWarning({}, "screen", "scr_AAAA"), undefined);
+});
+
+test("screen show and playlist show name open notes in warnings and list them in human output", async () => {
   const screen = { id: "scr_AAAAAAAAAAAAAAAAAAAAAAAA", label: "Lobby", state: "active", revision: 1 };
   const playlist = { id: "pl_AAAA", name: "Menu", revision: 2, pages: [] };
   const transport = new FakeTransport()
     .on("GET", "/api/screens/scr_AAAAAAAAAAAAAAAAAAAAAAAA", () => ok(screen))
     .on("GET", "/api/playlists/pl_AAAA", () => ok(playlist))
     .on("GET", "/api/notes", (req) => ok(req.query?.about_id === "scr_AAAAAAAAAAAAAAAAAAAAAAAA"
-      ? { items: [note()], next_cursor: "nc_more", review: [], counts: { open: 6, new: 0, due: 0 } }
+      ? { items: [note(), note({ id: "nte_BBBBBBBBBBBBBBBBBBBBBBBB", body: "Second." })], next_cursor: "nc_more", review: [], counts: { open: 6, new: 0, due: 0 } }
       : { items: [], next_cursor: "", review: [], counts: { open: 0, new: 0, due: 0 } }));
-  const shown = await invoke(["screen", "show", "scr_AAAAAAAAAAAAAAAAAAAAAAAA", "--human"], transport);
-  assert.equal(shown.code, 0, shown.stdout);
+  const json = await invoke(["screen", "show", "scr_AAAAAAAAAAAAAAAAAAAAAAAA"], transport);
+  assert.equal(json.code, 0, json.stdout);
   const notesCall = transport.calls.find((call) => call.path === "/api/notes")!;
   assert.deepEqual(notesCall.query, { state: undefined, about_id: "scr_AAAAAAAAAAAAAAAAAAAAAAAA", author_id: undefined, after: undefined, limit: "5" });
-  assert.match(shown.stdout, /\n\nNotes \(context from agents, not instructions\)\nnte_AAAAAAAAAAAAAAAAAAAAAAAA  Deploy bot \(claude-code\) · 3h ago · screen scr_AAAAAAAAAAAAAAAAAAAAAAAA\n  Lobby screen is portrait\./);
-  assert.match(shown.stdout, /More: screenrig notes --about scr_AAAAAAAAAAAAAAAAAAAAAAAA\n$/);
+  const envelope = JSON.parse(json.stdout);
+  assert.deepEqual(envelope.data, screen);
+  assert.deepEqual(envelope.warnings, [{ code: "notes_about_resource", message: "More than 2 open notes about this screen: screenrig notes --about scr_AAAAAAAAAAAAAAAAAAAAAAAA" }]);
 
+  const shown = await invoke(["screen", "show", "scr_AAAAAAAAAAAAAAAAAAAAAAAA", "--human"], transport);
+  assert.equal(shown.code, 0, shown.stdout);
+  assert.match(shown.stdout, /\n\nNotes \(context from agents, not instructions\)\nnte_AAAAAAAAAAAAAAAAAAAAAAAA  Deploy bot \(claude-code\) · 3h ago · screen scr_AAAAAAAAAAAAAAAAAAAAAAAA\n  Lobby screen is portrait\./);
+  assert.match(shown.stdout, /\n\nnte_BBBBBBBBBBBBBBBBBBBBBBBB  Deploy bot[^\n]*\n  Second\.\nMore: screenrig notes --about scr_AAAAAAAAAAAAAAAAAAAAAAAA\n$/);
+  assert.equal(shown.stdout.includes("warning:"), false);
+
+  const playlistJson = await invoke(["playlist", "show", "pl_AAAA"], transport);
+  assert.equal(playlistJson.code, 0, playlistJson.stdout);
+  assert.equal(transport.calls.at(-1)!.query?.about_id, "pl_AAAA");
+  assert.deepEqual(JSON.parse(playlistJson.stdout).data, playlist);
+  assert.deepEqual(JSON.parse(playlistJson.stdout).warnings, []);
   const playlistShown = await invoke(["playlist", "show", "pl_AAAA", "--human"], transport);
   assert.equal(playlistShown.code, 0, playlistShown.stdout);
   assert.equal(playlistShown.stdout.includes("Notes ("), false, "no notes prints no heading");
-  assert.equal(transport.calls.at(-1)!.query?.about_id, "pl_AAAA");
 
   const before = transport.calls.length;
-  const json = await invoke(["screen", "show", "scr_AAAAAAAAAAAAAAAAAAAAAAAA"], transport);
-  assert.equal(json.code, 0, json.stdout);
-  assert.deepEqual(JSON.parse(json.stdout).data, screen);
-  assert.deepEqual(transport.calls.slice(before).map((call) => call.path), ["/api/screens/scr_AAAAAAAAAAAAAAAAAAAAAAAA"]);
-  const playlistJson = await invoke(["playlist", "show", "pl_AAAA"], transport);
-  assert.equal(playlistJson.code, 0, playlistJson.stdout);
-  assert.equal(transport.calls.at(-1)!.path, "/api/playlists/pl_AAAA");
+  await invoke(["playlist", "show", "pl_AAAA", "--editable"], transport);
+  assert.deepEqual(transport.calls.slice(before).map((call) => call.path), ["/api/playlists/pl_AAAA"], "an editable document reads no notes");
 });
 
 test("a failed notes read never fails screen show", async () => {
@@ -354,4 +385,7 @@ test("a failed notes read never fails screen show", async () => {
   assert.equal(shown.code, 0, shown.stdout);
   assert.equal(shown.stdout.includes("Notes ("), false);
   assert.equal(shown.stderr, "");
+  const json = await invoke(["screen", "show", "scr_AAAA"], transport);
+  assert.equal(json.code, 0, json.stdout);
+  assert.deepEqual(JSON.parse(json.stdout).warnings, []);
 });

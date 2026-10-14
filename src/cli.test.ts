@@ -4672,7 +4672,7 @@ test("screen archive, unarchive, archived list, and retired unbind drive the rea
     );
     assert.equal(revoked.code, ExitCode.Usage, revoked.stdout);
     assert.equal(transport.calls.length, callsBeforeRevoke);
-    assert.equal(transport.calls.length, callsBeforeDelete + 2, "delete and show reach the server; revoke-credential does not");
+    assert.equal(transport.calls.length, callsBeforeDelete + 3, "delete, show and its notes read reach the server; revoke-credential does not");
     const revokeEnvelope = JSON.parse(revoked.stdout) as {
       error: { code: string; detail: string; next?: { command: string; reason: string } };
     };

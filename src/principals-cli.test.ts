@@ -181,7 +181,7 @@ test("project list and project use under a sign-in preserve both project retries
   assert.doesNotMatch(listed.out + used.out + shown.out, /eyJ|identity_token/);
 });
 
-test("project use names the selected project's due notes with that project's token", async t => {
+test("project use names the selected project's due notes in a notes_to_read warning, read with that project's token", async t => {
   const f = await fixture(t, initial());
   f.renews({ [B]: TOKEN_B });
   f.transport.on("GET", "/api/projects", () => ({ status: 200, headers: {}, body: { projects: [context(A, "Screens"), context(B, "Lobby")] } }));
@@ -192,8 +192,8 @@ test("project use names the selected project's due notes with that project's tok
   const used = await f.invoke("project", "use", B);
   assert.equal(used.code, 0, used.out);
   assert.equal(used.result.data.project.id, B);
-  assert.equal(used.err, "2 project notes due for review: screenrig notes\n");
-  assert.doesNotMatch(used.out, /screenrig notes/);
+  assert.deepEqual(used.result.warnings, [{ code: "notes_to_read", message: "2 project notes due for review: screenrig notes" }]);
+  assert.equal(used.err, "");
 });
 
 test("project use succeeds without a hint when the notes counts cannot be read", async t => {
@@ -203,6 +203,7 @@ test("project use succeeds without a hint when the notes counts cannot be read",
   const used = await f.invoke("project", "use", B);
   assert.equal(used.code, 0, used.out);
   assert.equal((await f.saved())?.project_id, B);
+  assert.deepEqual(used.result.warnings, []);
   assert.equal(used.err, "");
 });
 

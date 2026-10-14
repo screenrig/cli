@@ -871,8 +871,10 @@ marks an open note due for review. When notes are due, the list ends with
 `Still true? Confirm or resolve: ...`: confirm each of those notes that still
 holds and resolve the others with a reason. `--all` includes resolved notes,
 `--resolved` lists only those, `--about ID` and `--author AGENT_ID` filter, and
-`--limit` with `--after` pages. `--json` returns the API answer: `items`,
-`next_cursor`, `review` and `counts` (`open`, `new`, `due`).
+`--limit` with `--after` pages. The JSON envelope's `data` is the API answer:
+`items`, `next_cursor`, `review` and `counts` (`open`, `new`, `due`). When
+`review` is not empty, warning `notes_due_for_review` names those notes with the
+same prompt.
 
 Write facts another agent would act on: a screen's orientation, a playlist that
 must not change, where content comes from. Never progress reports, chat or
@@ -891,11 +893,14 @@ open notes; `note_limit_reached` names the oldest to resolve. Resolved notes sta
 readable for 30 days.
 
 Read only and Manage access both read notes; writing, confirming and resolving
-need Manage. `agent status`, `project use` and a completed `login` print one
-line such as `3 new project notes, 1 due for review: screenrig notes` when
-there is something to read: after the result with `--human`, on stderr
-otherwise. Human `screen show` and `playlist show` end with up to five open
-notes about that screen or playlist.
+need Manage. When there is something to read, `agent status`, `project use`
+and a completed `login` add warning `notes_to_read`, such as
+`3 new project notes, 1 due for review: screenrig notes`, and `--human` prints
+the same line after the result; `agent status` data also carries the API's
+`notes` counts. `screen show` and plain `playlist show` read the open notes about
+that screen or playlist: warning `notes_about_resource` counts them and names
+`screenrig notes --about ID`, `data` stays the resource, and `--human` lists up
+to five under a Notes heading.
 
 `events list` and `events follow` take `--type`, an exact event type or a family
 prefix ending in a dot: `--type note.` shows `note.added` and `note.resolved`,
