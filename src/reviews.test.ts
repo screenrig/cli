@@ -111,7 +111,7 @@ test("playlist create and update that wait for review are a success with the rev
     const created = await cli(["--json", "playlist", "create", "lobby.json", "--note", "  New lobby loop  "], transport, env);
     assertPending(created, "rvw_CREATE");
     assert.equal(created.envelope.data.playlist.id, PLAYLIST);
-    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], "New lobby loop");
+    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], encodeURIComponent("New lobby loop"));
 
     const updated = await cli(["--json", "playlist", "update", PLAYLIST, "lobby.json", "--expect-rev", "1"], transport, env);
     assertPending(updated, "rvw_UPDATE");
@@ -130,7 +130,7 @@ test("playlist create and update that wait for review are a success with the rev
   }
 });
 
-test("--note is checked locally: at most 280 characters and no control characters; other text travels as UTF-8 bytes", async () => {
+test("--note is checked locally: at most 280 characters and no control characters; it travels percent-encoded as UTF-8", async () => {
   const env = await enrolled();
   try {
     const transport = new FakeTransport()
@@ -145,8 +145,14 @@ test("--note is checked locally: at most 280 characters and no control character
     const fits = await cli(["--json", "playlist", "create", "lobby.json", "--note", "é".repeat(280)], transport, env);
     assert.equal(fits.code, ExitCode.Success, fits.stdout);
     assert.equal(fits.envelope.warnings?.length ?? 0, 0, "a write that applies is unchanged");
+    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], "%C3%A9".repeat(280));
+
+    const mixed = "Café menu: 50% off, 🍕 & 朝食";
+    assert.equal((await cli(["--json", "playlist", "create", "lobby.json", "--note", mixed], transport, env)).code, ExitCode.Success);
     const header = transport.calls.at(-1)!.headers?.[NOTE_HEADER]!;
-    assert.equal(Buffer.from(header, "latin1").toString("utf8"), "é".repeat(280));
+    assert.equal(header, "Caf%C3%A9%20menu%3A%2050%25%20off%2C%20%F0%9F%8D%95%20%26%20%E6%9C%9D%E9%A3%9F");
+    assert.match(header, /^[\x21-\x7e]+$/, "the header value is printable ASCII");
+    assert.equal(decodeURIComponent(header), mixed);
   } finally {
     await rm(env.dir, { recursive: true, force: true });
   }
@@ -165,16 +171,16 @@ test("screen assign, schedule and takeover writes send --note and report a revie
 
     const assigned = await cli(["--json", "screen", "assign", SCREEN, "--playlist-id", PLAYLIST, "--note", "Lobby loop for spring"], transport, env);
     assertPending(assigned, "rvw_ASSIGN");
-    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], "Lobby loop for spring");
+    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], encodeURIComponent("Lobby loop for spring"));
     assert.equal(transport.calls.filter((call) => call.method === "GET" && call.path === `/api/screens/${SCREEN}`).length, 0, "no assignment readback for a proposal");
 
     const cleared = await cli(["--json", "screen", "schedule", "clear", SCREEN, "--note", "Back to the default"], transport, env);
     assertPending(cleared, "rvw_SCHEDULE");
-    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], "Back to the default");
+    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], encodeURIComponent("Back to the default"));
 
     const takeover = await cli(["--json", "screen", "takeover", "set", SCREEN, "--playlist-id", PLAYLIST, "--note", "Fire drill"], transport, env);
     assertPending(takeover, "rvw_TAKEOVER");
-    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], "Fire drill");
+    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], encodeURIComponent("Fire drill"));
 
     const ended = await cli(["--json", "screen", "takeover", "clear", SCREEN], transport, env);
     assertPending(ended, "rvw_TAKEOVER_CLEAR");
@@ -199,7 +205,7 @@ test("a fleet action that waits for review is one review; a 202 continuation pag
     const proposed = await cli(["--json", "screen", "assign", "--tag", "Lobby", "--playlist-id", PLAYLIST, "--note", "Spring loop on every lobby"], transport, env);
     assertPending(proposed, "rvw_FLEET");
     assert.equal(proposed.envelope.data.review.impact.screens, 12);
-    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], "Spring loop on every lobby");
+    assert.equal(transport.calls.at(-1)!.headers?.[NOTE_HEADER], encodeURIComponent("Spring loop on every lobby"));
     assert.deepEqual(transport.calls.at(-1)!.body, { selector: { by: "tag", tag: "Lobby" }, action: { type: "assign", playlist_id: PLAYLIST } });
 
     proposals = false;
@@ -243,7 +249,7 @@ test("screen publish stops at pending_review with both reviews, reports them on 
     assert.deepEqual(first.envelope.data.next.argv, ["reviews", "show", "rvw_PLAYLIST"]);
     assert.deepEqual(first.envelope.warnings?.map((warning) => warning.code), ["pending_review", "pending_review"]);
     assert.match(first.stderr, /"stage":"pending_review"/);
-    for (const call of writes(transport)) assert.equal(call.headers?.[NOTE_HEADER], "Spring menu", `${call.method} ${call.path}`);
+    for (const call of writes(transport)) assert.equal(call.headers?.[NOTE_HEADER], "Spring%20menu", `${call.method} ${call.path}`);
     const afterAssign = transport.calls.slice(transport.calls.findIndex((call) => call.method === "PATCH") + 1);
     assert.equal(afterAssign.length, 0, "no readback or playback wait for a proposal");
 

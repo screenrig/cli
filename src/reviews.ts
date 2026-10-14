@@ -38,11 +38,11 @@ export function decisionNote(value: string): string {
 }
 
 /**
- * The note header. HTTP header values are bytes: the note travels as its UTF-8
- * bytes, which a Latin-1 string carries one byte per character.
+ * The note header. Header values are ASCII here: the note travels
+ * percent-encoded as UTF-8 (encodeURIComponent), and the server decodes it.
  */
 export function reviewNoteHeaders(note: string | undefined): Record<string, string> {
-  return note === undefined ? {} : { [REVIEW_NOTE_HEADER]: Buffer.from(note, "utf8").toString("latin1") };
+  return note === undefined ? {} : { [REVIEW_NOTE_HEADER]: encodeURIComponent(note) };
 }
 
 /**

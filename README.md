@@ -1000,8 +1000,9 @@ screenrig ads reviews request-changes rev_REVIEW --note TEXT
 ```
 
 `--note TEXT` on those writes and on `screen publish` sends the
-`Screenrig-Review-Note` header: plain text of at most 280 characters, without
-control characters, shown to the person who reviews the change. It is ignored
+`Screenrig-Review-Note` header, percent-encoded as UTF-8: plain text of at most
+280 characters, without control characters, shown to the person who reviews
+the change. It is ignored
 when the change applies directly.
 
 `reviews list` returns one page, pending reviews by default, with

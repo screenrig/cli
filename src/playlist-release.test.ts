@@ -136,6 +136,6 @@ test("an apply that waits for review sends the note and reports the review witho
   assert.equal((result as { status?: string }).status, "pending_review");
   assert.equal((result as { review?: { id: string } }).review?.id, "rvw_BOARD");
   const write = f.transport.calls.find(c => c.method === "PUT")!;
-  assert.equal(write.headers?.["screenrig-review-note"], "Board release with the new menu");
+  assert.equal(write.headers?.["screenrig-review-note"], encodeURIComponent("Board release with the new menu"));
   assert.equal(write.headers?.["if-match"], `"${preview.revision}"`);
 });
