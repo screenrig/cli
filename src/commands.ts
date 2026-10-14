@@ -1224,6 +1224,18 @@ export const handleAppRename = commandHandler(async (args, runtime, resolved) =>
   };
 }, true);
 
+export const handleAppDelete = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[2];
+  if (!id) throw usageError("app delete requires <id>.");
+  const revision = flagString(args.flags, "if-match");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({
+    method: "DELETE", path: `/api/applications/${encodeURIComponent(id)}`, idempotent: true,
+    headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
+  });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted application ${id}` };
+}, true);
+
 export const handleBrowserSetup = commandHandler(browserSetupCommand);
 
 export const handleOperationsGet = commandHandler(operationsGet);

@@ -637,7 +637,7 @@ export async function snapshotBundleSelectors(client: ApiClient, input: unknown)
     for (const raw of page.primitives) {
       const primitive = record(raw, "Playlist primitive");
       const selector = primitive.selector as JsonRecord | undefined;
-      if (!selector || !["all", "tag"].includes(String(selector.by))) { primitives.push(primitive); continue; }
+      if (!selector || !["all", "tag", "folder"].includes(String(selector.by))) { primitives.push(primitive); continue; }
       const category = stringField(primitive, "primitive", "Playlist primitive");
       if (selector.batch_size !== undefined && selector.one_at_a_time !== true) throw usageError("Static bundle export cannot retain a runtime batch cursor; remove batch_size or use explicit ids.");
       const key = JSON.stringify([category, selector]);

@@ -1191,6 +1191,14 @@ test("bundle export resolves dynamic selectors once per catalog and pins filenam
   assert.equal(transport.calls.length, 1);
 });
 
+test("bundle export pins a folder selector to the folder's files at export", async () => {
+  const transport = new FakeTransport().on("POST", "/api/selectors/preview", () => ({ status: 200, headers: {}, body: { candidates: [{ media_id: "med_A", filename: "a.png" }] } }));
+  const snapshot = await snapshotBundleSelectors(new ApiClient({ transport, token: "token" }), playlist(mediaPrimitive({ by: "folder", folder_id: "mfd_Lobby1", order: "filename", one_at_a_time: true })));
+  const normalized = normalizePlaylistForBundle(snapshot);
+  assert.deepEqual((normalized.playlist.pages as any[])[0].primitives[0].selector, { by: "ids", media_ids: ["med_A"], one_at_a_time: true });
+  assert.deepEqual((transport.calls[0]?.body as any)?.selector, { by: "folder", folder_id: "mfd_Lobby1", order: "filename", one_at_a_time: true });
+});
+
 test("empty dynamic selectors leave other bundle primitives intact", async () => {
   const transport = new FakeTransport().on("POST", "/api/selectors/preview", () => ({ status: 200, headers: {}, body: { candidates: [] } }));
   const snapshot = await snapshotBundleSelectors(new ApiClient({ transport, token: "token" }), playlist(mediaPrimitive({ by: "all", one_at_a_time: true })));

@@ -6639,7 +6639,7 @@ for (const argv of [
  ["screen", "archive", "scr_TEST"], ["screen", "unarchive", "scr_TEST"],
  ["screen", "delete", "scr_TEST"], ["screen", "rotate-public-id", "scr_TEST"],
  ["media", "update", "med_TEST", "--tag", "Updated"], ["media", "delete", "med_TEST"],
- ["playlist", "delete", "pl_TEST"], ["kv", "delete", "key", "--app-id", "app_TEST"],
+ ["playlist", "delete", "pl_TEST"], ["app", "delete", "app_TEST"], ["kv", "delete", "key", "--app-id", "app_TEST"],
  ["kv", "set", "key", "--app-id", "app_TEST", "--json-value", "{}"],
 ]) test(`revision is optional on ${argv.slice(0,2).join(" ")}`, async () => {
  const transport = new FakeTransport();
@@ -6647,7 +6647,7 @@ for (const argv of [
  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
  await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret"}, fsLike);
  const mutations: any[] = [];
- const paths = ["/api/screens/scr_TEST", "/api/screens/scr_TEST/archive", "/api/screens/scr_TEST/unarchive", "/api/screens/scr_TEST/public-id/rotate", "/api/media/med_TEST", "/api/playlists/pl_TEST", "/api/applications/app_TEST/kv/key"];
+ const paths = ["/api/screens/scr_TEST", "/api/screens/scr_TEST/archive", "/api/screens/scr_TEST/unarchive", "/api/screens/scr_TEST/public-id/rotate", "/api/media/med_TEST", "/api/playlists/pl_TEST", "/api/applications/app_TEST", "/api/applications/app_TEST/kv/key"];
  for (const method of ["PATCH", "POST", "PUT", "DELETE"] as const) for (const target of paths) transport.on(method, target, request => {
   mutations.push(request);
   return {status: method === "DELETE" ? 204 : 200, headers: {}, body: {id: argv[2], revision: 8, key: "key", value_base64: "e30=", content_type: "application/json"}};
@@ -6658,6 +6658,31 @@ for (const argv of [
   assert.equal(mutations.length, 1);
   assert.equal(mutations[0].headers?.["if-match"], undefined);
   assert.equal(transport.calls.filter(call => call.method === "GET").length, 0, "no revision lookup");
+ } finally { await rm(configDir, {recursive: true, force: true}); }
+});
+
+test("app delete guards the revision and reports application_in_use", async () => {
+ const transport = new FakeTransport();
+ const configDir = await testTemp("app-delete-");
+ const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+ await writeConfigAtomic(path.join(configDir, "screenrig", "config.json"), {api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_existing_secret"}, fsLike);
+ let inUse = false;
+ transport.on("DELETE", "/api/applications/app_TEST", (): TransportResponse => inUse
+  ? {status: 409, headers: {"content-type": "application/problem+json"}, body: {type: "https://screenrig.ai/problems/application_in_use", title: "Application in use", status: 409, code: "application_in_use", detail: "A live manifest still references one of the application's releases."}}
+  : {status: 204, headers: {}, body: undefined});
+ try {
+  let result = await withRuntime(["--json", "app", "delete", "app_TEST", "--expect-rev", "3"], transport, {fs: fsLike});
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  const call = transport.calls.at(-1)!;
+  assert.equal(call.method, "DELETE");
+  assert.equal(call.headers?.["if-match"], '"3"');
+  assert.ok(call.headers?.["idempotency-key"]);
+  inUse = true;
+  result = await withRuntime(["--json", "app", "delete", "app_TEST"], transport, {fs: fsLike});
+  assert.notEqual(result.code, ExitCode.Success);
+  const envelope = JSON.parse(result.stdout) as { ok: boolean; error: { code: string } };
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.error.code, "application_in_use");
  } finally { await rm(configDir, {recursive: true, force: true}); }
 });
 
