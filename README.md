@@ -1180,8 +1180,8 @@ privileges. Edit the document for application-controlled advancement.
 Audio inputs do not become pages. They become the playlist soundtrack: an
 ordered list of MP3 tracks that plays continuously while pages change, looping
 by default. `media upload` sends an MP3 unchanged and converts WAV, AAC/M4A,
-OGG, and FLAC to a 192 kb/s MP3 first (ffmpeg with libmp3lame). Tracks run 1
-second to 4 hours.
+OGG, and FLAC to a 128 kb/s MP3 first (ffmpeg with libmp3lame). Tracks run 1
+second to 3 hours.
 
 ```sh
 screenrig playlist init ./poster.png ./menu.mp4 ./lobby-loop.wav --name Lobby --screen-id scr_LOBBY --output lobby.json

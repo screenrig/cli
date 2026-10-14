@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, truncate, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
@@ -26,6 +26,7 @@ import {
   encodeTiming,
   isAnimated,
   isHdr,
+  MAX_AUDIO_BYTES,
   summarizeFfmpegError,
   transcodeForUpload,
   videoFilterChain,
@@ -1222,7 +1223,26 @@ test("an MP3 source is a soundtrack passthrough with no encode", async () => {
   }
 });
 
-test("other audio is re-encoded to a 192 kb/s stereo MP3 without cover art", async () => {
+test("an MP3 over the 170 MiB audio limit is re-encoded, not uploaded as is", async () => {
+  resetFfmpegToolchainCache();
+  const dir = await testTemp("transcode-audio-large-");
+  const source = path.join(dir, "set.mp3");
+  await writeFile(source, Buffer.alloc(512, 1));
+  // Sparse: the size counts, the disk stays empty.
+  await truncate(source, MAX_AUDIO_BYTES + 1);
+  const { runtime, calls } = fakeRuntime({ probe: audioProbe("mp3", "mp3"), encoders: LAME_ENCODERS, outputProbe: audioProbe("mp3", "mp3") });
+  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() });
+  try {
+    assert.equal(result.passthrough, false);
+    const args = encodeCall(calls)?.args ?? [];
+    assert.equal(args[args.indexOf("-b:a") + 1], "128k");
+  } finally {
+    await rm(result.cleanupDir!, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("other audio is re-encoded to a 128 kb/s stereo MP3 without cover art", async () => {
   resetFfmpegToolchainCache();
   const dir = await testTemp("transcode-audio-encode-");
   const source = path.join(dir, "theme.flac");
@@ -1234,7 +1254,7 @@ test("other audio is re-encoded to a 192 kb/s stereo MP3 without cover art", asy
     assert.equal(result.contentType, "audio/mpeg");
     assert.equal(result.filename, "theme.mp3");
     const args = encodeCall(calls)?.args ?? [];
-    for (const [flag, value] of [["-c:a", "libmp3lame"], ["-b:a", "192k"], ["-ar", "48000"], ["-ac", "2"], ["-map", "0:a:0"]] as const) {
+    for (const [flag, value] of [["-c:a", "libmp3lame"], ["-b:a", "128k"], ["-ar", "48000"], ["-ac", "2"], ["-map", "0:a:0"]] as const) {
       assert.equal(args[args.indexOf(flag) + 1], value, flag);
     }
     assert.ok(args.includes("-vn"));
@@ -1257,7 +1277,7 @@ test("audio transcode names a missing LAME encoder and out-of-range lengths", as
     resetFfmpegToolchainCache();
     await assert.rejects(
       () => transcodeForUpload({ runtime: fakeRuntime({ probe: audioProbe("pcm_s16le", "wav", {}, "0.4"), encoders: LAME_ENCODERS }).runtime, filePath: source, options: defaultTranscodeOptions() }),
-      /1 second to 4 hours/,
+      /1 second to 3 hours/,
     );
   } finally {
     await rm(dir, { recursive: true, force: true });

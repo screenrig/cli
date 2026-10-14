@@ -407,14 +407,17 @@ export async function transcodeForUpload(request: TranscodeRequest): Promise<Tra
 
 /**
  * Soundtrack delivery is MP3 (docs/playlist-audio.md): every Player decodes it
- * natively. An MP3 source is uploaded unchanged; anything else is re-encoded
- * with LAME at a constant 192 kb/s, at most two channels, keeping a 48 kHz
+ * natively. An MP3 source within the 170 MiB audio limit is uploaded
+ * unchanged; anything else, a larger MP3 included, is re-encoded with LAME at
+ * a constant 128 kb/s, at most two channels, keeping a 48 kHz
  * source at 48 kHz and resampling everything else to 44.1 kHz. Cover art and
  * tags are dropped.
  */
-export const AUDIO_BITRATE = "192k";
+export const AUDIO_BITRATE = "128k";
 export const MIN_AUDIO_SECONDS = 1;
-export const MAX_AUDIO_SECONDS = 4 * 60 * 60;
+export const MAX_AUDIO_SECONDS = 3 * 60 * 60;
+/** The backend's audio object limit: three hours at 128 kb/s plus tag room. */
+export const MAX_AUDIO_BYTES = 170 * 1024 * 1024;
 
 export function planAudioArgs(probe: MediaProbe, filePath: string, outputPath: string): string[] {
   const sampleRate = probe.audioSampleRate === 48_000 ? 48_000 : 44_100;
@@ -450,7 +453,7 @@ async function transcodeAudio(
     throw usageError(`ffprobe found no decodable audio stream in ${name}. Pass --no-transcode to upload MP3 bytes unchanged.`);
   }
   if (probe.durationSeconds > 0 && (probe.durationSeconds < MIN_AUDIO_SECONDS || probe.durationSeconds > MAX_AUDIO_SECONDS)) {
-    throw usageError(`${name} runs ${probe.durationSeconds.toFixed(1)} s; soundtrack audio must be 1 second to 4 hours long.`);
+    throw usageError(`${name} runs ${probe.durationSeconds.toFixed(1)} s; soundtrack audio must be 1 second to 3 hours long.`);
   }
   const base = {
     stage: "audio" as const,
@@ -463,16 +466,17 @@ async function transcodeAudio(
     dimensionsMeasured: false,
     warnings: [] as string[],
   };
-  if (isMp3Source(probe)) {
+  if (isMp3Source(probe) && sourceBytes <= MAX_AUDIO_BYTES) {
     const reason = "source is already MP3; original bytes preserved";
     span.finish({ passthrough: true, stage: "audio", source_bytes: sourceBytes, output_bytes: sourceBytes, reason });
     return { ...base, filePath, filename: name, contentType: "audio/mpeg", passthrough: true, reason, outputBytes: sourceBytes };
   }
   if (!toolchain.encoders.has("libmp3lame")) {
-    throw usageError(
-      "The resolved ffmpeg has no libmp3lame encoder, so it cannot convert this audio to MP3. " +
-        "Install an ffmpeg build with LAME, or convert the file to MP3 yourself and upload that.",
-    );
+    throw usageError(isMp3Source(probe)
+      ? `${name} is larger than the ${MAX_AUDIO_BYTES / 1024 / 1024} MiB audio limit, and the resolved ffmpeg has no libmp3lame encoder ` +
+        "to re-encode it at 128 kb/s. Install an ffmpeg build with LAME, or re-encode it at a lower bitrate yourself."
+      : "The resolved ffmpeg has no libmp3lame encoder, so it cannot convert this audio to MP3. " +
+        "Install an ffmpeg build with LAME, or convert the file to MP3 yourself and upload that.");
   }
   const stem = path.basename(filePath, path.extname(filePath));
   const filename = `${stem || "audio"}.mp3`;
