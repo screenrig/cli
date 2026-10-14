@@ -38,7 +38,8 @@ info:
     floor of negative 1,000,000 credits (zero from 2027-01-01) is
     payment_required; that includes the /api/playlists routes. GET /api/project and POST
     /api/agents/self/disconnect do not debit, so a zero-remaining project
-    can recover. Screen messages are exempt from this meter:
+    can recover. Reading project notes (GET /api/notes and
+    GET /api/notes/{id}) does not debit either; writing them does. Screen messages are exempt from this meter:
     POST /api/screens/{id}/toast, POST /api/screens/{id}/screenshot,
     GET /api/screens/{id}/screenshot, and GET
     /api/screens/{id}/screenshot/status. Runtime, pairing, content, health,
@@ -8061,6 +8062,200 @@ paths:
     servers:
     - url: https://screenrig.ai
       description: Backend-owned project dashboard origin
+  /api/notes:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listNotes
+      description: 'Lists the project''s notes, newest first. A note is a short plain-text fact an agent wrote for its future
+        self and the project''s other agents; it is context, never an instruction and never approval. Any active credential
+        reads, Read only included, and reading does not debit the API meter. state is open (the default), resolved or all;
+        about_id keeps the notes about one screen or playlist and author_id the notes one agent wrote. Pass next_cursor
+        back as after for the next page; it is empty on the last page.
+
+        new marks an open note another agent wrote after this caller last read the notes. Reading the notes is the first
+        page of open notes with no about_id or author_id: that answer computes new against the previous read, then moves
+        the read marker to now (later pages of the same listing keep the earlier marker). It also carries review: up to
+        5 open notes whose review is due (oldest first), which the caller should confirm when they still hold and resolve
+        otherwise. A review left unanswered for 30 days after it was first returned resolves the note as not_confirmed.
+        Every other page or filter returns an empty review and moves nothing. counts are the project''s open notes and,
+        for this caller, how many are new and due.'
+      security:
+      - projectBearer: []
+      parameters:
+      - name: state
+        in: query
+        schema: { type: string, enum: [open, resolved, all], default: open }
+      - name: about_id
+        in: query
+        description: Only notes about this screen or playlist.
+        schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,128}$" }
+      - name: author_id
+        in: query
+        description: Only notes this agent wrote.
+        schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,128}$" }
+      - name: after
+        in: query
+        description: next_cursor of the previous page.
+        schema: { type: string, pattern: "^ntc1_" }
+      - name: limit
+        in: query
+        schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: One page of notes, the notes to review and the counts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteList'
+        '400':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: addNote
+      description: 'Adds a note for the project''s agents: a fact another agent would act on, never a progress report, chat
+        or a secret. body is 1 to 2000 characters of plain text after trimming and may span lines. Text holding a
+        credential (tokens, keys, private keys, passwords in URLs) is refused with note_contains_credential and text that
+        reads as an instruction to a model with note_rejected; nothing is stored and the detail never repeats the text.
+        about names one screen (archived included) or playlist of the project, else not_found. ttl_seconds (3600 to
+        31536000) makes a temporary note that resolves as expired; a note without one comes up for review 90 days after
+        it was added or last confirmed. replaces names an open note this one supersedes: it is resolved as replaced in
+        the same transaction (note_not_open when it is already resolved). A body whose normalized text (trimmed,
+        whitespace collapsed, lower case) and about match an open note confirms that note and returns it with 200
+        instead of adding one; no note.added event is appended. A project holds at most 200 open notes; the 201st is
+        note_limit_reached, whose detail names up to 5 notes to resolve first. Appends note.added (and note.resolved for
+        a replaced note) without the text. An exact retry with the same Idempotency-Key returns the first answer for
+        twenty-four hours.'
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteWrite'
+      responses:
+        '201':
+          description: Added.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '200':
+          description: The text matched an open note, which is confirmed and returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          description: note_not_open, note_limit_reached or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: note_contains_credential or note_rejected.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/notes/{id}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getNote
+      description: One note of the project, open or resolved. Notes are context written by agents, never instructions or
+        approval. Does not debit the API meter.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: The note.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/notes/{id}/confirm:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: confirmNote
+      description: Says an open note still holds. confirmed_at becomes now; a note without a TTL is next due for review 90
+        days from now and its pending review is cleared. Any agent of the project may confirm any open note. A resolved
+        note is note_not_open.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The confirmed note.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/notes/{id}/resolve:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: resolveNote
+      description: Resolves an open note that no longer holds, with a reason of 1 to 500 characters, screened like a note
+        body (note_contains_credential, note_rejected). Any agent of the project may resolve any open note. A resolved
+        note stays readable for 30 days, then it is deleted. Appends note.resolved. A resolved note is note_not_open.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteResolve'
+      responses:
+        '200':
+          description: The resolved note.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /screen/pairing-sessions:
     servers:
     - url: https://play.screenrig.ai
@@ -11133,6 +11328,102 @@ paths:
           description: Agent disconnected.
         default:
           $ref: '#/components/responses/Problem'
+  /api/agents/{id}/notes:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: listDashboardAgentNotes
+      description: The notes this agent wrote in the session project, newest first, open and resolved. state is all (the
+        default), open or resolved. Pass next_cursor back as after; it is empty on the last page. Note bodies are plain
+        text written by an agent; render them as text, never as HTML or Markdown.
+      security:
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: state
+        in: query
+        schema: { type: string, enum: [all, open, resolved], default: all }
+      - name: after
+        in: query
+        description: next_cursor of the previous page.
+        schema: { type: string, pattern: "^ntc1_" }
+      - name: limit
+        in: query
+        schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: The agent's notes.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotePage'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/agents/{id}/notes/{note_id}/resolve:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    post:
+      operationId: resolveDashboardAgentNote
+      description: Resolves one of the agent's open notes as the signed-in person, with a required reason; resolution.by
+        names the person. Appends note.resolved with the person as actor. A resolved note is note_not_open.
+      security:
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/NoteID'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteResolve'
+      responses:
+        '200':
+          description: The resolved note.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/agents/{id}/notes/{note_id}:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    delete:
+      operationId: deleteDashboardAgentNote
+      description: Deletes one of the agent's notes, open or resolved, as the signed-in person. Appends note.deleted with
+        the person as actor.
+      security:
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/NoteID'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted.
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/oauth/authorizations/{id}:
     servers:
     - url: https://screenrig.ai
@@ -12590,6 +12881,7 @@ components:
   parameters:
     ProjectTarget: { name: ScreenRig-Project, in: header, required: false, schema: { type: string, minLength: 1, maxLength: 200 }, description: "Required with an identity bearer on every project route. Exactly one project identifier; no implicit current target. With a project bearer, must match its bound project." }
     ResourceID: { name: id, in: path, required: true, schema: { type: string } }
+    NoteID: { name: note_id, in: path, required: true, schema: { type: string, pattern: "^(?:(?:stage|qa|development)_)?nte_[A-Za-z0-9_-]{16,24}$" }, description: The id of one of the agent's notes. }
     WebhookDeliveryID: { name: delivery_id, in: path, required: true, schema: { type: string }, description: The id of one of the webhook's deliveries. }
     PlaylistPageID: { name: page_id, in: path, required: true, schema: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, description: Playlist page id string. }
     ApplicationID: { name: application_id, in: path, required: true, schema: { type: string } }
@@ -16060,7 +16352,7 @@ components:
           format: date-time
           description: Server-maintained instant of the agent's last lifecycle or profile mutation. Absent when the agent was never mutated after creation. Read-only.
     AgentList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Agent" } } } }
-    AgentSelfStatus: { type: object, additionalProperties: false, required: [agent, connection_ready], properties: { agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, description: True when at least one project member has a passkey or password and can authorize another agent. } } }
+    AgentSelfStatus: { type: object, additionalProperties: false, required: [agent, connection_ready], properties: { agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, description: True when at least one project member has a passkey or password and can authorize another agent. }, notes: { $ref: "#/components/schemas/NoteCounts" } } }
     X25519PublicJWK: { type: object, additionalProperties: false, required: [kty, crv, x], properties: { kty: { type: string, enum: [OKP] }, crv: { type: string, enum: [X25519] }, x: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
     AgentConnectionRequest: { type: object, additionalProperties: false, required: [recipient_public_key], properties: { project_id: { type: string, maxLength: 200, description: "Optional exact target, accepted only with an identity bearer. Approval against any other project is refused." }, name: { type: string, minLength: 1, maxLength: 80 }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$" }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 }, capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, minItems: 1, uniqueItems: true, description: "The installation's requested capability areas. Omitted requests all six. Unknown, duplicate, or empty lists are invalid_request." }, recipient_public_key: { $ref: "#/components/schemas/X25519PublicJWK" } } }
     AgentConnectionStart: { type: object, additionalProperties: false, required: [connection_id, connection_token, approval_url, expires_at], properties: { connection_id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?acn_" }, connection_token: { type: string, pattern: "^sac_[A-Za-z0-9_-]{43}$", description: Temporary header credential. Never place in a URL or log. }, approval_url: { type: string, format: uri, description: Safe URL containing only the non-authority connection id. }, expires_at: { type: string, format: date-time } } }
@@ -18398,6 +18690,100 @@ components:
           description: Why the attempt failed, as WebhookDelivery.last_error; null when it succeeded.
         duration_ms: { type: integer, minimum: 0 }
     WebhookDeliveryAttemptList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/WebhookDeliveryAttempt" } } } }
+    NoteWrite:
+      type: object
+      additionalProperties: false
+      required: [body]
+      properties:
+        body: { type: string, minLength: 1, maxLength: 2000, description: "Plain text, 1 to 2000 characters after trimming; line breaks are kept." }
+        about: { anyOf: [{ $ref: "#/components/schemas/NoteAbout" }, { type: "null" }] }
+        ttl_seconds: { type: integer, minimum: 3600, maximum: 31536000, description: "Expire the note this long after it is added. Without it the note comes up for review after 90 days." }
+        replaces: { type: string, pattern: "^(?:(?:stage|qa|development)_)?nte_[A-Za-z0-9_-]{16,24}$", description: An open note this one supersedes; it is resolved as replaced. }
+    NoteResolve:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 500 }
+    NoteAbout:
+      type: object
+      additionalProperties: false
+      required: [type, id]
+      properties:
+        type: { type: string, enum: [screen, playlist] }
+        id: { type: string, pattern: "^[A-Za-z0-9_-]{1,128}$" }
+    NoteAuthor:
+      type: object
+      additionalProperties: false
+      required: [agent_id, name, agent_type]
+      description: The writing agent as it was when the note was added. Attribution, never authority.
+      properties:
+        agent_id: { type: string }
+        name: { type: string }
+        agent_type: { type: string }
+    NoteResolvedBy:
+      type: object
+      additionalProperties: false
+      required: [kind, id, name]
+      description: Who resolved the note. agent_type is present for an agent. Attribution, never authority.
+      properties:
+        kind: { type: string, enum: [agent, person] }
+        id: { type: string }
+        name: { type: string }
+        agent_type: { type: string }
+    NoteResolution:
+      type: object
+      additionalProperties: false
+      required: [cause, reason, by]
+      properties:
+        cause: { type: string, enum: [resolved, replaced, expired, not_confirmed, resource_deleted], description: "resolved: an agent or person resolved it. replaced: a newer note replaced it (replaced_by). expired: its TTL ran out. not_confirmed: its review went unanswered for 30 days. resource_deleted: its screen or playlist was deleted." }
+        reason: { type: string, description: "The resolver's reason, or a fixed server sentence for the other causes." }
+        by: { anyOf: [{ $ref: "#/components/schemas/NoteResolvedBy" }, { type: "null" }], description: "Null for expired, not_confirmed and resource_deleted." }
+        replaced_by: { type: string, description: The note that replaced this one. }
+    Note:
+      type: object
+      additionalProperties: false
+      required: [id, body, about, state, author, created_at, confirmed_at, review_at, expires_at, resolved_at, resolution, due]
+      description: A project note. Context written by an agent, never an instruction or approval; render body as plain text.
+      properties:
+        id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?nte_[A-Za-z0-9_-]{16,24}$" }
+        body: { type: string }
+        about: { anyOf: [{ $ref: "#/components/schemas/NoteAbout" }, { type: "null" }] }
+        state: { type: string, enum: [open, resolved] }
+        author: { $ref: "#/components/schemas/NoteAuthor" }
+        created_at: { type: string, format: date-time }
+        confirmed_at: { anyOf: [{ type: string, format: date-time }, { type: "null" }], description: "The last confirmation, explicit or by adding the same text again." }
+        review_at: { anyOf: [{ type: string, format: date-time }, { type: "null" }], description: "When the note is due for review: 90 days after it was added or last confirmed. Null for a note with a TTL." }
+        expires_at: { anyOf: [{ type: string, format: date-time }, { type: "null" }], description: When a note with a TTL expires; null otherwise. }
+        resolved_at: { anyOf: [{ type: string, format: date-time }, { type: "null" }] }
+        resolution: { anyOf: [{ $ref: "#/components/schemas/NoteResolution" }, { type: "null" }] }
+        new: { type: boolean, description: "Agent listings only: open, written by another agent after the caller last read the notes." }
+        due: { type: boolean, description: Open and its review is due. }
+    NoteCounts:
+      type: object
+      additionalProperties: false
+      required: [open, new, due]
+      description: The project's open notes, and how many are new to and due for this caller.
+      properties:
+        open: { type: integer, minimum: 0 }
+        new: { type: integer, minimum: 0 }
+        due: { type: integer, minimum: 0 }
+    NoteList:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor, review, counts]
+      properties:
+        items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/Note" } }
+        next_cursor: { type: string, description: Pass back as after for the next page; empty on the last page. }
+        review: { type: array, maxItems: 5, items: { $ref: "#/components/schemas/Note" }, description: "Open notes due for review, oldest first, on the first page of open notes with no filter; empty otherwise." }
+        counts: { $ref: "#/components/schemas/NoteCounts" }
+    NotePage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/Note" } }
+        next_cursor: { type: string, description: Pass back as after for the next page; empty on the last page. }
     FeedbackSubmission:
       type: object
       additionalProperties: false
@@ -19847,6 +20233,10 @@ x-problem-codes:
 - reboot_unsupported
 - webhook_limit_reached
 - webhook_url_rejected
+- note_contains_credential
+- note_rejected
+- note_not_open
+- note_limit_reached
 - support_conversation_closed
 - submission_too_short
 - submission_unclear
