@@ -37,6 +37,10 @@ export function editablePlaylist(value: unknown): RecordValue {
         // Omit the server-inserted false default without changing selector behavior.
         if (primitive.selector?.by === "id" && primitive.selector.one_at_a_time === false) delete primitive.selector.one_at_a_time;
       }
+      if (primitive.primitive === "card") {
+        delete primitive.feed;
+        delete primitive.resolved_media;
+      }
     }
   }
   assertPlaylistValid(document);

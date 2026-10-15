@@ -5,6 +5,13 @@ import { addCommandExamples, addCommandNotes, commandExamples } from "./notes.js
 /** Help-only workflow guidance. Syntax and validation belong to the native commands. */
 export function registerGuidance(root: Command): void {
   const examples: Record<string, string[]> = {
+    "cards list": ["", "--tag weather", "--category information"],
+    "cards show": ["menu"],
+    "card-data get": ["menu-main"],
+    "card-data put": ["menu-main --file menu-data.json", "menu-main --file - --expect-rev 3"],
+    "card-data list": [""],
+    "card-data delete": ["menu-main --expect-rev 3"],
+    "feeds get": ["weather --lat 49.25 --lon -123", "rates --base EUR", "crypto --symbols btc,eth --currency usd", "earthquakes --lat 49.25 --lon -123 --radius-km 500", "headlines --url https://example.com/news.xml"],
     "project list": [""],
     "organization list": [""],
     "organization rename": ['org_ORGANIZATION "North"'],
@@ -157,6 +164,13 @@ export function registerGuidance(root: Command): void {
     if (!commandExamples(command).length) addCommandExamples(command, ...suffixes.map(suffix => `screenrig ${path}${suffix ? ` ${suffix}` : ""}`));
   }
   const notes: Record<string, string> = {
+    "cards list": "Reads the complete built-in card catalogue. --tag and --category filter it locally, with both filters combined. Built-in cards are drop-in live details drawn natively by the Player; use a custom application for complex interactions.",
+    "cards show": "Returns params_schema and data_schema unchanged, plus properties.static and properties.dynamic with types, defaults, required flags and limits. Copy example into a playlist page's primitives; replace sample content, rect and layer for the target screen. Set params.view to a supported canvas, corner or chip view and params.theme to a schema-listed theme. Corner and chip views overlay other content. A bound data key takes dynamic properties out of params. The example is a placement, not a complete playlist.",
+    "card-data get": "Reads a project-scoped JSON document and its revision. No application id is needed. Use that revision with --expect-rev on put or delete.",
+    "card-data put": "Reads a JSON object (the document itself, without a document wrapper) from --file or --file - for stdin; at most 1 MiB. Creates or replaces this project's key immediately and notifies screens that read it; no playlist republish or wait. The backend validates dynamic properties against every bound card and refuses card_data_invalid without writing. An unbound key accepts any object, so data can be staged before placement. --expect-rev sends If-Match; on revision_conflict, read the key and reconcile. After an ambiguous transport failure, rerun the identical command to reuse its saved idempotency key. Keys cannot start with feed:. media:<id> references must name ready, approved project images; image URLs are not card media references.",
+    "card-data list": "Reads every list page of this project's card data namespace, returning metadata and revisions without document bodies. Each page is one billed read.",
+    "card-data delete": "Requires --expect-rev from card-data get and sends If-Match. A bound card is hidden until its document is written again. On revision_conflict, read and reconcile; after an ambiguous transport failure, repeat the identical command with its saved idempotency key.",
+    "feeds get": "One read of data fetched and cached by screenRIG; never calls a third-party provider from the agent. Weather, airquality, alerts and earthquakes require --lat and --lon; earthquakes also accepts --radius-km. Rates accepts --base; crypto requires --symbols and accepts --currency; headlines requires --url. 202 returns state pending, retry_after_seconds and retry_at with exit 0; the CLI does not loop. 200 returns the document including fetchedAt and attribution: show the attribution wherever the data shows. Card placements derive feed keys from static params; do not write feed or feed: keys yourself.",
     "invitations create": "Invites people to this project or buyers to its advertising network. Email delivery does not prove receipt. Email invitations expire after seven days; member links expire after 24 hours. At most 50 invitations may be outstanding per project. --link is a recovery exception, not a setup step: use it only when a person never used their emailed invitation and later asks for dashboard access. It prints one URL once instead of emailing; --email identifies the intended recipient for the operator, but a link is not email-bound. Deliver it privately and never store or log it. Retry unchanged input after an ambiguous failure to reuse its saved Idempotency-Key.",
     "dashboard reset-sign-in": "Unauthenticated: never enrolls, sends a stored token, or changes stored credentials. The acknowledgment is identical for known and unknown addresses. Instructions expire after one hour. An unresolved request retains only its retry key and fingerprint in the local write ledger.",
     "agent connect": "Alias of screenrig login for one release, with a warning naming it. --target-project-id becomes --project; --wait waits for approval, otherwise it returns pending with a resume handle. The approver chooses capabilities, so --capability is not sent. --cancel clears this installation's pending sign-in.",

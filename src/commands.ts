@@ -149,7 +149,7 @@ import {
 } from "./credits.js";
 import { successEnvelope, type ProblemNext, type Warning } from "./envelope.js";
 import { ExitCode } from "./exit-codes.js";
-import { CliError, configError, fileError, makeProblem, networkError, notEnrolledError, unexpectedResponseError, usageError } from "./problems.js";
+import { CliError, configError, fileError, makeProblem, networkError, notEnrolledError, parseRetryAfter, unexpectedResponseError, usageError } from "./problems.js";
 import type { HttpMethod, Transport } from "./transport/types.js";
 import { packDirectory } from "./pack/index.js";
 import type { CliRuntime } from "./runtime.js";
@@ -237,6 +237,7 @@ import {
   type NoteState,
 } from "./agent-notes.js";
 import { CLI_VERSION, cliDistribution } from "./version.js";
+import { cardId, cardDataKey, cardProperties, cardDetailsHuman, validatePlaylistCards, feedQuery, type CardDetails, type CardSummary } from "./cards.js";
 
 export { CLI_VERSION };
 
@@ -740,7 +741,7 @@ function commandHandler(
     // Sign-in reset is unauthenticated but still retains a durable retry key.
     const ordinary = (group === "dashboard" && action === "reset-sign-in")
       || Boolean(authenticated && resolved.token && (
-        ["kv", "comment", "feedback", "support", "operations", "notes"].includes(group ?? "") ||
+        ["kv", "card-data", "comment", "feedback", "support", "operations", "notes"].includes(group ?? "") ||
         (group === "app" && ["upload", "update"].includes(action ?? "")) ||
         (group === "playlist" && ["create", "update", "delete"].includes(action ?? "")) ||
         (group === "reviews" && action === "withdraw") ||
@@ -4654,6 +4655,7 @@ async function playlistCreateUpdateAction(args: ParsedArgs, runtime: CliRuntime,
   const pages = expandPlaylistPages(parsed.pages);
   const body = { name: parsed.name, ...(parsed.audio !== undefined ? { audio: parsed.audio } : {}), pages };
   assertPlaylistValid(body);
+  await validatePlaylistCards(client, body);
   // Only a signage-capable project may place adslot pages.
   if (pages.some(isAdSlotPage)) {
     await requireCapability(client, "signage.playlists", `playlist ${action} with adslot pages`, {
@@ -6264,6 +6266,71 @@ async function screenScreenshotFleet(args: ParsedArgs, runtime: CliRuntime, clie
     ].join("\n"),
   };
 }
+
+export const handleCardsList = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: "/api/cards" });
+  const tag = flagString(args.flags, "tag"), category = flagString(args.flags, "category");
+  const cards = (response.body as { cards: CardSummary[] }).cards.filter(card =>
+    (!tag || card.tags.includes(tag)) && (!category || card.category === category));
+  return { envelope: jsonBody(response, client.requestId, { cards }), exitCode: ExitCode.Success,
+    human: cards.length ? cards.map(card => `${card.id}: ${card.title} — ${card.short}\n  category: ${card.category}; tags: ${card.tags.join(", ")}; views: ${card.views.join(", ")}; majors: ${card.majors.join(", ")}`).join("\n") : "No matching cards." };
+});
+
+export const handleCardsShow = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: `/api/cards/${cardId(args.positionals[2]!)}` });
+  const card = response.body as CardDetails;
+  return { envelope: jsonBody(response, client.requestId, { properties: cardProperties(card) }), exitCode: ExitCode.Success, human: cardDetailsHuman(card) };
+});
+
+export const handleCardDataList = commandHandler(async (args, runtime, resolved) => {
+  return simpleList(args, runtime, resolved, "/api/card-data", "Card data");
+});
+
+export const handleCardDataGet = commandHandler(async (args, runtime, resolved) => {
+  return simpleGet(args, runtime, resolved, `/api/card-data/${encodeURIComponent(cardDataKey(args.positionals[2]!))}`, "Card data");
+});
+
+export const handleCardDataPut = commandHandler(async (args, runtime, resolved) => {
+  const key = cardDataKey(args.positionals[2]!);
+  const document = await readAuthoringJson(flagString(args.flags, "file")!, runtime);
+  if (!document || typeof document !== "object" || Array.isArray(document)) throw usageError("Card data must be a JSON object.");
+  if (Buffer.byteLength(JSON.stringify(document), "utf8") > 1_048_576) throw usageError("Card data must be at most 1 MiB.");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const revision = flagString(args.flags, "if-match");
+  const response = await client.call({ method: "PUT", path: `/api/card-data/${encodeURIComponent(key)}`, body: { document }, idempotent: true,
+    headers: revision ? { "if-match": quotedRevision(revision) } : undefined });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Card data written: ${key}\nrevision: ${(response.body as { revision: number }).revision}` };
+});
+
+export const handleCardDataDelete = commandHandler(async (args, runtime, resolved) => {
+  const key = cardDataKey(args.positionals[2]!);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "DELETE", path: `/api/card-data/${encodeURIComponent(key)}`, idempotent: true,
+    headers: { "if-match": quotedRevision(flagString(args.flags, "if-match")!) } });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted card data: ${key}` };
+});
+
+export const handleFeedsGet = commandHandler(async (args, runtime, resolved) => {
+  const query = feedQuery(args);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: `/api/feeds/${args.positionals[2]!}`, query });
+  const body = response.body as Record<string, unknown>;
+  const key = response.headers["screenrig-feed-key"] ?? body.key;
+  if (response.status === 202) {
+    const now = runtime.now().getTime();
+    const seconds = parseRetryAfter(response.headers["retry-after"], now) ?? body.retry_after_seconds;
+    if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0 || !Number.isFinite(new Date(now + seconds * 1000).getTime())) {
+      throw unexpectedResponseError("Pending feed response lacks a valid retry time.", client.requestId);
+    }
+    const retryAt = new Date(now + seconds * 1000).toISOString();
+    return { envelope: jsonBody(response, client.requestId, { key, state: "pending", retry_after_seconds: seconds, retry_at: retryAt }), exitCode: ExitCode.Success,
+      human: `Feed pending\nkey: ${key}\nretry after: ${seconds} seconds (${retryAt})` };
+  }
+  return { envelope: jsonBody(response, client.requestId, key ? { key } : undefined), exitCode: ExitCode.Success,
+    human: `Feed\n${JSON.stringify(body, null, 2)}` };
+});
 
 export const handleKvList = commandHandler(async (args, runtime, resolved) => {
   const applicationId = flagString(args.flags, "application-id");

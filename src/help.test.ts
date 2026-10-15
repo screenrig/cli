@@ -17,7 +17,7 @@ test("root help is compact and every command is discoverable through immediate c
   const root = commandHelp();
   const commanderHelp = root.usage.split(/\n\nAll commands:\n/)[0]!;
   // Service status, support, notes, fleet links, triggers and reviews add six immediate root groups.
-  assert.ok(commanderHelp.split("\n").length <= 51);
+  assert.ok(commanderHelp.split("\n").length <= 54);
   assert.doesNotMatch(root.usage, /localhost|log_socket|--token/);
   const discovered: string[] = [];
   function visit(path: string[]): void {
@@ -35,6 +35,7 @@ test("root help is compact and every command is discoverable through immediate c
   }
   visit([]);
   assert.deepEqual(discovered.sort(), [
+    "cards list", "cards show", "card-data get", "card-data put", "card-data list", "card-data delete", "feeds get",
     "recovery list",
     "recovery show",
     "recovery reconcile",

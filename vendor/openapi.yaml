@@ -25,7 +25,7 @@ info:
     level that counts is the effective access: the credential's level, held
     to Propose while the project requires review for agent changes or while
     the agent's responsible person cannot approve. On read
-    operations a Read only credential receives each credential-bearing string,
+    operations a credential below effective Manage receives each credential-bearing string,
     such as a webhook receiver URL, empty, with a sibling <name>_redacted: true
     (url_redacted), so the response keeps its types.
 
@@ -7184,6 +7184,55 @@ paths:
       x-rate-limit-admitted-response-headers:
       - RateLimit-Policy
       - RateLimit
+  /api/cards:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listCards
+      description: >-
+        Discover built-in cards from this environment's published catalogue, merged with the
+        vendored floor. Refreshes and schema verification happen in the background; this route
+        never calls the edge bucket. Each entry lists its current copy and views and every served major.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Built-in card catalogue, ordered by id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardCatalogue'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/cards/{id}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - name: id
+      in: path
+      required: true
+      schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,39}$'}
+    get:
+      x-screenrig-access: read
+      operationId: getCard
+      description: >-
+        The current major's self-contained JSON Schemas for placement params and card-data documents,
+        feed schema, supported views and an example placement. Params marked dynamic come from the
+        data document when a placement binds a data key. Replace example content values before publishing.
+        Unknown ids answer card_not_found (404).
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Card property schemas and placement example
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardDetails'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/card-data:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
@@ -7238,12 +7287,17 @@ paths:
     put:
       x-screenrig-access: write
       operationId: putCardData
-      description: Creates or replaces a card data document. When card placements in the project's playlists bind the key, the
-        document must hold only each bound card's dynamic properties and validate against them; otherwise the write is refused
-        with card_data_invalid naming the card and the property path, and nothing changes. A key no placement binds accepts
-        any JSON object. Screens showing a placement that reads the key receive screen.card_data_changed and refetch it in place;
-        the project log records kv.updated with a card_data_entry resource, which never reaches a Player. Limits, quota, metering,
-        revisions and idempotency are the application K/V store's.
+      description: >-
+        Creates or replaces a card data document. When card placements in the project's playlists bind the key, the
+        document must hold only each bound card's dynamic properties and validate against them; otherwise the write is
+        refused with card_data_invalid naming the card and the property path, and nothing changes. A key no placement
+        binds accepts any JSON object. Every string that begins with media: is a media reference, media:<id>, for a
+        card to draw (a photo); on any key it must name a ready, approved image in this project, at most 256 distinct
+        media per document, or the write is refused with card_media_invalid naming the property path and media_id.
+        Screens whose content reads the key may then fetch those media from GET /media/{media_id}. Screens showing a
+        placement that reads the key receive screen.card_data_changed and refetch it in place; the project log records
+        kv.updated with a card_data_entry resource, which never reaches a Player. Limits, quota, metering, revisions
+        and idempotency are the application K/V store's.
       security:
       - projectBearer: []
       parameters:
@@ -7276,6 +7330,65 @@ paths:
       responses:
         '204':
           description: Deleted
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/feeds/{family}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - name: family
+      in: path
+      required: true
+      description: The feed family.
+      schema:
+        type: string
+        enum: [weather, airquality, alerts, rates, crypto, earthquakes, headlines]
+    get:
+      x-screenrig-access: read
+      operationId: getFeed
+      description: >-
+        Reads a shared third-party feed document: the same document a built-in card placement with the same params reads
+        (docs/feeds.md). Query parameters normalize into the card's feed key, named by the ScreenRig-Feed-Key header:
+        weather, airquality and alerts take lat and lon (rounded to a 0.25 degree cell); earthquakes lat, lon and
+        radius_km (10 to 20000, default 500); rates base (an ECB reference currency, default EUR); crypto symbols
+        (CoinGecko ids or tickers, comma separated, at most 20) and currency (default usd); headlines url (an http or
+        https RSS or Atom URL). The request never calls the provider. 200 is the document (schema, fetchedAt,
+        attribution and the family's fields, as the cards contract defines them); its ETag is the sha256 of the bytes and
+        If-None-Match answers 304; Cache-Control max-age runs to the next scheduled fetch. 202 means no document yet:
+        the read registered demand, and the feed worker fetches the key within about a minute (Retry-After). An API read
+        keeps a key fetched for 24 hours. A project registers at most 50 new keys a day (rate_limited past it). A family
+        with no source on this deployment answers not_found.
+      security:
+      - projectBearer: []
+      parameters:
+      - { name: lat, in: query, required: false, schema: { type: number, minimum: -90, maximum: 90 } }
+      - { name: lon, in: query, required: false, schema: { type: number, minimum: -180, maximum: 180 } }
+      - { name: radius_km, in: query, required: false, schema: { type: number, minimum: 10, maximum: 20000 } }
+      - { name: base, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z]{3}$" } }
+      - { name: symbols, in: query, required: false, schema: { type: string, maxLength: 1024 } }
+      - { name: currency, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z]{2,8}$" } }
+      - { name: url, in: query, required: false, schema: { type: string, maxLength: 2048 } }
+      - { name: If-None-Match, in: header, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: Feed document
+          headers:
+            ETag: { schema: { type: string } }
+            ScreenRig-Feed-Key: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedDocument'
+        '202':
+          description: No document yet; the feed worker fetches the key on its next pass.
+          headers:
+            Retry-After: { schema: { type: integer } }
+            ScreenRig-Feed-Key: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedPending'
+        '304':
+          description: The document matches If-None-Match.
         default:
           $ref: '#/components/responses/Problem'
   /api/media:
@@ -7563,6 +7676,11 @@ paths:
       - dashboardSession: []
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
+      - name: project_id
+        in: query
+        required: false
+        description: "Required with dashboardSession: the project where the file was queued. Must match the session's selected project, otherwise resource_conflict. This binds upload admission across tabs. The returned upload id remains project-scoped for byte upload and commit. Omitted with a project bearer."
+        schema: { type: string, minLength: 1, maxLength: 200 }
       requestBody:
         required: true
         content:
@@ -8598,7 +8716,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listFleetLinks
-      description: Lists the project's fleet links, oldest first (at most 50). For a Read only credential each url is empty
+      description: Lists the project's fleet links, oldest first (at most 50). Below effective Manage each url is empty
         and url_redacted is true, since the URL creates screens.
       security:
       - projectBearer: []
@@ -8676,7 +8794,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: getFleetLink
-      description: One fleet link. For a Read only credential url is empty and url_redacted is true.
+      description: One fleet link. Below effective Manage url is empty and url_redacted is true.
       security:
       - projectBearer: []
       - dashboardSession: []
@@ -11259,11 +11377,13 @@ paths:
       description: Trusted player/runtime origin
     get:
       operationId: getStableProtectedMedia
-      description: Stable immutable media URL shared across playlist revisions. The runtime session identifies the screen and
-        project for authorization and bandwidth accounting. Every request requires membership in that screen's desired, active,
-        or unexpired transition-grace grant in its current content-access generation. IDs alone grant no access. Browser cookie
-        and native session authentication remain on the trusted Player origin; redirects and public object-storage access are
-        not used.
+      description: >-
+        Stable immutable media URL shared across playlist revisions. The runtime session identifies the screen and
+        project for authorization and bandwidth accounting. Every request requires membership in that screen's
+        desired, active, or unexpired transition-grace grant in its current content-access generation, or a media:<id>
+        reference in the current document of a card data key such a grant lists. IDs alone grant no access. ETag is
+        the quoted sha256 of the bytes. Browser cookie and native session authentication remain on the trusted Player
+        origin; redirects and public object-storage access are not used.
       security:
       - runtimeCookie: []
       - nativeSessionAuthorization: []
@@ -20218,8 +20338,10 @@ components:
         record with no trailer; a stream that fails after the header is
         aborted at the connection (the client sees a transport error,
         never a clean end), so retry from the last received_at.
-    CardDataWrite: { type: object, additionalProperties: false, required: [document], properties: { document: { type: object, additionalProperties: true, description: "The card data document: a JSON object of at most 1 MiB. When a card placement binds the key it holds only that card's dynamic properties." } } }
+    CardDataWrite: { type: object, additionalProperties: false, required: [document], properties: { document: { type: object, additionalProperties: true, description: "The card data document: a JSON object of at most 1 MiB. When a card placement binds the key it holds only that card's dynamic properties. A string that begins with media: is a media reference, media:<id>, naming a ready, approved image in this project." } } }
     CardDataEntry: { type: object, additionalProperties: false, required: [key, document, bytes, sha256, revision, created_at, updated_at], properties: { key: { type: string }, document: { type: object, additionalProperties: true }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    FeedDocument: { type: object, additionalProperties: true, required: [schema, fetchedAt, attribution], properties: { schema: { type: string, description: "The feed schema, for example screenrig.weather/v1." }, fetchedAt: { type: string, format: date-time, description: The last time the feed worker confirmed the document. }, attribution: { type: object, additionalProperties: false, required: [text], properties: { text: { type: string }, url: { type: string } }, description: The credit to show wherever the data shows. } } }
+    FeedPending: { type: object, additionalProperties: false, required: [key, state, retry_after_seconds], properties: { key: { type: string }, state: { type: string, enum: [pending] }, retry_after_seconds: { type: integer } } }
     CardDataSummary: { type: object, additionalProperties: false, required: [key, bytes, sha256, revision, created_at, updated_at], properties: { key: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     CardDataList: { type: object, additionalProperties: false, required: [items, next_cursor], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/CardDataSummary" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }] } } }
     KVWrite: { type: object, additionalProperties: false, required: [value_base64], properties: { value_base64: { type: string, contentEncoding: base64, maxLength: 1398104 }, content_type: { type: string, minLength: 1, maxLength: 127, default: application/octet-stream } } }
@@ -20445,8 +20567,8 @@ components:
         appended.
       properties:
         id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?whk_[A-Za-z0-9_-]{16,24}$" }
-        url: { type: string, description: "The receiver URL. Empty, with url_redacted true, for a Read only credential." }
-        url_redacted: { type: boolean, description: "Present and true when url was withheld from a Read only credential: a receiver URL is often its only credential." }
+        url: { type: string, description: "The receiver URL. Empty, with url_redacted true, below effective Manage." }
+        url_redacted: { type: boolean, description: "Present and true when url was withheld below effective Manage: a receiver URL is often its only credential." }
         event_types: { type: array, items: { type: string } }
         enabled: { type: boolean }
         description: { type: string }
@@ -20489,8 +20611,8 @@ components:
         id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?flk_[A-Za-z0-9_-]+$" }
         label: { type: string, minLength: 1, maxLength: 80 }
         enabled: { type: boolean }
-        url: { type: string, maxLength: 512, description: "The Player URL to put in a device manager: https://play.<domain>/player/#fleet=<secret>. Empty, with url_redacted true, for a Read only credential. It is a credential that creates screens: share it only with the device manager." }
-        url_redacted: { type: boolean, description: "Present and true when url was withheld from a Read only credential." }
+        url: { type: string, maxLength: 512, description: "The Player URL to put in a device manager: https://play.<domain>/player/#fleet=<secret>. Empty, with url_redacted true, below effective Manage. It is a credential that creates screens: share it only with the device manager." }
+        url_redacted: { type: boolean, description: "Present and true when url was withheld below effective Manage." }
         tags: { $ref: "#/components/schemas/ScreenTags" }
         playlist_id: { type: string, description: Playlist assigned to each screen the link creates. }
         max_screens: { type: integer, minimum: 1, maximum: 10000, description: Most screens this link creates. Absent means only the project's screen limit applies. }
@@ -20944,6 +21066,48 @@ components:
         shell: { $ref: "#/components/schemas/PlayerShellIdentity" }
         compat: { type: array, maxItems: 64, items: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$", maxLength: 40 }, description: "Declared compat tokens. Invalid entries are dropped and duplicates collapse. The mint response echoes the granted subset as compat." }
         cards: { $ref: "#/components/schemas/PlayerCardsIdentity" }
+    CardFile:
+      type: object
+      required: [src, sha256]
+      properties:
+        src: { type: string, format: uri-reference, description: "Public root-relative /cards/ asset with ?sha=<sha256>, resolved against the Player origin. Verify the digest before use." }
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+    CardRequirements:
+      type: object
+      required: [cardml, features]
+      properties:
+        cardml: { type: integer, minimum: 1, maximum: 1000 }
+        features: { type: array, maxItems: 64, items: { type: string } }
+    CardCatalogue:
+      type: object
+      required: [cards]
+      properties:
+        cards:
+          type: array
+          items: { $ref: "#/components/schemas/CardSummary" }
+    CardSummary:
+      type: object
+      required: [id, title, short, category, tags, views, majors]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        short: { type: string }
+        category: { type: string }
+        tags: { type: array, items: { type: string } }
+        views: { type: array, items: { type: string } }
+        majors: { type: array, items: { type: integer, minimum: 1 } }
+    CardDetails:
+      type: object
+      required: [id, major, version, params_schema, data_schema, feed, views, example]
+      properties:
+        id: { type: string }
+        major: { type: integer, minimum: 1 }
+        version: { type: string }
+        params_schema: { type: object, additionalProperties: true, description: "Self-contained JSON Schema for placement params, with dynamic annotations." }
+        data_schema: { type: object, additionalProperties: true, description: "Self-contained JSON Schema for the bound card-data document; a card without dynamic properties accepts only an empty object." }
+        feed: { type: string, description: "Feed schema, or empty when the card has none." }
+        views: { type: array, items: { type: string } }
+        example: { type: object, additionalProperties: true, description: "Placement geometry, defaults and sample required values. Replace content values using params_schema." }
     PlayerCardsIdentity:
       type: object
       additionalProperties: true
@@ -20952,6 +21116,8 @@ components:
         CalVer and each card's semver, whose major says which card placements the screen renders. Stored on
         the screen with the rest of player. Malformed entries are dropped one by one; it is never a 400.
       properties:
+        cardml: { type: integer, minimum: 1, maximum: 1000, description: "CardML interpreter language level. With this declaration the backend omits card items whose published requires it cannot satisfy, with card_unavailable diagnostics. Omit for bundled-library compatibility." }
+        features: { type: array, maxItems: 64, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z][A-Za-z0-9-]{0,39}$" }, description: "CardML features implemented, including case-sensitive tickMs. Malformed entries are dropped individually." }
         library: { type: string, minLength: 1, maxLength: 40, description: "Cards library CalVer YY.MM.N." }
         versions: { type: object, maxProperties: 256, additionalProperties: { type: string, pattern: "^[0-9]+[.][0-9]+[.][0-9]+$" }, description: "Card id to semver, for example {clock: 1.1.0, menu: 1.0.0}." }
     PlayerShellIdentity:
@@ -21245,16 +21411,20 @@ components:
         properties (theme, view, corner, location, titles, column definitions) and changes only with a republish.
         data names a card data document (GET/PUT /api/card-data/{key}) that holds the card's dynamic properties
         (menu sections, ticker items, KPI tiles); agents change it without a republish. With data, params may not
-        carry dynamic properties; without it, params carry the whole configuration. Publish refuses an unknown
-        card or major and invalid params (card_invalid), and a bound key whose stored document the card
-        rejects (card_data_invalid). A card with a third-party feed (weather) reads it from the key the server
-        derives from its static params.
+        carry dynamic properties; without it, params carry the whole configuration. Every string in params that
+        begins with media: is a media reference, media:<id>, naming a ready image in this project that the card
+        draws (spotlight people[].photo, product-grid products[].photo); a card never takes an image URL. Publish
+        refuses an unknown card or major and invalid params (card_invalid), a media reference that names no ready
+        image of the project (card_media_invalid), and a bound key whose stored document the card rejects
+        (card_data_invalid). The screens showing the placement are granted its media, and a live write approves
+        pending media it names, as with a by:id selector. A card with a third-party feed (weather) reads it from
+        the key the server derives from its static params.
       properties:
         id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }
         primitive: { type: string, enum: [card] }
         card: { type: string, pattern: "^[a-z][a-z0-9-]{0,39}$", description: "Catalog card id, for example menu or weather." }
         major: { type: integer, minimum: 1, description: "Card major version. Absent selects the catalog's current major, which the stored placement then pins." }
-        params: { type: object, additionalProperties: true, description: "Static params, validated against the card's params schema." }
+        params: { type: object, additionalProperties: true, description: "Static params, validated against the card's params schema. A string that begins with media: is a media reference, media:<id>." }
         data: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$", description: "Card data key holding the dynamic properties. May not start with feed:." }
         rect: { $ref: "#/components/schemas/PlaylistRect" }
         layer: { type: integer, minimum: 0, maximum: 1024 }
@@ -21288,15 +21458,26 @@ components:
         dynamic properties of the document at GET /screen/card-data/{data} (only keys the card marks dynamic). A
         card with data stays hidden until its first document arrives and then fades in; screen.card_data_changed
         for the key refetches it in place. feed, when present, is fetched from the same route and passed to the
-        card as its feed. A Player that lacks the card or its major draws nothing for it.
+        card as its feed. A Player that lacks the card or its major draws nothing for it. A string in params or in
+        the data document that begins with media: is a media reference, media:<id>, that the Player resolves to
+        bytes it holds before the card draws it, and blanks when it cannot; it never passes a URL from params or
+        data to a card. media lists the ready images params name, with the descriptors an image primitive's
+        resolvedMedia carries, so the Player downloads and verifies them when the manifest arrives; a reference
+        to media gone since publish is absent and the card draws its fallback. Media a data document names come
+        from /media/{media_id} when the document arrives (ETag is the sha256). Card media never hold a page.
       properties:
         id: { type: string }
         primitive: { type: string, enum: [card] }
         card: { type: string }
         major: { type: integer, minimum: 1 }
+        src: { type: string, format: uri-reference, description: "Published .card, root-relative under /cards/ with ?sha=<sha256>. Resolve against the Player's own origin. Public; send no credential." }
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$", description: "Verify the .card bytes before interpreting. Cache by hash indefinitely." }
+        model: { $ref: "#/components/schemas/CardFile" }
+        requires: { $ref: "#/components/schemas/CardRequirements" }
         params: { type: object, additionalProperties: true }
         data: { type: string }
         feed: { type: string }
+        media: { type: array, maxItems: 256, items: { $ref: "#/components/schemas/RuntimeImageResolvedMedia" } }
         rect: { $ref: "#/components/schemas/RuntimeRect" }
         layer: { type: integer, minimum: 0, maximum: 1024 }
         contentFit: { type: string, enum: [fill] }
@@ -22232,8 +22413,10 @@ x-problem-codes:
 - browser_link_project_mismatch
 - origin_not_allowed
 - resource_conflict
+- card_not_found
 - card_invalid
 - card_data_invalid
+- card_media_invalid
 - revision_conflict
 - invalid_range
 - quota_exceeded

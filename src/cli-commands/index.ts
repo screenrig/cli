@@ -20,6 +20,7 @@ import { registerBrowserCommands } from "./browser.js";
 import { registerFleetLinksCommands } from "./fleet-links.js";
 import { registerTriggersCommands } from "./triggers.js";
 import { registerKvCommands } from "./kv.js";
+import { registerCardsCommands } from "./cards.js";
 import { registerCommentCommands } from "./comment.js";
 import { registerOperationsCommands } from "./operations.js";
 import { registerEventsCommands } from "./events.js";
@@ -53,6 +54,7 @@ export function registerCommands(root: Command, bind: CommandActionBinder): void
   registerFleetLinksCommands(root, bind);
   registerTriggersCommands(root, bind);
   registerKvCommands(root, bind);
+  registerCardsCommands(root, bind);
   registerCommentCommands(root, bind);
   registerOperationsCommands(root, bind);
   registerEventsCommands(root, bind);

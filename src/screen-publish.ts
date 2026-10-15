@@ -4,6 +4,7 @@ import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/prom
 import path from "node:path";
 import { requireCapability } from "./project-capabilities.js";
 import { ApiClient } from "./client.js";
+import { validatePlaylistCards } from "./cards.js";
 import { newIdempotencyKey } from "./ids.js";
 import { quotedRevision } from "./if-match.js";
 import { isAdSlotPage } from "./playlist-authoring.js";
@@ -233,6 +234,7 @@ export async function publishScreen(options: {
       throw usageError("The publish replay window has expired. Inspect the project and screen before reconciling; this command will not repeat an ambiguous write after server idempotency expiry.");
     }
     if (!state.playlist) {
+      await validatePlaylistCards(client, document);
       const response = await client.call({ method: "POST", path: "/api/playlists", body: document, headers: noteHeaders, idempotent: true, idempotencyKey: state.create_key });
       // Under Propose access the new playlist waits for approval; the assignment
       // that follows waits on it, so both become reviews.

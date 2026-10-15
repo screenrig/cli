@@ -298,7 +298,7 @@ export async function composeCatalog(): Promise<ComposeCatalog> {
       viewing: viewingGuidance(),
       lint: `warnings (${lintCodesList()}); never errors. compose render, compose batch, and playlist validate emit lint ordered by page. --lint-only skips artifact writes.`,
       preview: LOOK_AT_THE_CONTACT_SHEET,
-      wire: "Copy and chrome stay compose-local. Upload stills and place image primitives. Playlist wire accepts image|video|iframe|application|stream. Layered PNGs can later sit as image primitives at their manifest rects.",
+      wire: "Copy and chrome stay compose-local. Upload stills and place image primitives. Playlist wire accepts image|video|iframe|application|stream|card. Built-in cards provide live details drawn natively by the Player. Layered PNGs can later sit as image primitives at their manifest rects.",
     },
     wire_primitives: [...WIRE_PRIMITIVES],
     font_fallbacks: [...FONT_FALLBACKS],

@@ -93,6 +93,73 @@ Choose by what the page is:
 - Anything presentable: `media generate` as the whole page.
 - Slide-deck-like experiences: local unbilled `compose render`.
 - Live video, iframe, or webapp: write playlist primitives.
+- Drop-in live details such as weather, clocks and menus: place a built-in card;
+  use an application for complex interactions.
+
+## Built-in cards and feeds
+
+Discover the catalogue and inspect a card's static and dynamic properties,
+types, defaults, limits, supported views, feed and example placement:
+
+```sh
+screenrig cards list [--tag TAG] [--category CATEGORY]
+screenrig cards show menu
+screenrig card-data list
+screenrig card-data get menu-main
+screenrig card-data put menu-main --file menu-data.json [--expect-rev 3]
+screenrig card-data put menu-main --file - --expect-rev 3
+screenrig card-data delete menu-main --expect-rev 3
+screenrig feeds get weather --lat 49.25 --lon -123
+screenrig feeds get rates --base EUR
+screenrig feeds get crypto --symbols btc,eth --currency usd
+screenrig feeds get earthquakes --lat 49.25 --lon -123 --radius-km 500
+screenrig feeds get headlines --url https://example.com/news.xml
+```
+
+`card-data put` takes the JSON document itself, without a `document` wrapper,
+from a file or stdin. It creates or replaces a project key and notifies its
+screens immediately, without republishing. Documents are objects of at most
+1 MiB. The server validates them against every bound card's dynamic properties.
+Read the revision with `get`; `--expect-rev` sends `If-Match`. On a revision
+conflict, read and reconcile. After an ambiguous transport failure, rerun the
+identical write to reuse its saved idempotency key. Deleting requires a revision
+and hides bound cards until the document is written again. Keys follow the K/V
+grammar and cannot start with `feed:`; no application id is required.
+
+Copy `cards show`'s `example` into a playlist page's `primitives`, adapting its
+content and geometry. For example, this placement binds a menu's dynamic data:
+
+```json
+{
+  "id": "menu", "primitive": "card", "card": "menu", "major": 1,
+  "params": { "theme": "neomustard", "title": "Bistro" },
+  "data": "menu-main",
+  "rect": { "x": 0, "y": 0, "width": 1920, "height": 1080 },
+  "layer": 0, "content_fit": "fill"
+}
+```
+
+This is a canvas item inside a complete playlist, used with `playlist create`,
+`playlist update` or `screen publish`. These writes check current-major card
+params against the catalogue before uploading. The server validates older
+pinned majors, data bindings and media references. `playlist validate` stays
+local and checks the canvas contract; catalogue checks happen on writes.
+Omitting `major` selects and pins the current major on the server. With a data
+key, keep only static properties in `params`; without one, include the whole
+configuration there. Choose a supported `params.view` (`canvas`, or `corner`
+and `chip` for overlays) and a schema-listed `params.theme`. Use `fill` and
+layer overlays above the background. Cards accept `enter`, but no `motion`.
+Images inside card properties use `media:<id>` references to ready project
+images; data writes require approved images, and card image URLs are refused.
+
+screenRIG fetches and caches weather, airquality, alerts, rates, crypto,
+earthquakes and headlines. Agents use `feeds get` for these sources, never call
+their third-party APIs. Geographic families require `--lat` and `--lon`; crypto
+requires `--symbols`, and headlines requires `--url`. A pending feed returns
+`state: pending`, `retry_after_seconds` and `retry_at` with exit 0 and no polling.
+A ready feed includes `fetchedAt` and `attribution`; show attribution wherever
+the data shows. Placements derive their feed from static params: do not supply
+`feed` or write system `feed:` keys.
 
 ## Command vocabulary
 
