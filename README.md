@@ -84,7 +84,8 @@ that command, for example `screenrig screen update ID --name Lobby`.
 Global options such as `--json` may appear before or after the command. Use
 `--name=VALUE` for a value starting with a dash, and `--` before option-like file
 names. Duplicate options are rejected, except the repeatable
-`service-client create --capability` and `fleet-links create|update --tag`.
+`service-client create --capability`, `fleet-links create|update --tag` and
+`triggers create --screen-id`.
 
 Choose by what the page is:
 
@@ -612,6 +613,10 @@ An eleventh webhook is `webhook_limit_reached` (exit 5); delete one first.
 `--event-types` takes 1 to 32 exact types (`screen.online`) or prefixes ending
 in `.*` (`screen.*`), comma-separated.
 
+A receiver URL is often its only credential, so a Read only credential receives
+`data.url` empty with `url_redacted: true`. Human output then says the URL was
+withheld (`(withheld)` in the `list` table); a Manage sign-in receives it.
+
 `create` and `rotate-secret` return the webhook with its signing secret in
 `data.secret`, plus warning `webhook_secret_shown_once`. Store the secret
 right away. No other command returns it, and the CLI never writes it to its
@@ -715,6 +720,90 @@ the revision (`revision_conflict`, exit 6). After an interrupted or ambiguous
 `create`, rerun the identical command within 24 hours. It reuses the saved
 Idempotency-Key, and the server returns the same link instead of creating
 another.
+
+## CAP alert triggers
+
+A trigger lets an emergency notification system, such as Everbridge, Rave,
+Alertus or an IPAWS relay, take screens over with CAP 1.2 alerts. A project
+has at most 20.
+
+```sh
+screenrig triggers create --name "Campus alerts" (--tag TAG | --screen-id scr_SCREEN...) [--for DURATION]
+screenrig triggers list
+screenrig triggers show trg_TRIGGER
+screenrig triggers test trg_TRIGGER
+screenrig triggers clear trg_TRIGGER
+screenrig triggers rotate-secret trg_TRIGGER [--expect-rev REVISION]
+screenrig triggers delete trg_TRIGGER [--expect-rev REVISION]
+```
+
+`create` returns `data.url` (`https://api.<domain>/api/triggers/<id>/cap`),
+`data.username` (the trigger id) and `data.password` (`srtg_…`). Enter all
+three in the sending system as its CAP HTTP POST destination with HTTP Basic
+authentication. The password is shown only by `create` and `rotate-secret`,
+with warning `trigger_password_shown_once`. The CLI keeps it out of its
+config, operation log and recovery state, and redacts `srtg_` values.
+
+`--tag` targets every active screen with that tag when each alert arrives.
+`--screen-id` names up to 500 screens. A screen needs a default playlist to be
+taken over; other screens are skipped. An Alert shows a full-screen card
+coloured by its severity, with its headline, description and instruction,
+until the alert's `<expires>`. An alert without `<expires>` holds for `--for`
+(1m to 7d, default 1h), and no alert holds past 7 days. An Update redraws the
+card, and a Cancel or AllClear gives the screens back. Test, System and Draft
+messages, Ack and Error messages and expired alerts are ignored. A repeated
+sender and identifier is a duplicate. A new Alert replaces the one showing.
+
+`show` reports the latest alert in `data.alert`: state `active` or `ended`
+(with `ended_reason` cancelled, all_clear, cleared or expired), `until`, and
+`screens` `{targeted, taken_over, cleared, skipped, failed, pending}`. `test`
+shows a 60-second Exercise alert with an EXERCISE banner, and `clear` ends the
+alert now. Only screens still showing the trigger's alert go back; a screen
+taken over by something else since is left alone. `test` and `delete` answer
+`resource_conflict` (exit 5) while an alert is active; `clear` it first.
+`rotate-secret` stops the old password at once. A 21st trigger is
+`trigger_limit_reached` (exit 5).
+
+## K/V webhooks
+
+A K/V webhook lets an outside system, such as Zapier, Make, a point of sale or
+a cron job, write one key of an application with one HTTP POST. Apps read the
+key with `screenrig.kv.get` and see each change with `screenrig.kv.onChange`.
+An application has at most 20.
+
+```sh
+screenrig kv webhook create KEY --app-id app_APP [--description TEXT]
+screenrig kv webhook list --app-id app_APP
+screenrig kv webhook rotate-secret kvw_WEBHOOK --app-id app_APP
+screenrig kv webhook delete kvw_WEBHOOK --app-id app_APP
+```
+
+`create` returns `data.url`
+(`https://api.<domain>/api/applications/<app>/kv-webhooks/<id>/write`) and
+`data.secret` (`srkw_…`); the key need not exist yet. The sending system posts
+the new value to that URL with `Authorization: Bearer <secret>`, or HTTP Basic
+with the webhook id as the username and the secret as the password:
+
+```sh
+curl -X POST "$URL" -H "Authorization: Bearer $SECRET" \
+  -H "Content-Type: application/json" --data '{"message":"Hello"}'
+```
+
+The raw body, at most 1 MiB, becomes the value and its `Content-Type` the
+value's content type (`application/octet-stream` when absent). Each post
+replaces the value, increments its revision and is metered like `kv set`. The
+secret is never accepted in the URL. A sender's `Idempotency-Key` header
+deduplicates its retries for 24 hours, and a webhook accepts at most 120 posts
+a minute. Human output prints the secret and a ready `curl` line built from the
+URL.
+
+The secret is shown only by `create` and `rotate-secret`, with warning
+`kv_webhook_secret_shown_once`. The CLI keeps it out of its config, operation
+log and recovery state, and redacts `srkw_` values. `list` reports each
+webhook's key, URL and `last_used_at`, never a secret. `rotate-secret` stops
+the old secret at once. `delete` stops the URL; the key keeps its value. A 21st
+webhook is `kv_webhook_limit_reached` (exit 5). `list` works with Read only
+access; `create`, `rotate-secret` and `delete` need Manage.
 
 ## Playback export
 

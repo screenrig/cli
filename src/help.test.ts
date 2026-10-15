@@ -16,8 +16,8 @@ function invoke(args: string[]): { data: ReturnType<typeof commandHelp> & { vers
 test("root help is compact and every command is discoverable through immediate children", () => {
   const root = commandHelp();
   const commanderHelp = root.usage.split(/\n\nAll commands:\n/)[0]!;
-  // Service status, support, notes, fleet links and reviews add five immediate root groups.
-  assert.ok(commanderHelp.split("\n").length <= 50);
+  // Service status, support, notes, fleet links, triggers and reviews add six immediate root groups.
+  assert.ok(commanderHelp.split("\n").length <= 51);
   assert.doesNotMatch(root.usage, /localhost|log_socket|--token/);
   const discovered: string[] = [];
   function visit(path: string[]): void {
@@ -149,6 +149,13 @@ test("root help is compact and every command is discoverable through immediate c
     "fleet-links update",
     "fleet-links rotate",
     "fleet-links delete",
+    "triggers create",
+    "triggers list",
+    "triggers show",
+    "triggers test",
+    "triggers clear",
+    "triggers rotate-secret",
+    "triggers delete",
     "screen update",
     "screen list",
     "screen show",
@@ -168,6 +175,10 @@ test("root help is compact and every command is discoverable through immediate c
     "kv set",
     "kv delete",
     "kv list",
+    "kv webhook create",
+    "kv webhook list",
+    "kv webhook rotate-secret",
+    "kv webhook delete",
     "comment show screen",
     "comment show playlist",
     "comment set screen",
@@ -363,6 +374,7 @@ test("canonical vocabulary keeps legacy invocations equivalent without rewriting
     [["screen", "pair", "234567"], "--name", "--label", "--screen", []],
     [["screen", "provision"], "--name", "--label", "Lobby", ["--print-url"]],
     [["kv", "get", "greeting"], "--app-id", "--application-id", "app_TEST", []],
+    [["kv", "webhook", "create", "greeting"], "--app-id", "--application-id", "app_TEST", []],
   ] as const) {
     assert.deepEqual(parseArgv([...prefix, `${canonical}=${value}`, ...suffix]), parseArgv([...prefix, `${legacy}=${value}`, ...suffix]));
     assert.throws(() => parseArgv([...prefix, `${canonical}=${value}`, `${legacy}=${value}`, ...suffix]), /only once/);
@@ -373,6 +385,12 @@ test("canonical vocabulary keeps legacy invocations equivalent without rewriting
   assert.equal(selector?.required, true);
   assert.deepEqual(selector?.aliases, ["--application-id"]);
   assert.equal(commandHelp(["kv", "get"]).options.some(option => option.name === "--application-id"), false);
+  for (const action of ["create", "list", "rotate-secret", "delete"]) {
+    const webhookSelector = commandHelp(["kv", "webhook", action]).options.find(option => option.name === "--app-id");
+    assert.equal(webhookSelector?.required, true, action);
+    assert.deepEqual(webhookSelector?.aliases, ["--application-id"], action);
+  }
+  assert.equal(commandHelp(["kv", "webhook"]).kind, "group");
 });
 
 test("value dependencies and mutation requirements fail before runtime access", async () => {

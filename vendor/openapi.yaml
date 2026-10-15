@@ -6975,6 +6975,215 @@ paths:
           description: Deleted
         default:
           $ref: '#/components/responses/Problem'
+  /api/applications/{application_id}/kv-webhooks:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ApplicationID'
+    get:
+      x-screenrig-access: read
+      operationId: listKVWebhooks
+      description: Lists the application's incoming key/value webhooks, oldest first (at most 20), each with the key it writes,
+        its ingest url and last_used_at once it has written. The secret is never returned here.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: The application's key/value webhooks.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KVWebhookList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createKVWebhook
+      description: 'Creates an incoming key/value webhook: one URL that writes one key of this application, so an outside system
+        (Zapier, Make, a point of sale, a cron job, curl) pushes data to screens with one HTTP POST; see POST
+        /api/applications/{application_id}/kv-webhooks/{webhook_id}/write. The key need not exist yet. The answer is the only
+        place the secret appears (with the rotate answer): store it in the sending system at once; the server keeps a digest.
+        An application has at most 20 webhooks (kv_webhook_limit_reached). Appends kv_webhook.created. An exact retry with
+        the same Idempotency-Key returns this same answer, secret included, for twenty-four hours.'
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KVWebhookCreate'
+      responses:
+        '201':
+          description: Created, with its url and secret.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KVWebhookWithSecret'
+        '400':
+          description: invalid_request, including a malformed key or a description that holds a credential.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: not_found — the application is not in this project.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: kv_webhook_limit_reached or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/applications/{application_id}/kv-webhooks/{webhook_id}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ApplicationID'
+    - $ref: '#/components/parameters/KVWebhookID'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteKVWebhook
+      description: Deletes the webhook. Its URL stops working at once; the key it wrote keeps its value. Appends kv_webhook.deleted.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted.
+        '404':
+          description: not_found — the webhook is not on this application.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/applications/{application_id}/kv-webhooks/{webhook_id}/rotate-secret:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - $ref: '#/components/parameters/ApplicationID'
+    - $ref: '#/components/parameters/KVWebhookID'
+    post:
+      x-screenrig-access: write
+      operationId: rotateKVWebhookSecret
+      description: Replaces the webhook's secret and returns the new one, once. The old secret stops working at once; update
+        the sending system. Appends kv_webhook.secret_rotated. An exact retry with the same Idempotency-Key returns this same
+        answer, secret included, for twenty-four hours.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The webhook with its new secret.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KVWebhookWithSecret'
+        '404':
+          description: not_found — the webhook is not on this application.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/applications/{application_id}/kv-webhooks/{webhook_id}/write:
+    parameters:
+    - $ref: '#/components/parameters/ApplicationID'
+    - $ref: '#/components/parameters/KVWebhookID'
+    post:
+      operationId: receiveKVWebhook
+      description: 'The URL an outside system posts one key''s new value to. It authenticates with the webhook''s own secret
+        in the Authorization header only: Bearer <secret>, or HTTP Basic with the webhook id as the username and the secret
+        as the password. A secret in the URL or query is never accepted. An unknown webhook, one of another application and
+        a wrong secret all answer the same 401. The raw body, at most 1 MiB, becomes the value of the webhook''s key, and the
+        Content-Type header its content_type (application/octet-stream when absent; a header that is not one media type is
+        invalid_request). The write is PUT /api/applications/{application_id}/kv/{key} without If-Match: it replaces the value,
+        increments the revision, is metered and quota-checked like any K/V write, is one billed API request (payment_required when no credit is left), and appends kv.updated. Idempotency-Key (8
+        to 200 characters) deduplicates a sender''s retries of one write for twenty-four hours, and the same key with another
+        body or content type is idempotency_mismatch; without it every post is a new write. The answer is the key''s new metadata,
+        never its value. At most 120 writes per minute per webhook.'
+      security:
+      - kvWebhookBearer: []
+      - kvWebhookBasic: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          '*/*':
+            schema:
+              type: string
+              format: binary
+              maxLength: 1048576
+      responses:
+        '200':
+          description: The key's new metadata.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KVWebhookWriteResult'
+        '400':
+          description: invalid_request — the body is larger than 1 MiB, the Content-Type is not one media type, or the Idempotency-Key
+            is malformed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          description: unauthorized — missing or wrong credentials, or an unknown webhook. WWW-Authenticate names the Bearer and
+            Basic realms.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: idempotency_mismatch — the Idempotency-Key was used for another body or content type.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-rate-limit-policies:
+      - name: kv-webhook-write
+        quota: 120
+        windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
   /api/media:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
@@ -7216,7 +7425,9 @@ paths:
         move into itself or a folder inside it, and the move must keep every folder within 10 levels (invalid_request). Items
         already in the destination are left as they are; each moved file and folder advances its revision. Moving files
         changes what the by:folder selectors of their old and new folders play, from each screen's next selector resolve;
-        moving a folder changes no folder's own files. Emits media.moved.
+        moving a folder changes no folder's own files. Emits media.moved. A Propose credential moves only pending media it
+        uploaded (each move queues its media review); moving approved media, or another proposer's pending media, is 403
+        insufficient_access, and nothing moves.
       security:
       - projectBearer: []
       - dashboardSession: []
@@ -7370,6 +7581,10 @@ paths:
     patch:
       x-screenrig-access: contribute
       operationId: patchMedia
+      description: Sets or clears the media item's tag or tags. A Propose credential changes the tags only of pending media
+        it uploaded (each change queues its media review); a change of the tag set of approved media, or of another
+        proposer's pending media, is 403 insufficient_access with the hint to upload a new item. A patch that keeps the
+        same tag set applies and the item stays approved.
       security:
       - projectBearer: []
       parameters:
@@ -13690,9 +13905,12 @@ paths:
         shadow sessions cannot decide. A playlist update is applied with the
         base revision as If-Match; when the live playlist moved on the review
         becomes stale and the call answers review_stale. A screen change
-        replays its stored request (a tag resolves now); a screen change
-        waiting on a pending playlist review answers review_blocked naming
-        it. include_dependents also approves, in order, the screen changes
+        replays its stored request (a tag resolves now): the call applies
+        screens for a few seconds and the rest continue in the background
+        while screen_change.result.applying is true. A screen change waiting
+        on a pending playlist review answers review_blocked naming it; one
+        whose playlist has no approved version answers
+        playlist_not_approved. include_dependents also approves, in order, the screen changes
         waiting on this playlist review. Events of the applied change carry
         the person as actor and the proposing agent as agent. A decided review
         is review_not_pending; repeating the same decision replays.
@@ -13961,6 +14179,7 @@ components:
     WebhookDeliveryID: { name: delivery_id, in: path, required: true, schema: { type: string }, description: The id of one of the webhook's deliveries. }
     PlaylistPageID: { name: page_id, in: path, required: true, schema: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, description: Playlist page id string. }
     ApplicationID: { name: application_id, in: path, required: true, schema: { type: string } }
+    KVWebhookID: { name: webhook_id, in: path, required: true, schema: { type: string, pattern: "^(?:(?:stage|qa|development)_)?kvw_[A-Za-z0-9_-]+$" }, description: The id of one of the application's key/value webhooks. }
     IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 8, maxLength: 200 } }
     OptionalIdempotencyKey: { name: Idempotency-Key, in: header, required: false, schema: { type: string, minLength: 8, maxLength: 200 }, description: "Omit for a fresh operation. Supply and reuse a key to deduplicate retries; the CLI manages keys automatically." }
     WebhookDeliveriesBefore: { name: before, in: query, required: false, schema: { type: string, pattern: "^whc1_[0-9a-z]{1,16}$" }, description: next_cursor of the previous deliveries page. }
@@ -14058,6 +14277,8 @@ components:
     revocableAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active agent bearer, or the same cryptographically verified revoked bearer for an idempotent self-disconnect replay." }
     agentIdentityBearer: { type: http, scheme: bearer, bearerFormat: sr_live_idt, description: "Global agent identity bearer. Project routes also require ScreenRig-Project and the target membership capabilities; it grants no global project permissions. Identity self-revocation accepts its same verified revoked credential for an exact replay. The identity-wide routes (GET and POST /api/projects, GET /api/organizations, PATCH /api/organizations/{org_id}) also accept an agent access JWT carrying the identity scope: listing needs identity access Read only, Propose or Manage, a change needs access:manage (else 403 insufficient_access), and its grant is rechecked inside the action. Under a JWT the project list holds only the projects the grant was approved for, and a created project joins the grant instead of delivering a project token; refresh with its project_id for a token. A JWT without the identity scope is 403 forbidden." }
     projectBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active project bearer, or identity bearer with ScreenRig-Project and an active target membership. Use revocableAgentBearer for self-disconnect retries after revocation. Every bearer route requires its area AgentCapability; GET reads in an area also accept reports, except the webhook list and get reads (GET /api/webhooks, GET /api/webhooks/{id}), which need the project capability because they return receiver URLs, and the project reads, agents/self, operations reads, feedback routes, and support routes accept any active credential. A credential lacking the route capability is refused 403 forbidden with detail 'This agent credential lacks the <name> capability.' after the command is recorded and before any credit is metered, so refusals are attributed and never billed. An agent access JWT (a session JWT of profile agent, audience screenrig:api:<env>, from /oauth/token or an enrollment in the oauth credential format) is accepted on the same routes: prj is its project, its scope carries the access level (access:read or access:manage) and the capabilities. An expired, revoked or foreign JWT is 401 with WWW-Authenticate Bearer error=invalid_token, which a client answers by refreshing once; a JWT whose revocation state cannot be read is 500 revocation_unavailable with Retry-After 5. The legacy sr_live_ project and identity bearers are retired: every one answers 401 credential_retired with next screenrig login, on these routes, on /mcp and on /adcp/mcp; the legacy enrollment shape and the legacy connection routes (POST /api/agent-connections, its stream, credential and cancel) answer 410 client_update_required." }
+    kvWebhookBearer: { type: http, scheme: bearer, bearerFormat: srkw, description: "A key/value webhook's own secret, the srkw_ secret create or rotate-secret returned. Accepted only by POST /api/applications/{application_id}/kv-webhooks/{webhook_id}/write; never a project credential." }
+    kvWebhookBasic: { type: http, scheme: basic, description: "A key/value webhook's own credentials: username is the webhook id, password its srkw_ secret. Accepted only by POST /api/applications/{application_id}/kv-webhooks/{webhook_id}/write; never a project credential." }
     triggerBasic: { type: http, scheme: basic, description: "A CAP trigger's own credentials: username is the trigger id, password the srtg_ password create or rotate-secret returned. Accepted only by POST /api/triggers/{id}/cap; never a project credential." }
     nativePairingAuthorization:
       type: http
@@ -14178,9 +14399,9 @@ components:
       additionalProperties: false
       required: [type, id, name]
       properties:
-        type: { type: string, enum: [playlist, screen, creative] }
+        type: { type: string, enum: [playlist, screen, creative, media], description: "media is the pending media item of a selector_refresh review." }
         id: { type: string }
-        name: { type: string, description: "The playlist or screen name, or for several screens a summary such as '4 screens' or 'tag lobby'." }
+        name: { type: string, description: "The playlist, screen or media file name, or for several screens a summary such as '4 screens' or 'tag lobby'." }
     ReviewImpact:
       type: object
       additionalProperties: false
@@ -14217,6 +14438,15 @@ components:
             pages: { type: array, items: { type: object, additionalProperties: true } }
             audio: { type: object, additionalProperties: true }
         diff: { $ref: "#/components/schemas/ReviewPlaylistDiff" }
+        media_playlists: { type: array, items: { $ref: "#/components/schemas/ReviewMediaPlaylist" }, description: "The approved playlists whose tag, folder or all selectors play the pending media this review approves, once approved: for a selector_refresh (a media review) every one, for a create or update the others beside its subject. impact.screens includes their screens." }
+    ReviewMediaPlaylist:
+      type: object
+      additionalProperties: false
+      required: [id, name, screens]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        screens: { type: integer, minimum: 0, description: "Screens showing the playlist when the review was written." }
     ReviewScreenChange:
       type: object
       additionalProperties: false
@@ -14237,11 +14467,14 @@ components:
           type: object
           additionalProperties: false
           required: [matched, succeeded, failed]
-          description: Present after approval. Per-screen failures are a normal result, as for a fleet action.
+          description: Present after approval. Per-screen failures are a normal result, as for a fleet action. The approving
+            request applies screens for a few seconds and the rest continue in the background; applying is true until every
+            matched screen has its outcome.
           properties:
             matched: { type: integer, minimum: 0 }
             succeeded: { type: integer, minimum: 0 }
             failed: { type: integer, minimum: 0 }
+            applying: { type: boolean, description: "Present and true while some matched screens have no outcome yet." }
     ReviewAdCreative:
       type: object
       additionalProperties: false
@@ -14279,13 +14512,22 @@ components:
         decision_note: { type: string, maxLength: 500, description: "The reject reason or the requested changes, plain text." }
         previous_review_id: { type: string }
         superseded_by: { type: string }
-        blocked_by: { type: array, items: { type: string }, description: "Pending playlist reviews this screen change waits on." }
+        blocked_by: { type: array, items: { type: string }, description: "The playlist reviews this screen change was proposed behind. It waits while one of them is pending; blockers shows their state now." }
+        blockers: { type: array, items: { $ref: "#/components/schemas/ReviewBlocker" }, description: "GET /api/reviews/{id} only: each blocked_by review as it stands now. A blocker that ended without approval no longer blocks: approving then assigns the playlist's current approved version, or answers 409 playlist_not_approved when it has none." }
         dependents: { type: array, items: { type: string }, description: "Screen changes waiting on this playlist review." }
         impact: { $ref: "#/components/schemas/ReviewImpact" }
         playlist_change: { $ref: "#/components/schemas/ReviewPlaylistChange" }
         screen_change: { $ref: "#/components/schemas/ReviewScreenChange" }
         ad_creative: { $ref: "#/components/schemas/ReviewAdCreative" }
         preview: { $ref: "#/components/schemas/ReviewPreview" }
+    ReviewBlocker:
+      type: object
+      additionalProperties: false
+      required: [id, state, subject]
+      properties:
+        id: { type: string }
+        state: { type: string, enum: [pending, approved, rejected, changes_requested, withdrawn, superseded, stale] }
+        subject: { $ref: "#/components/schemas/ReviewSubject" }
     ReviewList:
       type: object
       additionalProperties: false
@@ -14366,6 +14608,7 @@ components:
         reason: { type: string, maxLength: 500 }
         created_at: { type: string, format: date-time }
         decided_at: { type: string, format: date-time }
+        previous_review_id: { type: string, description: "The seller's latest earlier review in the same campaign that requested changes, which this review answers." }
     ProjectMoveDestinations:
       type: object
       additionalProperties: false
@@ -15092,7 +15335,8 @@ components:
         can_approve:
           type: boolean
           description: This member decides reviews and may grant agents Manage access. Always true for the owner. A member who
-            cannot approve has their agents held to Propose.
+            cannot approve has their agents held to Propose. A member joining by invitation can approve only when a person
+            who can approve invited them; the owner changes it later.
     DashboardMemberList:
       type: object
       additionalProperties: false
@@ -18186,7 +18430,7 @@ components:
         created_at: { type: string, format: date-time }
         decided_at: { type: string, format: date-time }
         reason: { type: string, maxLength: 500, description: "The reject reason, or the changes the seller requested." }
-        previous_review_id: { type: string, description: "The review this one follows: the seller's earlier review of the same campaign that requested changes." }
+        previous_review_id: { type: string, description: "The review this one follows: the seller's latest earlier review in the same campaign that requested changes." }
     AdvertisingReviewList: { type: object, additionalProperties: false, required: [reviews], properties: { reviews: { type: array, items: { $ref: "#/components/schemas/AdvertisingReview" } } } }
     AdvertisingDaypart:
       type: object
@@ -19810,6 +20054,45 @@ components:
     KVEntry: { type: object, additionalProperties: false, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, value_base64: { type: string, contentEncoding: base64 }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer } } }
     KVSummary: { type: object, additionalProperties: false, required: [application_id, key, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string }, updated_at: { type: string } } }
     KVList: { type: object, additionalProperties: false, required: [items, next_cursor], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/KVSummary" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }] } } }
+    KVWebhook:
+      type: object
+      additionalProperties: false
+      required: [id, application_id, key, description, url, created_at]
+      description: An incoming key/value webhook. Its secret is returned only by create and rotate-secret.
+      properties:
+        id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?kvw_[A-Za-z0-9_-]+$" }
+        application_id: { type: string }
+        key: { type: string, minLength: 1, maxLength: 256, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$", description: The key every post writes. }
+        description: { type: string, maxLength: 200 }
+        url: { type: string, description: "Where the outside system posts the value: https://api.<domain>/api/applications/<application_id>/kv-webhooks/<id>/write. Not a credential: the secret is." }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time, description: "The last write, recorded at most once a minute; absent until the first." }
+    KVWebhookWithSecret:
+      allOf:
+      - $ref: "#/components/schemas/KVWebhook"
+      - type: object
+        required: [secret]
+        properties:
+          secret: { type: string, pattern: "^srkw_[A-Za-z0-9_-]{43}$", description: "The webhook secret: send it as Authorization Bearer, or as the HTTP Basic password with the webhook id as the username. Returned only here; the server keeps a digest." }
+    KVWebhookList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/KVWebhook" } } } }
+    KVWebhookCreate:
+      type: object
+      additionalProperties: false
+      required: [key]
+      properties:
+        key: { type: string, minLength: 1, maxLength: 256, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$" }
+        description: { type: string, maxLength: 200, description: "What sends to it, for the people reading the list. Trimmed; it must not hold a credential." }
+    KVWebhookWriteResult:
+      type: object
+      additionalProperties: false
+      required: [key, revision, bytes, sha256, content_type, updated_at]
+      properties:
+        key: { type: string }
+        revision: { type: integer, minimum: 1 }
+        bytes: { type: integer, minimum: 0 }
+        sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        content_type: { type: string }
+        updated_at: { type: string, format: date-time }
     RuntimeKVWrite: { type: object, additionalProperties: true, required: [value_base64], properties: { value_base64: { type: string, contentEncoding: base64, maxLength: 1398104 }, content_type: { type: string, minLength: 1, maxLength: 127, default: application/octet-stream } } }
     RuntimeKVEntry: { type: object, additionalProperties: true, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, value_base64: { type: string, contentEncoding: base64 }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer } } }
     RuntimeKVSummary: { type: object, additionalProperties: true, required: [application_id, key, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string }, updated_at: { type: string } } }
@@ -19882,7 +20165,7 @@ components:
     MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], description: "Declares only what the server can re-verify against the stored object byte for byte. Codec identity is not declared here: the server derives it from the container during asynchronous verification, so a client cannot assert a codec that drives player behaviour.", properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
     MediaUploadSession: { type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: { id: { type: string }, operation: { $ref: "#/components/schemas/Operation" }, upload_url: { type: string, format: uri }, method: { type: string, enum: [PUT] }, headers: { type: object, additionalProperties: { type: string }, description: Exact signed request headers; clients must send every field verbatim. }, expires_at: { type: string, format: date-time } } }
     MediaUploadSource: { type: object, additionalProperties: false, required: [filename, content_type, sha256, bytes], description: "Verified original upload identity when ingest normalized EXIF orientation. Read-only; use it to recognize retries. The ready media digest, size and type describe the normalized delivery bytes.", properties: { filename: { type: string }, source_filename: { type: string }, content_type: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer, minimum: 1 } } }
-    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { tags: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 10800000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, folder_id: { type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. Move files with POST /api/media/move." }, revision: { type: integer }, state: { type: string, enum: [ready] }, review_state: { type: string, enum: [pending], description: "pending: uploaded or changed by a Propose credential and waiting for a person's approval. Tag, folder and all selectors of approved playlists skip it until a person approves a review that uses it. Absent means approved." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
+    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { tags: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 10800000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, folder_id: { type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. Move files with POST /api/media/move." }, revision: { type: integer }, state: { type: string, enum: [ready] }, review_state: { type: string, enum: [pending], description: "pending: uploaded by a Propose credential and waiting for a person's approval. Tag, folder and all selectors of approved playlists play it only once a person approves its media review or a playlist review that uses it. Its uploader may change its tags and folder meanwhile; a Propose credential cannot change those of approved media (403 insufficient_access). Absent means approved." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
     MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/Media" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     SupportHours: {"type": "object", "additionalProperties": false, "required": ["timezone", "start", "end", "weekdays", "excludes_bc_holidays"], "properties": {"timezone": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "weekdays": {"type": "array", "items": {"type": "string"}}, "excludes_bc_holidays": {"type": "boolean"}}}
     SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean", "description": "This project can start or continue a conversation now. False where support chat is switched off in this environment."}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0}, "docs_url": {"type": "string"}}}
@@ -21736,6 +22019,7 @@ x-problem-codes:
 - recovery_not_offered
 - invitation_limit_reached
 - trigger_limit_reached
+- kv_webhook_limit_reached
 - organization_admin_limit
 - version_required
 - price_change_pending

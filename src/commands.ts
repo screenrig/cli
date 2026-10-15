@@ -18,6 +18,8 @@ import { displayLines, displayPower, displayProblem, displayScheduleWrite, displ
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
 import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "./screen-manifest-upgrade.js";
 import { openTempFile, removeOnSignal, shellQuote, tempPathFor } from "./temp-file.js";
+import { KV_WEBHOOK_ID_PATTERN, KV_WEBHOOK_SECRET_PATTERN, kvWebhookDescription, kvWebhookExample, kvWebhookId, kvWebhookKey, kvWebhookLines, kvWebhookProblem, kvWebhookSecretWarning, kvWebhookTableLines } from "./kv-webhooks.js";
+import { TRIGGER_ID_PATTERN, TRIGGER_PASSWORD_PATTERN, alertLines, triggerHoldSeconds, triggerId, triggerLines, triggerName, triggerPasswordWarning, triggerProblem, triggerScreenIds, triggerTableLines, triggerTag } from "./triggers.js";
 import { fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
 import { createHash, randomBytes } from "node:crypto";
@@ -87,6 +89,14 @@ import {
   type FleetLinkList,
   type FleetLinkPatch,
   type FleetLinkWrite,
+  type Trigger,
+  type TriggerList,
+  type TriggerReceipt,
+  type TriggerWithPassword,
+  type TriggerWrite,
+  type KVWebhookCreate,
+  type KVWebhookList,
+  type KVWebhookWithSecret,
   type Webhook,
   type WebhookDelivery,
   type WebhookDeliveryList,
@@ -737,7 +747,7 @@ function commandHandler(
         (group === "media" && ["update", "delete"].includes(action ?? "")) ||
         // A screenshot is an observation: every run requests a new capture.
         (group === "screen" && !["provision", "publish", "screenshot"].includes(action ?? "")) ||
-        group === "invitations" || group === "webhooks" || group === "fleet-links" || (group === "project" && ["rename", "create"].includes(action ?? ""))
+        group === "invitations" || group === "webhooks" || group === "fleet-links" || group === "triggers" || (group === "project" && ["rename", "create"].includes(action ?? ""))
       ));
     let recovery: WriteRecovery | undefined;
     try {
@@ -6301,6 +6311,115 @@ export const handleKvDelete = commandHandler(async (args, runtime, resolved) => 
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted ${key}` };
 }, true);
 
+// Incoming K/V webhooks: /api/applications/{id}/kv-webhooks. url is not
+// secret; the secret is returned only by create and rotate-secret, printed
+// once, and kept out of the operation log (client.ts privateBodies).
+function kvWebhookApplication(args: ParsedArgs): string {
+  const applicationId = flagString(args.flags, "application-id");
+  if (!applicationId) throw usageError("kv commands require --app-id.");
+  return applicationId;
+}
+
+function kvWebhooksPath(applicationId: string): string {
+  return `/api/applications/${encodeURIComponent(applicationId)}/kv-webhooks`;
+}
+
+async function kvWebhookCall(
+  client: ApiClient,
+  request: Parameters<ApiClient["call"]>[0],
+  applicationId: string,
+  id?: string,
+): Promise<Awaited<ReturnType<ApiClient["call"]>>> {
+  try {
+    return await client.call(request);
+  } catch (error) {
+    throw kvWebhookProblem(error, applicationId, id);
+  }
+}
+
+async function kvWebhookWithSecret(body: unknown, action: "create" | "rotate", applicationId: string, runtime: CliRuntime): Promise<KVWebhookWithSecret> {
+  const webhook = body as KVWebhookWithSecret | undefined;
+  if (!webhook || typeof webhook.id !== "string" || typeof webhook.secret !== "string" || !KV_WEBHOOK_SECRET_PATTERN.test(webhook.secret)) {
+    await writeRecoveries.get(runtime)?.finish();
+    const id = webhook && typeof webhook.id === "string" && KV_WEBHOOK_ID_PATTERN.test(webhook.id) ? webhook.id : undefined;
+    throw new CliError(makeProblem("unexpected_response", "Unexpected response", 502,
+      `The ${action === "create" ? "kv webhook create" : "rotate-secret"} request completed, but its answer did not carry a secret. Do not rerun it.`, {
+        next: id
+          ? { command: `screenrig kv webhook rotate-secret ${id} --app-id ${applicationId}`, reason: "Issue a new secret; it is shown once in data.secret." }
+          : { command: `screenrig kv webhook list --app-id ${applicationId}`, reason: "Find the webhook, then run screenrig kv webhook rotate-secret ID to receive a new secret." },
+      }), ExitCode.Unexpected);
+  }
+  return webhook;
+}
+
+async function kvWebhookSecretResult(
+  response: Awaited<ReturnType<ApiClient["call"]>>, client: ApiClient, action: "create" | "rotate", applicationId: string, runtime: CliRuntime,
+): Promise<CommandResult> {
+  const webhook = await kvWebhookWithSecret(response.body, action, applicationId, runtime);
+  const warning = kvWebhookSecretWarning(webhook.id, applicationId, action);
+  return {
+    envelope: jsonBody(response, client.requestId, undefined, [warning]),
+    exitCode: ExitCode.Success,
+    human: [
+      action === "create" ? `Created K/V webhook ${webhook.id}` : `Rotated the secret of K/V webhook ${webhook.id}`,
+      ...kvWebhookLines(webhook),
+      "",
+      "Sensitive webhook secret (store it only in the system that posts to the url above)",
+      `secret: ${webhook.secret}`,
+      `example: ${kvWebhookExample(webhook.url, webhook.secret)}`,
+      `warning: ${warning.message}`,
+    ].join("\n"),
+    keepRecoveryUntilOutput: true,
+  };
+}
+
+export const handleKvWebhookCreate = commandHandler(async (args, runtime, resolved) => {
+  const applicationId = kvWebhookApplication(args);
+  const key = kvWebhookKey(args.positionals[3]);
+  const description = flagString(args.flags, "description");
+  const body: KVWebhookCreate = { key, ...(description !== undefined ? { description: kvWebhookDescription(description) } : {}) };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await kvWebhookCall(client, { method: "POST", path: kvWebhooksPath(applicationId), idempotent: true, body }, applicationId);
+  return kvWebhookSecretResult(response, client, "create", applicationId, runtime);
+}, true);
+
+export const handleKvWebhookList = commandHandler(async (args, runtime, resolved) => {
+  const applicationId = kvWebhookApplication(args);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await kvWebhookCall(client, { method: "GET", path: kvWebhooksPath(applicationId) }, applicationId);
+  const items = (response.body as KVWebhookList | undefined)?.items;
+  const list = Array.isArray(items) ? items : [];
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`K/V webhooks (${list.length})`, ...kvWebhookTableLines(list)].join("\n"),
+  };
+}, true);
+
+export const handleKvWebhookRotateSecret = commandHandler(async (args, runtime, resolved) => {
+  const applicationId = kvWebhookApplication(args);
+  const id = kvWebhookId(args.positionals[3], "rotate-secret", applicationId);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await kvWebhookCall(client, {
+    method: "POST", path: `${kvWebhooksPath(applicationId)}/${id}/rotate-secret`, idempotent: true,
+  }, applicationId, id);
+  return kvWebhookSecretResult(response, client, "rotate", applicationId, runtime);
+}, true);
+
+export const handleKvWebhookDelete = commandHandler(async (args, runtime, resolved) => {
+  const applicationId = kvWebhookApplication(args);
+  const id = kvWebhookId(args.positionals[3], "delete", applicationId);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await kvWebhookCall(client, {
+    method: "DELETE", path: `${kvWebhooksPath(applicationId)}/${id}`, idempotent: true,
+  }, applicationId, id);
+  return {
+    envelope: successEnvelope({ id, deleted: true }, { request_id: response.headers["x-request-id"] ?? client.requestId }),
+    exitCode: ExitCode.Success,
+    human: `Deleted K/V webhook ${id}. Its URL stopped working; the key it wrote keeps its value.`,
+  };
+}, true);
+
 function commentPath(target: "screen" | "playlist", id: string, pageId: string | undefined): string {
   if (target === "screen") {
     return `/api/comment/screen/${encodeURIComponent(id)}`;
@@ -7614,6 +7733,157 @@ export const handleFleetLinksDelete = commandHandler(async (args, runtime, resol
     envelope: successEnvelope({ id, deleted: true }, { request_id: response.headers["x-request-id"] ?? client.requestId }),
     exitCode: ExitCode.Success,
     human: `Deleted fleet link ${id}. Its URL stopped working; screens it created stay, with their playlists and tags.`,
+  };
+});
+
+// CAP alert triggers: /api/triggers. url and username are not secret; the
+// password is returned only by create and rotate-secret, printed once, and
+// kept out of the operation log (client.ts privateBodies).
+const TRIGGERS_PATH = "/api/triggers";
+
+async function triggerCall(
+  client: ApiClient,
+  request: Parameters<ApiClient["call"]>[0],
+  id?: string,
+): Promise<Awaited<ReturnType<ApiClient["call"]>>> {
+  try {
+    return await client.call(request);
+  } catch (error) {
+    throw triggerProblem(error, id);
+  }
+}
+
+function triggerRevisionHeaders(args: ParsedArgs): Record<string, string> | undefined {
+  const revision = flagString(args.flags, "if-match");
+  return revision ? { "if-match": quotedRevision(revision) } : undefined;
+}
+
+async function triggerWithPassword(body: unknown, action: "create" | "rotate", runtime: CliRuntime): Promise<TriggerWithPassword> {
+  const trigger = body as TriggerWithPassword | undefined;
+  if (!trigger || typeof trigger.id !== "string" || typeof trigger.password !== "string" || !TRIGGER_PASSWORD_PATTERN.test(trigger.password)) {
+    await writeRecoveries.get(runtime)?.finish();
+    const id = trigger && typeof trigger.id === "string" && TRIGGER_ID_PATTERN.test(trigger.id) ? trigger.id : undefined;
+    throw new CliError(makeProblem("unexpected_response", "Unexpected response", 502,
+      `The ${action === "create" ? "trigger create" : "rotate-secret"} request completed, but its answer did not carry a password. Do not rerun it.`, {
+        next: id
+          ? { command: `screenrig triggers rotate-secret ${id}`, reason: "Issue a new password; it is shown once in data.password." }
+          : { command: "screenrig triggers list", reason: "Find the trigger, then run screenrig triggers rotate-secret ID to receive a new password." },
+      }), ExitCode.Unexpected);
+  }
+  return trigger;
+}
+
+async function triggerPasswordResult(response: Awaited<ReturnType<ApiClient["call"]>>, client: ApiClient, action: "create" | "rotate", runtime: CliRuntime): Promise<CommandResult> {
+  const trigger = await triggerWithPassword(response.body, action, runtime);
+  const warning = triggerPasswordWarning(trigger.id, action);
+  return {
+    envelope: jsonBody(response, client.requestId, undefined, [warning]),
+    exitCode: ExitCode.Success,
+    human: [
+      action === "create" ? `Created trigger ${trigger.id}` : `Rotated the password of trigger ${trigger.id}`,
+      ...triggerLines(trigger),
+      "",
+      "Sensitive CAP password (enter it only in your emergency notification system, with the url and username above)",
+      `password: ${trigger.password}`,
+      `warning: ${warning.message}`,
+    ].join("\n"),
+    keepRecoveryUntilOutput: true,
+  };
+}
+
+export const handleTriggersCreate = commandHandler(async (args, runtime, resolved) => {
+  const label = triggerName(flagString(args.flags, "name") ?? "");
+  const tag = flagString(args.flags, "tag");
+  const screenIds = flagString(args.flags, "screen-id");
+  if ((tag === undefined) === (screenIds === undefined)) throw usageError("triggers create takes exactly one of --tag TAG or --screen-id ID.");
+  const hold = flagString(args.flags, "for");
+  const body: TriggerWrite = {
+    label,
+    target: tag !== undefined ? { tag: triggerTag(tag) } : { screen_ids: triggerScreenIds(screenIds ?? "").split(",") },
+    ...(hold !== undefined ? { default_for_seconds: triggerHoldSeconds(hold) } : {}),
+  };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await triggerCall(client, { method: "POST", path: TRIGGERS_PATH, idempotent: true, body });
+  return triggerPasswordResult(response, client, "create", runtime);
+});
+
+export const handleTriggersList = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await triggerCall(client, { method: "GET", path: TRIGGERS_PATH });
+  const items = (response.body as TriggerList | undefined)?.items;
+  const list = Array.isArray(items) ? items : [];
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Triggers (${list.length})`, ...triggerTableLines(list)].join("\n"),
+  };
+});
+
+export const handleTriggersShow = commandHandler(async (args, runtime, resolved) => {
+  const id = triggerId(args.positionals[2], "show");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await triggerCall(client, { method: "GET", path: `${TRIGGERS_PATH}/${id}` }, id);
+  const trigger = response.body as Trigger | undefined;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: ["Trigger", ...triggerLines(trigger), ...alertLines(trigger?.alert)].join("\n"),
+  };
+});
+
+export const handleTriggersTest = commandHandler(async (args, runtime, resolved) => {
+  const id = triggerId(args.positionals[2], "test");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await triggerCall(client, { method: "POST", path: `${TRIGGERS_PATH}/${id}/test`, idempotent: true }, id);
+  const receipt = response.body as TriggerReceipt | undefined;
+  const alert = receipt?.alert;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [
+      alert && receipt?.outcome === "shown"
+        ? `Showing an exercise alert from trigger ${id} until ${alert.until}. screenrig triggers show ${id} reports its screens; screenrig triggers clear ${id} ends it sooner.`
+        : `Trigger ${id} answered ${receipt?.outcome ?? "no outcome"}.`,
+      ...alertLines(alert),
+    ].join("\n"),
+  };
+});
+
+export const handleTriggersClear = commandHandler(async (args, runtime, resolved) => {
+  const id = triggerId(args.positionals[2], "clear");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await triggerCall(client, { method: "POST", path: `${TRIGGERS_PATH}/${id}/clear`, idempotent: true }, id);
+  const trigger = response.body as Trigger | undefined;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [
+      `No alert is active on trigger ${id}. Screens its alert took over go back to what they played before.`,
+      ...triggerLines(trigger),
+      ...alertLines(trigger?.alert),
+    ].join("\n"),
+  };
+});
+
+export const handleTriggersRotateSecret = commandHandler(async (args, runtime, resolved) => {
+  const id = triggerId(args.positionals[2], "rotate-secret");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await triggerCall(client, {
+    method: "POST", path: `${TRIGGERS_PATH}/${id}/rotate-secret`, idempotent: true, headers: triggerRevisionHeaders(args),
+  }, id);
+  return triggerPasswordResult(response, client, "rotate", runtime);
+});
+
+export const handleTriggersDelete = commandHandler(async (args, runtime, resolved) => {
+  const id = triggerId(args.positionals[2], "delete");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await triggerCall(client, {
+    method: "DELETE", path: `${TRIGGERS_PATH}/${id}`, idempotent: true, headers: triggerRevisionHeaders(args),
+  }, id);
+  return {
+    envelope: successEnvelope({ id, deleted: true }, { request_id: response.headers["x-request-id"] ?? client.requestId }),
+    exitCode: ExitCode.Success,
+    human: `Deleted trigger ${id}. Its URL stopped accepting alerts.`,
   };
 });
 
