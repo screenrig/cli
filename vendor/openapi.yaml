@@ -21924,8 +21924,9 @@ components:
       type: object
       additionalProperties: true
       description: >-
-        The problem document of the Player-facing runtime (/runtime/) and
-        content (/content/) routes and the probe routes (/.ready, /.health):
+        The problem document of the Player-facing screen (/screen/) and media
+        (/media/) routes, the pairing streams and the probe routes (/.ready,
+        /.health):
         every member flat at the top level. Store-released Players read its
         top-level code and action (docs/player-compatibility.md §5), so this
         shape stays as it is; every other route answers Problem.
