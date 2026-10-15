@@ -33,7 +33,7 @@ screenrig version
 ```
 
 Node.js 22.11 or newer is required. `media upload` additionally requires ffmpeg
-and ffprobe, as do batch uploads and playlist preparation from local media files. Run `screenrig doctor` to inspect
+and ffprobe, as do batch uploads and playlist preparation from local media files, unless `--no-transcode` uploads the accepted bytes unchanged. Run `screenrig doctor` to inspect
 the optional media toolchain before an upload.
 
 This global package is the official developer-shell distribution. It is not the
@@ -84,8 +84,8 @@ that command, for example `screenrig screen update ID --name Lobby`.
 Global options such as `--json` may appear before or after the command. Use
 `--name=VALUE` for a value starting with a dash, and `--` before option-like file
 names. Duplicate options are rejected, except the repeatable
-`service-client create --capability`, `fleet-links create|update --tag` and
-`triggers create --screen-id`.
+`service-client create --capability`, `fleet-links create|update --tag`,
+`triggers create --screen-id` and `agent connect --capability`.
 
 Choose by what the page is:
 
@@ -119,10 +119,10 @@ screenrig feeds get headlines --url https://example.com/news.xml
 `card-data put` takes the JSON document itself, without a `document` wrapper,
 from a file or stdin. It creates or replaces a project key and notifies its
 screens immediately, without republishing. Documents are objects of at most
-1 MiB. The server validates them against every bound card's dynamic properties.
+1 MiB. When a key is bound, the server validates them against every bound card's dynamic properties; an unbound key accepts any JSON object, so data can be staged before placement.
 Read the revision with `get`; `--expect-rev` sends `If-Match`. On a revision
 conflict, read and reconcile. After an ambiguous transport failure, rerun the
-identical write to reuse its saved idempotency key. Deleting requires a revision
+identical write to reuse its saved idempotency key. Deleting with the CLI requires a revision (`--expect-rev`)
 and hides bound cards until the document is written again. Keys follow the K/V
 grammar and cannot start with `feed:`; no application id is required.
 
@@ -209,7 +209,7 @@ screenrig agent enroll --email ADDRESS --organization NAME [--name NAME] [--inte
 screenrig agent enroll --agentid-claim CODE --organization NAME [--name NAME] [--intent signage|advertising] [--force]
 screenrig login [--project ID] [--access read|propose|manage] [--no-wait] [--resume ID]
 screenrig logout
-screenrig service-client create --name NAME [--key-file PATH] [--secret-file PATH] [--access read|propose|manage] [--capability NAME]...
+screenrig service-client create --name NAME (--key-file PATH | --secret-file PATH) [--access read|propose|manage] [--capability NAME]...
 screenrig project list
 screenrig project use ID
 screenrig project create NAME [--organization-id ID | --organization NAME]
@@ -280,7 +280,8 @@ Invite people to the current project, or invite advertising buyers through the
 same invitation commands:
 
 ```sh
-screenrig invitations create --email ADDRESS[,ADDRESS] [--link]
+screenrig invitations create --email ADDRESS[,ADDRESS]
+screenrig invitations create --link
 screenrig invitations create --kind ad-buyer --email ADDRESS[,ADDRESS] [--screen-id ID] [--slot-id ID] [--policy trusted|review_required]
 screenrig invitations list [--kind member|ad-buyer] [--status STATUS]
 screenrig invitations revoke ID
@@ -1314,7 +1315,7 @@ another when needed, and never reads or writes the stored config. Agent
 commands (`login`, `logout`, `agent ...`) refuse to run in it.
 
 `service-client create|list|show|add-key|add-secret|remove-key|remove-secret|revoke`
-manages the project's clients and needs the project capability and Manage; a
+manages the project's clients. Create needs at least one of `--key-file` or `--secret-file`; both are allowed. and needs the project capability and Manage; a
 service client cannot manage clients. `--access` sets the client's level (Read
 only, Propose or Manage); a Propose client's changes become reviews like an
 agent's. A generated secret is shown once, so it
