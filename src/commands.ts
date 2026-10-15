@@ -3535,7 +3535,7 @@ async function mediaUpdate(args: ParsedArgs, client: ApiClient): Promise<Command
   };
 }
 
-const MEDIA_REVIEW_PENDING_SENTENCE = "Screens keep playing what was approved until a person approves this change. Its review appears in screenrig reviews list within seconds; a change that alters no approved playlist applies without one. Do not repeat the write.";
+const MEDIA_REVIEW_PENDING_SENTENCE = "Screens keep playing what was approved until a person approves this change. Its review appears in screenrig reviews list within seconds; a change that alters no approved playlist or open proposal applies without one. Do not repeat the write.";
 
 /**
  * Media a Propose write left pending (review_state pending): a success, exit

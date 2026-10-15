@@ -482,12 +482,19 @@ test("reviews show renders a media review, blockers with their state, and a flee
         media_playlists: [
           { id: "pl_CAFE", name: "Cafe tags", screens: 0, media_added: ["med_B"], media_removed: [] },
           { id: "pl_LOBBY", name: "Lobby tags", screens: 1, media_added: [], media_removed: ["med_B"] },
+          { id: "pl_PROMO", name: "Promo (proposed)", screens: 0, media_added: ["med_B"], media_removed: ["med_B"] },
         ],
       },
     };
     const move = {
       ...retag, id: "rvw_MOVE",
       playlist_change: { ...retag.playlist_change, media_change: { media_id: "med_B", filename: "menu.png", before: { tags: ["lobby"], folder_id: "fld_A" }, after: { tags: ["lobby"], folder_id: "" } } },
+    };
+    // A media review the earlier build wrote: no media_change, and entries
+    // without starts or stops (absent, or serialized as empty lists).
+    const prior = {
+      ...media, id: "rvw_PRIOR",
+      playlist_change: { ...media.playlist_change, media_playlists: [{ id: "pl_LOBBY", name: "Lobby", screens: 3, media_added: [], media_removed: [] }] },
     };
     const screen = {
       ...base, id: "rvw_SCREEN", kind: "screen_change", state: "approved", subject: { type: "screen", id: SCREEN, name: "tag Lobby" }, impact: { screens: 40 },
@@ -499,6 +506,7 @@ test("reviews show renders a media review, blockers with their state, and a flee
       .on("GET", "/api/reviews/rvw_UPLOAD", () => json(200, upload))
       .on("GET", "/api/reviews/rvw_RETAG", () => json(200, retag))
       .on("GET", "/api/reviews/rvw_MOVE", () => json(200, move))
+      .on("GET", "/api/reviews/rvw_PRIOR", () => json(200, prior))
       .on("GET", "/api/reviews/rvw_SCREEN", () => json(200, screen))
       .on("GET", "/api/reviews", () => json(200, { items: [media, retag], next_cursor: null, pending_count: 2 }));
 
@@ -523,11 +531,17 @@ test("reviews show renders a media review, blockers with their state, and a flee
     assert.match(shownRetag.stdout, /Review rvw_RETAG: Media change, pending/);
     assert.match(shownRetag.stdout, /change: changed tags or folder of approved media for the tag, folder or all selectors of approved playlists; pages unchanged; soundtrack unchanged; media 1 added, 1 removed/);
     assert.match(shownRetag.stdout, /media_change: tags lobby → cafe; library root unchanged/);
-    assert.match(shownRetag.stdout, /\nmedia_playlists:\n {2}Cafe tags \(pl_CAFE, 0 screens\): starts playing med_B\n {2}Lobby tags \(pl_LOBBY, 1 screen\): stops playing med_B\n/);
+    assert.match(shownRetag.stdout, /\nmedia_playlists:\n {2}Cafe tags \(pl_CAFE, 0 screens\): starts playing med_B\n {2}Lobby tags \(pl_LOBBY, 1 screen\): stops playing med_B\n {2}Promo \(proposed\) \(pl_PROMO, 0 screens\): starts playing med_B; stops playing med_B\n/);
     assert.match(shownRetag.stdout, /impact: approving changes 1 screen/);
     const json2 = await cli(["--json", "reviews", "show", "rvw_RETAG"], transport, env);
     assert.deepEqual(json2.envelope.data.playlist_change.media_change.before, { tags: ["lobby"], folder_id: "" });
     assert.deepEqual(json2.envelope.data.playlist_change.media_playlists[1].media_removed, ["med_B"]);
+
+    const shownPrior = await cli(["--human", "reviews", "show", "rvw_PRIOR"], transport, env);
+    assert.equal(shownPrior.code, ExitCode.Success, shownPrior.stdout);
+    assert.match(shownPrior.stdout, /Review rvw_PRIOR: New media, pending/);
+    assert.match(shownPrior.stdout, /\nmedia_playlists:\n {2}Lobby \(pl_LOBBY, 3 screens\)\n/);
+    assert.doesNotMatch(shownPrior.stdout, /media_change:|starts playing|stops playing/);
 
     const shownMove = await cli(["--human", "reviews", "show", "rvw_MOVE"], transport, env);
     assert.match(shownMove.stdout, /media_change: tags lobby unchanged; folder fld_A → library root/);

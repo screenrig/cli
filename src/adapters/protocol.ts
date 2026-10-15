@@ -1338,9 +1338,9 @@ export interface ReviewPlaylistDiff {
   media_added: string[];
   media_removed: string[];
 }
-/** An approved playlist whose tag, folder or all selectors start or stop playing pending media once approved. */
+/** An approved playlist, or an open create or update proposal, whose tag, folder or all selectors start or stop playing pending media once approved. */
 export interface ReviewMediaPlaylist { id: string; name: string; screens: number; media_added: string[]; media_removed: string[] }
-/** A media item's tag set and folder; folder_id is empty at the library root. */
+/** A media item's tags (tag and tags as one sorted set) and folder; folder_id is empty at the library root. */
 export interface ReviewMediaFields { tags: string[]; folder_id: string }
 /** A media review's change: before is what was last approved, null for a new upload. */
 export interface ReviewMediaChange { media_id: string; filename: string; before: ReviewMediaFields | null; after: ReviewMediaFields }

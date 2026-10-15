@@ -224,8 +224,9 @@ export function mediaChangeText(change: ReviewMediaChange): string {
 }
 
 /**
- * One approved playlist whose selection approving the review changes, with
- * the screens showing it and the media it starts and stops playing.
+ * One approved playlist, or open playlist proposal, whose selection approving
+ * the review changes, with the screens showing it and the media it starts and
+ * stops playing.
  */
 function mediaPlaylistText(playlist: ReviewMediaPlaylist): string {
   const ids = (list: string[] | undefined) => (Array.isArray(list) ? list.filter((id) => typeof id === "string" && id) : []);

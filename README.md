@@ -1098,7 +1098,8 @@ when the change applies directly.
 `pending_count`; pass `data.next_cursor` back as `--cursor`. `reviews show`
 reports `state`: `pending`, `approved`, `rejected`, `changes_requested`,
 `withdrawn`, `superseded` (a newer proposal replaced it) or `stale` (the live
-playlist changed before approval). A rejection or change request carries the
+playlist changed before approval; a stale media review is replaced by a fresh
+one within seconds). A rejection or change request carries the
 person's note in `decision_note`: fix the change and propose it again, with
 `--note` explaining what changed. `reviews withdraw` withdraws a pending change
 this credential proposed. Agents cannot approve playlist or screen reviews.
@@ -1108,15 +1109,17 @@ update`, waits for review (`review_state: "pending"`). Until a person approves,
 screens keep playing what was approved: the tag, folder and all selectors of
 approved playlists read the tags and folder the item was last approved with,
 and play a new upload not at all. When approving would change what an approved
-playlist plays, the item gets its own review: subject type `media`, operation
-`selector_refresh`, no `preview`, `playlist_change.media_change` with the tags
-and folder `before` (as last approved; `null` for a new upload) and `after`,
-and `playlist_change.media_playlists` naming each approved playlist with its
-screen count and the media it starts playing (`media_added`) or stops playing
-(`media_removed`). A change that alters no approved playlist applies without a
-review. A review that ends without approval (rejected, changes requested,
-withdrawn, stale or superseded) puts approved media back to the tags and folder
-it was approved with. A screen change lists `blockers`, the playlist reviews it
+playlist or an open playlist proposal plays, the item gets its own review:
+subject type `media`, operation `selector_refresh`, no `preview`,
+`playlist_change.media_change` with the tags (one sorted set) and folder (`""`
+at the library root) `before` (as last approved; `null` for a new upload) and
+`after`, and `playlist_change.media_playlists` naming each approved playlist or
+open playlist proposal with its screen count and the media it starts playing
+(`media_added`) or stops playing (`media_removed`). A change that alters no
+approved playlist or open proposal applies without a review. A rejected,
+withdrawn or changes-requested review puts approved media back to the tags and
+folder it was approved with, unless another open review names it; a new upload
+stays pending. A screen change lists `blockers`, the playlist reviews it
 waits on with their state now; once approved, its `result` carries
 `applying: true` while a large fleet finishes.
 
