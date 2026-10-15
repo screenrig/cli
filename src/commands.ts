@@ -3527,8 +3527,6 @@ async function mediaUpdate(args: ParsedArgs, client: ApiClient): Promise<Command
   });
   const done = clearTag ? `Cleared tags on media ${id}` : `Replaced tags on media ${id}`;
   // Under Propose a tag change waits for a person's review.
-  const pending = pendingReviewOf(response);
-  if (pending) return pendingReviewResult(response, pending, client.requestId);
   if ((response.body as { review_state?: unknown } | undefined)?.review_state === "pending") return mediaReviewPendingResult(response, client.requestId, done);
   return {
     envelope: jsonBody(response, client.requestId),
@@ -3537,7 +3535,7 @@ async function mediaUpdate(args: ParsedArgs, client: ApiClient): Promise<Command
   };
 }
 
-const MEDIA_REVIEW_PENDING_SENTENCE = "Screens keep playing what was approved until a person approves this change: approved playlists' selectors still read the tags and folder the item was last approved with, and play a new upload not at all. Its review appears in screenrig reviews list within seconds; a change that alters no approved playlist applies without one. Do not repeat the write.";
+const MEDIA_REVIEW_PENDING_SENTENCE = "Screens keep playing what was approved until a person approves this change. Its review appears in screenrig reviews list within seconds; a change that alters no approved playlist applies without one. Do not repeat the write.";
 
 /**
  * Media a Propose write left pending (review_state pending): a success, exit
@@ -3547,7 +3545,7 @@ const MEDIA_REVIEW_PENDING_SENTENCE = "Screens keep playing what was approved un
 function mediaReviewPendingResult(response: { body: unknown; headers: Record<string, string> }, requestId: string, done: string): CommandResult {
   const next: ProblemNext = { command: "screenrig reviews list", argv: ["reviews", "list"], reason: "Find this media's review and give the person its URL." };
   return {
-    envelope: jsonBody(response, requestId, { next }, [{ code: "media_review_pending", message: `Waiting for a person to approve this media change. ${MEDIA_REVIEW_PENDING_SENTENCE}` }]),
+    envelope: jsonBody(response, requestId, { next }, [{ code: "media_review_pending", message: "Waiting for a person to approve this media change; its review appears in screenrig reviews list within seconds." }]),
     exitCode: ExitCode.Success,
     human: [done, "review_state: pending", MEDIA_REVIEW_PENDING_SENTENCE, `next: ${next.command}`].join("\n"),
   };

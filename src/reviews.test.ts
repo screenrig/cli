@@ -545,15 +545,13 @@ test("reviews show renders a media review, blockers with their state, and a flee
   }
 });
 
-test("a Propose tag change of media waits for review: pending media with next reviews list, or the review a 202 names", async () => {
+test("a Propose tag change of media waits for review: pending media with warning media_review_pending and next reviews list", async () => {
   const env = await enrolled();
   try {
     const mediaRow = (id: string, extra: Record<string, unknown> = {}) => ({ id, filename: "poster.png", primitive: "image", content_type: "image/png", tags: ["Lobby"], revision: 3, state: "ready", ...extra });
-    const review = { id: "rvw_TAGS", kind: "playlist_change", state: "pending", url: "https://screenrig.ai/dashboard/reviews/rvw_TAGS", subject: { type: "media", id: "med_REVIEWED", name: "poster.png" }, impact: { screens: 2 } };
     const transport = new FakeTransport()
       .on("PATCH", "/api/media/med_POSTER", () => json(200, mediaRow("med_POSTER", { review_state: "pending" })))
       .on("PATCH", "/api/media/med_LIVE", () => json(200, mediaRow("med_LIVE")))
-      .on("PATCH", "/api/media/med_REVIEWED", () => json(202, { status: "pending_review", review }))
       .on("PATCH", "/api/media/med_READ", () => ({
         status: 403, headers: { "content-type": "application/problem+json" },
         body: { errors: [{ status: 403, code: "insufficient_access", type: "https://screenrig.ai/problems/insufficient-access", title: "This access level cannot do this", detail: "This credential has Read only access." }], request_id: "req_READ" },
@@ -569,7 +567,7 @@ test("a Propose tag change of media waits for review: pending media with next re
     assert.match(waiting.envelope.warnings?.[0]?.message ?? "", /Waiting for a person to approve this media change/);
     const waitingHuman = await cli(["--human", "media", "update", "med_POSTER", "--tags", "Lobby,Patio"], transport, env);
     assert.match(waitingHuman.stdout, /Replaced tags on media med_POSTER\nreview_state: pending\n/);
-    assert.match(waitingHuman.stdout, /approved playlists' selectors still read the tags and folder the item was last approved with/);
+    assert.match(waitingHuman.stdout, /Screens keep playing what was approved until a person approves this change\./);
     assert.match(waitingHuman.stdout, /next: screenrig reviews list/);
 
     const live = await cli(["--json", "media", "update", "med_LIVE", "--clear-tag"], transport, env);
@@ -580,9 +578,6 @@ test("a Propose tag change of media waits for review: pending media with next re
     assert.match(liveHuman.stdout, /\nCleared tags on media med_LIVE\n?$/);
     assert.doesNotMatch(liveHuman.stdout, /review_state|next:/);
 
-    const reviewed = await cli(["--json", "media", "update", "med_REVIEWED", "--tag", "Cafe"], transport, env);
-    assertPending(reviewed, "rvw_TAGS");
-    assert.match((await cli(["--human", "media", "update", "med_REVIEWED", "--tag", "Cafe"], transport, env)).stdout, /review_id: rvw_TAGS\n/);
 
     const readOnly = await cli(["--json", "media", "update", "med_READ", "--tag", "Lobby"], transport, env);
     assert.equal(readOnly.code, ExitCode.Auth, readOnly.stdout);
