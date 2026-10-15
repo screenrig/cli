@@ -1314,7 +1314,8 @@ export type CreatedProject = ProjectContext;
 /** Reviews: playlist and screen changes proposed under Propose access, and ad creatives. */
 export type ReviewKind = "playlist_change" | "screen_change" | "ad_creative";
 export type ReviewState = "pending" | "approved" | "rejected" | "changes_requested" | "withdrawn" | "superseded" | "stale";
-export interface ReviewSubject { type: "playlist" | "screen" | "creative"; id: string; name: string }
+/** media is the pending media item of a selector_refresh review. */
+export interface ReviewSubject { type: "playlist" | "screen" | "creative" | "media"; id: string; name: string }
 export interface ReviewImpact { screens: number }
 export interface ReviewPerson { user_id: string; name: string }
 export interface ReviewProposer {
@@ -1337,20 +1338,26 @@ export interface ReviewPlaylistDiff {
   media_added: string[];
   media_removed: string[];
 }
+/** An approved playlist whose tag, folder or all selectors play the pending media once approved. */
+export interface ReviewMediaPlaylist { id: string; name: string; screens: number }
 export interface ReviewPlaylistChange {
   operation: "create" | "update" | "selector_refresh";
   base_revision: number;
   applied_revision?: number;
   proposed: Record<string, unknown>;
   diff: ReviewPlaylistDiff;
+  media_playlists?: ReviewMediaPlaylist[];
 }
 export interface ReviewScreenChange {
   action: "assign" | "set_playlist_schedule" | "clear_playlist_schedule" | "takeover" | "takeover_clear";
   screens: { ids?: string[]; tag?: string; count_at_request: number };
   request: Record<string, unknown>;
   playlist_ids: string[];
-  result?: { matched: number; succeeded: number; failed: number };
+  /** applying is true while some matched screens have no outcome yet. */
+  result?: { matched: number; succeeded: number; failed: number; applying?: boolean };
 }
+/** A playlist review a screen change was proposed behind, as it stands now. */
+export interface ReviewBlocker { id: string; state: ReviewState; subject: ReviewSubject }
 export interface Review {
   id: string;
   kind: ReviewKind;
@@ -1367,6 +1374,8 @@ export interface Review {
   previous_review_id?: string;
   superseded_by?: string;
   blocked_by?: string[];
+  /** GET /api/reviews/{id} only: each blocked_by review as it stands now. */
+  blockers?: ReviewBlocker[];
   dependents?: string[];
   impact: ReviewImpact;
   playlist_change?: ReviewPlaylistChange;

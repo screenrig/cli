@@ -221,8 +221,10 @@ export class ApiClient {
     return headers;
   }
 
-  async call(req: Omit<TransportRequest, "headers"> & { headers?: Record<string, string>; idempotent?: boolean; idempotencyKey?: string; recoverySupersede?: string; recoveryQuery?: Record<string, string>; retainRecoveryOnRefusal?: boolean }): Promise<TransportResponse> {
-    const { idempotent, idempotencyKey, recoverySupersede, recoveryQuery, retainRecoveryOnRefusal, ...transportRequest } = req;
+  async call(req: Omit<TransportRequest, "headers"> & { headers?: Record<string, string>; idempotent?: boolean; idempotencyKey?: string; recoverySupersede?: string; recoveryQuery?: Record<string, string>; retainRecoveryOnRefusal?: boolean;
+    /** An insufficient_access answer is about this write, not the credential's level: keep the server's hint and add no sign-in. */
+    serverAccessHint?: boolean; }): Promise<TransportResponse> {
+    const { idempotent, idempotencyKey, recoverySupersede, recoveryQuery, retainRecoveryOnRefusal, serverAccessHint, ...transportRequest } = req;
     if (idempotencyKey !== undefined && !isValidIdempotencyKey(idempotencyKey)) {
       throw usageError("Invalid per-request idempotency key.");
     }
@@ -285,7 +287,7 @@ export class ApiClient {
         request_id: requestId,
         bodyText: errorBodyText(response.rawText, response.body),
       });
-      const problem = renewed && invalidTokenChallenge(response) ? sessionEnded(normalized) : withAccessGuidance(normalized);
+      const problem = renewed && invalidTokenChallenge(response) ? sessionEnded(normalized) : serverAccessHint ? normalized : withAccessGuidance(normalized);
       const wrapped = new CliError(
         withPaymentGuidance(
           withQuotaGuidance(

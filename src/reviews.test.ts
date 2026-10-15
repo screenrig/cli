@@ -453,3 +453,83 @@ test("insufficient_access names Manage, or the project or person cap from errors
     await rm(env.dir, { recursive: true, force: true });
   }
 });
+
+test("reviews show renders a media review, blockers with their state, and a fleet still applying", async () => {
+  const env = await enrolled();
+  try {
+    const base = { url: "https://screenrig.ai/dashboard/reviews/x", proposer: { kind: "agent", agent_id: AGENT, agent_name: "Menu agent" }, created_at: "2026-08-14T15:00:00Z", updated_at: "2026-08-14T15:00:00Z" };
+    const media = {
+      ...base, id: "rvw_MEDIA", kind: "playlist_change", state: "pending", subject: { type: "media", id: "med_POSTER", name: "poster.png" }, impact: { screens: 4 },
+      playlist_change: {
+        operation: "selector_refresh", base_revision: 7, proposed: { name: "Lobby", pages: [] },
+        diff: { name_changed: false, pages_added: [], pages_removed: [], pages_changed: [], soundtrack_changed: false, media_added: ["med_POSTER"], media_removed: [] },
+        media_playlists: [{ id: "pl_LOBBY", name: "Lobby", screens: 3 }, { id: "pl_MENU", name: "Menu", screens: 1 }],
+      },
+    };
+    const screen = {
+      ...base, id: "rvw_SCREEN", kind: "screen_change", state: "approved", subject: { type: "screen", id: SCREEN, name: "tag Lobby" }, impact: { screens: 40 },
+      blocked_by: ["rvw_PLAYLIST"], blockers: [{ id: "rvw_PLAYLIST", state: "rejected", subject: { type: "playlist", id: PLAYLIST, name: "Lobby" } }],
+      screen_change: { action: "assign", screens: { tag: "Lobby", count_at_request: 40 }, request: {}, playlist_ids: [PLAYLIST], result: { matched: 40, succeeded: 12, failed: 0, applying: true } },
+    };
+    const transport = new FakeTransport()
+      .on("GET", "/api/reviews/rvw_MEDIA", () => json(200, media))
+      .on("GET", "/api/reviews/rvw_SCREEN", () => json(200, screen))
+      .on("GET", "/api/reviews", () => json(200, { items: [media], next_cursor: null, pending_count: 1 }));
+
+    const shownMedia = await cli(["--human", "reviews", "show", "rvw_MEDIA"], transport, env);
+    assert.equal(shownMedia.code, ExitCode.Success, shownMedia.stdout);
+    assert.match(shownMedia.stdout, /Review rvw_MEDIA: New media, pending/);
+    assert.match(shownMedia.stdout, /subject: media poster\.png \(med_POSTER\)/);
+    assert.match(shownMedia.stdout, /plays_in: Lobby \(pl_LOBBY, 3 screens\); Menu \(pl_MENU, 1 screen\)/);
+    assert.match(shownMedia.stdout, /change: new media for the tag, folder or all selectors of approved playlists/);
+    assert.match(shownMedia.stdout, /impact: approving changes 4 screens/);
+    const json1 = await cli(["--json", "reviews", "show", "rvw_MEDIA"], transport, env);
+    assert.equal(json1.envelope.data.preview, undefined);
+    assert.equal(json1.envelope.data.playlist_change.media_playlists.length, 2);
+
+    const listed = await cli(["--human", "reviews", "list"], transport, env);
+    assert.match(listed.stdout, /rvw_MEDIA {2}playlist_change {2}pending {2}media poster\.png \(med_POSTER\)/);
+
+    const shownScreen = await cli(["--human", "reviews", "show", "rvw_SCREEN"], transport, env);
+    assert.match(shownScreen.stdout, /blockers: rvw_PLAYLIST rejected \(playlist Lobby \(pl_LOBBY\)\)/);
+    assert.doesNotMatch(shownScreen.stdout, /blocked_by:/);
+    assert.match(shownScreen.stdout, /result: 40 matched, 12 succeeded, 0 failed; still applying to the rest/);
+  } finally {
+    await rm(env.dir, { recursive: true, force: true });
+  }
+});
+
+test("a refused tag change on approved media shows the server's hint and no sign-in", async () => {
+  const env = await enrolled();
+  try {
+    const hint = "Upload a new media item with the tags or folder you want instead; it waits for review before any selector plays it.";
+    let limitedBy: string | undefined;
+    const transport = new FakeTransport()
+      .on("PATCH", "/api/media/med_POSTER", () => ({
+        status: 403, headers: { "content-type": "application/problem+json", "www-authenticate": 'Bearer error="insufficient_scope", scope="access:manage"' },
+        body: {
+          errors: [{
+            status: 403, code: "insufficient_access", type: "https://screenrig.ai/problems/insufficient-access", title: "This access level cannot do this",
+            detail: "This credential has Propose access, which cannot change the tags or folder of approved media: playlists' selectors read them, so the change would alter what screens play.",
+            hint, ...(limitedBy ? { access_limited_by: limitedBy } : {}),
+          }],
+          instance: "/api/media/med_POSTER", request_id: "req_HELD",
+        },
+      }));
+
+    const own = await cli(["--json", "media", "update", "med_POSTER", "--tag", "Lobby"], transport, env);
+    assert.equal(own.code, ExitCode.Auth, own.stdout);
+    assert.equal(own.envelope.error?.code, "insufficient_access");
+    assert.equal(own.envelope.error?.hint, hint);
+    assert.equal(own.envelope.error?.next, undefined);
+
+    limitedBy = "project";
+    const capped = await cli(["--human", "media", "update", "med_POSTER", "--tags", "Lobby,Patio"], transport, env);
+    assert.equal(capped.code, ExitCode.Auth);
+    assert.match(capped.stdout + capped.stderr, /hint: Upload a new media item with the tags or folder you want instead/);
+    assert.match(capped.stdout + capped.stderr, /access_limited_by: project/);
+    assert.doesNotMatch(capped.stdout + capped.stderr, /next: screenrig login/);
+  } finally {
+    await rm(env.dir, { recursive: true, force: true });
+  }
+});

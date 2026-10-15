@@ -806,12 +806,13 @@ function commandHandler(
 
 /**
  * 403 insufficient_access for a service client: it cannot sign in again, so
- * the login next action does not apply. Its level is chosen when it is
- * created; a project cap keeps the hint the client already gave.
+ * the login next action does not apply; its level is chosen when it is
+ * created. A cap hint or a write's own hint (no login next) stays as it is.
  */
 function serviceClientAccessRefusal(error: CliError): CliError {
+  if (error.problem.next?.argv?.[0] !== "login") return error;
   const { next: _login, ...problem } = error.problem;
-  return new CliError(problem.access_limited_by ? problem : { ...problem, hint: "This service client's access level cannot do this. Its access is chosen when it is created (service-client create --access manage)." }, error.exitCode, error.warnings);
+  return new CliError({ ...problem, hint: "This service client's access level cannot do this. Its access is chosen when it is created (service-client create --access manage)." }, error.exitCode, error.warnings);
 }
 
 export const handleVersion: CommandHandler = async () => {
@@ -3517,12 +3518,15 @@ async function mediaUpdate(args: ParsedArgs, client: ApiClient): Promise<Command
   const tags = tagsFlag?.split(",");
   if (tags !== undefined && (tags.length > 32 || new Set(tags).size !== tags.length || tags.some(value => !/^[A-Za-z0-9]{1,32}$/.test(value)))) throw usageError("--tags requires 1 through 32 unique alphanumeric tags separated by commas; use --clear-tag to clear the set.");
   const body: MediaTagPatch = tags === undefined ? { tag: clearTag ? null : tag ?? null } : { tags };
+  // Under Propose, the tags of approved media are held because approved
+  // playlists' selectors read them; the refusal's own hint says what to do.
   const response = await client.call({
     method: "PATCH",
     path: `/api/media/${id}`,
     idempotent: true,
     headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
     body,
+    serverAccessHint: true,
   });
   return {
     envelope: jsonBody(response, client.requestId),

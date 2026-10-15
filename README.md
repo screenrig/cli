@@ -1103,6 +1103,15 @@ person's note in `decision_note`: fix the change and propose it again, with
 `--note` explaining what changed. `reviews withdraw` withdraws a pending change
 this credential proposed. Agents cannot approve playlist or screen reviews.
 
+Media a Propose credential uploads waits for review (`review_state: "pending"`)
+before the tag, folder or all selectors of approved playlists play it. When such
+a selector would play it, the file gets its own review: subject type `media`,
+operation `selector_refresh`, no `preview`, and
+`playlist_change.media_playlists` naming each approved playlist that would play
+it with its screen count. A screen change lists `blockers`, the playlist
+reviews it waits on with their state now; once approved, its `result` carries
+`applying: true` while a large fleet finishes.
+
 `screen publish` under review returns `stage: "pending_review"` with
 `reviews` (the new playlist's review and the assignment's), one warning per
 review, and `data.next` naming the playlist review; it does not wait for
@@ -1174,8 +1183,10 @@ screenrig logout
 `--no-wait` returns at once with `data.login_id`, `data.user_code` and
 `data.verification_uri_complete`; `data.next.argv` resumes the wait. The handle
 holds no secret. Read only lists and reads, and cannot change, publish or buy;
-metered reads still bill. Propose also uploads media and writes notes, and every
-change to what plays becomes a review a person approves (see [Reviews](#reviews)).
+metered reads still bill. Propose also uploads new media, which waits for review
+before any selector plays it, and writes notes; every change to what plays
+becomes a review a person approves (see [Reviews](#reviews)), and the tags of
+approved media stay as they are.
 Manage applies changes directly. Asking for a higher level on a project is how
 access is raised, and a person approves it.
 
@@ -1518,7 +1529,11 @@ Media carries up to 32 unique tags, each 1–32 letters or digits. Replace the
 whole set with `screenrig media update med_ID --tags Summer,Drinks`.
 `--tag Summer` replaces it with one tag; `--clear-tag` clears every tag.
 `media list --tag Summer` matches membership anywhere in the set. Tags are
-case-sensitive and are never authorization.
+case-sensitive and are never authorization. Under Propose access, a credential
+changes the tags only of media it uploaded that still waits for review
+(`review_state: "pending"`); approved media's tags are held because approved
+playlists' selectors read them, so `media update` answers 403
+`insufficient_access` with a hint to upload a new item with the tags you want.
 
 A dynamic selector can use one `tag` or a `tags` filter object:
 

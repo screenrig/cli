@@ -1,4 +1,4 @@
-import type { AccessLevel, AccessLimitedBy, Review, ReviewList, ReviewPending, ReviewSummary } from "./adapters/protocol.js";
+import type { AccessLevel, AccessLimitedBy, Review, ReviewList, ReviewMediaPlaylist, ReviewPending, ReviewSummary } from "./adapters/protocol.js";
 import type { ProblemNext, Warning } from "./envelope.js";
 import { accessLabel } from "./oauth.js";
 import { unexpectedResponseError, usageError } from "./problems.js";
@@ -88,6 +88,11 @@ function kindLabel(kind: string): string {
   return KIND_LABELS[kind] ?? kind;
 }
 
+/** A selector_refresh review approves one pending media item (subject type media). */
+function reviewLabel(review: Pick<Review, "kind" | "subject">): string {
+  return review.subject?.type === "media" ? "New media" : kindLabel(review.kind);
+}
+
 function subjectText(subject: Review["subject"] | undefined): string | undefined {
   if (!subject) return undefined;
   return `${subject.type} ${plainText(subject.name)} (${subject.id})`;
@@ -133,7 +138,7 @@ function count(items: string[] | undefined): number {
 export function playlistChangeText(change: NonNullable<Review["playlist_change"]>): string {
   const diff = change.diff;
   const operation = change.operation === "create" ? "new playlist"
-    : change.operation === "selector_refresh" ? "new media matching its selectors"
+    : change.operation === "selector_refresh" ? "new media for the tag, folder or all selectors of approved playlists"
     : `update of revision ${change.base_revision}`;
   if (!diff) return operation;
   const pages = [
@@ -171,8 +176,13 @@ function screenChangeLines(change: NonNullable<Review["screen_change"]>): string
     `action: ${SCREEN_ACTION_LABELS[change.action] ?? change.action}`,
     ...(target ? [`screens: ${target} (${screensText(screens.count_at_request ?? 0)} when proposed)`] : []),
     ...(Array.isArray(change.playlist_ids) && change.playlist_ids.length ? [`playlists: ${change.playlist_ids.join(", ")}`] : []),
-    ...(result ? [`result: ${result.matched} matched, ${result.succeeded} succeeded, ${result.failed} failed`] : []),
+    ...(result ? [`result: ${result.matched} matched, ${result.succeeded} succeeded, ${result.failed} failed${result.applying ? "; still applying to the rest" : ""}`] : []),
   ];
+}
+
+/** One approved playlist a pending media item joins, with the screens showing it. */
+function mediaPlaylistText(playlist: ReviewMediaPlaylist): string {
+  return `${plainText(playlist.name)} (${playlist.id}, ${screensText(playlist.screens)})`;
 }
 
 /** Human detail of one review (reviews show, withdraw). */
@@ -188,14 +198,17 @@ export function reviewDetailLines(review: Review): string[] {
     ["change", review.playlist_change ? playlistChangeText(review.playlist_change) : undefined],
     ["applied_revision", review.playlist_change?.applied_revision === undefined ? undefined : String(review.playlist_change.applied_revision)],
     ["creative", review.ad_creative ? `${review.ad_creative.creative_id} revision ${review.ad_creative.creative_revision}` : undefined],
-    ["blocked_by", review.blocked_by?.length ? review.blocked_by.join(", ") : undefined],
+    ["plays_in", review.playlist_change?.media_playlists?.length ? review.playlist_change.media_playlists.map(mediaPlaylistText).join("; ") : undefined],
+    ...(review.blockers?.length
+      ? [["blockers", review.blockers.map((blocker) => `${blocker.id} ${blocker.state} (${subjectText(blocker.subject) ?? "-"})`).join("; ")] as [string, string]]
+      : [["blocked_by", review.blocked_by?.length ? review.blocked_by.join(", ") : undefined] as [string, string | undefined]]),
     ["dependents", review.dependents?.length ? review.dependents.join(", ") : undefined],
     ["previous_review_id", review.previous_review_id],
     ["superseded_by", review.superseded_by],
     ["url", review.url],
   ];
   return [
-    `Review ${review.id}: ${kindLabel(review.kind)}, ${review.state}`,
+    `Review ${review.id}: ${reviewLabel(review)}, ${review.state}`,
     ...fields.filter((field): field is [string, string] => Boolean(field[1])).map(([key, value]) => `${key}: ${value}`),
     ...(review.screen_change ? screenChangeLines(review.screen_change) : []),
   ];
