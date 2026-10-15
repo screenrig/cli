@@ -7184,6 +7184,100 @@ paths:
       x-rate-limit-admitted-response-headers:
       - RateLimit-Policy
       - RateLimit
+  /api/card-data:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listCardData
+      description: Lists the project's card data documents, at most 200 in ascending key order. next_cursor is the last returned
+        key; pass it back as after for the next page, null when there are no more. Card data documents hold the dynamic properties
+        of card placements (menu sections, ticker items, KPI tiles); the placement's data key names one.
+      security:
+      - projectBearer: []
+      parameters:
+      - name: after
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Card data documents
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardDataList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/card-data/{key}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    - name: key
+      in: path
+      required: true
+      description: Card data key. May not start with feed:.
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$'
+    get:
+      x-screenrig-access: read
+      operationId: getCardData
+      description: Returns the document and its revision. ETag is the revision, for If-Match on the next write.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Card data document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardDataEntry'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      x-screenrig-access: write
+      operationId: putCardData
+      description: Creates or replaces a card data document. When card placements in the project's playlists bind the key, the
+        document must hold only each bound card's dynamic properties and validate against them; otherwise the write is refused
+        with card_data_invalid naming the card and the property path, and nothing changes. A key no placement binds accepts
+        any JSON object. Screens showing a placement that reads the key receive screen.card_data_changed and refetch it in place;
+        the project log records kv.updated with a card_data_entry resource, which never reaches a Player. Limits, quota, metering,
+        revisions and idempotency are the application K/V store's.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIfMatch'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CardDataWrite'
+      responses:
+        '200':
+          description: Card data document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardDataEntry'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteCardData
+      description: Deletes a card data document. A card bound to the key is hidden on glass until a document is written again.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/IfMatch'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted
+        default:
+          $ref: '#/components/responses/Problem'
   /api/media:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
@@ -7425,9 +7519,9 @@ paths:
         move into itself or a folder inside it, and the move must keep every folder within 10 levels (invalid_request). Items
         already in the destination are left as they are; each moved file and folder advances its revision. Moving files
         changes what the by:folder selectors of their old and new folders play, from each screen's next selector resolve;
-        moving a folder changes no folder's own files. Emits media.moved. A Propose credential moves only pending media it
-        uploaded (each move queues its media review); moving approved media, or another proposer's pending media, is 403
-        insufficient_access, and nothing moves.
+        moving a folder changes no folder's own files. Emits media.moved. A Propose credential's move makes each moved file
+        pending and queues its media review, and approved playlists' selectors resolve it by the folder it was approved with
+        until a person approves the change (docs/reviews.md).
       security:
       - projectBearer: []
       - dashboardSession: []
@@ -7581,10 +7675,10 @@ paths:
     patch:
       x-screenrig-access: contribute
       operationId: patchMedia
-      description: Sets or clears the media item's tag or tags. A Propose credential changes the tags only of pending media
-        it uploaded (each change queues its media review); a change of the tag set of approved media, or of another
-        proposer's pending media, is 403 insufficient_access with the hint to upload a new item. A patch that keeps the
-        same tag set applies and the item stays approved.
+      description: Sets or clears the media item's tag or tags. A Propose credential's change of the tag set makes the item
+        pending and queues its media review; approved playlists' selectors resolve it by the tags it was approved with until
+        a person approves the change (docs/reviews.md). A patch that keeps the same tag set applies and the item stays
+        approved.
       security:
       - projectBearer: []
       parameters:
@@ -10397,8 +10491,9 @@ paths:
             hits zero or becomes positive. The runtime audience is an allowlist (docs/player-compatibility.md §7.1): screen.content_changed,
             screen.manifest_changed, screen.toast, screen.screenshot_requested, screen.archived, screen.unarchived, screen.deleted,
             screen.device_credential_revoked, project.suspended, project.resumed, player.reload, which reaches every runtime
-            session, and the per-screen commands player.reboot and player.display (docs/player-compatibility.md §6.5), never
-            delivered past details.expires_at. Every other type is never published to the stream. Players ignore unknown event types, including the default message type, and unknown field names, and advance
+            session, the per-screen commands player.reboot and player.display (docs/player-compatibility.md §6.5), never
+            delivered past details.expires_at, and screen.card_data_changed (resource {type: card_data, key}, details {revision} or
+            {deleted: true}), addressed only to screens whose current content reads that card data or feed key. Every other type is never published to the stream. Players ignore unknown event types, including the default message type, and unknown field names, and advance
             the cursor from every id. The stream opens with its own retry, drawn per connection between 3000 and 15000 ms so
             that streams dropped together do not reconnect together; a draining host sends each stream its own retry between
             1000 and 30000 ms. The in-band problem frame (event: problem) has no id; its data is {code, detail, action?}, where
@@ -11874,6 +11969,50 @@ paths:
               $ref: '#/components/headers/RateLimitPolicy'
             RateLimit:
               $ref: '#/components/headers/RateLimit'
+        default:
+          $ref: '#/components/responses/RuntimeProblem'
+  /screen/card-data/{key}:
+    servers:
+    - url: https://play.screenrig.ai
+      description: Trusted player/runtime origin
+    parameters:
+    - name: key
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      operationId: getRuntimeCardData
+      description: >-
+        Returns a card data or feed document, the card data or feed key of a card primitive in the screen's current
+        manifest. A key is readable only while a desired, active, or transition-grace grant of the session's screen lists it;
+        knowing a key is never enough. Feed keys start with feed: and read the system feed namespace (screenrig.weather/v1 and
+        the other feed schemas); every other key reads the card data of the screen's project. The body is the document itself. ETag is
+        the sha256 of its bytes and If-None-Match answers 304; keep the last good document for offline playback and refetch on
+        screen.card_data_changed for the key. 404 means no document is stored yet; keep the card hidden.
+      security:
+      - runtimeCookie: []
+      - nativeSessionAuthorization: []
+      parameters:
+      - name: If-None-Match
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: The document
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '304':
+          description: Not modified
         default:
           $ref: '#/components/responses/RuntimeProblem'
   /api/email/verify:
@@ -14444,16 +14583,36 @@ components:
             pages: { type: array, items: { type: object, additionalProperties: true } }
             audio: { type: object, additionalProperties: true }
         diff: { $ref: "#/components/schemas/ReviewPlaylistDiff" }
-        media_playlists: { type: array, items: { $ref: "#/components/schemas/ReviewMediaPlaylist" }, description: "The approved playlists whose tag, folder or all selectors play the pending media this review approves, once approved: for a selector_refresh (a media review) every one, plus every playlist with an open create or update review whose proposed selectors would play it, for a create or update the others beside its subject. impact.screens includes their screens." }
+        media_playlists: { type: array, items: { $ref: "#/components/schemas/ReviewMediaPlaylist" }, description: "The playlists whose tag, folder or all selectors approving this review's pending media would make start or stop playing it: for a selector_refresh (a media review) every playlist with an approved version, plus every playlist with an open create or update review whose proposed selectors would, one entry per playlist; for a create or update the approved playlists beside its subject. impact.screens includes their screens." }
+        media_change: { $ref: "#/components/schemas/ReviewMediaChange" }
         previously_rejected_media: { type: array, items: { type: string }, description: "GET one pending create or update review only. The pending media this review names by id whose latest media review a person rejected; approving the playlist approves that media." }
     ReviewMediaPlaylist:
       type: object
       additionalProperties: false
-      required: [id, name, screens]
+      required: [id, name, screens, media_added, media_removed]
       properties:
         id: { type: string }
         name: { type: string }
         screens: { type: integer, minimum: 0, description: "Screens showing the playlist when the review was written." }
+        media_added: { type: array, items: { type: string }, description: "Media the playlist's selectors start playing on approval." }
+        media_removed: { type: array, items: { type: string }, description: "Media the playlist's selectors stop playing on approval." }
+    ReviewMediaChange:
+      type: object
+      additionalProperties: false
+      description: "The pending change of one media item a selector_refresh review asks about."
+      required: [media_id, filename, before, after]
+      properties:
+        media_id: { type: string }
+        filename: { type: string }
+        before: { anyOf: [{ $ref: "#/components/schemas/ReviewMediaFields" }, { type: "null" }], description: "The tags and folder the item was last approved with; null for media never approved." }
+        after: { $ref: "#/components/schemas/ReviewMediaFields" }
+    ReviewMediaFields:
+      type: object
+      additionalProperties: false
+      required: [tags, folder_id]
+      properties:
+        tags: { type: array, items: { type: string }, description: "The item's tag and tags as one sorted set." }
+        folder_id: { type: string, description: "The item's folder; empty at the library root." }
     ReviewScreenChange:
       type: object
       additionalProperties: false
@@ -18937,6 +19096,7 @@ components:
         - { $ref: "#/components/schemas/PlaylistVideoPrimitiveWrite" }
         - { $ref: "#/components/schemas/PlaylistIframePrimitiveWrite" }
         - { $ref: "#/components/schemas/PlaylistStreamPrimitiveWrite" }
+        - { $ref: "#/components/schemas/PlaylistCardPrimitiveWrite" }
       discriminator: { propertyName: primitive }
     PlaylistPrimitive:
       oneOf:
@@ -18945,6 +19105,7 @@ components:
         - { $ref: "#/components/schemas/PlaylistVideoPrimitive" }
         - { $ref: "#/components/schemas/PlaylistIframePrimitive" }
         - { $ref: "#/components/schemas/PlaylistStreamPrimitive" }
+        - { $ref: "#/components/schemas/PlaylistCardPrimitive" }
       discriminator: { propertyName: primitive }
     PlaylistApplicationPrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, release_id, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [application] }, application_id: { type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id. }, release_id: { type: string }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [fill] }, controller: { type: boolean, default: false }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
     PlaylistImagePrimitiveWrite: { type: object, additionalProperties: false, required: [id, primitive, selector, rect, layer, content_fit], properties: { id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, primitive: { type: string, enum: [image] }, selector: { $ref: "#/components/schemas/PlaylistMediaSelector" }, alt: { type: string, maxLength: 300 }, dwell_ms: { type: integer, minimum: 1000, maximum: 86400000, description: Required on media_end image primitives. Forbidden on duration and application pages. }, rect: { $ref: "#/components/schemas/PlaylistRect" }, layer: { type: integer, minimum: 0, maximum: 1024 }, content_fit: { type: string, enum: [contain, cover, fill] }, enter: { $ref: "#/components/schemas/PrimitiveEnter" }, motion: { $ref: "#/components/schemas/PrimitiveMotion" } } }
@@ -20057,6 +20218,10 @@ components:
         record with no trailer; a stream that fails after the header is
         aborted at the connection (the client sees a transport error,
         never a clean end), so retry from the last received_at.
+    CardDataWrite: { type: object, additionalProperties: false, required: [document], properties: { document: { type: object, additionalProperties: true, description: "The card data document: a JSON object of at most 1 MiB. When a card placement binds the key it holds only that card's dynamic properties." } } }
+    CardDataEntry: { type: object, additionalProperties: false, required: [key, document, bytes, sha256, revision, created_at, updated_at], properties: { key: { type: string }, document: { type: object, additionalProperties: true }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    CardDataSummary: { type: object, additionalProperties: false, required: [key, bytes, sha256, revision, created_at, updated_at], properties: { key: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    CardDataList: { type: object, additionalProperties: false, required: [items, next_cursor], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/CardDataSummary" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }] } } }
     KVWrite: { type: object, additionalProperties: false, required: [value_base64], properties: { value_base64: { type: string, contentEncoding: base64, maxLength: 1398104 }, content_type: { type: string, minLength: 1, maxLength: 127, default: application/octet-stream } } }
     KVEntry: { type: object, additionalProperties: false, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, value_base64: { type: string, contentEncoding: base64 }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer } } }
     KVSummary: { type: object, additionalProperties: false, required: [application_id, key, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string }, updated_at: { type: string } } }
@@ -20172,7 +20337,7 @@ components:
     MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], description: "Declares only what the server can re-verify against the stored object byte for byte. Codec identity is not declared here: the server derives it from the container during asynchronous verification, so a client cannot assert a codec that drives player behaviour.", properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
     MediaUploadSession: { type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: { id: { type: string }, operation: { $ref: "#/components/schemas/Operation" }, upload_url: { type: string, format: uri }, method: { type: string, enum: [PUT] }, headers: { type: object, additionalProperties: { type: string }, description: Exact signed request headers; clients must send every field verbatim. }, expires_at: { type: string, format: date-time } } }
     MediaUploadSource: { type: object, additionalProperties: false, required: [filename, content_type, sha256, bytes], description: "Verified original upload identity when ingest normalized EXIF orientation. Read-only; use it to recognize retries. The ready media digest, size and type describe the normalized delivery bytes.", properties: { filename: { type: string }, source_filename: { type: string }, content_type: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer, minimum: 1 } } }
-    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { tags: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 10800000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, folder_id: { type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. Move files with POST /api/media/move." }, revision: { type: integer }, state: { type: string, enum: [ready] }, review_state: { type: string, enum: [pending], description: "pending: uploaded by a Propose credential and waiting for a person's approval. Tag, folder and all selectors of approved playlists play it only once a person approves its media review or a playlist review that uses it. Its uploader may change its tags and folder meanwhile; a Propose credential cannot change those of approved media (403 insufficient_access). Absent means approved." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
+    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { tags: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 10800000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, folder_id: { type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. Move files with POST /api/media/move." }, revision: { type: integer }, state: { type: string, enum: [ready] }, review_state: { type: string, enum: [pending], description: "pending: uploaded, or its tags or folder changed, by a Propose credential and waiting for a person's approval. Tag, folder and all selectors of approved playlists resolve it by the tags and folder it had when last approved (new media by none) until a person approves the change, so the change neither adds nor removes what they play. Absent means approved." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
     MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/Media" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     SupportHours: {"type": "object", "additionalProperties": false, "required": ["timezone", "start", "end", "weekdays", "excludes_bc_holidays"], "properties": {"timezone": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "weekdays": {"type": "array", "items": {"type": "string"}}, "excludes_bc_holidays": {"type": "boolean"}}}
     SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean", "description": "This project can start or continue a conversation now. False where support chat is switched off in this environment."}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0}, "docs_url": {"type": "string"}}}
@@ -20778,6 +20943,17 @@ components:
         flavor: { type: string, pattern: "^[a-z0-9-]{1,32}$" }
         shell: { $ref: "#/components/schemas/PlayerShellIdentity" }
         compat: { type: array, maxItems: 64, items: { type: string, pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$", maxLength: 40 }, description: "Declared compat tokens. Invalid entries are dropped and duplicates collapse. The mint response echoes the granted subset as compat." }
+        cards: { $ref: "#/components/schemas/PlayerCardsIdentity" }
+    PlayerCardsIdentity:
+      type: object
+      additionalProperties: true
+      description: >-
+        The built-in cards library the Player carries (docs/player-compatibility.md §3.1): the library
+        CalVer and each card's semver, whose major says which card placements the screen renders. Stored on
+        the screen with the rest of player. Malformed entries are dropped one by one; it is never a 400.
+      properties:
+        library: { type: string, minLength: 1, maxLength: 40, description: "Cards library CalVer YY.MM.N." }
+        versions: { type: object, maxProperties: 256, additionalProperties: { type: string, pattern: "^[0-9]+[.][0-9]+[.][0-9]+$" }, description: "Card id to semver, for example {clock: 1.1.0, menu: 1.0.0}." }
     PlayerShellIdentity:
       type: object
       additionalProperties: true
@@ -21001,6 +21177,7 @@ components:
         - { $ref: "#/components/schemas/RuntimeVideoPrimitive" }
         - { $ref: "#/components/schemas/RuntimeIframePrimitive" }
         - { $ref: "#/components/schemas/RuntimeStreamPrimitive" }
+        - { $ref: "#/components/schemas/RuntimeCardPrimitive" }
       discriminator: { propertyName: primitive }
     RuntimeApplicationPrimitive:
       type: object
@@ -21058,9 +21235,72 @@ components:
     StreamSource: {"oneOf": [{"$ref": "#/components/schemas/HLSStreamSource"}, {"$ref": "#/components/schemas/UDPStreamSource"}], "discriminator": {"propertyName": "protocol"}}
     HLSStreamSource: {"type": "object", "additionalProperties": false, "required": ["protocol", "url"], "properties": {"protocol": {"type": "string", "enum": ["hls"]}, "url": {"type": "string", "format": "uri", "maxLength": 2048, "pattern": "^https://"}}}
     UDPStreamSource: {"type": "object", "additionalProperties": false, "required": ["protocol", "group", "port"], "properties": {"protocol": {"type": "string", "enum": ["udp-mpegts"]}, "group": {"type": "string", "description": "IPv4 ASM group within 239.0.0.0/8. Raw MPEG-TS over UDP, not RTP."}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}}}
+    PlaylistCardPrimitiveWrite:
+      type: object
+      additionalProperties: false
+      required: [id, primitive, card, rect, layer, content_fit]
+      description: >-
+        A built-in card the Player draws natively (clock, weather, menu board, ticker, KPI tiles and the rest of
+        the vendored cards catalog, screenrig.cards.contract/v1). params holds the placement's static
+        properties (theme, view, corner, location, titles, column definitions) and changes only with a republish.
+        data names a card data document (GET/PUT /api/card-data/{key}) that holds the card's dynamic properties
+        (menu sections, ticker items, KPI tiles); agents change it without a republish. With data, params may not
+        carry dynamic properties; without it, params carry the whole configuration. Publish refuses an unknown
+        card or major and invalid params (card_invalid), and a bound key whose stored document the card
+        rejects (card_data_invalid). A card with a third-party feed (weather) reads it from the key the server
+        derives from its static params.
+      properties:
+        id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }
+        primitive: { type: string, enum: [card] }
+        card: { type: string, pattern: "^[a-z][a-z0-9-]{0,39}$", description: "Catalog card id, for example menu or weather." }
+        major: { type: integer, minimum: 1, description: "Card major version. Absent selects the catalog's current major, which the stored placement then pins." }
+        params: { type: object, additionalProperties: true, description: "Static params, validated against the card's params schema." }
+        data: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$", description: "Card data key holding the dynamic properties. May not start with feed:." }
+        rect: { $ref: "#/components/schemas/PlaylistRect" }
+        layer: { type: integer, minimum: 0, maximum: 1024 }
+        content_fit: { type: string, enum: [fill] }
+        enter: { $ref: "#/components/schemas/PrimitiveEnter" }
+    PlaylistCardPrimitive:
+      type: object
+      additionalProperties: false
+      required: [id, primitive, card, major, params, rect, layer, content_fit, controller]
+      properties:
+        id: { type: string }
+        primitive: { type: string, enum: [card] }
+        card: { type: string }
+        major: { type: integer, minimum: 1 }
+        params: { type: object, additionalProperties: true }
+        data: { type: string }
+        feed: { type: string, pattern: "^feed:", description: "Server-derived feed key (for weather, the 0.1 degree cell of params.location). Clients must not send it." }
+        rect: { $ref: "#/components/schemas/PlaylistRect" }
+        layer: { type: integer, minimum: 0, maximum: 1024 }
+        content_fit: { type: string, enum: [fill] }
+        controller: { type: boolean, enum: [false] }
+        enter: { $ref: "#/components/schemas/PrimitiveEnter" }
     PlaylistStreamPrimitiveWrite: {"type": "object", "additionalProperties": false, "required": ["id", "primitive", "sources", "fallback_media_id", "rect", "layer", "content_fit"], "properties": {"id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSource"}}, "muted": {"type": "boolean", "default": true}, "rect": {"$ref": "#/components/schemas/PlaylistRect"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "content_fit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "fallback_media_id": {"type": "string", "pattern": "^med_"}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}}}
     PlaylistStreamPrimitive: {"type": "object", "additionalProperties": false, "required": ["id", "primitive", "sources", "fallback_media_id", "rect", "layer", "content_fit", "muted", "controller", "resolved_media"], "properties": {"id": {"type": "string"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSource"}}, "muted": {"type": "boolean", "default": true}, "rect": {"$ref": "#/components/schemas/PlaylistRect"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "content_fit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "fallback_media_id": {"type": "string", "pattern": "^med_"}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}, "controller": {"type": "boolean", "enum": [false]}, "resolved_media": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"$ref": "#/components/schemas/PlaylistResolvedMedia"}}}}
     RuntimeStreamPrimitive: {"type": "object", "required": ["id", "primitive", "sources", "muted", "fallback", "grantId", "rect", "layer", "contentFit"], "properties": {"id": {"type": "string"}, "primitive": {"type": "string", "enum": ["stream"]}, "sources": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/StreamSource"}}, "muted": {"type": "boolean"}, "fallback": {"$ref": "#/components/schemas/RuntimeImageResolvedMedia"}, "grantId": {"type": "string"}, "rect": {"$ref": "#/components/schemas/RuntimeRect"}, "layer": {"type": "integer", "minimum": 0, "maximum": 1024}, "contentFit": {"type": "string", "enum": ["contain", "cover", "fill"]}, "enter": {"$ref": "#/components/schemas/PrimitiveEnter"}, "motion": {"$ref": "#/components/schemas/PrimitiveMotion"}}}
+    RuntimeCardPrimitive:
+      type: object
+      required: [id, primitive, card, major, params, rect, layer, contentFit]
+      description: >-
+        A built-in card. The Player merges the card's defaults, then params, then, when data is present, the
+        dynamic properties of the document at GET /screen/card-data/{data} (only keys the card marks dynamic). A
+        card with data stays hidden until its first document arrives and then fades in; screen.card_data_changed
+        for the key refetches it in place. feed, when present, is fetched from the same route and passed to the
+        card as its feed. A Player that lacks the card or its major draws nothing for it.
+      properties:
+        id: { type: string }
+        primitive: { type: string, enum: [card] }
+        card: { type: string }
+        major: { type: integer, minimum: 1 }
+        params: { type: object, additionalProperties: true }
+        data: { type: string }
+        feed: { type: string }
+        rect: { $ref: "#/components/schemas/RuntimeRect" }
+        layer: { type: integer, minimum: 0, maximum: 1024 }
+        contentFit: { type: string, enum: [fill] }
+        enter: { $ref: "#/components/schemas/PrimitiveEnter" }
     RuntimeIframePrimitive:
       type: object
       required: [id, primitive, src, title, rect, layer, contentFit]
@@ -21992,6 +22232,8 @@ x-problem-codes:
 - browser_link_project_mismatch
 - origin_not_allowed
 - resource_conflict
+- card_invalid
+- card_data_invalid
 - revision_conflict
 - invalid_range
 - quota_exceeded
