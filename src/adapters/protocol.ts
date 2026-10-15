@@ -1338,8 +1338,12 @@ export interface ReviewPlaylistDiff {
   media_added: string[];
   media_removed: string[];
 }
-/** An approved playlist whose tag, folder or all selectors play the pending media once approved. */
-export interface ReviewMediaPlaylist { id: string; name: string; screens: number }
+/** An approved playlist whose tag, folder or all selectors start or stop playing pending media once approved. */
+export interface ReviewMediaPlaylist { id: string; name: string; screens: number; media_added: string[]; media_removed: string[] }
+/** A media item's tag set and folder; folder_id is empty at the library root. */
+export interface ReviewMediaFields { tags: string[]; folder_id: string }
+/** A media review's change: before is what was last approved, null for a new upload. */
+export interface ReviewMediaChange { media_id: string; filename: string; before: ReviewMediaFields | null; after: ReviewMediaFields }
 export interface ReviewPlaylistChange {
   operation: "create" | "update" | "selector_refresh";
   base_revision: number;
@@ -1347,6 +1351,8 @@ export interface ReviewPlaylistChange {
   proposed: Record<string, unknown>;
   diff: ReviewPlaylistDiff;
   media_playlists?: ReviewMediaPlaylist[];
+  /** selector_refresh only. */
+  media_change?: ReviewMediaChange;
   previously_rejected_media?: string[];
 }
 export interface ReviewScreenChange {

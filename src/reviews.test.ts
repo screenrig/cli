@@ -458,13 +458,36 @@ test("reviews show renders a media review, blockers with their state, and a flee
   const env = await enrolled();
   try {
     const base = { url: "https://screenrig.ai/dashboard/reviews/x", proposer: { kind: "agent", agent_id: AGENT, agent_name: "Menu agent" }, created_at: "2026-08-14T15:00:00Z", updated_at: "2026-08-14T15:00:00Z" };
+    const diff = { name_changed: false, pages_added: [], pages_removed: [], pages_changed: [], soundtrack_changed: false, media_added: ["med_POSTER"], media_removed: [] };
     const media = {
       ...base, id: "rvw_MEDIA", kind: "playlist_change", state: "pending", subject: { type: "media", id: "med_POSTER", name: "poster.png" }, impact: { screens: 4 },
       playlist_change: {
-        operation: "selector_refresh", base_revision: 7, proposed: { name: "Lobby", pages: [] },
-        diff: { name_changed: false, pages_added: [], pages_removed: [], pages_changed: [], soundtrack_changed: false, media_added: ["med_POSTER"], media_removed: [] },
+        operation: "selector_refresh", base_revision: 7, proposed: { name: "Lobby", pages: [] }, diff,
         media_playlists: [{ id: "pl_LOBBY", name: "Lobby", screens: 3 }, { id: "pl_MENU", name: "Menu", screens: 1 }],
       },
+    };
+    const upload = {
+      ...media, id: "rvw_UPLOAD",
+      playlist_change: {
+        ...media.playlist_change,
+        media_change: { media_id: "med_POSTER", filename: "poster.png", before: null, after: { tags: ["lobby"], folder_id: "fld_A" } },
+        media_playlists: [{ id: "pl_LOBBY", name: "Lobby", screens: 3, media_added: ["med_POSTER"], media_removed: [] }],
+      },
+    };
+    const retag = {
+      ...base, id: "rvw_RETAG", kind: "playlist_change", state: "pending", subject: { type: "media", id: "med_B", name: "menu.png" }, impact: { screens: 1 },
+      playlist_change: {
+        operation: "selector_refresh", base_revision: 0, proposed: {}, diff: { ...diff, media_added: ["med_B"], media_removed: ["med_B"] },
+        media_change: { media_id: "med_B", filename: "menu.png", before: { tags: ["lobby"], folder_id: "" }, after: { tags: ["cafe"], folder_id: "" } },
+        media_playlists: [
+          { id: "pl_CAFE", name: "Cafe tags", screens: 0, media_added: ["med_B"], media_removed: [] },
+          { id: "pl_LOBBY", name: "Lobby tags", screens: 1, media_added: [], media_removed: ["med_B"] },
+        ],
+      },
+    };
+    const move = {
+      ...retag, id: "rvw_MOVE",
+      playlist_change: { ...retag.playlist_change, media_change: { media_id: "med_B", filename: "menu.png", before: { tags: ["lobby"], folder_id: "fld_A" }, after: { tags: ["lobby"], folder_id: "" } } },
     };
     const screen = {
       ...base, id: "rvw_SCREEN", kind: "screen_change", state: "approved", subject: { type: "screen", id: SCREEN, name: "tag Lobby" }, impact: { screens: 40 },
@@ -473,22 +496,45 @@ test("reviews show renders a media review, blockers with their state, and a flee
     };
     const transport = new FakeTransport()
       .on("GET", "/api/reviews/rvw_MEDIA", () => json(200, media))
+      .on("GET", "/api/reviews/rvw_UPLOAD", () => json(200, upload))
+      .on("GET", "/api/reviews/rvw_RETAG", () => json(200, retag))
+      .on("GET", "/api/reviews/rvw_MOVE", () => json(200, move))
       .on("GET", "/api/reviews/rvw_SCREEN", () => json(200, screen))
-      .on("GET", "/api/reviews", () => json(200, { items: [media], next_cursor: null, pending_count: 1 }));
+      .on("GET", "/api/reviews", () => json(200, { items: [media, retag], next_cursor: null, pending_count: 2 }));
 
     const shownMedia = await cli(["--human", "reviews", "show", "rvw_MEDIA"], transport, env);
     assert.equal(shownMedia.code, ExitCode.Success, shownMedia.stdout);
     assert.match(shownMedia.stdout, /Review rvw_MEDIA: New media, pending/);
     assert.match(shownMedia.stdout, /subject: media poster\.png \(med_POSTER\)/);
-    assert.match(shownMedia.stdout, /plays_in: Lobby \(pl_LOBBY, 3 screens\); Menu \(pl_MENU, 1 screen\)/);
+    assert.match(shownMedia.stdout, /\nmedia_playlists:\n {2}Lobby \(pl_LOBBY, 3 screens\)\n {2}Menu \(pl_MENU, 1 screen\)\n/);
     assert.match(shownMedia.stdout, /change: new media for the tag, folder or all selectors of approved playlists/);
     assert.match(shownMedia.stdout, /impact: approving changes 4 screens/);
+    assert.doesNotMatch(shownMedia.stdout, /media_change:/);
     const json1 = await cli(["--json", "reviews", "show", "rvw_MEDIA"], transport, env);
     assert.equal(json1.envelope.data.preview, undefined);
     assert.equal(json1.envelope.data.playlist_change.media_playlists.length, 2);
 
+    const shownUpload = await cli(["--human", "reviews", "show", "rvw_UPLOAD"], transport, env);
+    assert.match(shownUpload.stdout, /Review rvw_UPLOAD: New media, pending/);
+    assert.match(shownUpload.stdout, /media_change: new upload; tags lobby; folder fld_A/);
+    assert.match(shownUpload.stdout, /\n {2}Lobby \(pl_LOBBY, 3 screens\): starts playing med_POSTER\n/);
+
+    const shownRetag = await cli(["--human", "reviews", "show", "rvw_RETAG"], transport, env);
+    assert.match(shownRetag.stdout, /Review rvw_RETAG: Media change, pending/);
+    assert.match(shownRetag.stdout, /change: changed tags or folder of approved media for the tag, folder or all selectors of approved playlists; pages unchanged; soundtrack unchanged; media 1 added, 1 removed/);
+    assert.match(shownRetag.stdout, /media_change: tags lobby → cafe; library root unchanged/);
+    assert.match(shownRetag.stdout, /\nmedia_playlists:\n {2}Cafe tags \(pl_CAFE, 0 screens\): starts playing med_B\n {2}Lobby tags \(pl_LOBBY, 1 screen\): stops playing med_B\n/);
+    assert.match(shownRetag.stdout, /impact: approving changes 1 screen/);
+    const json2 = await cli(["--json", "reviews", "show", "rvw_RETAG"], transport, env);
+    assert.deepEqual(json2.envelope.data.playlist_change.media_change.before, { tags: ["lobby"], folder_id: "" });
+    assert.deepEqual(json2.envelope.data.playlist_change.media_playlists[1].media_removed, ["med_B"]);
+
+    const shownMove = await cli(["--human", "reviews", "show", "rvw_MOVE"], transport, env);
+    assert.match(shownMove.stdout, /media_change: tags lobby unchanged; folder fld_A → library root/);
+
     const listed = await cli(["--human", "reviews", "list"], transport, env);
-    assert.match(listed.stdout, /rvw_MEDIA {2}playlist_change {2}pending {2}media poster\.png \(med_POSTER\)/);
+    assert.match(listed.stdout, /rvw_MEDIA {2}playlist_change {2}pending {2}media poster\.png \(med_POSTER\) {2}2026-08-14T15:00:00Z\n/);
+    assert.match(listed.stdout, /rvw_RETAG {2}playlist_change {2}pending {2}media menu\.png \(med_B\) {2}2026-08-14T15:00:00Z {2}tags lobby → cafe; library root unchanged/);
 
     const shownScreen = await cli(["--human", "reviews", "show", "rvw_SCREEN"], transport, env);
     assert.match(shownScreen.stdout, /blockers: rvw_PLAYLIST rejected \(playlist Lobby \(pl_LOBBY\)\)/);
@@ -499,36 +545,48 @@ test("reviews show renders a media review, blockers with their state, and a flee
   }
 });
 
-test("a refused tag change on approved media shows the server's hint and no sign-in", async () => {
+test("a Propose tag change of media waits for review: pending media with next reviews list, or the review a 202 names", async () => {
   const env = await enrolled();
   try {
-    const hint = "Upload a new media item with the tags or folder you want instead; it waits for review before any selector plays it.";
-    let limitedBy: string | undefined;
+    const mediaRow = (id: string, extra: Record<string, unknown> = {}) => ({ id, filename: "poster.png", primitive: "image", content_type: "image/png", tags: ["Lobby"], revision: 3, state: "ready", ...extra });
+    const review = { id: "rvw_TAGS", kind: "playlist_change", state: "pending", url: "https://screenrig.ai/dashboard/reviews/rvw_TAGS", subject: { type: "media", id: "med_REVIEWED", name: "poster.png" }, impact: { screens: 2 } };
     const transport = new FakeTransport()
-      .on("PATCH", "/api/media/med_POSTER", () => ({
-        status: 403, headers: { "content-type": "application/problem+json", "www-authenticate": 'Bearer error="insufficient_scope", scope="access:manage"' },
-        body: {
-          errors: [{
-            status: 403, code: "insufficient_access", type: "https://screenrig.ai/problems/insufficient-access", title: "This access level cannot do this",
-            detail: "This credential has Propose access, which cannot change the tags or folder of approved media: playlists' selectors read them, so the change would alter what screens play.",
-            hint, ...(limitedBy ? { access_limited_by: limitedBy } : {}),
-          }],
-          instance: "/api/media/med_POSTER", request_id: "req_HELD",
-        },
+      .on("PATCH", "/api/media/med_POSTER", () => json(200, mediaRow("med_POSTER", { review_state: "pending" })))
+      .on("PATCH", "/api/media/med_LIVE", () => json(200, mediaRow("med_LIVE")))
+      .on("PATCH", "/api/media/med_REVIEWED", () => json(202, { status: "pending_review", review }))
+      .on("PATCH", "/api/media/med_READ", () => ({
+        status: 403, headers: { "content-type": "application/problem+json" },
+        body: { errors: [{ status: 403, code: "insufficient_access", type: "https://screenrig.ai/problems/insufficient-access", title: "This access level cannot do this", detail: "This credential has Read only access." }], request_id: "req_READ" },
       }));
 
-    const own = await cli(["--json", "media", "update", "med_POSTER", "--tag", "Lobby"], transport, env);
-    assert.equal(own.code, ExitCode.Auth, own.stdout);
-    assert.equal(own.envelope.error?.code, "insufficient_access");
-    assert.equal(own.envelope.error?.hint, hint);
-    assert.equal(own.envelope.error?.next, undefined);
+    const waiting = await cli(["--json", "media", "update", "med_POSTER", "--tag", "Lobby"], transport, env);
+    assert.equal(waiting.code, ExitCode.Success, waiting.stdout);
+    assert.equal(waiting.envelope.ok, true);
+    assert.equal(waiting.envelope.data.review_state, "pending");
+    assert.deepEqual(waiting.envelope.data.next.argv, ["reviews", "list"]);
+    assert.equal(waiting.envelope.warnings?.length, 1);
+    assert.equal(waiting.envelope.warnings?.[0]?.code, "media_review_pending");
+    assert.match(waiting.envelope.warnings?.[0]?.message ?? "", /Waiting for a person to approve this media change/);
+    const waitingHuman = await cli(["--human", "media", "update", "med_POSTER", "--tags", "Lobby,Patio"], transport, env);
+    assert.match(waitingHuman.stdout, /Replaced tags on media med_POSTER\nreview_state: pending\n/);
+    assert.match(waitingHuman.stdout, /approved playlists' selectors still read the tags and folder the item was last approved with/);
+    assert.match(waitingHuman.stdout, /next: screenrig reviews list/);
 
-    limitedBy = "project";
-    const capped = await cli(["--human", "media", "update", "med_POSTER", "--tags", "Lobby,Patio"], transport, env);
-    assert.equal(capped.code, ExitCode.Auth);
-    assert.match(capped.stdout + capped.stderr, /hint: Upload a new media item with the tags or folder you want instead/);
-    assert.match(capped.stdout + capped.stderr, /access_limited_by: project/);
-    assert.doesNotMatch(capped.stdout + capped.stderr, /next: screenrig login/);
+    const live = await cli(["--json", "media", "update", "med_LIVE", "--clear-tag"], transport, env);
+    assert.equal(live.code, ExitCode.Success, live.stdout);
+    assert.deepEqual(live.envelope.warnings, []);
+    assert.equal(live.envelope.data.next, undefined);
+    const liveHuman = await cli(["--human", "media", "update", "med_LIVE", "--clear-tag"], transport, env);
+    assert.match(liveHuman.stdout, /\nCleared tags on media med_LIVE\n?$/);
+    assert.doesNotMatch(liveHuman.stdout, /review_state|next:/);
+
+    const reviewed = await cli(["--json", "media", "update", "med_REVIEWED", "--tag", "Cafe"], transport, env);
+    assertPending(reviewed, "rvw_TAGS");
+    assert.match((await cli(["--human", "media", "update", "med_REVIEWED", "--tag", "Cafe"], transport, env)).stdout, /review_id: rvw_TAGS\n/);
+
+    const readOnly = await cli(["--json", "media", "update", "med_READ", "--tag", "Lobby"], transport, env);
+    assert.equal(readOnly.code, ExitCode.Auth, readOnly.stdout);
+    assert.deepEqual(readOnly.envelope.error?.next?.argv, ["login", "--access", "manage"], "a refusal is about the access level again");
   } finally {
     await rm(env.dir, { recursive: true, force: true });
   }

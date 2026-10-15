@@ -3518,20 +3518,38 @@ async function mediaUpdate(args: ParsedArgs, client: ApiClient): Promise<Command
   const tags = tagsFlag?.split(",");
   if (tags !== undefined && (tags.length > 32 || new Set(tags).size !== tags.length || tags.some(value => !/^[A-Za-z0-9]{1,32}$/.test(value)))) throw usageError("--tags requires 1 through 32 unique alphanumeric tags separated by commas; use --clear-tag to clear the set.");
   const body: MediaTagPatch = tags === undefined ? { tag: clearTag ? null : tag ?? null } : { tags };
-  // Under Propose, the tags of approved media are held because approved
-  // playlists' selectors read them; the refusal's own hint says what to do.
   const response = await client.call({
     method: "PATCH",
     path: `/api/media/${id}`,
     idempotent: true,
     headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
     body,
-    serverAccessHint: true,
   });
+  const done = clearTag ? `Cleared tags on media ${id}` : `Replaced tags on media ${id}`;
+  // Under Propose a tag change waits for a person's review.
+  const pending = pendingReviewOf(response);
+  if (pending) return pendingReviewResult(response, pending, client.requestId);
+  if ((response.body as { review_state?: unknown } | undefined)?.review_state === "pending") return mediaReviewPendingResult(response, client.requestId, done);
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
-    human: clearTag ? `Cleared tags on media ${id}` : `Replaced tags on media ${id}`,
+    human: done,
+  };
+}
+
+const MEDIA_REVIEW_PENDING_SENTENCE = "Screens keep playing what was approved until a person approves this change: approved playlists' selectors still read the tags and folder the item was last approved with, and play a new upload not at all. Its review appears in screenrig reviews list within seconds; a change that alters no approved playlist applies without one. Do not repeat the write.";
+
+/**
+ * Media a Propose write left pending (review_state pending): a success, exit
+ * 0. The media review worker opens its review shortly after, so the answer
+ * carries no review id; next lists reviews.
+ */
+function mediaReviewPendingResult(response: { body: unknown; headers: Record<string, string> }, requestId: string, done: string): CommandResult {
+  const next: ProblemNext = { command: "screenrig reviews list", argv: ["reviews", "list"], reason: "Find this media's review and give the person its URL." };
+  return {
+    envelope: jsonBody(response, requestId, { next }, [{ code: "media_review_pending", message: `Waiting for a person to approve this media change. ${MEDIA_REVIEW_PENDING_SENTENCE}` }]),
+    exitCode: ExitCode.Success,
+    human: [done, "review_state: pending", MEDIA_REVIEW_PENDING_SENTENCE, `next: ${next.command}`].join("\n"),
   };
 }
 

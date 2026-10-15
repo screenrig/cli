@@ -1,4 +1,4 @@
-import type { AccessLevel, AccessLimitedBy, Review, ReviewList, ReviewMediaPlaylist, ReviewPending, ReviewPlaylistChange, ReviewSummary } from "./adapters/protocol.js";
+import type { AccessLevel, AccessLimitedBy, Review, ReviewList, ReviewMediaChange, ReviewMediaFields, ReviewMediaPlaylist, ReviewPending, ReviewPlaylistChange, ReviewSummary } from "./adapters/protocol.js";
 import type { ProblemNext, Warning } from "./envelope.js";
 import { accessLabel } from "./oauth.js";
 import { unexpectedResponseError, usageError } from "./problems.js";
@@ -88,9 +88,14 @@ function kindLabel(kind: string): string {
   return KIND_LABELS[kind] ?? kind;
 }
 
-/** A selector_refresh review approves one pending media item (subject type media). */
-function reviewLabel(review: Pick<Review, "kind" | "subject">): string {
-  return review.subject?.type === "media" ? "New media" : kindLabel(review.kind);
+/**
+ * A selector_refresh review approves one pending media item (subject type
+ * media): a new upload, or a change of approved media's tags or folder
+ * (media_change.before is what was last approved).
+ */
+function reviewLabel(review: Pick<Review, "kind" | "subject" | "playlist_change">): string {
+  if (review.subject?.type !== "media") return kindLabel(review.kind);
+  return review.playlist_change?.media_change?.before ? "Media change" : "New media";
 }
 
 function subjectText(subject: Review["subject"] | undefined): string | undefined {
@@ -138,7 +143,8 @@ function count(items: string[] | undefined): number {
 export function playlistChangeText(change: NonNullable<Review["playlist_change"]>): string {
   const diff = change.diff;
   const operation = change.operation === "create" ? "new playlist"
-    : change.operation === "selector_refresh" ? "new media for the tag, folder or all selectors of approved playlists"
+    : change.operation === "selector_refresh"
+      ? `${change.media_change?.before ? "changed tags or folder of approved media" : "new media"} for the tag, folder or all selectors of approved playlists`
     : `update of revision ${change.base_revision}`;
   if (!diff) return operation;
   const pages = [
@@ -191,14 +197,50 @@ function previouslyRejectedText(change: ReviewPlaylistChange | undefined): strin
   return `${ids.join(", ")} ${ids.length === 1 ? "was" : "were"} rejected before`;
 }
 
-/** One approved playlist a pending media item joins, with the screens showing it. */
+function tagList(tags: string[] | undefined): string {
+  return Array.isArray(tags) && tags.length ? tags.map(plainText).join(", ") : "none";
+}
+
+function folderText(folderId: string | undefined): string {
+  return folderId ? `folder ${plainText(folderId)}` : "library root";
+}
+
+function sameTags(a: string[] | undefined, b: string[] | undefined): boolean {
+  const left = [...(a ?? [])].sort(), right = [...(b ?? [])].sort();
+  return left.length === right.length && left.every((tag, index) => tag === right[index]);
+}
+
+/**
+ * A media review's change: "new upload; tags Lobby; library root", or
+ * "tags Lobby → Cafe; folder fld_A unchanged" for approved media.
+ */
+export function mediaChangeText(change: ReviewMediaChange): string {
+  const after: Partial<ReviewMediaFields> = change.after ?? {};
+  if (!change.before) return `new upload; tags ${tagList(after.tags)}; ${folderText(after.folder_id)}`;
+  const before = change.before;
+  const tags = sameTags(before.tags, after.tags) ? `tags ${tagList(after.tags)} unchanged` : `tags ${tagList(before.tags)} → ${tagList(after.tags)}`;
+  const folder = (before.folder_id ?? "") === (after.folder_id ?? "") ? `${folderText(after.folder_id)} unchanged` : `${folderText(before.folder_id)} → ${folderText(after.folder_id)}`;
+  return `${tags}; ${folder}`;
+}
+
+/**
+ * One approved playlist whose selection approving the review changes, with
+ * the screens showing it and the media it starts and stops playing.
+ */
 function mediaPlaylistText(playlist: ReviewMediaPlaylist): string {
-  return `${plainText(playlist.name)} (${playlist.id}, ${screensText(playlist.screens)})`;
+  const ids = (list: string[] | undefined) => (Array.isArray(list) ? list.filter((id) => typeof id === "string" && id) : []);
+  const added = ids(playlist.media_added), removed = ids(playlist.media_removed);
+  const changes = [
+    ...(added.length ? [`starts playing ${added.join(", ")}`] : []),
+    ...(removed.length ? [`stops playing ${removed.join(", ")}`] : []),
+  ];
+  return `${plainText(playlist.name)} (${playlist.id}, ${screensText(playlist.screens)})${changes.length ? `: ${changes.join("; ")}` : ""}`;
 }
 
 /** Human detail of one review (reviews show, withdraw). */
 export function reviewDetailLines(review: Review): string[] {
-  const fields: Array<[string, string | undefined]> = [
+  // A list value prints as indented lines under its key.
+  const fields: Array<[string, string | string[] | undefined]> = [
     ["subject", subjectText(review.subject)],
     ["proposed_by", proposerText(review.proposer)],
     ["note", review.note === undefined ? undefined : plainText(review.note)],
@@ -207,9 +249,10 @@ export function reviewDetailLines(review: Review): string[] {
     ["decision_note", review.decision_note === undefined ? undefined : plainText(review.decision_note)],
     ["impact", typeof review.impact?.screens === "number" ? `approving changes ${screensText(review.impact.screens)}` : undefined],
     ["change", review.playlist_change ? playlistChangeText(review.playlist_change) : undefined],
+    ["media_change", review.playlist_change?.media_change ? mediaChangeText(review.playlist_change.media_change) : undefined],
     ["applied_revision", review.playlist_change?.applied_revision === undefined ? undefined : String(review.playlist_change.applied_revision)],
     ["creative", review.ad_creative ? `${review.ad_creative.creative_id} revision ${review.ad_creative.creative_revision}` : undefined],
-    ["plays_in", review.playlist_change?.media_playlists?.length ? review.playlist_change.media_playlists.map(mediaPlaylistText).join("; ") : undefined],
+    ["media_playlists", review.playlist_change?.media_playlists?.length ? review.playlist_change.media_playlists.map(mediaPlaylistText) : undefined],
     ...(review.blockers?.length
       ? [["blockers", review.blockers.map((blocker) => `${blocker.id} ${blocker.state} (${subjectText(blocker.subject) ?? "-"})`).join("; ")] as [string, string]]
       : [["blocked_by", review.blocked_by?.length ? review.blocked_by.join(", ") : undefined] as [string, string | undefined]]),
@@ -221,7 +264,7 @@ export function reviewDetailLines(review: Review): string[] {
   ];
   return [
     `Review ${review.id}: ${reviewLabel(review)}, ${review.state}`,
-    ...fields.filter((field): field is [string, string] => Boolean(field[1])).map(([key, value]) => `${key}: ${value}`),
+    ...fields.flatMap(([key, value]) => Array.isArray(value) ? [`${key}:`, ...value.map((line) => `  ${line}`)] : value ? [`${key}: ${value}`] : []),
     ...(review.screen_change ? screenChangeLines(review.screen_change) : []),
   ];
 }
@@ -231,7 +274,8 @@ export function reviewListLines(list: ReviewList): string[] {
   const items = Array.isArray(list.items) ? list.items : [];
   return [
     `Reviews (${items.length}; ${list.pending_count ?? 0} pending)`,
-    ...items.map((review) => [review.id, review.kind, review.state, subjectText(review.subject) ?? "-", review.created_at].join("  ")),
+    ...items.map((review) => [review.id, review.kind, review.state, subjectText(review.subject) ?? "-", review.created_at,
+      ...(review.playlist_change?.media_change ? [mediaChangeText(review.playlist_change.media_change)] : [])].join("  ")),
   ];
 }
 
