@@ -1,4 +1,4 @@
-import type { AccessLevel, AccessLimitedBy, Review, ReviewList, ReviewMediaPlaylist, ReviewPending, ReviewSummary } from "./adapters/protocol.js";
+import type { AccessLevel, AccessLimitedBy, Review, ReviewList, ReviewMediaPlaylist, ReviewPending, ReviewPlaylistChange, ReviewSummary } from "./adapters/protocol.js";
 import type { ProblemNext, Warning } from "./envelope.js";
 import { accessLabel } from "./oauth.js";
 import { unexpectedResponseError, usageError } from "./problems.js";
@@ -181,33 +181,14 @@ function screenChangeLines(change: NonNullable<Review["screen_change"]>): string
 }
 
 /**
- * previously_rejected: media named by a review whose last media review was
- * rejected. The flag is optional; a review, its playlist change, or a media
- * item in the proposed preview may carry it, as true or as media ids.
+ * previously_rejected_media: pending media this playlist review names whose
+ * latest media review a person rejected. Approving the playlist approves it.
  */
-function previouslyRejectedText(review: Review): string | undefined {
-  const flagged = new Set<string>();
-  let self = false;
-  const read = (value: unknown, id?: string) => {
-    if (value === true) {
-      if (id) flagged.add(id); else self = true;
-    } else if (Array.isArray(value)) {
-      for (const item of value) if (typeof item === "string" && item) flagged.add(item);
-    }
-  };
-  const record = review as unknown as Record<string, unknown>;
-  read(record.previously_rejected);
-  read((review.playlist_change as Record<string, unknown> | undefined)?.previously_rejected);
-  const visit = (node: unknown): void => {
-    if (Array.isArray(node)) { node.forEach(visit); return; }
-    if (!node || typeof node !== "object") return;
-    const item = node as Record<string, unknown>;
-    if ("previously_rejected" in item && typeof item.id === "string") read(item.previously_rejected, item.id);
-    for (const value of Object.values(item)) if (value && typeof value === "object") visit(value);
-  };
-  visit(review.preview?.proposed);
-  if (flagged.size) return `${[...flagged].join(", ")} ${flagged.size === 1 ? "was" : "were"} rejected before`;
-  return self ? "This item was rejected before" : undefined;
+function previouslyRejectedText(change: ReviewPlaylistChange | undefined): string | undefined {
+  const listed = change?.previously_rejected_media;
+  const ids = Array.isArray(listed) ? listed.filter((id) => typeof id === "string" && id) : [];
+  if (!ids.length) return undefined;
+  return `${ids.join(", ")} ${ids.length === 1 ? "was" : "were"} rejected before`;
 }
 
 /** One approved playlist a pending media item joins, with the screens showing it. */
@@ -233,7 +214,7 @@ export function reviewDetailLines(review: Review): string[] {
       ? [["blockers", review.blockers.map((blocker) => `${blocker.id} ${blocker.state} (${subjectText(blocker.subject) ?? "-"})`).join("; ")] as [string, string]]
       : [["blocked_by", review.blocked_by?.length ? review.blocked_by.join(", ") : undefined] as [string, string | undefined]]),
     ["dependents", review.dependents?.length ? review.dependents.join(", ") : undefined],
-    ["previously_rejected", previouslyRejectedText(review)],
+    ["previously_rejected_media", previouslyRejectedText(review.playlist_change)],
     ["previous_review_id", review.previous_review_id],
     ["superseded_by", review.superseded_by],
     ["url", review.url],

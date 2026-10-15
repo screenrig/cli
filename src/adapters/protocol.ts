@@ -1347,6 +1347,7 @@ export interface ReviewPlaylistChange {
   proposed: Record<string, unknown>;
   diff: ReviewPlaylistDiff;
   media_playlists?: ReviewMediaPlaylist[];
+  previously_rejected_media?: string[];
 }
 export interface ReviewScreenChange {
   action: "assign" | "set_playlist_schedule" | "clear_playlist_schedule" | "takeover" | "takeover_clear";

@@ -534,29 +534,25 @@ test("a refused tag change on approved media shows the server's hint and no sign
   }
 });
 
-test("previously_rejected renders when present and stays quiet when absent", async () => {
+test("previously_rejected_media renders when present and stays quiet when absent", async () => {
   const env = await enrolled();
   try {
-    const base = { url: "https://screenrig.ai/dashboard/reviews/x", proposer: { kind: "agent", agent_id: AGENT, agent_name: "Menu agent" }, created_at: "2026-08-14T15:00:00Z", updated_at: "2026-08-14T15:00:00Z", impact: { screens: 1 } };
-    const diff = { name_changed: false, pages_added: [], pages_removed: [], pages_changed: ["p1"], soundtrack_changed: false, media_added: ["med_POSTER"], media_removed: [] };
-    const mediaReview = { ...base, id: "rvw_MEDIA", kind: "playlist_change", state: "pending", subject: { type: "media", id: "med_POSTER", name: "poster.png" }, previously_rejected: true,
-      playlist_change: { operation: "selector_refresh", base_revision: 7, proposed: { name: "Lobby", pages: [] }, diff } };
-    const playlistReview = { ...base, id: "rvw_PLAYLIST", kind: "playlist_change", state: "pending", subject: { type: "playlist", id: PLAYLIST, name: "Lobby" },
-      playlist_change: { operation: "update", base_revision: 4, proposed: { name: "Lobby", pages: [] }, diff },
-      preview: { live: null, proposed: { id: PLAYLIST, revision: 5, pages: [{ id: "p1", primitives: [{ id: "a", resolved_media: [{ id: "med_POSTER", previously_rejected: true }, { id: "med_OTHER" }] }] }] } } };
-    const plain = { ...playlistReview, id: "rvw_PLAIN", preview: undefined };
+    const base = { url: "https://screenrig.ai/dashboard/reviews/x", proposer: { kind: "agent", agent_id: AGENT, agent_name: "Menu agent" }, created_at: "2026-08-14T15:00:00Z", updated_at: "2026-08-14T15:00:00Z", impact: { screens: 1 },
+      kind: "playlist_change", state: "pending", subject: { type: "playlist", id: PLAYLIST, name: "Lobby" } };
+    const diff = { name_changed: false, pages_added: [], pages_removed: [], pages_changed: ["p1"], soundtrack_changed: false, media_added: ["med_A", "med_B"], media_removed: [] };
+    const change = { operation: "update", base_revision: 4, proposed: { name: "Lobby", pages: [] }, diff };
     const transport = new FakeTransport()
-      .on("GET", "/api/reviews/rvw_MEDIA", () => json(200, mediaReview))
-      .on("GET", "/api/reviews/rvw_PLAYLIST", () => json(200, playlistReview))
-      .on("GET", "/api/reviews/rvw_PLAIN", () => json(200, plain))
-      .on("GET", "/api/media/med_POSTER", () => json(200, { id: "med_POSTER", filename: "poster.png", review_state: "pending", previously_rejected: true }))
-      .on("GET", "/api/media/med_OTHER", () => json(200, { id: "med_OTHER", filename: "other.png" }));
+      .on("GET", "/api/reviews/rvw_TWO", () => json(200, { ...base, id: "rvw_TWO", playlist_change: { ...change, previously_rejected_media: ["med_A", "med_B"] } }))
+      .on("GET", "/api/reviews/rvw_ONE", () => json(200, { ...base, id: "rvw_ONE", playlist_change: { ...change, previously_rejected_media: ["med_A"] } }))
+      .on("GET", "/api/reviews/rvw_EMPTY", () => json(200, { ...base, id: "rvw_EMPTY", playlist_change: { ...change, previously_rejected_media: [] } }))
+      .on("GET", "/api/reviews/rvw_PLAIN", () => json(200, { ...base, id: "rvw_PLAIN", playlist_change: change }));
 
-    assert.match((await cli(["--human", "reviews", "show", "rvw_MEDIA"], transport, env)).stdout, /previously_rejected: This item was rejected before/);
-    assert.match((await cli(["--human", "reviews", "show", "rvw_PLAYLIST"], transport, env)).stdout, /previously_rejected: med_POSTER was rejected before/);
+    assert.match((await cli(["--human", "reviews", "show", "rvw_TWO"], transport, env)).stdout, /previously_rejected_media: med_A, med_B were rejected before/);
+    assert.match((await cli(["--human", "reviews", "show", "rvw_ONE"], transport, env)).stdout, /previously_rejected_media: med_A was rejected before/);
+    assert.doesNotMatch((await cli(["--human", "reviews", "show", "rvw_EMPTY"], transport, env)).stdout, /previously_rejected/);
     assert.doesNotMatch((await cli(["--human", "reviews", "show", "rvw_PLAIN"], transport, env)).stdout, /previously_rejected/);
-    assert.match((await cli(["--human", "media", "show", "med_POSTER"], transport, env)).stdout, /This item was rejected before\./);
-    assert.doesNotMatch((await cli(["--human", "media", "show", "med_OTHER"], transport, env)).stdout, /rejected before/);
+    const shown = await cli(["reviews", "show", "rvw_TWO"], transport, env);
+    assert.deepEqual(shown.envelope.data.playlist_change.previously_rejected_media, ["med_A", "med_B"]);
   } finally {
     await rm(env.dir, { recursive: true, force: true });
   }

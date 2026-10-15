@@ -3210,10 +3210,7 @@ export const handleMediaShow = commandHandler(async (args, runtime, resolved) =>
 
   const id = args.positionals[2];
   if (!id) throw usageError("media show requires an id.");
-  const result = await simpleGet(args, runtime, resolved, `/api/media/${id}`, "Media");
-  // Optional: media whose last media review a person rejected.
-  const rejected = (result.envelope.data as { previously_rejected?: unknown } | undefined)?.previously_rejected === true;
-  return rejected ? { ...result, human: `${result.human ?? ""}\nThis item was rejected before.` } : result;
+  return simpleGet(args, runtime, resolved, `/api/media/${id}`, "Media");
 }, true);
 
 export const handleSelectorPreview = commandHandler(async (args, runtime, resolved) => {

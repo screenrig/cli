@@ -13901,10 +13901,16 @@ paths:
       operationId: approveReview
       description: >-
         Approves a pending review as a person who can approve (the project
-        owner or a member with can_approve; else approver_required). Staff
-        shadow sessions cannot decide. A playlist update is applied with the
-        base revision as If-Match; when the live playlist moved on the review
-        becomes stale and the call answers review_stale. A screen change
+        owner or a member with can_approve; else approver_required). The
+        flag is read again inside the decision's transaction, so a person
+        whose approval was turned off meanwhile decides nothing
+        (approver_required). Staff shadow sessions cannot decide. A playlist
+        update is applied with the base revision as If-Match; when the live
+        playlist moved on the review becomes stale and the call answers
+        review_stale. A create or update whose tag, folder or all selectors
+        would now play media they did not resolve when proposed, that the
+        review does not name and that the live version does not already
+        play, also becomes stale (review_stale). A screen change
         replays its stored request (a tag resolves now): the call applies
         screens for a few seconds and the rest continue in the background
         while screen_change.result.applying is true. A screen change waiting
@@ -14438,7 +14444,8 @@ components:
             pages: { type: array, items: { type: object, additionalProperties: true } }
             audio: { type: object, additionalProperties: true }
         diff: { $ref: "#/components/schemas/ReviewPlaylistDiff" }
-        media_playlists: { type: array, items: { $ref: "#/components/schemas/ReviewMediaPlaylist" }, description: "The approved playlists whose tag, folder or all selectors play the pending media this review approves, once approved: for a selector_refresh (a media review) every one, for a create or update the others beside its subject. impact.screens includes their screens." }
+        media_playlists: { type: array, items: { $ref: "#/components/schemas/ReviewMediaPlaylist" }, description: "The approved playlists whose tag, folder or all selectors play the pending media this review approves, once approved: for a selector_refresh (a media review) every one, plus every playlist with an open create or update review whose proposed selectors would play it, for a create or update the others beside its subject. impact.screens includes their screens." }
+        previously_rejected_media: { type: array, items: { type: string }, description: "GET one pending create or update review only. The pending media this review names by id whose latest media review a person rejected; approving the playlist approves that media." }
     ReviewMediaPlaylist:
       type: object
       additionalProperties: false
