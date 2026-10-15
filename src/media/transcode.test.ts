@@ -4,7 +4,7 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { CliError } from "../problems.js";
-import type { CliRuntime, RunProcessRequest, RunProcessResult } from "../runtime.js";
+import { processRuntime, type CliRuntime, type RunProcessRequest, type RunProcessResult } from "../runtime.js";
 import { testTemp } from "../test-temp.js";
 import {
   cwebpLookup,
@@ -486,8 +486,7 @@ test("video transcode defaults to H.264 and selects a level that fits the output
     assert.match(String(valueAfter("-x264-params")), /colorprim=bt709:transfer=bt709:colormatrix=bt709/);
     assert.ok(!args.includes("-tag:v"), "the H.264 profile carries no hvc1 tag");
     assert.equal(valueAfter("-pix_fmt"), "yuv420p");
-    assert.ok(!args.includes("-movflags"), "cached playback does not remux for progressive download");
-    assert.ok(!args.includes("+faststart"));
+    assert.equal(valueAfter("-movflags"), "+faststart");
     assert.equal(valueAfter("-r"), "30");
     assert.equal(valueAfter("-c:a"), "aac");
     assert.equal(valueAfter("-colorspace"), "bt709");
@@ -539,8 +538,7 @@ test("--codec hevc opts in to the H.265 delivery profile", async () => {
     assert.equal(valueAfter("-profile:v"), "main");
     assert.equal(valueAfter("-crf"), "28");
     assert.equal(valueAfter("-pix_fmt"), "yuv420p");
-    assert.ok(!args.includes("-movflags"), "cached playback does not remux for progressive download");
-    assert.ok(!args.includes("+faststart"));
+    assert.equal(valueAfter("-movflags"), "+faststart");
     assert.equal(valueAfter("-r"), "30");
     assert.match(String(valueAfter("-x265-params")), /min-keyint=60/);
     assert.match(String(valueAfter("-x265-params")), /level-idc=5.1:colorprim=bt709:transfer=bt709:colormatrix=bt709/);
@@ -550,6 +548,62 @@ test("--codec hevc opts in to the H.265 delivery profile", async () => {
   } finally {
     await rm(dir, { recursive: true, force: true });
     if (result.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });
+  }
+});
+
+test("real video transcodes keep the MP4 index first and all 240 frames", {
+  skip: process.env.SCREENRIG_TEST_FFMPEG !== "1" && "set SCREENRIG_TEST_FFMPEG=1 with libx264 and libx265 installed",
+  timeout: 90_000,
+}, async (t) => {
+  resetFfmpegToolchainCache();
+  const runtime = processRuntime();
+  const dir = await testTemp("transcode-faststart-");
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "animation.mp4");
+  const run = async (command: string, args: string[]) => {
+    const result = await runtime.runProcess!({ command, args, timeoutMs: 30_000 });
+    assert.equal(result.code, 0, result.spawnError ?? result.stderrTail);
+    return result.stdout;
+  };
+  const ffmpeg = runtime.env.SCREENRIG_FFMPEG || "ffmpeg";
+  const ffprobe = runtime.env.SCREENRIG_FFPROBE || "ffprobe";
+  await run(ffmpeg, [
+    "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24",
+    "-frames:v", "240", "-c:v", "libx264", "-profile:v", "baseline",
+    "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-nostdin", "-y", source,
+  ]);
+
+  const assertFaststart = async (filePath: string) => {
+    const bytes = await readFile(filePath);
+    const boxes = new Map<string, number>();
+    for (let offset = 0; offset < bytes.length;) {
+      assert.ok(offset + 8 <= bytes.length, "complete MP4 box header");
+      const shortSize = bytes.readUInt32BE(offset);
+      const size = shortSize === 1 ? Number(bytes.readBigUInt64BE(offset + 8))
+        : shortSize === 0 ? bytes.length - offset : shortSize;
+      assert.ok(Number.isSafeInteger(size) && size >= (shortSize === 1 ? 16 : 8) && offset + size <= bytes.length);
+      boxes.set(bytes.toString("ascii", offset + 4, offset + 8), offset);
+      offset += size;
+    }
+    assert.ok(boxes.has("moov") && boxes.has("mdat"), "index and media data are present");
+    assert.ok(boxes.get("moov")! < boxes.get("mdat")!, "moov must precede mdat");
+  };
+  await assertFaststart(source);
+  for (const codec of ["h264", "hevc"] as const) {
+    await t.test(codec, async (t) => {
+      const result = await transcodeForUpload({ runtime, filePath: source, options: { ...defaultTranscodeOptions(), codec } });
+      t.after(() => rm(result.cleanupDir!, { recursive: true, force: true }));
+      assert.equal(result.passthrough, false, "exercise the encoder rather than source passthrough");
+      await assertFaststart(result.filePath);
+      const probe = JSON.parse(await run(ffprobe, [
+        "-v", "error", "-select_streams", "v:0", "-count_frames",
+        "-show_entries", "stream=codec_name,nb_read_frames,duration", "-of", "json", result.filePath,
+      ]));
+      assert.equal(probe.streams[0].codec_name, codec);
+      assert.equal(Number(probe.streams[0].nb_read_frames), 240);
+      assert.ok(Math.abs(Number(probe.streams[0].duration) - 10) < 0.05, "preserve the full ten-second animation");
+      await run(ffmpeg, ["-v", "error", "-xerror", "-i", result.filePath, "-f", "null", "-"]);
+    });
   }
 });
 
