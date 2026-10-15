@@ -823,8 +823,9 @@ function planVideo(
     );
   }
 
-  // Players play a complete cached file, so a faststart remux is wasted work.
+  // Keep the MP4 index ahead of its media data for browser playback and previews.
   args.push(
+    "-movflags", "+faststart",
     "-avoid_negative_ts", "make_zero",
     ...(delivery.audio ? ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"] : ["-an"]),
     "-write_tmcd", "0",
