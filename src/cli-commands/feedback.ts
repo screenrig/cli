@@ -22,7 +22,7 @@ export function registerFeedbackCommands(root: Command, bind: CommandActionBinde
     .option("--no-context", "Omit diagnostic context")
     .action(bind(handleFeedbackFeature));
 
-  feedback.command("list").description("List submitted feedback")
+  feedback.command("list").description("List submitted feedback with its status and staff responses")
     .addOption(new Option("--kind <bug|feature>", "Filter feedback by kind").choices(["bug", "feature"]))
     .action(bind(handleFeedbackList));
   for (const command of feedback.commands.filter(command => command.name() !== "list")) requireOptionGroup(command, "exactlyOne", ["--body", "--body-file"]);

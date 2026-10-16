@@ -1245,6 +1245,11 @@ becomes `changes_requested`; the buyer reads the note in the creative's
 
 On Standard (free), resolve issues through the documentation and the
 operating agent, with `feedback bug` and `feedback feature` for reports.
+`feedback list` shows each submission's `status` (`open` until staff respond,
+then `planned`, `fixed`, `declined` or `duplicate`) and the staff `responses`,
+oldest first; a `fixed` response carries `fixed_in`, the version that fixes it.
+A `feedback.responded` event announces each reply in `events list` and
+`events follow`.
 Premium and Enterprise include persistent support conversations:
 
 ```bash

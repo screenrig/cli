@@ -4442,6 +4442,20 @@ async function submitFeedback(args: ParsedArgs, runtime: CliRuntime, resolved: R
   };
 }
 
+/**
+ * The human view of staff responses: the latest reply under its submission,
+ * one line, with the fixing version when staff named one. The full list, in
+ * order, is `responses` in the JSON envelope.
+ */
+function feedbackReplyLines(item: FeedbackSubmission): string[] {
+  const reply = item.responses?.at(-1);
+  if (!reply) return [];
+  const text = redactText(reply.text).replace(/\s+/g, " ").trim();
+  const shown = text.length > 200 ? `${text.slice(0, 199)}…` : text;
+  const fixed = reply.fixed_in ? ` in ${reply.fixed_in}` : "";
+  return [`    ${reply.status}${fixed}: ${shown}`];
+}
+
 async function feedbackList(args: ParsedArgs, client: ApiClient): Promise<CommandResult> {
   const kindFlag = flagString(args.flags, "kind")?.toLowerCase();
   if (kindFlag !== undefined && kindFlag !== "bug" && kindFlag !== "feature") {
@@ -4469,7 +4483,10 @@ async function feedbackList(args: ParsedArgs, client: ApiClient): Promise<Comman
         ? "No feedback submissions"
         : [
             `Feedback submissions (${items.length})`,
-            ...items.map((item) => `${item.created_at}  ${item.kind.padEnd(7)}  ${item.id}  ${item.title}`),
+            ...items.flatMap((item) => [
+              `${item.created_at}  ${item.kind.padEnd(7)}  ${item.id}  ${(item.status ?? "open").padEnd(9)}  ${item.title}`,
+              ...feedbackReplyLines(item),
+            ]),
           ].join("\n"),
   };
 }

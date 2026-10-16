@@ -1022,7 +1022,24 @@ export interface FeedbackWrite {
   context?: FeedbackContext;
 }
 
-/** Immutable once written, which is why it carries no revision. */
+/** Where staff stand on a submission; `open` until the first response. */
+export type FeedbackStatus = "open" | "planned" | "fixed" | "declined" | "duplicate";
+
+/** One staff reply, appended by staff and never edited or removed. */
+export interface FeedbackResponse {
+  id: string;
+  text: string;
+  status: FeedbackStatus;
+  /** The version that fixes it; present only with status fixed, when staff name one. */
+  fixed_in?: string;
+  created_at: string;
+}
+
+/**
+ * The submission's own fields never change after they are written, which is why
+ * it carries no revision. `status` and `responses` are the staff replies
+ * appended beside them.
+ */
 export interface FeedbackSubmission {
   id: string;
   kind: FeedbackKind;
@@ -1030,6 +1047,8 @@ export interface FeedbackSubmission {
   body: string;
   context?: FeedbackContext;
   created_at: string;
+  status?: FeedbackStatus;
+  responses?: FeedbackResponse[];
 }
 
 export interface FeedbackList {
