@@ -5378,9 +5378,15 @@ paths:
         lg1_ or ev1_ by where the server keeps the Player log, so pass back the one a page returned; a cursor of the other kind
         is refused with invalid_request naming the field. Player log records have no sequence, are not on GET /stream/project and are not delivered to webhooks. A record is acknowledged
         when the Player log queue accepts it and is kept for the project''s event retention. A poll with the last cursor and
-        the default window follows the log. Player log records are not in the default (source=project) list. screen_id, from
-        and to are refused with invalid_request unless source is log. Both sources take resource_id, type and severity (a minimum),
-        combined with each other and with paging; a Player log record is a runtime.reported record whose resource is its screen,
+        the default window follows the log. Player log records are not in the default (source=project) list. from and to are
+        refused with invalid_request unless source is log. The project list takes screen_id, playlist_id and application_id to
+        read the events of one screen, playlist or application, all scoped to the project of the credential (an id names which
+        events to read, never whose): screen_id keeps the events whose resource is that screen; playlist_id the events whose
+        resource is that playlist plus the events that name it as details.playlist_id (a screen taking it); application_id the
+        events whose resource is that application plus those whose resource carries it as application_id (its releases and key/value
+        entries). A value that is not an id of its kind is refused with invalid_request naming the field; playlist_id and
+        application_id are refused with source=log, whose records belong to a screen only. Both sources take resource_id, type
+        and severity (a minimum), combined with each other, with the id filters and with paging; a Player log record is a runtime.reported record whose resource is its screen,
         so a resource_id that is not that screen or a type that excludes runtime.reported answers an empty page. before (or order=desc)
         pages newest first: next_cursor is then the cursor of the oldest returned item and passed back as before continues to
         older items. Without from, a newest-first source=log page reaches past the default 24 hours to the oldest record the
@@ -5399,6 +5405,8 @@ paths:
       - $ref: '#/components/parameters/EventResourceID'
       - $ref: '#/components/parameters/EventTypeFilter'
       - $ref: '#/components/parameters/EventLogScreen'
+      - $ref: '#/components/parameters/EventPlaylistID'
+      - $ref: '#/components/parameters/EventApplicationID'
       - $ref: '#/components/parameters/EventLogSeverity'
       - $ref: '#/components/parameters/EventLogFrom'
       - $ref: '#/components/parameters/EventLogTo'
@@ -15245,8 +15253,15 @@ paths:
         is refused with invalid_request naming the field. Player log records have no sequence, are not on GET /stream/project
         and are not delivered to webhooks. A record is acknowledged when the Player log queue accepts it and is kept for the
         project''s event retention. A poll with the last cursor and the default window follows the log. Player log records are
-        not in the default (source=project) list. screen_id, from and to are refused with invalid_request unless source is log.
-        Both sources take resource_id, type and severity (a minimum), combined with each other and with paging; a Player log
+        not in the default (source=project) list. from and to are refused with invalid_request unless source is log. The project
+        list takes screen_id, playlist_id and application_id to read the events of one screen, playlist or application, all
+        scoped to the project of the credential (an id names which events to read, never whose): screen_id keeps the events
+        whose resource is that screen; playlist_id the events whose resource is that playlist plus the events that name it as
+        details.playlist_id (a screen taking it); application_id the events whose resource is that application plus those whose
+        resource carries it as application_id (its releases and key/value entries). A value that is not an id of its kind is
+        refused with invalid_request naming the field; playlist_id and application_id are refused with source=log, whose
+        records belong to a screen only. Both sources take resource_id, type and severity (a minimum), combined with each
+        other, with the id filters and with paging; a Player log
         record is a runtime.reported record whose resource is its screen, so a resource_id that is not that screen or a type
         that excludes runtime.reported answers an empty page. before (or order=desc) pages newest first: next_cursor is then
         the cursor of the oldest returned item and passed back as before continues to older items. Without from, a newest-first
@@ -15264,6 +15279,8 @@ paths:
       - $ref: '#/components/parameters/EventResourceID'
       - $ref: '#/components/parameters/EventTypeFilter'
       - $ref: '#/components/parameters/EventLogScreen'
+      - $ref: '#/components/parameters/EventPlaylistID'
+      - $ref: '#/components/parameters/EventApplicationID'
       - $ref: '#/components/parameters/EventLogSeverity'
       - $ref: '#/components/parameters/EventLogFrom'
       - $ref: '#/components/parameters/EventLogTo'
@@ -17389,7 +17406,9 @@ components:
     OptionalIfMatch: { name: If-Match, in: header, required: false, schema: { type: string }, description: "Optional positive resource revision. Omit to create or overwrite a key; a supplied stale revision is revision_conflict." }
     AfterCursor: { name: after, in: query, required: false, schema: { type: string }, description: "A cursor from a previous response: ev1_ for project events (and the event streams). The Player log (source=log) pages with lg1_ or ev1_ cursors by where the server keeps it; treat them as opaque and pass back the one a page returned. A cursor of another kind is refused with invalid_request." }
     EventSource: { name: source, in: query, required: false, schema: { type: string, enum: [project, log], default: project }, description: "project lists the sequenced project events. log lists the Player log: Player condition reports (runtime.reported), ascending by receipt time." }
-    EventLogScreen: { name: screen_id, in: query, required: false, schema: { type: string }, description: "With source=log, only records of this screen." }
+    EventLogScreen: { name: screen_id, in: query, required: false, schema: { type: string, pattern: "^(?:(?:stage|qa|development)_)?scr_[A-Za-z0-9_-]{1,100}$" }, description: "Only the events of this screen: with source=project those whose resource is the screen, with source=log its Player log records. Another id kind is refused with invalid_request." }
+    EventPlaylistID: { name: playlist_id, in: query, required: false, schema: { type: string, pattern: "^(?:(?:stage|qa|development)_)?pl_[A-Za-z0-9_-]{1,100}$" }, description: "With source=project, only the events of this playlist: those whose resource is the playlist and those naming it as details.playlist_id. Refused with source=log." }
+    EventApplicationID: { name: application_id, in: query, required: false, schema: { type: string, pattern: "^(?:(?:stage|qa|development)_)?app_[A-Za-z0-9_-]{1,100}$" }, description: "With source=project, only the events of this application: those whose resource is the application and those whose resource carries it as application_id (its releases and key/value entries). Refused with source=log." }
     EventLogSeverity: { name: severity, in: query, required: false, schema: { type: string, enum: [info, warning, error] }, description: "Minimum severity: info is every item, warning keeps warnings and errors, error keeps errors. Both sources." }
     EventResourceID: { name: resource_id, in: query, required: false, schema: { type: string, pattern: "^[a-z]+_[A-Za-z0-9_-]{1,100}$" }, description: "Only items whose resource.id is this id (a screen, playlist, media, webhook, agent or application id). With source=log it is the screen of the record." }
     EventTypeFilter: { name: type, in: query, required: false, schema: { type: string, maxLength: 80, pattern: "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+)*\\.?$" }, description: "An exact event type such as playlist.updated, or a family prefix ending in a dot such as playlist. for every playlist.* type." }
@@ -19912,13 +19931,17 @@ components:
       additionalProperties: false
       required:
       - project_id
-      - proof
       properties:
         project_id:
           type: string
           minLength: 1
         proof:
           $ref: '#/components/schemas/DashboardProof'
+          description: >-
+            Required, except that approving or denying an agent connection
+            accepts an omitted proof when the session signed in within the last
+            hour. A session older than that answers
+            reauthentication_required and the caller sends a proof.
         capabilities:
           type: array
           minItems: 1
@@ -24840,6 +24863,8 @@ components:
           properties:
             load_1m: { type: number, minimum: 0, description: One-minute load average. }
             cores: { type: integer, minimum: 1, maximum: 4096 }
+            utilization_percent: { type: number, minimum: 0, maximum: 100, description: "Whole-device CPU busy share, 0 to 100, averaged over the interval since the previous report (all cores together). Omit it when the platform cannot measure it." }
+            app_percent: { type: number, minimum: 0, maximum: 100, description: "This Player process's share of total CPU capacity (all cores together, 100 is every core busy), 0 to 100, over the same interval: the renderer/app share. Omit it when the platform cannot measure it." }
         temperature_c: { type: number, minimum: -50, maximum: 150, description: SoC or panel temperature in degrees Celsius. }
         display:
           type: object
@@ -24878,7 +24903,7 @@ components:
         uptime_s: { type: integer, minimum: 0 }
         app_uptime_s: { type: integer, minimum: 0 }
         memory: { type: object, additionalProperties: false, properties: { used_bytes: { type: integer, minimum: 0 }, total_bytes: { type: integer, minimum: 1 } } }
-        cpu: { type: object, additionalProperties: false, properties: { load_1m: { type: number, minimum: 0 }, cores: { type: integer, minimum: 1 } } }
+        cpu: { type: object, additionalProperties: false, properties: { load_1m: { type: number, minimum: 0 }, cores: { type: integer, minimum: 1 }, utilization_percent: { type: number, minimum: 0, maximum: 100 }, app_percent: { type: number, minimum: 0, maximum: 100 } } }
         temperature_c: { type: number }
         display: { type: object, additionalProperties: false, properties: { connected: { type: boolean }, power: { type: string, enum: [on, off, standby, unknown] } } }
         network: { type: object, additionalProperties: false, properties: { kind: { type: string, enum: [ethernet, wifi, cellular, unknown] }, wifi_rssi_dbm: { type: integer } } }
@@ -24942,7 +24967,7 @@ components:
       type: object
       additionalProperties: false
       required: [reported_at]
-      description: "One stored device health report: Screen.health without stale. A member the Player did not send is absent."
+      description: "One stored device health report: Screen.health without stale, and without cpu.utilization_percent and cpu.app_percent, which only the latest report (Screen.health) carries. A member the Player did not send is absent."
       properties:
         reported_at: { type: string, format: date-time }
         uptime_s: { type: integer, minimum: 0 }
