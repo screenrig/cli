@@ -388,6 +388,7 @@ test("file preparation recovers from an interrupted run: empty output is replace
  const first=await invoke(); assert.equal(first.code,0,JSON.stringify(first.body));
  assert.deepEqual(first.body.data.uploads.map((u:any)=>[u.source,u.media_id,u.reused]),[['./poster.mp4','med_AAAAAAAAAAAAAAAAAAAAAAAA',false]]);
  assert.equal(typeof first.body.data.uploads[0].timing.processing_ms,'number');
+ assert.deepEqual(first.body.data.media_ids,['med_AAAAAAAAAAAAAAAAAAAAAAAA']); assert.deepEqual(first.body.data.release_ids,['rel_TEST']);
  const second=await invoke('--overwrite'); assert.equal(second.code,0,JSON.stringify(second.body));
  assert.equal(second.body.data.uploads[0].reused,true); assert.equal(puts,1);
  const doc=JSON.parse(await readFile(dir+'/prepared.json','utf8'));
@@ -472,6 +473,30 @@ for (const sameFile of [false, true]) for (const explicitKey of [false, true]) {
   }
  });
 }
+
+test("an existing output pinning release A is never left pinned when init resolves release B", async t => {
+ const dir=await mkdtemp('/tmp/release-pin-');t.after(()=>rm(dir,{recursive:true,force:true}));
+ const output=dir+'/build.json';
+ const releaseA='rel_AAAAAAAAAAAAAAAAAAAAAAAA', releaseB='rel_BBBBBBBBBBBBBBBBBBBBBBBB';
+ async function invoke(release:string, extra:string[]=[]) {
+  let out=''; const transport=new FakeTransport();
+  const code=await run({...processRuntime(),argv:['--config',dir+'/config.json','playlist','init',release,'--name','Build','--target-width','1920','--target-height','1080','--output',output,...extra],env:{},cwd:()=>dir,transport,stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
+  return {code,body:JSON.parse(out)};
+ }
+ const pinned=async()=>JSON.stringify(JSON.parse(await readFile(output,'utf8')).pages);
+ const first=await invoke(releaseA); assert.equal(first.code,0,JSON.stringify(first.body));
+ assert.deepEqual(first.body.data.release_ids,[releaseA]); assert.equal(first.body.data.media_ids,undefined);
+ // Without --overwrite the command fails loudly, names the file and the fix, and leaves the file alone.
+ const refused=await invoke(releaseB);
+ assert.equal(refused.code,2); assert.equal(refused.body.ok,false); assert.equal(refused.body.error.code,'usage_error');
+ assert.match(refused.body.error.detail,new RegExp(output.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
+ assert.match(refused.body.error.detail,/--overwrite/);
+ assert.match(await pinned(),new RegExp(releaseA));
+ // With --overwrite the document is rebuilt from the resolved inputs and the envelope names the pin.
+ const replaced=await invoke(releaseB,['--overwrite']); assert.equal(replaced.code,0,JSON.stringify(replaced.body));
+ assert.deepEqual(replaced.body.data.release_ids,[releaseB]);
+ const after=await pinned(); assert.match(after,new RegExp(releaseB)); assert.doesNotMatch(after,new RegExp(releaseA));
+});
 
 test("local URL authoring works offline, creates parents, and supports explicit overwrite", async t => {
  const dir=await mkdtemp('/tmp/offline-authoring-');t.after(()=>rm(dir,{recursive:true,force:true}));

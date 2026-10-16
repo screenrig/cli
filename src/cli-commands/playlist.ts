@@ -13,7 +13,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .argument("<inputs...>", "Local image/video/audio files, med_ IDs, rel_ IDs, or HTTPS URLs in playback order; audio becomes the soundtrack")
     .requiredOption("--name <NAME>", "Playlist name")
     .requiredOption("--output <FILE>", "Write an editable playlist file")
-    .option("--overwrite", "Replace an existing output file atomically")
+    .option("--overwrite", "Replace an existing output file atomically with a document built from these inputs")
     .option("--target-width <PX>", "Override canvas width", positiveInteger("target-width"))
     .option("--target-height <PX>", "Override canvas height", positiveInteger("target-height"))
     .addOption(new Option("--duration-ms <MS>", "Non-video page duration").argParser(positiveInteger("duration-ms")).default(8000))
@@ -24,7 +24,7 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .action(bind(handlePlaylistInit));
   addValueAlias(init, "--screen-id", "--screen", "Use this screen’s identity, revision, and reported dimensions");
   requireOptionGroup(init, "together", ["--target-width", "--target-height"]);
-  addCommandNotes(init, "Provide --screen-id for target identity, revision, and reported dimensions, or both target dimensions. Files upload up to four at a time and wait for readiness; data.uploads reports each file's media_id, reused and per-stage timing. Nothing is written until every upload is ready, so an interrupted run leaves no output; rerun the same command and files already uploaded return their existing media IDs. Release IDs are pinned; preview/server validation checks availability. Audio inputs become the playlist soundtrack (tracks in input order) instead of pages. Inspect the document and preview before publishing.");
+  addCommandNotes(init, "Provide --screen-id for target identity, revision, and reported dimensions, or both target dimensions. Files upload up to four at a time and wait for readiness; data.uploads reports each file's media_id, reused and per-stage timing. Nothing is written until every upload is ready, so an interrupted run leaves no output; rerun the same command and files already uploaded return their existing media IDs. Release IDs are pinned; preview/server validation checks availability, and data.release_ids and data.media_ids report what the document holds. An existing non-empty --output file fails with usage_error (exit 2) and is left untouched; choose a new path or pass --overwrite to rebuild it from these inputs, never publish the old file. Audio inputs become the playlist soundtrack (tracks in input order) instead of pages. Inspect the document and preview before publishing.");
   addCommandExamples(init, 'screenrig playlist init med_IMAGE --name Lobby --screen-id scr_SCREEN --output lobby.json',
     'screenrig playlist init med_IMAGE med_VIDEO --name Lobby --target-width 1920 --target-height 1080 --output lobby.json');
 

@@ -7506,7 +7506,12 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
   await writeOutputFile(output, JSON.stringify(preparePlaylist(options), null, 2) + "\n", overwrite);
   const context = ["--config", resolved.configPath, "--api-url", sanitizedPreparationApiUrl(resolved.apiUrl)];
   const trackCount = content.filter((item) => item.primitive === "audio").length;
+  // The resolved pins in input order, so a caller asserts what the document
+  // holds instead of rereading the file.
+  const releaseIds = content.filter((item) => item.primitive === "application").map((item) => String(item.release_id));
+  const mediaIds = content.filter((item) => typeof item.id === "string" && RESOURCE_ID_PATTERNS.media.test(item.id)).map((item) => String(item.id));
   return { envelope: successEnvelope({ output, ...dimensions, page_count: content.length - trackCount, ...(trackCount > 0 ? { soundtrack_tracks: trackCount } : {}),
+    ...(releaseIds.length > 0 ? { release_ids: releaseIds } : {}), ...(mediaIds.length > 0 ? { media_ids: mediaIds } : {}),
     ...(uploads.length > 0 ? { uploads: uploads.sort((a, b) => a.index - b.index).map(({ index, ...upload }) => ({ source: args.positionals[2 + index], ...upload })) } : {}),
     ...(target ? { screen_id: target.id, screen_revision: target.revision } : {}),
     preview: { argv: ["playlist", "preview", output, "--output", `${output}.preview`, "--contact-sheet", ...context] },

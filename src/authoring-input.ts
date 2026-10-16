@@ -40,7 +40,8 @@ export async function readAuthoringJson(file: string, runtime: CliRuntime): Prom
   const text = await readAuthoringText(file, runtime);
   try { return JSON.parse(text); } catch { throw usageError("Input is not valid JSON."); }
 }
-const OUTPUT_EXISTS = "Output file already exists; choose a new file or use --overwrite to replace it.";
+const outputExists = (output: string) =>
+  `Output file already exists: ${output}. Nothing was written and it still holds its earlier content. Choose a new --output path, or pass --overwrite to replace it.`;
 
 /** An empty file is what an interrupted earlier run leaves behind, never a prepared document. */
 async function holdsContent(output: string): Promise<boolean> {
@@ -50,7 +51,7 @@ async function holdsContent(output: string): Promise<boolean> {
 
 /** Refuse a prepared document up front, before any slow or billed work. */
 export async function assertOutputAvailable(output: string, overwrite: boolean): Promise<void> {
-  if (!overwrite && await holdsContent(output)) throw usageError(OUTPUT_EXISTS);
+  if (!overwrite && await holdsContent(output)) throw usageError(outputExists(output));
 }
 
 /**
