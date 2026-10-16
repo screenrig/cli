@@ -2260,7 +2260,11 @@ paths:
       description: >-
         OAuth 2.0 token endpoint (RFC 6749 §3.2) for agent JWTs. grant_type refresh_token rotates an opaque refresh credential (RFC 9700): every use returns a new pair;
         a request_id (16 to 200 characters) makes a retry within 60 seconds return the same response, and any other reuse of a superseded refresh token
-        revokes the whole family (invalid_grant). grant_type urn:ietf:params:oauth:grant-type:token-exchange (RFC 8693) with
+        revokes the whole family (invalid_grant). A removed selected membership or project returns invalid_scope with
+        error_description beginning "project_selection_inactive:"; the refresh credential is not consumed. Discover live memberships
+        with GET /api/projects, intersect them with the previously consented selection, and retry with projects= and a new request_id.
+        Never end the refresh family for this selection error. Requested scope narrowing applies independently to every project and
+        to identity authority; an explicit scope without identity excludes identity authority. grant_type urn:ietf:params:oauth:grant-type:token-exchange (RFC 8693) with
         subject_token_type urn:screenrig:token-type:identity-credential or urn:screenrig:token-type:project-token answers unsupported_token_type: legacy
         credentials are retired, and the installation signs in again with screenrig login. resource (RFC 8707) is https://api.<domain>/api or absent; projects selects up to 64 consented project IDs. Omission selects all only when the set fits; otherwise the client must choose a subset. project_id selects one during the compatibility release. A connected
         app's grant has the single resource https://api.<domain>/mcp, which a refresh may omit. Clients are public (client_id only), or a connected
@@ -7376,6 +7380,10 @@ paths:
       description: A global card UID, or a deprecated catalogue type segment. The latter adds Deprecation and Warning headers
         pointing to /api/card-types.
     patch:
+      description: If-Match optionally compares the card metadata revision (not its data revision); omission updates the current revision. Idempotency-Key binds the method, UID, params and If-Match for 24 hours. A retry replays the recorded result, including 204 after deletion; changed input returns idempotency_mismatch. Stale If-Match returns revision_conflict (412). Keys are scoped to the card UID.
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/IfMatch'
       operationId: patchCard
       x-screenrig-access: write
       security:
@@ -7403,6 +7411,10 @@ paths:
                   type: object
                   additionalProperties: true
     delete:
+      description: If-Match optionally compares the card metadata revision (not its data revision); omission updates the current revision. Idempotency-Key binds the method, UID, params and If-Match for 24 hours. A retry replays the recorded result, including 204 after deletion; changed input returns idempotency_mismatch. Stale If-Match returns revision_conflict (412). Keys are scoped to the card UID.
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/IfMatch'
       operationId: deleteCard
       x-screenrig-access: write
       security:
@@ -24082,7 +24094,7 @@ components:
         CalVer and each card's semver, whose major says which card placements the screen renders. Stored on
         the screen with the rest of player. Malformed entries are dropped one by one; it is never a 400.
       properties:
-        cardml: { type: integer, minimum: 1, maximum: 1000, description: "CardML interpreter language level. With this declaration the backend omits card items whose published requires it cannot satisfy, with card_unavailable diagnostics. Omit for bundled-library compatibility." }
+        cardml: { type: integer, minimum: 1, maximum: 1000, description: "CardML interpreter language level. With this declaration the backend selects the newest compatible retained revision within each pinned card major by CardML level and declared features. When none qualifies it omits the card with card_unavailable diagnostics. Omit for bundled-library compatibility." }
         features: { type: array, maxItems: 64, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z][A-Za-z0-9-]{0,39}$" }, description: "CardML features implemented, including case-sensitive tickMs. Malformed entries are dropped individually." }
         library: { type: string, minLength: 1, maxLength: 40, description: "Cards library CalVer YY.MM.N." }
         versions: { type: object, maxProperties: 256, additionalProperties: { type: string, pattern: "^[0-9]+[.][0-9]+[.][0-9]+$" }, description: "Card id to semver, for example {clock: 1.1.0, menu: 1.0.0}." }
@@ -24421,7 +24433,10 @@ components:
       type: object
       required: [id, primitive, card, major, params, rect, layer, contentFit]
       description: >-
-        A built-in card. The Player merges the card's defaults, then params, then, when data is present, the
+        A built-in card. For a Player declaring CardML capabilities, the backend selects the newest compatible
+        published revision within the pinned major, considering retained revisions and all required features;
+        when none qualifies it omits the card with card_unavailable diagnostics and removes empty pages.
+        The Player merges the card's defaults, then params, then, when data is present, the
         dynamic properties of the document at GET /screen/card-data/{data} (only keys the card marks dynamic). A
         card with data stays hidden until its first document arrives and then fades in; screen.card_data_changed
         for the key refetches it in place. feed, when present, is fetched from the same route and passed to the
@@ -24437,6 +24452,7 @@ components:
         primitive: { type: string, enum: [card] }
         card: { type: string }
         major: { type: integer, minimum: 1 }
+        version: { type: string, pattern: "^[0-9]+[.][0-9]+[.][0-9]+$", description: "Selected published code revision semver within the pinned major. Optional and ignorable; src, sha256, model and requires all describe this same revision." }
         src: { type: string, format: uri-reference, description: "Published .card, root-relative under /cards/ with ?sha=<sha256>. Resolve against the Player's own origin. Public; send no credential." }
         sha256: { type: string, pattern: "^[0-9a-f]{64}$", description: "Verify the .card bytes before interpreting. Cache by hash indefinitely." }
         model: { $ref: "#/components/schemas/CardFile" }
