@@ -1,5 +1,18 @@
 import { assertPlaylistValid } from "./playlist-validate.js";
+import type { Warning } from "./envelope.js";
 import { usageError } from "./problems.js";
+
+/** Default hold for an image or iframe page when `--duration-ms` is omitted. */
+export const DEFAULT_PAGE_DURATION_MS = 8000;
+/**
+ * Default hold for a pinned application release: the contract maximum
+ * (`advance.after_ms` is 1 second through 24 hours). The contract has no
+ * untimed mode, and an app that rotates internally and keeps state restarts
+ * whenever its page advances, so the longest allowed hold is the default.
+ */
+export const APPLICATION_PAGE_DURATION_MS = 86_400_000;
+/** An application page timed below this is warned about, never refused. */
+export const APPLICATION_SHORT_PAGE_MS = 60_000;
 
 type RecordValue = Record<string, any>;
 function object(value: unknown): RecordValue {
@@ -56,15 +69,37 @@ export function isAdSlotPage(page: unknown): boolean {
   return "type" in page && page.type === "adslot";
 }
 
+/**
+ * Warn when an application sits on a page that advances in under a minute: the
+ * app is restarted each time the page returns. Explicit short durations stay
+ * legitimate, so this never blocks.
+ */
+export function shortApplicationPageWarning(document: unknown): Warning | undefined {
+  const pages = (document as RecordValue | undefined)?.pages;
+  if (!Array.isArray(pages)) return undefined;
+  const short: string[] = [];
+  for (const page of pages) {
+    if (!page || typeof page !== "object" || isAdSlotPage(page) || !Array.isArray(page.primitives)) continue;
+    if (!page.primitives.some((primitive: unknown) => (primitive as RecordValue | null)?.primitive === "application")) continue;
+    const ms = page.advance?.mode === "duration" ? page.advance.after_ms : page.advance?.mode === "application" ? page.advance.max_ms : undefined;
+    if (typeof ms === "number" && ms < APPLICATION_SHORT_PAGE_MS) short.push(`${typeof page.id === "string" ? page.id : "(unnamed)"} (${ms} ms)`);
+  }
+  if (short.length === 0) return undefined;
+  return {
+    code: "application_page_short",
+    message: `Application page ${short.join(", ")} advances in under ${APPLICATION_SHORT_PAGE_MS / 1000} seconds, so the app restarts each time the page returns and loses its state. For an app-driven board set advance after_ms (or --duration-ms) to a long hold; applications default to ${APPLICATION_PAGE_DURATION_MS} ms.`,
+  };
+}
+
 export function initializePlaylist(options: {
-  name: string; media: RecordValue[]; width: number; height: number; durationMs: number; fit: string;
+  name: string; media: RecordValue[]; width: number; height: number; durationMs?: number; fit: string;
 }): RecordValue {
   return preparePlaylist({ ...options, content: options.media });
 }
 
 /** Build the backend-owned write document; target metadata stays outside it. */
 export function preparePlaylist(options: {
-  name: string; content: RecordValue[]; width: number; height: number; durationMs: number; fit: string;
+  name: string; content: RecordValue[]; width: number; height: number; durationMs?: number; fit: string;
 }): RecordValue {
   // Ready audio inputs become the soundtrack in input order; every other input
   // is one page.
@@ -82,7 +117,10 @@ export function preparePlaylist(options: {
       id: `page_${index + 1}`,
       canvas: { width: options.width, height: options.height, viewport_fit: "contain", background: "#000000FF" },
       transition: { type: "crossfade", duration_ms: 200 },
-      advance: video ? { mode: "media_end" } : { mode: "duration", after_ms: options.durationMs },
+      // An explicit duration applies to every non-video page; an omitted one
+      // holds an application for the contract maximum and other pages for 8 s.
+      advance: video ? { mode: "media_end" }
+        : { mode: "duration", after_ms: options.durationMs ?? (media.primitive === "application" ? APPLICATION_PAGE_DURATION_MS : DEFAULT_PAGE_DURATION_MS) },
       primitives: [{ id: "content", primitive: media.primitive,
         ...(media.primitive === "iframe" ? { src: media.src, title: media.title }
           : media.primitive === "application" ? { release_id: media.release_id }

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { Writable, Readable } from "node:stream";
 import { run, processRuntime } from "./main.js";
-import { initializePlaylist, editablePlaylist, targetDimensions } from "./playlist-authoring.js";
+import { initializePlaylist, preparePlaylist, editablePlaylist, shortApplicationPageWarning, targetDimensions } from "./playlist-authoring.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import { parseArgv } from "./argv.js";
 import { publishScreen } from "./screen-publish.js";
@@ -317,8 +317,8 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) test(`mixed preparat
  const transport = new FakeTransport()
   .on('GET',`/api/screens/${prefix}scr_TEST`,()=>response({id:targetId,revision:7,observation:{surfaces:[{width:1080,height:1920}]}}))
   .on('GET','/api/media/med_IMAGE',()=>response({...media[0],state:mediaState}));
- async function invoke(inputs:string[], output='prepared.json') {
-  let out=''; const code = await run({...processRuntime(),argv:['--config',config,'playlist','init',...inputs,'--name','Lobby','--screen',`${prefix}scr_TEST`,'--output',output],env:{},cwd:()=>dir,transport,
+ async function invoke(inputs:string[], output='prepared.json', extra:string[]=[]) {
+  let out=''; const code = await run({...processRuntime(),argv:['--config',config,'playlist','init',...inputs,'--name','Lobby','--screen',`${prefix}scr_TEST`,'--output',output,...extra],env:{},cwd:()=>dir,transport,
    stdout:new Writable({write(c,e,d){out+=c;d();}}),stderr:new Writable({write(c,e,d){d();}})});
   return {code,body:JSON.parse(out)};
  }
@@ -330,10 +330,22 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) test(`mixed preparat
  assert.deepEqual(doc.pages.map((p:any)=>p.primitives[0].primitive),['image','application','iframe']);
  assert.equal(doc.pages[1].primitives[0].release_id,`${prefix}rel_TEST`);
  assert.equal(doc.pages[1].primitives[0].content_fit,'fill');
- assert.deepEqual(doc.pages[1].advance,{mode:'duration',after_ms:8000});
+ // An application holds for the contract maximum; images and iframes keep 8 s.
+ assert.deepEqual(doc.pages[1].advance,{mode:'duration',after_ms:86400000});
+ assert.deepEqual(doc.pages[0].advance,{mode:'duration',after_ms:8000});
+ assert.deepEqual(doc.pages[2].advance,{mode:'duration',after_ms:8000});
+ assert.deepEqual(result.body.warnings,[]);
  assert.equal(doc.pages[2].primitives[0].src,'https://example.com/board');
  const publish=parseArgv(result.body.data.publish.argv);
  assert.equal(publish.flags['if-match'],undefined); assert.equal(publish.positionals[3],dir+'/prepared.json');
+ // An explicit --duration-ms applies to every non-video page and warns for the short application page, never blocks.
+ const timed=await invoke(['med_IMAGE',`${prefix}rel_TEST`],'timed.json',['--duration-ms','8000']);
+ assert.equal(timed.code,0,JSON.stringify(timed.body));
+ assert.deepEqual(JSON.parse(await readFile(dir+'/timed.json','utf8')).pages.map((p:any)=>p.advance.after_ms),[8000,8000]);
+ assert.deepEqual(timed.body.warnings.map((w:any)=>w.code),['application_page_short']);
+ assert.match(timed.body.warnings[0].message,/page_2 \(8000 ms\)/);
+ const longer=await invoke(['med_IMAGE',`${prefix}rel_TEST`],'longer.json',['--duration-ms','60000']);
+ assert.equal(longer.code,0); assert.deepEqual(longer.body.warnings,[]);
  assert.equal(parseArgv(result.body.data.preview.argv).positionals[2],dir+'/prepared.json');
  assert.equal((await invoke(['https://user:secret@example.com'],'bad.json')).code,2);
  assert.equal((await invoke(['http://example.com'],'bad.json')).code,2);
@@ -510,4 +522,22 @@ test("local URL authoring works offline, creates parents, and supports explicit 
  assert.equal((await invoke()).code,2);
  assert.equal((await invoke(['--overwrite'])).code,0);
  assert.equal(JSON.parse(await readFile(output,'utf8')).name,'Offline');
+});
+
+test("application pages hold long by default and short application pages warn without blocking", () => {
+ const content=[{primitive:'image',state:'ready',id:'med_IMAGE'},{primitive:'application',release_id:'rel_APP'},{primitive:'iframe',src:'https://example.com/board',title:'board'}];
+ const base={name:'Board',content,width:1920,height:1080,fit:'contain'};
+ const defaults=preparePlaylist(base);
+ assert.deepEqual(defaults.pages.map((p:any)=>p.advance),[{mode:'duration',after_ms:8000},{mode:'duration',after_ms:86400000},{mode:'duration',after_ms:8000}]);
+ assert.equal(shortApplicationPageWarning(defaults),undefined);
+ const short=preparePlaylist({...base,durationMs:8000});
+ assert.deepEqual(short.pages.map((p:any)=>p.advance.after_ms),[8000,8000,8000]);
+ const warning=shortApplicationPageWarning(short);
+ assert.equal(warning?.code,'application_page_short');
+ assert.match(warning!.message,/page_2 \(8000 ms\)/); assert.doesNotMatch(warning!.message,/page_1|page_3/);
+ assert.equal(shortApplicationPageWarning(preparePlaylist({...base,durationMs:60000})),undefined);
+ // A controller page is bounded by max_ms; an ad slot and a read playlist without primitives are skipped.
+ const controller={pages:[{id:'kiosk',advance:{mode:'application',max_ms:30000},primitives:[{primitive:'application',controller:true}]},{id:'ad',type:'adslot'},{id:'plain',advance:{mode:'duration',after_ms:1000},primitives:[{primitive:'image'}]}]};
+ assert.match(shortApplicationPageWarning(controller)!.message,/kiosk \(30000 ms\)/);
+ assert.equal(shortApplicationPageWarning(undefined),undefined);
 });

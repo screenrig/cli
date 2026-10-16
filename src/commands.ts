@@ -7,7 +7,7 @@ import { assertOutputAvailable, readAuthoringJson, readAuthoringText, writeAutho
 import { publishScreen } from "./screen-publish.js";
 import { fleetHumanLines, fleetOutcome, rejectFleetRevision, screenActionResult, screenTag, screenTagList, screenTarget, SCREEN_TAGS_MAX, type FleetItem } from "./screen-fleet.js";
 import { canonicalPairingCode } from "./pairing-code.js";
-import { editablePlaylist, isAdSlotPage, preparePlaylist, targetDimensions } from "./playlist-authoring.js";
+import { editablePlaylist, isAdSlotPage, preparePlaylist, shortApplicationPageWarning, targetDimensions } from "./playlist-authoring.js";
 import { callPlaylist } from "./playlist-api.js";
 import { WriteRecovery } from "./write-recovery.js";
 import { cacheProjectContexts, clearResultContext, contextFromProject, formatResultContext, projectName as validateDisplayName, resultContext, setResultContext, validateProjectContext } from "./project-context.js";
@@ -865,11 +865,13 @@ export const handlePlaylistValidate = commandHandler(async (args, runtime, resol
   const body = parsed && typeof parsed === "object" && Array.isArray(parsed.pages) ? { ...parsed, pages: expandPlaylistPages(parsed.pages) } : parsed;
   assertPlaylistValid(body);
   const lint = playlistLint(body);
+  const shortApplication = shortApplicationPageWarning(body);
   return {
-    envelope: successEnvelope({ valid: true, scope: "local_schema_and_semantics", server_checks: PLAYLIST_SERVER_CHECKS, lint }),
+    envelope: successEnvelope({ valid: true, scope: "local_schema_and_semantics", server_checks: PLAYLIST_SERVER_CHECKS, lint }, { warnings: shortApplication ? [shortApplication] : [] }),
     exitCode: ExitCode.Success,
     human: [
       "Playlist passed local canonical validation. Reference authorization and runtime readiness require server checks.",
+      ...(shortApplication ? [`warning: ${shortApplication.message}`] : []),
       ...lint.map((item) => `lint: ${item.page_id} ${item.code} ${item.id}`),
       LOOK_AT_THE_CONTACT_SHEET,
     ].join("\n"),
@@ -4543,7 +4545,11 @@ async function playlistPreviewCommand(
     client,
     runtime,
   });
-  const warnings = result.placeholders.length > 0 ? [previewPlaceholderWarning(result.placeholders, Boolean(client))] : [];
+  const shortApplication = shortApplicationPageWarning(playlist);
+  const warnings = [
+    ...(result.placeholders.length > 0 ? [previewPlaceholderWarning(result.placeholders, Boolean(client))] : []),
+    ...(shortApplication ? [shortApplication] : []),
+  ];
   return {
     envelope: successEnvelope(result, { request_id: client?.requestId, warnings }),
     exitCode: ExitCode.Success,
@@ -7469,9 +7475,11 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
       content.push({ primitive: audioFile ? "audio" : "image", state: "ready", id: "med_PENDING" });
     }
   }
-  const options = { name: flagString(args.flags, "name")!, content, ...dimensions, durationMs: flagNumber(args.flags, "duration-ms") ?? 8000, fit: flagString(args.flags, "fit") ?? "contain" };
+  const options = { name: flagString(args.flags, "name")!, content, ...dimensions, durationMs: flagNumber(args.flags, "duration-ms"), fit: flagString(args.flags, "fit") ?? "contain" };
   // Validate the entire authoring shape and check the output before uploading.
-  preparePlaylist(options);
+  const validated = preparePlaylist(options);
+  const shortApplication = shortApplicationPageWarning(validated);
+  if (shortApplication) warnings.push(shortApplication);
   const output = path.resolve(runtime.cwd(), flagString(args.flags, "output")!);
   const overwrite = flagBool(args.flags, "overwrite");
   await assertOutputAvailable(output, overwrite);
@@ -7527,6 +7535,7 @@ export const handleScreenPublish = commandHandler(async (args, runtime, resolved
   const json = !flagBool(args.flags, "human");
   const progress = flagBool(args.flags, "no-progress") ? undefined : (stage: string, state?: string) =>
     runtime.stderr.write(json ? `${JSON.stringify({ event: "publish_stage", stage, ...(state ? { state } : {}) })}\n` : `screenrig: ${stage}${state ? ` (${state})` : ""}\n`);
+  const shortApplication = shortApplicationPageWarning(document);
   const result = await publishScreen({ client, runtime, configPath: resolved.configPath, apiUrl: resolved.apiUrl, screenId: args.positionals[2]!, revision: flagString(args.flags, "if-match")!, document, requestedKey: flagString(args.flags, "idempotency-key"),
     note: flagString(args.flags, "note"),
     wait: flagBool(args.flags, "no-wait") ? undefined : { timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000, pollMs: flagNumber(args.flags, "poll-ms") ?? 2000 },
@@ -7536,7 +7545,7 @@ export const handleScreenPublish = commandHandler(async (args, runtime, resolved
     // assignment too), so it is the one to check first.
     const first = result.reviews.find((review) => review.kind === "playlist_change") ?? result.reviews[0]!;
     return {
-      envelope: successEnvelope({ ...result, next: reviewNext(first.id) }, { request_id: client.requestId, warnings: result.reviews.map(pendingReviewWarning) }),
+      envelope: successEnvelope({ ...result, next: reviewNext(first.id) }, { request_id: client.requestId, warnings: [...(shortApplication ? [shortApplication] : []), ...result.reviews.map(pendingReviewWarning)] }),
       exitCode: ExitCode.Success,
       human: [
         "Publish waiting for review",
@@ -7550,7 +7559,7 @@ export const handleScreenPublish = commandHandler(async (args, runtime, resolved
   }
   const warning = publishPlaybackWarning(result);
   return {
-    envelope: successEnvelope(result, { request_id: client.requestId, warnings: warning ? [warning] : [] }),
+    envelope: successEnvelope(result, { request_id: client.requestId, warnings: [...(shortApplication ? [shortApplication] : []), ...(warning ? [warning] : [])] }),
     exitCode: ExitCode.Success,
     human: humanLines(result.playback_verified ? "Published and playing" : "Published and assigned", [
       ["playlist_id", result.playlist_id],
@@ -7558,6 +7567,7 @@ export const handleScreenPublish = commandHandler(async (args, runtime, resolved
       ["stage", result.stage],
       ["waited", `${result.playback.waited_ms} ms`],
       ...(warning ? [["warning", warning.message] as [string, string]] : []),
+      ...(shortApplication ? [["warning", shortApplication.message] as [string, string]] : []),
     ]),
   };
 });

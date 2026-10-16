@@ -1495,10 +1495,18 @@ declaration or commit that was in flight.
 
 The canonical document contains one full-screen page per input, a black background,
 and a 200 ms crossfade. Images use `--fit contain|cover|fill` (default `contain`);
-videos are muted, do not loop, and advance on completion. Other pages advance after
-`--duration-ms` (default 8000). Applications and iframes use `fill`; applications
-are pinned to the supplied release and use timed advancement, without controller
-privileges. Edit the document for application-controlled advancement.
+videos are muted, do not loop, and advance on completion. Image and iframe pages
+advance after `--duration-ms` (default 8000). Applications and iframes use `fill`;
+applications are pinned to the supplied release and use timed advancement, without
+controller privileges. Edit the document for application-controlled advancement.
+
+An application page holds for 86400000 ms (24 hours, the longest `after_ms` the
+contract allows) unless `--duration-ms` is given, so an app that rotates internally
+and keeps its state is not restarted by the page timer. An explicit `--duration-ms`
+applies to every non-video page, applications included. An application page that
+advances in under 60 seconds returns an `application_page_short` warning from
+`playlist init`, `playlist validate`, `playlist preview` and `screen publish`; the
+command still succeeds.
 
 ### Soundtrack
 

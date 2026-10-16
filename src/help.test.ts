@@ -326,7 +326,8 @@ test("structured discovery exposes positional cardinality, choices, defaults and
   const init = invoke(["playlist", "init", "--help"]).data;
   assert.deepEqual(init.arguments, [{ name: "inputs", description: "Local image/video/audio files, med_ IDs, rel_ IDs, or HTTPS URLs in playback order; audio becomes the soundtrack", required: true, variadic: true }]);
   assert.deepEqual(init.options.find((option) => option.name === "--fit")?.choices, ["contain", "cover", "fill"]);
-  assert.equal(init.options.find((option) => option.name === "--duration-ms")?.default, 8000);
+  assert.equal(init.options.find((option) => option.name === "--duration-ms")?.default, undefined);
+  assert.match(init.options.find((option) => option.name === "--duration-ms")?.description ?? "", /8000.*86400000 for application pages/);
   assert.ok(init.examples.length > 0);
   assert.deepEqual(init.relationships, [{ kind: "together", options: ["--target-width", "--target-height"] }]);
   const generate = invoke(["media", "generate", "--help"]).data;
