@@ -321,7 +321,7 @@ test("a stale lock whose owner is still alive is not reclaimed", async () => {
   const configPath = path.join(home, "screenrig", "config.json");
   let clock = 1_000_000;
   try {
-    await plantLock(configPath, fsLike, { pid: process.pid, nonce: "holder", acquired_at: clock });
+    await plantLock(configPath, fsLike, { pid: process.pid, nonce: "holder", acquired_at: clock - 60_000 });
     let ran = false;
     await assert.rejects(withConfigLock(configPath, fsLike, {
       now: () => clock, sleep: async (ms) => { clock += ms; }, staleMs: 30_000, maxWaitMs: 20_000, isAlive: () => true,
@@ -332,7 +332,7 @@ test("a stale lock whose owner is still alive is not reclaimed", async () => {
   }
 });
 
-test("a lock is reclaimed when its owner is gone, or held past the stale age by an unchanged owner", async () => {
+test("a lock is reclaimed when its owner is gone", async () => {
   const home = await testTemp("config-lock-reclaim-");
   const fsLike = realFs(home);
   const configPath = path.join(home, "screenrig", "config.json");
@@ -342,10 +342,6 @@ test("a lock is reclaimed when its owner is gone, or held past the stale age by 
     await plantLock(configPath, fsLike, { pid: 2 ** 22 + 7, nonce: "dead", acquired_at: clock });
     assert.equal(await withConfigLock(configPath, fsLike, { ...options, isAlive: () => false }, async () => "ran"), "ran");
 
-    await plantLock(configPath, fsLike, { pid: process.pid, nonce: "stuck", acquired_at: clock - 60_000 });
-    let looks = 0;
-    assert.equal(await withConfigLock(configPath, fsLike, { ...options, isAlive: () => { looks += 1; return true; } }, async () => "ran"), "ran");
-    assert.equal(looks, 2, "the same nonce is seen on two looks before reclaiming");
     await assert.rejects(stat(`${configPath}.lock`), (err: NodeJS.ErrnoException) => err.code === "ENOENT");
   } finally {
     await rm(home, { recursive: true, force: true });

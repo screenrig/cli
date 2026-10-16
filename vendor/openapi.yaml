@@ -2259,7 +2259,7 @@ paths:
       operationId: oauthToken
       description: >-
         OAuth 2.0 token endpoint (RFC 6749 §3.2) for agent JWTs. grant_type refresh_token rotates an opaque refresh credential (RFC 9700): every use returns a new pair;
-        a request_id (16 to 200 characters) makes a retry within 60 seconds return the same response, and any other reuse of a superseded refresh token
+        a request_id (16 to 200 characters) makes an exact retry return the same response while its credential and grant are live and the successor is still current, without an elapsed-time retry deadline. Any other reuse of a superseded refresh token
         revokes the whole family (invalid_grant). A removed selected membership or project returns invalid_scope with
         error_description beginning "project_selection_inactive:"; the refresh credential is not consumed. Discover live memberships
         with GET /api/projects, intersect them with the previously consented selection, and retry with projects= and a new request_id.
@@ -8582,7 +8582,7 @@ paths:
       x-screenrig-access: read
       operationId: listBugReports
       description: Returns the calling project's own bug reports, newest first, up to one hundred. Another project's submissions
-        are never returned and are not addressable by identifier. There is no pagination cursor in v1.
+        are never returned and are not addressable by identifier. There is no pagination cursor in v1. Each submission carries its status (open until staff respond) and the staff responses, oldest first.
       security:
       - projectBearer: []
       responses:
@@ -8607,7 +8607,7 @@ paths:
       x-rate-limit-admitted-response-headers:
       - RateLimit-Policy
       - RateLimit
-      description: Records one immutable bug report against the calling project. A submission cannot be updated or deleted;
+      description: Records one bug report against the calling project. A submission's own fields cannot be updated or deleted;
         a correction is a new submission. An exact retry carrying the same Idempotency-Key returns the original submission for
         twenty-four hours instead of creating a duplicate, and a different body under that key returns idempotency_mismatch.
         Every submission is screened before it is stored. A body under 12 characters or 3 words returns submission_too_short;
@@ -8659,7 +8659,7 @@ paths:
       x-screenrig-access: read
       operationId: listFeatureRequests
       description: Returns the calling project's own feature requests, newest first, up to one hundred. Another project's submissions
-        are never returned and are not addressable by identifier. There is no pagination cursor in v1.
+        are never returned and are not addressable by identifier. There is no pagination cursor in v1. Each submission carries its status (open until staff respond) and the staff responses, oldest first.
       security:
       - projectBearer: []
       responses:
@@ -8684,7 +8684,7 @@ paths:
       x-rate-limit-admitted-response-headers:
       - RateLimit-Policy
       - RateLimit
-      description: Records one immutable feature request against the calling project. A submission cannot be updated or deleted;
+      description: Records one feature request against the calling project. A submission's own fields cannot be updated or deleted;
         a correction is a new submission. An exact retry carrying the same Idempotency-Key returns the original submission for
         twenty-four hours instead of creating a duplicate, and a different body under that key returns idempotency_mismatch.
         Every submission is screened before it is stored. A body under 12 characters or 3 words returns submission_too_short;
@@ -16447,7 +16447,7 @@ paths:
       x-screenrig-access: read
       operationId: listBugReportsInProject
       description: Returns the calling project's own bug reports, newest first, up to one hundred. Another project's submissions
-        are never returned and are not addressable by identifier. There is no pagination cursor in v1.
+        are never returned and are not addressable by identifier. There is no pagination cursor in v1. Each submission carries its status (open until staff respond) and the staff responses, oldest first.
       security:
       - projectBearer: []
       responses:
@@ -16473,7 +16473,7 @@ paths:
       x-rate-limit-admitted-response-headers:
       - RateLimit-Policy
       - RateLimit
-      description: Records one immutable bug report against the calling project. A submission cannot be updated or deleted;
+      description: Records one bug report against the calling project. A submission's own fields cannot be updated or deleted;
         a correction is a new submission. An exact retry carrying the same Idempotency-Key returns the original submission for
         twenty-four hours instead of creating a duplicate, and a different body under that key returns idempotency_mismatch.
         Every submission is screened before it is stored. A body under 12 characters or 3 words returns submission_too_short;
@@ -16528,7 +16528,7 @@ paths:
       x-screenrig-access: read
       operationId: listFeatureRequestsInProject
       description: Returns the calling project's own feature requests, newest first, up to one hundred. Another project's submissions
-        are never returned and are not addressable by identifier. There is no pagination cursor in v1.
+        are never returned and are not addressable by identifier. There is no pagination cursor in v1. Each submission carries its status (open until staff respond) and the staff responses, oldest first.
       security:
       - projectBearer: []
       responses:
@@ -16554,7 +16554,7 @@ paths:
       x-rate-limit-admitted-response-headers:
       - RateLimit-Policy
       - RateLimit
-      description: Records one immutable feature request against the calling project. A submission cannot be updated or deleted;
+      description: Records one feature request against the calling project. A submission's own fields cannot be updated or deleted;
         a correction is a new submission. An exact retry carrying the same Idempotency-Key returns the original submission for
         twenty-four hours instead of creating a duplicate, and a different body under that key returns idempotency_mismatch.
         Every submission is screened before it is stored. A body under 12 characters or 3 words returns submission_too_short;
@@ -19457,6 +19457,8 @@ components:
         body: { type: string, maxLength: 4000 }
         context: { $ref: '#/components/schemas/FeedbackContext' }
         created_at: { type: string, format: date-time }
+        status: { $ref: '#/components/schemas/FeedbackStatus' }
+        responses: { type: array, maxItems: 20, items: { $ref: '#/components/schemas/FeedbackResponse' } }
         screening: { $ref: '#/components/schemas/ScreeningResult' }
     ScreeningResult:
       type: object
@@ -23822,14 +23824,39 @@ components:
       additionalProperties: false
       required: [id, kind, title, body, created_at]
       description: >-
-        One immutable project-scoped submission. It has no revision because it never
-        changes after it is written.
+        One project-scoped submission. Its own fields (id, kind, title, body, context,
+        created_at) never change after it is written. status is open until staff
+        respond and then the status of the latest response; responses are the staff
+        replies, oldest first and at most 20, appended by staff and never edited or
+        removed. A staff reply also appends a feedback.responded event to the project's
+        event stream (resource.id is the submission id; details carry response_id,
+        status and fixed_in, never the text). The submission id is never authorization:
+        only the owning project reads it.
       properties:
         id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?fb_[A-Za-z0-9_-]{16,24}$" }
         kind: { type: string, enum: [bug, feature] }
         title: { type: string, maxLength: 120 }
         body: { type: string, maxLength: 4000 }
         context: { $ref: "#/components/schemas/FeedbackContext" }
+        created_at: { type: string, format: date-time }
+        status: { $ref: "#/components/schemas/FeedbackStatus" }
+        responses: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/FeedbackResponse" } }
+    FeedbackStatus:
+      type: string
+      enum: [open, planned, fixed, declined, duplicate]
+      description: Where staff stand on a submission. open until the first response.
+    FeedbackResponse:
+      type: object
+      additionalProperties: false
+      required: [id, text, status, created_at]
+      description: >-
+        One staff reply to a submission. Plain text (escape it for any display context);
+        credential-shaped text is replaced with [redacted] before it is stored.
+      properties:
+        id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?fbr_[A-Za-z0-9_-]{16,24}$" }
+        text: { type: string, minLength: 1, maxLength: 2000, description: "Line feed and tab are the only control characters." }
+        status: { $ref: "#/components/schemas/FeedbackStatus" }
+        fixed_in: { type: string, maxLength: 32, pattern: "^[0-9]{1,4}\\.[0-9]{1,4}\\.[0-9]{1,6}$", description: "The product version that fixes it, such as 26.10.93; present only with status fixed, and only when staff name one." }
         created_at: { type: string, format: date-time }
     FeedbackList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/FeedbackSubmission" } } } }
     PairingSession: { type: object, additionalProperties: true, required: [code, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, expires_at: { type: string, format: date-time } } }

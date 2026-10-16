@@ -8,8 +8,8 @@ import type { Transport, TransportResponse } from "./transport/types.js";
 export const OAUTH_CLIENT_ID = "screenrig-cli";
 export const GRANT_DEVICE_CODE = "urn:ietf:params:oauth:grant-type:device_code";
 export const SCOPE_IDENTITY = "identity";
-/** One HTTP attempt. A refresh holds the config lock for at most 15 s: this plus I/O. */
-export const OAUTH_TIMEOUT_MS = 10_000;
+/** Slow auth requests may take a minute; ambiguous failures keep their retry state. */
+export const OAUTH_TIMEOUT_MS = 60_000;
 
 /** read (Read only) < propose < manage; each includes everything below it. */
 export const ACCESS_LEVELS = ["read", "propose", "manage"] as const;

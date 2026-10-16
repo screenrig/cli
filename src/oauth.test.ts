@@ -180,10 +180,70 @@ test("credentials and the pending request_id are kept on 5xx, 429 and network er
     assert.ok(await h.session(transport).accessFor(PROJECT));
     assert.equal(ids.length, 4);
     assert.ok(ids[0]!.length >= 43);
-    assert.deepEqual(new Set(ids).size, 1, "every retry within 60 s reuses the request_id");
+    assert.deepEqual(new Set(ids).size, 1, "every exact retry reuses the request_id");
   } finally {
     await h.done();
   }
+});
+
+test("a delayed lost-response retry recovers the refresh token and renews expired access before an API call", async () => {
+  const h = await harness(grantConfig());
+  const recovered = "opaque-recovered-successor";
+  const latest = "opaque-current-successor";
+  const expired = access({ exp: NOW_S - 600 });
+  const fresh = access({ scope: "access:read screens identity" });
+  const ids: string[] = [];
+  const transport = withDiscovery(new FakeTransport())
+    .on("POST", "/oauth/token", req => {
+      assert.equal(req.timeout_ms, 60_000, "a slow OAuth request has a full minute");
+      ids.push(form(req).get("request_id")!);
+      if (ids.length === 1) throw networkError("rotation committed but its response was lost");
+      if (ids.length === 2) {
+        assert.equal(ids[1], ids[0], "a delayed retry keeps the exact request ID");
+        return tokenResponse(expired, recovered);
+      }
+      assert.equal(ids.length, 3, "recovery needs one new rotation, never an unbounded loop");
+      assert.equal(form(req).get("refresh_token"), recovered);
+      assert.notEqual(ids[2], ids[1], "the recovered successor starts its own rotation");
+      return tokenResponse(fresh, latest, "access:read screens identity");
+    })
+    .on("GET", "/api/project", req => {
+      assert.equal(req.headers?.authorization, `Bearer ${fresh}`, "expired replay access never reaches the API");
+      return projectBody();
+    });
+  try {
+    await assert.rejects(h.session(transport).accessFor(PROJECT), (err: CliError) => err.problem.code === "transport_error");
+    const pending = (await h.read())!;
+    pending.oauth!.refresh_request!.started_at = "2020-01-01T00:00:00Z";
+    await writeConfigAtomic(h.configPath, pending, h.fs);
+    const result = await h.cli(["project", "show"], transport);
+    assert.equal(result.code, 0, result.stdout);
+    assert.equal(ids.length, 3);
+    const stored = (await h.read())!;
+    assert.equal(stored.oauth?.refresh_token, latest);
+    assert.equal(stored.oauth?.refresh_request, undefined);
+    assert.equal(stored.token, fresh);
+    assert.equal(stored.agent_id, AGENT);
+    assert.equal(stored.signed_out_at, undefined);
+  } finally { await h.done(); }
+});
+
+test("an issuer repeatedly returning expired access is bounded and keeps the latest session", async () => {
+  const h = await harness(grantConfig());
+  let calls = 0;
+  const transport = withDiscovery(new FakeTransport()).on("POST", "/oauth/token", () => {
+    calls += 1;
+    return tokenResponse(access({ exp: NOW_S - 600 }), `opaque-successor-${calls}`);
+  });
+  try {
+    await assert.rejects(h.session(transport).accessFor(PROJECT), (err: CliError) =>
+      err.problem.code === "unexpected_response" && err.problem.status === 502);
+    assert.equal(calls, 2);
+    const stored = (await h.read())!;
+    assert.equal(stored.oauth?.refresh_token, "opaque-successor-2");
+    assert.equal(stored.oauth?.refresh_request, undefined);
+    assert.equal(stored.signed_out_at, undefined);
+  } finally { await h.done(); }
 });
 
 test("invalid_grant ends the session, removes its credentials and names screenrig login", async () => {

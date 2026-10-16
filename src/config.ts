@@ -377,17 +377,15 @@ import { isResourceID } from "./generated/resource-ids.js";
       const dir = path.dirname(configPath);
       const lockPath = `${configPath}.lock`;
       const retryMs = options.retryMs ?? 50;
-      const staleMs = options.staleMs ?? 30_000;
-      // A refresh holds the lock for at most 15 s (one 10 s HTTP attempt plus I/O).
-      const maxWaitMs = options.maxWaitMs ?? 20_000;
+      const staleMs = options.staleMs ?? 180_000;
+      // A delayed replay may need two minute-long OAuth attempts plus I/O.
+      const maxWaitMs = options.maxWaitMs ?? 180_000;
       const started = options.now();
       await fsLike.mkdir(dir, { recursive: true, mode: 0o700 });
       await fsLike.chmod(dir, 0o700).catch(() => undefined);
 
       const isAlive = options.isAlive ?? processAlive;
       const nonce = randomBytes(16).toString("hex");
-      // A live owner past staleMs is reclaimed only when the same nonce is seen on two looks.
-      let observed: string | undefined;
       const reclaim = async () => {
         const abandoned = `${lockPath}.stale.${process.pid}.${options.now()}`;
         try {
@@ -416,13 +414,8 @@ import { isResourceID } from "./generated/resource-ids.js";
               await reclaim();
               continue;
             }
-            if (options.now() - owner.acquired_at > staleMs) {
-              if (observed === owner.nonce) {
-                await reclaim();
-                continue;
-              }
-              observed = owner.nonce;
-            }
+            // Never displace a live process: it may still rotate and save the
+            // shared refresh token. A timeout belongs to the waiter alone.
           } else {
             // A lock without an owner file comes from an older CLI, or is a
             // moment from getting one: its age alone decides.

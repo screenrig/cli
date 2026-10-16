@@ -18,7 +18,8 @@ import {
   type ServiceClientCredentials,
   type TokenSet,
 } from "./oauth.js";
-import { CliError, configError } from "./problems.js";
+import { CliError, configError, makeProblem } from "./problems.js";
+import { ExitCode } from "./exit-codes.js";
 import type { Transport } from "./transport/types.js";
 
 /** An access token is renewed when it expires within this many seconds. */
@@ -194,7 +195,7 @@ export class OAuthSession {
     });
   }
 
-  private async refreshLocked(file: ScreenRigConfig, grant: OAuthGrantState, projects?: string[]): Promise<string | undefined> {
+  private async refreshLocked(file: ScreenRigConfig, grant: OAuthGrantState, projects?: string[], recoveredExpiredAccess = false): Promise<string | undefined> {
     if (grant.client_id !== "screenrig-cli") throw configError("The stored refresh family belongs to another client. Sign in with this CLI.");
     const from = digest(grant.refresh_token);
     let pending = grant.refresh_request;
@@ -227,7 +228,7 @@ export class OAuthSession {
     }
     const { refresh_request: _done, ...settled } = grant;
     const next = placeAccessToken(current, tokens.accessToken, tokens.scope);
-    await this.write({
+    const updated: ScreenRigConfig = {
       ...next,
       oauth: {
         ...settled,
@@ -235,7 +236,19 @@ export class OAuthSession {
         ...(tokens.refreshExpiresAt !== undefined ? { refresh_expires_at: tokens.refreshExpiresAt } : {}),
         identity: Boolean(grant.identity || tokens.scope.includes(SCOPE_IDENTITY)),
       },
-    });
+    };
+    await this.write(updated);
+    // A lost response may be recovered days later. Store its successor before
+    // renewing the expired access token with that successor, under the same lock.
+    // A broken issuer cannot cause an unbounded loop or erase the latest session.
+    const claims = accessClaims(tokens.accessToken);
+    if (!claims || claims.exp - this.nowMs() / 1000 <= ACCESS_RENEW_MARGIN_S) {
+      if (recoveredExpiredAccess) {
+        throw new CliError(makeProblem("unexpected_response", "Expired access token", 502,
+          "The server returned expired access tokens twice. The sign-in and latest refresh token were preserved; retry the command."), ExitCode.Server);
+      }
+      return this.refreshLocked(updated, updated.oauth!, projects, true);
+    }
     return tokens.accessToken;
   }
 

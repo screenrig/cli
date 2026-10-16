@@ -3269,7 +3269,8 @@ function projectShowTransport(opts?: { header?: string; remaining?: number; low?
 
 test("project show reports integer credit_remaining and warns when remaining is zero", async () => {
   const transport = memoryBackend();
-  const json = await withTokenConfig(transport, ["--json", "project", "show"]);
+  // Random request IDs can contain a forbidden billing abbreviation by chance.
+  const json = await withTokenConfig(transport, ["--json", "--request-id", "req_credit_remaining_fixture0001", "project", "show"]);
   assert.equal(json.code, 0, json.stdout);
   const envelope = JSON.parse(json.stdout) as {
     ok: boolean;
