@@ -700,6 +700,27 @@ function missingCredentialError(resolved: ResolvedCommandConfig): CliError {
   });
 }
 
+/** Bind context to the selected project, or the token's sole project. */
+async function resolveProjectContext(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<ResolvedCommandConfig> {
+  const projects = accessClaims(resolved.token)?.projects;
+  if (projects && !resolved.projectId) {
+    const ids = Object.keys(projects);
+    if (ids.length !== 1) return resolved;
+    resolved = { ...resolved, projectId: ids[0], projectName: undefined, organizationId: undefined, organizationName: undefined };
+  }
+  // clientFor must route the context read and subsequent work to this target.
+  invocationTargets.set(runtime, resolved);
+  if (!resolved.projectName || !resolved.organizationName) {
+    const client = clientFor(runtime, args, resolved.apiUrl, resolved.token);
+    const response = await client.call({ method: "GET", path: "/api/project" });
+    const context = contextFromProject(response.body as Project);
+    if (resolved.projectId && context.project.id !== resolved.projectId) throw configError("Project credential resolved to a different project.");
+    resolved = await cacheProjectContexts(runtime, resolved, [context], { credential: resolved.token });
+    invocationTargets.set(runtime, resolved);
+  }
+  return resolved;
+}
+
 /** Prepare configuration, logging and credential guidance once for a bound leaf. */
 function commandHandler(
   handler: (args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig) => Promise<CommandResult>,
@@ -754,15 +775,8 @@ function commandHandler(
     let recovery: WriteRecovery | undefined;
     try {
       if (authenticated && resolved.token && args.command[0] !== "agent"
-        && !(args.command[0] === "project" && ["list", "create", "use"].includes(args.command[1] ?? ""))
-        && !accessClaims(resolved.token)?.projects
-        && (!resolved.projectName || !resolved.organizationName)) {
-        const contextClient = clientFor(runtime, args, resolved.apiUrl, resolved.token);
-        const contextResponse = await contextClient.call({ method: "GET", path: "/api/project" });
-        const context = contextFromProject(contextResponse.body as Project);
-        if (resolved.projectId && context.project.id !== resolved.projectId) throw configError("Project credential resolved to a different project.");
-        resolved = await cacheProjectContexts(runtime, resolved, [context], { credential: resolved.token });
-        invocationTargets.set(runtime, resolved);
+        && !(args.command[0] === "project" && ["list", "create", "use"].includes(args.command[1] ?? ""))) {
+        resolved = await resolveProjectContext(args, runtime, resolved);
       }
       recovery = ordinary ? new WriteRecovery(resolved, runtime, args.command.slice(0, 2).join(" ")) : undefined;
       if (recovery) writeRecoveries.set(runtime, recovery);
@@ -7414,18 +7428,12 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
   let existingClient: ApiClient | undefined;
   let preparedClient: Promise<ApiClient> | undefined;
   const remote = () => preparedClient ??= (async () => {
-    const client = existingClient ??= clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
     // Purely local preparation remains offline. Once this invocation reads
     // a screen/media or uploads a file, bind a config without cached project
     // names to its authenticated project before performing that remote work.
-    if (!accessClaims(resolved.token)?.projects && (!resolved.projectId || !resolved.projectName || !resolved.organizationName)) {
-      const response = await client.call({ method: "GET", path: "/api/project" });
-      const context = contextFromProject(response.body as Project);
-      if (resolved.projectId && context.project.id !== resolved.projectId) throw configError("Project credential resolved to a different project.");
-      resolved = await cacheProjectContexts(runtime, resolved, [context], { credential: resolved.token });
-      invocationTargets.set(runtime, resolved);
-    }
-    return client;
+    requireToken(resolved.token);
+    resolved = await resolveProjectContext(args, runtime, resolved);
+    return existingClient = clientFor(runtime, args, resolved.apiUrl, resolved.token);
   })();
   const screenId = flagString(args.flags, "screen");
   const width = flagNumber(args.flags, "target-width"), height = flagNumber(args.flags, "target-height");
