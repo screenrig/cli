@@ -26,7 +26,7 @@ export type LoginOutcome =
 
 function loginProblem(code: "login_expired" | "login_not_found", detail: string): CliError {
   return code === "login_expired"
-    ? new CliError(makeProblem(code, "Sign-in expired", 400, detail, { next: { command: "screenrig login", reason: "Start a new sign-in; each code lasts 10 minutes." } }), ExitCode.Timeout)
+    ? new CliError(makeProblem(code, "Sign-in expired", 400, detail, { next: { command: "screenrig login", reason: "Start a new sign-in; each code lasts 24 hours." } }), ExitCode.Timeout)
     : new CliError(makeProblem(code, "No pending sign-in", 404, detail, { next: { command: "screenrig login", reason: "Start a new sign-in." } }), ExitCode.Usage);
 }
 
