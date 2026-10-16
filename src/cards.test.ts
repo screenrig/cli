@@ -7,7 +7,7 @@ import { cardProperties, validatePlaylistCards, type CardDetails } from "./cards
 import { commandHelp } from "./help.js";
 import { parseArgv } from "./argv.js";
 import { run, processRuntime } from "./main.js";
-import { FakeTransport } from "./transport/fake.js";
+import { FakeTransport, fakeSessionJwt } from "./transport/fake.js";
 import { networkError } from "./problems.js";
 import { publishScreen } from "./screen-publish.js";
 import { editablePlaylist } from "./playlist-authoring.js";
@@ -45,7 +45,7 @@ async function fixture(t: TestContext, enrolled = true) {
 test("cards list returns catalogue metadata and combines local tag/category filters", async t => {
   const f = await fixture(t);
   const cards = [summary("menu"), summary("clock", "information", ["time"]), summary("specials", "food", ["menu", "daily"])];
-  f.transport.on("GET", "/api/cards", request => { assert.equal(request.query, undefined); return ok({ cards }); });
+  f.transport.on("GET", "/api/card-types", request => { assert.equal(request.query, undefined); return ok({ cards }); });
   assert.deepEqual((await f.invoke(["cards", "list"])).body.data.cards, cards);
   assert.deepEqual((await f.invoke(["cards", "list", "--tag", "daily", "--category", "food"])).body.data.cards, [cards[2]]);
   assert.deepEqual((await f.invoke(["cards", "list", "--category", "missing"])).body.data.cards, []);
@@ -53,7 +53,7 @@ test("cards list returns catalogue metadata and combines local tag/category filt
 
 test("cards show preserves schemas, splits properties and prints limits/defaults and placement", async t => {
   const f = await fixture(t);
-  f.transport.on("GET", "/api/cards/menu", () => ok(details));
+  f.transport.on("GET", "/api/card-types/menu", () => ok(details));
   const result = await f.invoke(["cards", "show", "menu"]);
   assert.equal(result.code, 0);
   assert.deepEqual(result.body.data.params_schema, details.params_schema);
@@ -71,7 +71,7 @@ test("cards show preserves schemas, splits properties and prints limits/defaults
 
 test("unknown cards preserve card_not_found and exit 4", async t => {
   const f = await fixture(t);
-  f.transport.on("GET", "/api/cards/unknown", () => ({ status: 404, headers: {}, body: { code: "card_not_found", title: "Card not found", status: 404 } }));
+  f.transport.on("GET", "/api/card-types/unknown", () => ({ status: 404, headers: {}, body: { code: "card_not_found", title: "Card not found", status: 404 } }));
   const result = await f.invoke(["cards", "show", "unknown"]);
   assert.equal(result.code, 4); assert.equal(result.body.error.code, "card_not_found");
 });
@@ -203,7 +203,7 @@ function playlist(params: object, data?: string, major?: number) {
 
 test("playlist create/update validate schemas before uploading card JSON", async t => {
   const f = await fixture(t);
-  f.transport.on("GET", "/api/cards/menu", () => ok(details));
+  f.transport.on("GET", "/api/card-types/menu", () => ok(details));
   f.transport.on("GET", "/api/screens", () => ok({ items: [], next_cursor: null }));
   f.transport.on("POST", "/api/playlists", request => ok({ ...(request.body as object), id: "pl_MENU", revision: 1 }));
   f.transport.on("PUT", "/api/playlists/pl_MENU", request => ok({ ...(request.body as object), id: "pl_MENU", revision: 2 }));
@@ -220,7 +220,7 @@ test("playlist create/update validate schemas before uploading card JSON", async
 });
 
 test("card checks cache one schema per card, accept inline dynamic data and defer older majors", async () => {
-  const transport = new FakeTransport().on("GET", "/api/cards/menu", () => ok(details));
+  const transport = new FakeTransport().on("GET", "/api/card-types/menu", () => ok(details));
   const doc = playlist({ sections: [{ title: "Lunch" }] });
   doc.pages.push(structuredClone(doc.pages[0]!));
   await validatePlaylistCards(new ApiClient({ transport }), doc);
@@ -242,10 +242,10 @@ test("screen publish checks cards before its create, preserves replay and refuse
   let assigned = false;
   f.transport.on("GET", "/api/project", () => ok({ id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA" }));
   f.transport.on("GET", `/api/screens/${screenId}`, () => ok({ id: screenId, revision: 1, ...(assigned ? { playlist_id: playlistId } : {}) }));
-  f.transport.on("GET", "/api/cards/menu", () => ok({ ...details, params_schema: { ...details.params_schema, $schema: "https://json-schema.org/draft/2020-12/schema" } }));
+  f.transport.on("GET", "/api/card-types/menu", () => ok({ ...details, params_schema: { ...details.params_schema, $schema: "https://json-schema.org/draft/2020-12/schema" } }));
   f.transport.on("POST", "/api/playlists", request => {
     assert.equal((request.body as any).pages[0].primitives[0].card, "menu");
-    assert.ok(f.transport.calls.some(call => call.path === "/api/cards/menu"));
+    assert.ok(f.transport.calls.some(call => call.path === "/api/card-types/menu"));
     return ok({ id: playlistId, revision: 1 });
   });
   f.transport.on("PATCH", `/api/screens/${screenId}`, () => { assigned = true; return ok({ id: screenId, revision: 1 }); });
@@ -253,8 +253,103 @@ test("screen publish checks cards before its create, preserves replay and refuse
   assert.equal((await publishScreen(options)).stage, "assigned");
   const calls = f.transport.calls.length;
   assert.equal((await publishScreen(options)).stage, "assigned");
-  assert.ok(f.transport.calls.slice(calls).every(call => call.method === "GET" && call.path !== "/api/cards/menu"));
+  assert.ok(f.transport.calls.slice(calls).every(call => call.method === "GET" && call.path !== "/api/card-types/menu"));
   const writes = f.transport.calls.filter(call => call.method !== "GET").length;
   await assert.rejects(() => publishScreen({ ...options, document: playlist({ title: 5 }, "menu-main") }), /Invalid card params/);
   assert.equal(f.transport.calls.filter(call => call.method !== "GET").length, writes);
+});
+
+async function subsetFixture(t: TestContext) {
+  const f = await fixture(t);
+  const stored = JSON.parse(await readFile(f.config, "utf8"));
+  stored.token = fakeSessionJwt({ exp: 4102444800, sid: "grant", scope: "identity", projects: { prj_AAAAAAAAAAAAAAAAAAAAAAAA: ["access:manage", "content"] } });
+  await writeFile(f.config, JSON.stringify(stored), { mode: 0o600 });
+  return f;
+}
+const instanceId = "crd_INSTANCE";
+const instancePath = `/api/cards/${instanceId}`;
+const selectedPath = "/api/projects/prj_AAAAAAAAAAAAAAAAAAAAAAAA";
+
+test("card create uses an explicit project parent, stdin params and a saved replay key", async t => {
+  const f = await subsetFixture(t);
+  const keys: string[] = [];
+  f.transport.on("POST", `${selectedPath}/cards`, req => {
+    assert.deepEqual(req.body, { type: "menu", major: 1, params: { title: "Lunch" } });
+    assert.equal(req.headers?.["screenrig-project"], undefined);
+    keys.push(req.headers!["idempotency-key"]!);
+    if (keys.length === 1) throw networkError("lost response");
+    return ok({ id: instanceId, revision: 1 });
+  });
+  const argv = ["card", "create", "--type", "menu", "--major", "1", "--file", "-"];
+  assert.notEqual((await f.invoke(argv, '{"title":"Lunch"}')).code, 0);
+  assert.equal((await f.invoke(argv, '{"title":"Lunch"}')).body.data.id, instanceId);
+  assert.equal(keys[0], keys[1]);
+});
+
+test("card list completes every page and narrows with project query; show uses a global ID", async t => {
+  const f = await subsetFixture(t);
+  f.transport.on("GET", "/api/cards", req => {
+    assert.equal(req.query?.project, "prj_AAAAAAAAAAAAAAAAAAAAAAAA");
+    return ok(req.query?.after ? { items: [{ id: "crd_SECOND" }], next_cursor: null } : { items: [{ id: instanceId }], next_cursor: "next" });
+  });
+  f.transport.on("GET", instancePath, req => { assert.equal(req.query, undefined); return ok({ id: instanceId, revision: 1 }); });
+  assert.equal((await f.invoke(["card", "list"])).body.data.items.length, 2);
+  assert.equal((await f.invoke(["card", "show", instanceId])).body.data.id, instanceId);
+});
+
+test("card params replaces static params and card delete surfaces in-use refusal", async t => {
+  const f = await subsetFixture(t);
+  f.transport.on("PATCH", instancePath, req => { assert.deepEqual(req.body, { params: { title: "Dinner" } }); return ok({ id: instanceId, revision: 2 }); });
+  let used = true;
+  f.transport.on("DELETE", instancePath, req => {
+    assert.ok(req.headers?.["idempotency-key"]);
+    return used ? { status: 409, headers: {}, body: { code: "resource_conflict", status: 409, title: "Card in use" } } : { status: 204, headers: {}, body: undefined };
+  });
+  assert.equal((await f.invoke(["card", "params", instanceId, "--file", "-"], '{"title":"Dinner"}')).body.data.revision, 2);
+  assert.equal((await f.invoke(["card", "delete", instanceId])).body.error.code, "resource_conflict");
+  used = false;
+  assert.equal((await f.invoke(["card", "delete", instanceId])).code, 0);
+});
+
+test("card instance data reads revisions and writes with If-Match and replay recovery", async t => {
+  const f = await subsetFixture(t);
+  f.transport.on("GET", `${instancePath}/data`, () => ok({ document: { sections: [] }, revision: 3 }));
+  assert.equal((await f.invoke(["card", "data", "get", instanceId])).body.data.revision, 3);
+  const keys: string[] = [];
+  f.transport.on("PUT", `${instancePath}/data`, req => {
+    assert.deepEqual(req.body, { document: { sections: [] } });
+    assert.equal(req.headers?.["if-match"], '"3"');
+    keys.push(req.headers!["idempotency-key"]!);
+    if (keys.length === 1) throw networkError("lost response");
+    return ok({ revision: 4 });
+  });
+  const argv = ["card", "data", "put", instanceId, "--file", "-", "--expect-rev", "3"];
+  assert.notEqual((await f.invoke(argv, '{"sections":[]}')).code, 0);
+  assert.equal((await f.invoke(argv, '{"sections":[]}')).body.data.revision, 4);
+  assert.equal(keys[0], keys[1]);
+});
+
+test("instance data preserves revision refusals and rejects nonobject input before writes", async t => {
+  const f = await subsetFixture(t);
+  f.transport.on("PUT", `${instancePath}/data`, () => ({ status: 409, headers: {}, body: { code: "revision_conflict", status: 409, title: "Revision conflict" } }));
+  assert.equal((await f.invoke(["card", "data", "put", instanceId, "--file", "-", "--expect-rev", "3"], "{}")).body.error.code, "revision_conflict");
+  for (const argv of [["card", "create", "--type", "menu"], ["card", "params", instanceId], ["card", "data", "put", instanceId]]) {
+    const count = f.transport.calls.length;
+    assert.notEqual((await f.invoke([...argv, "--file", "-"], "[]")).code, 0);
+    assert.equal(f.transport.calls.length, count);
+  }
+});
+
+test("compatibility card-data commands surface server warning headers", async t => {
+  const f = await subsetFixture(t);
+  f.transport.on("GET", `${selectedPath}/card-data/old`, () => ok({ revision: 1 }, { warning: '299 screenrig "Use card instance data"', deprecation: "true" }));
+  const result = await f.invoke(["card-data", "get", "old"]);
+  assert.equal(result.code, 0);
+  assert.match(result.body.warnings[0].message, /Use card instance data/);
+});
+
+test("UID placements defer validation to the server without a catalogue fetch", async () => {
+  const transport = new FakeTransport();
+  await validatePlaylistCards(new ApiClient({ transport, token: "test" }), { pages: [{ primitives: [{ primitive: "card", card: instanceId }] }] });
+  assert.equal(transport.calls.length, 0);
 });

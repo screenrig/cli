@@ -104,6 +104,13 @@ types, defaults, limits, supported views, feed and example placement:
 ```sh
 screenrig cards list [--tag TAG] [--category CATEGORY]
 screenrig cards show menu
+screenrig card create --type menu --file params.json
+screenrig card list
+screenrig card show crd_CARD
+screenrig card params crd_CARD --file params.json
+screenrig card data get crd_CARD
+screenrig card data put crd_CARD --file menu-data.json --expect-rev 3
+screenrig card delete crd_CARD
 screenrig card-data list
 screenrig card-data get menu-main
 screenrig card-data put menu-main --file menu-data.json [--expect-rev 3]
@@ -126,14 +133,18 @@ identical write to reuse its saved idempotency key. Deleting with the CLI requir
 and hides bound cards until the document is written again. Keys follow the K/V
 grammar and cannot start with `feed:`; no application id is required.
 
-Copy `cards show`'s `example` into a playlist page's `primitives`, adapting its
-content and geometry. For example, this placement binds a menu's dynamic data:
+`cards list` and `cards show` inspect catalogue types. `card create` reads static
+params from a JSON object and creates an instance in the selected project. Use
+its global `crd_` ID in a playlist placement. `card params` replaces static
+params; `card data put` replaces dynamic data without republishing. Data writes
+accept `--expect-rev`; read and reconcile after a revision conflict. Rerun an
+identical create or data write after a lost response to reuse its saved key.
+`card delete` removes an instance only when no playlist uses it. Name-keyed
+`card-data` commands remain available and surface the server's warnings.
 
 ```json
 {
-  "id": "menu", "primitive": "card", "card": "menu", "major": 1,
-  "params": { "theme": "neomustard", "title": "Bistro" },
-  "data": "menu-main",
+  "id": "menu", "primitive": "card", "card": "crd_CARD",
   "rect": { "x": 0, "y": 0, "width": 1920, "height": 1080 },
   "layer": 0, "content_fit": "fill"
 }
@@ -212,6 +223,7 @@ screenrig logout
 screenrig service-client create --name NAME (--key-file PATH | --secret-file PATH) [--access read|propose|manage] [--capability NAME]...
 screenrig project list
 screenrig project use ID
+screenrig project token --projects prj_PROJECT,prj_OTHER
 screenrig project create NAME [--organization-id ID | --organization NAME]
 screenrig project show
 screenrig project capabilities
@@ -247,11 +259,17 @@ responsible person becomes owner. Each person has one free Standard
 organization; the server refuses a second (`free_organization_limit`) and its
 hint names the organization to add the project to. Another organization needs
 Premium or Enterprise from sales@screenrig.ai. A successful create adds the new
-project to this sign-in and selects it; the next command renews an access token
-for it.
+project to this sign-in and selects it. Request its token subset with
+`project token --projects ID`.
 
 The current project is the last selected or created project. `--project-id ID`
-targets a cached project for one command without changing that selection.
+selects a project for creates, streams, local names and list narrowing for one
+command without changing that selection. Object requests use their global ID.
+The CLI stores one current access token and one opaque, rotating refresh family.
+`project list` discovers all live memberships and reports `in_token`; discovery
+does not grant access. `project token --projects ID,ID` requests up to 64 consented
+projects, replacing the current token subset. `project_required` means select a
+project with `project use ID` or `--project-id ID`, then retry.
 Every command keeps its target while it runs, and generation, provisioning,
 browser setup and ordinary-write retries are stored separately per project.
 JSON results include organization and project context; human output names both.
@@ -1315,8 +1333,10 @@ another when needed, and never reads or writes the stored config. Agent
 commands (`login`, `logout`, `agent ...`) refuse to run in it.
 
 `service-client create|list|show|add-key|add-secret|remove-key|remove-secret|revoke`
-manages the project's clients. Create needs at least one of `--key-file` or `--secret-file`; both are allowed. and needs the project capability and Manage; a
-service client cannot manage clients. `--access` sets the client's level (Read
+manages the project's clients. Create needs at least one of `--key-file` or
+`--secret-file`; both are allowed. Changes require identity scope and a live
+organization admin role; reading clients requires a project grant. A service
+client cannot manage clients. `--access` sets the client's level (Read
 only, Propose or Manage); a Propose client's changes become reviews like an
 agent's. A generated secret is shown once, so it
 is written only to the new 0600 file `--secret-file` names, never to stdout.

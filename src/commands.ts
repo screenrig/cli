@@ -10,7 +10,7 @@ import { canonicalPairingCode } from "./pairing-code.js";
 import { editablePlaylist, isAdSlotPage, preparePlaylist, targetDimensions } from "./playlist-authoring.js";
 import { callPlaylist } from "./playlist-api.js";
 import { WriteRecovery } from "./write-recovery.js";
-import { cacheProjectContexts, contextFromProject, formatResultContext, projectName as validateDisplayName, resultContext, setResultContext, validateProjectContext } from "./project-context.js";
+import { cacheProjectContexts, clearResultContext, contextFromProject, formatResultContext, projectName as validateDisplayName, resultContext, setResultContext, validateProjectContext } from "./project-context.js";
 import { projectConfigFor, withProjectConfig, assertProjectCredential } from "./project-state.js";
 import { instantInZone, normalizeInstant, assignmentLine, playlistInUseProblem, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "./screen-control.js";
 import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLAYS_SETTLE_MS, unusedPath, PLAYS_ALL_MAX_PAGES, PLAYS_LIMIT_MAX, playbackExportBudget, playsCursor, playsLimit, playsRange, requireCsvResponse, writeCsvFile, writeCsvStdout } from "./playback-export.js";
@@ -112,6 +112,7 @@ import {
 } from "./adapters/protocol.js";
 import { SDK_PROTOCOL_VERSION } from "./adapters/sdk-injection.js";
 import { flagBool, flagNumber, flagString, type ParsedArgs } from "./command-input.js";
+import { projectStreamQuery } from "./project-routing.js";
 import { ApiClient, RequestIds, requireToken } from "./client.js";
 import {
   preserveLogSocket,
@@ -237,7 +238,7 @@ import {
   type NoteState,
 } from "./agent-notes.js";
 import { CLI_VERSION, cliDistribution } from "./version.js";
-import { cardId, cardDataKey, cardProperties, cardDetailsHuman, validatePlaylistCards, feedQuery, type CardDetails, type CardSummary } from "./cards.js";
+import { cardId, cardUid, cardDataKey, cardProperties, cardDetailsHuman, validatePlaylistCards, feedQuery, type CardDetails, type CardSummary } from "./cards.js";
 
 export { CLI_VERSION };
 
@@ -537,7 +538,7 @@ async function streamToken(runtime: CliRuntime, token: string): Promise<string> 
   const claims = accessClaims(token);
   const session = oauthSessions.get(runtime);
   if (!session || !claims?.sid) return token;
-  return (await session.accessFor(claims.prj)) ?? token;
+  return (await session.accessFor(undefined)) ?? token;
 }
 
 /**
@@ -559,7 +560,7 @@ function credentialRetiredError(): CliError {
 }
 
 /** Commands that act on the identity rather than the selected project. */
-const IDENTITY_COMMANDS = new Set(["project list", "project use", "project create"]);
+const IDENTITY_COMMANDS = new Set(["project list", "project use", "project create", "project token"]);
 
 const writeRecoveries = new WeakMap<CliRuntime, WriteRecovery>();
 
@@ -603,7 +604,7 @@ function jsonBody(
     {
       request_id: (body.request_id as string | undefined) ?? response.headers["x-request-id"] ?? requestId,
       operation_id: body.operation_id as string | undefined,
-      warnings,
+      warnings: [...warnings, ...(response.headers.warning ? [{ code: "server_warning", message: response.headers.warning }] : [])],
     },
   );
 }
@@ -647,7 +648,7 @@ type ResolvedCommandConfig = Awaited<ReturnType<typeof resolveConfig>>;
 const serviceCredentials = new WeakMap<CliRuntime, ServiceClientCredentials>();
 
 /** Commands that act as an agent installation; a service-client run has none. */
-const AGENT_ONLY_COMMANDS = new Set(["login", "logout", "agent enroll", "agent connect", "agent disconnect", "agent revoke-identity"]);
+const AGENT_ONLY_COMMANDS = new Set(["login", "logout", "project token", "agent enroll", "agent connect", "agent disconnect", "agent revoke-identity"]);
 
 /**
  * SCREENRIG_CLIENT_ID mode: the run authenticates as a service client. Its
@@ -741,7 +742,7 @@ function commandHandler(
     // Sign-in reset is unauthenticated but still retains a durable retry key.
     const ordinary = (group === "dashboard" && action === "reset-sign-in")
       || Boolean(authenticated && resolved.token && (
-        ["kv", "card-data", "comment", "feedback", "support", "operations", "notes"].includes(group ?? "") ||
+        ["kv", "card", "card-data", "comment", "feedback", "support", "operations", "notes"].includes(group ?? "") ||
         (group === "app" && ["upload", "update"].includes(action ?? "")) ||
         (group === "playlist" && ["create", "update", "delete"].includes(action ?? "")) ||
         (group === "reviews" && action === "withdraw") ||
@@ -754,6 +755,7 @@ function commandHandler(
     try {
       if (authenticated && resolved.token && args.command[0] !== "agent"
         && !(args.command[0] === "project" && ["list", "create", "use"].includes(args.command[1] ?? ""))
+        && !accessClaims(resolved.token)?.projects
         && (!resolved.projectName || !resolved.organizationName)) {
         const contextClient = clientFor(runtime, args, resolved.apiUrl, resolved.token);
         const contextResponse = await contextClient.call({ method: "GET", path: "/api/project" });
@@ -769,6 +771,8 @@ function commandHandler(
       if (expiring && result.output !== "stream") {
         result = { ...result, envelope: { ...result.envelope, warnings: [...(result.envelope.warnings ?? []), expiring] } };
       }
+      const owner = (result.envelope.data as { project_id?: unknown } | undefined)?.project_id;
+      if (typeof owner === "string" && owner !== resolved.projectId) clearResultContext(runtime);
       const context = resultContext(runtime);
       const contextual = context ? { ...result, envelope: { ...result.envelope, context }, human: result.output === "stream" ? result.human : `${formatResultContext(runtime)}${result.human ? "\n" + result.human : ""}` } : result;
       if (recovery && result.keepRecoveryUntilOutput) {
@@ -1532,8 +1536,9 @@ async function removeLocalAgentCredential(
     if (current.identity_token || current.projects) {
       const { token: _token, screen_provision: _provision, browser_setup: _browser, media_generate: _generate, pending_writes: _writes, ...withoutCredential } = scoped;
       const next = withProjectConfig(current, resolved, { ...withoutCredential, updated_at: runtime.now().toISOString() });
+      if (!accessClaims(next.token)?.projects && resolved.projectId === accessClaims(next.token)?.prj) delete next.token;
       // An access token bound to the disconnected project is spent wherever it is stored.
-      if (resolved.projectId && accessClaims(next.identity_token)?.prj === resolved.projectId) delete next.identity_token;
+      if (!accessClaims(next.identity_token)?.projects && resolved.projectId && accessClaims(next.identity_token)?.prj === resolved.projectId) delete next.identity_token;
       await writeConfigAtomic(resolved.configPath, next, fsLike);
       return;
     }
@@ -1666,7 +1671,7 @@ async function agentRevokeIdentity(args: ParsedArgs, runtime: CliRuntime, resolv
     const current = await readConfigFile(resolved.configPath, fs);
     if (!current || !sameCredential(current.identity_token, identity.identityToken, "identity")) throw configError("Identity changed before revocation cleanup. Local credentials were retained.");
     const scrub = (value: ScreenRigConfig): ScreenRigConfig => {
-      const { token: _token, screen_provision: _provision, browser_setup: _browser, media_generate: _generate, pending_writes: _writes, ...rest } = value;
+      const { token: _token, token_projects: _subset, screen_provision: _provision, browser_setup: _browser, media_generate: _generate, pending_writes: _writes, ...rest } = value;
       return rest;
     };
     // Revoking the identity revokes every grant it holds, so the session goes too.
@@ -1892,7 +1897,7 @@ async function enrollForCommand(
         const delivered = response.body as CLIEnrollmentOAuth;
         const agent = validateAgent(delivered.agent, "active");
         if (!delivered.project?.id || !delivered.project.name || !delivered.invitation?.id
-          || delivered.connection_ready !== false || !isSessionJwt(delivered.access_token) || !isSessionJwt(delivered.refresh_token)
+          || delivered.connection_ready !== false || !isSessionJwt(delivered.access_token) || (typeof delivered.refresh_token !== "string" || !delivered.refresh_token)
           || delivered.token_type !== "Bearer" || typeof delivered.scope !== "string"
           || !delivered.issuance_id || !delivered.issuance_expires_at) {
           throw usageError("Enrollment response does not match the generated CLIEnrollmentOAuth contract.");
@@ -1975,16 +1980,27 @@ async function accessibleProjects(args: ParsedArgs, runtime: CliRuntime, resolve
   const response = await client.call({ method: "GET", path: "/api/projects" });
   const body = response.body as ProjectContextList;
   if (!Array.isArray(body?.projects)) throw configError("Project list does not match the generated contract.");
-  const projects = body.projects.map(validateProjectContext);
+  const projects = body.projects.map(item => ({ ...validateProjectContext(item), ...(typeof item.in_token === "boolean" ? { in_token: item.in_token } : {}) }));
   if (new Set(projects.map(item => item.project.id)).size !== projects.length) throw configError("Project list contains duplicate project IDs.");
   return { resolved: identity, projects, requestId: client.requestId };
 }
+
+export const handleProjectToken = commandHandler(async (args, runtime, resolved) => {
+  const stored = await readConfigFile(resolved.configPath, { ...runtime.fs, env: runtime.env, homedir: runtime.homedir });
+  if (!stored?.oauth) throw missingCredentialError(resolved);
+  const raw = flagString(args.flags, "projects") ?? "";
+  const projects = raw.split(/[\s,]+/).filter(Boolean);
+  if (projects.some(id => !isResourceID(id, "project"))) throw usageError("--projects requires project IDs separated by commas or spaces.");
+  const token = await oauthSessionFor(runtime, resolved).selectProjects(projects);
+  return { envelope: successEnvelope({ projects: token ? Object.keys(accessClaims(token)?.projects ?? {}) : [] }),
+    exitCode: ExitCode.Success, human: "Current token project subset updated." };
+}, false);
 
 async function projectList(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
   const listed = await accessibleProjects(args, runtime, resolved);
   await cacheProjectContexts(runtime, listed.resolved, listed.projects, { identityToken: listed.resolved.identityToken });
   return { envelope: successEnvelope({ projects: listed.projects }, { request_id: listed.requestId }), exitCode: ExitCode.Success,
-    human: listed.projects.map(item => `${item.organization.name} / ${item.project.name}: ${item.project.id}`).join("\n") || "No accessible projects." };
+    human: listed.projects.map(item => `${item.organization.name} / ${item.project.name}: ${item.project.id}${typeof item.in_token === "boolean" ? ` (in token: ${item.in_token})` : ""}`).join("\n") || "No accessible projects." };
 }
 
 async function projectUse(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig): Promise<CommandResult> {
@@ -1998,6 +2014,7 @@ async function projectUse(args: ParsedArgs, runtime: CliRuntime, resolved: Resol
       next: { command: "screenrig project list", reason: "Lists the projects this identity can select." },
     }));
   }
+  if (selected.in_token === false) throw new CliError(makeProblem("project_not_in_token", "Project outside token", 403, "This project is outside the current token subset.", { next: { command: `screenrig project token --projects ${id}`, reason: "Request a token for consented projects. Membership discovery does not grant access." } }));
   await cacheProjectContexts(runtime, listed.resolved, [selected], { identityToken: listed.resolved.identityToken, select: id });
   return { envelope: successEnvelope(selected, { request_id: listed.requestId }), exitCode: ExitCode.Success,
     human: `Selected ${selected.organization.name} / ${selected.project.name} (${id})` };
@@ -2012,13 +2029,12 @@ async function projectCreate(args: ParsedArgs, runtime: CliRuntime, resolved: Re
   const client = clientFor(runtime, args, identity.apiUrl, identity.identityToken);
   const body: ProjectCreate = { name, ...(organizationId ? { organization_id: organizationId } : {}),
     ...(organizationName !== undefined ? { organization_name: validateDisplayName(organizationName, "Organization name") } : {}) };
-  const response = await client.call({ method: "POST", path: "/api/projects", body, idempotent: true,
-    ...(resolved.projectId ? { headers: { "screenrig-project": resolved.projectId } } : {}) });
+  const response = await client.call({ method: "POST", path: "/api/projects", body, idempotent: true });
   if (!(headerValue(response.headers, "cache-control") ?? "").split(",").map(value => value.trim().toLowerCase()).includes("no-store")) {
     throw configError("The project create response did not prohibit storage.");
   }
   const context = validateProjectContext(response.body as CreatedProject);
-  // The new project joins the grant's consent and delivers no token: the next command renews one for it.
+  // Creating a project does not expand the current token subset.
   await cacheProjectContexts(runtime, identity, [context], { identityToken: identity.identityToken, select: context.project.id });
   return { envelope: successEnvelope({ project: context.project, organization: context.organization, ...(context.owner_user_id ? { owner_user_id: context.owner_user_id } : {}) }, { request_id: client.requestId }),
     exitCode: ExitCode.Success, human: `Created ${context.organization.name} / ${context.project.name} (${context.project.id})` };
@@ -4323,7 +4339,7 @@ export const handleSupportFollow = commandHandler(async (args, runtime, resolved
       let buffer = "";
       try {
         token = await streamToken(runtime, token);
-        const stream = await transport.stream({ method: "GET", path: "/stream/support", query: { after }, headers: { authorization: `Bearer ${token}`, "x-request-id": client.nextRequestId(), ...(resolved.projectId ? { "screenrig-project": resolved.projectId } : {}) }, signal: controller.signal });
+        const stream = await transport.stream({ method: "GET", path: "/stream/support", query: { after, ...projectStreamQuery(resolved.projectId) }, headers: { authorization: `Bearer ${token}`, "x-request-id": client.nextRequestId() }, signal: controller.signal });
         for await (const chunk of stream) {
           buffer += chunk;
           const parsed = parseSse(buffer); buffer = parsed.rest;
@@ -6269,7 +6285,7 @@ async function screenScreenshotFleet(args: ParsedArgs, runtime: CliRuntime, clie
 
 export const handleCardsList = commandHandler(async (args, runtime, resolved) => {
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "GET", path: "/api/cards" });
+  const response = await client.call({ method: "GET", path: "/api/card-types" });
   const tag = flagString(args.flags, "tag"), category = flagString(args.flags, "category");
   const cards = (response.body as { cards: CardSummary[] }).cards.filter(card =>
     (!tag || card.tags.includes(tag)) && (!category || card.category === category));
@@ -6279,9 +6295,58 @@ export const handleCardsList = commandHandler(async (args, runtime, resolved) =>
 
 export const handleCardsShow = commandHandler(async (args, runtime, resolved) => {
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "GET", path: `/api/cards/${cardId(args.positionals[2]!)}` });
+  const response = await client.call({ method: "GET", path: `/api/card-types/${cardId(args.positionals[2]!)}` });
   const card = response.body as CardDetails;
   return { envelope: jsonBody(response, client.requestId, { properties: cardProperties(card) }), exitCode: ExitCode.Success, human: cardDetailsHuman(card) };
+});
+
+/** Global instance IDs are separate from catalogue type names. */
+function cardInstanceId(args: ParsedArgs, index = 2): string {
+  const id = args.positionals[index] ?? "";
+  return cardUid(id);
+}
+
+async function cardObjectFile(args: ParsedArgs, runtime: CliRuntime): Promise<Record<string, unknown>> {
+  const value = await readAuthoringJson(flagString(args.flags, "file")!, runtime);
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw usageError("Card input must be a JSON object.");
+  if (Buffer.byteLength(JSON.stringify(value), "utf8") > 1_048_576) throw usageError("Card input must be at most 1 MiB.");
+  return value as Record<string, unknown>;
+}
+
+export const handleCardCreate = commandHandler(async (args, runtime, resolved) => {
+  const params = await cardObjectFile(args, runtime);
+  const type = cardId(flagString(args.flags, "type")!);
+  const major = flagNumber(args.flags, "major");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "POST", path: "/api/cards", idempotent: true,
+    body: { type, params, ...(major !== undefined ? { major } : {}) } });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Created card ${(response.body as { id: string }).id}` };
+});
+
+export const handleCardList = commandHandler(async (args, runtime, resolved) => simpleList(args, runtime, resolved, "/api/cards", "Card instances"));
+export const handleCardShow = commandHandler(async (args, runtime, resolved) => simpleGet(args, runtime, resolved, `/api/cards/${cardInstanceId(args)}`, "Card instance"));
+export const handleCardParams = commandHandler(async (args, runtime, resolved) => {
+  const id = cardInstanceId(args);
+  const params = await cardObjectFile(args, runtime);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "PATCH", path: `/api/cards/${id}`, body: { params } });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Card params replaced: ${id}` };
+});
+export const handleCardDelete = commandHandler(async (args, runtime, resolved) => {
+  const id = cardInstanceId(args);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "DELETE", path: `/api/cards/${id}`, idempotent: true });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted card: ${id}` };
+});
+export const handleCardInstanceDataGet = commandHandler(async (args, runtime, resolved) => simpleGet(args, runtime, resolved, `/api/cards/${cardInstanceId(args, 3)}/data`, "Card instance data"));
+export const handleCardInstanceDataPut = commandHandler(async (args, runtime, resolved) => {
+  const id = cardInstanceId(args, 3);
+  const document = await cardObjectFile(args, runtime);
+  const revision = flagString(args.flags, "if-match");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "PUT", path: `/api/cards/${id}/data`, body: { document }, idempotent: true,
+    headers: revision ? { "if-match": quotedRevision(revision) } : undefined });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Card data written: ${id}\nrevision: ${(response.body as { revision: number }).revision}` };
 });
 
 export const handleCardDataList = commandHandler(async (args, runtime, resolved) => {
@@ -6961,8 +7026,8 @@ async function eventsFollow(args: ParsedArgs, runtime: CliRuntime, resolved: Awa
         const stream = await transport.stream({
           method: "GET",
           path: "/stream/project",
-          query: { after },
-          headers: { "x-request-id": client.nextRequestId(), authorization: `Bearer ${token}`, ...(resolved.projectId ? { "screenrig-project": resolved.projectId } : {}) },
+          query: { after, ...projectStreamQuery(resolved.projectId) },
+          headers: { "x-request-id": client.nextRequestId(), authorization: `Bearer ${token}` },
           signal: controller.signal,
         });
         connected = true;
@@ -7353,7 +7418,7 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
     // Purely local preparation remains offline. Once this invocation reads
     // a screen/media or uploads a file, bind a config without cached project
     // names to its authenticated project before performing that remote work.
-    if (!resolved.projectId || !resolved.projectName || !resolved.organizationName) {
+    if (!accessClaims(resolved.token)?.projects && (!resolved.projectId || !resolved.projectName || !resolved.organizationName)) {
       const response = await client.call({ method: "GET", path: "/api/project" });
       const context = contextFromProject(response.body as Project);
       if (resolved.projectId && context.project.id !== resolved.projectId) throw configError("Project credential resolved to a different project.");

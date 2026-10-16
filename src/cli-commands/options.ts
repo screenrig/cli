@@ -1,3 +1,4 @@
+import { isResourceID } from "../generated/resource-ids.js";
 import { quotedRevision } from "../if-match.js";
 import { usageError } from "../problems.js";
 import { screenTag, screenTagList } from "../screen-fleet.js";
@@ -79,4 +80,13 @@ export function eventTypeOption(value: string): string {
     throw usageError("--type takes an event type such as note.added, or a family prefix ending in a dot such as note.");
   }
   return value;
+}
+
+/** Native option validation for an explicit token subset, never a permission union. */
+export function projectSubset(value: string): string {
+  const ids = value.split(/[\s,]+/).filter(Boolean);
+  if (!ids.length || ids.length > 64 || new Set(ids).size !== ids.length || ids.some(id => !isResourceID(id, "project"))) {
+    throw usageError("--projects requires 1–64 distinct project IDs separated by commas or spaces.");
+  }
+  return ids.join(",");
 }

@@ -1,3 +1,5 @@
+import { accessClaims } from "./oauth.js";
+import { projectRequest } from "./project-routing.js";
 import type { WriteRecovery } from "./write-recovery.js";
 import type { NormalizedProblem } from "./envelope.js";
 import { accessLimitHint } from "./reviews.js";
@@ -32,6 +34,7 @@ import type { OperationLogger } from "./log/types.js";
  * Support history is private customer correspondence.
  */
 function privateBodies(method: string, path: string): boolean {
+  path = path.replace(/^\/api\/projects\/[^/]+\//, "/api/");
   return (method === "POST" && path === "/api/invitations") || /^\/api\/(?:webhooks|support|fleet-links|triggers)(?:\/|$)/.test(path)
     || /^\/api\/applications\/[^/]+\/kv-webhooks(?:\/|$)/.test(path);
 }
@@ -213,7 +216,6 @@ export class ApiClient {
     };
     if (this.token) {
       headers.authorization = `Bearer ${this.token}`;
-      if (this.projectId) headers["screenrig-project"] = this.projectId;
     }
     if (idempotent) {
       headers["idempotency-key"] = idempotencyKey ?? this.idempotencyKey;
@@ -222,6 +224,8 @@ export class ApiClient {
   }
 
   async call(req: Omit<TransportRequest, "headers"> & { headers?: Record<string, string>; idempotent?: boolean; idempotencyKey?: string; recoverySupersede?: string; recoveryQuery?: Record<string, string>; retainRecoveryOnRefusal?: boolean }): Promise<TransportResponse> {
+    // Legacy single-project credentials retain their flat defaults during compatibility.
+    req = projectRequest(req, accessClaims(this.token)?.projects ? this.projectId : undefined);
     const { idempotent, idempotencyKey, recoverySupersede, recoveryQuery, retainRecoveryOnRefusal, ...transportRequest } = req;
     if (idempotencyKey !== undefined && !isValidIdempotencyKey(idempotencyKey)) {
       throw usageError("Invalid per-request idempotency key.");
@@ -336,6 +340,8 @@ export class ApiClient {
   }
 
   async download(req: Omit<TransportRequest, "headers"> & { headers?: Record<string, string> }): Promise<TransportDownloadResponse> {
+    // Legacy single-project credentials retain their flat defaults during compatibility.
+    req = projectRequest(req, accessClaims(this.token)?.projects ? this.projectId : undefined);
     let headers = this.headers(false, req.headers);
     const keys = queryKeys(req.query);
     const span = this.logger.startHttp({

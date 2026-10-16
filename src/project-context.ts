@@ -69,7 +69,7 @@ export async function cacheProjectContexts(
     for (const context of verified) {
       const id = context.project.id;
       const view = current.projects?.[id] ? projectConfigFor(current, { ...resolved, projectId: id })
-        : current.project_id === id || (!current.project_id && options.credential && current.token === options.credential) ? current : { ...current, project_id: id, token: undefined, screen_provision: undefined, browser_setup: undefined, media_generate: undefined, pending_writes: undefined };
+        : current.project_id === id || (!current.project_id && options.credential && current.token === options.credential) ? current : { ...current, project_id: id, screen_provision: undefined, browser_setup: undefined, media_generate: undefined, pending_writes: undefined };
       current = withProjectConfig(current, { ...resolved, projectId: id }, {
         ...view,
         project_name: context.project.name,

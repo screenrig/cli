@@ -1,7 +1,7 @@
 import { type Command, Argument } from "commander";
-import { cardId, cardDataKey } from "../cards.js";
-import { handleCardsList, handleCardsShow, handleCardDataGet, handleCardDataPut, handleCardDataList, handleCardDataDelete, handleFeedsGet } from "../commands.js";
-import { revision } from "./options.js";
+import { cardId, cardUid, cardDataKey } from "../cards.js";
+import { handleCardCreate, handleCardList, handleCardShow, handleCardParams, handleCardDelete, handleCardInstanceDataGet, handleCardInstanceDataPut, handleCardsList, handleCardsShow, handleCardDataGet, handleCardDataPut, handleCardDataList, handleCardDataDelete, handleFeedsGet } from "../commands.js";
+import { positiveInteger, revision } from "./options.js";
 import { requireOptionGroup } from "./notes.js";
 import type { CommandActionBinder } from "./types.js";
 
@@ -13,6 +13,27 @@ export function registerCardsCommands(root: Command, bind: CommandActionBinder):
     .action(bind(handleCardsList));
   cards.command("show").description("Inspect static and dynamic properties, views, feed and an example placement")
     .argument("<id>", "Catalogue card id", cardId).action(bind(handleCardsShow));
+
+  const card = root.command("card").description("Create and manage built-in card instances");
+  card.command("create").description("Create a card instance in the selected project")
+    .requiredOption("--type <ID>", "Catalogue type from cards list", cardId)
+    .option("--major <N>", "Select a catalogue major version", positiveInteger("major"))
+    .requiredOption("--file <FILE>", "Read static params as a JSON object, or - for stdin")
+    .action(bind(handleCardCreate));
+  card.command("list").description("List card instances across all pages").action(bind(handleCardList));
+  card.command("show").description("Read a card instance by its global ID").argument("<id>", "Card instance ID (crd_...)", cardUid).action(bind(handleCardShow));
+  card.command("params").description("Replace a card instance's static params")
+    .argument("<id>", "Card instance ID (crd_...)", cardUid)
+    .requiredOption("--file <FILE>", "Read static params as a JSON object, or - for stdin").action(bind(handleCardParams));
+  card.command("delete").description("Delete a card instance that no playlist uses")
+    .argument("<id>", "Card instance ID (crd_...)", cardUid).action(bind(handleCardDelete));
+  const instanceData = card.command("data").description("Read and replace a card instance's dynamic data");
+  instanceData.command("get").description("Read dynamic data and its revision")
+    .argument("<id>", "Card instance ID (crd_...)", cardUid).action(bind(handleCardInstanceDataGet));
+  instanceData.command("put").description("Create or replace dynamic data")
+    .argument("<id>", "Card instance ID (crd_...)", cardUid)
+    .requiredOption("--file <FILE>", "Read a JSON object, or - for stdin")
+    .option("--expect-rev <REVISION>", "Require the current data revision (If-Match)", revision).action(bind(handleCardInstanceDataPut));
 
   const data = root.command("card-data").description("Read and write dynamic data for built-in cards");
   data.command("get").description("Read a card data document and its revision")

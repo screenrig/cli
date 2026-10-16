@@ -136,7 +136,7 @@ test("two CLI processes renewing one expired token rotate the family once", asyn
   const transport = withDiscovery(new FakeTransport()).on("POST", "/oauth/token", async (req) => {
     rotations += 1;
     assert.equal(form(req).get("grant_type"), "refresh_token");
-    assert.equal(form(req).get("project_id"), PROJECT);
+    assert.equal(form(req).get("projects"), PROJECT);
     await new Promise((resolve) => setTimeout(resolve, 80));
     return tokenResponse(renewed, next);
   });
@@ -332,7 +332,7 @@ test("screenrig login from a config holding a retired credential starts a new in
 
 test("enroll stores the oauth response shape as a grant", async () => {
   const h = await harness();
-  const pair = { access: access(), refresh: refresh(1) };
+  const pair = { access: access(), refresh: "opaque-enrollment-family" };
   const transport = new FakeTransport()
     .on("POST", "/api/enrollments", (req) => {
       assert.equal((req.body as { credential_format?: string }).credential_format, "oauth");
@@ -609,7 +609,7 @@ test("login from a signed-in installation extends its grant and selects the appr
     const stored = await h.read();
     assert.equal(stored?.project_id, OTHER_PROJECT);
     assert.equal(stored?.token, added);
-    assert.equal(stored?.projects?.[PROJECT]?.token, live);
+    assert.equal(stored?.projects?.[PROJECT]?.token, undefined);
     assert.equal(stored?.oauth?.refresh_token, config.oauth?.refresh_token, "extending a grant does not rotate its family");
   } finally {
     await h.done();
@@ -705,57 +705,172 @@ test("discovery that is missing or not JSON, and token answers that are not bear
   for (const body of [
     { access_token: access(), token_type: "mac", expires_in: 900 },
     { access_token: "opaque-token", token_type: "Bearer", expires_in: 900 },
-    { access_token: access(), token_type: "Bearer", refresh_token: "opaque", expires_in: 900 },
+    { access_token: access(), token_type: "Bearer", refresh_token: "", expires_in: 900 },
   ]) {
     const transport = withDiscovery(new FakeTransport()).on("POST", "/oauth/token", () => json(200, body));
     await assert.rejects(new OAuthClient(API, transport).refresh(refresh(1), { requestId: "r".repeat(43) }), (err: CliError) => err.problem.code === "unexpected_response");
   }
   const sent = withDiscovery(new FakeTransport()).on("POST", "/oauth/token", () => tokenResponse(access(), refresh(2)));
-  await new OAuthClient(API, sent).refresh(refresh(1), { requestId: "r".repeat(43), projectId: PROJECT });
+  await new OAuthClient(API, sent).refresh(refresh(1), { requestId: "r".repeat(43), projects: [PROJECT] });
   const call = sent.oauthCalls.find((item) => item.path === "/oauth/token")!;
   assert.equal(call.credential, true);
   assert.equal(call.headers?.["content-type"], "application/x-www-form-urlencoded");
-  assert.deepEqual([...form(call).keys()].sort(), ["client_id", "grant_type", "project_id", "refresh_token", "request_id"]);
+  assert.deepEqual([...form(call).keys()].sort(), ["client_id", "grant_type", "projects", "refresh_token", "request_id", "resource"]);
 });
 
-test("a deleted project is not a dead session: the sign-in stays and project use moves on", async () => {
-  const config = grantConfig({ projects: { [OTHER_PROJECT]: { project_name: "Lobby" } } });
-  const h = await harness(config);
-  const other = access({ project: OTHER_PROJECT });
-  const identity = access({ project: "" });
+test("project_required is a selection error and never asks for a grant", async () => {
+  const live = jwt({ sub: `agent:${AGENT}`, sid: "grt_AAAA", exp: NOW_S + 900, scope: "identity access:manage", projects: { [PROJECT]: ["content"], [OTHER_PROJECT]: ["reports"] } });
+  const h = await harness(grantConfig({ project_id: undefined, project_name: undefined, organization_name: undefined }, live));
+  const transport = new FakeTransport().on("GET", "/api/card-types", () => json(400, { code: "project_required", status: 400, title: "Select a project", next: { command: "screenrig login", reason: "wrong guidance" } }));
+  try {
+    const answer = await h.cli(["cards", "list"], transport);
+    const error = JSON.parse(answer.stdout).error;
+    assert.equal(error.code, "project_required");
+    assert.equal(error.next.command, "screenrig project list");
+    assert.match(error.next.reason, /select|Select/);
+    assert.doesNotMatch(answer.stdout, /login|enroll|grant/);
+    assert.equal(transport.oauthCalls.length, 0);
+  } finally { await h.done(); }
+});
+
+function subset(projects: string[], exp = NOW_S + 900): string {
+  return jwt({ sub: `agent:${AGENT}`, sid: "grt_AAAA", exp, scope: "access:manage identity", projects: Object.fromEntries(projects.map((id, index) => [id, index ? ["access:read", "reports"] : ["access:manage", "content"]])) });
+}
+
+test("one subset token serves global objects across projects without rotation or ambient headers", async () => {
+  const live = subset([PROJECT, OTHER_PROJECT]);
+  const h = await harness(grantConfig({}, live));
+  const transport = new FakeTransport().on("GET", "/api/cards/crd_OTHER", req => {
+    assert.equal(req.headers?.authorization, `Bearer ${live}`);
+    assert.equal(req.headers?.["screenrig-project"], undefined);
+    assert.equal(req.query, undefined);
+    return json(200, { id: "crd_OTHER", project_id: OTHER_PROJECT });
+  });
+  try {
+    const result = await h.cli(["card", "show", "crd_OTHER"], transport);
+    assert.equal(result.code, 0, result.stdout);
+    assert.equal(transport.calls.length, 1);
+    assert.equal(transport.oauthCalls.length, 0);
+    assert.equal(JSON.parse(result.stdout).context, undefined, "a global object must not inherit another project's context");
+  } finally { await h.done(); }
+});
+
+test("opaque refresh rotates one token subset with the same request ID beyond the replay interval", async () => {
+  const old = subset([PROJECT, OTHER_PROJECT], NOW_S - 10);
+  const original = grantConfig({ token_projects: [PROJECT, OTHER_PROJECT], oauth: { ...grantConfig().oauth!, refresh_token: "opaque-family-before" } }, old);
+  const h = await harness(original);
+  const next = subset([PROJECT, OTHER_PROJECT]);
+  const ids: string[] = [];
+  const transport = withDiscovery(new FakeTransport()).on("POST", "/oauth/token", req => {
+    assert.equal(form(req).get("refresh_token"), "opaque-family-before");
+    assert.equal(form(req).get("project_id"), null);
+    assert.equal(form(req).get("projects"), `${PROJECT} ${OTHER_PROJECT}`);
+    ids.push(form(req).get("request_id")!);
+    if (ids.length === 1) throw networkError("answer lost");
+    return tokenResponse(next, "opaque-family-after");
+  });
+  try {
+    await assert.rejects(h.session(transport).accessFor(PROJECT));
+    const pending = (await h.read())!;
+    pending.oauth!.refresh_request!.started_at = "2020-01-01T00:00:00Z";
+    await writeConfigAtomic(h.configPath, pending, h.fs);
+    assert.equal(await h.session(transport).accessFor(OTHER_PROJECT), next);
+    assert.equal(ids[0], ids[1]);
+    const saved = (await h.read())!;
+    assert.equal(saved.token, next);
+    assert.deepEqual(saved.token_projects, [PROJECT, OTHER_PROJECT]);
+    assert.equal(saved.oauth?.refresh_token, "opaque-family-after");
+    assert.ok(Object.values(saved.projects ?? {}).every(slot => !slot.token));
+  } finally { await h.done(); }
+});
+
+test("project token requests a consented subset; project directory retains in_token without granting access", async () => {
+  const live = subset([PROJECT]);
+  const selected = subset([OTHER_PROJECT]);
+  const h = await harness(grantConfig({}, live));
+  let rotations = 0;
   const transport = withDiscovery(new FakeTransport())
-    .on("POST", "/oauth/token", (req) => {
-      const project = form(req).get("project_id");
-      if (project === PROJECT) return json(400, { error: "invalid_grant", error_description: "the membership or project is no longer live" });
-      return project === OTHER_PROJECT ? tokenResponse(other, refresh(3)) : tokenResponse(identity, refresh(2), "access:manage identity");
-    })
-    .on("GET", "/api/projects", (req) => {
-      assert.equal(req.headers?.authorization, `Bearer ${identity}`);
-      return json(200, { projects: [{ project: { id: OTHER_PROJECT, name: "Lobby", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization" },
-        organization: { id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Example organization" } }] });
-    })
-    .on("GET", "/api/project", (req) => {
-      assert.equal(req.headers?.authorization, `Bearer ${other}`);
-      return projectBody(OTHER_PROJECT, "Lobby");
+    .on("GET", "/api/projects", () => json(200, { projects: [
+      { project: projectBody().body, organization: { id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Example organization" }, in_token: true },
+      { project: projectBody(OTHER_PROJECT, "Lobby").body, organization: { id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Example organization" }, in_token: false },
+    ] }))
+    .on("POST", "/oauth/token", req => {
+      rotations++;
+      assert.equal(form(req).get("projects"), OTHER_PROJECT);
+      return tokenResponse(selected, "next-opaque-refresh");
     });
   try {
-    const gone = await h.cli(["--json", "project", "show"], transport);
-    assert.equal(gone.code, ExitCode.NotFound, gone.stdout);
-    const error = (JSON.parse(gone.stdout) as { error: { code: string; next: { command: string } } }).error;
-    assert.equal(error.code, "project_unavailable");
-    assert.equal(error.next.command, "screenrig project list");
-    let stored = await h.read();
-    assert.ok(stored?.oauth?.refresh_token, "the sign-in is kept");
-    assert.equal(stored?.signed_out_at, undefined);
+    const listed = await h.cli(["project", "list"], transport);
+    assert.equal(JSON.parse(listed.stdout).data.projects[1].in_token, false);
+    const refused = await h.cli(["project", "use", OTHER_PROJECT], transport);
+    assert.equal(JSON.parse(refused.stdout).error.code, "project_not_in_token");
+    assert.equal(rotations, 0);
+    const token = await h.cli(["project", "token", "--projects", OTHER_PROJECT], transport);
+    assert.equal(token.code, 0, token.stdout);
+    assert.deepEqual(JSON.parse(token.stdout).data.projects, [OTHER_PROJECT]);
+    assert.equal((await h.read())?.token, selected);
+    assert.doesNotMatch(token.stdout, /eyJ|opaque/);
+  } finally { await h.done(); }
+});
 
-    const moved = await h.cli(["--json", "project", "use", OTHER_PROJECT], transport);
-    assert.equal(moved.code, 0, moved.stdout);
-    const shown = await h.cli(["--json", "project", "show"], transport);
-    assert.equal(shown.code, 0, shown.stdout);
-    stored = await h.read();
-    assert.equal(stored?.project_id, OTHER_PROJECT);
-    assert.equal(stored?.token, other);
-  } finally {
-    await h.done();
-  }
+test("subset selection rejects zero, duplicate and more than 64 IDs before network access", async () => {
+  const h = await harness(grantConfig({}, subset([PROJECT])));
+  const transport = withDiscovery(new FakeTransport());
+  try {
+    for (const ids of [[], [PROJECT, PROJECT], Array.from({length: 65}, (_, i) => `prj_${i}`)]) await assert.rejects(h.session(transport).selectProjects(ids));
+    assert.equal(transport.oauthCalls.length, 0);
+  } finally { await h.done(); }
+});
+
+
+test("a refused subset can be corrected without replacing the refresh family", async () => {
+  const h = await harness(grantConfig({}, subset([PROJECT])));
+  const token = subset([OTHER_PROJECT]);
+  let attempts = 0;
+  const ids: string[] = [];
+  const transport = withDiscovery(new FakeTransport()).on("POST", "/oauth/token", req => {
+    ids.push(form(req).get("request_id")!);
+    if (++attempts === 1) return oauthError("invalid_scope");
+    assert.equal(form(req).get("projects"), OTHER_PROJECT);
+    assert.equal(form(req).get("resource"), `${API}/api`);
+    return tokenResponse(token, "opaque-successor");
+  });
+  try {
+    await assert.rejects(h.session(transport).selectProjects(["prj_UNCONSENTED"]));
+    assert.equal((await h.read())?.oauth?.refresh_request, undefined);
+    assert.ok((await h.read())?.oauth?.refresh_token);
+    assert.equal(await h.session(transport).selectProjects([OTHER_PROJECT]), token);
+    assert.notEqual(ids[0], ids[1]);
+  } finally { await h.done(); }
+});
+
+
+test("retrying explicit subset selection replays one rotation without minting again", async () => {
+  const h = await harness(grantConfig({}, subset([PROJECT])));
+  const token = subset([OTHER_PROJECT]);
+  const ids: string[] = [];
+  const transport = withDiscovery(new FakeTransport()).on("POST", "/oauth/token", req => {
+    ids.push(form(req).get("request_id")!);
+    if (ids.length === 1) throw networkError("answer lost");
+    return tokenResponse(token, "opaque-replayed-successor");
+  });
+  try {
+    await assert.rejects(h.session(transport).selectProjects([OTHER_PROJECT]));
+    assert.equal(await h.session(transport).selectProjects([OTHER_PROJECT]), token);
+    assert.equal(ids.length, 2);
+    assert.equal(ids[0], ids[1]);
+    assert.equal((await h.read())?.oauth?.refresh_request, undefined);
+  } finally { await h.done(); }
+});
+
+
+test("project token requires explicit enrollment and sends nothing on a fresh installation", async () => {
+  const h = await harness();
+  const transport = new FakeTransport();
+  try {
+    const result = await h.cli(["project", "token", "--projects", PROJECT], transport);
+    assert.equal(result.code, ExitCode.Auth);
+    assert.equal(JSON.parse(result.stdout).error.code, "not_enrolled");
+    assert.equal(transport.calls.length + transport.oauthCalls.length, 0);
+  } finally { await h.done(); }
 });

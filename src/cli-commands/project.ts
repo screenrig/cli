@@ -1,12 +1,15 @@
 import type { CommandActionBinder } from "./types.js";
-import { handleProjectShow, handleProjectCapabilities, handleProjectRename, handleProjectList, handleProjectCreate, handleProjectUse, handleProjectMoves, handleProjectMove, handleProjectOwnerTransfer, handleProjectDeletionPreview, handleProjectDelete } from "../commands.js";
+import { handleProjectToken, handleProjectShow, handleProjectCapabilities, handleProjectRename, handleProjectList, handleProjectCreate, handleProjectUse, handleProjectMoves, handleProjectMove, handleProjectOwnerTransfer, handleProjectDeletionPreview, handleProjectDelete } from "../commands.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes } from "./notes.js";
-import { positiveInteger } from "./options.js";
+import { positiveInteger, projectSubset } from "./options.js";
 import { CREDIT_HELP } from "../help-text.js";
 
 export function registerProjectCommands(root: Command, bind: CommandActionBinder): void {
   const project = root.command("project").description("Create, select, and manage projects");
+  project.command("token").description("Request one access token for a subset of consented projects")
+    .requiredOption("--projects <IDS>", "Select 1–64 project IDs separated by commas or spaces", projectSubset)
+    .action(bind(handleProjectToken));
   project.command("list").description("List this identity's accessible projects by organization").action(bind(handleProjectList));
   project.command("create").description("Create and select a named project; defaults to the current or administered organization")
     .argument("<NAME>", "Project name, unique within its organization")

@@ -228,3 +228,11 @@ test("human rendering shows no HTTP status for a dropped connection or a client 
   assert.doesNotMatch(renderProblem(networkError("socket hang up").problem), /503/);
   assert.match(renderProblem(normalizeProblem({ code: "internal_error", status: 500, detail: "Boom" }, { status: 500 })), /\(internal_error\/500\)/);
 });
+
+
+test("project_required reports selection guidance on every transport", () => {
+  const problem = normalizeProblem({ code: "project_required", status: 400, hint: "Gain a grant", next: { command: "screenrig login", reason: "Gain a grant" } });
+  assert.equal(problem.next?.command, "screenrig project list");
+  assert.match(problem.hint!, /Select a project/);
+  assert.doesNotMatch(JSON.stringify(problem), /login|grant/);
+});

@@ -25,6 +25,11 @@ export function cardId(value: string): string {
   return value;
 }
 
+export function cardUid(value: string): string {
+  if (!/^(?:(?:stage|qa|development)_)?crd_[A-Za-z0-9_-]+$/.test(value)) throw usageError("Use a card instance ID (crd_...).");
+  return value;
+}
+
 export function cardDataKey(value: string): string {
   if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/.test(value) || value.startsWith("feed:")) {
     throw usageError("Card data key must follow the K/V key grammar and may not start with feed:.");
@@ -82,10 +87,11 @@ export async function validatePlaylistCards(client: ApiClient, playlist: { pages
   for (const [pageIndex, page] of playlist.pages.entries()) {
     for (const [index, item] of (page.primitives ?? []).entries()) {
       if (item.primitive !== "card") continue;
+      if (typeof item.card === "string" && /^(?:(?:stage|qa|development)_)?crd_/.test(item.card)) continue;
       const id = cardId(item.card);
       let card = cards.get(id);
       if (!card) {
-        card = (await client.call({ method: "GET", path: `/api/cards/${id}` })).body as CardDetails;
+        card = (await client.call({ method: "GET", path: `/api/card-types/${id}` })).body as CardDetails;
         cards.set(id, card);
       }
       if (item.major !== undefined && item.major !== card.major) continue;

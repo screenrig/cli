@@ -52,6 +52,7 @@ export interface AccessClaims {
   /** `client_id` on a service token: the service client. */
   clientId?: string;
   prj?: string;
+  projects?: Record<string, string[]>;
   sid?: string;
   sub?: string;
   scope: string[];
@@ -69,6 +70,7 @@ export function accessClaims(token: string | undefined): AccessClaims | undefine
     const scope = typeof payload.scope === "string" ? payload.scope.split(" ").filter(Boolean) : [];
     return {
       exp: payload.exp,
+      ...(payload.projects && typeof payload.projects === "object" && !Array.isArray(payload.projects) ? { projects: payload.projects as Record<string, string[]> } : {}),
       ...(typeof payload.prj === "string" && payload.prj ? { prj: payload.prj } : {}),
       ...(typeof payload.sid === "string" && payload.sid ? { sid: payload.sid } : {}),
       ...(typeof payload.sub === "string" ? { sub: payload.sub } : {}),
@@ -145,7 +147,7 @@ function tokenSet(response: TransportResponse): TokenSet {
   const accessToken = body?.access_token;
   const refreshToken = body?.refresh_token;
   if (!body || typeof accessToken !== "string" || !isSessionJwt(accessToken) || typeof body.token_type !== "string" || body.token_type.toLowerCase() !== "bearer"
-    || (refreshToken !== undefined && (typeof refreshToken !== "string" || !isSessionJwt(refreshToken)))) {
+    || (refreshToken !== undefined && (typeof refreshToken !== "string" || !refreshToken))) {
     throw unexpected(response.status, "The token response does not carry a bearer session JWT.");
   }
   const refreshExpiresAt = body.refresh_expires_at;
@@ -270,12 +272,13 @@ export class OAuthClient {
     return tokenSet(response);
   }
 
-  refresh(refreshToken: string, options: { requestId: string; projectId?: string }): Promise<TokenSet> {
+  refresh(refreshToken: string, options: { requestId: string; projects?: string[] }): Promise<TokenSet> {
     return this.grant({
       grant_type: "refresh_token",
+      resource: `${this.issuer}/api`,
       refresh_token: refreshToken,
       request_id: options.requestId,
-      ...(options.projectId ? { project_id: options.projectId } : {}),
+      ...(options.projects ? { projects: options.projects.join(" ") } : {}),
     });
   }
 

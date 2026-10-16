@@ -253,8 +253,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listAgentProjects
-      description: Lists only the identity’s active project memberships, with organization and owner context. Under an agent access
-        JWT, only those its grant was approved for.
+      description: Lists every active membership of the identity, with organization and owner context, including memberships omitted from this token or its grant's consent. Each entry marks in_token; discovery adds no authority and has no 64-project cap.
       security:
       - agentIdentityBearer: []
       - dashboardSession: []
@@ -2259,11 +2258,11 @@ paths:
     post:
       operationId: oauthToken
       description: >-
-        OAuth 2.0 token endpoint (RFC 6749 §3.2) for agent JWTs. grant_type refresh_token rotates a refresh JWT (RFC 9700): every use returns a new pair;
+        OAuth 2.0 token endpoint (RFC 6749 §3.2) for agent JWTs. grant_type refresh_token rotates an opaque refresh credential (RFC 9700): every use returns a new pair;
         a request_id (16 to 200 characters) makes a retry within 60 seconds return the same response, and any other reuse of a superseded refresh token
         revokes the whole family (invalid_grant). grant_type urn:ietf:params:oauth:grant-type:token-exchange (RFC 8693) with
         subject_token_type urn:screenrig:token-type:identity-credential or urn:screenrig:token-type:project-token answers unsupported_token_type: legacy
-        credentials are retired, and the installation signs in again with screenrig login. resource (RFC 8707) is https://api.<domain>/api or absent; project_id selects the project of a multi-project grant. A connected
+        credentials are retired, and the installation signs in again with screenrig login. resource (RFC 8707) is https://api.<domain>/api or absent; projects selects up to 64 consented project IDs. Omission selects all only when the set fits; otherwise the client must choose a subset. project_id selects one during the compatibility release. A connected
         app's grant has the single resource https://api.<domain>/mcp, which a refresh may omit. Clients are public (client_id only), or a connected
         app whose metadata declares private_key_jwt authenticates with client_assertion_type
         urn:ietf:params:oauth:client-assertion-type:jwt-bearer and a client_assertion (iss and sub its client_id, aud the issuer or this endpoint as
@@ -2303,6 +2302,7 @@ paths:
                 subject_token_type: { type: string, enum: ["urn:screenrig:token-type:identity-credential", "urn:screenrig:token-type:project-token"] }
                 scope: { type: string }
                 resource: { type: string, format: uri }
+                projects: { type: string, description: "Space- or comma-separated project IDs; omit for all consented projects up to the configured cap (default 64). Cannot be combined with project_id." }
                 project_id: { type: string }
       responses:
         '200':
@@ -2402,7 +2402,7 @@ paths:
   /oauth/revoke:
     post:
       operationId: oauthRevoke
-      description: RFC 7009 revocation. A refresh JWT, or an agent access JWT, issued to the client revokes its grant; the grant's access tokens are refused
+      description: RFC 7009 revocation. An opaque refresh credential (or a previous-release refresh JWT), or an agent access JWT, issued to the client revokes its grant; the grant's access tokens are refused
         within seconds. An unknown, expired or foreign token also answers 200. POST only, form-encoded.
       security: []
       requestBody:
@@ -2770,8 +2770,7 @@ paths:
         memberships, project and content. Repeating with the same cryptographically valid revoked bearer is a no-op success.
         Disconnecting the last active agent returns agent_lockout_risk unless allow_last_agent is explicit. Does not debit the
         API meter. An agent access JWT, Read only included, disconnects the agent from its token's project; the membership ends, the
-        project's consent leaves the agent's grants and every access token of the agent is refused within seconds (refresh for
-        the projects that remain). A retry with the same JWT after the disconnect is a no-op success.
+        project's consent leaves the agent's grants and that identity/project pair is cut off for older access tokens. Other projects in the token keep working. A retry with the same JWT after the disconnect is a no-op success.
       security:
       - revocableAgentBearer: []
       requestBody:
@@ -7184,12 +7183,12 @@ paths:
       x-rate-limit-admitted-response-headers:
       - RateLimit-Policy
       - RateLimit
-  /api/cards:
+  /api/card-types:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
     get:
       x-screenrig-access: read
-      operationId: listCards
+      operationId: listCardTypes
       description: >-
         Discover built-in cards from this environment's published catalogue, merged with the
         vendored floor. Refreshes and schema verification happen in the background; this route
@@ -7205,7 +7204,7 @@ paths:
                 $ref: '#/components/schemas/CardCatalogue'
         default:
           $ref: '#/components/responses/Problem'
-  /api/cards/{id}:
+  /api/card-types/{id}:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
     - name: id
@@ -7214,7 +7213,7 @@ paths:
       schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,39}$'}
     get:
       x-screenrig-access: read
-      operationId: getCard
+      operationId: getCardType
       description: >-
         The current major's self-contained JSON Schemas for placement params and card-data documents,
         feed schema, supported views and an example placement. Params marked dynamic come from the
@@ -7233,6 +7232,243 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/cards:
+    get:
+      operationId: listCards
+      x-screenrig-access: read
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Card resource
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                - next_cursor
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CardInstance'
+                  next_cursor:
+                    type:
+                    - string
+                    - 'null'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - name: project
+        in: query
+        schema:
+          type: string
+      - name: after
+        in: query
+        schema:
+          type: string
+    post:
+      operationId: createCard
+      x-screenrig-access: write
+      security:
+      - projectBearer: []
+      responses:
+        '201':
+          description: Card resource
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardInstance'
+        default:
+          $ref: '#/components/responses/Problem'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CardCreate'
+  /api/projects/{project_id}/cards:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      operationId: createProjectCard
+      x-screenrig-access: write
+      security:
+      - projectBearer: []
+      responses:
+        '201':
+          description: Card resource
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardInstance'
+        default:
+          $ref: '#/components/responses/Problem'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CardCreate'
+    get:
+      operationId: listCardsInProject
+      x-screenrig-access: read
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Card resource
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                - next_cursor
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CardInstance'
+                  next_cursor:
+                    type:
+                    - string
+                    - 'null'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters:
+      - name: project
+        in: query
+        schema:
+          type: string
+      - name: after
+        in: query
+        schema:
+          type: string
+  /api/cards/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      operationId: getCard
+      x-screenrig-access: read
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Card resource
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/CardInstance'
+                - $ref: '#/components/schemas/CardDetails'
+        default:
+          $ref: '#/components/responses/Problem'
+      description: A global card UID, or a deprecated catalogue type segment. The latter adds Deprecation and Warning headers
+        pointing to /api/card-types.
+    patch:
+      operationId: patchCard
+      x-screenrig-access: write
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Card resource
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardInstance'
+        default:
+          $ref: '#/components/responses/Problem'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - params
+              properties:
+                params:
+                  type: object
+                  additionalProperties: true
+    delete:
+      operationId: deleteCard
+      x-screenrig-access: write
+      security:
+      - projectBearer: []
+      responses:
+        '204':
+          description: Deleted
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/cards/{id}/data:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      operationId: getInstanceData
+      x-screenrig-access: read
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Card resource
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardDataEntry'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: putInstanceData
+      x-screenrig-access: write
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Card resource
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardDataEntry'
+        default:
+          $ref: '#/components/responses/Problem'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - document
+              additionalProperties: false
+              properties:
+                document:
+                  type: object
+                  additionalProperties: true
+      parameters:
+      - name: If-Match
+        in: header
+        schema:
+          type: string
+      - name: Idempotency-Key
+        in: header
+        schema:
+          type: string
   /api/card-data:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
@@ -8500,9 +8736,9 @@ paths:
       description: >-
         Creates a service client owned by the project with a name, capabilities (omitted means all six; each must be one
         the manager holds, else 403), access (read, the default, or manage), and a public JWK key (OKP Ed25519, EC P-256 or RSA of at least 2048 bits) and/or secret true. The
-        secret is returned once, here only. At most 50 live clients per project. Agents need the project capability and Manage; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
+        secret is returned once, here only. At most 50 live clients per project. Agents need identity scope, live identity Manage and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
       security:
-      - projectBearer: []
+      - agentIdentityBearer: []
       - dashboardSession: []
       requestBody:
         required: true
@@ -8546,9 +8782,9 @@ paths:
       operationId: updateServiceClient
       description: >-
         Renames a service client or changes its capabilities (within the manager's) or access. Narrowing either ends the
-        client's current tokens within seconds. Agents need the project capability and Manage; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
+        client's current tokens within seconds. Agents need identity scope, live identity Manage and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
       security:
-      - projectBearer: []
+      - agentIdentityBearer: []
       - dashboardSession: []
       parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -8574,9 +8810,9 @@ paths:
       x-screenrig-access: write
       operationId: addServiceClientKey
       description: >-
-        Registers a second public JWK (key in the body) for a zero-downtime rotation; a client holds at most two. Agents need the project capability and Manage; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
+        Registers a second public JWK (key in the body) for a zero-downtime rotation; a client holds at most two. Agents need identity scope, live identity Manage and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
       security:
-      - projectBearer: []
+      - agentIdentityBearer: []
       - dashboardSession: []
       parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -8602,9 +8838,9 @@ paths:
       x-screenrig-access: write
       operationId: removeServiceClientKey
       description: >-
-        Removes a key; the client's current tokens end within seconds. A client keeps at least one key or secret. Agents need the project capability and Manage; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
+        Removes a key; the client's current tokens end within seconds. A client keeps at least one key or secret. Agents need identity scope, live identity Manage and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
       security:
-      - projectBearer: []
+      - agentIdentityBearer: []
       - dashboardSession: []
       parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -8631,9 +8867,9 @@ paths:
       x-screenrig-access: write
       operationId: addServiceClientSecret
       description: >-
-        Generates a second secret, returned once, for a zero-downtime rotation; a client holds at most two. Agents need the project capability and Manage; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
+        Generates a second secret, returned once, for a zero-downtime rotation; a client holds at most two. Agents need identity scope, live identity Manage and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
       security:
-      - projectBearer: []
+      - agentIdentityBearer: []
       - dashboardSession: []
       parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -8659,9 +8895,9 @@ paths:
       x-screenrig-access: write
       operationId: removeServiceClientSecret
       description: >-
-        Removes a secret; the client's current tokens end within seconds. Agents need the project capability and Manage; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
+        Removes a secret; the client's current tokens end within seconds. Agents need identity scope, live identity Manage and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
       security:
-      - projectBearer: []
+      - agentIdentityBearer: []
       - dashboardSession: []
       parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -8689,9 +8925,9 @@ paths:
       operationId: revokeServiceClient
       description: >-
         Revokes a service client permanently: its keys and secret digests are deleted, the record stays for audit, and
-        its tokens end within seconds (propagation applied or pending). Agents need the project capability and Manage; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
+        its tokens end within seconds (propagation applied or pending). Agents need identity scope, live identity Manage and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
       security:
-      - projectBearer: []
+      - agentIdentityBearer: []
       - dashboardSession: []
       parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -9907,10 +10143,22 @@ paths:
       description: HTTPS apex browser-link origin
     get:
       operationId: getBrowserLinkSetupPage
-      description: Read-only no-JavaScript setup page authenticated by the owning browser-link cookie. It contains code/status
-        instructions only and never a provisioning URL or token.
+      parameters:
+      - name: code
+        in: query
+        required: false
+        schema: {type: string}
+        description: Public setup code for side-effect-free setup instructions; no cookie required.
+      - name: format
+        in: query
+        required: false
+        schema: {type: string, enum: [markdown]}
+      description: Read-only setup instructions. Without code, the owning browser-link cookie supplies status.
+        With code, returns public-only instructions, using generic 404 for invalid or expired codes.
+        Accept text/markdown or format=markdown selects Markdown for the public code form. No provisioning URL or token is returned.
       security:
       - browserLinkCookie: []
+      - {}
       responses:
         '200':
           description: Safe noindex setup HTML.
@@ -9940,265 +10188,6 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
-  /ABC-234:
-    servers:
-    - url: https://screenrig.ai
-      description: HTTPS apex browser-link origin
-    get:
-      operationId: getDashedBrowserLinkLocator
-      description: Representative dashed public handoff-code locator. Production accepts every canonical ambiguity-safe XXX-XXX
-        code. The route is side-effect-free and reveals only generic locator instructions. Accept text/markdown negotiates Markdown;
-        Link metadata identifies canonical HTML, the explicit .md alternate, and /llms.txt.
-      responses:
-        '200':
-          description: Public locator instructions.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                enum:
-                - no-store
-            Referrer-Policy:
-              schema:
-                type: string
-                enum:
-                - no-referrer
-            X-Robots-Tag:
-              schema:
-                type: string
-                enum:
-                - noindex, nofollow
-            Vary:
-              schema:
-                type: string
-                enum:
-                - Accept
-            Link:
-              schema:
-                type: string
-          content:
-            text/html:
-              schema:
-                type: string
-            text/markdown:
-              schema:
-                type: string
-        '404':
-          description: Generic unknown-or-expired locator response with no existence oracle.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                enum:
-                - no-store
-            Referrer-Policy:
-              schema:
-                type: string
-                enum:
-                - no-referrer
-            X-Robots-Tag:
-              schema:
-                type: string
-                enum:
-                - noindex, nofollow
-          content:
-            text/html:
-              schema:
-                type: string
-            text/markdown:
-              schema:
-                type: string
-  /ABC234:
-    servers:
-    - url: https://screenrig.ai
-      description: HTTPS apex browser-link origin
-    get:
-      operationId: getUndashedBrowserLinkLocator
-      description: Representative undashed public handoff-code locator equivalent to /ABC-234. The route is side-effect-free
-        and reveals only generic locator instructions.
-      responses:
-        '200':
-          description: Public locator instructions.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                enum:
-                - no-store
-            Referrer-Policy:
-              schema:
-                type: string
-                enum:
-                - no-referrer
-            X-Robots-Tag:
-              schema:
-                type: string
-                enum:
-                - noindex, nofollow
-            Vary:
-              schema:
-                type: string
-                enum:
-                - Accept
-            Link:
-              schema:
-                type: string
-          content:
-            text/html:
-              schema:
-                type: string
-            text/markdown:
-              schema:
-                type: string
-        '404':
-          description: Generic unknown-or-expired locator response with no existence oracle.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                enum:
-                - no-store
-            Referrer-Policy:
-              schema:
-                type: string
-                enum:
-                - no-referrer
-            X-Robots-Tag:
-              schema:
-                type: string
-                enum:
-                - noindex, nofollow
-          content:
-            text/html:
-              schema:
-                type: string
-            text/markdown:
-              schema:
-                type: string
-  /ABC-234.md:
-    servers:
-    - url: https://screenrig.ai
-      description: HTTPS apex browser-link origin
-    get:
-      operationId: getDashedBrowserLinkLocatorMarkdown
-      description: Side-effect-free explicit Markdown alias for the representative dashed public handoff-code locator. Production
-        also accepts the undashed .md form. It returns the same public-only instructions and generic no-oracle 404 policy as
-        the canonical locator.
-      responses:
-        '200':
-          description: Public locator Markdown instructions.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                enum:
-                - no-store
-            Referrer-Policy:
-              schema:
-                type: string
-                enum:
-                - no-referrer
-            X-Robots-Tag:
-              schema:
-                type: string
-                enum:
-                - noindex, nofollow
-            Vary:
-              schema:
-                type: string
-                enum:
-                - Accept
-            Link:
-              schema:
-                type: string
-          content:
-            text/markdown:
-              schema:
-                type: string
-        '404':
-          description: Generic unknown-or-expired locator response with no existence oracle.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                enum:
-                - no-store
-            Referrer-Policy:
-              schema:
-                type: string
-                enum:
-                - no-referrer
-            X-Robots-Tag:
-              schema:
-                type: string
-                enum:
-                - noindex, nofollow
-          content:
-            text/markdown:
-              schema:
-                type: string
-  /ABC-234/index.md:
-    servers:
-    - url: https://screenrig.ai
-      description: HTTPS apex browser-link origin
-    get:
-      operationId: getDashedBrowserLinkLocatorIndexMarkdown
-      description: Side-effect-free directory-style Markdown alias for the representative dashed public handoff-code locator.
-        Production also accepts the undashed /index.md form. Its canonical and alternate Link metadata point to /ABC-234 and
-        /ABC-234.md.
-      responses:
-        '200':
-          description: Public locator Markdown instructions.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                enum:
-                - no-store
-            Referrer-Policy:
-              schema:
-                type: string
-                enum:
-                - no-referrer
-            X-Robots-Tag:
-              schema:
-                type: string
-                enum:
-                - noindex, nofollow
-            Vary:
-              schema:
-                type: string
-                enum:
-                - Accept
-            Link:
-              schema:
-                type: string
-          content:
-            text/markdown:
-              schema:
-                type: string
-        '404':
-          description: Generic unknown-or-expired locator response with no existence oracle.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                enum:
-                - no-store
-            Referrer-Policy:
-              schema:
-                type: string
-                enum:
-                - no-referrer
-            X-Robots-Tag:
-              schema:
-                type: string
-                enum:
-                - noindex, nofollow
-          content:
-            text/markdown:
-              schema:
-                type: string
   /screen/native/pairing-sessions:
     servers:
     - url: https://play.screenrig.ai
@@ -14388,6 +14377,2918 @@ paths:
     servers:
     - url: https://screenrig.ai
       description: Backend-owned project dashboard origin
+  /api/projects/{project_id}/project/deletion-preview:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      parameters:
+      - name: project_id
+        in: query
+        description: Expected project ID; a changed selection is refused.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      operationId: previewProjectDeletionAgentInProject
+      description: Returns current confirmation details, deletion blockers and archived devices that will be disconnected.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDeletionPreview'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/project/owner:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    put:
+      x-screenrig-access: write
+      operationId: transferProjectOwnerAgentInProject
+      description: The owner transfers ownership to a verified existing project member; this grants no new membership.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectContext'
+        default:
+          $ref: '#/components/responses/Problem'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectOwnerTransfer'
+      parameters: []
+  /api/projects/{project_id}/project/move:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      x-screenrig-access: write
+      operationId: moveProjectAgentInProject
+      description: Owner-authorized move transfers screen occupancy and new usage to the destination payer atomically; historical
+        charges keep their payer.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectContext'
+        default:
+          $ref: '#/components/responses/Problem'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectMove'
+      parameters: []
+  /api/projects/{project_id}/project/moves:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      parameters:
+      - name: project_id
+        in: query
+        description: Expected project ID; a changed selection is refused.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      operationId: allowedProjectMovesAgentInProject
+      description: Lists destinations the owner administers or whose verified domain matches their verified email.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMoveDestinations'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/invitations:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      x-screenrig-access: write
+      operationId: createInvitationsInProject
+      description: Creates member or ad-buyer invitations. Email delivery never returns a credential. Link delivery is member-only
+        and returns one URL, including on exact idempotent replay within 24 hours. Email invitations expire after seven days;
+        links expire after 24 hours. Outstanding email invitations of the same kind, address, and project are reused.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvitationCreate'
+      responses:
+        '201':
+          description: Creates member or ad-buyer invitations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationCreated'
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+        default:
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+      x-rate-limit-policies:
+      - name: invitation-create-project
+        quota: 100
+        windowSeconds: 3600
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
+    get:
+      x-screenrig-access: read
+      operationId: listInvitationsInProject
+      description: Lists invitation lifecycle records for the current project, excluding sign-in resets. Recipient addresses
+        are visible to the owning project, which supplied them. Tokens and credential URLs are never listed.
+      security:
+      - projectBearer: []
+      parameters:
+      - name: kind
+        in: query
+        schema:
+          type: string
+          enum:
+          - project_member
+          - ad_buyer
+      - name: status
+        in: query
+        schema:
+          $ref: '#/components/schemas/InvitationStatus'
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Lists invitation lifecycle records for the current project, excluding sign-in resets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/project:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: getProjectInProject
+      description: The calling project. Does not debit the 1-credit API meter, so a zero-remaining project can still read remaining
+        and recover. After a successful project principal, authenticated /api JSON and problem responses include ScreenRig-Credits-Remaining,
+        ScreenRig-Credits-Reset, and ScreenRig-Credits-Included as whole credits. SSE, runtime, content, and unauthenticated
+        responses omit them.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Project
+          headers:
+            ScreenRig-Credits-Remaining:
+              $ref: '#/components/headers/ScreenRigCreditsRemaining'
+            ScreenRig-Credits-Reset:
+              $ref: '#/components/headers/ScreenRigCreditsReset'
+            ScreenRig-Credits-Included:
+              $ref: '#/components/headers/ScreenRigCreditsIncluded'
+            ScreenRig-Credits-Low:
+              $ref: '#/components/headers/ScreenRigCreditsLow'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+    patch:
+      x-screenrig-access: write
+      operationId: updateProjectInProject
+      description: "Renames the current project. Names contain 1\u201360 printable characters and no URL-looking text."
+      security:
+      - projectBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectPatch'
+      responses:
+        '200':
+          description: Renames the current project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+    delete:
+      x-screenrig-access: write
+      operationId: deleteProjectAgentInProject
+      description: Requires the target membership project capability, the current name and revision, zero non-archived screens,
+        no credit, reservations or debt in its own wallet and no live advertising. A negative balance run up under free or launch
+        terms does not block; deletion writes it off with a project_delete_writeoff ledger entry. Queues member notices and
+        uses the irreversible tombstone.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Project lifecycle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedProject'
+        default:
+          $ref: '#/components/responses/Problem'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectDeleteConfirmation'
+      parameters: []
+  /api/projects/{project_id}/applications:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listApplicationsInProject
+      description: Lists applications newest first, at most 500 per page. Names are labels and need not be unique; address an
+        application by id. next_cursor is the position of the last returned row while more rows remain; pass it back as after,
+        with the same filters, for the next page. next_cursor is null on the last page.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/ListAfter'
+      responses:
+        '200':
+          description: Applications
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: uploadApplicationInProject
+      x-rate-limit-policies:
+      - name: application-upload
+        quota: 10
+        windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
+      description: Streams one CLI-produced tar.gz directly into bounded durable staging. Metadata is carried in headers so
+        the archive is never base64-wrapped or materialized as JSON by the server.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/ArchiveSHA256'
+      - $ref: '#/components/parameters/ExpandedBytes'
+      - $ref: '#/components/parameters/FileCount'
+      - $ref: '#/components/parameters/SDKVersion'
+      - $ref: '#/components/parameters/ApplicationName'
+      - $ref: '#/components/parameters/ApplicationNameEncoded'
+      requestBody:
+        required: true
+        content:
+          application/gzip:
+            schema:
+              type: string
+              contentMediaType: application/gzip
+              contentEncoding: binary
+              maxLength: 104857600
+      responses:
+        '202':
+          description: Upload accepted
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationAccepted'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/playlists:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listPlaylistsV2InProject
+      description: Versioned playlist list that may expose adslot pages. The v1 list refuses a page holding an ad-bearing document
+        with version_required instead of filtering it. Pages like listPlaylists, newest first, at most 200 per page and fewer
+        once a page holds 8 MiB of stored playlists. next_cursor is the position of the last returned row while more rows remain;
+        pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/ListAfter'
+      responses:
+        '200':
+          description: Playlists with the adslot page union.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistV2List'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: review
+      operationId: createPlaylistV2InProject
+      description: Authoring entry for the adslot page union. At most 16 adslot pages, at least one ordinary page with no visibility,
+        and the reuse of one slot definition on different pages remain server checks. Reference resolution and DNS stay server
+        checks.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/ReviewNote'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaylistWriteV2'
+      responses:
+        '202':
+          $ref: '#/components/responses/PendingReview'
+        '201':
+          description: Playlist with its adslot pages.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistV2'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/screens:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listScreensInProject
+      description: Default list returns pairing_pending and active screens. Pass state=archived to list archived screens only.
+        Pass tag to list only screens whose tags contain that exact tag; untagged screens are omitted when the filter is present.
+        Screens are newest first, at most 500 per page. next_cursor is the position of the last returned row while more rows
+        remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the last page.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/ScreenListState'
+      - $ref: '#/components/parameters/ScreenTagQuery'
+      - $ref: '#/components/parameters/ListAfter'
+      responses:
+        '200':
+          description: Screens
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/project/browser-links/claim:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      x-screenrig-access: write
+      operationId: claimBrowserLinkInProject
+      x-rate-limit-policies:
+      - name: browser-link-claim-project
+        quota: 20
+        windowSeconds: 3600
+      - name: browser-link-claim-token
+        quota: 5
+        windowSeconds: 3600
+      - name: browser-link-claim-ip
+        quota: 10
+        windowSeconds: 3600
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
+      description: Claims one browser-link code for the authenticated project and atomically creates exactly one first pairing_pending
+        screen plus its existing browser provisioning grant. Enrollment remains project-only. The response is safe metadata
+        only and never contains a provisioning token, fragment URL, cookie, or proof.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserLinkClaimRequest'
+      responses:
+        '201':
+          description: Exact replay-safe fragment-free browser-link claim.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserLinkClaim'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '410':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/screens/pair:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      x-screenrig-access: write
+      operationId: pairScreenInProject
+      x-rate-limit-policies:
+      - name: pairing-claim-project
+        quota: 30
+        windowSeconds: 60
+      - name: pairing-claim-ip
+        quota: 30
+        windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
+      description: Claims one fleet-global six-character Player pairing session. Exact Idempotency-Key retries return the durable
+        original result without consuming quota again. The dashboard session claims into its current project with the same body,
+        Idempotency-Key, budgets and problems, except that its not_found for an unknown or already-claimed code names no CLI
+        command; it is a state change, so it follows the dashboard mutation rules, a shadow session without staff write mode
+        is refused, and the events the claim appends name the dashboard user.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PairScreen'
+      responses:
+        '201':
+          description: Durable pairing_pending screen claim.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PairingClaim'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '413':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/screens/provision:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      x-screenrig-access: costly
+      operationId: provisionScreenInProject
+      x-rate-limit-policies:
+      - name: screen-provision-project
+        quota: 20
+        windowSeconds: 3600
+      - name: screen-provision-token
+        quota: 5
+        windowSeconds: 3600
+      - name: screen-provision-ip
+        quota: 10
+        windowSeconds: 3600
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
+      description: Optional browser-only new-screen provisioning. Always creates one new quota-counted pairing_pending screen;
+        exact retries redeliver the same fragment token for ten minutes. Six-character pairing remains the default and only
+        recovery flow.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProvisionScreen'
+      responses:
+        '201':
+          description: New browser provisioning link.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenProvisioning'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '410':
+          $ref: '#/components/responses/Problem'
+        '413':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/screens/actions:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      x-screenrig-access: review
+      operationId: applyScreenActionsInProject
+      x-rate-limit-policies:
+      - name: screen-actions-project
+        quota: 30
+        windowSeconds: 60
+      - name: screen-actions-ip
+        quota: 60
+        windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
+      description: Applies one action to a selected fleet with no screen-count cap. Select unique screen_ids or a tag matching
+        active screens in creation order. The resolved selection is pinned before any mutation, stored in bounded chunks, and
+        kept for twenty-four hours under Idempotency-Key. Each step uses its single-screen mutation path, preserving revisions,
+        events, runtime signals and per-screen limits. A response contains one bounded page of results; matched, succeeded and
+        failed describe that page. HTTP 202 includes total, offset and next_cursor. Continue with the same selector, action
+        and Idempotency-Key, passing next_cursor as after. Honor Retry-After when present, including a page with zero results.
+        The response echoes Idempotency-Key, including a generated key when the caller omitted it; retain this key for continuations.
+        HTTP 200 finishes the selection. Answered pages replay exactly, including per-screen failures; interrupted steps replay
+        without repeating their effects. Large actions are paced against the existing 600-per-minute project budgets for reload,
+        toast, takeover, playlist schedules, reboot, display and display schedules; project exhaustion pauses the action instead
+        of refusing the fleet. Per-screen exhaustion fails that screen alone. Assign and tag changes have no message budget.
+        Partial failure is a normal result. All pages and retries under one key are one metered action. Requests use a bounded
+        byte payload; use a tag for a selection larger than the transport payload. A malformed selector or action is refused
+        before any screen is touched.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/ReviewNote'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      - name: after
+        in: query
+        required: false
+        description: next_cursor from the preceding result page. Reuse the original Idempotency-Key and request body.
+        schema:
+          type: string
+          pattern: ^[0-9]+$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenActionRequest'
+      responses:
+        '200':
+          description: Per-screen results. Partial success is a normal answer.
+          headers:
+            Idempotency-Key:
+              description: Retain this key for every continuation and exact retry.
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenActionResult'
+        '202':
+          description: More screens remain (continue with next_cursor and the same Idempotency-Key and body, honoring Retry-After),
+            or, with status pending_review, the action became a review under Propose access (docs/reviews.md). Only assign,
+            takeover, takeover_clear, set_playlist_schedule and clear_playlist_schedule become reviews; every other action is
+            insufficient_access for Propose.
+          headers:
+            Idempotency-Key:
+              description: Retain this key for every continuation and exact retry.
+              schema:
+                type: string
+            Retry-After:
+              schema:
+                type: integer
+                minimum: 1
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/ScreenActionResult'
+                - $ref: '#/components/schemas/ReviewPending'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '402':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/triggers:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listTriggersInProject
+      description: Lists the project's CAP alert triggers, oldest first (at most 20), each with its ingest url, username and
+        latest alert. The password is never returned here.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: The project's triggers.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerList'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+    post:
+      x-screenrig-access: write
+      operationId: createTriggerInProject
+      description: 'Creates a CAP alert trigger: one inbound URL an emergency notification system (Everbridge, Rave, Alertus,
+        IPAWS relays and other CAP 1.2 senders) posts alerts to, with HTTP Basic credentials. The answer is the only place the
+        password appears (with the rotate answer): store it in the sending system at once. target is a tag (every active screen
+        with it when the alert arrives) or up to 500 screen_ids. An alert takes every target screen with a default playlist
+        over until the alert''s <expires>, else for default_for_seconds (60 to 604800, default 3600); see POST /api/triggers/{id}/cap.
+        A project has at most 20 triggers (trigger_limit_reached). Appends trigger.created. An exact retry with the same Idempotency-Key
+        returns this same answer, password included, for twenty-four hours.'
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerWrite'
+      responses:
+        '201':
+          description: Created, with its url, username and password.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerWithPassword'
+        '400':
+          description: invalid_request, including a malformed tag or both tag and screen_ids.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: trigger_limit_reached or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/events:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listEventsInProject
+      description: 'Lists durable project events ascending by sequence. Paging is contiguous: pass the returned next_cursor
+        as after to continue exactly where the page stopped. next_cursor is the cursor of the last returned event while newer
+        events already exist, and null at the end of the history. limit defaults to 50 and accepts 1-200; a value outside that
+        range is refused with invalid_request and an errors[] member naming limit. Offset paging is not supported. source=log
+        lists the Player log instead: the condition reports Players send (runtime.reported) ascending by receipt time, filtered
+        by screen_id and severity over a window from to (default the last 24 hours, at most 31 days). Its cursors are opaque:
+        lg1_ or ev1_ by where the server keeps the Player log, so pass back the one a page returned; a cursor of the other kind
+        is refused with invalid_request naming the field. Player log records have no sequence, are not on GET /stream/project
+        and are not delivered to webhooks. A record is acknowledged when the Player log queue accepts it and is kept for the
+        project''s event retention. A poll with the last cursor and the default window follows the log. Player log records are
+        not in the default (source=project) list. screen_id, from and to are refused with invalid_request unless source is log.
+        Both sources take resource_id, type and severity (a minimum), combined with each other and with paging; a Player log
+        record is a runtime.reported record whose resource is its screen, so a resource_id that is not that screen or a type
+        that excludes runtime.reported answers an empty page. before (or order=desc) pages newest first: next_cursor is then
+        the cursor of the oldest returned item and passed back as before continues to older items. Without from, a newest-first
+        source=log page reaches past the default 24 hours to the oldest record the project''s event retention keeps, at most
+        31 days below the page''s upper edge per request. A newest-first source=log page may hold fewer than limit records,
+        even none, with a next_cursor; null still ends it, at the end of the retained log.'
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/AfterCursor'
+      - $ref: '#/components/parameters/EventBeforeCursor'
+      - $ref: '#/components/parameters/EventOrder'
+      - $ref: '#/components/parameters/EventListLimit'
+      - $ref: '#/components/parameters/EventSource'
+      - $ref: '#/components/parameters/EventResourceID'
+      - $ref: '#/components/parameters/EventTypeFilter'
+      - $ref: '#/components/parameters/EventLogScreen'
+      - $ref: '#/components/parameters/EventLogSeverity'
+      - $ref: '#/components/parameters/EventLogFrom'
+      - $ref: '#/components/parameters/EventLogTo'
+      responses:
+        '200':
+          description: Durable events (source=project) or Player log records (source=log)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/project/capabilities:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: getProjectCapabilitiesInProject
+      description: The calling project's plan, independent advertiser/screens flags with their revision, and the derived effective
+        capability set. Never reflects a client claim; an unknown plan fails closed as forbidden.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Project capabilities.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectCapabilities'
+        '403':
+          description: forbidden - the project plan is not in the catalog.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+  /api/projects/{project_id}/billing/balance:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: getBillingBalanceInProject
+      description: The calling project's source-aware balance snapshot. All millicredit amounts are canonical decimal strings.
+        It is a snapshot, not authority to pay; rails_available is false while card, tax and cash-out rail are unavailable.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Balance snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingBalance'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+  /api/projects/{project_id}/billing/statement:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: getBillingStatementInProject
+      description: Stable cursor pagination over immutable posted journal entries for the calling project. Holds are not posted
+        entries. Corrections link to the original event instead of rewriting it. There is no arbitrary grant or payout mutation
+        on this surface.
+      security:
+      - projectBearer: []
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: Statement page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingStatement'
+        '400':
+          description: invalid_request - limit is out of range.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/billing/usage:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: getBillingUsageInProject
+      description: The calling project's use of its monthly allowance (10 GB bandwidth, 1 GB-month storage, and 10,000 API requests,
+        billed project stream events and webhook delivery attempts) for one UTC month. A project paying for itself reads its
+        own pool. A project another payer pays for shares that payer's pool with the payer's other projects; it reads its own
+        share, and payer names the payer. The payer's pool total stays on the payer's billing reads.
+      security:
+      - projectBearer: []
+      parameters:
+      - name: period
+        in: query
+        required: false
+        schema:
+          type: string
+          pattern: ^[0-9]{4}-[0-9]{2}$
+        description: UTC month in YYYY-MM form; defaults to the current month.
+      responses:
+        '200':
+          description: Project allowance usage.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectBillingUsage'
+        '400':
+          description: invalid_request - period is not a UTC month in YYYY-MM form.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/advertising/network:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: getAdvertisingNetworkInProject
+      description: The calling seller's one network, including its resolved ScreenRig serving fee. Sellers cannot change that
+        fee.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Network.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingNetwork'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+    post:
+      x-screenrig-access: write
+      operationId: createAdvertisingNetworkInProject
+      description: Creates the calling seller's one network if absent. Requires screens=true. Idempotent; repeating returns
+        the same network.
+      security:
+      - projectBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdvertisingNetworkCreate'
+      responses:
+        '200':
+          description: Network.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingNetwork'
+        '403':
+          description: forbidden - the project lacks screen capability or has an unknown plan.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+  /api/projects/{project_id}/advertising/network/rate:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      x-screenrig-access: write
+      operationId: setAdvertisingDefaultRateInProject
+      description: Sets the seller's project default rate per 15 seconds of completed playback. A change that alters an accepted
+        campaign's effective rate pauses that whole campaign with price_change_pending; a masked or no-op change does not. If-Match
+        carries the network revision.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdvertisingRate'
+      responses:
+        '200':
+          description: Updated network.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingNetwork'
+        '412':
+          description: revision_conflict - If-Match is stale.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/advertising/inventory:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listAdvertisingInventoryInProject
+      description: The calling seller's opted-in inventory.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Inventory.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingInventoryList'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+  /api/projects/{project_id}/advertising/slots:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listAdvertisingSlotsInProject
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Slots.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingSlotList'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+    post:
+      x-screenrig-access: write
+      operationId: createAdvertisingSlotInProject
+      description: Creates a reusable seller slot. Images are 5-30 seconds and videos at most the platform ceiling of 120 seconds.
+        Ads are always muted.
+      security:
+      - projectBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdvertisingSlotWrite'
+      responses:
+        '201':
+          description: Slotslot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingSlot'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+  /api/projects/{project_id}/advertising/memberships:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listAdvertisingMembershipsInProject
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Memberships.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingMembershipList'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+  /api/projects/{project_id}/advertising/networks:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listAdvertisingJoinedNetworksInProject
+      description: Networks the calling advertiser currently belongs to, with the scope and review policy it was granted. Screen
+        count is not a guaranteed impression count.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Joined networks.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingJoinedNetworkList'
+        '403':
+          description: forbidden - the project lacks the advertiser flag.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+  /api/projects/{project_id}/advertising/creatives:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listAdvertisingCreativesInProject
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Creatives.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingCreativeList'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+    post:
+      x-screenrig-access: contribute
+      operationId: createAdvertisingCreativeInProject
+      description: Binds one ready owned media revision to an immutable creative. Does not copy bytes, re-upload, or re-charge
+        generation. Unknown or non-ready media is rejected.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdvertisingCreativeCreate'
+      responses:
+        '201':
+          description: Creative.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingCreative'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/advertising/campaigns:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listAdvertisingCampaignsInProject
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Campaigns.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingCampaignList'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+    post:
+      x-screenrig-access: contribute
+      operationId: createAdvertisingCampaignInProject
+      description: Creates a draft campaign. Drafts hold no money, reserve nothing, and authorize no delivery. Activation requires
+        an explicitly accepted quote.
+      security:
+      - projectBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdvertisingCampaignDraft'
+      responses:
+        '201':
+          description: Draft campaign.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingCampaign'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+  /api/projects/{project_id}/advertising/reviews:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listAdvertisingReviewsInProject
+      description: Creative versions submitted to the calling seller for review. A seller sees only exact submitted creative,
+        never the buyer's library.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Reviews.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingReviewList'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+  /api/projects/{project_id}/advertising/reports/spend:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: getAdvertisingSpendInProject
+      description: Buyer-scoped spend and delivery counts for one campaign. Amounts are decimal mcr strings. It never exposes
+        the seller's income, bank status, or project-wide usage.
+      security:
+      - projectBearer: []
+      parameters:
+      - name: campaign_id
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Spend report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingSpendReport'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/advertising/reports/delivery:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: getAdvertisingDeliveryInProject
+      description: Seller-scoped gross, serving fee and net for one window, with its own delivery evidence. It never exposes
+        the buyer's wallet or other networks. Only authorized completed-play evidence establishes billable delivery. The window
+        is at most 92 days; a wider window is invalid_request. When it holds more than 5000 settlements the response sets truncated,
+        totals and counts still cover all of them and rows lists only the earliest 5000.
+      security:
+      - projectBearer: []
+      parameters:
+      - name: from
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date-time
+      responses:
+        '200':
+          description: Delivery report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingDeliveryReport'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/playback:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listPlaybackAggregatesInProject
+      x-rate-limit-policies:
+      - name: playback-export-project
+        quota: 30
+        windowSeconds: 60
+      - name: playback-export-ip
+        quota: 60
+        windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
+      description: Daily playback aggregates. JSON returns at most 200 rows and is not rate limited. format=csv (or Accept text/csv
+        without application/json) streams every matching row inside day_from to day_to (inclusive UTC days; defaults day_to
+        today and day_from 30 days earlier; at most 366 days, else invalid_request) as CSV with a fixed header row (PlaybackAggregateCsv);
+        only the CSV form spends the playback-export-project (30 per minute) and playback-export-ip (60 per minute) budgets.
+        Either form is one metered API request. Responses carry Vary Accept.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/PlaybackScreenID'
+      - $ref: '#/components/parameters/PlaybackMediaID'
+      - $ref: '#/components/parameters/PlaybackDay'
+      - $ref: '#/components/parameters/PlaybackDayFrom'
+      - $ref: '#/components/parameters/PlaybackDayTo'
+      - $ref: '#/components/parameters/PlaybackFormat'
+      responses:
+        '200':
+          description: Daily playback aggregates for the calling project, images and videos alike. One row per screen, media,
+            and UTC day. Newest days first. Identifiers filter the caller's own rows and are never a cross-project lookup.
+          headers:
+            Vary:
+              schema:
+                type: string
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybackAggregateList'
+            text/csv:
+              schema:
+                $ref: '#/components/schemas/PlaybackAggregateCsv'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/playback/plays:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listPlaybackPlaysInProject
+      x-rate-limit-policies:
+      - name: playback-export-project
+        quota: 30
+        windowSeconds: 60
+      - name: playback-export-ip
+        quota: 60
+        windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
+      description: 'Per-play records: one row per accepted playback.media_started (or legacy playback.video_started) and one
+        row per accepted playback.application_started (release_id set, media fields empty) of the calling project, oldest first
+        by received_at, ties by insertion. from (inclusive) and to (exclusive) bound received_at; to defaults to now, from to
+        24 hours before to, and the range is at most 31 days (invalid_request otherwise). The newest 5 seconds are not returned
+        yet: the effective to is at most now minus 5 seconds (settle lag), so a live tail never skips a row that commits behind
+        its cursor. screen_id, media_id, playlist_id (the playlist the start was shown from), and tag (a screen tag the screen
+        carried when the play was received) filter. A playlist_id page may hold fewer than limit rows, even none, with a next_cursor
+        when a long stretch of plays of other playlists was scanned; null still ends the range. JSON is a page of at most limit
+        rows (default 200, at most 1000) with next_cursor, null at the end of the range; pass it back as cursor with the same
+        filters. order=desc (or before) pages newest first within the same range: next_cursor is then the cursor of the oldest
+        returned row, null at the start of the range, and is passed back as before (exclusive) with the same filters; order=asc
+        with before is refused with invalid_request naming order, and cursor with a newest-first page naming cursor. A newest-first
+        page may hold fewer than limit rows, even none, with a next_cursor; null still ends it. A later page never skips a row
+        that existed when the earlier page was read and does not repeat one, except that a start the Player re-sent after an
+        unacknowledged report (the same play_id, received a moment later) can appear again on a later page; the CSV stream lists
+        it once. format=csv (or Accept text/csv without application/json) streams every play from cursor to the end of the range
+        as CSV (PlaybackPlayCsv), newest first below before with order=desc; limit is refused with CSV. Metering is per request:
+        every JSON page costs one API request credit, while one CSV stream of the whole range costs one. Every plays request
+        (page or stream) spends the playback-export-project (30 per minute) and playback-export-ip (60 per minute) budgets.
+        A stream bounds each write (15 seconds) and ends when the client disconnects; if it fails after the 200 header the connection
+        is aborted, so an export that reads to a clean end is complete. Responses carry Vary Accept. Plays are kept for the
+        plan''s event retention (30 days is the shipped floor; plan-based retention uses the plan''s own 7- or 90-day window).'
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/PlaysFrom'
+      - $ref: '#/components/parameters/PlaysTo'
+      - $ref: '#/components/parameters/PlaybackScreenID'
+      - $ref: '#/components/parameters/PlaybackMediaID'
+      - $ref: '#/components/parameters/PlaysPlaylistID'
+      - $ref: '#/components/parameters/PlaysTag'
+      - $ref: '#/components/parameters/PlaysCursor'
+      - $ref: '#/components/parameters/PlaysOrder'
+      - $ref: '#/components/parameters/PlaysBefore'
+      - $ref: '#/components/parameters/PlaysLimit'
+      - $ref: '#/components/parameters/PlaybackFormat'
+      responses:
+        '200':
+          description: A page of plays, or the CSV stream.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+            Vary:
+              schema:
+                type: string
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybackPlayList'
+            text/csv:
+              schema:
+                $ref: '#/components/schemas/PlaybackPlayCsv'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/playback/totals:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: getPlaybackTotalsInProject
+      description: 'Play totals of the calling project over inclusive UTC days, read from the daily rollups: by=day returns
+        one row per day with plays (screen_id or media_id narrows it to one screen or media), by=screen and by=media rank the
+        busiest screens or media (top, at most 100), and by=screen_day returns the day series of the top screens (top at most
+        10). day_to defaults to today (UTC) and day_from to 29 days before it. A day series spans at most 366 days (92 when
+        narrowed to a screen or media); a ranking at most 92. Counts include every start the project has recorded, including
+        those stored before play rollups existed. Rollups follow ingestion by up to about 21 minutes. truncated is true when
+        a ranking was built from slices of a window too large for one read: it covers the best keys of each slice. Not rate
+        limited. One metered API request.'
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/PlaybackTotalsBy'
+      - $ref: '#/components/parameters/PlaybackTotalsDayFrom'
+      - $ref: '#/components/parameters/PlaybackTotalsDayTo'
+      - $ref: '#/components/parameters/PlaybackScreenID'
+      - $ref: '#/components/parameters/PlaybackMediaID'
+      - $ref: '#/components/parameters/PlaybackTotalsTop'
+      responses:
+        '200':
+          description: Totals of the requested grouping.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybackTotals'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/health/trend:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: getHealthTrendInProject
+      description: "The project's fleet health by UTC hour: how many screens reported, and how many of them were hot (at or\
+        \ above 80 \xB0C), had a disconnected display, or were crashing (3 or more crashes in 24 hours). from (inclusive) and\
+        \ to (exclusive) default to the last 24 hours, at most 93 days; a page holds at most limit rows (default 100, at most\
+        \ 500) with next_cursor, null at the end. Hours follow reports by up to about 5 minutes."
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/SeriesFrom'
+      - $ref: '#/components/parameters/SeriesTo'
+      - $ref: '#/components/parameters/SeriesLimit'
+      - $ref: '#/components/parameters/SeriesCursor'
+      responses:
+        '200':
+          description: A page of hourly fleet health.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthTrend'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/uptime/daily:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: getProjectUptimeInProject
+      description: Daily availability of the project's screens over inclusive UTC days (defaults and range as GET /api/screens/{id}/uptime).
+        Each row sums the online and offline seconds of the screens with a recorded state that day; coverage is the share of
+        those screens' day with a recorded state. Intervals count when they end, so today's row covers intervals that ended
+        so far; the live online count is in the dashboard summary.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/UptimeDayFrom'
+      - $ref: '#/components/parameters/UptimeDayTo'
+      responses:
+        '200':
+          description: Daily uptime rows, oldest first.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectUptime'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/card-types:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listCardTypesInProject
+      description: Discover built-in cards from this environment's published catalogue, merged with the vendored floor. Refreshes
+        and schema verification happen in the background; this route never calls the edge bucket. Each entry lists its current
+        copy and views and every served major.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Built-in card catalogue, ordered by id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardCatalogue'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+  /api/projects/{project_id}/card-data:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listCardDataInProject
+      description: Lists the project's card data documents, at most 200 in ascending key order. next_cursor is the last returned
+        key; pass it back as after for the next page, null when there are no more. Card data documents hold the dynamic properties
+        of card placements (menu sections, ticker items, KPI tiles); the placement's data key names one.
+      security:
+      - projectBearer: []
+      parameters:
+      - name: after
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Card data documents
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardDataList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/media:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listMediaInProject
+      description: Lists ready media newest first, at most 1000 per page. next_cursor is the position of the last returned row
+        while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the
+        last page.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/MediaTagQuery'
+      - $ref: '#/components/parameters/MediaPrimitiveQuery'
+      - $ref: '#/components/parameters/ListAfter'
+      responses:
+        '200':
+          description: Media
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaList'
+  /api/projects/{project_id}/media/generations:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      x-screenrig-access: costly
+      operationId: createMediaGenerationInProject
+      description: 'Generate one still image from a prompt, store it as ready private project media, and return a MediaGeneration
+        object on the original POST. The handler waits for the vendor still and does not return a pollable Operation. The response
+        is MediaGeneration: the ready Media object plus usage (quality, credits, usd). It never includes image bytes, b64_json,
+        object keys, signed URLs, vendor URLs, vendor cost, vendor tokens, or the deployment model name. The prompt is customer
+        bytes and is not echoed. Before the prompt reaches the image vendor the server appends fixed framing requirements to
+        it: the artwork must fill the frame edge to edge, and no television, monitor, screen, display, bezel, frame, border,
+        mounting, stand, wall, room, device mockup, drop shadow, or photograph of an installed sign may be depicted, and any
+        wording in the caller''s prompt describing where the sign will hang or what device will show it is treated as placement
+        metadata rather than subject matter. Decorative rules and borders inside the design itself remain available. The caller''s
+        prompt is never rewritten or stripped and is stored unchanged. Idempotency-Key replays the same MediaGeneration. Clients
+        do not PUT or commit generated bytes. The stored rendition is lossy WebP (quality 90) at the exact aspect size with
+        a 1080 px short edge (16:9 is 1920x1080, 9:16 1080x1920, 1:1 1080x1080, 4:3 1440x1080, 3:4 1080x1440, 3:2 1620x1080,
+        2:3 1080x1620); the vendor canvas is centre-cropped and resampled to that size. The filename is distinctive per generation,
+        generated-16x9-1a2b3c4d.webp, with the suffix taken from the media id. Fetch the bytes with GET /api/media/{id}/content.
+        Own-gen-then-upload remains valid. Remaining that cannot cover twice the vendor cost of the still, rounded up to whole
+        credits, after the intro floor (negative 1,000,000 credits until 2027-01-01, then zero) returns payment_required, except
+        SCREENRIG__ENVIRONMENT=development. Admission before the vendor call requires remaining above that floor by the per-quality
+        minimum: 200 credits for low, 800 for medium, 2000 for high. Empty selected-vendor configuration returns not_ready.
+        Project bearer only. One in-flight generation per project; further parallelism is rate_limited.'
+      x-rate-limit-policies:
+      - name: media-generate-admission
+        quota: 6
+        windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaGenerationRequest'
+      responses:
+        '201':
+          description: Ready still stored as private project media, with billed usage (quality, credits, usd). Fetch original
+            bytes with GET /api/media/{id}/content. GET /api/media/{id} remains Media-only. Never image bytes, b64_json, object
+            keys, signed URLs, vendor URLs, vendor cost, or the prompt.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaGeneration'
+        '402':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/media-folders:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listMediaFoldersInProject
+      description: Lists every media folder in the project, at most 1000, ordered by name. Folders organize the media library,
+        and a playlist selector by:folder plays the files directly inside one folder. A folder's parent_id is null at the library
+        root. Build the tree from parent_id; a file's folder is Media.folder_id.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Media folders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaFolderList'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+    post:
+      x-screenrig-access: contribute
+      operationId: createMediaFolderInProject
+      description: Creates one media folder at the library root (parent_id null or absent) or inside parent_id. Names are trimmed,
+        hold 1 to 100 Unicode characters with no controls, are not "." or "..", and may repeat. A project holds at most 1000
+        folders (quota_exceeded) nested at most 10 deep (invalid_request). Emits media.folder_created.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaFolderCreate'
+      responses:
+        '201':
+          description: Created folder.
+          headers:
+            ETag:
+              description: Quoted folder revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaFolder'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/media/move:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      x-screenrig-access: contribute
+      operationId: moveMediaInProject
+      description: Moves files (media_ids) and folders (folder_ids) into one folder (folder_id), or to the library root when
+        folder_id is null, in one all-or-nothing request of at most 1000 ids. Every id must exist (not_found). A folder cannot
+        move into itself or a folder inside it, and the move must keep every folder within 10 levels (invalid_request). Items
+        already in the destination are left as they are; each moved file and folder advances its revision. Moving files changes
+        what the by:folder selectors of their old and new folders play, from each screen's next selector resolve; moving a folder
+        changes no folder's own files. Emits media.moved. A Propose credential's move makes each moved file pending and queues
+        its media review, and approved playlists' selectors resolve it by the folder it was approved with until a person approves
+        the change (docs/reviews.md).
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaMove'
+      responses:
+        '200':
+          description: How many files and folders moved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaMoveResult'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/media/uploads:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      x-screenrig-access: contribute
+      operationId: createMediaUploadInProject
+      x-rate-limit-policies:
+      - name: media-upload-admission
+        quota: 120
+        windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - name: project_id
+        in: query
+        required: false
+        description: 'Required with dashboardSession: the project where the file was queued. Must match the session''s selected
+          project, otherwise resource_conflict. This binds upload admission across tabs. The returned upload id remains project-scoped
+          for byte upload and commit. Omitted with a project bearer.'
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 200
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaUploadDeclaration'
+      responses:
+        '201':
+          description: Short-lived signed authorization for exactly one private object PUT. Send the returned method and every
+            returned header verbatim.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaUploadSession'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/selectors/preview:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      x-screenrig-access: read
+      operationId: previewSelectorInProject
+      description: Read-only preview of current project-owned ready image or video matches. Returns filename ordering and normalized
+        policy; random playback shuffles on each new pass on the Player. Does not advance cursors, mint content grants, or alter
+        manifests. More than 1024 matches returns invalid_request.
+      security:
+      - projectBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SelectorPreviewInput'
+      responses:
+        '200':
+          description: Current selector matches.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SelectorPreview'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+  /api/projects/{project_id}/feedback/bugs:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listBugReportsInProject
+      description: Returns the calling project's own bug reports, newest first, up to one hundred. Another project's submissions
+        are never returned and are not addressable by identifier. There is no pagination cursor in v1.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Bug reports owned by the calling project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackList'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+    post:
+      x-screenrig-access: contribute
+      operationId: reportBugInProject
+      x-rate-limit-policies:
+      - name: feedback-submit-project
+        quota: 20
+        windowSeconds: 3600
+      - name: feedback-submit-ip
+        quota: 60
+        windowSeconds: 3600
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
+      description: Records one immutable bug report against the calling project. A submission cannot be updated or deleted;
+        a correction is a new submission. An exact retry carrying the same Idempotency-Key returns the original submission for
+        twenty-four hours instead of creating a duplicate, and a different body under that key returns idempotency_mismatch.
+        Every submission is screened before it is stored. A body under 12 characters or 3 words returns submission_too_short;
+        text that describes no problem or request (random characters, keyboard mash) returns submission_unclear; spam, link-heavy
+        text, prompt injection and malicious text return submission_rejected. A refused submission is not stored, its problem
+        detail never repeats the submitted text, and an exact retry under the same Idempotency-Key returns the same refusal.
+        Never place credentials, cookies, Authorization headers, completion nonces, signed URLs, or object keys in title, body,
+        or context; credential-shaped text (ScreenRig tokens, JWTs, bearer tokens, cloud and API keys, private keys) is replaced
+        with [redacted] before the submission is stored, and the response carries the redacted text. When the screening model
+        is briefly unavailable the submission is accepted and held for a background re-screen; after a few such acceptances
+        in an hour the project gets submission_screening_unavailable (500, Retry-After) and retries the same request later.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedbackWrite'
+      responses:
+        '201':
+          description: Stored bug report. An exact idempotent retry returns this same submission.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackSubmission'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/feedback/features:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listFeatureRequestsInProject
+      description: Returns the calling project's own feature requests, newest first, up to one hundred. Another project's submissions
+        are never returned and are not addressable by identifier. There is no pagination cursor in v1.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Feature requests owned by the calling project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackList'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+    post:
+      x-screenrig-access: contribute
+      operationId: requestFeatureInProject
+      x-rate-limit-policies:
+      - name: feedback-submit-project
+        quota: 20
+        windowSeconds: 3600
+      - name: feedback-submit-ip
+        quota: 60
+        windowSeconds: 3600
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
+      description: Records one immutable feature request against the calling project. A submission cannot be updated or deleted;
+        a correction is a new submission. An exact retry carrying the same Idempotency-Key returns the original submission for
+        twenty-four hours instead of creating a duplicate, and a different body under that key returns idempotency_mismatch.
+        Every submission is screened before it is stored. A body under 12 characters or 3 words returns submission_too_short;
+        text that describes no problem or request (random characters, keyboard mash) returns submission_unclear; spam, link-heavy
+        text, prompt injection and malicious text return submission_rejected. A refused submission is not stored, its problem
+        detail never repeats the submitted text, and an exact retry under the same Idempotency-Key returns the same refusal.
+        Never place credentials, cookies, Authorization headers, completion nonces, signed URLs, or object keys in title, body,
+        or context; credential-shaped text (ScreenRig tokens, JWTs, bearer tokens, cloud and API keys, private keys) is replaced
+        with [redacted] before the submission is stored, and the response carries the redacted text. When the screening model
+        is briefly unavailable the submission is accepted and held for a background re-screen; after a few such acceptances
+        in an hour the project gets submission_screening_unavailable (500, Retry-After) and retries the same request later.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedbackWrite'
+      responses:
+        '201':
+          description: Stored feature request. An exact idempotent retry returns this same submission.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackSubmission'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/service-clients:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listServiceClientsInProject
+      description: 'The project''s service clients (spec: a customer''s server, script or CI job owned by the project), newest
+        first, live and revoked, with their public keys, secret ids and usage; never a secret or its digest. Needs the project
+        capability.'
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: The service client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceClientList'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+    post:
+      x-screenrig-access: write
+      operationId: createServiceClientInProject
+      description: Creates a service client owned by the project with a name, capabilities (omitted means all six; each must
+        be one the manager holds, else 403), access (read, the default, or manage), and a public JWK key (OKP Ed25519, EC P-256
+        or RSA of at least 2048 bits) and/or secret true. The secret is returned once, here only. At most 50 live clients per
+        project. Agents need identity scope, live identity Manage and a live organization admin role; a person uses the dashboard session with project_id and a fresh
+        proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token
+        is refused 403.
+      security:
+      - agentIdentityBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceClientChange'
+      responses:
+        '201':
+          description: The service client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceClientResult'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+  /api/projects/{project_id}/fleet-links:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listFleetLinksInProject
+      description: Lists the project's fleet links, oldest first (at most 50). Below effective Manage each url is empty and
+        url_redacted is true, since the URL creates screens.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: The project's fleet links.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FleetLinkList'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+    post:
+      x-screenrig-access: write
+      operationId: createFleetLinkInProject
+      description: 'Creates a fleet link: one Player URL (https://play.<domain>/player/#fleet=<secret>) that turns every device
+        opening it into its own screen in this project, without a pairing code. Put it in a device manager, such as a Google
+        Admin console kiosk app. Each new screen gets the link''s tags and playlist, and a label from the device (its administrator
+        asset ID, then location), else the next default label. A Player that already holds a screen never makes another: its
+        key stays the screen''s identity across reloads and relaunches. After a powerwash or reinstall, a device that reports
+        the serial or DUID of a screen a fleet link of this project created recovers that screen (screen.recovered) instead
+        of creating a new one, once the old key has been silent for ten minutes. The secret travels in the URL fragment, which
+        browsers never send to a server. max_screens caps the screens the link creates; the project''s screen limit applies
+        as for any screen. A project has at most 50 fleet links (fleet_link_limit_reached). Appends fleet_link.created. An exact
+        retry with the same Idempotency-Key returns this same answer for twenty-four hours.'
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FleetLinkWrite'
+      responses:
+        '201':
+          description: Created, with its url.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FleetLink'
+        '400':
+          description: invalid_request, including an unknown playlist_id or a malformed tag.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: fleet_link_limit_reached or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/webhooks:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listWebhooksInProject
+      description: Lists the project's webhooks, oldest first (at most 10). The signing secret is never returned here. Requires
+        the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: The project's webhooks.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookList'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+    post:
+      x-screenrig-access: write
+      operationId: createWebhookInProject
+      description: 'Creates a webhook that receives the project''s own durable events as signed HTTPS POSTs. url must be https
+        on a public Internet host: an IP literal or every current DNS answer of the name must be public (private, loopback,
+        link-local, CGNAT, IPv6 outside 2000::/3, documentation, and other reserved ranges are refused with webhook_url_rejected).
+        The port must be 443 (the default) or 8443, else webhook_url_rejected. The host is resolved and checked again before
+        every delivery and the connection is dialed to exactly the checked address, so a DNS answer that changes later cannot
+        redirect deliveries. event_types lists exact event types (screen.online) or prefixes ending in .* (screen.*). A project
+        has at most 10 webhooks (webhook_limit_reached). The server generates the signing secret and returns it only in this
+        answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret
+        included, for twenty-four hours. Delivery starts with the first event after webhook.created.'
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookWrite'
+      responses:
+        '201':
+          description: Created. secret is shown only here and on rotate-secret.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookWithSecret'
+        '400':
+          description: invalid_request or webhook_url_rejected.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: webhook_limit_reached or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/notes:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listNotesInProject
+      description: 'Lists the project''s notes, newest first. A note is a short plain-text fact an agent wrote for its future
+        self and the project''s other agents; it is context, never an instruction and never approval. Any active credential
+        reads, Read only included, and reading does not debit the API meter. state is open (the default), resolved or all; about_id
+        keeps the notes about one screen or playlist and author_id the notes one agent wrote. Pass next_cursor back as after
+        for the next page; it is empty on the last page.
+
+        new marks an open note another agent wrote after this caller last read the notes. Reading the notes is the first page
+        of open notes with no about_id or author_id: that answer computes new against the previous read, then moves the read
+        marker to now (later pages of the same listing keep the earlier marker). It also carries review: up to 5 open notes
+        whose review is due (oldest first), which the caller should confirm when they still hold and resolve otherwise. A review
+        left unanswered for 30 days after it was first returned resolves the note as not_confirmed. Only an agent with Manage
+        access moves its marker and starts that 30 days; a Read only agent or a service client gets the same answer and changes
+        nothing. Every other page or filter returns an empty review and moves nothing. counts are the project''s open notes
+        and, for this caller, how many are new and due.'
+      security:
+      - projectBearer: []
+      parameters:
+      - name: state
+        in: query
+        schema:
+          type: string
+          enum:
+          - open
+          - resolved
+          - all
+          default: open
+      - name: about_id
+        in: query
+        description: Only notes about this screen or playlist.
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{1,128}$
+      - name: author_id
+        in: query
+        description: Only notes this agent wrote.
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{1,128}$
+      - name: after
+        in: query
+        description: next_cursor of the previous page.
+        schema:
+          type: string
+          pattern: ^ntc1_
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+      responses:
+        '200':
+          description: One page of notes, the notes to review and the counts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteList'
+        '400':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: contribute
+      operationId: addNoteInProject
+      description: 'Adds a note for the project''s agents: a fact another agent would act on, never a progress report, chat
+        or a secret. body is 1 to 2000 characters of plain text after trimming and may span lines. Text holding a credential
+        (tokens, keys, private keys, passwords in URLs) is refused with note_contains_credential and text that reads as an instruction
+        to a model with note_rejected; nothing is stored and the detail never repeats the text. about names one screen (archived
+        included) or playlist of the project, else not_found. ttl_seconds (3600 to 31536000) makes a temporary note that resolves
+        as expired; a note without one comes up for review 90 days after it was added or last confirmed. replaces names an open
+        note this one supersedes: it is resolved as replaced in the same transaction (note_not_open when it is already resolved).
+        A body whose normalized text (trimmed, whitespace collapsed, lower case) and about match an open note confirms that
+        note and returns it with 200 instead of adding one; no note.added event is appended. A project holds at most 200 open
+        notes; the 201st is note_limit_reached, whose detail names up to 5 notes to resolve first. Appends note.added (and note.resolved
+        for a replaced note) without the text. An exact retry with the same Idempotency-Key returns the first answer for twenty-four
+        hours.'
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteWrite'
+      responses:
+        '201':
+          description: Added.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '200':
+          description: The text matched an open note, which is confirmed and returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          description: note_not_open, note_limit_reached or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: note_contains_credential or note_rejected.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/support/status:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: supportStatusInProject
+      security:
+      - projectBearer: []
+      description: Availability and hours for any active project. chat_allowed is true for every active project, including Standard.
+      responses:
+        '200':
+          description: Support result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportStatus'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+  /api/projects/{project_id}/support/conversations:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listSupportConversationsInProject
+      security:
+      - projectBearer: []
+      description: Project conversations, newest first, at most 100. Staff unread counts are per authenticated person or agent.
+      parameters:
+      - in: query
+        name: before
+        schema:
+          type: string
+          pattern: ^sc_[A-Za-z0-9_-]+$
+        description: Conversation ID from the preceding page's next cursor.
+      responses:
+        '200':
+          description: Support result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportConversationList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: contribute
+      operationId: createSupportConversationInProject
+      security:
+      - projectBearer: []
+      description: Available on every plan. Screened before storage or Slack. An opening message under 8 characters or 3 words
+        returns submission_too_short; one that is not a question or problem returns submission_unclear; spam, link-heavy text,
+        prompt injection and unsafe text return submission_rejected. Rejected text is not retained or sent to Luna, and the
+        problem detail never repeats it. Credential-shaped text other than ScreenRig credentials (bearer tokens, cloud and API
+        keys, private keys) is replaced with [redacted] before storage; ScreenRig credential material returns invalid_request.
+        A new conversation starts one Slack thread; follow-ups stay in it. Requests with the same key replay for 24 hours, a
+        refusal included.
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupportWrite'
+      responses:
+        '201':
+          description: Support result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportSubmission'
+        '422':
+          description: 'The message was refused by screening: submission_too_short or submission_unclear (the opening message
+            only) or submission_rejected. The detail never repeats the text.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/reviews:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      x-screenrig-access: read
+      operationId: listReviewsInProject
+      description: 'The project''s reviews (docs/reviews.md): playlist and screen changes proposed under Propose access, and
+        for an ad network the creatives buyers submitted (kind ad_creative). Newest first, at most limit (default 50, at most
+        100) per page; pass next_cursor back as cursor with the same filters. state pending (the default), decided (every other
+        state) or all; kind narrows to one kind. A dashboard session reads every kind; a bearer reads the kinds its capabilities
+        cover (playlists for playlist_change, screens for screen_change, advertising for ad_creative), and a kind it cannot
+        read is an empty page. pending_count counts the pending reviews of every kind the caller sees.'
+      security:
+      - projectBearer: []
+      parameters:
+      - name: state
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - pending
+          - decided
+          - all
+      - name: kind
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - playlist_change
+          - screen_change
+          - ad_creative
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 200
+      responses:
+        '200':
+          description: One page of reviews.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/card-data/{key}:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema: {type: string}
+    - $ref: '#/components/parameters/ProjectTarget'
+    - name: key
+      in: path
+      required: true
+      description: Card data key. May not start with feed:.
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$'
+    get:
+      x-screenrig-access: read
+      operationId: projectScoped_getCardData
+      description: Returns the document and its revision. ETag is the revision, for If-Match on the next write.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Card data document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardDataEntry'
+        default:
+          $ref: '#/components/responses/Problem'
+    put:
+      x-screenrig-access: write
+      operationId: projectScoped_putCardData
+      description: >-
+        Creates or replaces a card data document. When card placements in the project's playlists bind the key, the
+        document must hold only each bound card's dynamic properties and validate against them; otherwise the write is
+        refused with card_data_invalid naming the card and the property path, and nothing changes. A key no placement
+        binds accepts any JSON object. Every string that begins with media: is a media reference, media:<id>, for a
+        card to draw (a photo); on any key it must name a ready, approved image in this project, at most 256 distinct
+        media per document, or the write is refused with card_media_invalid naming the property path and media_id.
+        Screens whose content reads the key may then fetch those media from GET /media/{media_id}. Screens showing a
+        placement that reads the key receive screen.card_data_changed and refetch it in place; the project log records
+        kv.updated with a card_data_entry resource, which never reaches a Player. Limits, quota, metering, revisions
+        and idempotency are the application K/V store's.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/OptionalIfMatch'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CardDataWrite'
+      responses:
+        '200':
+          description: Card data document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardDataEntry'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: projectScoped_deleteCardData
+      description: Deletes a card data document. A card bound to the key is hidden on glass until a document is written again.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/IfMatch'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/feeds/{family}:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema: {type: string}
+    - $ref: '#/components/parameters/ProjectTarget'
+    - name: family
+      in: path
+      required: true
+      description: The feed family.
+      schema:
+        type: string
+        enum: [weather, airquality, alerts, rates, crypto, earthquakes, headlines]
+    get:
+      x-screenrig-access: read
+      operationId: projectScoped_getFeed
+      description: >-
+        Reads a shared third-party feed document: the same document a built-in card placement with the same params reads
+        (docs/feeds.md). Query parameters normalize into the card's feed key, named by the ScreenRig-Feed-Key header:
+        weather, airquality and alerts take lat and lon (rounded to a 0.25 degree cell); earthquakes lat, lon and
+        radius_km (10 to 20000, default 500); rates base (an ECB reference currency, default EUR); crypto symbols
+        (CoinGecko ids or tickers, comma separated, at most 20) and currency (default usd); headlines url (an http or
+        https RSS or Atom URL). The request never calls the provider. 200 is the document (schema, fetchedAt,
+        attribution and the family's fields, as the cards contract defines them); its ETag is the sha256 of the bytes and
+        If-None-Match answers 304; Cache-Control max-age runs to the next scheduled fetch. 202 means no document yet:
+        the read registered demand, and the feed worker fetches the key within about a minute (Retry-After). An API read
+        keeps a key fetched for 24 hours. A project registers at most 50 new keys a day (rate_limited past it). A family
+        with no source on this deployment answers not_found.
+      security:
+      - projectBearer: []
+      parameters:
+      - { name: lat, in: query, required: false, schema: { type: number, minimum: -90, maximum: 90 } }
+      - { name: lon, in: query, required: false, schema: { type: number, minimum: -180, maximum: 180 } }
+      - { name: radius_km, in: query, required: false, schema: { type: number, minimum: 10, maximum: 20000 } }
+      - { name: base, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z]{3}$" } }
+      - { name: symbols, in: query, required: false, schema: { type: string, maxLength: 1024 } }
+      - { name: currency, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z]{2,8}$" } }
+      - { name: url, in: query, required: false, schema: { type: string, maxLength: 2048 } }
+      - { name: If-None-Match, in: header, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: Feed document
+          headers:
+            ETag: { schema: { type: string } }
+            ScreenRig-Feed-Key: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedDocument'
+        '202':
+          description: No document yet; the feed worker fetches the key on its next pass.
+          headers:
+            Retry-After: { schema: { type: integer } }
+            ScreenRig-Feed-Key: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedPending'
+        '304':
+          description: The document matches If-None-Match.
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/advertising/networks/{seller_project_id}/inventory:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema: {type: string}
+    - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: projectScoped_listAdvertisingJoinedInventory
+      description: Opted-in inventory and reusable slots inside the caller's membership. Never exposes the seller's screenshots,
+        playlists, or project-wide data.
+      security:
+      - projectBearer: []
+      - dashboardSession: []
+      parameters:
+      - name: seller_project_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Permitted inventory and slots.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingJoinedInventory'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+  /api/projects/{project_id}/agents/self:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema: {type: string}
+    - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: projectScoped_getCurrentAgent
+      description: Returns the agent installation linked to the calling project bearer plus connection_ready. A project is ready
+        when at least one member has a passkey or password. Identity status is diagnostic and does not debit the API meter.
+      security:
+      - projectBearer: []
+      responses:
+        '200':
+          description: Current agent and project connection readiness.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSelfStatus'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/agents/self/disconnect:
+    parameters:
+    - name: project_id
+      in: path
+      required: true
+      schema: {type: string}
+    - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: projectScoped_disconnectCurrentAgent
+      description: Revokes only the calling project membership and its project token, preserving the global identity, other
+        memberships, project and content. Repeating with the same cryptographically valid revoked bearer is a no-op success.
+        Disconnecting the last active agent returns agent_lockout_risk unless allow_last_agent is explicit. Does not debit the
+        API meter. An agent access JWT, Read only included, disconnects the agent from its token's project; the membership ends, the
+        project's consent leaves the agent's grants and that identity/project pair is cut off for older access tokens. Other projects in the token keep working. A retry with the same JWT after the disconnect is a no-op success.
+      security:
+      - revocableAgentBearer: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentDisconnectRequest'
+      responses:
+        '204':
+          description: Agent disconnected.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+        '401':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
 components:
   # Anonymous demos have their own cookie, independent of project/dashboard auth.
   headers:
@@ -14438,7 +17339,7 @@ components:
       schema: { type: string, enum: ["true", "false"] }
   parameters:
     ReviewNote: { name: Screenrig-Review-Note, in: header, required: false, schema: { type: string, maxLength: 280 }, description: "Optional proposer note on a review-class write, sent as percent-encoded UTF-8 (what JavaScript's encodeURIComponent writes). The server percent-decodes it (an invalid escape is 400 invalid_request); the decoded note is plain text, at most 280 characters after trimming, no control characters (else 400 invalid_request). Stored on the review when the write becomes one; ignored when it applies live." }
-    ProjectTarget: { name: ScreenRig-Project, in: header, required: false, schema: { type: string, minLength: 1, maxLength: 200 }, description: "Required with an identity bearer on every project route. Exactly one project identifier; no implicit current target. With a project bearer, must match its bound project." }
+    ProjectTarget: { name: ScreenRig-Project, in: header, required: false, deprecated: true, schema: { type: string }, description: "Deprecated for one release. Must be consistent with the JWT projects grants; adds Deprecation and Warning headers. No token exchange." }
     ResourceID: { name: id, in: path, required: true, schema: { type: string } }
     NoteID: { name: note_id, in: path, required: true, schema: { type: string, pattern: "^(?:(?:stage|qa|development)_)?nte_[A-Za-z0-9_-]{16,24}$" }, description: The id of one of the agent's notes. }
     WebhookDeliveryID: { name: delivery_id, in: path, required: true, schema: { type: string }, description: The id of one of the webhook's deliveries. }
@@ -14538,10 +17439,10 @@ components:
       in: header
       name: Authorization
       description: Temporary `ScreenRig-Agent-Connect <credential>` authority returned only by connection creation. It is never accepted as a project bearer, dashboard cookie, URL parameter, or runtime credential.
-    pendingAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Pending agent bearer accepted only for its own activation, plus the same active bearer for exact acknowledgement replay." }
-    revocableAgentBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active agent bearer, or the same cryptographically verified revoked bearer for an idempotent self-disconnect replay." }
-    agentIdentityBearer: { type: http, scheme: bearer, bearerFormat: sr_live_idt, description: "Global agent identity bearer. Project routes also require ScreenRig-Project and the target membership capabilities; it grants no global project permissions. Identity self-revocation accepts its same verified revoked credential for an exact replay. The identity-wide routes (GET and POST /api/projects, GET /api/organizations, PATCH /api/organizations/{org_id}) also accept an agent access JWT carrying the identity scope: listing needs identity access Read only, Propose or Manage, a change needs access:manage (else 403 insufficient_access), and its grant is rechecked inside the action. Under a JWT the project list holds only the projects the grant was approved for, and a created project joins the grant instead of delivering a project token; refresh with its project_id for a token. A JWT without the identity scope is 403 forbidden." }
-    projectBearer: { type: http, scheme: bearer, bearerFormat: sr_live, description: "Active project bearer, or identity bearer with ScreenRig-Project and an active target membership. Use revocableAgentBearer for self-disconnect retries after revocation. Every bearer route requires its area AgentCapability; GET reads in an area also accept reports, except the webhook list and get reads (GET /api/webhooks, GET /api/webhooks/{id}), which need the project capability because they return receiver URLs, and the project reads, agents/self, operations reads, feedback routes, and support routes accept any active credential. A credential lacking the route capability is refused 403 forbidden with detail 'This agent credential lacks the <name> capability.' after the command is recorded and before any credit is metered, so refusals are attributed and never billed. An agent access JWT (a session JWT of profile agent, audience screenrig:api:<env>, from /oauth/token or an enrollment in the oauth credential format) is accepted on the same routes: prj is its project, its scope carries the access level (access:read or access:manage) and the capabilities. An expired, revoked or foreign JWT is 401 with WWW-Authenticate Bearer error=invalid_token, which a client answers by refreshing once; a JWT whose revocation state cannot be read is 500 revocation_unavailable with Retry-After 5. The legacy sr_live_ project and identity bearers are retired: every one answers 401 credential_retired with next screenrig login, on these routes, on /mcp and on /adcp/mcp; the legacy enrollment shape and the legacy connection routes (POST /api/agent-connections, its stream, credential and cancel) answer 410 client_update_required." }
+    pendingAgentBearer: { type: http, scheme: bearer, bearerFormat: JWT, description: "Legacy pending-agent transport (retired); agent access JWT accepted only for its own activation, plus the same active bearer for exact acknowledgement replay." }
+    revocableAgentBearer: { type: http, scheme: bearer, bearerFormat: JWT, description: "Agent access JWT, or the same cryptographically verified revoked bearer for an idempotent self-disconnect replay." }
+    agentIdentityBearer: { type: http, scheme: bearer, bearerFormat: JWT, description: "Agent access JWT with identity scope. Project authority is carried by projects grants; ScreenRig-Project is a deprecated narrowing selector and never expands those grants. It grants no arbitrary organization permissions. Identity self-revocation accepts its same verified revoked credential for an exact replay. The identity-wide routes (GET and POST /api/projects, GET /api/organizations, PATCH /api/organizations/{org_id}) also accept an agent access JWT carrying the identity scope: listing needs identity access Read only, Propose or Manage, a change needs access:manage (else 403 insufficient_access), and its grant is rechecked inside the action. Under a JWT the project list holds only the projects the grant was approved for, and a created project joins the grant instead of delivering a project token; refresh with its project_id for a token. A JWT without the identity scope is 403 forbidden." }
+    projectBearer: { type: http, scheme: bearer, bearerFormat: JWT, description: "Short-lived agent or service JWT. projects maps global project IDs to access scopes and capabilities, checked in memory after signature and Valkey revocation checks. A preceding-release prj plus scope is accepted as one grant. Flat object-less operations default only for a one-project token; object IDs select their own project; lists accept project= to narrow. Refresh uses the opaque refresh token and current database memberships. Legacy opaque API bearers remain retired on this branch." }
     kvWebhookBearer: { type: http, scheme: bearer, bearerFormat: srkw, description: "A key/value webhook's own secret, the srkw_ secret create or rotate-secret returned. Accepted only by POST /api/applications/{application_id}/kv-webhooks/{webhook_id}/write; never a project credential." }
     kvWebhookBasic: { type: http, scheme: basic, description: "A key/value webhook's own credentials: username is the webhook id, password its srkw_ secret. Accepted only by POST /api/applications/{application_id}/kv-webhooks/{webhook_id}/write; never a project credential." }
     triggerBasic: { type: http, scheme: basic, description: "A CAP trigger's own credentials: username is the trigger id, password the srtg_ password create or rotate-secret returned. Accepted only by POST /api/triggers/{id}/cap; never a project credential." }
@@ -15107,6 +18008,10 @@ components:
       - project
       - organization
       properties:
+        in_token:
+          type: boolean
+          description: On the project directory, whether the current access token carries this project. Membership discovery does not add token authority.
+
         project:
           $ref: '#/components/schemas/Project'
         organization:
@@ -18255,10 +21160,10 @@ components:
     AgentCredentialCollection: { type: object, additionalProperties: false, required: [agent, credential_envelope, issuance_expires_at], properties: { agent: { $ref: "#/components/schemas/Agent" }, credential_envelope: { $ref: "#/components/schemas/AgentCredentialEnvelope" }, identity_credential_envelope: { $ref: "#/components/schemas/AgentCredentialEnvelope" }, issuance_expires_at: { type: string, format: date-time } } }
     AgentDisconnectRequest: { type: object, additionalProperties: false, properties: { allow_last_agent: { type: boolean, default: false, description: Explicitly accept loss of the last active agent bearer. A registered dashboard passkey remains independent administrative authority. } } }
     ApplicationRename: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string, minLength: 1, maxLength: 120, description: "Display name after trimming; controls and empty names are rejected." } } }
-    Application: { type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: { id: { type: string }, name: { type: string }, revision: { type: integer }, latest_ready_release: { type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the application's releases were last used on glass (playback.application_started). Absent until first use. Read-only." } } }
+    Application: { type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: { project_id: { type: string }, id: { type: string }, name: { type: string }, revision: { type: integer }, latest_ready_release: { type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the application's releases were last used on glass (playback.application_started). Absent until first use. Read-only." } } }
     ApplicationList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 500, items: { $ref: "#/components/schemas/Application" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     OperationAccepted: { type: object, additionalProperties: false, required: [id, release_id, operation_id], properties: { id: { type: string, description: Application identifier the upload was attributed to. }, release_id: { type: string, description: "Release identifier created by this upload. Poll the operation and pin this release into a playlist once the operation succeeds." }, operation_id: { type: string } } }
-    Operation: { type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: { id: { type: string }, kind: { type: string }, state: { type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the bounded upload body is still being durably staged. Terminal values are succeeded, failed, and cancelled." }, request_id: { type: string }, created_at: { type: string }, updated_at: { type: string }, result: { type: object, additionalProperties: true }, error: { type: object, additionalProperties: true } } }
+    Operation: { type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: { project_id: { type: string }, id: { type: string }, kind: { type: string }, state: { type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the bounded upload body is still being durably staged. Terminal values are succeeded, failed, and cancelled." }, request_id: { type: string }, created_at: { type: string }, updated_at: { type: string }, result: { type: object, additionalProperties: true }, error: { type: object, additionalProperties: true } } }
     PlaylistWrite:
       type: object
       additionalProperties: false
@@ -18272,6 +21177,7 @@ components:
       additionalProperties: false
       required: [id, name, revision, pages]
       properties:
+        project_id: { type: string }
         id: { type: string }
         name: { type: string }
         revision: { type: integer }
@@ -19414,6 +22320,7 @@ components:
       additionalProperties: false
       required: [id, public_id, label, revision, manifest_revision, manifest_upgrade, content_access_generation, state, online, created_at, updated_at]
       properties:
+        project_id: { type: string }
         id: { type: string }
         public_id: { type: string }
         label: { type: string }
@@ -20444,7 +23351,7 @@ components:
         credits: { type: integer, minimum: 1 }
         usd: { type: string }
     MediaUploadDeclaration: { type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: declaration never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. Remaining prepaid credit of zero rejects declare and commit with payment_required. An audio/mpeg (MP3) declaration is bounded at 178257920 bytes, 170 MiB, and a larger one is rejected the same way; read media_audio_bytes to preflight it. Read media_image_bytes from the capabilities document to preflight the image bound, and project_content_bytes there, or content_limit_bytes on the project, to know any custom storage ceiling. An optional tag is stored on the ready media object and is not redeclared at commit. An optional source_filename records the caller's original file name when the client transcoded the bytes before upload; the ready object's filename is then derived from it so distinct sources never collide (photo.png uploaded as photo.webp is stored as photo.png.webp, photo.jpg as photo.jpg.webp, and a source photo.webp stays photo.webp).", properties: { filename: { type: string, minLength: 1, maxLength: 255, description: "Name of the bytes being uploaded, as they will be sent." }, source_filename: { type: string, minLength: 1, maxLength: 255, description: "Caller's original file name before any client-side transcode. Bare file name only. Stored verbatim on the ready media as source_filename and used to derive filename." }, content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } } }
-    MediaFolder: { type: object, additionalProperties: false, required: [id, name, parent_id, revision, created_at, updated_at], description: "One media library folder. A playlist selector by:folder plays the ready files directly inside it, not those of its subfolders.", properties: { id: { type: string }, name: { type: string, minLength: 1, maxLength: 100 }, parent_id: { anyOf: [{ type: string }, { type: "null" }], description: "The folder holding this one; null at the library root." }, revision: { type: integer }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    MediaFolder: { type: object, additionalProperties: false, required: [id, name, parent_id, revision, created_at, updated_at], description: "One media library folder. A playlist selector by:folder plays the ready files directly inside it, not those of its subfolders.", properties: { project_id: { type: string }, id: { type: string }, name: { type: string, minLength: 1, maxLength: 100 }, parent_id: { anyOf: [{ type: string }, { type: "null" }], description: "The folder holding this one; null at the library root." }, revision: { type: integer }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
     MediaFolderList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/MediaFolder" } } } }
     MediaFolderCreate: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string, minLength: 1, maxLength: 100, description: "Trimmed; 1 to 100 Unicode characters, no controls, not . or .." }, parent_id: { anyOf: [{ type: string }, { type: "null" }], description: "The folder to create it in; null or absent for the library root." } } }
     MediaFolderPatch: { type: object, additionalProperties: false, minProperties: 1, properties: { name: { type: string, minLength: 1, maxLength: 100, description: "Trimmed; 1 to 100 Unicode characters, no controls, not . or .." }, parent_id: { anyOf: [{ type: string }, { type: "null" }], description: "Move the folder into this one; null for the library root." } } }
@@ -20459,7 +23366,7 @@ components:
     MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], description: "Declares only what the server can re-verify against the stored object byte for byte. Codec identity is not declared here: the server derives it from the container during asynchronous verification, so a client cannot assert a codec that drives player behaviour.", properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
     MediaUploadSession: { type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: { id: { type: string }, operation: { $ref: "#/components/schemas/Operation" }, upload_url: { type: string, format: uri }, method: { type: string, enum: [PUT] }, headers: { type: object, additionalProperties: { type: string }, description: Exact signed request headers; clients must send every field verbatim. }, expires_at: { type: string, format: date-time } } }
     MediaUploadSource: { type: object, additionalProperties: false, required: [filename, content_type, sha256, bytes], description: "Verified original upload identity when ingest normalized EXIF orientation. Read-only; use it to recognize retries. The ready media digest, size and type describe the normalized delivery bytes.", properties: { filename: { type: string }, source_filename: { type: string }, content_type: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer, minimum: 1 } } }
-    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { tags: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 10800000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, folder_id: { type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. Move files with POST /api/media/move." }, revision: { type: integer }, state: { type: string, enum: [ready] }, review_state: { type: string, enum: [pending], description: "pending: uploaded, or its tags or folder changed, by a Propose credential and waiting for a person's approval. Tag, folder and all selectors of approved playlists resolve it by the tags and folder it had when last approved (new media by none) until a person approves the change, so the change neither adds nor removes what they play. Absent means approved." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
+    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { project_id: { type: string }, tags: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 10800000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, folder_id: { type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. Move files with POST /api/media/move." }, revision: { type: integer }, state: { type: string, enum: [ready] }, review_state: { type: string, enum: [pending], description: "pending: uploaded, or its tags or folder changed, by a Propose credential and waiting for a person's approval. Tag, folder and all selectors of approved playlists resolve it by the tags and folder it had when last approved (new media by none) until a person approves the change, so the change neither adds nor removes what they play. Absent means approved." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
     MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/Media" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     SupportHours: {"type": "object", "additionalProperties": false, "required": ["timezone", "start", "end", "weekdays", "excludes_bc_holidays"], "properties": {"timezone": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "weekdays": {"type": "array", "items": {"type": "string"}}, "excludes_bc_holidays": {"type": "boolean"}}}
     SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean", "description": "This project can start or continue a conversation now. False where support chat is switched off in this environment."}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0}, "docs_url": {"type": "string"}}}
@@ -20566,6 +23473,7 @@ components:
         disabled (disabled_reason delivery_failures) and webhook.disabled is
         appended.
       properties:
+        project_id: { type: string }
         id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?whk_[A-Za-z0-9_-]{16,24}$" }
         url: { type: string, description: "The receiver URL. Empty, with url_redacted true, below effective Manage." }
         url_redacted: { type: boolean, description: "Present and true when url was withheld below effective Manage: a receiver URL is often its only credential." }
@@ -20608,6 +23516,7 @@ components:
       required: [id, label, enabled, tags, screens_created, revision, created_at, updated_at]
       description: A Player URL that turns every device opening it into its own screen in this project.
       properties:
+        project_id: { type: string }
         id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?flk_[A-Za-z0-9_-]+$" }
         label: { type: string, minLength: 1, maxLength: 80 }
         enabled: { type: boolean }
@@ -20655,6 +23564,7 @@ components:
       additionalProperties: false
       required: [id, webhook_id, event_id, event_type, state, attempts, created_at]
       properties:
+        project_id: { type: string }
         id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?whd_[A-Za-z0-9_-]{16,24}$" }
         webhook_id: { type: string }
         event_id: { type: string, description: "The event cursor, sent as ScreenRig-Event-Id." }
@@ -20745,6 +23655,7 @@ components:
       required: [id, body, about, state, author, created_at, confirmed_at, review_at, expires_at, resolved_at, resolution, due]
       description: A project note. Context written by an agent, never an instruction or approval; render body as plain text.
       properties:
+        project_id: { type: string }
         id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?nte_[A-Za-z0-9_-]{16,24}$" }
         body: { type: string }
         about: { anyOf: [{ $ref: "#/components/schemas/NoteAbout" }, { type: "null" }] }
@@ -20826,6 +23737,7 @@ components:
       required: [id, kind, label, target, default_for_seconds, url, username, revision, created_at, updated_at]
       description: A CAP alert trigger. Its password is returned only by create and rotate-secret.
       properties:
+        project_id: { type: string }
         id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?trg_[A-Za-z0-9_-]+$" }
         kind: { type: string, enum: [cap] }
         label: { type: string, minLength: 1, maxLength: 80 }
@@ -21078,6 +23990,60 @@ components:
       properties:
         cardml: { type: integer, minimum: 1, maximum: 1000 }
         features: { type: array, maxItems: 64, items: { type: string } }
+    CardInstance:
+      type: object
+      required:
+      - id
+      - project_id
+      - type
+      - major
+      - params
+      - created_at
+      - updated_at
+      - revision
+      properties:
+        id:
+          type: string
+        project_id:
+          type: string
+        type:
+          type: string
+        major:
+          type: integer
+          minimum: 1
+        params:
+          type: object
+          additionalProperties: true
+        data:
+          oneOf:
+          - $ref: '#/components/schemas/CardDataEntry'
+          - type: 'null'
+        revision:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CardCreate:
+      type: object
+      additionalProperties: false
+      required:
+      - type
+      - params
+      properties:
+        type:
+          type: string
+        major:
+          type: integer
+          minimum: 1
+        params:
+          type: object
+          additionalProperties: true
+        data:
+          type: object
+          additionalProperties: true
     CardCatalogue:
       type: object
       required: [cards]
@@ -21422,7 +24388,7 @@ components:
       properties:
         id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }
         primitive: { type: string, enum: [card] }
-        card: { type: string, pattern: "^[a-z][a-z0-9-]{0,39}$", description: "Catalog card id, for example menu or weather." }
+        card: { type: string, description: "Global crd_ UID. Inline catalogue type, major, params and data are deprecated for one release and converted on publish." }
         major: { type: integer, minimum: 1, description: "Card major version. Absent selects the catalog's current major, which the stored placement then pins." }
         params: { type: object, additionalProperties: true, description: "Static params, validated against the card's params schema. A string that begins with media: is a media reference, media:<id>." }
         data: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$", description: "Card data key holding the dynamic properties. May not start with feed:." }
@@ -21438,6 +24404,7 @@ components:
         id: { type: string }
         primitive: { type: string, enum: [card] }
         card: { type: string }
+        type: { type: string, description: "Server-resolved catalogue type of a UID placement." }
         major: { type: integer, minimum: 1 }
         params: { type: object, additionalProperties: true }
         data: { type: string }
@@ -22385,6 +25352,7 @@ x-problem-codes:
 - owner_cannot_leave
 - internal_error
 - invalid_request
+- project_required
 - unauthorized
 - credential_retired
 - client_update_required

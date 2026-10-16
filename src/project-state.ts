@@ -2,7 +2,7 @@ import { sameCredential, type ResolvedConfig, type ScreenRigConfig, type StoredP
 import { configError } from "./problems.js";
 
 const PROJECT_FIELDS = [
-  "token", "project_name", "organization_id", "organization_name",
+  "project_name", "organization_id", "organization_name",
   "screen_provision", "browser_setup", "media_generate", "pending_writes",
 ] as const;
 
@@ -28,7 +28,9 @@ export function projectConfigFor(config: ScreenRigConfig, resolved: ResolvedConf
     return { ...view, ...pickProjectState(entry) };
   }
   if (id && config.project_id !== id) {
-    throw configError("The command's project credential is no longer stored. Select the project again before retrying.");
+    const view = { ...config, project_id: id };
+    for (const field of PROJECT_FIELDS) delete view[field];
+    return view;
   }
   return config;
 }
@@ -70,10 +72,10 @@ export function selectProject(config: ScreenRigConfig, id: string): ScreenRigCon
     ? withProjectConfig(config, { projectId: config.project_id } as ResolvedConfig, config)
     : config;
   const slot = storedProjects(captured)[id];
-  if (!slot || (!slot.token && !config.identity_token)) {
+  if (!config.token && !config.identity_token) {
     throw configError("The selected project has no stored credential. Run project list and project use again.");
   }
   const selected = { ...captured, project_id: id };
   for (const field of PROJECT_FIELDS) delete selected[field];
-  return { ...selected, ...pickProjectState(slot) };
+  return { ...selected, ...pickProjectState(slot ?? {}) };
 }

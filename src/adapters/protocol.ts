@@ -1306,7 +1306,7 @@ export interface ScreenEffectivePlaylist {
 
 /** Backend-owned principals contracts mirrored from the reviewed snapshot. */
 export interface OrganizationSummary { id: string; name: string }
-export interface ProjectContext { organization: OrganizationSummary; project: Project; owner_user_id?: string }
+export interface ProjectContext { in_token?: boolean; organization: OrganizationSummary; project: Project; owner_user_id?: string }
 export interface ProjectContextList { projects: ProjectContext[] }
 export interface ProjectCreate { name: string; organization_id?: string; organization_name?: string }
 export type CreatedProject = ProjectContext;

@@ -163,7 +163,7 @@ export function normalizeProblem(
   const missingCapability = status === 403 && code === "forbidden"
     ? /^This agent credential lacks the (screens|content|playlists|advertising|reports|project) capability\.$/.exec(detail)?.[1]
     : undefined;
-  const hint = asString(rec?.hint) ?? (foreign ? foreignBodyHint(status) : undefined);
+  const hint = code === "project_required" ? "Select a project with project use ID or --project-id ID, then retry." : asString(rec?.hint) ?? (foreign ? foreignBodyHint(status) : undefined);
   const retryable = typeof rec?.retryable === "boolean" ? rec.retryable : undefined;
   const traceId = asString(rec?.trace_id);
   const limitedBy = rec?.access_limited_by === "project" || rec?.access_limited_by === "person" ? rec.access_limited_by : undefined;
@@ -183,7 +183,7 @@ export function normalizeProblem(
     ...(retryable !== undefined ? { retryable } : {}),
     errors,
     // The server's own next action always wins over local guidance.
-    next: asNext(rec?.next) ?? (missingCapability ? {
+    next: code === "project_required" ? { command: "screenrig project list", reason: "Select a project with project use ID or --project-id ID, then retry." } : asNext(rec?.next) ?? (missingCapability ? {
       command: "screenrig login",
       reason: `This sign-in lacks the ${missingCapability} capability. Sign in again and ask the person approving it in the dashboard to grant ${missingCapability}.`,
     } : undefined),

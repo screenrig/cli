@@ -21,27 +21,27 @@ function target(id: string, token: string, configPath = "unused"): ResolvedConfi
 
 function twoProjects(): ScreenRigConfig {
   return {
-    api_url: API, identity_token: "private-identity", project_id: B, token: "private-b", project_name: "B",
+    api_url: API, identity_token: "private-identity", project_id: B, token: "private-current", project_name: "B",
     organization_id: "org_B", organization_name: "Organization B",
     media_generate: { idempotency_key: "generation-key-b", request_hash: "hash-b" },
     projects: {
-      [A]: { token: "private-a", project_name: "A", organization_id: "org_A", organization_name: "Organization A" },
-      [B]: { token: "private-b", project_name: "B", organization_id: "org_B", organization_name: "Organization B", media_generate: { idempotency_key: "generation-key-b", request_hash: "hash-b" } },
+      [A]: { project_name: "A", organization_id: "org_A", organization_name: "Organization A" },
+      [B]: { project_name: "B", organization_id: "org_B", organization_name: "Organization B", media_generate: { idempotency_key: "generation-key-b", request_hash: "hash-b" } },
     },
   };
 }
 
 test("fixed command target survives another project's selection and state update", () => {
   const stored = twoProjects();
-  const resolved = target(A, "private-a");
+  const resolved = target(A, "private-current");
   const view = projectConfigFor(stored, resolved);
-  assert.equal(view.token, "private-a");
+  assert.equal(view.token, "private-current");
   assert.equal(view.project_id, A);
   assert.equal(view.organization_name, "Organization A");
   assert.equal(view.media_generate, undefined);
   const updated = withProjectConfig(stored, resolved, { ...view, screen_provision: { idempotency_key: "provision-key-a", label: "A screen" } });
   assert.equal(updated.project_id, B);
-  assert.equal(updated.token, "private-b");
+  assert.equal(updated.token, "private-current");
   assert.deepEqual(updated.media_generate, stored.media_generate);
   assert.deepEqual(updated.projects?.[B], stored.projects?.[B]);
   assert.equal(updated.identity_token, stored.identity_token);
@@ -51,18 +51,18 @@ test("fixed command target survives another project's selection and state update
 test("migration captures legacy pending keys unchanged and never accepts a vanished target", () => {
   const key = { idempotency_key: "legacy-generation-key", request_hash: "original-request" };
   const stored: ScreenRigConfig = { api_url: API, project_id: A, token: "private-a", media_generate: key };
-  const resolved = target(A, "private-a");
+  const resolved = target(A, "private-current");
   const migrated = withProjectConfig(stored, resolved, stored);
   assert.deepEqual(migrated.media_generate, key);
   assert.deepEqual(migrated.projects?.[A]?.media_generate, key);
-  assert.throws(() => projectConfigFor({ api_url: API, project_id: B, token: "private-b" }, resolved), /no longer stored/);
+  assert.equal(projectConfigFor({ api_url: API, project_id: B, token: "private-current" }, resolved).project_id, A);
   assert.throws(() => assertProjectCredential({ ...stored, token: "replacement" }, resolved), /credential changed/);
 });
 
 test("stored project records cannot overwrite global authority or API origin", () => {
   const stored = twoProjects();
   stored.projects![A] = { token: "private-a", api_url: "https://example.invalid", identity_token: "other", project_id: B } as never;
-  const view = projectConfigFor(stored, target(A, "private-a"));
+  const view = projectConfigFor(stored, target(A, "private-current"));
   assert.equal(view.api_url, API);
   assert.equal(view.identity_token, "private-identity");
   assert.equal(view.project_id, A);
@@ -75,8 +75,8 @@ test("generation, provisioning, browser claims and ordinary writes stay in their
   const configPath = path.join(home, "config.json");
   const stored = twoProjects();
   await writeConfigAtomic(configPath, stored, fs);
-  const resolvedA = target(A, "private-a", configPath);
-  const resolvedB = target(B, "private-b", configPath);
+  const resolvedA = target(A, "private-current", configPath);
+  const resolvedB = target(B, "private-current", configPath);
   const runtime = { ...processRuntime(), fs, env: fs.env, homedir: fs.homedir, now: () => new Date(), sleep: (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)) };
   const options = { resolved: resolvedA, runtime };
   const generation = await generateRetryState({ ...options, requestHash: "hash-a", generateIdempotencyKey: () => "generation-key-a" });
@@ -96,7 +96,7 @@ test("generation, provisioning, browser claims and ordinary writes stay in their
   await recovery.finish();
   const final = (await readConfigFile(configPath, fs))!;
   assert.equal(final.project_id, B);
-  assert.equal(final.token, "private-b");
+  assert.equal(final.token, "private-current");
   assert.deepEqual(final.projects?.[B], stored.projects?.[B]);
   assert.deepEqual(final.media_generate, stored.media_generate);
   assert.deepEqual(final.projects?.[A], stored.projects?.[A]);

@@ -15,11 +15,11 @@ const A = "prj_AAAAAAAAAAAAAAAAAAAAAAAA", B = "prj_BBBBBBBBBBBBBBBBBBBBBBBB", C 
 const AGENT = { id: "agt_AAAAAAAAAAAAAAAAAAAAAAAA", name: "Agent", agent_type: "cli", capabilities: [...AGENT_CAPABILITIES], state: "active" as const, authenticated_requests: 0, metered_credits: 0, created_at: "2026-10-04T12:00:00Z" };
 const API = "https://api.screenrig.ai";
 const SCOPE = "access:manage screens content playlists advertising reports project identity";
-/** Access tokens of one sign-in: identity scope with no project, and one per project. */
+/** One current access token also carries identity scope. */
 function access(project?: string): string {
   return fakeSessionJwt({ sub: `agent:${AGENT.id}`, sid: "grt_PRINCIPALS", exp: 4102444800, scope: SCOPE, ...(project ? { prj: project } : {}) });
 }
-const IDENTITY = access(), TOKEN_A = access(A), TOKEN_B = access(B);
+const TOKEN_A = access(A), IDENTITY = TOKEN_A, TOKEN_B = TOKEN_A;
 const REFRESH = fakeSessionJwt({ sub: `agent:${AGENT.id}`, sid: "grt_PRINCIPALS", gen: 1, exp: 4102444800 });
 const GRANT = { issuer: API, client_id: "screenrig-cli", refresh_token: REFRESH, identity: true };
 function context(id: string, name: string, organizationName = "Acme"): ProjectContext {
@@ -45,7 +45,7 @@ async function fixture(t: TestContext, config?: ScreenRigConfig) {
     transport.on("GET", "/.well-known/oauth-authorization-server", () => ({ status: 200, headers: { "content-type": "application/json" },
       body: { issuer: API, token_endpoint: `${API}/oauth/token`, revocation_endpoint: `${API}/oauth/revoke`, device_authorization_endpoint: `${API}/oauth/device_authorization` } }));
     transport.on("POST", "/oauth/token", req => {
-      const token = tokens[new URLSearchParams(String(req.body)).get("project_id") ?? ""];
+      const token = tokens[new URLSearchParams(String(req.body)).get("projects") ?? ""];
       assert.ok(token, "a renewal names a project this test expects");
       return { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" },
         body: { access_token: token, token_type: "Bearer", expires_in: 900, scope: SCOPE } };
@@ -166,7 +166,7 @@ test("project list and project use under a sign-in preserve both project retries
   const used = await f.invoke("project", "use", B);
   assert.equal(used.code, 0, used.out);
   const saved = (await f.saved())!;
-  assert.equal(saved.project_id, B); assert.equal(saved.token, undefined);
+  assert.equal(saved.project_id, B); assert.equal(saved.token, TOKEN_A);
   assert.deepEqual(saved.projects?.[A]?.media_generate, config.media_generate);
   assert.equal(saved.projects?.[B]?.media_generate, undefined);
   f.transport.on("GET", "/api/project", req => {
@@ -186,7 +186,7 @@ test("a captured create retry stays in A while another process selects B", async
   const f = await fixture(t, config);
   let count = 0, key: string | undefined;
   f.transport.on("POST", "/api/projects", async req => {
-    assert.equal(req.headers?.["screenrig-project"], A);
+    assert.equal(req.headers?.["screenrig-project"], undefined);
     assert.equal(req.headers?.authorization, "Bearer " + IDENTITY);
     if (++count === 1) {
       key = req.headers?.["idempotency-key"];
@@ -205,8 +205,8 @@ test("a captured create retry stays in A while another process selects B", async
   assert.equal(retried.code, 0, retried.out);
   const saved = (await f.saved())!;
   // The new project delivers no token: the next command renews one for it.
-  assert.equal(saved.project_id, C); assert.equal(saved.token, undefined);
-  assert.equal(saved.projects?.[A]?.token, TOKEN_A);
+  assert.equal(saved.project_id, C); assert.equal(saved.token, TOKEN_A);
+  assert.equal(saved.projects?.[A]?.token, undefined);
   assert.equal(saved.projects?.[A]?.pending_writes, undefined);
   assert.equal(saved.projects?.[B]?.token, undefined);
   assert.equal(retried.result.context.project.id, C);
@@ -262,15 +262,15 @@ test("membership disconnect cleans only its captured project after another proce
   const f = await fixture(t, config);
   f.transport.on("GET", "/api/agents/self", () => ({ status: 200, headers: { "cache-control": "private, no-store" }, body: { agent: AGENT, connection_ready: true } }));
   f.transport.on("POST", "/api/agents/self/disconnect", async req => {
-    assert.equal(req.headers?.["screenrig-project"], A);
+    assert.equal(req.headers?.["screenrig-project"], undefined);
     await writeConfigAtomic(f.configPath, selectProject((await f.saved())!, B), f.fs);
     return { status: 204, headers: { "cache-control": "private, no-store" }, body: undefined };
   });
   const result = await f.invoke("agent", "disconnect", "--yes");
   assert.equal(result.code, 0, result.out);
   const saved = (await f.saved())!;
-  assert.equal(saved.identity_token, IDENTITY); assert.equal(saved.project_id, B);
-  assert.equal(saved.token, config.projects[B]?.token);
+  assert.equal(saved.identity_token, undefined); assert.equal(saved.project_id, B);
+  assert.equal(saved.token, undefined);
   assert.equal(saved.projects?.[A]?.token, undefined);
   assert.deepEqual(saved.projects?.[B]?.media_generate, config.projects[B]?.media_generate);
   assert.equal(result.result.context.project.id, A);
@@ -298,7 +298,7 @@ test("global identity revocation retains all credentials after response loss, th
 });
 
 
-test("project mutations without a stored project token renew one, reuse saved keys and refresh project names", async t => {
+test("project mutations use the current token, reuse saved keys and refresh project names", async t => {
   const config = initial(); delete config.token;
   const f = await fixture(t, config);
   f.renews({ [A]: TOKEN_A });

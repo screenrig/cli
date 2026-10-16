@@ -18,14 +18,12 @@ import {
   type ServiceClientCredentials,
   type TokenSet,
 } from "./oauth.js";
-import { ExitCode } from "./exit-codes.js";
-import { CliError, configError, makeProblem } from "./problems.js";
+import { CliError, configError } from "./problems.js";
 import type { Transport } from "./transport/types.js";
 
 /** An access token is renewed when it expires within this many seconds. */
 export const ACCESS_RENEW_MARGIN_S = 120;
-/** A refresh retry within this window reuses its request_id: the server replays the persisted successor. */
-const REFRESH_REPLAY_MS = 60_000;
+
 /** The CLI warns this many days before the refresh family ends. */
 export const REFRESH_EXPIRY_WARNINGS_DAYS = [30, 7] as const;
 
@@ -40,30 +38,23 @@ function digest(value: string): string {
   return createHash("sha256").update("screenrig/cli-oauth/v1\0").update(value).digest("hex");
 }
 
-function projectUnavailable(projectId: string): CliError {
-  return new CliError(makeProblem("project_unavailable", "Project unavailable", 404,
-    `${projectId} was deleted, or this installation no longer belongs to it. The sign-in itself is still valid.`, {
-      next: { command: "screenrig project list", reason: "Lists the projects this sign-in can use; select one with screenrig project use ID." },
-    }), ExitCode.NotFound);
-}
-
 /** Whether the grant ended for good, with the CLI deleting what it stored. */
 export function isSessionEnded(err: unknown): boolean {
   return err instanceof CliError && err.problem.code === "session_ended";
 }
 
-/** Store an access token where the CLI reads credentials: its project's slot, and the identity slot when it carries identity. */
+/** Store one current access token and its project subset; identity_token is a compatibility alias. */
 export function placeAccessToken(file: ScreenRigConfig, accessToken: string, scope: string[]): ScreenRigConfig {
   const claims = accessClaims(accessToken);
-  const next: ScreenRigConfig = { ...file };
-  const project = claims?.prj;
-  if (project) {
-    if (!next.project_id) next.project_id = project;
-    if (next.project_id === project) next.token = accessToken;
-    if (next.projects?.[project] || next.project_id !== project) {
-      next.projects = { ...next.projects, [project]: { ...next.projects?.[project], token: accessToken } };
-    }
-  }
+  const next: ScreenRigConfig = { ...file, token: accessToken,
+    token_projects: claims?.projects ? Object.keys(claims.projects) : claims?.prj ? [claims.prj] : [] };
+  if (!next.project_id && next.token_projects?.length === 1) next.project_id = next.token_projects[0];
+  // Retire per-project credentials while keeping each project's pending writes.
+  if (next.projects) next.projects = Object.fromEntries(Object.entries(next.projects).map(([id, slot]) => {
+    const { token: _token, ...state } = slot;
+    return [id, state];
+  }));
+  delete next.identity_token;
   if (scope.includes(SCOPE_IDENTITY)) next.identity_token = accessToken;
   return next;
 }
@@ -73,6 +64,7 @@ export function withoutSession(file: ScreenRigConfig): ScreenRigConfig {
   const { oauth: _grant, login: _login, ...rest } = file;
   const next: ScreenRigConfig = { ...rest };
   if (isSessionJwt(next.token)) delete next.token;
+  delete next.token_projects;
   if (isSessionJwt(next.identity_token)) delete next.identity_token;
   if (next.projects) {
     next.projects = Object.fromEntries(Object.entries(next.projects).map(([id, slot]) => {
@@ -142,18 +134,8 @@ export class OAuthSession {
     return withConfigLock(this.configPath, this.runtime.fs, { sleep: this.runtime.sleep, now: () => this.nowMs() }, action);
   }
 
-  private usable(token: string | undefined, projectId: string | undefined): token is string {
-    const claims = accessClaims(token);
-    if (!claims || claims.exp - this.nowMs() / 1000 <= ACCESS_RENEW_MARGIN_S) return false;
-    return projectId ? claims.prj === projectId : claims.scope.includes(SCOPE_IDENTITY);
-  }
-
-  /**
-   * Credentials for one command. With a grant, the target project's access
-   * token (or, with no project, the identity token) is renewed when it is
-   * missing or about to expire.
-   */
-  async prepare(resolved: ResolvedConfig, options: { identity?: boolean } = {}): Promise<ResolvedConfig> {
+  /** Renew one current token without changing its subset for the command's selection. */
+  async prepare(resolved: ResolvedConfig, _options: { identity?: boolean } = {}): Promise<ResolvedConfig> {
     if (this.service) {
       const token = await this.serviceToken();
       const project = accessClaims(token)?.prj;
@@ -164,19 +146,10 @@ export class OAuthSession {
     }
     const file = await this.read();
     if (!file?.oauth) return resolved;
-    if (options.identity) {
-      // Project list, use and create act on the identity: a stale selection must not block them.
-      const identity = file.oauth.identity ? await this.accessFor(undefined) : undefined;
-      return identity ? { ...resolved, identityToken: identity } : resolved;
-    }
-    if (resolved.identityWriteScope || !resolved.projectId) {
-      const identity = file.oauth.identity ? await this.accessFor(undefined) : undefined;
-      if (!identity) return resolved;
-      return { ...resolved, identityToken: identity, ...(resolved.identityWriteScope ? { token: identity } : {}) };
-    }
-    const token = await this.accessFor(resolved.projectId);
-    const latest = await this.read();
-    return { ...resolved, token, identityToken: latest?.identity_token ?? resolved.identityToken };
+    const token = await this.accessFor(undefined);
+    if (!token) return resolved;
+    const claims = accessClaims(token);
+    return { ...resolved, token, ...(claims?.scope.includes(SCOPE_IDENTITY) ? { identityToken: token } : {}) };
   }
 
   /** An access token carrying identity scope, renewed when needed; undefined when the grant has no identity access. */
@@ -192,22 +165,20 @@ export class OAuthSession {
     if (this.service) return invalidToken ? this.serviceToken(token) : undefined;
     const claims = accessClaims(token);
     if (!claims?.sid) return undefined;
-    return invalidToken ? this.accessFor(claims.prj, token) : undefined;
+    return invalidToken ? this.accessFor(undefined, token) : undefined;
   }
 
   /**
-   * The access token for a project (or, with none, one carrying identity),
+   * The current access token, independent of project selection,
    * renewed under the lock. The holder re-reads the config first: another
    * process may have refreshed already, and then nothing is sent.
    */
-  async accessFor(projectId: string | undefined, rejected?: string): Promise<string | undefined> {
+  async accessFor(_projectId: string | undefined, rejected?: string): Promise<string | undefined> {
     if (this.service) return this.serviceToken(rejected);
     const stored = (file: ScreenRigConfig): string | undefined => {
-      const slot = projectId
-        ? (file.project_id === projectId ? file.token : file.projects?.[projectId]?.token)
-        : file.identity_token;
-      return [slot, file.identity_token, projectId ? undefined : file.token]
-        .find((candidate) => candidate !== rejected && this.usable(candidate, projectId));
+      const token = file.token ?? file.identity_token;
+      const claims = accessClaims(token);
+      return token && token !== rejected && claims && claims.exp - this.nowMs() / 1000 > ACCESS_RENEW_MARGIN_S ? token : undefined;
     };
     const unlocked = await this.read();
     if (!unlocked?.oauth) return undefined;
@@ -219,37 +190,33 @@ export class OAuthSession {
       const file = await this.read();
       const grant = file?.oauth;
       if (!file || !grant) return undefined;
-      return stored(file) ?? this.refreshLocked(file, grant, projectId);
+      return stored(file) ?? this.refreshLocked(file, grant);
     });
   }
 
-  private async refreshLocked(file: ScreenRigConfig, grant: OAuthGrantState, projectId: string | undefined): Promise<string | undefined> {
+  private async refreshLocked(file: ScreenRigConfig, grant: OAuthGrantState, projects?: string[]): Promise<string | undefined> {
+    if (grant.client_id !== "screenrig-cli") throw configError("The stored refresh family belongs to another client. Sign in with this CLI.");
     const from = digest(grant.refresh_token);
     let pending = grant.refresh_request;
-    if (!pending || pending.from !== from || this.nowMs() - Date.parse(pending.started_at) > REFRESH_REPLAY_MS) {
+    if (!pending || pending.from !== from) {
       // Persisted before the request: a retry after a lost answer replays the same rotation.
-      pending = { request_id: newOAuthRequestId(), from, started_at: this.runtime.now().toISOString() };
+      const claims = accessClaims(file.token ?? file.identity_token);
+      const selected = projects ?? file.token_projects ?? (claims?.projects ? Object.keys(claims.projects) : claims?.prj ? [claims.prj] : undefined);
+      pending = { request_id: newOAuthRequestId(), from, started_at: this.runtime.now().toISOString(), ...(selected ? { projects: selected } : {}) };
       await this.write({ ...file, oauth: { ...grant, refresh_request: pending } });
     }
     let tokens: TokenSet;
     try {
-      tokens = await this.client.refresh(grant.refresh_token, { requestId: pending.request_id, ...(projectId ? { projectId } : {}) });
+      tokens = await this.client.refresh(grant.refresh_token, { requestId: pending.request_id, ...(pending.projects ? { projects: pending.projects } : {}) });
     } catch (err) {
-      if (isSessionEnded(err) && projectId) {
-        // A project that was deleted or left answers invalid_grant too. One
-        // refresh without it tells a dead project from a dead session.
-        const latest = (await this.read()) ?? file;
-        const alive = latest.oauth && await this.refreshLocked(latest, latest.oauth, undefined)
-          .then(() => true, (probe: unknown) => { if (isSessionEnded(probe)) return false; throw probe; });
-        if (alive) {
-          await this.dropProject(projectId);
-          throw projectUnavailable(projectId);
-        }
-        throw err;
-      }
       if (isSessionEnded(err)) {
         const current = (await this.read()) ?? file;
         await this.write({ ...withoutSession(current), signed_out_at: this.runtime.now().toISOString() });
+      }
+      if (err instanceof CliError && !isSessionEnded(err) && err.problem.status >= 400 && err.problem.status < 500 && ![408, 429].includes(err.problem.status)) {
+        // A definite refusal did not rotate: allow a corrected subset on the next request.
+        const { refresh_request: _refused, ...kept } = grant;
+        await this.write({ ...file, oauth: kept });
       }
       // Network, timeout, 429 and 5xx keep every credential and the pending request_id.
       throw err;
@@ -272,18 +239,22 @@ export class OAuthSession {
     return tokens.accessToken;
   }
 
-  /** Forget a project the session can no longer reach; the selection stays until project use. */
-  private async dropProject(projectId: string): Promise<void> {
-    const current = await this.read();
-    if (!current) return;
-    const next: ScreenRigConfig = { ...current };
-    if (next.project_id === projectId) delete next.token;
-    if (next.projects?.[projectId]?.token) {
-      const { token: _token, ...kept } = next.projects[projectId]!;
-      next.projects = { ...next.projects, [projectId]: kept };
-    }
-    if (accessClaims(next.identity_token)?.prj === projectId) delete next.identity_token;
-    await this.write(next);
+  /** Replace the token subset explicitly; directory memberships never expand it implicitly. */
+  async selectProjects(projects: string[]): Promise<string | undefined> {
+    if (!projects.length || projects.length > 64 || new Set(projects).size !== projects.length) throw configError("Select 1–64 distinct project IDs.");
+    await this.client.ready();
+    return this.locked(async () => {
+      const file = await this.read();
+      if (!file?.oauth) throw configError("Sign in before selecting token projects.");
+      if (file.oauth.refresh_request) {
+        const pendingProjects = file.oauth.refresh_request.projects;
+        const token = await this.refreshLocked(file, file.oauth);
+        if (pendingProjects && JSON.stringify([...pendingProjects].sort()) === JSON.stringify([...projects].sort())) return token;
+        const settled = (await this.read())!;
+        return this.refreshLocked(settled, settled.oauth!, projects);
+      }
+      return this.refreshLocked(file, file.oauth, projects);
+    });
   }
 
   /**

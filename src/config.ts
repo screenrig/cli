@@ -10,6 +10,8 @@ import { isResourceID } from "./generated/resource-ids.js";
     export interface ScreenRigConfig {
       api_url: string;
       token?: string;
+      /** Project IDs carried by the current access token, not directory memberships. */
+      token_projects?: string[];
       /** Global identity; never used as an implicit project credential. */
       identity_token?: string;
       /** Identity-scoped creates made without a current project. */
@@ -78,8 +80,7 @@ import { isResourceID } from "./generated/resource-ids.js";
       pending_writes?: Record<string, { idempotency_key: string; created_at: string; command?: string; supersede?: string }>;
       /**
        * The OAuth grant: the rotating refresh token of this installation's
-       * session. Access tokens live in the project slots' `token` and in
-       * `identity_token`.
+       * session. One current access token lives in `token`; `token_projects` records its subset.
        */
       oauth?: OAuthGrantState;
       /** A device login waiting for approval. The device code is a secret: it is sent only to the token endpoint. */
@@ -98,8 +99,8 @@ import { isResourceID } from "./generated/resource-ids.js";
       refresh_expires_at?: number;
       /** Whether the grant carries identity access (project list and create). */
       identity?: boolean;
-      /** A refresh in flight: a retry of the same refresh within 60 s reuses its request_id. */
-      refresh_request?: { request_id: string; from: string; started_at: string };
+      /** A refresh in flight: all retries of that rotation reuse its request_id. */
+      refresh_request?: { request_id: string; from: string; started_at: string; projects?: string[] };
     }
 
     export interface PendingLogin {
@@ -614,11 +615,11 @@ import { isResourceID } from "./generated/resource-ids.js";
       const selectedId = typeof options.flags["project-id"] === "string" ? options.flags["project-id"] : file?.project_id;
       if (options.flags["project-id"] !== undefined && !isResourceID(selectedId, "project")) throw configError("--project-id must be a project ID from project list.");
       const selected = selectedId && selectedId !== file?.project_id ? file?.projects?.[selectedId] : file;
-      if (selectedId && !selected) throw configError("This project is not cached. Run project use ID to select an accessible project.");
+
       const usable = (value: string | undefined) => isRetiredCredential(value) ? undefined : value;
-      const selectedToken = usable(selected?.token);
+      const selectedToken = usable(file?.token);
       const identityToken = usable(file?.identity_token);
-      if (selectedToken || (selectedId && identityToken)) {
+      if (selectedToken || identityToken) {
         token = selectedToken ?? identityToken;
         tokenSource = "config";
       }
@@ -655,7 +656,7 @@ import { isResourceID } from "./generated/resource-ids.js";
       // A grant's tokens share its sid; a service client's share its client_id.
       const holder = (claims: typeof left) => claims?.sid ?? (claims?.clientId ? `client:${claims.clientId}` : undefined);
       if (!left || !right || !holder(left) || holder(left) !== holder(right)) return false;
-      return kind === "identity" || left.prj === right.prj;
+      return kind === "identity" || (left.projects || right.projects ? JSON.stringify(Object.keys(left.projects ?? {}).sort()) === JSON.stringify(Object.keys(right.projects ?? {}).sort()) : left.prj === right.prj);
     }
 
     /** Whether this installation holds a credential at all. */

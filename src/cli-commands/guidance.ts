@@ -7,6 +7,14 @@ export function registerGuidance(root: Command): void {
   const examples: Record<string, string[]> = {
     "cards list": ["", "--tag weather", "--category information"],
     "cards show": ["menu"],
+    "card create": ["--type menu --file params.json"],
+    "card list": [""],
+    "card show": ["crd_CARD"],
+    "card params": ["crd_CARD --file params.json"],
+    "card delete": ["crd_CARD"],
+    "card data get": ["crd_CARD"],
+    "card data put": ["crd_CARD --file data.json --expect-rev 3"],
+    "project token": ["--projects prj_PROJECT,prj_OTHER"],
     "card-data get": ["menu-main"],
     "card-data put": ["menu-main --file menu-data.json", "menu-main --file - --expect-rev 3"],
     "card-data list": [""],
@@ -164,6 +172,11 @@ export function registerGuidance(root: Command): void {
     if (!commandExamples(command).length) addCommandExamples(command, ...suffixes.map(suffix => `screenrig ${path}${suffix ? ` ${suffix}` : ""}`));
   }
   const notes: Record<string, string> = {
+    "project token": "Replaces the current token subset with 1–64 consented projects. Discovery with project list does not grant access. A lost response keeps the rotation request ID for an identical retry.",
+    "card create": "Creates one instance in the selected project and returns its crd_ ID. Rerun an identical request after a lost response to reuse the saved idempotency key.",
+    "card params": "Replaces the instance's static params immediately. Read the instance with card show to check the result.",
+    "card data put": "Replaces dynamic data immediately without republishing. Use the revision from card data get with --expect-rev. Read and reconcile after a revision conflict; rerun an identical request after a lost response to reuse the saved key.",
+    "card delete": "Deletes one instance; the server refuses while a playlist uses it.",
     "cards list": "Reads the complete built-in card catalogue. --tag and --category filter it locally, with both filters combined. Built-in cards are drop-in live details drawn natively by the Player; use a custom application for complex interactions.",
     "cards show": "Returns params_schema and data_schema unchanged, plus properties.static and properties.dynamic with types, defaults, required flags and limits. Copy example into a playlist page's primitives; replace sample content, rect and layer for the target screen. Set params.view to a supported canvas, corner or chip view and params.theme to a schema-listed theme. Corner and chip views overlay other content. A bound data key takes dynamic properties out of params. The example is a placement, not a complete playlist.",
     "card-data get": "Reads a project-scoped JSON document and its revision. No application id is needed. Use that revision with --expect-rev on put or delete.",
@@ -179,7 +192,7 @@ export function registerGuidance(root: Command): void {
     "project list": "Lists only memberships granted to this identity, grouped by organization. Listing preserves the last-used selection. It needs a sign-in with identity access.",
     "organization list": "Lists organizations visible to the responsible person, including empty ones they administer. Organization names are not unique; use the ID for administration. This grants no project membership. free marks a free Standard organization; plan_required marks one that admits no new screens until a Premium or Enterprise plan pays; new_organization_allowed is false once the person holds their free organization, so project create adds projects to an existing one.",
     "organization rename": "Requires a verified responsible person who administers this organization. Renaming grants no project access and updates cached project labels without changing the selected project.",
-    "project use": "Verifies current membership before selecting a project. Credential and retry state for other projects remain. --project-id targets a cached project for one invocation without changing the last-used selection.",
+    "project use": "Lists live memberships and selects a project carried by the current token. Use project token --projects ID,ID to replace the subset with up to 64 consented projects. Retry state stays separate per project. --project-id selects a project for one invocation.",
     "project create": "Creates a named project unique within its organization; the responsible person becomes owner. Defaults to the current project's organization, otherwise the organization the person administers or holds free, most recently used first; with no organization named, the organization holding the owner's verified email domain overrides both. One organization option chooses another. An organization holds any number of projects. Each person has one free Standard organization, and the server refuses a second with free_organization_limit; add the project to the existing organization instead, or the user asks sales@screenrig.ai for Premium or Enterprise. Retry the same input after an ambiguous failure; success adds the new project to this sign-in and selects it.",
     "project move": "Only the owner can move to a destination returned by project moves. The move carries screens and checks the destination payer's limit. Existing charges retain their original payer. After an ambiguous failure, inspect project show and project moves before retrying.",
     "project transfer-owner": "Requires an existing verified project member. After an ambiguous failure, inspect the current owner before retrying.",
