@@ -551,7 +551,7 @@ test("--codec hevc opts in to the H.265 delivery profile", async () => {
   }
 });
 
-test("real video transcodes keep the MP4 index first and all 240 frames", {
+test("real video transcodes keep faststart, all 240 frames and zero-based track timelines", {
   skip: process.env.SCREENRIG_TEST_FFMPEG !== "1" && "set SCREENRIG_TEST_FFMPEG=1 with libx264 and libx265 installed",
   timeout: 90_000,
 }, async (t) => {
@@ -573,35 +573,74 @@ test("real video transcodes keep the MP4 index first and all 240 frames", {
     "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-nostdin", "-y", source,
   ]);
 
-  const assertFaststart = async (filePath: string) => {
+  const assertMp4Timeline = async (filePath: string) => {
     const bytes = await readFile(filePath);
     const boxes = new Map<string, number>();
-    for (let offset = 0; offset < bytes.length;) {
-      assert.ok(offset + 8 <= bytes.length, "complete MP4 box header");
-      const shortSize = bytes.readUInt32BE(offset);
-      const size = shortSize === 1 ? Number(bytes.readBigUInt64BE(offset + 8))
-        : shortSize === 0 ? bytes.length - offset : shortSize;
-      assert.ok(Number.isSafeInteger(size) && size >= (shortSize === 1 ? 16 : 8) && offset + size <= bytes.length);
-      boxes.set(bytes.toString("ascii", offset + 4, offset + 8), offset);
-      offset += size;
-    }
+    const walk = (start: number, end: number) => {
+      for (let offset = start; offset < end;) {
+        assert.ok(offset + 8 <= end, "complete MP4 box header");
+        const shortSize = bytes.readUInt32BE(offset);
+        const header = shortSize === 1 ? 16 : 8;
+        assert.ok(offset + header <= end, "complete extended MP4 box header");
+        const size = shortSize === 1 ? Number(bytes.readBigUInt64BE(offset + 8))
+          : shortSize === 0 ? end - offset : shortSize;
+        assert.ok(Number.isSafeInteger(size) && size >= header && offset + size <= end);
+        const type = bytes.toString("ascii", offset + 4, offset + 8);
+        const body = offset + header;
+        if (start === 0) boxes.set(type, offset);
+        if (["moov", "trak", "edts", "mdia", "minf", "stbl"].includes(type)) walk(body, offset + size);
+        if (type === "elst") {
+          const version = bytes[body];
+          assert.ok(version === 0 || version === 1);
+          const count = bytes.readUInt32BE(body + 4);
+          const entrySize = version === 1 ? 20 : 12;
+          assert.ok(body + 8 + count * entrySize <= offset + size, "complete edit list");
+          for (let i = 0; i < count; i++) {
+            const entry = body + 8 + i * entrySize;
+            const mediaTime = version === 1 ? bytes.readBigInt64BE(entry + 8) : BigInt(bytes.readInt32BE(entry + 4));
+            assert.ok(mediaTime >= 0n, "no empty edit may delay a track's first media");
+          }
+        }
+        offset += size;
+      }
+    };
+    walk(0, bytes.length);
     assert.ok(boxes.has("moov") && boxes.has("mdat"), "index and media data are present");
     assert.ok(boxes.get("moov")! < boxes.get("mdat")!, "moov must precede mdat");
   };
-  await assertFaststart(source);
+  await assertMp4Timeline(source);
+  const audioSource = path.join(dir, "animation-audio.mp4");
+  await run(ffmpeg, [
+    "-v", "error", "-i", source, "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+    "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-t", "10",
+    "-movflags", "+faststart", "-nostdin", "-y", audioSource,
+  ]);
   for (const codec of ["h264", "hevc"] as const) {
-    await t.test(codec, async (t) => {
-      const result = await transcodeForUpload({ runtime, filePath: source, options: { ...defaultTranscodeOptions(), codec } });
+    for (const audio of [false, true]) await t.test(`${codec}, ${audio ? "AAC audio" : "silent"}`, async (t) => {
+      const result = await transcodeForUpload({ runtime, filePath: audio ? audioSource : source, options: { ...defaultTranscodeOptions(), codec } });
       t.after(() => rm(result.cleanupDir!, { recursive: true, force: true }));
       assert.equal(result.passthrough, false, "exercise the encoder rather than source passthrough");
-      await assertFaststart(result.filePath);
+      await assertMp4Timeline(result.filePath);
       const probe = JSON.parse(await run(ffprobe, [
-        "-v", "error", "-select_streams", "v:0", "-count_frames",
-        "-show_entries", "stream=codec_name,nb_read_frames,duration", "-of", "json", result.filePath,
+        "-v", "error", "-count_frames",
+        "-show_entries", "stream=codec_type,codec_name,nb_read_frames,start_time,duration", "-of", "json", result.filePath,
       ]));
+      assert.equal(probe.streams.length, audio ? 2 : 1);
       assert.equal(probe.streams[0].codec_name, codec);
       assert.equal(Number(probe.streams[0].nb_read_frames), 240);
-      assert.ok(Math.abs(Number(probe.streams[0].duration) - 10) < 0.05, "preserve the full ten-second animation");
+      for (const stream of probe.streams) {
+        assert.equal(Number(stream.start_time), 0, `${stream.codec_type} starts at time zero`);
+        assert.ok(Math.abs(Number(stream.duration) - 10) < 0.05, "preserve the full ten-second timeline");
+      }
+      if (audio) {
+        const packets = JSON.parse(await run(ffprobe, [
+          "-v", "error", "-select_streams", "a:0", "-read_intervals", "%+#1", "-show_packets",
+          "-show_entries", "packet=pts_time:packet_side_data=skip_samples", "-of", "json", result.filePath,
+        ]));
+        assert.ok(Number(packets.packets[0].pts_time) < 0, "AAC priming precedes presentation time zero");
+        assert.ok(packets.packets[0].side_data_list.some((data: { skip_samples?: number }) => (data.skip_samples ?? 0) > 0),
+          "preserve the AAC priming skip");
+      }
       await run(ffmpeg, ["-v", "error", "-xerror", "-i", result.filePath, "-f", "null", "-"]);
     });
   }

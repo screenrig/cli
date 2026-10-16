@@ -823,10 +823,11 @@ function planVideo(
     );
   }
 
-  // Keep the MP4 index ahead of its media data for browser playback and previews.
+  // Keep faststart and let the MP4 muxer compensate for B-frame/AAC priming.
+  // Forcing negative DTS to zero also shifts presentation timestamps forward,
+  // creating empty leading edits and losing the AAC priming skip.
   args.push(
     "-movflags", "+faststart",
-    "-avoid_negative_ts", "make_zero",
     ...(delivery.audio ? ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"] : ["-an"]),
     "-write_tmcd", "0",
     "-threads", "0",

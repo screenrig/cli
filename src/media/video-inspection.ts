@@ -59,6 +59,9 @@ export class VideoPacketInspection {
       !(video ? /^[K_]+$/ : /^[KD_]+$/).test(fields.get("flags") ?? "")) return this.valid = false;
     const delta = state.lastDts === undefined ? 0 : dts - state.lastDts;
     const tolerance = this.tolerance();
+    // A leading empty MP4 edit delays presentation even when DTS/cadence are
+    // otherwise valid. Re-encode it rather than preserving that delayed track.
+    if (video && state.count === 0 && Math.abs(pts) > tolerance) return this.valid = false;
     if (state.lastDts !== undefined && (delta <= 0 || Math.abs(delta - state.lastDuration!) > tolerance)) return this.valid = false;
     const period = 1 / this.probe.fps;
     if (video && (Math.abs(duration - period) > tolerance || Math.abs(pts - dts) > period * 4 + tolerance)) return this.valid = false;
