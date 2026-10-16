@@ -521,7 +521,7 @@ export interface ScreenHealth {
   uptime_s?: number;
   app_uptime_s?: number;
   memory?: { used_bytes?: number; total_bytes?: number };
-  cpu?: { load_1m?: number; cores?: number };
+  cpu?: { load_1m?: number; cores?: number; utilization_percent?: number; app_percent?: number };
   temperature_c?: number;
   display?: { connected?: boolean; power?: "on" | "off" | "standby" | "unknown" };
   network?: { kind?: "ethernet" | "wifi" | "cellular" | "unknown"; wifi_rssi_dbm?: number };

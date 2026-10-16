@@ -303,6 +303,59 @@ test("events list sends --type and events follow filters the stream by it", asyn
   assert.equal(stream.calls.at(-1)!.query?.after, "ev1_4", "filtered events still advance the cursor");
 });
 
+test("events list accepts --screen-id, --playlist-id and --app-id for project events and checks their shape", async () => {
+  const page = () => new FakeTransport().on("GET", "/api/events", () => ok({ items: [], next_cursor: null }));
+  const scr = "scr_AAAAAAAAAAAAAAAAAAAAAAAA";
+  const pl = "pl_AAAAAAAAAAAAAAAAAAAAAAAA";
+  const app = "app_AAAAAAAAAAAAAAAAAAAAAAAA";
+
+  const screen = page();
+  const byScreen = await invoke(["events", "list", "--screen-id", scr, "--type", "screen.", "--limit", "10"], screen);
+  assert.equal(byScreen.code, 0, byScreen.stdout);
+  assert.equal(screen.calls[0]!.query?.screen_id, scr);
+  assert.equal(screen.calls[0]!.query?.type, "screen.");
+  assert.equal(screen.calls[0]!.query?.limit, "10");
+
+  const playlist = page();
+  assert.equal((await invoke(["events", "list", "--playlist-id", pl], playlist)).code, 0);
+  assert.equal(playlist.calls[0]!.query?.playlist_id, pl);
+
+  for (const flag of ["--app-id", "--application-id"]) {
+    const application = page();
+    assert.equal((await invoke(["events", "list", flag, app], application)).code, 0, flag);
+    assert.equal(application.calls[0]!.query?.application_id, app);
+  }
+
+  const all = page();
+  assert.equal((await invoke(["events", "list", "--screen-id", scr, "--playlist-id", pl, "--app-id", app], all)).code, 0);
+  assert.deepEqual([all.calls[0]!.query?.screen_id, all.calls[0]!.query?.playlist_id, all.calls[0]!.query?.application_id], [scr, pl, app]);
+
+  const log = page();
+  assert.equal((await invoke(["events", "list", "--source", "log", "--screen-id", scr], log)).code, 0);
+  assert.deepEqual([log.calls[0]!.query?.source, log.calls[0]!.query?.screen_id], ["log", scr]);
+
+  for (const argv of [
+    ["--screen-id", pl], ["--screen-id", "scr_"], ["--playlist-id", scr], ["--app-id", pl], ["--application-id", "weather"],
+    ["--screen-id"], ["--playlist-id"], ["--app-id"], ["--source", "audit"],
+  ]) {
+    const refused = page();
+    const result = await invoke(["events", "list", ...argv], refused);
+    assert.equal(result.code, ExitCode.Usage, argv.join(" "));
+    assert.equal(refused.calls.length, 0, argv.join(" "));
+  }
+
+  for (const [flag, value] of [["--playlist-id", pl], ["--app-id", app]] as const) {
+    const refused = page();
+    const result = await invoke(["events", "list", "--source", "log", flag, value], refused);
+    assert.equal(result.code, ExitCode.Usage, flag);
+    assert.equal(refused.calls.length, 0);
+    const detail = (JSON.parse(result.stdout) as { error: { detail: string } }).error.detail;
+    assert.match(detail, new RegExp(`${flag} reads project events`));
+    assert.match(detail, /Drop --source log/);
+    assert.match(detail, /--screen-id/);
+  }
+});
+
 test("agent status carries the notes counts and a notes_waiting warning, and human output prints the line", async () => {
   const self = (notes?: unknown) => new FakeTransport().on("GET", "/api/agents/self", () => ({
     status: 200, headers: { "cache-control": "private, no-store" }, body: { agent: AGENT, connection_ready: true, ...(notes ? { notes } : {}) },

@@ -49,7 +49,12 @@ export function healthLines(health: ScreenHealth | undefined): string[] {
     add("memory", `${Math.round((memory.used_bytes / memory.total_bytes) * 100)}% of ${(memory.total_bytes / 1024 ** 3).toFixed(1)} GiB`);
   }
   const cpu = health.cpu;
-  add("cpu", [number(cpu?.load_1m) ? `load ${cpu.load_1m.toFixed(2)}` : undefined, number(cpu?.cores) ? `${cpu.cores} cores` : undefined].filter(Boolean).join(", "));
+  add("cpu", [
+    number(cpu?.load_1m) ? `load ${cpu.load_1m.toFixed(2)}` : undefined,
+    number(cpu?.cores) ? `${cpu.cores} cores` : undefined,
+    number(cpu?.utilization_percent) ? `${Math.round(cpu.utilization_percent)}% busy` : undefined,
+    number(cpu?.app_percent) ? `player ${Math.round(cpu.app_percent)}%` : undefined,
+  ].filter(Boolean).join(", "));
   if (number(health.temperature_c)) add("temperature", `${health.temperature_c.toFixed(1)} °C${health.temperature_c >= HEALTH_HOT_C ? " (hot)" : ""}`);
   const display = health.display;
   if (display) {

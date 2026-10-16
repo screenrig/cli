@@ -994,7 +994,12 @@ minutes, and at once when its display connection or power changes.
 stays visible. With `--human` it prints a `Health` block: report
 time, device and Player uptime, memory in use, CPU load and cores,
 temperature, display connection and power, network kind and Wi-Fi signal, and
-crashes and renderer restarts in the last 24 hours.
+crashes and renderer restarts in the last 24 hours. `data.health.cpu` carries
+`load_1m` and `cores` and, when the Player can measure them,
+`utilization_percent` (the whole device's CPU busy share, 0 to 100) and
+`app_percent` (the Player process's share of total CPU capacity, 0 to 100),
+both averaged over the interval since the previous report; the human block
+prints them as `NN% busy` and `player NN%`.
 
 `screen list --human` adds a `HEALTH` column when any listed screen needs
 attention: `display disconnected`, `hot` (80 °C or more), `crashing` (3 or more
@@ -1148,6 +1153,21 @@ to five under a Notes heading.
 prefix ending in a dot: `--type note.` shows `note.added` and `note.resolved`,
 which carry ids and never note text. `events follow` filters what it prints and
 always passes `stream.*` frames.
+
+`events list` narrows to one resource of the project with `--screen-id`,
+`--playlist-id` and `--app-id` (`--application-id` is an alias), alone or with
+`--type`, `--limit` and `--after`. A screen's events are the ones about that
+screen; a playlist's also include the events that name it as
+`details.playlist_id`, such as a screen taking it; an application's also include
+its releases and K/V entries. Ids are checked for their kind before the request.
+`--source log` reads the Player log instead, which belongs to a screen: it takes
+`--screen-id` and refuses `--playlist-id` and `--app-id` with a usage error.
+
+```sh
+screenrig events list --screen-id scr_LOBBY --type screen.
+screenrig events list --playlist-id pl_MENU
+screenrig events list --source log --screen-id scr_LOBBY
+```
 
 ## Reviews
 

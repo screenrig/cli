@@ -6925,12 +6925,46 @@ function formatEventLines(events: ProjectEvent[]): string {
     .join("\n");
 }
 
+const EVENT_APPLICATION_ID = /^(?:(?:stage|qa|development)_)?app_[A-Za-z0-9_-]+$/;
+
+/**
+ * events list resource filters. The project event source takes screen, playlist
+ * and application ids; the Player log (--source log) belongs to a screen only.
+ * Shapes are checked here with the same id patterns the backend enforces, so a
+ * wrong kind of id fails before a request.
+ */
+function eventsListFilters(args: ParsedArgs): { source?: string; screen_id?: string; playlist_id?: string; application_id?: string } {
+  requireFlagValue(args, "source", "log");
+  requireFlagValue(args, "screen-id", "scr_01");
+  requireFlagValue(args, "playlist-id", "pl_01");
+  requireFlagValue(args, "application-id", "app_01");
+  const source = flagString(args.flags, "source");
+  const screenId = flagString(args.flags, "screen-id");
+  const playlistId = flagString(args.flags, "playlist-id");
+  const applicationId = flagString(args.flags, "application-id");
+  if (source !== undefined && source !== "project" && source !== "log") throw usageError("--source must be project or log.");
+  if (screenId !== undefined && !isResourceID(screenId, "screen")) throw usageError("--screen-id must be a screen identifier (scr_...).");
+  if (playlistId !== undefined && !isResourceID(playlistId, "playlist")) throw usageError("--playlist-id must be a playlist identifier (pl_...).");
+  if (applicationId !== undefined && !EVENT_APPLICATION_ID.test(applicationId)) throw usageError("--app-id must be an application identifier (app_...).");
+  if (source === "log" && (playlistId !== undefined || applicationId !== undefined)) {
+    const flag = playlistId !== undefined ? "--playlist-id" : "--app-id";
+    throw usageError(`${flag} reads project events, and the Player log (--source log) holds screen records only. Drop --source log to read the project events of ${playlistId !== undefined ? "a playlist" : "an application"}, or use --screen-id to read one screen's Player log.`);
+  }
+  return {
+    ...(source === undefined ? {} : { source }),
+    ...(screenId === undefined ? {} : { screen_id: screenId }),
+    ...(playlistId === undefined ? {} : { playlist_id: playlistId }),
+    ...(applicationId === undefined ? {} : { application_id: applicationId }),
+  };
+}
+
 async function eventsList(args: ParsedArgs, runtime: CliRuntime, resolved: Awaited<ReturnType<typeof resolveConfig>>): Promise<CommandResult> {
   // `--limit` is forwarded verbatim: the server owns the 1..200 bound and
   // answers 400 invalid_request with errors[].field = "limit", which the
   // envelope surfaces. A null next_cursor is the end of the history, not an error.
   requireFlagValue(args, "limit", "50");
   requireFlagValue(args, "after", "ev1_0");
+  const filters = eventsListFilters(args);
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const response = await client.call({
@@ -6940,6 +6974,7 @@ async function eventsList(args: ParsedArgs, runtime: CliRuntime, resolved: Await
       after: flagString(args.flags, "after") ?? flagString(args.flags, "cursor"),
       limit: flagString(args.flags, "limit"),
       type: flagString(args.flags, "type"),
+      ...filters,
     },
   });
   const page = response.body as EventPage;

@@ -71,6 +71,11 @@ test("healthLines prints a compact block and marks a stale report", () => {
   assert.deepEqual(healthLines(undefined), []);
 });
 
+test("healthLines prints CPU utilization and the Player share when the Player reports them", () => {
+  const lines = healthLines({ ...healthy, cpu: { load_1m: 0.42, cores: 4, utilization_percent: 37.4, app_percent: 12.6 } });
+  assert.ok(lines.includes("cpu: load 0.42, 4 cores, 37% busy, player 13%"), lines.join("\n"));
+});
+
 test("healthIssues flags disconnected, hot at 80 °C, crashing at 3, and stale", () => {
   assert.deepEqual(healthIssues(healthy), []);
   assert.deepEqual(healthIssues({ ...healthy, temperature_c: 79.9, crashes_24h: 2 }), []);
