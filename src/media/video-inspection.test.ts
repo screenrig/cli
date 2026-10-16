@@ -44,6 +44,8 @@ function picture(index: number, type: number, idr = false, slices = 1): string[]
 const trace = [...section("Sequence Parameter Set", sps), ...section("Picture Parameter Set", pps),
   ...picture(0, 2, true), ...picture(1, 0), ...picture(2, 1)];
 const packets = [0, 1, 2].map((i) => `stream_index=0|pts_time=${(i / 30).toFixed(6)}|dts_time=${((i - 2) / 30).toFixed(6)}|duration_time=0.033333|size=100|flags=${i ? "___" : "K__"}`);
+const delayedPackets = packets.map((line) => line.replace(/(pts_time|dts_time)=([^|]+)/g,
+  (_, field: string, value: string) => `${field}=${(Number(value) + 2 / 30).toFixed(6)}`));
 function headersValid(lines: string[], input = probe): boolean {
   const inspection = new H264HeaderInspection(input);
   return lines.every((line) => inspection.line(line)) && inspection.finish();
@@ -56,6 +58,11 @@ function packetsValid(lines: string[], input = probe): boolean {
 test("external High 4.1 headers and every packet pass the bounded inspection", () => {
   assert.equal(headersValid(trace), true);
   assert.equal(packetsValid(packets), true);
+});
+
+test("a leading presentation delay cannot pass through as delivery video", () => {
+  assert.equal(packetsValid(delayedPackets), false);
+  assert.equal(packetsValid(packets), true, "negative decode timestamps remain valid with presentation starting at zero");
 });
 
 test("structured diagnostics do not confuse harmless filenames or title metadata with errors", () => {
@@ -120,7 +127,7 @@ function fakeRuntime(dir: string, failure?: string): { runtime: CliRuntime; call
       calls.push(request);
       const ok = { code: 0, signal: null, stdout: "", stderrTail: "" };
       if (request.args.includes("-show_packets")) {
-        for (const line of failure === "bad-packets" ? packets.slice(0, 1) : packets) request.onStdoutLine?.(line);
+        for (const line of failure === "bad-packets" ? packets.slice(0, 1) : failure === "delayed-track" ? delayedPackets : packets) request.onStdoutLine?.(line);
         return { ...ok, stderrTail: failure === "probe-errors" ? "error while reading packet" : "" };
       }
       if (request.args.includes("trace_headers")) {
@@ -165,7 +172,7 @@ test("valid input skips the encoder, snapshots original bytes, and binds the upl
   }
 });
 
-for (const failure of ["bad-packets", "probe-errors", "no-headers", "timeout"]) {
+for (const failure of ["bad-packets", "delayed-track", "probe-errors", "no-headers", "timeout"]) {
   test(`uncertain inspection falls back to encoding and removes its snapshot: ${failure}`, async () => {
     resetFfmpegToolchainCache();
     const dir = await testTemp("video-fallback-");
