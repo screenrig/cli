@@ -118,7 +118,10 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
     if (mode === "application" && controllers !== 1) fail(`${path}/primitives`, "application advance requires exactly one controller application");
     if (streams > 1) fail(`${path}/primitives`, "must contain at most one stream primitive");
     if (web > 2) fail(`${path}/primitives`, "must contain at most two application or iframe primitives");
-    if (mode === "media_end" && (primitives.length !== 1 || !["image", "video"].includes(String(primitives[0]?.primitive)))) fail(`${path}/advance`, "media_end requires exactly one image or video primitive");
+    if (mode === "media_end") {
+      if (web > 0) fail(`${path}/advance`, "media_end forbids application and iframe primitives");
+      else if (primitives.filter((primitive) => primitive.primitive === "image" || primitive.primitive === "video").length !== 1) fail(`${path}/advance`, "media_end requires exactly one image or video primitive");
+    }
   }
   if (pages.length > 0 && unscheduled === 0) fail("/pages", "must retain at least one page without a visibility rule");
   const trackIds = new Set<unknown>();

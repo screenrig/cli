@@ -91,3 +91,13 @@ test("canonical cross-field semantics reject duplicate IDs, controllers and loop
   const missingController = playlist(); missingController.pages[0]!.advance = { mode: "application", max_ms: 180000 } as any;
   assert.ok(playlistIssues(missingController).some((issue) => issue.message.includes("exactly one controller")));
 });
+test("media_end allows a card chip beside its one video, as the server does", () => {
+  const rect = { x: 0, y: 0, width: 1920, height: 1080 };
+  const withChip = playlist({ primitive: "video", loop: false });
+  withChip.pages[0]!.advance = { mode: "media_end" } as any;
+  withChip.pages[0]!.primitives = [...withChip.pages[0]!.primitives as any[], { id: "chip", primitive: "card", card: "clock", major: 1, params: {}, rect, layer: 1, content_fit: "fill" }] as any;
+  assert.deepEqual(playlistIssues(withChip), []);
+  const cardOnly = playlist(); cardOnly.pages[0]!.advance = { mode: "media_end" } as any;
+  cardOnly.pages[0]!.primitives = [{ id: "chip", primitive: "card", card: "clock", major: 1, params: {}, rect, layer: 0, content_fit: "fill" }] as any;
+  assert.ok(playlistIssues(cardOnly).some((issue) => issue.path === "/pages/0/advance" && issue.message.includes("exactly one image or video")));
+});
