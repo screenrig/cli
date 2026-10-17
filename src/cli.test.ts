@@ -6253,6 +6253,16 @@ test("playlist templates --json lists the fifteen closed ids without enrolling",
     "swipe-right",
     "swipe-up",
     "swipe-down",
+    "dip",
+    "wipe-left",
+    "wipe-right",
+    "wipe-up",
+    "wipe-down",
+    "slide-left",
+    "slide-right",
+    "slide-up",
+    "slide-down",
+    "stinger",
   ]);
   assert.equal(catalog.swipe_duration_ms, 600);
   assert.deepEqual(catalog.enter_types, [
@@ -6266,6 +6276,16 @@ test("playlist templates --json lists the fifteen closed ids without enrolling",
   ]);
   assert.equal(transport.calls.length, 0);
   await rm(configDir, { recursive: true, force: true });
+});
+
+test("playlist help lists extended transitions and their authoring rules", () => {
+  for (const path of [["playlist", "validate"], ["playlist", "templates"]]) {
+    const help = commandHelp(path).usage;
+    for (const type of ["crossfade", "swipe-left", "swipe-right", "swipe-up", "swipe-down", "dip", "wipe-left", "wipe-right", "wipe-up", "wipe-down", "slide-left", "slide-right", "slide-up", "slide-down", "stinger"]) assert.ok(help.includes(type), type);
+    assert.match(help, /2000 through 6000/);
+    assert.match(help, /60% of duration_ms/);
+    assert.match(help, /200 ms crossfade/);
+  }
 });
 
 test("playlist create expands a picture template and forwards a full page unchanged", async () => {

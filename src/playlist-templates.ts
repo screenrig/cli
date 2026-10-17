@@ -21,7 +21,32 @@ export const PLAYLIST_TRANSITION_TYPES = [
   "swipe-right",
   "swipe-up",
   "swipe-down",
+  "dip",
+  "wipe-left",
+  "wipe-right",
+  "wipe-up",
+  "wipe-down",
+  "slide-left",
+  "slide-right",
+  "slide-up",
+  "slide-down",
+  "stinger",
 ] as const;
+export type PlaylistTransitionType = typeof PLAYLIST_TRANSITION_TYPES[number];
+export type PlaylistTransitionEase = "linear" | "in" | "out" | "in-out";
+export interface PlaylistStinger {
+  theme?: "neomustard" | "aurora" | "folio" | "signal" | "manifesto" | "bloom" | "primetime";
+  title?: string;
+  subtitle?: string;
+  logo?: string;
+  accent?: string;
+  hang_ms?: number;
+}
+export type PlaylistTransition = { duration_ms: number } & (
+  | { type: Exclude<PlaylistTransitionType, "dip" | "stinger">; ease?: PlaylistTransitionEase; color?: never; stinger?: never }
+  | { type: "dip"; ease?: PlaylistTransitionEase; color?: string; stinger?: never }
+  | { type: "stinger"; stinger: PlaylistStinger; ease?: never; color?: never }
+);
 export const OBJECT_ENTER_TYPES = [
   "fade-up",
   "fade-down",
@@ -555,7 +580,7 @@ export interface TemplateCatalog {
     viewport_fit: "contain";
     background: string;
   };
-  transition: { type: "crossfade"; duration_ms: number };
+  transition: PlaylistTransition;
   transition_types: readonly typeof PLAYLIST_TRANSITION_TYPES[number][];
   swipe_duration_ms: number;
   enter_types: readonly typeof OBJECT_ENTER_TYPES[number][];
@@ -622,6 +647,7 @@ export function formatTemplateCatalog(catalog: TemplateCatalog): string {
     `Wire primitives: ${catalog.compose.wire_primitives.join(", ")}.`,
     `Compose: ${catalog.compose.catalog_command}`,
     `Default page transition is ${catalog.transition.type} ${catalog.transition.duration_ms} ms with no object enter. Swipe and enter are optional and spare.`,
+    `Page transition types: ${catalog.transition_types.join(", ")}.`,
     "Panning background (path, loop):",
     JSON.stringify(catalog.motion_examples.panning_background, null, 2),
     catalog.motion_guidance,

@@ -13,7 +13,9 @@ import {
   SLIDE_SWIPE_AUTHORING_DURATION_MS,
   SLIDE_TEMPLATES,
   SPINNING_BADGE_EXAMPLE_PAGE,
+  type PlaylistTransition,
 } from "./playlist-templates.js";
+import { assertPlaylistValid } from "./playlist-validate.js";
 
 const MEDIA = {
   primitive: "image" as const,
@@ -86,6 +88,16 @@ test("the catalog lists the fifteen slide ids and points copy at compose", () =>
     "swipe-right",
     "swipe-up",
     "swipe-down",
+    "dip",
+    "wipe-left",
+    "wipe-right",
+    "wipe-up",
+    "wipe-down",
+    "slide-left",
+    "slide-right",
+    "slide-up",
+    "slide-down",
+    "stinger",
   ]);
   assert.equal(catalog.swipe_duration_ms, 600);
   assert.equal(catalog.swipe_duration_ms, SLIDE_SWIPE_AUTHORING_DURATION_MS);
@@ -387,6 +399,26 @@ test("a templated page forwards a supplied swipe transition and never invents en
   }) as { transition: unknown; primitives: Array<Record<string, unknown>> };
   assert.deepEqual(expanded.transition, { type: "swipe-left", duration_ms: 600 });
   assert.ok(expanded.primitives.every((primitive) => !("enter" in primitive)));
+});
+
+test("templates forward extended transitions and their members unchanged", () => {
+  const transitions: PlaylistTransition[] = [
+    { type: "dip", duration_ms: 800, ease: "in-out", color: "#123aBc" },
+    { type: "wipe-left", duration_ms: 600 },
+    { type: "wipe-right", duration_ms: 600 },
+    { type: "wipe-up", duration_ms: 600 },
+    { type: "wipe-down", duration_ms: 600 },
+    { type: "slide-left", duration_ms: 600 },
+    { type: "slide-right", duration_ms: 600 },
+    { type: "slide-up", duration_ms: 600 },
+    { type: "slide-down", duration_ms: 600 },
+    { type: "stinger", duration_ms: 3500, stinger: { theme: "primetime", title: "WELCOME", subtitle: "Example event", logo: "media:med_EXAMPLE", accent: "#FF2D4B", hang_ms: 1000 } },
+  ];
+  for (const transition of transitions) {
+    const expanded = expandPlaylistPage({ id: "hero", template: "slide-full-bleed", transition, slots: { picture: MEDIA } }) as { transition: unknown };
+    assert.deepEqual(expanded.transition, transition);
+    assert.doesNotThrow(() => assertPlaylistValid({ name: "Example", pages: [expanded] }));
+  }
 });
 
 test("a full page with path or spin motion is forwarded unchanged", () => {

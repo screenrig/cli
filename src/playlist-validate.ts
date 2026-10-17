@@ -6,6 +6,7 @@ import { lintPlaylistPages, type LintFinding } from "./compose/lint.js";
 import { ExitCode } from "./exit-codes.js";
 import { isAdSlotPage } from "./playlist-authoring.js";
 import { CliError, makeProblem } from "./problems.js";
+import { playlistTransitionIssue } from "./playlist-write-validation.js";
 
 /**
  * Local validation compiles the canonical generated playlist write schema.
@@ -90,6 +91,16 @@ export function playlistIssues(value: unknown): Array<{ path: string; message: s
     }));
     return [...new Map(issues.map((issue) => [`${issue.path}:${issue.message}`, issue])).values()];
   }
+  // The schema cannot express a transition's cross-field rules (a stinger's hang_ms is at most
+  // 60% of its duration_ms), so the shared authoring validator runs on a document that passed it.
+  const transitionIssues = (pages ?? []).flatMap((page, index) => {
+    if (!page || typeof page !== "object" || Array.isArray(page) || isAdSlotPage(page)) return [];
+    const issue = playlistTransitionIssue((page as Record<string, unknown>).transition);
+    if (!issue) return [];
+    const suffix = issue.path.map((key) => `/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`).join("");
+    return [{ path: `/pages/${index}/transition${suffix}`, message: issue.message }];
+  });
+  if (transitionIssues.length) return transitionIssues;
   return adslot && pages ? [...validatePlaylistWriteSemantics(value), ...adslotPageIssues(pages)] : validatePlaylistWriteSemantics(value);
 }
 export function assertPlaylistValid(value: unknown): void {

@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import path from "node:path";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { Readable, Writable } from "node:stream";
@@ -24,7 +26,7 @@ const ok = (body: unknown, headers: Record<string, string> = {}) => ({ status: 2
 const summary = (id: string, category = "food", tags = ["menu"]) => ({ id, title: id, short: "Live details", category, tags, views: ["canvas"], majors: [1] });
 
 async function fixture(t: TestContext, enrolled = true) {
-  const dir = await mkdtemp("/tmp/screenrig-cards-");
+  const dir = await mkdtemp(path.join(tmpdir(), "screenrig-cards-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const config = dir + "/config.json";
   if (enrolled) await writeFile(config, JSON.stringify({ api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens", organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example", token: "test-token" }), { mode: 0o600 });

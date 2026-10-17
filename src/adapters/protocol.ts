@@ -310,7 +310,7 @@ export function limitsFromCapabilities(capabilities: Capabilities): ArchiveLimit
 
 /**
  * Full playlist pages stay opaque: the CLI forwards author-supplied playlist
- * JSON unchanged, including `transition.type` swipe variants, optional
+ * JSON unchanged, including all page transition types and their members, optional
  * object `enter`, and optional object `motion`. Templated pages are the
  * exception — the CLI expands `template` + `slots` into an ordinary write page
  * in `playlist-templates.ts` and never sends `template` to the server. Omitted

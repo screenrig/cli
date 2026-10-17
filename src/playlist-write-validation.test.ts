@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CliError } from "./problems.js";
 import { validatePlaylistWrite } from "./playlist-write-validation.js";
+import { playlistIssues } from "./playlist-validate.js";
 
 function iframePrimitive(id: string, src: string) {
   return {
@@ -32,6 +33,92 @@ const TWO_IFRAMES = [
   iframePrimitive("web_a", "https://example.com/"),
   iframePrimitive("web_b", "https://example.org/"),
 ];
+
+function playlistWithTransition(transition: unknown) {
+  const value = playlistWithPrimitives(TWO_IFRAMES);
+  return { ...value, pages: value.pages.map((page) => ({ ...page, transition })) };
+}
+
+test("both local authoring validators accept all fifteen transition types without changing the document", () => {
+  const plainTypes = ["crossfade", "swipe-left", "swipe-right", "swipe-up", "swipe-down", "dip", "wipe-left", "wipe-right", "wipe-up", "wipe-down", "slide-left", "slide-right", "slide-up", "slide-down"] as const;
+  const transitions: unknown[] = [];
+  for (const type of plainTypes) {
+    for (const duration_ms of [0, 200, 60_000]) {
+      transitions.push({ type, duration_ms });
+      for (const ease of ["linear", "in", "out", "in-out"] as const) transitions.push({ type, duration_ms, ease });
+    }
+  }
+  transitions.push({ type: "dip", duration_ms: 800, ease: "in-out", color: "#aB09fF" });
+  for (const theme of ["neomustard", "aurora", "folio", "signal", "manifesto", "bloom", "primetime"] as const) {
+    transitions.push({ type: "stinger", duration_ms: 3500, stinger: { theme, title: "FIRST HALF", subtitle: "Example match", logo: "media:med_01EXAMPLE", accent: "#FF2d4B", hang_ms: 1000 } });
+  }
+  for (const duration_ms of [2000, 2001, 3500, 6000]) {
+    transitions.push({ type: "stinger", duration_ms, stinger: {} });
+    for (const hang_ms of [0, Math.floor(duration_ms * 3 / 5)]) transitions.push({ type: "stinger", duration_ms, stinger: { hang_ms } });
+  }
+  transitions.push({ type: "stinger", duration_ms: 2000, stinger: { title: "", subtitle: "" } });
+  transitions.push({ type: "stinger", duration_ms: 2000, stinger: { title: "🌟".repeat(40), subtitle: "🌟".repeat(60) } });
+  transitions.push({ type: "stinger", duration_ms: 2000, stinger: { logo: `media:med_${"x".repeat(120)}` } });
+  for (const transition of transitions) {
+    const value = playlistWithTransition(transition);
+    const original = structuredClone(value);
+    assert.deepEqual(validatePlaylistWrite(value, new Map()), new Set(), JSON.stringify(transition));
+    assert.deepEqual(playlistIssues(value), [], JSON.stringify(transition));
+    assert.deepEqual(value, original);
+  }
+});
+
+test("both local authoring validators refuse transition rule violations at the server's member path", () => {
+  const plain = (members: Record<string, unknown>) => ({ type: "crossfade", duration_ms: 200, ...members });
+  const stinger = (members: Record<string, unknown>, duration_ms: unknown = 3500) => ({ type: "stinger", duration_ms, stinger: members });
+  const cases: Array<[unknown, string]> = [
+    ...[undefined, null, [], "crossfade", 200].map((value): [unknown, string] => [value, ""]),
+    [{ duration_ms: 200 }, "type"],
+    [{ type: "crossfade" }, "duration_ms"],
+    [plain({ extra: true }), "extra"],
+    [plain({ "extra/~": true }), "extra/~"],
+    ...[null, 1, {}, ["crossfade"], "", "fade", "STINGER"].map((type): [unknown, string] => [plain({ type }), "type"]),
+    ...[null, "200", -1, 60_001, 0.5, NaN, Infinity].map((duration_ms): [unknown, string] => [plain({ duration_ms }), "duration_ms"]),
+    ...[null, "", "ease-in", 1, ["linear"]].map((ease): [unknown, string] => [plain({ ease }), "ease"]),
+    [plain({ color: "#000000" }), "color"],
+    ...[null, "#000", "#000000FF", "#GG0000", "#000000\n", 123].map((color): [unknown, string] => [{ type: "dip", duration_ms: 800, color }, "color"]),
+    ...[null, {}, []].map((value): [unknown, string] => [plain({ stinger: value }), "stinger"]),
+    [{ type: "stinger", duration_ms: 3500 }, "stinger"],
+    ...[null, [], "title", 1].map((value): [unknown, string] => [{ type: "stinger", duration_ms: 3500, stinger: value }, "stinger"]),
+    ...[0, 1999, 6001, 60_000, 3500.5].map((duration): [unknown, string] => [stinger({}, duration), "duration_ms"]),
+    [stinger({ extra: true }), "stinger.extra"],
+    [stinger({ duration_ms: 3500 }), "stinger.duration_ms"],
+    [stinger({ hangMs: 1000 }), "stinger.hangMs"],
+    ...[null, "", "unknown", "Primetime", 1, ["aurora"]].map((theme): [unknown, string] => [stinger({ theme }), "stinger.theme"]),
+    ...[null, 1, [], "x".repeat(41), "🌟".repeat(41)].map((title): [unknown, string] => [stinger({ title }), "stinger.title"]),
+    ...[null, 1, [], "x".repeat(61), "🌟".repeat(61)].map((subtitle): [unknown, string] => [stinger({ subtitle }), "stinger.subtitle"]),
+    ...[null, "#fff", "#11223344", "#GG0000", "#112233\n", 1].map((accent): [unknown, string] => [stinger({ accent }), "stinger.accent"]),
+    // The server resolves a logo through the card media check, which accepts only media:med_<id>.
+    ...[null, "", "media:", "media:example", `media:${"x".repeat(300)}`, `media:med_${"x".repeat(121)}`, "med_EXAMPLE", "MEDIA:med_EXAMPLE", "https://example.com/logo.png", 1].map((logo): [unknown, string] => [stinger({ logo }), "stinger.logo"]),
+    ...[null, "1000", -1, 6001, 0.5, 2101, NaN, Infinity].map((hang_ms): [unknown, string] => [stinger({ hang_ms }), "stinger.hang_ms"]),
+    [stinger({ hang_ms: 1201 }, 2001), "stinger.hang_ms"],
+    ...["linear", "in", "out", "in-out", null].map((ease): [unknown, string] => [{ ...stinger({}), ease }, "ease"]),
+    [{ ...stinger({}), color: "#000000" }, "color"],
+  ];
+  for (const type of ["swipe-left", "swipe-right", "swipe-up", "swipe-down", "wipe-left", "wipe-right", "wipe-up", "wipe-down", "slide-left", "slide-right", "slide-up", "slide-down"]) {
+    cases.push([plain({ type, color: "#000000" }), "color"], [plain({ type, stinger: {} }), "stinger"]);
+  }
+  for (const [transition, field] of cases) {
+    const value = playlistWithTransition(transition);
+    const path = `playlist.pages[0].transition${field ? `.${field}` : ""}`;
+    assert.throws(() => validatePlaylistWrite(value, new Map()), (error: unknown) => {
+      assert.ok(error instanceof CliError);
+      assert.equal(error.problem.code, "usage_error");
+      assert.ok(error.problem.detail.startsWith(`${path} `), error.problem.detail);
+      return true;
+    }, JSON.stringify(transition) ?? "missing transition");
+    const pointer = field.split(".").filter(Boolean).map((key) => `/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`).join("");
+    // The canonical schema decides validity and may add companion errors for a conditional rule;
+    // the offending member's path must be among the issues.
+    const issuePaths = playlistIssues(value).map((issue) => issue.path);
+    assert.ok(issuePaths.includes(`/pages/0/transition${pointer}`), `${JSON.stringify(transition) ?? "missing transition"} -> ${issuePaths.join(", ")}`);
+  }
+});
 
 test("playlist write accepts two iframe primitives on a page", () => {
   assert.deepEqual(validatePlaylistWrite(playlistWithPrimitives(TWO_IFRAMES), new Map()), new Set());

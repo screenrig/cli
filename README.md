@@ -1533,6 +1533,41 @@ advances in under 60 seconds returns an `application_page_short` warning from
 `playlist init`, `playlist validate`, `playlist preview` and `screen publish`; the
 command still succeeds.
 
+### Page transitions
+
+Edit the incoming page's `transition` object. Types are `crossfade`,
+`swipe-left`, `swipe-right`, `swipe-up`, `swipe-down`, `dip`, `wipe-left`,
+`wipe-right`, `wipe-up`, `wipe-down`, `slide-left`, `slide-right`, `slide-up`,
+`slide-down`, and `stinger`. Both `type` and integer `duration_ms` (0 through
+60000) are required. Templates keep their 200 ms crossfade default.
+
+`ease` is optional: `linear`, `in`, `out`, or `in-out`. It defaults to `linear`
+for crossfade and swipe, and `in-out` for dip, wipe, and slide. Stinger forbids
+`ease`. Only dip accepts an optional `color` in `#RRGGBB` form; its default is
+black. For example:
+
+```json
+"transition": { "type": "dip", "duration_ms": 800, "ease": "in-out", "color": "#000000" }
+```
+
+Stinger requires `duration_ms` from 2000 through 6000 and a `stinger` object;
+other types forbid that object. Its members are all optional: `theme` is
+`neomustard`, `aurora`, `folio`, `signal`, `manifesto`, `bloom`, or `primetime`;
+`title` is at most 40 characters; `subtitle` is at most 60; `logo` is a string
+starting with `media:`; `accent` is `#RRGGBB`; and `hang_ms` is an integer from
+0 through 6000, at most 60% of `duration_ms`. Unknown transition and stinger
+members are refused. Logo authorization and image readiness are server checks.
+
+```json
+"transition": {
+  "type": "stinger", "duration_ms": 3500,
+  "stinger": { "theme": "primetime", "title": "WELCOME", "hang_ms": 1000 }
+}
+```
+
+Run `screenrig playlist validate lobby.json` to check an edited document locally.
+Publishing or updating the playlist applies its transitions to assigned screens.
+
 ### Soundtrack
 
 Audio inputs do not become pages. They become the playlist soundtrack: an

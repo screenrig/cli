@@ -58,6 +58,11 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
       if (stops[0]?.at !== 0 || stops.at(-1)?.at !== 1) fail(`${path}/canvas/background/stops`, "must start at 0 and end at 1");
       for (let i = 1; i < stops.length; i++) if (Number(stops[i]?.at) <= Number(stops[i - 1]?.at)) fail(`${path}/canvas/background/stops/${i}/at`, "must be strictly increasing");
     }
+    const transition = object(page.transition);
+    const stinger = object(transition.stinger);
+    if (transition.type === "stinger" && typeof stinger.hang_ms === "number" && typeof transition.duration_ms === "number" && stinger.hang_ms * 5 > transition.duration_ms * 3) {
+      fail(`${path}/transition/stinger/hang_ms`, "must be at most 60% of duration_ms");
+    }
     const mode = object(page.advance).mode;
     const primitives = array(page.primitives).map(object);
     const ids = new Set<unknown>();

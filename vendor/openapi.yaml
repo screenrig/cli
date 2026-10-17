@@ -22073,8 +22073,34 @@ components:
         Page transition. type and duration_ms are both required; OpenAPI does not default
         them. Swipe authoring examples use duration_ms 600; that value is not a schema default.
       properties:
-        type: { type: string, enum: [crossfade, swipe-left, swipe-right, swipe-up, swipe-down] }
+        type: { type: string, enum: [crossfade, swipe-left, swipe-right, swipe-up, swipe-down, dip, wipe-left, wipe-right, wipe-up, wipe-down, slide-left, slide-right, slide-up, slide-down, stinger] }
         duration_ms: { type: integer, minimum: 0, maximum: 60000 }
+        ease: { type: string, enum: [linear, in, out, in-out], description: Optional cubic ease; forbidden on stinger. Defaults to linear for crossfade/swipe and in-out for dip/wipe/slide. }
+        color: { type: string, pattern: '^#[0-9A-Fa-f]{6}$', description: Dip stage fill; allowed only on dip. Defaults to black. }
+        stinger: { $ref: "#/components/schemas/PlaylistStinger" }
+      allOf:
+        - if: { properties: { type: { const: stinger } }, required: [type] }
+          then:
+            required: [stinger]
+            properties: { duration_ms: { type: integer, minimum: 2000, maximum: 6000 }, stinger: {}, ease: false }
+          else: { properties: { stinger: false } }
+        - if: { properties: { type: { not: { const: dip } } }, required: [type] }
+          then: { properties: { color: false } }
+    PlaylistStinger:
+      type: object
+      additionalProperties: false
+      description: >-
+        A transition-only stinger card (major 1). All members are optional; defaults
+        stay in the synthetic runtime placement. hang_ms defaults to 1000 and is
+        at most 60% of the transition duration_ms (checked by the server).
+        logo names a ready image in this project, using the card media grant path.
+      properties:
+        theme: { type: string, enum: [neomustard, aurora, folio, signal, manifesto, bloom, primetime] }
+        title: { type: string, maxLength: 40 }
+        subtitle: { type: string, maxLength: 60 }
+        logo: { type: string, pattern: '^media:med_[A-Za-z0-9_-]{1,120}$' }
+        accent: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+        hang_ms: { type: integer, minimum: 0, maximum: 6000 }
     PrimitiveEnter:
       type: object
       additionalProperties: false
@@ -24353,10 +24379,32 @@ components:
     RuntimeTransition:
       type: object
       required: [type, durationMs]
-      description: Authored page transition. The runtime mint passes type through; it does not rewrite swipe to crossfade.
+      description: >-
+        Authored page transition. Plain moves retain type, duration and optional decorations.
+        Stinger carries the normal card content shape above both layers. Missing code or an
+        incompatible Player interpreter degrades only the transition to crossfade of the same
+        duration, with transition_unavailable diagnostics.
       properties:
-        type: { type: string, enum: [crossfade, swipe-left, swipe-right, swipe-up, swipe-down] }
-        durationMs: { type: integer }
+        type: { type: string, enum: [crossfade, swipe-left, swipe-right, swipe-up, swipe-down, dip, wipe-left, wipe-right, wipe-up, wipe-down, slide-left, slide-right, slide-up, slide-down, stinger] }
+        durationMs: { type: integer, minimum: 0, maximum: 60000 }
+        ease: { type: string, enum: [linear, in, out, in-out], description: Optional on plain moves; absent on stinger. }
+        color: { type: string, pattern: '^#[0-9A-Fa-f]{6}$', description: Authored dip stage fill. }
+        card: { $ref: "#/components/schemas/RuntimeTransitionCard" }
+    RuntimeTransitionCard:
+      type: object
+      required: [primitive, card, major, params, version, src, sha256, model, requires]
+      description: The same projected card content as a canvas card, without canvas placement geometry. Stinger is pinned to major 1; params includes durationMs and hangMs.
+      properties:
+        primitive: { type: string, enum: [card] }
+        card: { type: string, enum: [stinger] }
+        major: { type: integer, enum: [1] }
+        params: { type: object, additionalProperties: true }
+        media: { type: array, maxItems: 256, items: { $ref: "#/components/schemas/RuntimeImageResolvedMedia" } }
+        version: { type: string }
+        src: { type: string, format: uri-reference }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        model: { $ref: "#/components/schemas/CardFile" }
+        requires: { $ref: "#/components/schemas/CardRequirements" }
     RuntimeAdvance:
       type: object
       required: [mode]

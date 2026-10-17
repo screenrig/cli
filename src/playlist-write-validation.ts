@@ -1,6 +1,7 @@
 import { RESOURCE_ID_PATTERNS } from "./generated/resource-ids.js";
 import { isIP } from "node:net";
 import { usageError } from "./problems.js";
+import { PLAYLIST_TRANSITION_TYPES } from "./playlist-templates.js";
 
 interface JsonRecord { [key: string]: unknown }
 
@@ -81,13 +82,67 @@ function validateCanvas(value: unknown, name: string): void {
   validateBackground(canvas.background, `${name}.background`);
 }
 
-function validateTransition(value: unknown, name: string): void {
-  const transition = record(value, name);
-  exact(transition, ["type", "duration_ms"], name);
-  if (!["crossfade", "swipe-left", "swipe-right", "swipe-up", "swipe-down"].includes(String(transition.type))) {
-    throw usageError(`${name}.type is invalid.`);
+/** A member path relative to the page transition, using authoring field names. */
+export interface TransitionIssue {
+  path: string[];
+  message: string;
+}
+
+/** Shared by playlist file and bundle validation; does not add defaults or mutate input. */
+export function playlistTransitionIssue(value: unknown): TransitionIssue | undefined {
+  const fail = (path: string[], message: string): TransitionIssue => ({ path, message });
+  const isRecord = (value: unknown): value is JsonRecord => value !== null && typeof value === "object" && !Array.isArray(value);
+  const isColor = (value: unknown): value is string => typeof value === "string" && value.length === 7 && /^#[0-9A-Fa-f]{6}$/.test(value);
+  if (!isRecord(value)) return fail([], "must be an object");
+  const extra = Object.keys(value).find((key) => !["type", "duration_ms", "ease", "color", "stinger"].includes(key));
+  if (extra !== undefined) return fail([extra], "is not allowed");
+  const type = value.type;
+  if (typeof type !== "string" || !(PLAYLIST_TRANSITION_TYPES as readonly string[]).includes(type)) {
+    return fail(["type"], "must be a known page transition type");
   }
-  number(transition, "duration_ms", name, { integer: true, min: 0, max: 60_000 });
+  const duration = value.duration_ms;
+  if (typeof duration !== "number" || !Number.isInteger(duration) || duration < 0 || duration > 60_000) {
+    return fail(["duration_ms"], "must be an integer from 0 through 60000");
+  }
+  if (Object.hasOwn(value, "ease") && (type === "stinger" || typeof value.ease !== "string" || !["linear", "in", "out", "in-out"].includes(value.ease))) {
+    return fail(["ease"], "must be linear, in, out, or in-out and is forbidden on stinger");
+  }
+  if (Object.hasOwn(value, "color") && (type !== "dip" || !isColor(value.color))) {
+    return fail(["color"], "must be #RRGGBB and is allowed only on dip");
+  }
+  if (type !== "stinger") {
+    return Object.hasOwn(value, "stinger") ? fail(["stinger"], "is allowed only on stinger") : undefined;
+  }
+  if (duration < 2000 || duration > 6000) return fail(["duration_ms"], "must be from 2000 through 6000 for stinger");
+  const stinger = value.stinger;
+  if (!isRecord(stinger)) return fail(["stinger"], "must be an object for stinger");
+  const extraStinger = Object.keys(stinger).find((key) => !["theme", "title", "subtitle", "logo", "accent", "hang_ms"].includes(key));
+  if (extraStinger !== undefined) return fail(["stinger", extraStinger], "is not allowed");
+  if (Object.hasOwn(stinger, "theme") && (typeof stinger.theme !== "string" || !["neomustard", "aurora", "folio", "signal", "manifesto", "bloom", "primetime"].includes(stinger.theme))) {
+    return fail(["stinger", "theme"], "must name one of the seven stinger themes");
+  }
+  for (const [key, limit] of [["title", 40], ["subtitle", 60]] as const) {
+    if (Object.hasOwn(stinger, key) && (typeof stinger[key] !== "string" || Array.from(stinger[key]).length > limit)) {
+      return fail(["stinger", key], `must be a string of at most ${limit} characters`);
+    }
+  }
+  if (Object.hasOwn(stinger, "accent") && !isColor(stinger.accent)) return fail(["stinger", "accent"], "must be #RRGGBB");
+  // The server resolves a logo through the card media check, which accepts only media:med_<id>.
+  if (Object.hasOwn(stinger, "logo") && (typeof stinger.logo !== "string" || !/^media:med_[A-Za-z0-9_-]{1,120}$/.test(stinger.logo))) {
+    return fail(["stinger", "logo"], "must be media:med_<id> naming a ready image in this project");
+  }
+  if (Object.hasOwn(stinger, "hang_ms")) {
+    const hang = stinger.hang_ms;
+    if (typeof hang !== "number" || !Number.isInteger(hang) || hang < 0 || hang > 6000 || hang * 5 > duration * 3) {
+      return fail(["stinger", "hang_ms"], "must be an integer from 0 through 6000 and at most 60% of duration_ms");
+    }
+  }
+  return undefined;
+}
+
+function validateTransition(value: unknown, name: string): void {
+  const issue = playlistTransitionIssue(value);
+  if (issue) throw usageError(`${[name, ...issue.path].join(".")} ${issue.message}.`);
 }
 
 function validCivil(value: string): boolean {
