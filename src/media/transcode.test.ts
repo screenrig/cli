@@ -299,12 +299,14 @@ test("scale filter bounds width and height together", () => {
   assert.match(filter, /force_divisible_by=2/);
 });
 
-test("frame rate is capped and the keyframe interval follows the capped rate", () => {
+test("output frame rate is constant and the keyframe interval follows it, whatever the source rate", () => {
+  for (const source of ["60/1", "30000/1001", "25/1", "24000/1001", "30/1"]) {
+    const probe = parseProbePayload(probeJson({ avg_frame_rate: source }));
+    assert.deepEqual(encodeTiming(probe, 30), { rate: "30", gop: 60 }, source);
+  }
   const probe = parseProbePayload(probeJson({ avg_frame_rate: "60/1" }));
-  assert.deepEqual(encodeTiming(probe, 30), { rate: "30", gop: 60 });
-  assert.deepEqual(encodeTiming(probe, 120), { rate: "60", gop: 120 });
-  const ntsc = parseProbePayload(probeJson({ avg_frame_rate: "30000/1001" }));
-  assert.equal(encodeTiming(ntsc, 30).gop, 60);
+  assert.deepEqual(encodeTiming(probe, 24), { rate: "24", gop: 48 });
+  assert.deepEqual(encodeTiming(probe, 59.94), { rate: "59.94", gop: 120 });
 });
 
 test("probe reads rotation, alpha, duration, and rate", () => {
@@ -369,7 +371,7 @@ test("HDR sources tone map when the build allows it and warn when it does not", 
   assert.equal(fallback.warnings.length, 1);
 
   assert.deepEqual(videoFilterChain(capable, sdr, 3840).warnings, []);
-  assert.equal(videoFilterChain(capable, sdr, 3840).filter, boundedScaleFilter(3840));
+  assert.equal(videoFilterChain(capable, sdr, 3840).filter, `${boundedScaleFilter(3840)},setsar=1`);
 });
 
 test("animation detection uses frame count then timeline", () => {
@@ -490,7 +492,7 @@ test("video transcode defaults to H.264 and selects a level that fits the output
     assert.equal(valueAfter("-r"), "30");
     assert.equal(valueAfter("-c:a"), "aac");
     assert.equal(valueAfter("-colorspace"), "bt709");
-    assert.equal(valueAfter("-vf"), "scale=w=3840:h=1536");
+    assert.equal(valueAfter("-vf"), "scale=w=3840:h=1536,setsar=1");
     assert.ok(args.includes("-progress") && args.includes("pipe:1"));
     assert.ok(args.includes("-nostdin"));
 
@@ -1183,7 +1185,7 @@ test("signage preset bounds portrait video and strips audio when requested", asy
     const args = encodeCall(calls)?.args ?? [];
     assert.ok(args.includes("-an"));
     assert.ok(!args.includes("-c:a") && !args.includes("0:a:0?"));
-    assert.equal(args[args.indexOf("-vf") + 1], "scale=w=1080:h=1920");
+    assert.equal(args[args.indexOf("-vf") + 1], "scale=w=1080:h=1920,setsar=1");
     assert.deepEqual(result.video, { codec: "h264", profile: "high", level: "4.2", fps: 30,
       audio: false, scan: "progressive", preset: "signage-1080p30" });
   } finally {

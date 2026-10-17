@@ -75,8 +75,11 @@ export function videoLevel(codec: VideoOptions["codec"], width: number, height: 
 
 export function planVideoDelivery(probe: MediaProbe, options: VideoOptions): VideoDelivery {
   const size = boundedVideoSize(probe.displayWidth, probe.displayHeight, options);
-  const maxFps = videoBounds(options).fps;
-  const fps = Math.min(probe.fps > 0 ? probe.fps : maxFps, maxFps);
+  // Every clip leaves at the same constant rate, never at its own source rate. A TV that
+  // re-locks its video path when consecutive clips change frame rate or stream header
+  // blanks the picture between them (measured on a Sony MT5891). Slower sources repeat
+  // frames and faster ones drop frames; uniform output is the cost of seamless playlists.
+  const fps = videoBounds(options).fps;
   return { ...size, fps, ...videoLevel(options.codec, size.width, size.height, fps), audio: probe.hasAudio && !options.noAudio };
 }
 

@@ -696,7 +696,9 @@ export function videoFilterChain(
   maxEdge: number,
   outputSize?: { width: number; height: number },
 ): { filter: string; warnings: string[] } {
-  const scale = outputSize ? `scale=w=${outputSize.width}:h=${outputSize.height}` : boundedScaleFilter(maxEdge);
+  // The scale already applies the display aspect, so pixels leave square. Stating it keeps the
+  // stream header identical whether or not the source carried a pixel aspect ratio.
+  const scale = `${outputSize ? `scale=w=${outputSize.width}:h=${outputSize.height}` : boundedScaleFilter(maxEdge)},setsar=1`;
   if (!isHdr(probe)) {
     return { filter: scale, warnings: [] };
   }
@@ -733,11 +735,10 @@ export function videoFilterChain(
   };
 }
 
-export function encodeTiming(probe: MediaProbe, maxFps: number): { rate: string; gop: number } {
-  const sourceFps = probe.fps > 0 ? probe.fps : maxFps;
-  const targetFps = Math.min(sourceFps, maxFps);
-  const gop = Math.max(1, Math.round(targetFps * 2));
-  return { rate: formatRate(targetFps), gop };
+/** The constant output rate and its two-second GOP; the source rate never changes either. */
+export function encodeTiming(_probe: MediaProbe, outputFps: number): { rate: string; gop: number } {
+  const gop = Math.max(1, Math.round(outputFps * 2));
+  return { rate: formatRate(outputFps), gop };
 }
 
 function formatRate(fps: number): string {

@@ -46,6 +46,17 @@ test("explicit limits can tighten but never enlarge a preset", () => {
   assert.equal(planVideoDelivery(probe(), { ...defaults, preset: "signage-4k30", maxFps: 24 }).fps, 24);
 });
 
+test("every source frame rate is delivered at the one preset rate", () => {
+  for (const source of ["24000/1001", "25/1", "30000/1001", "30/1", "50/1", "60/1"]) {
+    const result = planVideoDelivery(probe({ width: 1920, height: 1080, avg_frame_rate: source }),
+      { ...defaults, preset: "signage-1080p30" });
+    assert.equal(result.fps, 30, source);
+  }
+  // A clip that already ran at 30 fps still passes; one that did not no longer validates as delivered.
+  const delivery = planVideoDelivery(probe({ width: 1920, height: 1080, avg_frame_rate: "30000/1001" }), defaults);
+  assert.equal(delivery.fps, 30);
+});
+
 test("H.264 level fits macroblocks, throughput and four DPB frames", () => {
   assert.equal(videoLevel("h264", 1920, 1080, 30).level, "4.2");
   assert.equal(videoLevel("h264", 3840, 2160, 30).level, "5.1");
