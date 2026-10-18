@@ -48,7 +48,7 @@ info:
     /api/agents/self/disconnect do not debit, so a zero-remaining project
     can recover. Reading project notes (GET /api/notes and
     GET /api/notes/{id}) does not debit either; writing them does. Screen messages are exempt from this meter:
-    POST /api/screens/{id}/toast, POST /api/screens/{id}/screenshot,
+    POST /api/screens/{id}/toast, POST /api/screens/{id}/play-page, POST /api/screens/{id}/screenshot,
     GET /api/screens/{id}/screenshot, and GET
     /api/screens/{id}/screenshot/status. Runtime, pairing, content, health,
     and unauthenticated routes are not this meter. Inbound media commit,
@@ -4400,6 +4400,76 @@ paths:
           $ref: '#/components/responses/RateLimitedProblem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/screens/{id}/play-page:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: playScreenPage
+      x-rate-limit-policies:
+      - name: play-page-project
+        quota: 600
+        windowSeconds: 60
+      - name: play-page-screen
+        quota: 20
+        windowSeconds: 60
+      - name: play-page-ip
+        quota: 60
+        windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
+      description: 'Asks the screen''s Player to start one page of the playlist it is playing now, so a screenshot taken next
+        shows that page without waiting out the rotation (docs/player-compatibility.md §6.3.1). The page must be a page of
+        the screen''s effective playlist, the one its manifest is built from: an active takeover, else the current playlist
+        schedule entry, else the assigned playlist. Otherwise 409 page_not_on_screen, whose detail names that playlist. The
+        screen''s host hint must declare the play_page capability, else 409 play_page_unsupported and nothing is sent; update
+        the Player. The screen must be active; an archived screen answers screen_archived and a pairing_pending one resource_conflict.
+        Appends the per-screen runtime command player.play_page (details page_id, playlist_id, manifest_revision, expires_at
+        sixty seconds later; never delivered after expires_at). The Player starts the page from its beginning as if the rotation
+        had reached it and continues the rotation from there. The screen revision does not change. The Idempotency-Key is
+        required, as for toast; an exact retry returns the original body for twenty-four hours. A refused request, a failed
+        one, and an exact replay spend no rate-limit budget. Screen messages are exempt from the 1-credit API meter.'
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenPlayPageWrite'
+      responses:
+        '202':
+          description: Accepted. The command is actionable until expires_at. An exact idempotent retry returns this same body.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenPlayPageAccepted'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/screens/{id}/reboot:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
@@ -4913,7 +4983,8 @@ paths:
         screen with it when the alert arrives) or up to 500 screen_ids. An alert takes every target screen with a default
         playlist over until the alert''s <expires>, else for default_for_seconds (60 to 604800, default 3600); see POST
         /api/triggers/{id}/cap. A project has at most 20 triggers (trigger_limit_reached). Appends trigger.created. An exact
-        retry with the same Idempotency-Key returns this same answer, password included, for twenty-four hours.'
+        retry with the same Idempotency-Key returns this same answer, password included, for twenty-four hours. Optional pull
+        adds CAP sources the platform reads for the trigger (see CapPull); the ingest url keeps working beside it.'
       security:
       - projectBearer: []
       - dashboardSession: []
@@ -7597,7 +7668,7 @@ paths:
       description: The feed family.
       schema:
         type: string
-        enum: [weather, airquality, alerts, rates, crypto, earthquakes, headlines]
+        enum: [weather, airquality, alerts, rates, crypto, earthquakes, headlines, cap]
     get:
       x-screenrig-access: read
       operationId: getFeed
@@ -7607,7 +7678,11 @@ paths:
         weather, airquality and alerts take lat and lon (rounded to a 0.25 degree cell); earthquakes lat, lon and
         radius_km (10 to 20000, default 500); rates base (an ECB reference currency, default EUR); crypto symbols
         (CoinGecko ids or tickers, comma separated, at most 20) and currency (default usd); headlines url (an http or
-        https RSS or Atom URL). The request never calls the provider. 200 is the document (schema, fetchedAt,
+        https RSS or Atom URL); cap (screenrig.cap/v1) the CAP alerts matching a screen: url (repeatable, up to 5 CAP alert
+        or ATOM/RSS index URLs), public (also read the public feeds covering lat and lon; default when no url), lat and lon,
+        geocode (repeatable NAME:VALUE area codes), min_severity, max_severity, min_urgency, min_certainty, event, exclude_event, sender,
+        status (default Actual), scope (default Public), language (repeatable, in preference order) and area_unknown (hide or
+        show). The request never calls the provider. 200 is the document (schema, fetchedAt,
         attribution and the family's fields, as the cards contract defines them); its ETag is the sha256 of the bytes and
         If-None-Match answers 304; Cache-Control max-age runs to the next scheduled fetch. 202 means no document yet:
         the read registered demand, and the feed worker fetches the key within about a minute (Retry-After). An API read
@@ -7622,7 +7697,20 @@ paths:
       - { name: base, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z]{3}$" } }
       - { name: symbols, in: query, required: false, schema: { type: string, maxLength: 1024 } }
       - { name: currency, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z]{2,8}$" } }
-      - { name: url, in: query, required: false, schema: { type: string, maxLength: 2048 } }
+      - { name: url, in: query, required: false, schema: { type: string, maxLength: 2048 }, description: "headlines: the feed URL. cap: repeat up to 5 times." }
+      - { name: public, in: query, required: false, schema: { type: boolean } }
+      - { name: geocode, in: query, required: false, schema: { type: string, maxLength: 140 }, description: "cap: NAME:VALUE, repeatable (UGC:WAC033)." }
+      - { name: min_severity, in: query, required: false, schema: { type: string, enum: [minor, moderate, severe, extreme] } }
+      - { name: max_severity, in: query, required: false, schema: { type: string, enum: [minor, moderate, severe, extreme] } }
+      - { name: min_urgency, in: query, required: false, schema: { type: string, enum: [past, future, expected, immediate] } }
+      - { name: min_certainty, in: query, required: false, schema: { type: string, enum: [unlikely, possible, likely, observed] } }
+      - { name: event, in: query, required: false, schema: { type: string, maxLength: 120 }, description: "cap: repeatable; * matches any run of characters." }
+      - { name: exclude_event, in: query, required: false, schema: { type: string, maxLength: 120 } }
+      - { name: sender, in: query, required: false, schema: { type: string, maxLength: 120 } }
+      - { name: status, in: query, required: false, schema: { type: string, enum: [Actual, Exercise, Test, System] } }
+      - { name: scope, in: query, required: false, schema: { type: string, enum: [Public, Restricted, Private] } }
+      - { name: language, in: query, required: false, schema: { type: string, maxLength: 35 } }
+      - { name: area_unknown, in: query, required: false, schema: { type: string, enum: [hide, show] } }
       - { name: If-None-Match, in: header, required: false, schema: { type: string } }
       responses:
         '200':
@@ -10618,7 +10706,7 @@ paths:
             hits zero or becomes positive. The runtime audience is an allowlist (docs/player-compatibility.md §7.1): screen.content_changed,
             screen.manifest_changed, screen.toast, screen.screenshot_requested, screen.archived, screen.unarchived, screen.deleted,
             screen.device_credential_revoked, project.suspended, project.resumed, player.reload, which reaches every runtime
-            session, the per-screen commands player.reboot and player.display (docs/player-compatibility.md §6.5), never
+            session, the per-screen commands player.reboot and player.display (docs/player-compatibility.md §6.5) and player.play_page (§6.3.1), never
             delivered past details.expires_at, and screen.card_data_changed (resource {type: card_data, key}, details {revision} or
             {deleted: true}), addressed only to screens whose current content reads that card data or feed key. Every other type is never published to the stream. Players ignore unknown event types, including the default message type, and unknown field names, and advance
             the cursor from every id. The stream opens with its own retry, drawn per connection between 3000 and 15000 ms so
@@ -22532,7 +22620,7 @@ components:
         platform: { type: string, pattern: "^[a-z][a-z0-9-]{0,31}$", description: "Registered values: tizen, android, windows, qt, apple, chromeos, browser, brightsign. Another value matching the pattern is stored as the player reported it." }
         host_version: { type: string, minLength: 1, maxLength: 40, description: "Shell or container product version, CalVer or vendor form." }
         device: { $ref: "#/components/schemas/HostDevice" }
-        capabilities: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40 }, description: "Host capability tokens, optionally dotted into a family. Documented values: reboot (the Player reboots the device on player.reboot), display_power.serial, display_power.cec, display_power.ddc, display_power.backlight, display_power.scrim (display power methods the Player can use, docs/player-compatibility.md §6.5). Legacy cec_power_on reads as display_power.cec; reboot_daily and other values are stored as reported." }
+        capabilities: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40 }, description: "Host capability tokens, optionally dotted into a family. Documented values: reboot (the Player reboots the device on player.reboot), play_page (the Player starts a page of its playlist on player.play_page, docs/player-compatibility.md §6.3.1), display_power.serial, display_power.cec, display_power.ddc, display_power.backlight, display_power.scrim (display power methods the Player can use, docs/player-compatibility.md §6.5). Legacy cec_power_on reads as display_power.cec; reboot_daily and other values are stored as reported." }
     HostDevice:
       type: object
       additionalProperties: false
@@ -23099,6 +23187,32 @@ components:
       properties:
         reload_id: { type: string, pattern: "^[A-Za-z0-9_-]{8,64}$", description: "details.reload_id of the player.reload event. A Player acts on one reload_id at most once." }
         expires_at: { type: string, format: date-time, description: Instant after which runtime scan must not deliver the reload and a Player ignores it. }
+    ScreenPlayPageWrite:
+      type: object
+      additionalProperties: false
+      required: [page_id]
+      properties:
+        page_id: { type: string, minLength: 1, maxLength: 128, description: "The id of a page of the playlist the screen is playing now (an id in that playlist's pages)." }
+    ScreenPlayPageAccepted:
+      type: object
+      additionalProperties: false
+      required: [screen_id, playlist_id, page_id, manifest_revision, expires_at]
+      properties:
+        screen_id: { type: string }
+        playlist_id: { type: string, description: "The playlist the screen is playing, the one that holds the page." }
+        page_id: { type: string }
+        manifest_revision: { type: string, pattern: "^man_[A-Za-z0-9_-]{1,80}$", description: "The manifest revision the command was validated against. A Player applies the command once this revision is active." }
+        expires_at: { type: string, format: date-time, description: Instant after which runtime scan does not deliver the command and a Player ignores it. }
+    ScreenPlayPageDetails:
+      type: object
+      additionalProperties: false
+      required: [page_id, playlist_id, manifest_revision, expires_at]
+      description: details object on a durable player.play_page event.
+      properties:
+        page_id: { type: string }
+        playlist_id: { type: string }
+        manifest_revision: { type: string, pattern: "^man_[A-Za-z0-9_-]{1,80}$" }
+        expires_at: { type: string, format: date-time }
     ScreenToastAccepted:
       type: object
       additionalProperties: false
@@ -23779,6 +23893,7 @@ components:
         revision: { type: integer, minimum: 1, description: Grows with each Update shown. }
         state: { type: string, enum: [active, ended] }
         ended_reason: { type: string, enum: [cancelled, all_clear, cleared, expired] }
+        via: { type: string, enum: [push, pull], description: "How the alert's latest message arrived: posted to the ingest url, or read from the trigger's pull sources." }
         status: { type: string, enum: [Actual, Exercise] }
         msg_type: { type: string, enum: [Alert, Update, Cancel] }
         sender: { type: string }
@@ -23806,6 +23921,7 @@ components:
         label: { type: string, minLength: 1, maxLength: 80 }
         target: { $ref: "#/components/schemas/TriggerTarget" }
         default_for_seconds: { type: integer, minimum: 60, maximum: 604800 }
+        pull: { $ref: "#/components/schemas/CapPull" }
         url: { type: string, description: "Where the sending system posts CAP messages: https://api.<domain>/api/triggers/<id>/cap. Not a credential: the password is." }
         username: { type: string, description: "The HTTP Basic username: the trigger id." }
         playlist_id: { type: string, description: "The trigger's alert playlist, made on its first alert: one page showing the alert card." }
@@ -23830,6 +23946,40 @@ components:
         label: { type: string, minLength: 1, maxLength: 80 }
         target: { $ref: "#/components/schemas/TriggerTarget" }
         default_for_seconds: { type: integer, minimum: 60, maximum: 604800, description: How long an alert without <expires> holds the screens. Defaults to 3600. }
+        pull: { $ref: "#/components/schemas/CapPull" }
+    CapPull:
+      type: object
+      additionalProperties: false
+      description: >-
+        CAP sources the platform reads for the trigger, with where the target screens are and which alerts count: the
+        params of a cap-alert card placement (docs/feeds.md "CAP alerts"). Each source URL is fetched once per minute for
+        every trigger and placement that names it. With no sources the platform's public feeds covering location are read
+        (NWS, Canada NAAD, and MeteoAlarm for a location with area codes). The most severe matching alert takes the target
+        screens over exactly as a pushed message would; when the sources show none (a cancel or an expiry) a pulled
+        alert ends. A stale or failing source never ends an alert. location is required unless sources are given.
+      properties:
+        sources: { type: array, maxItems: 5, items: { type: string, maxLength: 2048, description: "An http or https URL of a CAP 1.0 to 1.2 alert or an ATOM or RSS index of alerts, on port 80 or 443." } }
+        publicAlerts: { type: boolean, description: "Also read the public feeds that cover location. Default true when sources is empty, false otherwise." }
+        location:
+          type: object
+          additionalProperties: false
+          required: [latitude, longitude]
+          properties:
+            name: { type: string, maxLength: 40 }
+            latitude: { type: number, minimum: -90, maximum: 90 }
+            longitude: { type: number, minimum: -180, maximum: 180 }
+            geocodes: { type: array, maxItems: 40, items: { type: object, additionalProperties: false, required: [name, value], properties: { name: { type: string, minLength: 1, maxLength: 40 }, value: { type: string, minLength: 1, maxLength: 120 } } }, description: "Area codes of the place by code system (SAME, UGC, NUTS3, EMMA_ID), matched against alerts that name areas by code: [{name: UGC, value: WAC033}]." }
+        minSeverity: { type: string, enum: [minor, moderate, severe, extreme] }
+        maxSeverity: { type: string, enum: [minor, moderate, severe, extreme], description: "Only alerts at or below this severity: a placement for lesser alerts leaves the severe ones to a full-screen placement." }
+        minUrgency: { type: string, enum: [past, future, expected, immediate] }
+        minCertainty: { type: string, enum: [unlikely, possible, likely, observed] }
+        events: { type: array, maxItems: 30, items: { type: string, maxLength: 120 }, description: "Only these events (case-insensitive; * matches any run of characters)." }
+        excludeEvents: { type: array, maxItems: 30, items: { type: string, maxLength: 120 } }
+        senders: { type: array, maxItems: 30, items: { type: string, maxLength: 120 }, description: "Only alerts from these senders (case-insensitive; * allowed)." }
+        statuses: { type: array, maxItems: 4, items: { type: string, enum: [Actual, Exercise, Test, System] }, description: "Default [Actual]. A trigger only acts on Actual and Exercise." }
+        scopes: { type: array, maxItems: 3, items: { type: string, enum: [Public, Restricted, Private] }, description: "Default [Public]." }
+        languages: { type: array, maxItems: 30, items: { type: string, maxLength: 120 }, description: "Language preference, first wins; the alert text shown is in the first language present." }
+        areaUnknown: { type: string, enum: [hide, show], description: "An alert told only by area codes the location has none of: hide (default) or show." }
     TriggerReceipt:
       type: object
       additionalProperties: false
@@ -25561,6 +25711,8 @@ x-problem-codes:
 - assignment_not_found
 - upgrade_required
 - reboot_unsupported
+- play_page_unsupported
+- page_not_on_screen
 - webhook_limit_reached
 - fleet_link_limit_reached
 - webhook_url_rejected

@@ -622,6 +622,7 @@ cleared, and `reason`), and `screen.takeover_ended` (`reason`
 screenrig screen reboot scr_LOBBY [--expect-rev REVISION]
 screenrig screen reboot scr_A scr_B --yes
 screenrig screen reboot --tag Lobby --yes
+screenrig screen play-page scr_LOBBY --page-id pg_WELCOME
 screenrig screen display scr_LOBBY --power off [--until RFC3339 | --for 2h] [--expect-rev REVISION]
 screenrig screen display --tag Lobby --power on
 screenrig screen display clear scr_LOBBY [--expect-rev REVISION]
@@ -640,6 +641,16 @@ content without a device reboot. A reboot request expires after ten minutes,
 and each screen accepts at most 2 reboots per 10 minutes. A refused or failed
 request and an exact replay of the same request do not count. The CLI never
 prompts, so rebooting several ids or a `--tag` fleet requires `--yes`.
+
+`screen play-page` starts one page of the playlist the screen is playing now
+(its takeover, else its schedule, else its assigned playlist), so
+`screen screenshot` shows that page without waiting out the rotation. The Player
+starts the page from its beginning and continues the rotation from there. A page
+of another playlist is refused with `page_not_on_screen` (exit 5), and the
+problem names the playlist the screen is playing. A Player that does not declare
+the `play_page` capability in its host report is refused with
+`play_page_unsupported` (exit 5) and nothing is sent; update the Player. The
+request expires after 60 seconds and does not change the screen revision.
 
 `screen display` turns the display on or off now, as a manual override of the
 display schedule. `--power on|off` sets it (a trailing `on` or `off` after the

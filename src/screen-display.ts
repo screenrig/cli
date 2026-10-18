@@ -138,6 +138,37 @@ export function rebootProblem(error: unknown, id: string): unknown {
   return error;
 }
 
+/** 409 page_not_on_screen and play_page_unsupported, explained. */
+export function playPageProblem(error: unknown, id: string): unknown {
+  if (!(error instanceof CliError) || error.problem.next) return error;
+  if (error.problem.code === "page_not_on_screen") {
+    return new CliError({
+      ...error.problem,
+      next: { command: `screenrig screen show ${id}`, reason: "The page must belong to the playlist the screen is playing now (its takeover, else its schedule, else its assigned playlist). The detail names that playlist; use one of its page ids." },
+    }, error.exitCode, error.warnings);
+  }
+  if (error.problem.code === "play_page_unsupported") {
+    return new CliError({
+      ...error.problem,
+      detail: `${error.problem.detail} Nothing was sent. Only a Player that declares the play_page capability in its host report starts a page on demand; update this device's Player.`,
+      next: { command: `screenrig screen show ${id}`, reason: "Check the host capabilities. Update the Player, then run the command again." },
+    }, error.exitCode, error.warnings);
+  }
+  if (error.problem.code === "resource_conflict") {
+    return new CliError({
+      ...error.problem,
+      next: { command: `screenrig screen show ${id}`, reason: "A screen still waiting to pair has no Player to start a page. Pair it first." },
+    }, error.exitCode, error.warnings);
+  }
+  if (error.problem.code === "screen_archived") {
+    return new CliError({
+      ...error.problem,
+      next: { command: `screenrig screen unarchive ${id}`, reason: "An archived screen refuses page control. Unarchive it first if it should play again." },
+    }, error.exitCode, error.warnings);
+  }
+  return error;
+}
+
 /** Display override refusals: a pending screen has no paired Player yet; an archived one must be unarchived. */
 export function displayProblem(error: unknown, id: string): unknown {
   if (!(error instanceof CliError) || error.problem.next) return error;

@@ -121,6 +121,54 @@ test("screen reboot: single route, reboot_unsupported explained, fleet needs --y
   assert.notEqual(confirmed.code, ExitCode.Success, "a partial fleet reboot follows the fleet exit rule");
 });
 
+test("screen play-page: closed body, accepted envelope, both problems explained, usage errors send nothing", async () => {
+  const env = await enrolled();
+  const transport = fleet();
+  const PAGE = "pg_WELCOME";
+  transport.putScreen!(screen(LOBBY, { playlist_id: "pl_LOBBY", host: { platform: "android", capabilities: ["play_page"] } as unknown as Screen["host"] }));
+  transport.putScreen!(screen(PLAIN, { playlist_id: "pl_LOBBY", host: { platform: "web", capabilities: ["display_power.scrim"] } as unknown as Screen["host"] }));
+  transport.putPlaylist!({ id: "pl_LOBBY", name: "Lobby", pages: [{ id: PAGE }] });
+  const calls = () => transport.calls.filter((item) => item.path.endsWith("/play-page"));
+
+  const ok = await cli(["--json", "screen", "play-page", LOBBY, "--page-id", PAGE], transport, env);
+  assert.equal(ok.code, ExitCode.Success, ok.stdout);
+  assert.deepEqual(Object.keys(ok.envelope.data).sort(), ["expires_at", "manifest_revision", "page_id", "playlist_id", "screen_id"]);
+  assert.equal(ok.envelope.data.page_id, PAGE);
+  assert.equal(ok.envelope.data.playlist_id, "pl_LOBBY");
+  const call = calls()[0];
+  assert.equal(call?.method, "POST");
+  assert.equal(call?.path, `/api/screens/${LOBBY}/play-page`);
+  assert.deepEqual(call?.body, { page_id: PAGE });
+  assert.ok(call?.headers?.["idempotency-key"]);
+
+  const human = await cli(["--human", "screen", "play-page", LOBBY, "--page-id", PAGE], transport, env);
+  assert.equal(human.code, ExitCode.Success, human.stdout);
+  assert.match(human.stdout, /Play-page accepted/);
+
+  const elsewhere = await cli(["--json", "screen", "play-page", LOBBY, "--page-id", "pg_OTHER"], transport, env);
+  assert.equal(elsewhere.code, ExitCode.Conflict, elsewhere.stdout);
+  assert.equal(elsewhere.envelope.error?.code, "page_not_on_screen");
+  assert.equal(elsewhere.envelope.error?.next?.command, `screenrig screen show ${LOBBY}`);
+
+  const unsupported = await cli(["--json", "screen", "play-page", PLAIN, "--page-id", PAGE], transport, env);
+  assert.equal(unsupported.code, ExitCode.Conflict, unsupported.stdout);
+  assert.equal(unsupported.envelope.error?.code, "play_page_unsupported");
+  assert.match(unsupported.envelope.error!.detail, /Nothing was sent/);
+
+  const sent = calls().length;
+  for (const [argv, pattern] of [
+    [["screen", "play-page", LOBBY], /--page-id/],
+    [["screen", "play-page", "--page-id", PAGE], /requires <id>/],
+    [["screen", "play-page", LOBBY, PLAIN, "--page-id", PAGE], /extra arguments/],
+    [["screen", "play-page", LOBBY, "--page-id", "x".repeat(129)], /1 to 128/],
+  ] as const) {
+    const result = await cli(["--json", ...argv], transport, env);
+    assert.equal(result.code, ExitCode.Usage, `${argv.join(" ")}: ${result.stdout}`);
+    assert.match(`${result.envelope.error?.detail ?? ""}`, pattern);
+  }
+  assert.equal(calls().length, sent, "usage errors must not reach the server");
+});
+
 test("screen display: --power or trailing on|off, until rules, fleet action, Display lines", async () => {
   const env = await enrolled();
   const transport = fleet();

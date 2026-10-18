@@ -171,6 +171,7 @@ test("root help is compact and every command is discoverable through immediate c
     "screen recover",
     "screen reload",
     "screen toast",
+    "screen play-page",
     "screen screenshot",
     "screen tag",
     "kv get",

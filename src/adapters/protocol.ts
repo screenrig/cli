@@ -563,6 +563,20 @@ export interface ScreenRebootAccepted {
   expires_at: string;
 }
 
+/** Write body for POST /api/screens/{id}/play-page. */
+export interface ScreenPlayPageWrite {
+  page_id: string;
+}
+
+/** Accepted POST /api/screens/{id}/play-page. The Player ignores the command after expires_at. */
+export interface ScreenPlayPageAccepted {
+  screen_id: string;
+  playlist_id: string;
+  page_id: string;
+  manifest_revision: string;
+  expires_at: string;
+}
+
 /**
  * Nested playlist identity for the manifest upgrade read model. `name` is
  * resolved by playlist id; null when unknown. revision is >= 1 and is the

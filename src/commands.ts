@@ -14,7 +14,7 @@ import { cacheProjectContexts, clearResultContext, contextFromProject, formatRes
 import { projectConfigFor, withProjectConfig, assertProjectCredential } from "./project-state.js";
 import { instantInZone, normalizeInstant, assignmentLine, playlistInUseProblem, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "./screen-control.js";
 import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLAYS_SETTLE_MS, unusedPath, PLAYS_ALL_MAX_PAGES, PLAYS_LIMIT_MAX, playbackExportBudget, playsCursor, playsLimit, playsRange, requireCsvResponse, writeCsvFile, writeCsvStdout } from "./playback-export.js";
-import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, rebootProblem } from "./screen-display.js";
+import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
 import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "./screen-manifest-upgrade.js";
 import { openTempFile, removeOnSignal, shellQuote, tempPathFor } from "./temp-file.js";
@@ -84,6 +84,8 @@ import {
   type PlaybackPlay,
   type ScreenDisplayScheduleView,
   type ScreenRebootAccepted,
+  type ScreenPlayPageAccepted,
+  type ScreenPlayPageWrite,
   type PlaybackPlayList,
   type FleetLink,
   type FleetLinkList,
@@ -8331,6 +8333,34 @@ export const handleScreenReboot = commandHandler(async (args, runtime, resolved)
       humanLines("Reboot accepted", [["screen_id", id], ["reboot_id", accepted.reboot_id], ["expires_at", accepted.expires_at]]),
       "The Player reboots the device when it receives this before expires_at. Confirm it came back with screen show (online, health uptime).",
     ].join("\n"),
+  };
+}, true);
+
+// Start one page of the playlist a screen is playing now. Single screen only.
+export const handleScreenPlayPage = commandHandler(async (args, runtime, resolved) => {
+  if (args.flags["page-id"] === true) throw usageError("--page-id requires a value, such as --page-id pg_WELCOME.");
+  const pageId = flagString(args.flags, "page-id");
+  const ids = args.positionals.slice(2);
+  if (!ids.length || pageId === undefined) throw usageError("screen play-page requires <id> and --page-id PAGE_ID.");
+  const id = ids[0]!;
+  if (id.length < 1 || id.length > 200) throw usageError("screen play-page screen ids must be 1 to 200 characters.");
+  if (pageId.length < 1 || pageId.length > 128) throw usageError("--page-id must be 1 to 128 characters.");
+  const body: ScreenPlayPageWrite = { page_id: pageId };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  let response;
+  try {
+    response = await client.call({ method: "POST", path: `/api/screens/${encodeURIComponent(id)}/play-page`, idempotent: true, body });
+  } catch (error) {
+    throw playPageProblem(error, id);
+  }
+  const accepted = (response.body ?? {}) as Partial<ScreenPlayPageAccepted>;
+  if (typeof accepted.playlist_id !== "string" || typeof accepted.page_id !== "string" || serverInstant(accepted.expires_at) === undefined) {
+    throw usageError("Screen play-page response does not match the generated ScreenPlayPageAccepted contract.");
+  }
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: humanLines("Play-page accepted", [["screen_id", id], ["playlist_id", accepted.playlist_id], ["page_id", accepted.page_id], ["expires_at", accepted.expires_at]]),
   };
 }, true);
 

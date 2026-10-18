@@ -82,6 +82,8 @@ export class FakeTransport implements Transport {
   streamHandler?: (req: TransportRequest) => Promise<TransportStream>;
   /** memoryBackend hook: seed or replace a stored screen (tests and the localhost smoke). */
   putScreen?: (screen: Screen) => void;
+  /** memoryBackend hook: seed or replace a stored playlist (id and pages are enough for play-page). */
+  putPlaylist?: (playlist: Record<string, unknown> & { id: string }) => void;
   /** memoryBackend hook: remaining playback-export requests before 429. */
   setPlaybackExportBudget?: (value: number) => void;
   /** Test hook: merged onto every `request` response (not SSE stream frames). */
@@ -259,6 +261,7 @@ export function memoryBackend(options: {
   const playlists = new Map<string, Record<string, unknown>>();
   const screens = new Map<string, Screen>();
   transport.putScreen = (screen: Screen) => { screens.set(screen.id, screen); };
+  transport.putPlaylist = (playlist) => { playlists.set(playlist.id, playlist); };
   const media = new Map<string, Record<string, unknown>>();
   const kv = new Map<string, KVEntry>();
   const currentAgent: Agent = {
@@ -1090,6 +1093,27 @@ export function memoryBackend(options: {
     const outcome = rebootOutcome(screen);
     if ("problem" in outcome) return { status: outcome.problem.status, headers: { "content-type": "application/problem+json" }, body: outcome.problem };
     return { status: 202, headers: { "cache-control": "no-store", etag: `"${screen.revision}"` }, body: outcome.accepted };
+  });
+  transport.on("POST", /^\/api\/screens\/[^/]+\/play-page$/, (req): TransportResponse => {
+    const screen = screenOf(req);
+    const problem = (status: number, code: string, detail: string): TransportResponse => ({ status, headers: { "content-type": "application/problem+json" }, body: controlProblem(status, code, detail) });
+    if (!screen) return problem(404, "not_found", "Resource was not found.");
+    if (screen.state === "archived") return problem(409, "screen_archived", "screen is archived");
+    if (screen.state !== "active") return problem(409, "resource_conflict", "screen is not active");
+    if (!(screen.host?.capabilities ?? []).includes("play_page")) {
+      return problem(409, "play_page_unsupported", "The screen's Player does not declare the play_page capability.");
+    }
+    const pageId = String((req.body as { page_id?: unknown } | undefined)?.page_id ?? "");
+    const playlistId = resolveEffective(screen).effective_playlist?.id ?? screen.playlist_id ?? "";
+    const pages = (playlists.get(playlistId)?.pages ?? []) as Array<{ id?: string }>;
+    if (!pages.some((page) => page.id === pageId)) {
+      return problem(409, "page_not_on_screen", `Page ${pageId} is not in ${playlistId || "any playlist"}, the playlist this screen is playing.`);
+    }
+    return {
+      status: 202,
+      headers: { "cache-control": "no-store" },
+      body: { screen_id: screen.id, playlist_id: playlistId, page_id: pageId, manifest_revision: "man_FAKE", expires_at: new Date(clock().getTime() + 60_000).toISOString() },
+    };
   });
   transport.on("POST", /^\/api\/screens\/[^/]+\/display$/, (req) => {
     const body = (req.body ?? {}) as { power: "on" | "off"; until?: string | null };
