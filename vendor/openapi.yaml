@@ -11221,6 +11221,125 @@ paths:
           $ref: '#/components/responses/RuntimeRateLimitedProblem'
         default:
           $ref: '#/components/responses/RuntimeProblem'
+  /screen/playlists:
+    servers:
+    - url: https://play.screenrig.ai
+      description: Trusted player/runtime origin
+    get:
+      operationId: getRuntimeScreenPlaylists
+      x-rate-limit-policies:
+      - name: runtime-screen-playlists
+        quota: 30
+        windowSeconds: 60
+      - name: runtime-screen-playlists-ip
+        quota: 300
+        windowSeconds: 60
+        condition: anonymous_or_archived
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
+      description: 'Lists the playlists the paired Player''s on-device settings menu offers for the screen: the live playlists
+        of the screen''s project that have an approved version, alphabetical by name without regard to case, then by id. At
+        most 500 are returned; more is true when the project has further playlists. The paired runtime session binds the
+        project; the path names none. Auth is the runtime cookie or ScreenRig-Session, as GET /screen/chrome. Anonymous and
+        unpaired sessions are unauthorized. An archived screen is screen_archived. Cache-Control is private, no-store. A Player
+        that receives 404 treats the route as unsupported and reports it like any other failure to load the list
+        (docs/player-compatibility.md §2.6).'
+      security:
+      - pairedRuntimeCookie: []
+      - nativeSessionAuthorization: []
+      responses:
+        '200':
+          description: The project's assignable playlists.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeScreenPlaylists'
+        '401':
+          $ref: '#/components/responses/RuntimeProblem'
+        '403':
+          $ref: '#/components/responses/RuntimeProblem'
+        '409':
+          $ref: '#/components/responses/RuntimeProblem'
+        '429':
+          $ref: '#/components/responses/RuntimeRateLimitedProblem'
+        default:
+          $ref: '#/components/responses/RuntimeProblem'
+  /screen/playlist:
+    servers:
+    - url: https://play.screenrig.ai
+      description: Trusted player/runtime origin
+    put:
+      operationId: putRuntimeScreenPlaylist
+      x-rate-limit-policies:
+      - name: runtime-screen-playlist
+        quota: 30
+        windowSeconds: 60
+      - name: runtime-screen-playlist-ip
+        quota: 300
+        windowSeconds: 60
+        condition: anonymous_or_archived
+      x-rate-limit-admitted-response-headers:
+      - RateLimit-Policy
+      - RateLimit
+      description: 'Assigns a playlist to the screen bound to the paired runtime session. It is the same assignment as PATCH
+        /api/screens/{id} playlist_id, made by the person at the device: no review is opened. The playlist must belong to the
+        screen''s project and have an approved version (playlist_not_approved otherwise); a playlist that does not exist in
+        the project is invalid_request. The assignment records the same screen events and emits screen.manifest_changed to the
+        Player. It sets the screen''s assigned playlist; an active takeover or a matching playlist schedule entry still
+        decides what plays. Path and body do not name screen_id; the paired runtime session binds it. No If-Match or
+        Idempotency-Key; last write wins. Auth is the runtime cookie or ScreenRig-Session, as GET /screen/chrome. Anonymous
+        and unpaired sessions are unauthorized. An archived screen is screen_archived. A Player that receives 404 treats the
+        route as unsupported and reports it like any other failure to change the playlist (docs/player-compatibility.md
+        §2.6).'
+      security:
+      - pairedRuntimeCookie: []
+      - nativeSessionAuthorization: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeScreenPlaylistWrite'
+      responses:
+        '200':
+          description: Playlist assigned. playlist_id is the screen's assigned playlist.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeScreenPlaylist'
+        '400':
+          $ref: '#/components/responses/RuntimeProblem'
+        '401':
+          $ref: '#/components/responses/RuntimeProblem'
+        '403':
+          $ref: '#/components/responses/RuntimeProblem'
+        '409':
+          $ref: '#/components/responses/RuntimeProblem'
+        '429':
+          $ref: '#/components/responses/RuntimeRateLimitedProblem'
+        default:
+          $ref: '#/components/responses/RuntimeProblem'
   /screen/unpair:
     servers:
     - url: https://play.screenrig.ai
@@ -20982,6 +21101,41 @@ components:
       description: The stored screen name, the value the manifest carries as screen_label.
       properties:
         screen_label: { type: string, minLength: 1, maxLength: 120 }
+    RuntimeScreenPlaylistWrite:
+      type: object
+      additionalProperties: true
+      required: [playlist_id]
+      description: >-
+        The PUT /screen/playlist body. Unknown members are ignored
+        (docs/player-compatibility.md §1.1).
+      properties:
+        playlist_id: { type: string, minLength: 1 }
+    RuntimeScreenPlaylist:
+      type: object
+      additionalProperties: true
+      required: [playlist_id]
+      description: The screen's assigned playlist after the change.
+      properties:
+        playlist_id: { type: string, minLength: 1 }
+    RuntimeScreenPlaylists:
+      type: object
+      additionalProperties: true
+      required: [playlists, more]
+      description: >-
+        The playlists a screen's on-device picker offers, alphabetical by name
+        without regard to case, then by id.
+      properties:
+        playlists:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: true
+            required: [id, name]
+            properties:
+              id: { type: string, minLength: 1 }
+              name: { type: string }
+        more: { type: boolean, description: True when the project has playlists beyond the 500 listed. }
     OAuthTokenResponse:
       type: object
       additionalProperties: false
