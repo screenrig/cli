@@ -65,6 +65,18 @@ test("init turns ready audio into the soundtrack and edits keep it", () => {
  assert.deepEqual(editable.pages[0].audio_cue, { track: "track_2", restart: false });
 });
 
+test("edits keep a cued soundtrack and drop the server's max_ms from an audio_end page", () => {
+ const authored = initializePlaylist({ name: "Album", media: [media[0]!, { id: "med_SONG", primitive: "audio", state: "ready" }], width: 1920, height: 1080, durationMs: 8000, fit: "contain" });
+ const read: Record<string, any> = { ...structuredClone(authored), id: "pl_TEST", revision: 4, audio: { ...authored.audio, loop: true, volume: 1, cued: true } };
+ read.pages[0].audio_cue = { track: "track_1", restart: true };
+ read.pages[0].advance = { mode: "audio_end", max_ms: 214000 };
+ const editable = editablePlaylist(read);
+ assert.deepEqual(editable.audio, { tracks: authored.audio.tracks, loop: true, volume: 1, cued: true });
+ assert.deepEqual(editable.pages[0].advance, { mode: "audio_end" });
+ assert.deepEqual(editable.pages[0].audio_cue, { track: "track_1", restart: true });
+ assert.equal(read.pages[0].advance.max_ms, 214000);
+});
+
 test("editable stream preserves sources and fallback without resolved media", () => {
  const authored = document();
  authored.pages = [authored.pages[0]];

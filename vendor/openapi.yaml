@@ -22082,18 +22082,20 @@ components:
         never stop or restart it. PUT replaces the whole playlist, so omitting
         audio removes the soundtrack.
       properties:
-        tracks: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistAudioTrack" }, description: "Play order. Track ids are unique within the playlist; the same media may appear under two ids." }
-        loop: { type: boolean, default: true, description: "After the last track, start again at the first. false stops after the last track." }
+        tracks: { type: array, minItems: 1, maxItems: 128, items: { $ref: "#/components/schemas/PlaylistAudioTrack" }, description: "Play order. Track ids are unique within the playlist; the same media may appear under two ids." }
+        loop: { type: boolean, default: true, description: "After the last track, start again at the first. false stops after the last track. Ignored when cued is true." }
         volume: { type: number, minimum: 0, maximum: 1, default: 1, description: "Soundtrack gain, multiplied by the Player's own volume." }
+        cued: { type: boolean, default: false, description: "true stops the soundtrack after each track: a track plays only when a page audio_cue starts it, so each page and its track stay bound. false plays the tracks back to back." }
     PlaylistAudio:
       type: object
       additionalProperties: false
       required: [tracks, loop, volume]
       description: Stored playlist soundtrack with defaults filled in.
       properties:
-        tracks: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/PlaylistAudioTrack" } }
+        tracks: { type: array, minItems: 1, maxItems: 128, items: { $ref: "#/components/schemas/PlaylistAudioTrack" } }
         loop: { type: boolean }
         volume: { type: number, minimum: 0, maximum: 1 }
+        cued: { type: boolean, description: "Present and true only for a cued soundtrack." }
     PlaylistAudioTrack:
       type: object
       additionalProperties: false
@@ -22111,7 +22113,8 @@ components:
         it is already playing; restart true restarts it even then. The sequence
         continues from that track. Players may ignore a hint. track must name a
         track id in the playlist audio; a cue without a playlist audio is
-        invalid_request. Not allowed on adslot pages.
+        invalid_request. Not allowed on adslot pages. A page with advance mode
+        audio_end ends when the cued track ends; it requires this cue.
       properties:
         track: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }
         restart: { type: boolean, default: false }
@@ -22265,17 +22268,21 @@ components:
         - { $ref: "#/components/schemas/PlaylistDurationAdvance" }
         - { $ref: "#/components/schemas/PlaylistApplicationAdvance" }
         - { $ref: "#/components/schemas/PlaylistMediaEndAdvanceWrite" }
+        - { $ref: "#/components/schemas/PlaylistAudioEndAdvanceWrite" }
       discriminator: { propertyName: mode }
     PlaylistAdvance:
       oneOf:
         - { $ref: "#/components/schemas/PlaylistDurationAdvance" }
         - { $ref: "#/components/schemas/PlaylistApplicationAdvance" }
         - { $ref: "#/components/schemas/PlaylistMediaEndAdvance" }
+        - { $ref: "#/components/schemas/PlaylistAudioEndAdvance" }
       discriminator: { propertyName: mode }
     PlaylistDurationAdvance: { type: object, additionalProperties: false, required: [mode, after_ms], properties: { mode: { type: string, enum: [duration] }, after_ms: { type: integer, minimum: 1000, maximum: 86400000 } } }
     PlaylistApplicationAdvance: { type: object, additionalProperties: false, required: [mode, max_ms], properties: { mode: { type: string, enum: [application] }, max_ms: { type: integer, minimum: 1000, maximum: 86400000 } } }
     PlaylistMediaEndAdvanceWrite: { type: object, additionalProperties: false, required: [mode], properties: { mode: { type: string, enum: [media_end] }, max_ms: { type: integer, minimum: 1000, maximum: 86400000, description: Optional client safety hint; the server resolves the authoritative deadline from resolved item lengths. } } }
     PlaylistMediaEndAdvance: { type: object, additionalProperties: false, required: [mode, max_ms], properties: { mode: { type: string, enum: [media_end] }, max_ms: { type: integer, minimum: 1000, maximum: 86400000 } } }
+    PlaylistAudioEndAdvanceWrite: { type: object, additionalProperties: false, required: [mode], description: "The page ends when the soundtrack track its audio_cue names ends. The page must carry an audio_cue and the playlist an audio soundtrack (docs/playlist-audio.md).", properties: { mode: { type: string, enum: [audio_end] }, max_ms: { type: integer, minimum: 1000, maximum: 86400000, description: Optional client safety hint; the server resolves the authoritative deadline from the cued track's verified duration. } } }
+    PlaylistAudioEndAdvance: { type: object, additionalProperties: false, required: [mode, max_ms], properties: { mode: { type: string, enum: [audio_end] }, max_ms: { type: integer, minimum: 1000, maximum: 86400000 } } }
     PlaylistPrimitiveWrite:
       oneOf:
         - { $ref: "#/components/schemas/PlaylistApplicationPrimitiveWrite" }
@@ -22630,7 +22637,7 @@ components:
         platform: { type: string, pattern: "^[a-z][a-z0-9-]{0,31}$", description: "Registered values: tizen, android, windows, qt, apple, chromeos, browser, brightsign. Another value matching the pattern is stored as the player reported it." }
         host_version: { type: string, minLength: 1, maxLength: 40, description: "Shell or container product version, CalVer or vendor form." }
         device: { $ref: "#/components/schemas/HostDevice" }
-        capabilities: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40 }, description: "Host capability tokens, optionally dotted into a family. Documented values: reboot (the Player reboots the device on player.reboot), play_page (the Player starts a page of its playlist on player.play_page, docs/player-compatibility.md §6.3.1), display_power.serial, display_power.cec, display_power.ddc, display_power.backlight, display_power.scrim (display power methods the Player can use, docs/player-compatibility.md §6.5). Legacy cec_power_on reads as display_power.cec; reboot_daily and other values are stored as reported." }
+        capabilities: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40 }, description: "Host capability tokens, optionally dotted into a family. Documented values: reboot (the Player reboots the device on player.reboot), play_page (the Player starts a page of its playlist on player.play_page, docs/player-compatibility.md §6.3.1), audio.extended (the Player plays soundtracks of up to 128 tracks, a cued soundtrack, and audio_end pages, docs/player-compatibility.md §6.6), display_power.serial, display_power.cec, display_power.ddc, display_power.backlight, display_power.scrim (display power methods the Player can use, docs/player-compatibility.md §6.5). Legacy cec_power_on reads as display_power.cec; reboot_daily and other values are stored as reported." }
     HostDevice:
       type: object
       additionalProperties: false
@@ -24571,8 +24578,8 @@ components:
       type: object
       required: [mode]
       properties:
-        mode: { type: string, enum: [duration, application, media_end] }
-        afterMs: { type: integer }
+        mode: { type: string, enum: [duration, application, media_end, audio_end] }
+        afterMs: { type: integer, description: "duration: the page length. audio_end: the cued track's verified duration, the page length when the track cannot play." }
         maxMs: { type: integer }
     RuntimePrimitive:
       oneOf:
@@ -24827,7 +24834,8 @@ components:
       properties:
         loop: { type: boolean }
         volume: { type: number, minimum: 0, maximum: 1 }
-        tracks: { type: array, minItems: 1, maxItems: 32, items: { $ref: "#/components/schemas/RuntimeAudioTrack" } }
+        tracks: { type: array, minItems: 1, maxItems: 128, items: { $ref: "#/components/schemas/RuntimeAudioTrack" } }
+        cued: { type: boolean, description: "Present and true only for a cued soundtrack." }
     RuntimeAudioTrack:
       type: object
       required: [id, mediaId, src, sha256, bytes, contentType, durationMs, grantId]

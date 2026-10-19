@@ -314,7 +314,7 @@ function validateSelector(
   return { count: ids.length, oneAtATime: selector.one_at_a_time === true };
 }
 
-function validateAdvance(value: unknown, name: string): "duration" | "application" | "media_end" {
+function validateAdvance(value: unknown, name: string): "duration" | "application" | "media_end" | "audio_end" {
   const advance = record(value, name);
   if (advance.mode === "duration") {
     exact(advance, ["mode", "after_ms"], name);
@@ -331,10 +331,20 @@ function validateAdvance(value: unknown, name: string): "duration" | "applicatio
     if (advance.max_ms !== undefined) number(advance, "max_ms", name, { integer: true, min: 1000, max: 86_400_000 });
     return "media_end";
   }
+  if (advance.mode === "audio_end") {
+    // The page ends when the track its audio_cue names ends. max_ms is an optional
+    // client hint; the server resolves the authoritative deadline from the track.
+    exact(advance, ["mode", "max_ms"], name);
+    if (advance.max_ms !== undefined) number(advance, "max_ms", name, { integer: true, min: 1000, max: 86_400_000 });
+    return "audio_end";
+  }
   throw usageError(`${name}.mode is invalid.`);
 }
 
 export type BundleMediaPrimitive = "image" | "video" | "audio";
+
+/** A playlist soundtrack holds 1 to this many tracks. */
+const MAX_AUDIO_TRACKS = 128;
 
 /** Validate the optional soundtrack and return its track ids for page cues. */
 function validateAudio(
@@ -344,11 +354,13 @@ function validateAudio(
 ): Set<string> {
   const name = "playlist.audio";
   const audio = record(value, name);
-  exact(audio, ["tracks", "loop", "volume"], name);
-  if (!Array.isArray(audio.tracks) || audio.tracks.length < 1 || audio.tracks.length > 32) {
-    throw usageError(`${name}.tracks must contain 1 to 32 tracks.`);
+  exact(audio, ["tracks", "loop", "volume", "cued"], name);
+  if (!Array.isArray(audio.tracks)) throw usageError(`${name}.tracks must be an array of 1 to ${MAX_AUDIO_TRACKS} tracks.`);
+  if (audio.tracks.length < 1 || audio.tracks.length > MAX_AUDIO_TRACKS) {
+    throw usageError(`${name}.tracks must contain 1 to ${MAX_AUDIO_TRACKS} tracks; this playlist has ${audio.tracks.length}.`);
   }
   optionalBoolean(audio, "loop", name);
+  optionalBoolean(audio, "cued", name);
   if (audio.volume !== undefined) number(audio, "volume", name, { min: 0, max: 1 });
   const trackIds = new Set<string>();
   for (const [index, trackValue] of audio.tracks.entries()) {
@@ -403,6 +415,7 @@ export function validatePlaylistWrite(
     if (page.visibility === undefined) unscheduled += 1;
     else validateVisibility(page.visibility, `${pageName}.visibility`);
     if (page.audio_cue !== undefined) validateAudioCue(page.audio_cue, `${pageName}.audio_cue`, trackIds);
+    else if (advance === "audio_end") throw usageError(`${pageName}.advance audio_end requires an audio_cue on the same page.`);
     if (!Array.isArray(page.primitives) || page.primitives.length < 1 || page.primitives.length > 24) {
       throw usageError(`${pageName}.primitives must contain 1 to 24 primitives.`);
     }
@@ -461,7 +474,7 @@ export function validatePlaylistWrite(
       if (only.primitive === "video" && only.value.loop === true) throw usageError(`${pageName} media_end video must not loop.`);
     } else {
       for (const media of mediaPrimitivesOnPage) {
-        if (media.primitive === "image" && media.value.dwell_ms !== undefined) throw usageError(`${pageName} duration pages forbid image dwell_ms.`);
+        if (media.primitive === "image" && media.value.dwell_ms !== undefined) throw usageError(`${pageName} ${advance} pages forbid image dwell_ms.`);
         if (media.selector.count > 1 && !media.selector.oneAtATime) throw usageError(`${pageName} multi-item selectors require one_at_a_time true.`);
       }
     }

@@ -524,6 +524,8 @@ function normalizedAudio(input: unknown): JsonRecord {
     tracks,
     ...(typeof audio.loop === "boolean" ? { loop: audio.loop } : {}),
     ...(typeof audio.volume === "number" ? { volume: audio.volume } : {}),
+    // The server stores and echoes `cued` only when true.
+    ...(audio.cued === true ? { cued: true } : {}),
   };
 }
 

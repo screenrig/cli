@@ -155,6 +155,21 @@ test("a soundtrack and page cues travel with the bundle and its media is exporte
   assert.deepEqual((normalized.playlist.pages as any[])[0].audio_cue, { track: "intro", restart: false });
 });
 
+test("a cued soundtrack keeps cued, an uncued one omits it, and an audio_end page keeps its advance", () => {
+  const source = playlist(mediaPrimitive({ by: "id", media_id: "med_A" })) as Record<string, any>;
+  source.audio = { tracks: [{ id: "intro", media_id: "med_SONG" }], loop: true, volume: 1, cued: true };
+  source.pages[0].audio_cue = { track: "intro", restart: true };
+  source.pages[0].advance = { mode: "audio_end", max_ms: 214000 };
+  const normalized = normalizePlaylistForBundle(source);
+  assert.deepEqual(normalized.playlist.audio, { tracks: [{ id: "intro", media_id: "med_SONG" }], loop: true, volume: 1, cued: true });
+  assert.deepEqual((normalized.playlist.pages as any[])[0].advance, { mode: "audio_end", max_ms: 214000 });
+  // The server echoes cued only when true; a false value never reaches the bundle.
+  source.audio.cued = false;
+  assert.deepEqual(normalizePlaylistForBundle(source).playlist.audio, { tracks: [{ id: "intro", media_id: "med_SONG" }], loop: true, volume: 1 });
+  delete source.audio.cued;
+  assert.deepEqual(normalizePlaylistForBundle(source).playlist.audio, { tracks: [{ id: "intro", media_id: "med_SONG" }], loop: true, volume: 1 });
+});
+
 test("rejects application primitives before any media lookup or local output", async () => {
   const dir = await testTemp("bundle-app-");
   const output = path.join(dir, "export");

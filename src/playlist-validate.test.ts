@@ -100,3 +100,46 @@ test("media_end allows a card chip beside its one video, as the server does", ()
   cardOnly.pages[0]!.primitives = [{ id: "chip", primitive: "card", card: "clock", major: 1, params: {}, layout: "full", content_fit: "fill" }] as any;
   assert.ok(playlistIssues(cardOnly).some((issue) => issue.path === "/pages/0/advance" && issue.message.includes("exactly one image or video")));
 });
+
+function soundtrackDocument(page: Record<string, unknown>, audio: Record<string, unknown> = {}) {
+  const pageDefaults = { id: "page", canvas: { width: 1920, height: 1080, background: "#000000FF", viewport_fit: "contain" }, transition: { type: "crossfade", duration_ms: 200 }, primitives: [{ id: "media", primitive: "image", selector: { by: "id", media_id: "med_IMAGE" }, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "contain" }] };
+  return { name: "Album", audio: { tracks: [{ id: "intro", media_id: "med_SONG" }, { id: "bed", media_id: "med_SONG" }], loop: false, volume: 0.5, ...audio }, pages: [{ ...pageDefaults, advance: { mode: "duration", after_ms: 5000 }, ...page }] };
+}
+
+test("soundtrack audio_end page: the local validator accepts a cued page that ends with its track", () => {
+  const cue = { track: "bed", restart: true };
+  assert.deepEqual(playlistIssues(soundtrackDocument({ advance: { mode: "audio_end" }, audio_cue: cue })), []);
+  assert.deepEqual(playlistIssues(soundtrackDocument({ advance: { mode: "audio_end", max_ms: 214000 }, audio_cue: cue })), []);
+  // The read form carries the server's max_ms; the write form omits it.
+  assert.notDeepEqual(playlistIssues(soundtrackDocument({ advance: { mode: "audio_end", max_ms: 500 }, audio_cue: cue })), []);
+  assert.notDeepEqual(playlistIssues(soundtrackDocument({ advance: { mode: "audio_end", after_ms: 5000 }, audio_cue: cue })), []);
+});
+
+test("soundtrack audio_end without cue is refused at the page advance", () => {
+  const issues = playlistIssues(soundtrackDocument({ advance: { mode: "audio_end" } }));
+  assert.ok(issues.some((issue) => issue.path === "/pages/0/advance" && issue.message.includes("audio_end requires an audio_cue")));
+});
+
+test("soundtrack audio_end image dwell is refused, as on a duration page", () => {
+  const document = soundtrackDocument({ advance: { mode: "audio_end" }, audio_cue: { track: "bed", restart: true } });
+  (document.pages[0]!.primitives[0] as Record<string, unknown>).dwell_ms = 3000;
+  assert.ok(playlistIssues(document).some((issue) => issue.path === "/pages/0/primitives/0/dwell_ms"));
+  const several = soundtrackDocument({ advance: { mode: "audio_end" }, audio_cue: { track: "bed", restart: true } });
+  (several.pages[0]!.primitives[0] as Record<string, unknown>).selector = { by: "all" };
+  assert.ok(playlistIssues(several).some((issue) => issue.path === "/pages/0/primitives/0/selector/one_at_a_time"));
+});
+
+test("soundtrack cued is a boolean", () => {
+  const cue = { track: "bed", restart: true };
+  assert.deepEqual(playlistIssues(soundtrackDocument({ audio_cue: cue }, { cued: true })), []);
+  assert.deepEqual(playlistIssues(soundtrackDocument({ audio_cue: cue }, { cued: false })), []);
+  assert.ok(playlistIssues(soundtrackDocument({ audio_cue: cue }, { cued: "yes" })).some((issue) => issue.path === "/audio/cued"));
+});
+
+test("soundtrack 128 tracks is the limit and 129 tracks is refused", () => {
+  const tracksOf = (count: number) => Array.from({ length: count }, (_, index) => ({ id: `track_${index + 1}`, media_id: "med_SONG" }));
+  assert.deepEqual(playlistIssues(soundtrackDocument({}, { tracks: tracksOf(128) })), []);
+  const issues = playlistIssues(soundtrackDocument({}, { tracks: tracksOf(129) }));
+  assert.ok(issues.some((issue) => issue.path === "/audio/tracks" && issue.message.includes("128")));
+  assert.ok(playlistIssues(soundtrackDocument({}, { tracks: [] })).some((issue) => issue.path === "/audio/tracks"));
+});

@@ -231,3 +231,96 @@ test("playlist write rejects malformed soundtracks and cues", () => {
     assert.throws(() => validatePlaylistWrite(value, AUDIO_MEDIA), CliError, name);
   }
 });
+
+function imagePage(id: string, advance: unknown, cue?: unknown, imageOverrides: Record<string, unknown> = {}) {
+  return {
+    id,
+    canvas: { width: 1920, height: 1080, background: "#000000FF" },
+    transition: { type: "crossfade", duration_ms: 200 },
+    advance,
+    ...(cue === undefined ? {} : { audio_cue: cue }),
+    primitives: [{
+      id: "image",
+      primitive: "image",
+      selector: { by: "id", media_id: "med_STILL" },
+      rect: { x: 0, y: 0, width: 1920, height: 1080 },
+      layer: 0,
+      content_fit: "contain",
+      ...imageOverrides,
+    }],
+  };
+}
+
+function audioEndPlaylist(page: Record<string, unknown>, audio: unknown = { tracks: [{ id: "intro", media_id: "med_SONG" }, { id: "bed", media_id: "med_BED" }], loop: false, volume: 0.5 }) {
+  return { name: "Album", ...(audio === null ? {} : { audio }), pages: [page] };
+}
+
+const AUDIO_END_MEDIA = new Set(["med_SONG", "med_BED", "med_STILL"]);
+
+test("soundtrack audio_end page: a page cued to a track ends with it, with or without a max_ms hint", () => {
+  const cue = { track: "bed", restart: true };
+  assert.deepEqual(validatePlaylistWrite(audioEndPlaylist(imagePage("one", { mode: "audio_end" }, cue)), AUDIO_MEDIA), AUDIO_END_MEDIA);
+  assert.deepEqual(validatePlaylistWrite(audioEndPlaylist(imagePage("one", { mode: "audio_end", max_ms: 214_000 }, cue)), AUDIO_MEDIA), AUDIO_END_MEDIA);
+  // A selector that matches several images plays one at a time, as on a duration page.
+  const several = imagePage("one", { mode: "audio_end" }, cue, { selector: { by: "ids", media_ids: ["med_STILL", "med_STILL2"], one_at_a_time: true } });
+  assert.doesNotThrow(() => validatePlaylistWrite(audioEndPlaylist(several), new Map([...AUDIO_MEDIA, ["med_STILL2", "image"] as const])));
+});
+
+test("soundtrack audio_end without cue, without soundtrack, or with a bad hint is refused", () => {
+  const cue = { track: "bed", restart: true };
+  assert.throws(
+    () => validatePlaylistWrite(audioEndPlaylist(imagePage("one", { mode: "audio_end" })), AUDIO_MEDIA),
+    (error: unknown) => error instanceof CliError && /pages\[0\]\.advance audio_end requires an audio_cue on the same page/.test(error.problem.detail),
+  );
+  assert.throws(
+    () => validatePlaylistWrite(audioEndPlaylist(imagePage("one", { mode: "audio_end" }), null), AUDIO_MEDIA),
+    (error: unknown) => error instanceof CliError && /audio_end requires an audio_cue/.test(error.problem.detail),
+  );
+  assert.throws(
+    () => validatePlaylistWrite(audioEndPlaylist(imagePage("one", { mode: "audio_end" }, cue), null), AUDIO_MEDIA),
+    (error: unknown) => error instanceof CliError && /requires a playlist audio soundtrack/.test(error.problem.detail),
+  );
+  assert.throws(() => validatePlaylistWrite(audioEndPlaylist(imagePage("one", { mode: "audio_end" }, { track: "missing" })), AUDIO_MEDIA), CliError);
+  assert.throws(() => validatePlaylistWrite(audioEndPlaylist(imagePage("one", { mode: "audio_end", max_ms: 500 }, cue)), AUDIO_MEDIA), CliError);
+  assert.throws(() => validatePlaylistWrite(audioEndPlaylist(imagePage("one", { mode: "audio_end", after_ms: 5000 }, cue)), AUDIO_MEDIA), CliError);
+});
+
+test("soundtrack audio_end image dwell: an audio_end page follows the duration page rules", () => {
+  const cue = { track: "bed", restart: true };
+  assert.throws(
+    () => validatePlaylistWrite(audioEndPlaylist(imagePage("one", { mode: "audio_end" }, cue, { dwell_ms: 3000 })), AUDIO_MEDIA),
+    (error: unknown) => error instanceof CliError && /audio_end pages forbid image dwell_ms/.test(error.problem.detail),
+  );
+  const several = imagePage("one", { mode: "audio_end" }, cue, { selector: { by: "ids", media_ids: ["med_STILL", "med_STILL2"] } });
+  assert.throws(
+    () => validatePlaylistWrite(audioEndPlaylist(several), new Map([...AUDIO_MEDIA, ["med_STILL2", "image"] as const])),
+    (error: unknown) => error instanceof CliError && /multi-item selectors require one_at_a_time true/.test(error.problem.detail),
+  );
+});
+
+test("soundtrack cued: cued is a boolean on the soundtrack", () => {
+  const tracks = [{ id: "intro", media_id: "med_SONG" }, { id: "bed", media_id: "med_BED" }];
+  const page = imagePage("one", { mode: "duration", after_ms: 5000 }, { track: "bed", restart: true });
+  assert.deepEqual(validatePlaylistWrite(audioEndPlaylist(page, { tracks, loop: false, volume: 0.5, cued: true }), AUDIO_MEDIA), AUDIO_END_MEDIA);
+  assert.doesNotThrow(() => validatePlaylistWrite(audioEndPlaylist(page, { tracks, cued: false }), AUDIO_MEDIA));
+  assert.throws(
+    () => validatePlaylistWrite(audioEndPlaylist(page, { tracks, cued: "yes" }), AUDIO_MEDIA),
+    (error: unknown) => error instanceof CliError && /cued/.test(error.problem.detail),
+  );
+});
+
+test("soundtrack 128 tracks and 129 tracks: the limit is 128 and the refusal names it and the count", () => {
+  const tracksOf = (count: number) => Array.from({ length: count }, (_, index) => ({ id: `track_${index + 1}`, media_id: "med_SONG" }));
+  const page = imagePage("one", { mode: "duration", after_ms: 5000 });
+  assert.deepEqual(validatePlaylistWrite(audioEndPlaylist(page, { tracks: tracksOf(128) }), AUDIO_MEDIA), new Set(["med_SONG", "med_STILL"]));
+  assert.throws(
+    () => validatePlaylistWrite(audioEndPlaylist(page, { tracks: tracksOf(129) }), AUDIO_MEDIA),
+    (error: unknown) => error instanceof CliError
+      && error.problem.code === "usage_error"
+      && error.problem.detail.includes("audio.tracks must contain 1 to 128 tracks; this playlist has 129."),
+  );
+  assert.throws(
+    () => validatePlaylistWrite(audioEndPlaylist(page, { tracks: [] }), AUDIO_MEDIA),
+    (error: unknown) => error instanceof CliError && error.problem.detail.includes("audio.tracks must contain 1 to 128 tracks; this playlist has 0."),
+  );
+});

@@ -130,7 +130,7 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
         const mediaSelector = object(primitive.selector);
         if (mediaSelector.by === "tag" && object(mediaSelector.tags) && mediaSelector.tags !== undefined && Object.keys(object(mediaSelector.tags)).length === 0) fail(`${itemPath}/selector/tags`, "must contain at least one filter");
         if (mediaSelector.one_at_a_time === true && mediaSelector.batch_size !== undefined && mediaSelector.batch_size !== 1) fail(`${itemPath}/selector/batch_size`, "one_at_a_time requires batch_size 1");
-        if (mode === "duration" || mode === "application") {
+        if (mode === "duration" || mode === "application" || mode === "audio_end") {
           if (Object.hasOwn(primitive, "dwell_ms")) fail(`${itemPath}/dwell_ms`, "is forbidden on duration and application pages");
           const selector = object(primitive.selector);
           if ((selector.by === "all" || selector.by === "tag" || selector.by === "folder" || selector.by === "ids" && array(selector.media_ids).length > 1) && selector.one_at_a_time !== true) fail(`${itemPath}/selector/one_at_a_time`, "must be true for multiple media on duration or application pages");
@@ -158,7 +158,10 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
   }
   for (const [index, raw] of pages.entries()) {
     const page = object(raw);
-    if (!Object.hasOwn(page, "audio_cue")) continue;
+    if (!Object.hasOwn(page, "audio_cue")) {
+      if (object(page.advance).mode === "audio_end") fail(`/pages/${index}/advance`, "audio_end requires an audio_cue on the same page");
+      continue;
+    }
     if (!Object.hasOwn(playlist, "audio")) fail(`/pages/${index}/audio_cue`, "requires a playlist audio soundtrack");
     else if (!trackIds.has(object(page.audio_cue).track)) fail(`/pages/${index}/audio_cue/track`, "must name a track id in audio.tracks");
   }

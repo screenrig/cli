@@ -101,6 +101,8 @@ export interface PreviewSoundtrack {
   tracks: Array<{ id: string; media_id: string }>;
   loop: boolean;
   volume: number;
+  /** Present and true for a cued soundtrack: a track plays only when a page cue starts it. */
+  cued?: true;
 }
 
 /** A media primitive drawn as a labelled box because its pixels were not available. */
@@ -206,7 +208,7 @@ function soundtrackOf(audio: unknown): PreviewSoundtrack | undefined {
     const track = recordOf(value);
     return { id: String(track.id), media_id: String(track.media_id) };
   }) : [];
-  return { tracks, loop: raw.loop !== false, volume: typeof raw.volume === "number" ? raw.volume : 1 };
+  return { tracks, loop: raw.loop !== false, volume: typeof raw.volume === "number" ? raw.volume : 1, ...(raw.cued === true ? { cued: true as const } : {}) };
 }
 
 function audioCueOf(page: Record<string, unknown>): PreviewPageResult["audio_cue"] {

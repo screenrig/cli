@@ -129,6 +129,18 @@ test("playlist preview writes N*3 stable files and a 6-column contact sheet", as
   await rm(cwdDir, { recursive: true, force: true });
 });
 
+test("playlist preview reports a cued soundtrack and the page cue instead of drawing them", async () => {
+  const cwdDir = await testTemp("preview-soundtrack-");
+  const page = { ...iframePage("one"), audio_cue: { track: "bed", restart: true } };
+  const audio = { tracks: [{ id: "intro", media_id: "med_SONG" }, { id: "bed", media_id: "med_SONG" }], loop: false, volume: 0.5 };
+  const cued = await previewPlaylist({ playlist: { name: "Preview", audio: { ...audio, cued: true }, pages: [page] }, outputDirectory: path.join(cwdDir, "cued"), lintOnly: true });
+  assert.deepEqual(cued.soundtrack, { ...audio, cued: true });
+  assert.deepEqual(cued.pages[0]!.audio_cue, { track: "bed", restart: true });
+  const plain = await previewPlaylist({ playlist: { name: "Preview", audio, pages: [page] }, outputDirectory: path.join(cwdDir, "plain"), lintOnly: true });
+  assert.deepEqual(plain.soundtrack, audio);
+  await rm(cwdDir, { recursive: true, force: true });
+});
+
 test("playlist preview command writes files, lint, and the contact-sheet sentence", async () => {
   const cwdDir = await testTemp("preview-cli-cmd-");
   const file = path.join(cwdDir, "playlist.json");

@@ -38,7 +38,8 @@ export function editablePlaylist(value: unknown): RecordValue {
     if (page.type === "adslot") continue;
     // Page comments are read-only here; updates carry them over by page id.
     delete page.comments;
-    if (page.advance?.mode === "media_end") delete page.advance.max_ms;
+    // The server resolves max_ms for media_end and audio_end pages; a read value is not authoring input.
+    if (page.advance?.mode === "media_end" || page.advance?.mode === "audio_end") delete page.advance.max_ms;
     if (!Array.isArray(page.primitives)) throw usageError("Playlist primitives are missing.");
     for (const primitive of page.primitives) {
       object(primitive);

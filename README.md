@@ -1606,7 +1606,7 @@ Audio inputs do not become pages. They become the playlist soundtrack: an
 ordered list of MP3 tracks that plays continuously while pages change, looping
 by default. `media upload` sends an MP3 unchanged and converts WAV, AAC/M4A,
 OGG, and FLAC to a 128 kb/s MP3 first (ffmpeg with libmp3lame). Tracks run 1
-second to 3 hours.
+second to 3 hours. A soundtrack holds 1 to 128 tracks.
 
 ```sh
 screenrig playlist init ./poster.png ./menu.mp4 ./lobby-loop.wav --name Lobby --screen-id scr_LOBBY --output lobby.json
@@ -1627,6 +1627,43 @@ The document gains a top-level `audio` object; a page may add an optional
 `playlist update` replaces the whole document, so omitting `audio` removes the
 soundtrack. `playlist show --editable`, `playlist export`, and `playlist import`
 keep the soundtrack, its cues, and its audio files.
+
+#### Bind a page to a track
+
+Two additions tie a page to its track, for an album or a book with one page per
+track.
+
+- `advance: { "mode": "audio_end" }` ends the page when the track its
+  `audio_cue` names ends, the way `media_end` ends a page with its video. The
+  page must carry an `audio_cue` and the playlist an `audio` soundtrack. Image
+  and video primitives follow the `duration` page rules: no `dwell_ms`, and
+  `one_at_a_time: true` on every dynamic selector (`all`, `tag`, `folder`, or
+  `ids` with more than one id), even when it matches one object today. A
+  `stream` primitive still needs a `duration` page, and an application on the
+  page is never its controller. An optional `max_ms` is a safety hint; the server sets the deadline from the
+  track's verified length, so `playlist show --editable` omits it.
+- `audio.cued: true` stops the soundtrack after each track. A track plays only
+  when a page `audio_cue` starts it. It keeps playing under any ordinary pages
+  that follow its page until it ends, and then the soundtrack is silent until
+  the next cue, so a page and its track stay bound, with any number of ordinary
+  pages between bound pages. `loop` has no effect on a cued soundtrack. `cued` defaults to `false` (tracks play back to back) and the
+  stored playlist carries it only when `true`.
+
+```json
+{
+  "name": "Album",
+  "audio": { "tracks": [{ "id": "song1", "media_id": "med_SONG1" }, { "id": "song2", "media_id": "med_SONG2" }], "cued": true },
+  "pages": [
+    { "id": "song1-art", "audio_cue": { "track": "song1", "restart": true }, "advance": { "mode": "audio_end" }, "...": "..." },
+    { "id": "interlude", "advance": { "mode": "duration", "after_ms": 8000 }, "...": "..." },
+    { "id": "song2-art", "audio_cue": { "track": "song2", "restart": true }, "advance": { "mode": "audio_end" }, "...": "..." }
+  ]
+}
+```
+
+`playlist validate` reports a missing `audio_cue` on an `audio_end` page, a cue
+for a track the soundtrack lacks, and a soundtrack over 128 tracks before
+anything uploads.
 
 With `--screen-id`, the result includes `screen_id`, `screen_revision`, and a
 `publish.argv` array containing the output path and optional revision guard. It also
@@ -1760,8 +1797,9 @@ an error; narrow the filters. `batch_size` is a separate limit of 1–1,024
 items per page visit. On a `media_end` page, `one_at_a_time: false` plays the
 next batch in sequence; omitting `batch_size` plays the remaining pass.
 `one_at_a_time: true` plays one item per appearance and allows only an omitted
-batch size or `batch_size: 1`. Duration and application pages require
-`one_at_a_time: true`. Images on `media_end` also require `dwell_ms`; videos
+batch size or `batch_size: 1`. Duration, application, and `audio_end` pages require
+`one_at_a_time: true` on every dynamic selector (`all`, `tag`, `folder`, or `ids`
+with more than one id), even when it matches one object today. Images on `media_end` also require `dwell_ms`; videos
 cannot loop on that page.
 
 The Player resolves every dynamic media primitive in one request at playlist
