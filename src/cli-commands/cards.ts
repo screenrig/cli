@@ -11,7 +11,7 @@ export function registerCardsCommands(root: Command, bind: CommandActionBinder):
     .option("--tag <TAG>", "Match a catalogue tag")
     .option("--category <CATEGORY>", "Match a catalogue category")
     .action(bind(handleCardsList));
-  cards.command("show").description("Inspect static and dynamic properties, views, feed and an example placement")
+  cards.command("show").description("Inspect static and dynamic properties, tier, layouts, feed and an example placement")
     .argument("<id>", "Catalogue card id", cardId).action(bind(handleCardsShow));
 
   const card = root.command("card").description("Create and manage built-in card instances");

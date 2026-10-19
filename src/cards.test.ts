@@ -13,17 +13,18 @@ import { FakeTransport, fakeSessionJwt } from "./transport/fake.js";
 import { networkError } from "./problems.js";
 import { publishScreen } from "./screen-publish.js";
 import { editablePlaylist } from "./playlist-authoring.js";
+import { validatePlaylistWriteSemantics } from "./generated/playlist-write-semantics.js";
 
 const details: CardDetails = {
-  id: "menu", major: 1, version: "1.0.0", views: ["canvas", "corner", "chip"], feed: "",
+  id: "menu", major: 1, version: "1.0.0", tier: "core", layouts: ["full", "free", "center", "corner", "chip", "strip"], feed: "",
   params_schema: { type: "object", additionalProperties: false, required: ["sections"],
     $defs: { rows: { type: "array", minItems: 1, maxItems: 3, items: { type: "object", additionalProperties: false, required: ["title"], properties: { title: { type: "string", maxLength: 30 } } } } },
     properties: { theme: { type: "string", enum: ["neomustard"], default: "neomustard" }, title: { type: "string", maxLength: 40, default: "Menu" }, sections: { $ref: "#/$defs/rows", dynamic: true } } },
   data_schema: { type: "object", additionalProperties: false, required: ["sections"], properties: { sections: { type: "array", minItems: 1, maxItems: 3 } } },
-  example: { id: "menu", primitive: "card", card: "menu", params: { title: "Menu", sections: [{ title: "Lunch" }] }, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "fill" },
+  example: { id: "menu", primitive: "card", card: "menu", params: { title: "Menu", sections: [{ title: "Lunch" }] }, layout: "center", content_fit: "fill" },
 };
 const ok = (body: unknown, headers: Record<string, string> = {}) => ({ status: 200, headers, body });
-const summary = (id: string, category = "food", tags = ["menu"]) => ({ id, title: id, short: "Live details", category, tags, views: ["canvas"], majors: [1] });
+const summary = (id: string, category = "food", tags = ["menu"]) => ({ id, title: id, short: "Live details", category, tags, tier: "core", layouts: ["full", "center"], majors: [1] });
 
 async function fixture(t: TestContext, enrolled = true) {
   const dir = await mkdtemp(path.join(tmpdir(), "screenrig-cards-"));
@@ -60,7 +61,8 @@ test("cards show preserves schemas, splits properties and prints limits/defaults
   assert.equal(result.code, 0);
   assert.deepEqual(result.body.data.params_schema, details.params_schema);
   assert.deepEqual(result.body.data.data_schema, details.data_schema);
-  assert.deepEqual(result.body.data.views, details.views);
+  assert.equal(result.body.data.tier, "core");
+  assert.deepEqual(result.body.data.layouts, details.layouts);
   assert.deepEqual(result.body.data.example, details.example);
   assert.equal(result.body.data.properties.static.title.schema.default, "Menu");
   assert.equal(result.body.data.properties.dynamic.sections.schema.maxItems, 3);
@@ -199,7 +201,7 @@ function playlist(params: object, data?: string, major?: number) {
   return { name: "Menu", pages: [{ id: "lobby", canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
     transition: { type: "crossfade", duration_ms: 200 }, advance: { mode: "duration", after_ms: 8000 }, primitives: [
       { id: "menu", primitive: "card", card: "menu", ...(major === undefined ? {} : { major }), params, ...(data ? { data } : {}),
-        rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "fill" },
+        layout: "full", content_fit: "fill" },
     ] }] };
 }
 
@@ -219,6 +221,23 @@ test("playlist create/update validate schemas before uploading card JSON", async
   }
   assert.equal(f.transport.calls.filter(call => ["POST", "PUT"].includes(call.method)).length, writes);
   assert.equal((await f.invoke(["playlist", "validate", "-"], JSON.stringify(bound))).code, 0);
+});
+
+test("playlist writes refuse a layout the card's tier does not take, and local semantics check placement shape", async () => {
+  const transport = new FakeTransport().on("GET", "/api/card-types/menu", () => ok({ ...details, tier: "fullscreen", layouts: ["full"] }));
+  const doc = playlist({ sections: [{ title: "Lunch" }] });
+  Object.assign(doc.pages[0]!.primitives[0]!, { layout: "corner", anchor: "top-left" });
+  await assert.rejects(() => validatePlaylistCards(new ApiClient({ transport }), doc), /fullscreen tier\) takes full, not corner/);
+  const issues = (primitive: object) => validatePlaylistWriteSemantics({ pages: [{ id: "p", primitives: [{ id: "a", primitive: "card", card: "menu", ...primitive }] }] }).map(issue => issue.path);
+  assert.deepEqual(issues({ layout: "full" }), []);
+  assert.deepEqual(issues({ layout: "corner", anchor: "bottom-left" }), []);
+  assert.deepEqual(issues({ layout: "strip", anchor: "left" }), []);
+  assert.deepEqual(issues({ layout: "free", rect: {}, layer: 3 }), []);
+  assert.deepEqual(issues({}), ["/pages/0/primitives/0/layout"]);
+  assert.deepEqual(issues({ layout: "corner" }), ["/pages/0/primitives/0/anchor"]);
+  assert.deepEqual(issues({ layout: "chip", anchor: "top" }), ["/pages/0/primitives/0/anchor"]);
+  assert.deepEqual(issues({ layout: "center", anchor: "top" }), ["/pages/0/primitives/0/anchor"]);
+  assert.deepEqual(issues({ layout: "free" }), ["/pages/0/primitives/0/rect", "/pages/0/primitives/0/layer"]);
 });
 
 test("card checks cache one schema per card, accept inline dynamic data and defer older majors", async () => {

@@ -6329,7 +6329,7 @@ export const handleCardsList = commandHandler(async (args, runtime, resolved) =>
   const cards = (response.body as { cards: CardSummary[] }).cards.filter(card =>
     (!tag || card.tags.includes(tag)) && (!category || card.category === category));
   return { envelope: jsonBody(response, client.requestId, { cards }), exitCode: ExitCode.Success,
-    human: cards.length ? cards.map(card => `${card.id}: ${card.title} — ${card.short}\n  category: ${card.category}; tags: ${card.tags.join(", ")}; views: ${card.views.join(", ")}; majors: ${card.majors.join(", ")}`).join("\n") : "No matching cards." };
+    human: cards.length ? cards.map(card => `${card.id}: ${card.title} — ${card.short}\n  category: ${card.category}; tags: ${card.tags.join(", ")}; tier: ${card.tier}; layouts: ${card.layouts.join(", ") || "(none)"}; majors: ${card.majors.join(", ")}`).join("\n") : "No matching cards." };
 });
 
 export const handleCardsShow = commandHandler(async (args, runtime, resolved) => {

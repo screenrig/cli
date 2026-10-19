@@ -99,7 +99,7 @@ Choose by what the page is:
 ## Built-in cards and feeds
 
 Discover the catalogue and inspect a card's static and dynamic properties,
-types, defaults, limits, supported views, feed and example placement:
+types, defaults, limits, tier, layouts, feed and example placement:
 
 ```sh
 screenrig cards list [--tag TAG] [--category CATEGORY]
@@ -145,8 +145,7 @@ identical create or data write after a lost response to reuse its saved key.
 ```json
 {
   "id": "menu", "primitive": "card", "card": "crd_CARD",
-  "rect": { "x": 0, "y": 0, "width": 1920, "height": 1080 },
-  "layer": 0, "content_fit": "fill"
+  "layout": "center", "content_fit": "fill"
 }
 ```
 
@@ -157,9 +156,31 @@ pinned majors, data bindings and media references. `playlist validate` stays
 local and checks the canvas contract; catalogue checks happen on writes.
 Omitting `major` selects and pins the current major on the server. With a data
 key, keep only static properties in `params`; without one, include the whole
-configuration there. Choose a supported `params.view` (`canvas`, or `corner`
-and `chip` for overlays) and a schema-listed `params.theme`. Use `fill` and
-layer overlays above the background. Cards accept `enter`, but no `motion`.
+configuration there. Choose a schema-listed `params.theme`. Cards accept
+`enter`, but no `motion`.
+
+A card is placed by `layout`, which is required, and `anchor`. `cards list`
+and `cards show` report each card's `tier` and the `layouts` it takes: a `core`
+card takes every layout, a `fullscreen` card takes `full` only.
+
+| `layout` | Box (1080p design units) | `anchor` |
+| --- | --- | --- |
+| `full` | the whole canvas | none |
+| `center` | 900 x 420, centred | none |
+| `corner` | 270 x 270, flush to the corner | `top-left`, `top-right`, `bottom-left`, `bottom-right` |
+| `chip` | 240 x 70, 30 in from the two edges | the four corners |
+| `strip` | the whole edge by 120 | `top`, `bottom`, `left`, `right` |
+| `free` | your own `rect` and `layer` | none |
+
+Sizes scale by min(canvas width, canvas height) / 1080, so a 4K canvas and a
+portrait canvas show the same apparent size. The server derives `rect` and
+`layer` for every layout except `free`; omit them. A page holds at most one
+`full` or `center` card, one `corner` or `chip` card per corner, and one
+`strip` per edge (a strip with a presence condition may share an edge with a
+normal strip and takes over while it is present). Publishing refuses a wrong
+layout or anchor with `card_layout_invalid` and two cards claiming one place
+with `card_layout_conflict`; playlist writes check the layout against the
+card's `layouts` before uploading.
 Images inside card properties use `media:<id>` references to ready project
 images; data writes require approved images, and card image URLs are refused.
 

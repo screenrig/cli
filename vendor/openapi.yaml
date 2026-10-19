@@ -7275,7 +7275,7 @@ paths:
       description: >-
         Discover built-in cards from this environment's published catalogue, merged with the
         vendored floor. Refreshes and schema verification happen in the background; this route
-        never calls the edge bucket. Each entry lists its current copy and views and every served major.
+        never calls the edge bucket. Each entry lists its current copy, its tier and the layouts that tier allows, and every served major.
       security:
       - projectBearer: []
       responses:
@@ -7299,7 +7299,7 @@ paths:
       operationId: getCardType
       description: >-
         The current major's self-contained JSON Schemas for placement params and card-data documents,
-        feed schema, supported views and an example placement. Params marked dynamic come from the
+        feed schema, tier, allowed layouts and an example placement. Params marked dynamic come from the
         data document when a placement binds a data key. Replace example content values before publishing.
         Unknown ids answer card_not_found (404).
       security:
@@ -7668,15 +7668,17 @@ paths:
       description: The feed family.
       schema:
         type: string
-        enum: [weather, airquality, alerts, rates, crypto, earthquakes, headlines, cap]
+        enum: [weather, airquality, alerts, rates, crypto, earthquakes, cyclones, headlines, cap]
     get:
       x-screenrig-access: read
       operationId: getFeed
       description: >-
         Reads a shared third-party feed document: the same document a built-in card placement with the same params reads
         (docs/feeds.md). Query parameters normalize into the card's feed key, named by the ScreenRig-Feed-Key header:
-        weather, airquality and alerts take lat and lon (rounded to a 0.25 degree cell); earthquakes lat, lon and
-        radius_km (10 to 20000, default 500); rates base (an ECB reference currency, default EUR); crypto symbols
+        weather, airquality and alerts take lat and lon (rounded to a 0.25 degree cell); earthquakes lat, lon,
+        radius_km (10 to 20000, default 500), min_magnitude (0 to 9, default 2.5) and hours (1 to 168, default 24);
+        cyclones basins (comma separated at, ep, cp, wp; default all) and optionally lat, lon and radius_km (the storms
+        near that place); rates base (an ECB reference currency, default EUR); crypto symbols
         (CoinGecko ids or tickers, comma separated, at most 20) and currency (default usd); headlines url (an http or
         https RSS or Atom URL); cap (screenrig.cap/v1) the CAP alerts matching a screen: url (repeatable, up to 5 CAP alert
         or ATOM/RSS index URLs), public (also read the public feeds covering lat and lon; default when no url), lat and lon,
@@ -7694,6 +7696,9 @@ paths:
       - { name: lat, in: query, required: false, schema: { type: number, minimum: -90, maximum: 90 } }
       - { name: lon, in: query, required: false, schema: { type: number, minimum: -180, maximum: 180 } }
       - { name: radius_km, in: query, required: false, schema: { type: number, minimum: 10, maximum: 20000 } }
+      - { name: min_magnitude, in: query, required: false, schema: { type: number, minimum: 0, maximum: 9 }, description: "earthquakes: the least magnitude." }
+      - { name: hours, in: query, required: false, schema: { type: number, minimum: 1, maximum: 168 }, description: "earthquakes: the window in hours." }
+      - { name: basins, in: query, required: false, schema: { type: string, maxLength: 16 }, description: "cyclones: comma separated at, ep, cp, wp." }
       - { name: base, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z]{3}$" } }
       - { name: symbols, in: query, required: false, schema: { type: string, maxLength: 1024 } }
       - { name: currency, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z]{2,8}$" } }
@@ -16204,7 +16209,7 @@ paths:
       operationId: listCardTypesInProject
       description: Discover built-in cards from this environment's published catalogue, merged with the vendored floor. Refreshes
         and schema verification happen in the background; this route never calls the edge bucket. Each entry lists its current
-        copy and views and every served major.
+        copy, its tier and the layouts that tier allows, and every served major.
       security:
       - projectBearer: []
       responses:
@@ -17256,15 +17261,17 @@ paths:
       description: The feed family.
       schema:
         type: string
-        enum: [weather, airquality, alerts, rates, crypto, earthquakes, headlines]
+        enum: [weather, airquality, alerts, rates, crypto, earthquakes, cyclones, headlines]
     get:
       x-screenrig-access: read
       operationId: projectScoped_getFeed
       description: >-
         Reads a shared third-party feed document: the same document a built-in card placement with the same params reads
         (docs/feeds.md). Query parameters normalize into the card's feed key, named by the ScreenRig-Feed-Key header:
-        weather, airquality and alerts take lat and lon (rounded to a 0.25 degree cell); earthquakes lat, lon and
-        radius_km (10 to 20000, default 500); rates base (an ECB reference currency, default EUR); crypto symbols
+        weather, airquality and alerts take lat and lon (rounded to a 0.25 degree cell); earthquakes lat, lon,
+        radius_km (10 to 20000, default 500), min_magnitude (0 to 9, default 2.5) and hours (1 to 168, default 24);
+        cyclones basins (comma separated at, ep, cp, wp; default all) and optionally lat, lon and radius_km (the storms
+        near that place); rates base (an ECB reference currency, default EUR); crypto symbols
         (CoinGecko ids or tickers, comma separated, at most 20) and currency (default usd); headlines url (an http or
         https RSS or Atom URL). The request never calls the provider. 200 is the document (schema, fetchedAt,
         attribution and the family's fields, as the cards contract defines them); its ETag is the sha256 of the bytes and
@@ -17278,6 +17285,9 @@ paths:
       - { name: lat, in: query, required: false, schema: { type: number, minimum: -90, maximum: 90 } }
       - { name: lon, in: query, required: false, schema: { type: number, minimum: -180, maximum: 180 } }
       - { name: radius_km, in: query, required: false, schema: { type: number, minimum: 10, maximum: 20000 } }
+      - { name: min_magnitude, in: query, required: false, schema: { type: number, minimum: 0, maximum: 9 }, description: "earthquakes: the least magnitude." }
+      - { name: hours, in: query, required: false, schema: { type: number, minimum: 1, maximum: 168 }, description: "earthquakes: the window in hours." }
+      - { name: basins, in: query, required: false, schema: { type: string, maxLength: 16 }, description: "cyclones: comma separated at, ep, cp, wp." }
       - { name: base, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z]{3}$" } }
       - { name: symbols, in: query, required: false, schema: { type: string, maxLength: 1024 } }
       - { name: currency, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z]{2,8}$" } }
@@ -24291,18 +24301,19 @@ components:
           items: { $ref: "#/components/schemas/CardSummary" }
     CardSummary:
       type: object
-      required: [id, title, short, category, tags, views, majors]
+      required: [id, title, short, category, tags, tier, layouts, majors]
       properties:
         id: { type: string }
         title: { type: string }
         short: { type: string }
         category: { type: string }
         tags: { type: array, items: { type: string } }
-        views: { type: array, items: { type: string } }
+        tier: { type: string, enum: [core, fullscreen], description: "core takes every layout; fullscreen takes full only." }
+        layouts: { type: array, items: { type: string, enum: [full, free, center, corner, chip, strip] }, description: "The layouts a placement of this card may use." }
         majors: { type: array, items: { type: integer, minimum: 1 } }
     CardDetails:
       type: object
-      required: [id, major, version, params_schema, data_schema, feed, views, example]
+      required: [id, major, version, params_schema, data_schema, feed, tier, layouts, example]
       properties:
         id: { type: string }
         major: { type: integer, minimum: 1 }
@@ -24310,7 +24321,8 @@ components:
         params_schema: { type: object, additionalProperties: true, description: "Self-contained JSON Schema for placement params, with dynamic annotations." }
         data_schema: { type: object, additionalProperties: true, description: "Self-contained JSON Schema for the bound card-data document; a card without dynamic properties accepts only an empty object." }
         feed: { type: string, description: "Feed schema, or empty when the card has none." }
-        views: { type: array, items: { type: string } }
+        tier: { type: string, enum: [core, fullscreen], description: "core takes every layout; fullscreen takes full only." }
+        layouts: { type: array, items: { type: string, enum: [full, free, center, corner, chip, strip] }, description: "The layouts a placement of this card may use." }
         example: { type: object, additionalProperties: true, description: "Placement geometry, defaults and sample required values. Replace content values using params_schema." }
     PlayerCardsIdentity:
       type: object
@@ -24630,17 +24642,25 @@ components:
     PlaylistCardPrimitiveWrite:
       type: object
       additionalProperties: false
-      required: [id, primitive, card, rect, layer, content_fit]
+      required: [id, primitive, card, layout, content_fit]
       description: >-
         A built-in card the Player draws natively (clock, weather, menu board, ticker, KPI tiles and the rest of
-        the vendored cards catalog, screenrig.cards.contract/v1). params holds the placement's static
-        properties (theme, view, corner, location, titles, column definitions) and changes only with a republish.
+        the vendored cards catalog, screenrig.cards.contract/v1). layout places it: full (the whole canvas), free
+        (your own rect and layer), center (900 x 420), corner (270 square), chip (240 x 70) or strip (the whole
+        edge, 120 high), in 1080p design units scaled by min(canvas width, canvas height) / 1080. corner and chip
+        take an anchor corner (top-left, top-right, bottom-left, bottom-right) and strip an anchor edge (top,
+        bottom, left, right); the other layouts take none. Except for free, the server derives rect and layer from
+        the canvas: omit them, or send exactly what it derives. A page holds at most one full or center card, one
+        corner or chip card per corner, and one strip per edge (a card with presence may share an edge with a
+        normal strip); a corner or chip on an edge that holds a strip moves in past it. A card's tier decides its
+        layouts (GET /api/card-types): core takes all six, fullscreen takes full. params holds the placement's
+        static properties (theme, location, titles, column definitions) and changes only with a republish.
         data names a card data document (GET/PUT /api/card-data/{key}) that holds the card's dynamic properties
         (menu sections, ticker items, KPI tiles); agents change it without a republish. With data, params may not
         carry dynamic properties; without it, params carry the whole configuration. Every string in params that
         begins with media: is a media reference, media:<id>, naming a ready image in this project that the card
         draws (spotlight people[].photo, product-grid products[].photo); a card never takes an image URL. Publish
-        refuses an unknown card or major and invalid params (card_invalid), a media reference that names no ready
+        refuses an unknown card or major and invalid params (card_invalid), a layout, anchor, rect or layer the card may not carry (card_layout_invalid), cards that claim one place on the page (card_layout_conflict), a media reference that names no ready
         image of the project (card_media_invalid), and a bound key whose stored document the card rejects
         (card_data_invalid). The screens showing the placement are granted its media, and a live write approves
         pending media it names, as with a by:id selector. A card with a third-party feed (weather) reads it from
@@ -24648,12 +24668,14 @@ components:
       properties:
         id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }
         primitive: { type: string, enum: [card] }
+        layout: { type: string, enum: [full, free, center, corner, chip, strip], description: "Where the card sits. Required." }
+        anchor: { type: string, enum: [top-left, top-right, bottom-left, bottom-right, top, bottom, left, right], description: "Required for corner and chip (a corner) and strip (an edge); not allowed for full, free and center." }
         card: { type: string, description: "Global crd_ UID. Inline catalogue type, major, params and data are deprecated for one release and converted on publish." }
         major: { type: integer, minimum: 1, description: "Card major version. Absent selects the catalog's current major, which the stored placement then pins." }
         params: { type: object, additionalProperties: true, description: "Static params, validated against the card's params schema. A string that begins with media: is a media reference, media:<id>." }
         data: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$", description: "Card data key holding the dynamic properties. May not start with feed:." }
-        rect: { $ref: "#/components/schemas/PlaylistRect" }
-        layer: { type: integer, minimum: 0, maximum: 1024 }
+        rect: { $ref: "#/components/schemas/PlaylistRect", description: "Required for layout free. For every other layout omit it or send the rect the server derives; left and right strips are the band on that edge (120 units wide, canvas high), which the Player draws as a horizontal strip turned 90 degrees." }
+        layer: { type: integer, minimum: 0, maximum: 1024, description: "Required for layout free. Fixed for every other layout (full 10, center 20, strip 30, corner 40, chip 50): omit it or send that value." }
         content_fit: { type: string, enum: [fill] }
         enter: { $ref: "#/components/schemas/PrimitiveEnter" }
     PlaylistCardPrimitive:
@@ -24669,6 +24691,8 @@ components:
         params: { type: object, additionalProperties: true }
         data: { type: string }
         feed: { type: string, pattern: "^feed:", description: "Server-derived feed key (for weather, the 0.1 degree cell of params.location). Clients must not send it." }
+        layout: { type: string, enum: [full, free, center, corner, chip, strip], description: "How rect and layer were placed. Absent on a page stored before layouts, which Players treat as free." }
+        anchor: { type: string, enum: [top-left, top-right, bottom-left, bottom-right, top, bottom, left, right] }
         rect: { $ref: "#/components/schemas/PlaylistRect" }
         layer: { type: integer, minimum: 0, maximum: 1024 }
         content_fit: { type: string, enum: [fill] }
@@ -24709,6 +24733,8 @@ components:
         data: { type: string }
         feed: { type: string }
         media: { type: array, maxItems: 256, items: { $ref: "#/components/schemas/RuntimeImageResolvedMedia" } }
+        layout: { type: string, enum: [full, free, center, corner, chip, strip], description: "How the rect was placed, so the Player can choose the card's design for it (full, free, center, corner, chip or strip). Absent on a placement stored before layouts, which a Player treats as free; an unknown value is treated the same way." }
+        anchor: { type: string, enum: [top-left, top-right, bottom-left, bottom-right, top, bottom, left, right], description: "The corner of a corner or chip layout, or the edge of a strip; absent for the other layouts. A left or right strip's rect is the band on that edge (120 units wide, canvas high): the Player draws the card as a horizontal strip of the band's height by its width, turned 90 degrees counter-clockwise (left) or clockwise (right) about the band's centre." }
         rect: { $ref: "#/components/schemas/RuntimeRect" }
         layer: { type: integer, minimum: 0, maximum: 1024 }
         contentFit: { type: string, enum: [fill] }
@@ -25649,6 +25675,8 @@ x-problem-codes:
 - resource_conflict
 - card_not_found
 - card_invalid
+- card_layout_invalid
+- card_layout_conflict
 - card_data_invalid
 - card_media_invalid
 - revision_conflict

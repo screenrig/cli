@@ -27,6 +27,10 @@ function validCivil(value: string): boolean {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day && date.getUTCHours() === hour && date.getUTCMinutes() === minute;
 }
 
+const LAYOUTS = ["full", "free", "center", "corner", "chip", "strip"];
+const CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"];
+const EDGES = ["top", "bottom", "left", "right"];
+
 export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIssue[] {
   const issues: PlaylistWriteIssue[] = [];
   const fail = (path: string, message: string): void => { issues.push({ path, message }); };
@@ -67,6 +71,8 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
     const primitives = array(page.primitives).map(object);
     const ids = new Set<unknown>();
     let controllers = 0, web = 0, streams = 0;
+    let mainCard: number | undefined;
+    const corners = new Map<unknown, number>();
     for (const [primitiveIndex, primitive] of primitives.entries()) {
       const itemPath = `${path}/primitives/${primitiveIndex}`;
       if (ids.has(primitive.id)) fail(`${itemPath}/id`, "must be unique within the page");
@@ -94,6 +100,26 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
         if (primitive.primitive !== "application" || mode !== "application") fail(`${itemPath}/controller`, "is valid only on an application in application advance mode");
       }
       if (primitive.primitive === "application" && typeof primitive.release_id === "string" && !primitive.release_id) fail(`${itemPath}/release_id`, "is required");
+      if (primitive.primitive === "card") {
+        // Placement shape. The card's tier, the strip edges and the derived rect and layer stay server checks.
+        const layout = primitive.layout;
+        const anchors = layout === "corner" || layout === "chip" ? CORNERS : layout === "strip" ? EDGES : [];
+        if (typeof layout !== "string" || !LAYOUTS.includes(layout)) fail(`${itemPath}/layout`, `is required and must be one of ${LAYOUTS.join(", ")}`);
+        else if (anchors.length === 0 && Object.hasOwn(primitive, "anchor")) fail(`${itemPath}/anchor`, `is not allowed for layout ${layout}`);
+        else if (anchors.length > 0 && !anchors.includes(primitive.anchor as string)) fail(`${itemPath}/anchor`, `is required for layout ${layout} and must be one of ${anchors.join(", ")}`);
+        if (layout === "free") {
+          if (!Object.hasOwn(primitive, "rect")) fail(`${itemPath}/rect`, "is required for layout free");
+          if (!Object.hasOwn(primitive, "layer")) fail(`${itemPath}/layer`, "is required for layout free");
+        }
+        if (layout === "full" || layout === "center") {
+          if (mainCard !== undefined) fail(`${itemPath}/layout`, "a page holds one full or center card");
+          mainCard = primitiveIndex;
+        }
+        if (layout === "corner" || layout === "chip") {
+          if (corners.has(primitive.anchor)) fail(`${itemPath}/anchor`, "a page holds one corner or chip card per corner");
+          corners.set(primitive.anchor, primitiveIndex);
+        }
+      }
       if (Object.hasOwn(primitive, "motion")) {
         const motionType = object(primitive.motion).type;
         if ((motionType === "spin" || motionType === "drift") && (primitive.primitive === "application" || primitive.primitive === "iframe" || primitive.primitive === "stream")) {

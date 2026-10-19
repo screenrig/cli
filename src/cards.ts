@@ -12,12 +12,13 @@ export interface CardDetails {
   params_schema: Schema;
   data_schema: Schema;
   feed: string;
-  views: string[];
+  tier: string;
+  layouts: string[];
   example: Record<string, unknown>;
 }
 export interface CardSummary {
   id: string; title: string; short: string; category: string;
-  tags: string[]; views: string[]; majors: number[];
+  tags: string[]; tier: string; layouts: string[]; majors: number[];
 }
 
 export function cardId(value: string): string {
@@ -65,7 +66,7 @@ export function cardDetailsHuman(card: CardDetails): string {
   ];
   return [
     `${card.id} v${card.version} (major ${card.major})`, ...section("static"), ...section("dynamic"),
-    `views: ${card.views.join(", ")}`, `feed: ${card.feed || "(none)"}`,
+    `tier: ${card.tier}`, `layouts: ${card.layouts.length ? card.layouts.join(", ") : "(none)"}`, `feed: ${card.feed || "(none)"}`,
     `example placement:\n${JSON.stringify(card.example, null, 2)}`,
   ].join("\n");
 }
@@ -95,6 +96,9 @@ export async function validatePlaylistCards(client: ApiClient, playlist: { pages
         cards.set(id, card);
       }
       if (item.major !== undefined && item.major !== card.major) continue;
+      if (typeof item.layout === "string" && Array.isArray(card.layouts) && !card.layouts.includes(item.layout)) {
+        throw usageError(`pages[${pageIndex}].primitives[${index}].layout: card ${id} (${card.tier} tier) takes ${card.layouts.length ? card.layouts.join(", ") : "no layout"}, not ${item.layout}.`);
+      }
       const schema = structuredClone(card.params_schema);
       const field = `pages[${pageIndex}].primitives[${index}].params`;
       if (item.data !== undefined) {
