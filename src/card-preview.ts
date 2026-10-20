@@ -81,6 +81,7 @@ export async function withCardPreview<T>(options: { apiUrl: string; runtime: Cli
         html = `<!doctype html><html><head><link rel="stylesheet" href="${index.web.fonts.src}"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}#card{position:absolute;inset:0}</style><script src="${index.web.script.src}"></script></head><body><div id="card"></div><script>
           const p=${payload};
           window.onerror=(message)=>window.previewError=String(message);
+          window.onunhandledrejection=(event)=>window.previewError=String(event.reason?.message||event.reason);
           (async()=>{
             await document.fonts.ready;
             const api=window.ScreenRigCards;
@@ -100,7 +101,7 @@ export async function withCardPreview<T>(options: { apiUrl: string; runtime: Cli
               }
               Object.assign(document.getElementById('card').style,{inset:'auto',left:geometry.x+'px',top:geometry.y+'px',width:geometry.w+'px',height:geometry.h+'px',transform:'rotate('+geometry.rotation+'deg)'});
             }
-            const handle=api.mount(document.getElementById('card'),{cardId:p.card,params,dataKey:p.data?'preview':'',dataSource:p.data?{fetch:(key,done)=>done(p.data)}:null,feed:p.feed||null,mediaResolver:{resolve:(src,done)=>done(typeof src==='string'&&/^media:(?:(?:stage|qa|development)_)?med_[A-Za-z0-9_-]+$/.test(src)?'/preview-media/'+src.slice(6):'')},active:true,fadeMs:0,frozenNowMs:p.now?Date.parse(p.now):Date.now(),timeZone:p.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone,onFailed:(code)=>window.previewError=code,onReady:()=>requestAnimationFrame(async()=>{await document.fonts.ready;await Promise.all(Array.from(document.images).filter(img=>img.getAttribute('src')).map(img=>img.decode().catch(()=>{})));requestAnimationFrame(()=>{window.previewResult={card:p.card,version,geometry,feed:manifest.feed,unrendered:[]};window.previewReady=true;});})});
+            const handle=api.mount(document.getElementById('card'),{cardId:p.card,params,dataKey:p.data?'preview':'',dataSource:p.data?{fetch:(key,done)=>done(p.data)}:null,feed:p.feed||null,mediaResolver:{resolve:(src,done)=>done(typeof src==='string'&&/^media:(?:(?:stage|qa|development)_)?med_[A-Za-z0-9_-]+$/.test(src)?'/preview-media/'+src.slice(6):'')},active:true,fadeMs:0,frozenNowMs:p.now?Date.parse(p.now):Date.now(),timeZone:p.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone,onFailed:(code,cause)=>window.previewError=cause?code+': '+cause:code,onReady:()=>requestAnimationFrame(async()=>{await document.fonts.ready;await Promise.all(Array.from(document.images).filter(img=>img.getAttribute('src')).map(img=>img.decode().catch(()=>{})));requestAnimationFrame(()=>{window.previewResult={card:p.card,version,geometry,feed:manifest.feed,unrendered:[]};window.previewReady=true;});})});
           })().catch(e=>window.previewError=e.message);
         </script></body></html>`;
         const answer = await browser.render(`http://127.0.0.1:${address.port}/`, input.width, input.height);

@@ -143,6 +143,20 @@ identical create or data write after a lost response to reuse its saved key.
 `card delete` removes an instance only when no playlist uses it. Name-keyed
 `card-data` commands remain available and surface the server's warnings.
 
+Preview a card locally before publishing:
+
+```sh
+screenrig card preview clock --layout corner --output clock.png
+screenrig card preview events --params params.json --data events.json --output events.png
+```
+
+Local previews need Chromium or Chrome. Set `SCREENRIG_BROWSER` to its executable
+path when it is installed elsewhere. The CLI waits for the preview page to load
+and draw; failures include browser console errors and failed resource paths,
+with credentials and URL query strings removed. Chromium running as root uses
+`--no-sandbox`; other users retain Chromium's sandbox. Open and inspect the PNG
+before publishing.
+
 ```json
 {
   "id": "menu", "primitive": "card", "card": "crd_CARD",

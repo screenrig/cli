@@ -4,6 +4,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { usageError } from "./problems.js";
+import { redactText } from "./redact.js";
+
+// Browser errors can contain resource URLs. Omit credentials, queries and fragments.
+function diagnostic(value: string): string {
+  return redactText(value.replace(/\b(?:https?|file):\/\/[^\s"'<>]+/g, (raw) => {
+    try {
+      const url = new URL(raw);
+      return url.protocol === "file:" ? path.basename(url.pathname) : `${url.origin}${url.pathname}`;
+    } catch { return "[resource]"; }
+  }).replace(/data:[^\s"'<>]+/g, "[inline resource]")).slice(0, 1000);
+}
 
 /** A local browser, driven over private pipes; no debugging port or installed service. */
 export async function withPreviewBrowser<T>(env: NodeJS.Dict<string>, work: (browser: PreviewBrowser) => Promise<T>): Promise<T> {
@@ -12,46 +23,108 @@ export async function withPreviewBrowser<T>(env: NodeJS.Dict<string>, work: (bro
   for (const candidate of candidates) if (candidate) { try { await access(candidate); binary = candidate; break; } catch { /* next installed browser */ } }
   if (!binary) throw usageError("Local card previews need Chromium or Chrome. Set SCREENRIG_BROWSER to its executable path.");
   const profile = await mkdtemp(path.join(env.TMPDIR ?? tmpdir(), "screenrig-preview-"));
-  const child = spawn(binary, ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-extensions", "--disable-dev-shm-usage", "--remote-debugging-pipe", `--user-data-dir=${profile}`, "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "about:blank"], { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
-  const closed = new Promise<void>((resolve) => { child.once("close", () => resolve()); child.once("error", () => resolve()); });
+  // Chromium cannot start its own sandbox as root. Other users keep it enabled.
+  const rootFlags = process.getuid?.() === 0 ? ["--no-sandbox"] : [];
+  const child = spawn(binary, ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-extensions", "--disable-dev-shm-usage", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", ...rootFlags, "--remote-debugging-pipe", `--user-data-dir=${profile}`, "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "about:blank"], { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
+  const closed = new Promise<void>((resolve) => { child.once("close", () => resolve()); });
   const pending = new Map<number, { resolve(value: any): void; reject(error: Error): void }>();
+  const listeners = new Set<(message: any) => void>();
   let serial = 0, buffered = "", stderr = "";
+  let stopped: string | undefined;
   child.stderr?.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-2000); });
-  const fail = (): void => { for (const call of pending.values()) call.reject(usageError(`Local preview browser stopped. ${stderr}`)); pending.clear(); };
-  child.once("error", fail); child.once("exit", fail);
-  (child.stdio[4] as Readable).on("data", (chunk: Buffer) => {
+  const failure = (): Error => usageError(diagnostic(`Local preview browser stopped: ${stopped}. ${stderr}`));
+  const fail = (cause: string): void => {
+    stopped ??= cause;
+    for (const call of pending.values()) call.reject(failure());
+    pending.clear();
+    for (const listener of listeners) listener({ method: "Browser.stopped" });
+  };
+  child.once("error", (error) => fail(error.message));
+  child.once("close", (code, signal) => fail(signal ? `signal ${signal}` : `exit ${code}`));
+  const input = child.stdio[3] as Writable;
+  const output = child.stdio[4] as Readable;
+  input.on("error", (error) => fail(error.message));
+  output.on("error", (error) => fail(error.message));
+  output.once("end", () => fail("browser closed its debugging pipe"));
+  output.on("data", (chunk: Buffer) => {
     buffered += chunk.toString();
     let end: number;
     while ((end = buffered.indexOf("\0")) >= 0) {
       const frame = buffered.slice(0, end); buffered = buffered.slice(end + 1);
       if (!frame) continue;
-      const answer = JSON.parse(frame);
+      let answer: any;
+      try { answer = JSON.parse(frame); }
+      catch { fail("invalid browser protocol response"); continue; }
+      if (answer.method) { for (const listener of listeners) listener(answer); continue; }
       const call = pending.get(answer.id);
       if (!call) continue;
       pending.delete(answer.id);
       if (answer.error) call.reject(usageError(`Local preview: ${answer.error.message}`)); else call.resolve(answer.result);
     }
   });
-  const call = (method: string, params: object = {}, sessionId?: string): Promise<any> => new Promise((resolve, reject) => {
+  const call = (method: string, params: object = {}, sessionId?: string, timeoutMs = 30_000): Promise<any> => new Promise((resolve, reject) => {
+    if (stopped) { reject(failure()); return; }
     const id = ++serial;
-    const timer = setTimeout(() => { pending.delete(id); reject(usageError(`Local preview timed out: ${method}`)); }, 30_000);
+    const timer = setTimeout(() => { pending.delete(id); reject(usageError(diagnostic(`Local preview timed out: ${method}. ${stderr}`))); }, timeoutMs);
     pending.set(id, { resolve: (value) => { clearTimeout(timer); resolve(value); }, reject: (error) => { clearTimeout(timer); reject(error); } });
-    (child.stdio[3] as Writable).write(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }) + "\0");
+    input.write(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }) + "\0");
   });
   const browser: PreviewBrowser = {
     async render(url, width, height) {
       const { targetId } = await call("Target.createTarget", { url: "about:blank" });
-      const { sessionId } = await call("Target.attachToTarget", { targetId, flatten: true });
+      let sessionId: string | undefined;
+      const loaded = new Set<string>();
+      const errors: string[] = [];
+      const requests = new Map<string, string>();
+      let loadWaiter: (() => void) | undefined;
+      const remember = (message: string): void => { errors.push(diagnostic(message)); if (errors.length > 8) errors.shift(); };
+      const observe = (message: any): void => {
+        if (message.method === "Browser.stopped") { loadWaiter?.(); return; }
+        if (message.sessionId !== sessionId) return;
+        const p = message.params;
+        if (message.method === "Page.lifecycleEvent" && p.name === "load") { loaded.add(`${p.frameId}:${p.loaderId}`); loadWaiter?.(); }
+        if (message.method === "Runtime.exceptionThrown") remember(p.exceptionDetails.exception?.description ?? p.exceptionDetails.text);
+        if (message.method === "Runtime.consoleAPICalled" && ["error", "warning"].includes(p.type)) remember(`Console ${p.type}: ${p.args.map((arg: any) => arg.description ?? (typeof arg.value === "string" ? arg.value : arg.type)).join(" ")}`);
+        if (message.method === "Log.entryAdded" && ["error", "warning"].includes(p.entry.level)) remember(`${p.entry.text} ${p.entry.url ?? ""}`);
+        if (message.method === "Network.requestWillBeSent") { if (requests.size >= 256) requests.delete(requests.keys().next().value!); requests.set(p.requestId, diagnostic(p.request.url)); }
+        if (message.method === "Network.responseReceived" && p.response.status >= 400) remember(`HTTP ${p.response.status}: ${p.response.url}`);
+        if (message.method === "Network.loadingFailed") remember(`Resource failed: ${requests.get(p.requestId) ?? p.type}: ${p.errorText}${p.blockedReason ? ` (${p.blockedReason})` : ""}`);
+        if (message.method === "Network.loadingFailed" || message.method === "Network.loadingFinished") requests.delete(p.requestId);
+      };
+      listeners.add(observe);
       try {
+        ({ sessionId } = await call("Target.attachToTarget", { targetId, flatten: true }));
         await call("Page.enable", {}, sessionId);
+        await call("Page.setLifecycleEventsEnabled", { enabled: true }, sessionId);
+        await call("Runtime.enable", {}, sessionId);
+        await call("Log.enable", {}, sessionId);
+        await call("Network.enable", {}, sessionId);
         await call("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g: 0, b: 0, a: 0 } }, sessionId);
         await call("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
-        await call("Page.navigate", { url }, sessionId);
+        await call("Page.bringToFront", {}, sessionId);
+        const navigation = await call("Page.navigate", { url }, sessionId);
+        if (navigation.errorText) throw usageError(`Local preview navigation failed: ${navigation.errorText}`);
+        // Page.navigate can answer before the new document and its scripts load.
+        // Match its loader so an about:blank load cannot satisfy this wait.
+        if (navigation.loaderId) await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => { loadWaiter = undefined; reject(usageError("Local preview timed out loading the card page.")); }, 30_000);
+          loadWaiter = () => {
+            if (!stopped && !loaded.has(`${navigation.frameId}:${navigation.loaderId}`)) return;
+            clearTimeout(timer); loadWaiter = undefined;
+            if (stopped) reject(failure()); else resolve();
+          };
+          loadWaiter();
+        });
         const result = await call("Runtime.evaluate", { expression: "new Promise((resolve,reject)=>{const until=Date.now()+20000;function wait(){if(window.previewError)reject(new Error(window.previewError));else if(window.previewReady)resolve(window.previewResult);else if(Date.now()>until)reject(new Error('Card did not render'));else setTimeout(wait,20)}wait()})", awaitPromise: true, returnByValue: true }, sessionId);
         if (result.exceptionDetails) throw usageError(`Card preview failed: ${result.exceptionDetails.exception?.description ?? result.exceptionDetails.text}`);
         const image = await call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, sessionId);
         return { png: Buffer.from(image.data, "base64"), result: result.result.value };
-      } finally { await call("Target.closeTarget", { targetId }).catch(() => undefined); }
+      } catch (error) {
+        throw usageError(diagnostic(error instanceof Error ? error.message : String(error)) + (errors.length ? `\nBrowser diagnostics:\n${errors.join("\n")}` : ""));
+      } finally {
+        listeners.delete(observe);
+        await call("Target.closeTarget", { targetId }, undefined, 1000).catch(() => undefined);
+      }
     },
   };
   try { return await work(browser); }
@@ -59,7 +132,7 @@ export async function withPreviewBrowser<T>(env: NodeJS.Dict<string>, work: (bro
     // Stop and reap every Chromium child even after a render, navigation or pipe error.
     if (child.pid) { try { if (process.platform === "win32") child.kill(); else process.kill(-child.pid, "SIGKILL"); } catch { /* already exited */ } }
     await closed;
-    await rm(profile, { recursive: true, force: true });
+    await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 
