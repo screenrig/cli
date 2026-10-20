@@ -19,6 +19,7 @@ import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLA
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
 import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "./screen-manifest-upgrade.js";
+import { forecastStorageWarnings, isStorageFailureCode, screenStorageWarnings, storageFullWarning } from "./screen-storage.js";
 import { openTempFile, removeOnSignal, shellQuote, tempPathFor } from "./temp-file.js";
 import { KV_WEBHOOK_ID_PATTERN, KV_WEBHOOK_SECRET_PATTERN, kvWebhookDescription, kvWebhookExample, kvWebhookId, kvWebhookKey, kvWebhookLines, kvWebhookProblem, kvWebhookSecretWarning, kvWebhookTableLines } from "./kv-webhooks.js";
 import { TRIGGER_ID_PATTERN, TRIGGER_PASSWORD_PATTERN, alertLines, triggerHoldSeconds, triggerId, triggerLines, triggerName, triggerPasswordWarning, triggerProblem, triggerScreenIds, triggerTableLines, triggerTag } from "./triggers.js";
@@ -4859,10 +4860,11 @@ export const handleScreenList = commandHandler(async (args, runtime, resolved) =
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const response = await client.listAll("/api/screens", screenListQuery(args));
   const items = (response.body as { items?: Screen[] } | undefined)?.items;
+  const warnings = Array.isArray(items) ? items.flatMap((screen) => screenStorageWarnings(screen.id, screen, runtime.now())) : [];
   return {
-    envelope: jsonBody(response, client.requestId),
+    envelope: jsonBody(response, client.requestId, undefined, warnings),
     exitCode: ExitCode.Success,
-    human: ["Screens", ...screenTableLines(Array.isArray(items) ? items : [], runtime.now()), JSON.stringify(response.body, null, 2)].join("\n"),
+    human: ["Screens", ...screenTableLines(Array.isArray(items) ? items : [], runtime.now()), JSON.stringify(response.body, null, 2), ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
   };
 }, true);
 
@@ -5215,8 +5217,9 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
   const screen = response.body as Screen | undefined;
   const requestId = client.requestId;
   const notes = await resourceNotes(runtime, client, "screen", id);
+  const warnings = screenStorageWarnings(id, screen, runtime.now());
   return {
-    envelope: jsonBody(response, requestId, undefined, notes.warnings),
+    envelope: jsonBody(response, requestId, undefined, [...notes.warnings, ...warnings]),
     exitCode: ExitCode.Success,
     human: [
       "Screen",
@@ -5231,6 +5234,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...archivedLines(screen),
       ...applicationsUnsupportedLines(screen),
       ...recoveryPendingLine(screen),
+      ...warnings.map((warning) => `warning: ${warning.message}`),
       ...storageLines(screen, runtime.now()),
       ...manifestUpgradeLines(screen, runtime.now()),
       ...displayLines(screen?.display, screen?.timezone),
@@ -5270,10 +5274,11 @@ export const handleScreenStorageForecast = commandHandler(async (args, runtime, 
     || forecast.basis !== "reported_capacity") {
     throw usageError("Screen storage forecast response does not match the generated ScreenStorageForecastDryRun contract.");
   }
+  const warnings = forecastStorageWarnings(id, forecast, runtime.now());
   return {
-    envelope: jsonBody(response, client.requestId),
+    envelope: jsonBody(response, client.requestId, undefined, warnings),
     exitCode: ExitCode.Success,
-    human: forecastLines(id, playlistId, forecast, runtime.now()),
+    human: [forecastLines(id, playlistId, forecast, runtime.now()), ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
   };
 }, true);
 
@@ -5313,7 +5318,10 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
   // A playlist-only change under Propose access waits for review.
   const pending = pendingReviewOf(response);
   if (pending) return pendingReviewResult(response, pending, client.requestId);
-  const warnings = playlistId ? aspectMismatchWarnings(id, response.body, playlist) : [];
+  const warnings = [
+    ...(playlistId ? aspectMismatchWarnings(id, response.body, playlist) : []),
+    ...screenStorageWarnings(id, response.body as Screen | undefined, runtime.now()),
+  ];
   return {
     envelope: jsonBody(response, client.requestId, undefined, warnings),
     exitCode: ExitCode.Success,
@@ -5347,7 +5355,10 @@ export const handleScreenAssign = commandHandler(async (args, runtime, resolved)
   });
   const pending = pendingReviewOf(response);
   if (pending) return pendingReviewResult(response, pending, client.requestId);
-  const warnings = aspectMismatchWarnings(id, response.body, playlist);
+  const warnings = [
+    ...aspectMismatchWarnings(id, response.body, playlist),
+    ...screenStorageWarnings(id, response.body as Screen | undefined, runtime.now()),
+  ];
   return {
     envelope: jsonBody(response, client.requestId, undefined, warnings),
     exitCode: ExitCode.Success,
@@ -7682,6 +7693,11 @@ export const handleScreenPublish = commandHandler(async (args, runtime, resolved
 /** Why a publish is not visibly playing yet, and what to do about it. */
 function publishPlaybackWarning(result: Extract<Awaited<ReturnType<typeof publishScreen>>, { playback: unknown }>): Warning | undefined {
   const { playback, screen_id: screen } = result;
+  if ((playback.reason === "playback_failed" || playback.reason === "playback_pending" || playback.playing)
+    && isStorageFailureCode(playback.code)) {
+    return storageFullWarning(screen, playback.state === "partial" ? "partial"
+      : playback.code === "transition_blocked" ? "transition_blocked" : "none_fit");
+  }
   const rerun = "Rerun the identical publish command to wait again; it does not create another playlist.";
   switch (playback.reason) {
     case "screen_offline":

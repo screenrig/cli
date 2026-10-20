@@ -153,8 +153,8 @@ test("blocked explains storage; an unacknowledged target shows Playing: none yet
     state: "blocked", desired_revision: TARGET_HASH, active_revision: ACK_HASH,
     desired_playlist: playlist(PROMO, 7), active_playlist: playlist(LOBBY, 41), code: "storage_full",
   })), NOW);
-  assert.ok(blocked.includes("reason: storage_full — the screen's storage cannot hold the candidate"));
-  assert.ok(blocked.includes("Storage could not stage the candidate; the acknowledged revision keeps playing."));
+  assert.ok(blocked.includes("reason: storage_full — Storage full."));
+  assert.ok(blocked.includes("Free up storage on the device running this Player, then retry the playlist."));
 
   const fresh = manifestUpgradeLines(screen("scr_LOBBY", "Lobby", upgrade({
     state: "pending", desired_revision: TARGET_HASH, desired_playlist: playlist(PROMO, 7),

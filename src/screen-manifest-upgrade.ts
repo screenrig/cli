@@ -80,15 +80,15 @@ function upgradeDetail(desired: unknown, active: unknown): string {
 const UPGRADE_CODE_TEXT: Record<string, string> = {
   download_failed: "the candidate download failed",
   hash_mismatch: "the downloaded candidate did not match its hash",
-  storage_full: "the screen's storage cannot hold the candidate",
+  storage_full: "Storage full.",
   manifest_invalid: "the candidate manifest was rejected as invalid",
   prepare_failed: "the candidate could not be prepared on the display",
   activate_failed: "the swap to the candidate failed",
   anchor_unavailable: "a page anchor the manifest references is unavailable",
-  transition_blocked: "the transition to the new revision is blocked",
-  none_fit: "no candidate fits the screen's reported storage",
+  transition_blocked: "Storage full. Can't load the playlist update.",
+  none_fit: "Storage full. Can't load this playlist.",
   staged: "the candidate is staged; the upgrade still needs its final step",
-  capacity: "the candidate exceeds the screen's capacity",
+  capacity: "Storage full. Some playlist pages can't be loaded.",
   persist_failed: "the screen could not persist the activation",
   internal: "an internal error occurred",
   unsupported_content: "the manifest carries content this player cannot show",
@@ -163,7 +163,7 @@ export function manifestUpgradeLines(screen: Screen | undefined, now: Date): str
     lines.push("A retry is scheduled; the player reports again after it. Offline is never reported as failure.");
   }
   if (state === "blocked") {
-    lines.push("Storage could not stage the candidate; the acknowledged revision keeps playing.");
+    lines.push("Free up storage on the device running this Player, then retry the playlist.");
   }
   return lines;
 }

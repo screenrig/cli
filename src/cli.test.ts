@@ -5610,7 +5610,7 @@ test("screen storage-forecast explains a partial fit with the excluded page coun
   assert.equal(human.code, ExitCode.Success, human.stdout);
   assert.match(
     projectHumanBody(human.stdout),
-    /^Storage forecast\nscreen_id: scr_PAIRINGAAAAAAAAAAAAAAAA\nplaylist_id: pl_LOBBY\nfit: partial\nexcluded pages: 1\nrequired: 125 GiB\ncapacity: 110 GiB\nbasis: reported_capacity\nreceived_at: 2026-08-14T16:56:00Z\n?$/,
+    /^Storage forecast\nscreen_id: scr_PAIRINGAAAAAAAAAAAAAAAA\nplaylist_id: pl_LOBBY\nfit: partial\nexcluded pages: 1\nrequired: 125 GiB\ncapacity: 110 GiB\nbasis: reported_capacity\nreceived_at: 2026-08-14T16:56:00Z\nwarning: [^\n]*Storage full[^\n]*free up storage[^\n]*\n?$/,
   );
   await rm(configDir, { recursive: true, force: true });
 });
