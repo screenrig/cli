@@ -127,7 +127,12 @@ test("a fresh fitting forecast replaces an older playlist's shortfall and stale 
   assert.match(stale.warnings[0].message, /more than 24 hours old/);
 });
 
-test("publish reports a storage-blocked playlist with device recovery rather than download or reload advice", async () => {
+test("publish distinguishes full storage from a playlist that is still loading", async () => {
+  for (const fixture of [
+    { state: "blocked", code: "none_fit", playing: false, impact: "Can't load this playlist." },
+    { state: "partial", code: "capacity", playing: true, impact: "Some playlist pages can't be loaded." },
+    { state: "partial", code: "staged", playing: true, impact: undefined },
+  ]) {
   for (const mode of ["--json", "--human"]) {
     let assigned = false;
     const transport = new FakeTransport()
@@ -135,8 +140,9 @@ test("publish reports a storage-blocked playlist with device recovery rather tha
       .on("GET", `/api/screens/${SCREEN}`, () => response(assigned ? {
         id: SCREEN, revision: 4, playlist_id: PLAYLIST, online: true,
         effective_playlist: { id: PLAYLIST, source: "default" },
-        manifest_upgrade: { state: "blocked", code: "none_fit", desired_revision: "man_NEW", active_revision: null,
-          desired_playlist: { id: PLAYLIST, name: "Lobby", revision: 1 }, active_playlist: null },
+        manifest_upgrade: { state: fixture.state, code: fixture.code, desired_revision: "man_NEW", active_revision: fixture.playing ? "man_NEW" : null,
+          desired_playlist: { id: PLAYLIST, name: "Lobby", revision: 1 },
+          active_playlist: fixture.playing ? { id: PLAYLIST, name: "Lobby", revision: 1 } : null },
       } : { id: SCREEN, revision: 3 }))
       .on("POST", "/api/playlists", () => response({ id: PLAYLIST, revision: 1 }))
       .on("PATCH", `/api/screens/${SCREEN}`, () => { assigned = true; return response({ id: SCREEN, revision: 4, playlist_id: PLAYLIST }); });
@@ -146,13 +152,24 @@ test("publish reports a storage-blocked playlist with device recovery rather tha
     assert.equal(result.code, 0, result.stdout);
     if (mode === "--json") {
       const envelope = JSON.parse(result.stdout);
-      assert.equal(envelope.data.stage, "assigned");
-      assert.equal(envelope.data.playback_verified, false);
-      assertRecovery(envelope.warnings[0], "Can't load this playlist.");
+      assert.equal(envelope.data.stage, fixture.playing ? "playing" : "assigned");
+      assert.equal(envelope.data.playback_verified, fixture.playing);
+      if (fixture.impact) assertRecovery(envelope.warnings[0], fixture.impact);
+      else {
+        assert.equal(envelope.warnings[0].code, "playback_partial");
+        assert.match(envelope.warnings[0].message, /showing only part of the playlist/);
+        assert.doesNotMatch(envelope.warnings[0].message, /Storage full|free up storage/);
+      }
     } else {
-      assert.match(result.stdout, /Storage full\. Can't load this playlist\./);
-      assert.match(result.stdout, /Ask the user to free up storage/);
+      if (fixture.impact) {
+        assert.ok(result.stdout.includes(fixture.impact), result.stdout);
+        assert.match(result.stdout, /Ask the user to free up storage/);
+      } else {
+        assert.match(result.stdout, /showing only part of the playlist/);
+        assert.doesNotMatch(result.stdout, /Storage full|free up storage/);
+      }
     }
     assert.equal(transport.calls.filter((call) => call.method === "PATCH").length, 1);
+  }
   }
 });

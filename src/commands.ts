@@ -7710,7 +7710,7 @@ function publishPlaybackWarning(result: Extract<Awaited<ReturnType<typeof publis
       return { code: "playback_pending", message: `The Player had not shown the playlist after ${Math.round(playback.waited_ms / 1000)} s (state ${playback.state ?? "unknown"}). Large videos take longer to download. ${rerun}` };
   }
   if (playback.playing && playback.state === "partial") {
-    return { code: "playback_partial", message: `The Player shows the playlist without ${playback.missing_page_count ?? "some"} page(s) that do not fit its storage. screen storage-forecast ${screen} --playlist-id ${result.playlist_id} explains the fit.` };
+    return { code: "playback_partial", message: `The Player is showing only part of the playlist. screen show ${screen} reports progress and screen storage-forecast ${screen} --playlist-id ${result.playlist_id} checks available storage.` };
   }
   return undefined;
 }
