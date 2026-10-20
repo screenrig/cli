@@ -4552,7 +4552,7 @@ async function playlistPreviewCommand(
     const token = requireToken(resolved.token);
     client = clientFor(runtime, args, resolved.apiUrl, token);
     const response = await callPlaylist(client, { method: "GET", id: target });
-    playlist = response.body;
+    playlist = editablePlaylist(response.body);
     searchDirs = [runtime.cwd(), outputDir];
   }
   await loadRenderer(runtime);

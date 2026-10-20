@@ -233,6 +233,34 @@ async function centerPixel(file: string): Promise<number[]> {
   return Array.from(context.getImageData(960, 540, 1, 1).data);
 }
 
+test("preview by id accepts server-derived fields and matches the authored pixels", async t => {
+  const cwdDir = await testTemp("preview-read-document-");
+  t.after(() => rm(cwdDir, { recursive: true, force: true }));
+  const fsLike: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => cwdDir, env: { XDG_CONFIG_HOME: cwdDir } };
+  await writeConfigAtomic(path.join(cwdDir, "screenrig", "config.json"), { api_url: "https://api.screenrig.ai", token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr" }, fsLike);
+  const authored = imagePlaylist("med_MENU");
+  const resource = structuredClone(authored) as any;
+  Object.assign(resource, { id: "pl_AAAAAAAAAAAAAAAA", revision: 2 });
+  resource.pages[0].comments = [];
+  Object.assign(resource.pages[0].primitives[0], { controller: false, resolved_media: [] });
+  resource.pages[0].primitives[0].selector.one_at_a_time = false;
+  const original = structuredClone(resource);
+  await writeFile(path.join(cwdDir, "med_MENU.png"), redPng());
+  const transport = new FakeTransport().on("GET", "/api/playlists/pl_AAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: resource }));
+  const output = path.join(cwdDir, "by-id");
+  const result = await withRuntime(["playlist", "preview", resource.id, "--output", output, "--contact-sheet"], { cwdDir, fs: fsLike, transport });
+  assert.equal(result.code, ExitCode.Success, result.stdout);
+  const preview = JSON.parse(result.stdout).data;
+  const local = await previewPlaylist({ playlist: authored, outputDirectory: path.join(cwdDir, "authored"), searchDirs: [cwdDir], contactSheet: true });
+  for (const state of PREVIEW_STATES) {
+    assert.deepEqual(await readFile(preview.pages[0].files[state]), await readFile(local.pages[0]!.files[state]));
+  }
+  assert.deepEqual(await readFile(preview.contact_sheet), await readFile(local.contact_sheet!));
+  assert.deepEqual(await centerPixel(preview.pages[0].files.rest), [0xcc, 0x33, 0x00, 255]);
+  assert.deepEqual(resource, original, "preview must not mutate the served document");
+  assert.ok(transport.calls.every(call => call.method === "GET"), "preview performs no writes");
+});
+
 test("file preview fetches uploaded media from the project when logged in", async () => {
   const cwdDir = await testTemp("preview-fetch-");
   const fsLike: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => cwdDir, env: { XDG_CONFIG_HOME: cwdDir } };

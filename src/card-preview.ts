@@ -87,8 +87,8 @@ export async function withCardPreview<T>(options: { apiUrl: string; runtime: Cli
                 const anchor=p.anchor||'top-right';
                 for(const edge of p.placement.strips){if(anchor.indexOf(edge)>=0){if(edge==='top')geometry.y+=thickness;else if(edge==='bottom')geometry.y-=thickness;else if(edge==='left')geometry.x+=thickness;else if(edge==='right')geometry.x-=thickness;}}
               }
-              Object.assign(document.getElementById('card').style,{inset:'auto',left:geometry.x+'px',top:geometry.y+'px',width:geometry.w+'px',height:geometry.h+'px',transform:'rotate('+geometry.rotation+'deg)'});
             }
+            Object.assign(document.getElementById('card').style,{inset:'auto',left:geometry.x+'px',top:geometry.y+'px',width:geometry.w+'px',height:geometry.h+'px',transform:'rotate('+geometry.rotation+'deg)'});
             const handle=api.mount(document.getElementById('card'),{cardId:p.card,params,dataKey:p.data?'preview':'',dataSource:p.data?{fetch:(key,done)=>done(p.data)}:null,feed:p.feed||null,mediaResolver:{resolve:(src,done)=>done(typeof src==='string'&&/^media:(?:(?:stage|qa|development)_)?med_[A-Za-z0-9_-]+$/.test(src)?'/preview-media/'+src.slice(6):'')},active:true,fadeMs:0,frozenNowMs:p.now?Date.parse(p.now):Date.now(),timeZone:p.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone,onFailed:(code,cause)=>window.previewError=cause?code+': '+cause:code,onReady:()=>requestAnimationFrame(async()=>{await document.fonts.ready;await Promise.all(Array.from(document.images).filter(img=>img.getAttribute('src')).map(img=>img.decode().catch(()=>{})));requestAnimationFrame(()=>{window.previewResult={card:p.card,version,geometry,feed:manifest.feed,unrendered:[]};window.previewReady=true;});})});
           })().catch(e=>window.previewError=e.message);
         </script></body></html>`;
