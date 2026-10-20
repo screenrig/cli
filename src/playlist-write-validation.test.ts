@@ -49,7 +49,7 @@ test("both local authoring validators accept all fifteen transition types withou
     }
   }
   transitions.push({ type: "dip", duration_ms: 800, ease: "in-out", color: "#aB09fF" });
-  for (const theme of ["neomustard", "aurora", "folio", "signal", "manifesto", "bloom", "primetime"] as const) {
+  for (const theme of ["neomustard", "cyanotype", "propaganda", "signal", "avant-garde", "bloom", "primetime"] as const) {
     transitions.push({ type: "stinger", duration_ms: 3500, stinger: { theme, title: "FIRST HALF", subtitle: "Example match", logo: "media:med_01EXAMPLE", accent: "#FF2d4B", hang_ms: 1000 } });
   }
   for (const duration_ms of [2000, 2001, 3500, 6000]) {
@@ -89,7 +89,7 @@ test("both local authoring validators refuse transition rule violations at the s
     [stinger({ extra: true }), "stinger.extra"],
     [stinger({ duration_ms: 3500 }), "stinger.duration_ms"],
     [stinger({ hangMs: 1000 }), "stinger.hangMs"],
-    ...[null, "", "unknown", "Primetime", 1, ["aurora"]].map((theme): [unknown, string] => [stinger({ theme }), "stinger.theme"]),
+    ...[null, "", "unknown", "Primetime", "aurora", "folio", "manifesto", 1, ["aurora"]].map((theme): [unknown, string] => [stinger({ theme }), "stinger.theme"]),
     ...[null, 1, [], "x".repeat(41), "🌟".repeat(41)].map((title): [unknown, string] => [stinger({ title }), "stinger.title"]),
     ...[null, 1, [], "x".repeat(61), "🌟".repeat(61)].map((subtitle): [unknown, string] => [stinger({ subtitle }), "stinger.subtitle"]),
     ...[null, "#fff", "#11223344", "#GG0000", "#112233\n", 1].map((accent): [unknown, string] => [stinger({ accent }), "stinger.accent"]),

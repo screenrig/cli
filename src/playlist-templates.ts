@@ -35,7 +35,7 @@ export const PLAYLIST_TRANSITION_TYPES = [
 export type PlaylistTransitionType = typeof PLAYLIST_TRANSITION_TYPES[number];
 export type PlaylistTransitionEase = "linear" | "in" | "out" | "in-out";
 export interface PlaylistStinger {
-  theme?: "neomustard" | "aurora" | "folio" | "signal" | "manifesto" | "bloom" | "primetime";
+  theme?: "neomustard" | "cyanotype" | "propaganda" | "signal" | "avant-garde" | "bloom" | "primetime";
   title?: string;
   subtitle?: string;
   logo?: string;

@@ -118,7 +118,7 @@ export function playlistTransitionIssue(value: unknown): TransitionIssue | undef
   if (!isRecord(stinger)) return fail(["stinger"], "must be an object for stinger");
   const extraStinger = Object.keys(stinger).find((key) => !["theme", "title", "subtitle", "logo", "accent", "hang_ms"].includes(key));
   if (extraStinger !== undefined) return fail(["stinger", extraStinger], "is not allowed");
-  if (Object.hasOwn(stinger, "theme") && (typeof stinger.theme !== "string" || !["neomustard", "aurora", "folio", "signal", "manifesto", "bloom", "primetime"].includes(stinger.theme))) {
+  if (Object.hasOwn(stinger, "theme") && (typeof stinger.theme !== "string" || !["neomustard", "cyanotype", "propaganda", "signal", "avant-garde", "bloom", "primetime"].includes(stinger.theme))) {
     return fail(["stinger", "theme"], "must name one of the seven stinger themes");
   }
   for (const [key, limit] of [["title", 40], ["subtitle", 60]] as const) {

@@ -22350,7 +22350,7 @@ components:
         at most 60% of the transition duration_ms (checked by the server).
         logo names a ready image in this project, using the card media grant path.
       properties:
-        theme: { type: string, enum: [neomustard, aurora, folio, signal, manifesto, bloom, primetime] }
+        theme: { type: string, enum: [neomustard, cyanotype, propaganda, signal, avant-garde, bloom, primetime] }
         title: { type: string, maxLength: 40 }
         subtitle: { type: string, maxLength: 60 }
         logo: { type: string, pattern: '^media:med_[A-Za-z0-9_-]{1,120}$' }

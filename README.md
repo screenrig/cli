@@ -1583,13 +1583,14 @@ black. For example:
 "transition": { "type": "dip", "duration_ms": 800, "ease": "in-out", "color": "#000000" }
 ```
 
-Stinger requires `duration_ms` from 2000 through 6000 and a `stinger` object;
-other types forbid that object. Its members are all optional: `theme` is
-`neomustard`, `aurora`, `folio`, `signal`, `manifesto`, `bloom`, or `primetime`;
-`title` is at most 40 characters; `subtitle` is at most 60; `logo` is a string
-starting with `media:`; `accent` is `#RRGGBB`; and `hang_ms` is an integer from
-0 through 6000, at most 60% of `duration_ms`. Unknown transition and stinger
-members are refused. Logo authorization and image readiness are server checks.
+Stinger requires `duration_ms` from 2000 through 6000 (typical lengths are 2700
+to 4000) and a `stinger` object; other types forbid that object. Its members
+are all optional: `theme` is `neomustard`, `cyanotype`, `propaganda`, `signal`,
+`avant-garde`, `bloom`, or `primetime`; `title` is at most 40 characters;
+`subtitle` is at most 60; `logo` is a string starting with `media:`; `accent`
+is `#RRGGBB`; and `hang_ms` is an integer from 0 through 6000, at most 60% of
+`duration_ms`. Unknown transition and stinger members are refused. Logo
+authorization and image readiness are server checks.
 
 ```json
 "transition": {
