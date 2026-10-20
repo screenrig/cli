@@ -92,9 +92,10 @@ Choose by what the page is:
 - Already have the file: `media upload`, then a playlist and `screen assign`.
 - Anything presentable: `media generate` as the whole page.
 - Slide-deck-like experiences: local unbilled `compose render`.
-- Live video, iframe, or webapp: write playlist primitives.
-- Drop-in live details such as weather, clocks and menus: place a built-in card;
-  use an application for complex interactions.
+- Non-interactive live display such as weather, clocks, menus and boards: place a
+  card. Touch or other input, a peripheral, an outside system that pushes data
+  itself, or an exact look no card has: build an application.
+- Live video or an existing web page: write playlist primitives.
 
 ## Built-in cards and feeds
 

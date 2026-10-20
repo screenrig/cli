@@ -6,15 +6,15 @@ import { requireOptionGroup } from "./notes.js";
 import type { CommandActionBinder } from "./types.js";
 
 export function registerCardsCommands(root: Command, bind: CommandActionBinder): void {
-  const cards = root.command("cards").description("Discover built-in cards and their property schemas");
-  cards.command("list").description("List built-in cards, optionally matching a tag and category")
+  const cards = root.command("cards").description("Discover cards and their property schemas");
+  cards.command("list").description("List cards, optionally matching a tag and category")
     .option("--tag <TAG>", "Match a catalogue tag")
     .option("--category <CATEGORY>", "Match a catalogue category")
     .action(bind(handleCardsList));
   cards.command("show").description("Inspect static and dynamic properties, tier, layouts, feed and an example placement")
     .argument("<id>", "Catalogue card id", cardId).action(bind(handleCardsShow));
 
-  const card = root.command("card").description("Create and manage built-in card instances");
+  const card = root.command("card").description("Create and manage card instances");
   card.command("create").description("Create a card instance in the selected project")
     .requiredOption("--type <ID>", "Catalogue type from cards list", cardId)
     .option("--major <N>", "Select a catalogue major version", positiveInteger("major"))
@@ -35,7 +35,7 @@ export function registerCardsCommands(root: Command, bind: CommandActionBinder):
     .requiredOption("--file <FILE>", "Read a JSON object, or - for stdin")
     .option("--expect-rev <REVISION>", "Require the current data revision (If-Match)", revision).action(bind(handleCardInstanceDataPut));
 
-  const data = root.command("card-data").description("Read and write dynamic data for built-in cards");
+  const data = root.command("card-data").description("Read and write dynamic data for cards");
   data.command("get").description("Read a card data document and its revision")
     .argument("<key>", "Card data key", cardDataKey).action(bind(handleCardDataGet));
   data.command("put").description("Create or replace a card data document")
