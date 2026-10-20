@@ -1,4 +1,6 @@
 import { requireCapability, validateProjectCapabilities } from "./project-capabilities.js";
+import { cardExpiry } from "./card-expiry.js";
+import { withCardPreview } from "./card-preview.js";
 import { RESOURCE_ID_PATTERNS, isResourceID } from "./generated/resource-ids.js";
 import { newIdempotencyKey } from "./ids.js";
 import { apexHost } from "./apex-origin.js";
@@ -4501,7 +4503,7 @@ function previewPlaceholderWarning(placeholders: PreviewPlaceholder[], online: b
     : "Sign in (screenrig login or agent enroll) to fetch project media, or save each file beside the playlist as <media_id>.png, .jpg, .webp, .gif, .mp4 or .webm.";
   return {
     code: "preview_media_placeholder",
-    message: `${placeholders.length} media primitive(s) were drawn as labelled placeholder boxes, not their real pixels${what}. ${fix}`,
+    message: `${placeholders.length} primitive(s) or dependencies could not be fully rendered${what}. Applications, iframes, runtime ads and unavailable feeds are reported in placeholders. ${fix}`,
   };
 }
 
@@ -4563,6 +4565,9 @@ async function playlistPreviewCommand(
     searchDirs,
     client,
     runtime,
+    apiUrl: resolved.apiUrl,
+    now: flagString(args.flags, "now"),
+    timezone: flagString(args.flags, "timezone"),
   });
   const shortApplication = shortApplicationPageWarning(playlist);
   const warnings = [
@@ -6352,6 +6357,33 @@ async function cardObjectFile(args: ParsedArgs, runtime: CliRuntime): Promise<Re
   return value as Record<string, unknown>;
 }
 
+export const handleCardPreview = commandHandler(async (args, runtime, resolved) => {
+  const target = args.positionals[2];
+  const output = flagString(args.flags, "output");
+  if (!target || !output) throw usageError("card preview requires <type|id> and --output FILE.png.");
+  const paramsFile = flagString(args.flags, "params");
+  const dataFile = flagString(args.flags, "data");
+  const feedFile = flagString(args.flags, "feed");
+  const feed = feedFile ? await readAuthoringJson(feedFile, runtime) as Record<string, unknown> : undefined;
+  const params = paramsFile ? await readAuthoringJson(paramsFile, runtime) as Record<string, unknown> : undefined;
+  const data = dataFile ? await readAuthoringJson(dataFile, runtime) as Record<string, unknown> : undefined;
+  const client = resolved.token ? clientFor(runtime, args, resolved.apiUrl, resolved.token) : undefined;
+  const result = await withCardPreview({ apiUrl: resolved.apiUrl, runtime, client }, async (renderer) => {
+    const placement = await renderer.placement({ card: target });
+    const rendered = await renderer.render({ ...placement, ...(params ? { params } : {}), ...(data ? { data } : {}), ...(feed ? { feed } : {}),
+      width: flagNumber(args.flags, "width") ?? 1920, height: flagNumber(args.flags, "height") ?? 1080,
+      layout: flagString(args.flags, "layout"), anchor: flagString(args.flags, "anchor"),
+      now: flagString(args.flags, "now"), timezone: flagString(args.flags, "timezone"),
+    });
+    const file = path.resolve(runtime.cwd(), output);
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, rendered.png);
+    return { ...rendered.result, file, local: true };
+  });
+  return { envelope: successEnvelope(result, { request_id: client?.requestId }), exitCode: ExitCode.Success,
+    human: `Local card preview: ${result.file}\nOpen and inspect this image before publishing.` };
+});
+
 export const handleCardCreate = commandHandler(async (args, runtime, resolved) => {
   const params = await cardObjectFile(args, runtime);
   const type = cardId(flagString(args.flags, "type")!);
@@ -6383,7 +6415,7 @@ export const handleCardInstanceDataPut = commandHandler(async (args, runtime, re
   const document = await cardObjectFile(args, runtime);
   const revision = flagString(args.flags, "if-match");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "PUT", path: `/api/cards/${id}/data`, body: { document }, idempotent: true,
+  const response = await client.call({ method: "PUT", path: `/api/cards/${id}/data`, body: { document, ...cardExpiry(args.flags) }, idempotent: true,
     headers: revision ? { "if-match": quotedRevision(revision) } : undefined });
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Card data written: ${id}\nrevision: ${(response.body as { revision: number }).revision}` };
 });
@@ -6403,7 +6435,7 @@ export const handleCardDataPut = commandHandler(async (args, runtime, resolved) 
   if (Buffer.byteLength(JSON.stringify(document), "utf8") > 1_048_576) throw usageError("Card data must be at most 1 MiB.");
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const revision = flagString(args.flags, "if-match");
-  const response = await client.call({ method: "PUT", path: `/api/card-data/${encodeURIComponent(key)}`, body: { document }, idempotent: true,
+  const response = await client.call({ method: "PUT", path: `/api/card-data/${encodeURIComponent(key)}`, body: { document, ...cardExpiry(args.flags) }, idempotent: true,
     headers: revision ? { "if-match": quotedRevision(revision) } : undefined });
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Card data written: ${key}\nrevision: ${(response.body as { revision: number }).revision}` };
 });
@@ -7580,6 +7612,27 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
     ...(target ? { publish: { argv: ["screen", "publish", target.id, output, ...context], reason: "Inspect the prepared document and preview before publishing." } } : {}),
   }, { request_id: existingClient?.requestId, warnings }), exitCode: ExitCode.Success, human: `Playlist prepared at ${output}` };
 }, false);
+
+export const handleScreenChanges = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[2];
+  if (!id) throw usageError("screen changes requires a screen ID.");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: `/api/screens/${encodeURIComponent(id)}/changes` });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success,
+    human: JSON.stringify(response.body, null, 2) };
+});
+
+export const handleScreenRevert = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[2];
+  const change = flagString(args.flags, "change-id");
+  const revision = flagString(args.flags, "if-match");
+  if (!id || !change || !revision) throw usageError("screen revert requires a screen ID, --change-id and --expect-rev.");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "POST", path: `/api/screens/${encodeURIComponent(id)}/revert`,
+    body: { change_id: change }, headers: { "If-Match": `"${revision}"` }, idempotent: true });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success,
+    human: `Screen revert accepted. Read screen show ${id} and its manifest_upgrade to confirm Player activation.\n${JSON.stringify(response.body, null, 2)}` };
+});
 
 export const handleScreenPublish = commandHandler(async (args, runtime, resolved) => {
   const parsed = await readAuthoringJson(args.positionals[3]!, runtime);

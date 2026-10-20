@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Image, SKRSContext2D } from "@napi-rs/canvas";
 import { createCanvas, loadCanvas, loadImage } from "./canvas.js";
+import { withCardPreview, type LocalCardPreview } from "./card-preview.js";
 import type { ApiClient } from "./client.js";
 import {
   LOOK_AT_THE_CONTACT_SHEET,
@@ -105,12 +106,13 @@ export interface PreviewSoundtrack {
   cued?: true;
 }
 
-/** A media primitive drawn as a labelled box because its pixels were not available. */
+/** A primitive or dependency the preview could not draw. */
 export interface PreviewPlaceholder {
   page_id: string;
   primitive_id: string;
   primitive: string;
   media_id?: string;
+  reason?: string;
 }
 
 export interface PlaylistPreviewResult {
@@ -120,8 +122,9 @@ export interface PlaylistPreviewResult {
   pages: PreviewPageResult[];
   contact_sheet?: string;
   lint: LintFinding[];
-  /** Media primitives drawn as placeholders; empty when every image and video frame was drawn. */
+  /** Content that could not be rendered, including live applications and feeds. */
   placeholders: PreviewPlaceholder[];
+  rendered_cards: Array<{page_id: string; primitive_id: string; card: string; version: string}>;
 }
 
 export async function previewPlaylist(options: {
@@ -134,6 +137,9 @@ export async function previewPlaylist(options: {
   searchDirs?: string[];
   client?: ApiClient;
   runtime?: CliRuntime;
+  apiUrl?: string;
+  now?: string;
+  timezone?: string;
 }): Promise<PlaylistPreviewResult> {
   const viewport = options.viewport ?? PREVIEW_VIEWPORT;
   if (![viewport.width, viewport.height].every((n) => Number.isSafeInteger(n) && n > 0)) {
@@ -143,7 +149,12 @@ export async function previewPlaylist(options: {
   assertPlaylistValid(body);
   await loadCanvas();
   const placeholders: PreviewPlaceholder[] = [];
-  const pages = await preparePages(body.pages, viewport, options, placeholders);
+  const renderedCards: PlaylistPreviewResult["rendered_cards"] = [];
+  const hasCards = body.pages.some((page) => (recordOf(page).primitives as unknown[] | undefined)?.some((item) => recordOf(item).primitive === "card"));
+  const pages = hasCards && options.runtime && options.apiUrl
+    ? await withCardPreview({ apiUrl: options.apiUrl, runtime: options.runtime, client: options.client },
+      (renderer) => preparePages(body.pages, viewport, { ...options, renderer, renderedCards }, placeholders))
+    : await preparePages(body.pages, viewport, options, placeholders);
   const restPixels = new Map<string, PixelBuffer>();
   const pageResults: PreviewPageResult[] = [];
   if (!options.lintOnly) await mkdir(options.outputDirectory, { recursive: true });
@@ -178,6 +189,7 @@ export async function previewPlaylist(options: {
     ...(contact_sheet ? { contact_sheet } : {}),
     lint,
     placeholders,
+    rendered_cards: renderedCards,
   };
 }
 
@@ -226,6 +238,10 @@ async function preparePages(
     searchDirs?: string[];
     client?: ApiClient;
     runtime?: CliRuntime;
+    renderer?: LocalCardPreview;
+    renderedCards?: PlaylistPreviewResult["rendered_cards"];
+    now?: string;
+    timezone?: string;
   },
   placeholders: PreviewPlaceholder[],
 ): Promise<PreviewPage[]> {
@@ -247,6 +263,7 @@ async function preparePages(
     if (raw.type === "adslot") {
       const slot = typeof raw.adslot_id === "string" ? raw.adslot_id : "adslot";
       const rect: Rect = { x: 0, y: 0, width: canvas.width, height: canvas.height };
+      placeholders.push({ page_id: id, primitive_id: `${id}-adslot`, primitive: "adslot", reason: "Runtime ad selection" });
       const placeholder: ResolvedPrimitive = {
         id: `${id}-adslot`, kind: "adslot", sourceIndex: 0, layer: 0, paintOrder: 0,
         rect, viewportRect: rect, clipRect: rect, contentRect: rect, contentFit: "contain",
@@ -266,7 +283,7 @@ async function preparePages(
     for (const [sourceIndex, item] of source.entries()) {
       const primitive = recordOf(item);
       const rectValue = recordOf(primitive.rect);
-      const rect: Rect = {
+      let rect: Rect = {
         x: numberOf(rectValue.x, 0),
         y: numberOf(rectValue.y, 0),
         width: numberOf(rectValue.width, 0),
@@ -275,10 +292,27 @@ async function preparePages(
       const kind = typeof primitive.primitive === "string" ? primitive.primitive : "image";
       const selector = kind === "stream"
         ? { by: "id", media_id: primitive.fallback_media_id } : recordOf(primitive.selector);
-      const media = kind === "image" || kind === "video" || kind === "stream"
+      let media = kind === "image" || kind === "video" || kind === "stream"
         ? await loadMedia(selector, kind === "stream" ? "image" : kind, options)
         : undefined;
       const primitiveId = typeof primitive.id === "string" ? primitive.id : `p${sourceIndex}`;
+      let layer = numberOf(primitive.layer, 0);
+      if (kind === "card" && options.renderer) {
+        const placement = await options.renderer.placement(primitive);
+        const layout = typeof primitive.layout === "string" ? primitive.layout : "free";
+        const strips = [...new Set(source.map((raw) => recordOf(raw)).filter((raw) => raw.primitive === "card" && raw.layout === "strip").map((raw) => typeof raw.anchor === "string" ? raw.anchor : "bottom"))];
+        const image = await options.renderer.render({ ...placement, width: canvas.width, height: canvas.height, layout,
+          anchor: typeof primitive.anchor === "string" ? primitive.anchor : undefined,
+          placement: { rect, strips }, now: options.now, timezone: options.timezone });
+        media = { image: await loadImage(image.png), label: undefined };
+        // The transparent raster includes its derived placement and strip rotation.
+        rect = { x: 0, y: 0, width: canvas.width, height: canvas.height };
+        layer = layout === "free" ? layer : ({ full: 10, center: 20, corner: 30, chip: 40, strip: 50 }[layout] ?? layer);
+        for (const reason of image.result.unrendered ?? []) placeholders.push({ page_id: id, primitive_id: primitiveId, primitive: "card", reason });
+        options.renderedCards?.push({ page_id: id, primitive_id: primitiveId, card: placement.card, version: image.result.version });
+      } else if (kind !== "image" && kind !== "video" && kind !== "stream") {
+        placeholders.push({ page_id: id, primitive_id: primitiveId, primitive: kind });
+      }
       if (media && !media.image) {
         const mediaId = mediaIdOf(selector);
         placeholders.push({ page_id: id, primitive_id: primitiveId, primitive: kind, ...(mediaId ? { media_id: mediaId } : {}) });
@@ -287,7 +321,7 @@ async function preparePages(
         id: primitiveId,
         kind,
         sourceIndex,
-        layer: numberOf(primitive.layer, 0),
+        layer,
         paintOrder: 0,
         rect,
         viewportRect: rect,

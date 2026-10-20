@@ -1,9 +1,10 @@
 import { type Command, Argument } from "commander";
 import { cardId, cardUid, cardDataKey } from "../cards.js";
-import { handleCardCreate, handleCardList, handleCardShow, handleCardParams, handleCardDelete, handleCardInstanceDataGet, handleCardInstanceDataPut, handleCardsList, handleCardsShow, handleCardDataGet, handleCardDataPut, handleCardDataList, handleCardDataDelete, handleFeedsGet } from "../commands.js";
+import { handleCardPreview, handleCardCreate, handleCardList, handleCardShow, handleCardParams, handleCardDelete, handleCardInstanceDataGet, handleCardInstanceDataPut, handleCardsList, handleCardsShow, handleCardDataGet, handleCardDataPut, handleCardDataList, handleCardDataDelete, handleFeedsGet } from "../commands.js";
 import { positiveInteger, revision } from "./options.js";
 import { requireOptionGroup } from "./notes.js";
 import type { CommandActionBinder } from "./types.js";
+import { cardTtl } from "../card-expiry.js";
 
 export function registerCardsCommands(root: Command, bind: CommandActionBinder): void {
   const cards = root.command("cards").description("Discover cards and their property schemas");
@@ -15,6 +16,19 @@ export function registerCardsCommands(root: Command, bind: CommandActionBinder):
     .argument("<id>", "Catalogue card id", cardId).action(bind(handleCardsShow));
 
   const card = root.command("card").description("Create and manage card instances");
+  card.command("preview").description("Render a card locally with Chromium; inspect the PNG before publishing")
+    .argument("<type|id>", "Catalogue type or card instance ID")
+    .requiredOption("--output <FILE>", "Write the local PNG")
+    .option("--params <FILE>", "Static properties as JSON")
+    .option("--data <FILE>", "Dynamic document as JSON")
+    .option("--feed <FILE>", "Host feed document as JSON; omitted feeds are reported")
+    .option("--width <PX>", "Image width (default 1920)", positiveInteger("width"))
+    .option("--height <PX>", "Image height (default 1080)", positiveInteger("height"))
+    .option("--layout <LAYOUT>", "Card layout to draw")
+    .option("--anchor <ANCHOR>", "Corner or strip edge")
+    .option("--now <ISO>", "Freeze the clock at this instant")
+    .option("--timezone <ZONE>", "Render in this IANA timezone")
+    .action(bind(handleCardPreview));
   card.command("create").description("Create a card instance in the selected project")
     .requiredOption("--type <ID>", "Catalogue type from cards list", cardId)
     .option("--major <N>", "Select a catalogue major version", positiveInteger("major"))
@@ -30,19 +44,25 @@ export function registerCardsCommands(root: Command, bind: CommandActionBinder):
   const instanceData = card.command("data").description("Read and replace a card instance's dynamic data");
   instanceData.command("get").description("Read dynamic data and its revision")
     .argument("<id>", "Card instance ID (crd_...)", cardUid).action(bind(handleCardInstanceDataGet));
-  instanceData.command("put").description("Create or replace dynamic data")
+  const instancePut = instanceData.command("put").description("Create or replace dynamic data")
     .argument("<id>", "Card instance ID (crd_...)", cardUid)
     .requiredOption("--file <FILE>", "Read a JSON object, or - for stdin")
+    .option("--ttl <DURATION>", "Blank data after this long, including offline: 30m, 12h or 1d", cardTtl)
+    .option("--expires-at <INSTANT>", "Blank data at this ISO timestamp with timezone")
     .option("--expect-rev <REVISION>", "Require the current data revision (If-Match)", revision).action(bind(handleCardInstanceDataPut));
+  requireOptionGroup(instancePut, "atMostOne", ["--ttl", "--expires-at"]);
 
   const data = root.command("card-data").description("Read and write dynamic data for cards");
   data.command("get").description("Read a card data document and its revision")
     .argument("<key>", "Card data key", cardDataKey).action(bind(handleCardDataGet));
-  data.command("put").description("Create or replace a card data document")
+  const dataPut = data.command("put").description("Create or replace a card data document")
     .argument("<key>", "Card data key", cardDataKey)
     .requiredOption("--file <FILE>", "Read a JSON object from a file, or - for stdin")
+    .option("--ttl <DURATION>", "Blank data after this long: 30m, 12h or 1d", cardTtl)
+    .option("--expires-at <INSTANT>", "Blank data at this ISO timestamp with timezone")
     .option("--expect-rev <REVISION>", "Require the current document revision (If-Match)", revision)
     .action(bind(handleCardDataPut));
+  requireOptionGroup(dataPut, "atMostOne", ["--ttl", "--expires-at"]);
   data.command("list").description("List card data keys and revisions across all pages")
     .action(bind(handleCardDataList));
   data.command("delete").description("Delete a card data document at its current revision")

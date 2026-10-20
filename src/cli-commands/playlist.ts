@@ -33,11 +33,13 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--lint-only", "Run the command's local validation/lint mode")
     .action(bind(handlePlaylistValidate));
 
-  addCommandNotes(playlist.command("preview").description("Render playlist previews and a contact sheet")
+  addCommandNotes(playlist.command("preview").description("Render pages and cards locally; inspect the contact sheet before publishing")
     .argument("<file|id>", "Playlist JSON file, playlist identifier, or - for stdin")
     .requiredOption("--output <PATH>", "Write preview files to this directory (required)")
     .option("--frame-ms <MS>", "Select the preview frame time", nonnegativeInteger("frame-ms"))
     .option("--contact-sheet", "Include a contact sheet")
+    .option("--now <ISO>", "Freeze card clocks at this instant")
+    .option("--timezone <ZONE>", "Render cards in this IANA timezone")
     .option("--lint-only", "Run the command's local validation/lint mode")
     .action(bind(handlePlaylistPreview)), LOOK_AT_THE_CONTACT_SHEET);
 

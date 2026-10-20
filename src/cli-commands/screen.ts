@@ -2,7 +2,7 @@ import { addValueAlias } from "./aliases.js";
 import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes.js";
 import { NOTE_HELP, positiveInteger, reviewNoteOption, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear } from "../commands.js";
+import { handleScreenChanges, handleScreenRevert, handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear } from "../commands.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
 import { untilOption } from "../screen-display.js";
 import { type Command, Option } from "commander";
@@ -10,7 +10,16 @@ import { type Command, Option } from "commander";
 export function registerScreenCommands(root: Command, bind: CommandActionBinder): void {
   const screen = root.command("screen").description("Pair, configure, and inspect screens");
 
-  screen.command("publish").description("Create a new playlist from a prepared file and assign it to a screen")
+  screen.command("changes").description("List this screen's issued composition changes retained for 30 days")
+    .argument("<id>", "Screen identifier")
+    .action(bind(handleScreenChanges));
+  screen.command("revert").description("Restore the preceding composition of one explicit current screen change")
+    .argument("<id>", "Screen identifier")
+    .requiredOption("--change-id <ID>", "Current retained change ID from screen changes")
+    .requiredOption("--expect-rev <REVISION>", "Current screen revision (If-Match)", revision)
+    .action(bind(handleScreenRevert));
+
+  screen.command("publish").description("Publish a prepared playlist after rendering and inspecting its local preview")
     .argument("<id>", "Screen identifier")
     .argument("<file>", "Prepared playlist file, or - for stdin")
     .option("--expect-rev <REVISION>", "Expected screen revision", revision)

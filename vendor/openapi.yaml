@@ -4010,6 +4010,80 @@ paths:
     servers:
     - url: https://screenrig.ai
       description: Backend-owned project dashboard origin
+  /api/screens/{id}/changes:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listScreenCompositionChanges
+      description: Lists up to 50 newest issued or queued composition changes retained for 30 days. A change ID is the desired manifest revision issued or queued for this screen. History starts when composition retention is enabled; a row without previous_change_id has no preceding retained composition.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      responses:
+        '200':
+          description: Retained screen composition changes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, retention_days]
+                properties:
+                  retention_days:
+                    type: integer
+                    const: 30
+                  items:
+                    type: array
+                    maxItems: 50
+                    items:
+                      $ref: '#/components/schemas/ScreenCompositionChange'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/screens/{id}/revert:
+    parameters:
+    - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: revertScreenCompositionChange
+      description: Reverts the named current issued change on one screen by forking its preceding immutable composition into a new playlist and assigning it atomically. Requires a live-write credential, If-Match and an explicit change_id. A takeover, an intervening newer publication or screen change, expired history or unavailable dependency refuses the write. Other screens and source playlists remain unchanged. Card data stays current and expiry is preserved. Exact idempotency retries return the same accepted assignment. Acceptance is separate from the Player's manifest_upgrade activation state.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/IfMatch'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [change_id]
+              properties:
+                change_id:
+                  type: string
+                  pattern: '^man_'
+                  maxLength: 128
+      responses:
+        '200':
+          description: The screen assignment is accepted. Observe screen.manifest_activated or manifest_upgrade to confirm Player activation.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted, reverted_change_id, screen]
+                properties:
+                  accepted:
+                    type: boolean
+                    const: true
+                  reverted_change_id:
+                    type: string
+                  screen:
+                    $ref: '#/components/schemas/Screen'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/screens/{id}/reload:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
@@ -19826,7 +19900,7 @@ components:
             replies and Luna.
         origin:
           type: string
-          enum: [customer, slack, dashboard, luna, system]
+          enum: [customer, slack, dashboard, rig, luna, system]
           description: Where it was written. Absent only for a staff reply recorded before origins were.
     DashboardStaffSupportMessageList:
       type: object
@@ -22286,10 +22360,46 @@ components:
         at all, so eligible content always exists. Conformance vectors for the evaluation
         rules are the screenrig.schedule/v1 family in packages/schedule-contract.
       properties:
-        enabled: { type: boolean, description: "False hides the page unconditionally and needs no clock. A visibility object that sets enabled true and carries no from, until, or windows is a no-op and is rejected." }
+        enabled: { type: boolean, description: "False hides the page unconditionally and needs no clock. A visibility object that sets enabled true and carries no from, until, windows or data is a no-op and is rejected." }
         from: { type: string, pattern: "^\\d{4}-\\d{2}-\\d{2}T([01]\\d|2[0-3]):[0-5]\\d$", description: "Inclusive civil lower bound in the screen timezone, minute precision, no offset and no zone suffix." }
         until: { type: string, pattern: "^\\d{4}-\\d{2}-\\d{2}T([01]\\d|2[0-3]):[0-5]\\d$", description: "Exclusive civil upper bound in the screen timezone. When both bounds are present, from must be strictly earlier than until." }
         windows: { type: array, minItems: 1, maxItems: 16, items: { $ref: "#/components/schemas/PageVisibilityWindow" } }
+        data: { $ref: "#/components/schemas/PageDataCondition" }
+    ScreenCompositionChange:
+      type: object
+      required: [screen_id, change_id, playlist_id, playlist_revision, created_at, expires_at]
+      properties:
+        screen_id:
+          type: string
+        change_id:
+          type: string
+        previous_change_id:
+          type: string
+        playlist_id:
+          type: string
+        playlist_revision:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    PageDataCondition:
+      type: object
+      additionalProperties: false
+      required: [key]
+      description: "A card-data predicate, evaluated before civil time. Missing or expired data never matches. The page also respects its ordinary time bounds. Requires host capability page.conditions; older hosts receive the page disabled."
+      properties:
+        key: { type: string, maxLength: 256, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$", description: "Project card data key or card instance ID; feed keys are not accepted." }
+        path: { type: string, maxLength: 256, description: "RFC 6901 pointer with at most 16 segments; absent or empty tests the document itself." }
+        equals:
+          description: "Optional scalar equality. Omitting it tests existence, including a present null or false."
+          oneOf:
+            - { type: string, maxLength: 1024 }
+            - { type: number }
+            - { type: boolean }
+            - { type: "null" }
     PageVisibilityWindow:
       type: object
       additionalProperties: false
@@ -22653,6 +22763,8 @@ components:
         health: { $ref: "#/components/schemas/ScreenHealth" }
         display: { $ref: "#/components/schemas/ScreenDisplay" }
         timezone: { type: string, description: "IANA time zone identifier. Absent until it is set. Page visibility rules are evaluated in this zone." }
+        effective_timezone: { type: string, description: "Effective card clock zone: explicit screen timezone, otherwise the device zone reported at mint. Absent when unknown." }
+        timezone_source: { type: string, enum: [screen, device, unknown] }
         tags: { $ref: "#/components/schemas/ScreenTags" }
         fleet_link_id: { type: string, description: "The fleet link that created this screen. Read-only; it stays after the link is deleted." }
         observation: { $ref: "#/components/schemas/ScreenObservation" }
@@ -22790,6 +22902,7 @@ components:
       properties:
         platform: { type: string, pattern: "^[a-z][a-z0-9-]{0,31}$", description: "Registered values: tizen, android, windows, qt, apple, chromeos, browser, brightsign. Another value matching the pattern is stored as the player reported it." }
         host_version: { type: string, minLength: 1, maxLength: 40, description: "Shell or container product version, CalVer or vendor form." }
+        timezone: { type: string, maxLength: 64, description: "Device IANA timezone hint. Used for effective card clock diagnostics when the screen has no explicit timezone." }
         device: { $ref: "#/components/schemas/HostDevice" }
         capabilities: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[a-z0-9_]+(\\.[a-z0-9_]+)*$", maxLength: 40 }, description: "Host capability tokens, optionally dotted into a family. Documented values: reboot (the Player reboots the device on player.reboot), play_page (the Player starts a page of its playlist on player.play_page, docs/player-compatibility.md §6.3.1), audio.extended (the Player plays soundtracks of up to 128 tracks, a cued soundtrack, and audio_end pages, docs/player-compatibility.md §6.6), display_power.serial, display_power.cec, display_power.ddc, display_power.backlight, display_power.scrim (display power methods the Player can use, docs/player-compatibility.md §6.5). Legacy cec_power_on reads as display_power.cec; reboot_daily and other values are stored as reported." }
     HostDevice:
@@ -23593,11 +23706,11 @@ components:
         record with no trailer; a stream that fails after the header is
         aborted at the connection (the client sees a transport error,
         never a clean end), so retry from the last received_at.
-    CardDataWrite: { type: object, additionalProperties: false, required: [document], properties: { document: { type: object, additionalProperties: true, description: "The card data document: a JSON object of at most 1 MiB. When a card placement binds the key it holds only that card's dynamic properties. A string that begins with media: is a media reference, media:<id>, naming a ready, approved image in this project." } } }
-    CardDataEntry: { type: object, additionalProperties: false, required: [key, document, bytes, sha256, revision, created_at, updated_at], properties: { key: { type: string }, document: { type: object, additionalProperties: true }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    CardDataWrite: { type: object, additionalProperties: false, required: [document], properties: { document: { type: object, additionalProperties: true, description: "The card data document: a JSON object of at most 1 MiB. When a card placement binds the key it holds only that card's dynamic properties. A string that begins with media: is a media reference, media:<id>, naming a ready, approved image in this project." }, expires_at: { type: string, format: date-time, description: "Absolute expiry; omitted data never expires." }, ttl_seconds: { type: integer, minimum: 1, maximum: 31536000, description: "TTL from the first committed write. Mutually exclusive with expires_at. A retry preserves the original expiry. Omitting both clears expiry." } } }
+    CardDataEntry: { type: object, additionalProperties: false, required: [key, document, bytes, sha256, revision, created_at, updated_at], properties: { key: { type: string }, document: { type: object, additionalProperties: true }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, expires_at: { type: string, format: date-time, description: "Absolute expiry; omitted data never expires." }, expired: { type: boolean, description: "Whether the stored document is past its expiry; runtime readers receive 404 for expired data." } } }
     FeedDocument: { type: object, additionalProperties: true, required: [schema, fetchedAt, attribution], properties: { schema: { type: string, description: "The feed schema, for example screenrig.weather/v1." }, fetchedAt: { type: string, format: date-time, description: The last time the feed worker confirmed the document. }, attribution: { type: object, additionalProperties: false, required: [text], properties: { text: { type: string }, url: { type: string } }, description: The credit to show wherever the data shows. } } }
     FeedPending: { type: object, additionalProperties: false, required: [key, state, retry_after_seconds], properties: { key: { type: string }, state: { type: string, enum: [pending] }, retry_after_seconds: { type: integer } } }
-    CardDataSummary: { type: object, additionalProperties: false, required: [key, bytes, sha256, revision, created_at, updated_at], properties: { key: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time } } }
+    CardDataSummary: { type: object, additionalProperties: false, required: [key, bytes, sha256, revision, created_at, updated_at], properties: { key: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, expires_at: { type: string, format: date-time, description: "Absolute expiry; omitted data never expires." } } }
     CardDataList: { type: object, additionalProperties: false, required: [items, next_cursor], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/CardDataSummary" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }] } } }
     KVWrite: { type: object, additionalProperties: false, required: [value_base64], properties: { value_base64: { type: string, contentEncoding: base64, maxLength: 1398104 }, content_type: { type: string, minLength: 1, maxLength: 127, default: application/octet-stream } } }
     KVEntry: { type: object, additionalProperties: false, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: { application_id: { type: string }, key: { type: string }, value_base64: { type: string, contentEncoding: base64 }, content_type: { type: string }, bytes: { type: integer }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, revision: { type: integer } } }
