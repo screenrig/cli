@@ -25,7 +25,10 @@ export async function withPreviewBrowser<T>(env: NodeJS.Dict<string>, work: (bro
   const profile = await mkdtemp(path.join(env.TMPDIR ?? tmpdir(), "screenrig-preview-"));
   // Chromium cannot start its own sandbox as root. Other users keep it enabled.
   const rootFlags = process.getuid?.() === 0 ? ["--no-sandbox"] : [];
-  const child = spawn(binary, ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-extensions", "--disable-dev-shm-usage", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", ...rootFlags, "--remote-debugging-pipe", `--user-data-dir=${profile}`, "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "about:blank"], { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
+  // The credential-free preview loads its own loopback server. Chromium's local
+  // network permission prompt cannot be answered headlessly; relax only that
+  // check in this disposable browser, retaining the renderer's CSP and CORS.
+  const child = spawn(binary, ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-features=LocalNetworkAccessChecks", "--disable-extensions", "--disable-dev-shm-usage", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", ...rootFlags, "--remote-debugging-pipe", `--user-data-dir=${profile}`, "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "about:blank"], { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
   const closed = new Promise<void>((resolve) => { child.once("close", () => resolve()); });
   const pending = new Map<number, { resolve(value: any): void; reject(error: Error): void }>();
   const listeners = new Set<(message: any) => void>();

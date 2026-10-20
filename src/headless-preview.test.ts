@@ -32,6 +32,12 @@ fs.createReadStream(null,{fd:3}).on('data', chunk => {
       case 'Target.attachToTarget': reply({sessionId:'session'}); break;
       case 'Page.bringToFront': foreground=true; reply({}); break;
       case 'Page.navigate':
+        if (mode === 'local-network-checks' && !process.argv.includes('--disable-features=LocalNetworkAccessChecks')) {
+          event('Network.requestWillBeSent',{requestId:'document',request:{url:message.params.url}});
+          event('Network.loadingFailed',{requestId:'document',type:'Document',errorText:'net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS'});
+          reply({errorText:'net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS'});
+          break;
+        }
         event('Page.lifecycleEvent',{name:'load',frameId:'frame',loaderId:'about-blank'});
         if (mode==='early-load') {
           loaded=true;
@@ -79,6 +85,18 @@ test("root preview starts Chromium with its required sandbox flag", unix, async 
   if (process.getuid) t.mock.method(process as NodeJS.Process & { getuid(): number }, "getuid", () => 0);
   const result = await withPreviewBrowser(await browserFixture(t), browser => browser.render("http://127.0.0.1/", 320, 180));
   assert.ok(result.result.args.includes("--no-sandbox"));
+});
+
+test("preview reaches its loopback server when Chromium enforces local-network checks", unix, async t => {
+  for (const uid of [1000, 0]) {
+    if (process.getuid) t.mock.method(process as NodeJS.Process & { getuid(): number }, "getuid", () => uid);
+    const result = await withPreviewBrowser(await browserFixture(t, "local-network-checks"), browser => browser.render("http://127.0.0.1:45081/", 320, 180));
+    assert.equal(result.png.toString(), "png");
+    assert.equal(result.result.args.includes("--no-sandbox"), uid === 0);
+    assert.ok(!result.result.args.includes("--disable-web-security"));
+    assert.throws(() => process.kill(result.result.pid, 0), { code: "ESRCH" });
+    await assert.rejects(access(result.result.profile), { code: "ENOENT" });
+  }
 });
 
 test("startup failure rejects promptly, including when the browser exits before work", unix, async t => {
