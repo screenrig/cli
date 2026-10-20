@@ -73,7 +73,7 @@ export async function withCardPreview<T>(options: { apiUrl: string; runtime: Cli
             if (bytes.length > 32 * 1024 * 1024) throw new Error("image too large");
             const localPath = `/preview-media/${id}`;
             assets.set(localPath, {bytes, type: "application/octet-stream"});
-            return localPath;
+            return value;
           } catch { unrendered.push(`Card image ${id} unavailable`); return ""; }
         }
         const resolved = { ...input, params: await resolveMedia(input.params), data: await resolveMedia(input.data) };
@@ -100,7 +100,7 @@ export async function withCardPreview<T>(options: { apiUrl: string; runtime: Cli
               }
               Object.assign(document.getElementById('card').style,{inset:'auto',left:geometry.x+'px',top:geometry.y+'px',width:geometry.w+'px',height:geometry.h+'px',transform:'rotate('+geometry.rotation+'deg)'});
             }
-            const handle=api.mount(document.getElementById('card'),{cardId:p.card,params,dataKey:p.data?'preview':'',dataSource:p.data?{fetch:(key,done)=>done(p.data)}:null,feed:p.feed||null,mediaResolver:{resolve:(src,done)=>done(typeof src==='string'&&src.startsWith('/preview-media/')?src:'')},active:true,fadeMs:0,frozenNowMs:p.now?Date.parse(p.now):Date.now(),timeZone:p.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone,onFailed:(code)=>window.previewError=code,onReady:()=>requestAnimationFrame(()=>requestAnimationFrame(()=>{window.previewResult={card:p.card,version,geometry,feed:manifest.feed,unrendered:[]};window.previewReady=true;}))});
+            const handle=api.mount(document.getElementById('card'),{cardId:p.card,params,dataKey:p.data?'preview':'',dataSource:p.data?{fetch:(key,done)=>done(p.data)}:null,feed:p.feed||null,mediaResolver:{resolve:(src,done)=>done(typeof src==='string'&&/^media:(?:(?:stage|qa|development)_)?med_[A-Za-z0-9_-]+$/.test(src)?'/preview-media/'+src.slice(6):'')},active:true,fadeMs:0,frozenNowMs:p.now?Date.parse(p.now):Date.now(),timeZone:p.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone,onFailed:(code)=>window.previewError=code,onReady:()=>requestAnimationFrame(async()=>{await document.fonts.ready;await Promise.all(Array.from(document.images).filter(img=>img.getAttribute('src')).map(img=>img.decode().catch(()=>{})));requestAnimationFrame(()=>{window.previewResult={card:p.card,version,geometry,feed:manifest.feed,unrendered:[]};window.previewReady=true;});})});
           })().catch(e=>window.previewError=e.message);
         </script></body></html>`;
         const answer = await browser.render(`http://127.0.0.1:${address.port}/`, input.width, input.height);
