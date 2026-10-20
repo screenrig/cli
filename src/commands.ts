@@ -769,8 +769,8 @@ function commandHandler(
     const ordinary = (group === "dashboard" && action === "reset-sign-in")
       || Boolean(authenticated && resolved.token && (
         ["kv", "card", "card-data", "comment", "feedback", "support", "operations", "notes"].includes(group ?? "") ||
-        (group === "app" && ["upload", "update"].includes(action ?? "")) ||
-        (group === "playlist" && ["create", "update", "delete"].includes(action ?? "")) ||
+        (group === "app" && ["upload", "update", "rename"].includes(action ?? "")) ||
+        (group === "playlist" && ["create", "update", "patch", "rename", "delete"].includes(action ?? "")) ||
         (group === "reviews" && action === "withdraw") ||
         (group === "media" && ["update", "delete"].includes(action ?? "")) ||
         // A screenshot is an observation: every run requests a new capture.
@@ -4590,7 +4590,16 @@ async function playlistPreviewCommand(
 
 export const handlePlaylistList = commandHandler(async (args, runtime, resolved) => {
 
-  return simpleList(args, runtime, resolved, "/api/playlists", "Playlists");
+  const result = await simpleList(args, runtime, resolved, "/api/playlists", "Playlists");
+  if (result.envelope.ok) {
+    const data = result.envelope.data as { items?: Array<{ id: string; name: string; revision: number; updated_at?: string }> };
+    if (Array.isArray(data.items)) {
+      result.human = ["Playlists", "ID\tRevision\tUpdated\tName",
+        ...data.items.map((item) => `${item.id}\t${item.revision}\t${item.updated_at ?? "—"}\t${item.name}`),
+      ].join("\n");
+    }
+  }
+  return result;
 }, true);
 
 export const handlePlaylistShow = commandHandler(async (args, runtime, resolved) => {
@@ -4750,6 +4759,55 @@ export const handlePlaylistCreate = commandHandler(async (args, runtime, resolve
 
 export const handlePlaylistUpdate = commandHandler(async (args, runtime, resolved) => {
   return playlistCreateUpdateAction(args, runtime, resolved, "update");
+}, true);
+
+export const handlePlaylistPatch = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[2];
+  const file = args.positionals[3];
+  if (!id) throw usageError("playlist patch requires <id> and at least one changed field.");
+  let body: Record<string, unknown> = {};
+  if (file) {
+    const parsed = await readAuthoringJson(file, runtime);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw usageError("Playlist patch JSON must be an object.");
+    body = parsed as Record<string, unknown>;
+  }
+  const unknown = Object.keys(body).filter((key) => !["name", "pages", "audio"].includes(key));
+  if (unknown.length) throw usageError(`Playlist patch contains unsupported fields: ${unknown.join(", ")}.`);
+  const name = flagString(args.flags, "name");
+  if (name !== undefined) {
+    if (Object.hasOwn(body, "name")) throw usageError("Supply name in the patch file or --name, not both.");
+    body.name = name;
+  }
+  if (flagBool(args.flags, "clear-audio")) {
+    if (Object.hasOwn(body, "audio")) throw usageError("Supply audio in the patch file or --clear-audio, not both.");
+    body.audio = null;
+  }
+  if (!Object.keys(body).length) throw usageError("playlist patch requires a partial JSON file, --name, or --clear-audio.");
+  if (Object.hasOwn(body, "name")) {
+    if (typeof body.name !== "string" || !body.name.trim() || [...body.name.trim()].length > 120 || /[\p{Cc}]/u.test(body.name)) {
+      throw usageError("name must contain 1 to 120 Unicode characters after trimming, with no control characters.");
+    }
+    body.name = body.name.trim();
+  }
+  if (Object.hasOwn(body, "pages")) {
+    if (!Array.isArray(body.pages) || body.pages.length === 0) throw usageError("pages must be a non-empty array.");
+    body.pages = expandPlaylistPages(body.pages);
+  }
+  if (body.audio !== undefined && body.audio !== null && (typeof body.audio !== "object" || Array.isArray(body.audio))) {
+    throw usageError("audio must be a soundtrack object or null.");
+  }
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  if (Array.isArray(body.pages)) {
+    await validatePlaylistCards(client, { pages: body.pages });
+    await assertAssignedScreensHaveZone(client, id, body.pages);
+  }
+  const expected = flagString(args.flags, "if-match");
+  const response = await callPlaylist(client, { method: "PATCH", id, body,
+    headers: { ...reviewNoteFrom(args), ...(expected ? { "if-match": quotedRevision(expected) } : {}) },
+  });
+  const pending = pendingReviewOf(response);
+  if (pending) return pendingReviewResult(response, pending, client.requestId);
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Playlist ${id} updated.` };
 }, true);
 
 export const handlePlaylistReplaceRelease = commandHandler(async (args, runtime, resolved) => {

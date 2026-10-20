@@ -1727,6 +1727,23 @@ selected configuration and API origin without requiring shell parsing. Publishin
 silently refreshes the expected revision. Unfinished recovery stops after the
 24-hour server idempotency window; inspect and reconcile before making more writes.
 
+To rename or change selected fields without exporting the full document:
+
+```sh
+screenrig playlist rename pl_EXISTING --name "Cello recordings — 36 tracks" --expect-rev 7
+screenrig playlist patch pl_EXISTING changes.json --expect-rev 7
+screenrig playlist patch pl_EXISTING --clear-audio --expect-rev 7
+```
+
+The partial JSON file accepts `name`, `pages` and `audio`. Omitted fields stay
+unchanged; supplied pages and audio replace their complete values, and `audio: null`
+removes the soundtrack. Arrays are not merged. Pages that cue audio must be changed
+in the same patch before their soundtrack can be removed. Name-only changes preserve
+existing content without revalidating its authoring format. `playlist patch --name`
+is the same rename operation. Revision guards, saved retry keys and review policy
+apply. `playlist list --human` shows ID, revision and update time beside each name;
+use IDs when selecting a playlist.
+
 To edit an existing playlist:
 
 ```sh

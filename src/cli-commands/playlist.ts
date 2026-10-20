@@ -1,7 +1,7 @@
 import { addValueAlias } from "./aliases.js";
 import { NOTE_HELP, nonnegativeInteger, positiveInteger, reviewNoteOption, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handlePlaylistReplaceRelease, handlePlaylistInit, handlePlaylistValidate, handlePlaylistPreview, handlePlaylistTemplates, handlePlaylistCreate, handlePlaylistUpdate, handlePlaylistExport, handlePlaylistImport, handlePlaylistShow, handlePlaylistList, handlePlaylistDelete } from "../commands.js";
+import { handlePlaylistReplaceRelease, handlePlaylistInit, handlePlaylistValidate, handlePlaylistPreview, handlePlaylistTemplates, handlePlaylistCreate, handlePlaylistUpdate, handlePlaylistPatch, handlePlaylistExport, handlePlaylistImport, handlePlaylistShow, handlePlaylistList, handlePlaylistDelete } from "../commands.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes.js";
 import { LOOK_AT_THE_CONTACT_SHEET } from "../playlist-preview.js";
@@ -57,6 +57,25 @@ export function registerPlaylistCommands(root: Command, bind: CommandActionBinde
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handlePlaylistUpdate));
+
+  const patch = playlist.command("patch").description("Change only supplied playlist fields; preserve everything omitted")
+    .argument("<id>", "Playlist identifier")
+    .argument("[file]", "Partial JSON object containing name, pages or audio; - for stdin")
+    .option("--name <NAME>", "Set the playlist name without resubmitting its content")
+    .option("--clear-audio", "Remove the soundtrack; pages must not retain audio cues")
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
+    .action(bind(handlePlaylistPatch));
+  addCommandNotes(patch, "Supply a partial JSON file, --name, or --clear-audio. Omitted fields stay unchanged; supplied pages and audio replace the complete value, and audio null clears it. Arrays are not merged. Name-only changes do not revalidate existing content. Page/audio changes are checked together by the server. Review policy and Propose access work as for playlist update; pending_review waits for a person's approval. Use --expect-rev to refuse intervening edits. An interrupted retry uses the same saved write key.");
+  addCommandExamples(patch, 'screenrig playlist patch pl_PLAYLIST --name "Cello recordings — 36 tracks" --expect-rev 7',
+    'screenrig playlist patch pl_PLAYLIST changes.json --expect-rev 7');
+
+  playlist.command("rename").description("Change a playlist's name without resubmitting its content")
+    .argument("<id>", "Playlist identifier")
+    .requiredOption("--name <NAME>", "New playlist name")
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
+    .action(bind(handlePlaylistPatch));
 
   const replaceRelease = playlist.command("replace-release").description("Preview or apply one application release replacement and its shared-screen impact")
     .argument("<id>", "Playlist identifier")

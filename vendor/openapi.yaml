@@ -3239,6 +3239,43 @@ paths:
                 $ref: '#/components/schemas/PlaylistV2'
         default:
           $ref: '#/components/responses/Problem'
+    patch:
+      x-screenrig-access: review
+      operationId: patchPlaylist
+      description: >-
+        Change only supplied top-level fields: name, pages or audio. Omitted fields are
+        preserved from the same transaction snapshot. Supplied pages and audio replace
+        the complete value; audio null removes the soundtrack. Nested array elements
+        are not merged. A name-only edit of an approved playlist does not revalidate
+        or re-resolve its unchanged content, including older stored page formats.
+        Supplied content and audio/page cue relationships are validated. If-Match
+        optionally guards the revision; identical patches are no-ops and idempotent
+        retries replay the original answer. Propose access and review policy behave
+        as for PUT. PUT remains a complete document replacement.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/ReviewNote'
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/IfMatch'
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaylistPatch'
+      responses:
+        '202':
+          $ref: '#/components/responses/PendingReview'
+        '200':
+          description: Updated playlist; ETag carries its revision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistV2'
+        default:
+          $ref: '#/components/responses/Problem'
     delete:
       x-screenrig-access: write
       operationId: deletePlaylistV2
@@ -21581,6 +21618,21 @@ components:
         name: { type: string, minLength: 1, maxLength: 120 }
         pages: { type: array, minItems: 1, maxItems: 100, description: "The pages of one playlist may resolve to at most 1024 media references in total. A by:ids selector counts its length; a by:all, by:tag or by:folder definition reserves 32 references independently of catalog size. The actual loop snapshot is bounded at 1024 media references in total. Above either budget is 422 invalid at path pages.", items: { $ref: "#/components/schemas/PlaylistPageWriteV2" } }
         audio: { $ref: "#/components/schemas/PlaylistAudioWrite" }
+    PlaylistPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: >-
+        Omitted fields are preserved. Supplied name, pages and audio replace those
+        top-level values; audio null removes it. Identity, revision, comments and
+        timestamps cannot be set here. Comments have their own endpoints.
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        pages: { type: array, minItems: 1, maxItems: 100, items: { $ref: "#/components/schemas/PlaylistPageWriteV2" } }
+        audio:
+          anyOf:
+          - { $ref: "#/components/schemas/PlaylistAudioWrite" }
+          - { type: "null" }
     PlaylistPage:
       type: object
       additionalProperties: false

@@ -11,7 +11,7 @@ import type { TransportResponse } from "./transport/types.js";
 export async function callPlaylist(
   client: ApiClient,
   options: {
-    method: "GET" | "PUT" | "DELETE";
+    method: "GET" | "PUT" | "PATCH" | "DELETE";
     id: string;
     body?: unknown;
     headers?: Record<string, string>;
