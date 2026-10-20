@@ -6,6 +6,11 @@ import type { Readable, Writable } from "node:stream";
 import { usageError } from "./problems.js";
 import { redactText } from "./redact.js";
 
+const PREVIEW_ORIGIN = "https://screenrig-preview.invalid";
+const PREVIEW_CSP = "default-src 'self' blob: data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'none'";
+
+export interface PreviewAsset { bytes: Buffer; type: string }
+
 // Browser errors can contain resource URLs. Omit credentials, queries and fragments.
 function diagnostic(value: string): string {
   return redactText(value.replace(/\b(?:https?|file):\/\/[^\s"'<>]+/g, (raw) => {
@@ -25,10 +30,7 @@ export async function withPreviewBrowser<T>(env: NodeJS.Dict<string>, work: (bro
   const profile = await mkdtemp(path.join(env.TMPDIR ?? tmpdir(), "screenrig-preview-"));
   // Chromium cannot start its own sandbox as root. Other users keep it enabled.
   const rootFlags = process.getuid?.() === 0 ? ["--no-sandbox"] : [];
-  // The credential-free preview loads its own loopback server. Chromium's local
-  // network permission prompt cannot be answered headlessly; relax only that
-  // check in this disposable browser, retaining the renderer's CSP and CORS.
-  const child = spawn(binary, ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-features=LocalNetworkAccessChecks", "--disable-extensions", "--disable-dev-shm-usage", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", ...rootFlags, "--remote-debugging-pipe", `--user-data-dir=${profile}`, "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "about:blank"], { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
+  const child = spawn(binary, ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-extensions", "--disable-dev-shm-usage", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", ...rootFlags, "--remote-debugging-pipe", `--user-data-dir=${profile}`, "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "about:blank"], { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
   const closed = new Promise<void>((resolve) => { child.once("close", () => resolve()); });
   const pending = new Map<number, { resolve(value: any): void; reject(error: Error): void }>();
   const listeners = new Set<(message: any) => void>();
@@ -73,18 +75,37 @@ export async function withPreviewBrowser<T>(env: NodeJS.Dict<string>, work: (bro
     input.write(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }) + "\0");
   });
   const browser: PreviewBrowser = {
-    async render(url, width, height) {
+    async render(html, width, height, assets = new Map()) {
       const { targetId } = await call("Target.createTarget", { url: "about:blank" });
       let sessionId: string | undefined;
+      const document: PreviewAsset = { bytes: Buffer.from(html), type: "text/html; charset=utf-8" };
       const loaded = new Set<string>();
       const errors: string[] = [];
       const requests = new Map<string, string>();
       let loadWaiter: (() => void) | undefined;
+      let loadTimer: ReturnType<typeof setTimeout> | undefined;
+      let rejectDelivery: (error: unknown) => void;
+      const deliveryFailure = new Promise<never>((_, reject) => { rejectDelivery = reject; });
+      void deliveryFailure.catch(() => undefined);
+      const pageCall = (method: string, params: object = {}): Promise<any> => Promise.race([call(method, params, sessionId), deliveryFailure]);
       const remember = (message: string): void => { errors.push(diagnostic(message)); if (errors.length > 8) errors.shift(); };
       const observe = (message: any): void => {
         if (message.method === "Browser.stopped") { loadWaiter?.(); return; }
         if (message.sessionId !== sessionId) return;
         const p = message.params;
+        if (message.method === "Fetch.requestPaused") {
+          // Fulfill every request through the private pipe. The reserved origin
+          // needs neither DNS nor a socket, and external resources never escape.
+          const url = new URL(p.request.url);
+          const asset = url.origin === PREVIEW_ORIGIN && p.request.method === "GET"
+            ? (url.pathname === "/" ? document : assets.get(url.pathname)) : undefined;
+          const responseHeaders = [{ name: "Content-Type", value: asset?.type ?? "text/plain" }];
+          if (asset === document) responseHeaders.push({ name: "Content-Security-Policy", value: PREVIEW_CSP }, { name: "Cache-Control", value: "no-store" });
+          void call("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: asset ? 200 : 404, responseHeaders, body: (asset?.bytes ?? Buffer.alloc(0)).toString("base64") }, sessionId).catch(error => {
+            remember(`Preview resource delivery failed: ${error instanceof Error ? error.message : String(error)}`);
+            rejectDelivery(error);
+          });
+        }
         if (message.method === "Page.lifecycleEvent" && p.name === "load") { loaded.add(`${p.frameId}:${p.loaderId}`); loadWaiter?.(); }
         if (message.method === "Runtime.exceptionThrown") remember(p.exceptionDetails.exception?.description ?? p.exceptionDetails.text);
         if (message.method === "Runtime.consoleAPICalled" && ["error", "warning"].includes(p.type)) remember(`Console ${p.type}: ${p.args.map((arg: any) => arg.description ?? (typeof arg.value === "string" ? arg.value : arg.type)).join(" ")}`);
@@ -97,34 +118,36 @@ export async function withPreviewBrowser<T>(env: NodeJS.Dict<string>, work: (bro
       listeners.add(observe);
       try {
         ({ sessionId } = await call("Target.attachToTarget", { targetId, flatten: true }));
-        await call("Page.enable", {}, sessionId);
-        await call("Page.setLifecycleEventsEnabled", { enabled: true }, sessionId);
-        await call("Runtime.enable", {}, sessionId);
-        await call("Log.enable", {}, sessionId);
-        await call("Network.enable", {}, sessionId);
-        await call("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g: 0, b: 0, a: 0 } }, sessionId);
-        await call("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
-        await call("Page.bringToFront", {}, sessionId);
-        const navigation = await call("Page.navigate", { url }, sessionId);
+        await pageCall("Page.enable");
+        await pageCall("Page.setLifecycleEventsEnabled", { enabled: true });
+        await pageCall("Runtime.enable");
+        await pageCall("Log.enable");
+        await pageCall("Network.enable");
+        await pageCall("Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
+        await pageCall("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g: 0, b: 0, a: 0 } });
+        await pageCall("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+        await pageCall("Page.bringToFront");
+        const navigation = await pageCall("Page.navigate", { url: `${PREVIEW_ORIGIN}/` });
         if (navigation.errorText) throw usageError(`Local preview navigation failed: ${navigation.errorText}`);
         // Page.navigate can answer before the new document and its scripts load.
         // Match its loader so an about:blank load cannot satisfy this wait.
-        if (navigation.loaderId) await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(() => { loadWaiter = undefined; reject(usageError("Local preview timed out loading the card page.")); }, 30_000);
+        if (navigation.loaderId) await Promise.race([new Promise<void>((resolve, reject) => {
+          loadTimer = setTimeout(() => { loadWaiter = undefined; reject(usageError("Local preview timed out loading the card page.")); }, 30_000);
           loadWaiter = () => {
             if (!stopped && !loaded.has(`${navigation.frameId}:${navigation.loaderId}`)) return;
-            clearTimeout(timer); loadWaiter = undefined;
+            clearTimeout(loadTimer); loadWaiter = undefined;
             if (stopped) reject(failure()); else resolve();
           };
           loadWaiter();
-        });
-        const result = await call("Runtime.evaluate", { expression: "new Promise((resolve,reject)=>{const until=Date.now()+20000;function wait(){if(window.previewError)reject(new Error(window.previewError));else if(window.previewReady)resolve(window.previewResult);else if(Date.now()>until)reject(new Error('Card did not render'));else setTimeout(wait,20)}wait()})", awaitPromise: true, returnByValue: true }, sessionId);
+        }), deliveryFailure]);
+        const result = await pageCall("Runtime.evaluate", { expression: "new Promise((resolve,reject)=>{const until=Date.now()+20000;function wait(){if(window.previewError)reject(new Error(window.previewError));else if(window.previewReady)resolve(window.previewResult);else if(Date.now()>until)reject(new Error('Card did not render'));else setTimeout(wait,20)}wait()})", awaitPromise: true, returnByValue: true });
         if (result.exceptionDetails) throw usageError(`Card preview failed: ${result.exceptionDetails.exception?.description ?? result.exceptionDetails.text}`);
-        const image = await call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }, sessionId);
+        const image = await pageCall("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
         return { png: Buffer.from(image.data, "base64"), result: result.result.value };
       } catch (error) {
         throw usageError(diagnostic(error instanceof Error ? error.message : String(error)) + (errors.length ? `\nBrowser diagnostics:\n${errors.join("\n")}` : ""));
       } finally {
+        clearTimeout(loadTimer); loadWaiter = undefined;
         listeners.delete(observe);
         await call("Target.closeTarget", { targetId }, undefined, 1000).catch(() => undefined);
       }
@@ -140,5 +163,5 @@ export async function withPreviewBrowser<T>(env: NodeJS.Dict<string>, work: (bro
 }
 
 export interface PreviewBrowser {
-  render(url: string, width: number, height: number): Promise<{ png: Buffer; result: any }>;
+  render(html: string, width: number, height: number, assets?: ReadonlyMap<string, PreviewAsset>): Promise<{ png: Buffer; result: any }>;
 }

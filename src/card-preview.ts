@@ -1,11 +1,10 @@
 import { createHash } from "node:crypto";
-import { createServer } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ApiClient } from "./client.js";
 import type { CliRuntime } from "./runtime.js";
 import { apexHost } from "./apex-origin.js";
-import { withPreviewBrowser, type PreviewBrowser } from "./headless-preview.js";
+import { withPreviewBrowser, type PreviewAsset, type PreviewBrowser } from "./headless-preview.js";
 import { CliError, usageError } from "./problems.js";
 
 type Json = Record<string, any>;
@@ -24,7 +23,7 @@ export async function withCardPreview<T>(options: { apiUrl: string; runtime: Cli
   if (!response.ok) throw usageError(`Cannot load the public card renderer (${response.status}).`);
   const index = await response.json() as Json;
   if (!index.web?.script || !index.web?.sandbox || !index.web?.fonts) throw usageError("The public cards index has no web renderer.");
-  const assets = new Map<string, { bytes: Buffer; type: string }>();
+  const assets = new Map<string, PreviewAsset>();
   const cache = path.join(options.runtime.homedir(), ".cache", "screenrig", "preview");
   await mkdir(cache, { recursive: true });
   for (const link of [index.web.script, index.web.sandbox, index.web.fonts, ...(index.web.font_files ?? [])]) {
@@ -41,18 +40,7 @@ export async function withCardPreview<T>(options: { apiUrl: string; runtime: Cli
     }
     assets.set(new URL(link.src, origin).pathname, { bytes, type: link.src.endsWith(".js") ? "text/javascript" : link.src.endsWith(".css") ? "text/css" : "font/ttf" });
   }
-  let html = "";
-  const server = createServer((request, reply) => {
-    const asset = assets.get(new URL(request.url ?? "/", "http://localhost").pathname);
-    if (asset) { reply.writeHead(200, { "content-type": asset.type }); reply.end(asset.bytes); }
-    else if (request.url === "/") { reply.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": "default-src 'self' blob: data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'none'" }); reply.end(html); }
-    else { reply.writeHead(404); reply.end(); }
-  });
-  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
-  const address = server.address();
-  if (!address || typeof address === "string") throw usageError("Cannot listen for the local preview browser.");
-  try {
-    return await withPreviewBrowser(options.runtime.env, async (browser: PreviewBrowser) => work({
+  return await withPreviewBrowser(options.runtime.env, async (browser: PreviewBrowser) => work({
       async render(input) {
         if (![input.width, input.height].every((size) => Number.isSafeInteger(size) && size > 0 && size <= 8192)) throw usageError("Preview dimensions must be integers from 1 to 8192.");
         if (input.now && !Number.isFinite(Date.parse(input.now))) throw usageError("--now must be an ISO timestamp.");
@@ -78,7 +66,7 @@ export async function withCardPreview<T>(options: { apiUrl: string; runtime: Cli
         }
         const resolved = { ...input, params: await resolveMedia(input.params), data: await resolveMedia(input.data) };
         const payload = JSON.stringify(resolved).replace(/</g, "\\u003c");
-        html = `<!doctype html><html><head><link rel="stylesheet" href="${index.web.fonts.src}"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}#card{position:absolute;inset:0}</style><script src="${index.web.script.src}"></script></head><body><div id="card"></div><script>
+        const html = `<!doctype html><html><head><link rel="stylesheet" href="${index.web.fonts.src}"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}#card{position:absolute;inset:0}</style><script src="${index.web.script.src}"></script></head><body><div id="card"></div><script>
           const p=${payload};
           window.onerror=(message)=>window.previewError=String(message);
           window.onunhandledrejection=(event)=>window.previewError=String(event.reason?.message||event.reason);
@@ -104,7 +92,7 @@ export async function withCardPreview<T>(options: { apiUrl: string; runtime: Cli
             const handle=api.mount(document.getElementById('card'),{cardId:p.card,params,dataKey:p.data?'preview':'',dataSource:p.data?{fetch:(key,done)=>done(p.data)}:null,feed:p.feed||null,mediaResolver:{resolve:(src,done)=>done(typeof src==='string'&&/^media:(?:(?:stage|qa|development)_)?med_[A-Za-z0-9_-]+$/.test(src)?'/preview-media/'+src.slice(6):'')},active:true,fadeMs:0,frozenNowMs:p.now?Date.parse(p.now):Date.now(),timeZone:p.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone,onFailed:(code,cause)=>window.previewError=cause?code+': '+cause:code,onReady:()=>requestAnimationFrame(async()=>{await document.fonts.ready;await Promise.all(Array.from(document.images).filter(img=>img.getAttribute('src')).map(img=>img.decode().catch(()=>{})));requestAnimationFrame(()=>{window.previewResult={card:p.card,version,geometry,feed:manifest.feed,unrendered:[]};window.previewReady=true;});})});
           })().catch(e=>window.previewError=e.message);
         </script></body></html>`;
-        const answer = await browser.render(`http://127.0.0.1:${address.port}/`, input.width, input.height);
+        const answer = await browser.render(html, input.width, input.height, assets);
         // A feed is host-supplied; an absent feed can draw a designed waiting state.
         if (answer.result.feed && !input.feed && !(input.card === "events" && input.data?.events)) unrendered.push(`Host feed ${answer.result.feed} was not supplied`);
         answer.result.unrendered = unrendered;
@@ -129,7 +117,6 @@ export async function withCardPreview<T>(options: { apiUrl: string; runtime: Cli
         return { card, params, major, data };
       },
     }));
-  } finally { await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); }); }
 }
 
 export interface LocalCardPreview {
