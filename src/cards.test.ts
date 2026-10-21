@@ -16,7 +16,7 @@ import { editablePlaylist } from "./playlist-authoring.js";
 import { validatePlaylistWriteSemantics } from "./generated/playlist-write-semantics.js";
 
 const details: CardDetails = {
-  id: "menu", major: 1, version: "1.0.0", tier: "core", layouts: ["full", "free", "center", "wide", "corner", "chip", "strip"], feed: "",
+  id: "menu", major: 1, version: "1.0.0", tier: "core", layouts: ["full", "free", "center", "wide", "header", "footer", "corner", "chip", "strip"], feed: "",
   params_schema: { type: "object", additionalProperties: false, required: ["sections"],
     $defs: { rows: { type: "array", minItems: 1, maxItems: 3, items: { type: "object", additionalProperties: false, required: ["title"], properties: { title: { type: "string", maxLength: 30 } } } } },
     properties: { theme: { type: "string", enum: ["neomustard"], default: "neomustard" }, title: { type: "string", maxLength: 40, default: "Menu" }, sections: { $ref: "#/$defs/rows", dynamic: true } } },
@@ -239,7 +239,28 @@ test("playlist writes refuse a layout the card's tier does not take, and local s
   assert.deepEqual(issues({ layout: "center", anchor: "top" }), ["/pages/0/primitives/0/anchor"]);
   assert.deepEqual(issues({ layout: "wide" }), []);
   assert.deepEqual(issues({ layout: "wide", anchor: "top" }), ["/pages/0/primitives/0/anchor"]);
+  assert.deepEqual(issues({ layout: "header" }), []);
+  assert.deepEqual(issues({ layout: "footer" }), []);
+  assert.deepEqual(issues({ layout: "header", anchor: "top" }), ["/pages/0/primitives/0/anchor"]);
+  assert.deepEqual(issues({ layout: "footer", anchor: "bottom" }), ["/pages/0/primitives/0/anchor"]);
   assert.deepEqual(issues({ layout: "free" }), ["/pages/0/primitives/0/rect", "/pages/0/primitives/0/layer"]);
+});
+
+test("a page holds one header and one footer, and a card takes them only when its layouts list them", async () => {
+  const card = (id: string, layout: string, anchor?: string) => ({ id, primitive: "card", card: "menu", layout, ...(anchor ? { anchor } : {}) });
+  const conflicts = (...primitives: object[]) => validatePlaylistWriteSemantics({ pages: [{ id: "p", primitives }] })
+    .filter(issue => issue.message.includes("a page holds one header card") || issue.message.includes("a page holds one footer card")).map(issue => issue.path);
+  assert.deepEqual(conflicts(card("a", "header"), card("b", "footer"), card("c", "wide"), card("d", "chip", "top-left"), card("e", "corner", "bottom-right")), []);
+  assert.deepEqual(conflicts(card("a", "header"), card("b", "header")), ["/pages/0/primitives/1/layout"]);
+  assert.deepEqual(conflicts(card("a", "footer"), card("b", "footer")), ["/pages/0/primitives/1/layout"]);
+  assert.deepEqual(conflicts(card("a", "header"), card("b", "footer"), card("c", "footer"), card("d", "header")), ["/pages/0/primitives/2/layout", "/pages/0/primitives/3/layout"]);
+  const transport = new FakeTransport().on("GET", "/api/card-types/menu", () => ok({ ...details, layouts: ["full", "free", "center", "wide", "corner", "chip", "strip"] }));
+  const doc = playlist({ sections: [{ title: "Lunch" }] });
+  for (const layout of ["header", "footer"]) {
+    Object.assign(doc.pages[0]!.primitives[0]!, { layout });
+    await assert.rejects(() => validatePlaylistCards(new ApiClient({ transport }), doc), new RegExp(`takes full, free, center, wide, corner, chip, strip, not ${layout}`));
+    await validatePlaylistCards(new ApiClient({ transport: new FakeTransport().on("GET", "/api/card-types/menu", () => ok(details)) }), doc);
+  }
 });
 
 test("a page holds one full, center or wide card, and a card takes wide only when its layouts list it", async () => {

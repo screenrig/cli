@@ -34,10 +34,10 @@ export const CONTACT_SHEET_LABEL_HEIGHT = 28;
 
 /**
  * Fixed paint layer of each non-free card layout: full below center and wide
- * (which share a layer) below strip below corner below chip, as the server
- * derives it. A free card carries its own layer.
+ * (which share a layer) below strip, header and footer (which share one) below
+ * corner below chip, as the server derives it. A free card carries its own layer.
  */
-export const CARD_LAYOUT_LAYERS: Readonly<Record<string, number>> = { full: 10, center: 20, wide: 20, strip: 30, corner: 40, chip: 50 };
+export const CARD_LAYOUT_LAYERS: Readonly<Record<string, number>> = { full: 10, center: 20, wide: 20, strip: 30, header: 30, footer: 30, corner: 40, chip: 50 };
 
 const MEDIA_EXTENSIONS = [".png", ".webp", ".jpg", ".jpeg", ".gif", ".mp4", ".webm"];
 const VIDEO_TYPES = new Set([".mp4", ".webm"]);
@@ -308,9 +308,10 @@ async function preparePages(
         const placement = await options.renderer.placement(primitive);
         const layout = typeof primitive.layout === "string" ? primitive.layout : "free";
         const strips = [...new Set(source.map((raw) => recordOf(raw)).filter((raw) => raw.primitive === "card" && raw.layout === "strip").map((raw) => typeof raw.anchor === "string" ? raw.anchor : "bottom"))];
+        const bars = [...new Set(source.map((raw) => recordOf(raw)).filter((raw) => raw.primitive === "card" && (raw.layout === "header" || raw.layout === "footer")).map((raw) => String(raw.layout)))];
         const image = await options.renderer.render({ ...placement, width: canvas.width, height: canvas.height, layout,
           anchor: typeof primitive.anchor === "string" ? primitive.anchor : undefined,
-          placement: { rect, strips }, now: options.now, timezone: options.timezone });
+          placement: { rect, strips, bars }, now: options.now, timezone: options.timezone });
         media = { image: await loadImage(image.png), label: undefined };
         // The transparent raster includes its derived placement and strip rotation.
         rect = { x: 0, y: 0, width: canvas.width, height: canvas.height };

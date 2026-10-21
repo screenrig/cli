@@ -27,7 +27,7 @@ function validCivil(value: string): boolean {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day && date.getUTCHours() === hour && date.getUTCMinutes() === minute;
 }
 
-const LAYOUTS = ["full", "free", "center", "wide", "corner", "chip", "strip"];
+const LAYOUTS = ["full", "free", "center", "wide", "header", "footer", "corner", "chip", "strip"];
 const CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"];
 const EDGES = ["top", "bottom", "left", "right"];
 
@@ -73,6 +73,7 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
     let controllers = 0, web = 0, streams = 0;
     let mainCard: number | undefined;
     const corners = new Map<unknown, number>();
+    const bars = new Set<unknown>();
     for (const [primitiveIndex, primitive] of primitives.entries()) {
       const itemPath = `${path}/primitives/${primitiveIndex}`;
       if (ids.has(primitive.id)) fail(`${itemPath}/id`, "must be unique within the page");
@@ -101,7 +102,8 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
       }
       if (primitive.primitive === "application" && typeof primitive.release_id === "string" && !primitive.release_id) fail(`${itemPath}/release_id`, "is required");
       if (primitive.primitive === "card") {
-        // Placement shape. The card's tier, the strip edges and the derived rect and layer stay server checks.
+        // Placement shape. The card's tier, the strip edges (a header takes the top edge's normal strip slot and a footer the
+        // bottom edge's; a strip's presence is server knowledge) and the derived rect and layer stay server checks.
         const layout = primitive.layout;
         const anchors = layout === "corner" || layout === "chip" ? CORNERS : layout === "strip" ? EDGES : [];
         if (typeof layout !== "string" || !LAYOUTS.includes(layout)) fail(`${itemPath}/layout`, `is required and must be one of ${LAYOUTS.join(", ")}`);
@@ -114,6 +116,10 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
         if (layout === "full" || layout === "center" || layout === "wide") {
           if (mainCard !== undefined) fail(`${itemPath}/layout`, "a page holds one full, center or wide card");
           mainCard = primitiveIndex;
+        }
+        if (layout === "header" || layout === "footer") {
+          if (bars.has(layout)) fail(`${itemPath}/layout`, `a page holds one ${layout} card`);
+          bars.add(layout);
         }
         if (layout === "corner" || layout === "chip") {
           if (corners.has(primitive.anchor)) fail(`${itemPath}/anchor`, "a page holds one corner or chip card per corner");

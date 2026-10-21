@@ -12,7 +12,11 @@ export interface CardPreviewInput {
   card: string; major?: number; params?: Json; data?: Json; feed?: Json;
   layout?: string; anchor?: string; width: number; height: number;
   now?: string; timezone?: string;
-  placement?: { rect?: { x: number; y: number; width: number; height: number }; strips: string[] };
+  /**
+   * What the page around the card holds: its free rect, the edges that hold a strip, and the bars (`header` along
+   * the top edge, `footer` along the bottom edge). A corner or chip moves in past them.
+   */
+  placement?: { rect?: { x: number; y: number; width: number; height: number }; strips: string[]; bars?: string[] };
 }
 
 /** Public renderer bytes are verified before a local browser ever sees project data. */
@@ -83,9 +87,15 @@ export async function withCardPreview<T>(options: { apiUrl: string; runtime: Cli
             if(p.placement){
               if(p.layout==='free'&&p.placement.rect){const r=p.placement.rect;geometry={x:r.x,y:r.y,w:r.width,h:r.height,rotation:0};}
               if(p.layout==='corner'||p.layout==='chip'){
+                // A strip is 120 high and a header or footer 80, in design units; the larger wins where both hold an edge.
                 const thickness=api.place('strip','bottom',p.width,p.height).h;
+                const bar=thickness*80/120;
                 const anchor=p.anchor||'top-right';
-                for(const edge of p.placement.strips){if(anchor.indexOf(edge)>=0){if(edge==='top')geometry.y+=thickness;else if(edge==='bottom')geometry.y-=thickness;else if(edge==='left')geometry.x+=thickness;else if(edge==='right')geometry.x-=thickness;}}
+                const strips=p.placement.strips||[],bars=p.placement.bars||[];
+                const held=(edge)=>anchor.indexOf(edge)>=0&&strips.indexOf(edge)>=0;
+                const inset=(edge,barName)=>Math.max(held(edge)?thickness:0,anchor.indexOf(edge)>=0&&bars.indexOf(barName)>=0?bar:0);
+                if(held('left'))geometry.x+=thickness;else if(held('right'))geometry.x-=thickness;
+                if(anchor.indexOf('top')>=0)geometry.y+=inset('top','header');else if(anchor.indexOf('bottom')>=0)geometry.y-=inset('bottom','footer');
               }
             }
             Object.assign(document.getElementById('card').style,{inset:'auto',left:geometry.x+'px',top:geometry.y+'px',width:geometry.w+'px',height:geometry.h+'px',transform:'rotate('+geometry.rotation+'deg)'});

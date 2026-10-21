@@ -111,6 +111,18 @@ test("a wide card validates without an anchor and shares the page's one full, ce
     assert.ok(issues.some((issue) => issue.path === "/pages/0/primitives/1/layout" && issue.message.includes("one full, center or wide card")), other);
   }
 });
+test("a header or footer card validates without an anchor, one per edge, beside a wide card and corner cards", () => {
+  const bar = (id: string, layout: string, extra: Record<string, unknown> = {}) => ({ id, primitive: "card", card: "clock", major: 1, params: {}, layout, content_fit: "fill", ...extra });
+  const withCards = (...cards: Record<string, unknown>[]) => { const p = playlist(); p.pages[0]!.primitives = cards as any; return p; };
+  assert.deepEqual(playlistIssues(withCards(bar("h", "header"))), []);
+  assert.deepEqual(playlistIssues(withCards(bar("f", "footer"))), []);
+  assert.deepEqual(playlistIssues(withCards(bar("h", "header"), bar("f", "footer"), bar("w", "wide"), bar("c", "chip", { anchor: "top-left" }), bar("k", "corner", { anchor: "bottom-right" }))), []);
+  for (const layout of ["header", "footer"]) {
+    assert.ok(playlistIssues(withCards(bar("b", layout, { anchor: "top" }))).some((issue) => issue.path === "/pages/0/primitives/0/anchor"), `${layout} takes no anchor`);
+    const second = playlistIssues(withCards(bar("a", layout), bar("b", layout)));
+    assert.ok(second.some((issue) => issue.path === "/pages/0/primitives/1/layout" && issue.message.includes(`one ${layout} card`)), `${layout} twice`);
+  }
+});
 
 function soundtrackDocument(page: Record<string, unknown>, audio: Record<string, unknown> = {}) {
   const pageDefaults = { id: "page", canvas: { width: 1920, height: 1080, background: "#000000FF", viewport_fit: "contain" }, transition: { type: "crossfade", duration_ms: 200 }, primitives: [{ id: "media", primitive: "image", selector: { by: "id", media_id: "med_IMAGE" }, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "contain" }] };

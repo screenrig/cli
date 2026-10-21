@@ -176,13 +176,16 @@ configuration there. Choose a schema-listed `params.theme`. Cards accept
 
 A card is placed by `layout`, which is required, and `anchor`. `cards list`
 and `cards show` report each card's `tier` and the `layouts` it takes: a `core`
-card takes every layout, a `fullscreen` card takes `full` only.
+card takes the layouts it lists (`header` and `footer` only on a card made for
+them), a `fullscreen` card takes `full` only.
 
 | `layout` | Box (1080p design units) | `anchor` |
 | --- | --- | --- |
 | `full` | the whole canvas | none |
 | `center` | 900 x 420, centred | none |
 | `wide` | the screen inset 80 from the top and bottom and 30 from the sides | none |
+| `header` | the whole top edge by 80 | none |
+| `footer` | the whole bottom edge by 80 | none |
 | `corner` | 270 x 270, flush to the corner | `top-left`, `top-right`, `bottom-left`, `bottom-right` |
 | `chip` | 240 x 70, 30 in from the two edges | the four corners |
 | `strip` | the whole edge by 120 | `top`, `bottom`, `left`, `right` |
@@ -193,10 +196,15 @@ portrait canvas show the same apparent size. The server derives `rect` and
 `layer` for every layout except `free`; omit them. A page holds at most one
 `full`, `center` or `wide` card, one `corner` or `chip` card per corner, and one
 `strip` per edge (a strip with a presence condition may share an edge with a
-normal strip and takes over while it is present). Publishing refuses a wrong
-layout or anchor with `card_layout_invalid` and two cards claiming one place
-with `card_layout_conflict`; playlist writes check the layout against the
-card's `layouts` before uploading.
+normal strip and takes over while it is present). `header` and `footer` are
+full-width bars along the top and bottom edges: they take no anchor, a page
+holds one of each, and a bar takes its edge's normal strip slot (a strip with a
+presence condition may still share the edge). A `corner` or `chip` on an edge
+that holds a bar moves in 80 past it, or 120 past a strip, the larger when both
+hold the edge. Publishing refuses a wrong layout or anchor with
+`card_layout_invalid` and two cards claiming one place with
+`card_layout_conflict`; playlist writes check the layout against the card's
+`layouts` before uploading.
 Images inside card properties use `media:<id>` references to ready project
 images; data writes require approved images, and card image URLs are refused.
 

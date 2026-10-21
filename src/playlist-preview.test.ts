@@ -22,8 +22,8 @@ import {
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
 
-test("card layouts paint in the server's fixed layer order, with wide sharing center's layer", () => {
-  assert.deepEqual(CARD_LAYOUT_LAYERS, { full: 10, center: 20, wide: 20, strip: 30, corner: 40, chip: 50 });
+test("card layouts paint in the server's fixed layer order, with wide sharing center's layer and header and footer the strip's", () => {
+  assert.deepEqual(CARD_LAYOUT_LAYERS, { full: 10, center: 20, wide: 20, strip: 30, header: 30, footer: 30, corner: 40, chip: 50 });
 });
 
 const PNG_HEADER = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
