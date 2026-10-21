@@ -31,11 +31,10 @@ import type { OperationLogger } from "./log/types.js";
  * receiver token. A fleet link answer carries the URL that creates screens,
  * a trigger answer the password a CAP sender authenticates with, and a K/V
  * webhook answer the secret its sender authenticates with.
- * Support history is private customer correspondence.
  */
 function privateBodies(method: string, path: string): boolean {
   path = path.replace(/^\/api\/projects\/[^/]+\//, "/api/");
-  return (method === "POST" && path === "/api/invitations") || /^\/api\/(?:webhooks|support|fleet-links|triggers)(?:\/|$)/.test(path)
+  return (method === "POST" && path === "/api/invitations") || /^\/api\/(?:webhooks|fleet-links|triggers)(?:\/|$)/.test(path)
     || /^\/api\/applications\/[^/]+\/kv-webhooks(?:\/|$)/.test(path);
 }
 

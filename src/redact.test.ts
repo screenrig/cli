@@ -8,16 +8,18 @@ import {
   redactValue,
 } from "./redact.js";
 
-test("redacts credentials and email addresses from errors", () => {
+test("redacts credentials and passes email addresses through", () => {
   const token = "sr_live_identifier_secret";
-  assert.equal(redactText(`Bearer ${token} for owner@example.com`), "Bearer *** for [redacted-email]");
+  assert.equal(redactText(`Bearer ${token} for owner@example.com`), "Bearer *** for owner@example.com");
   assert.deepEqual(
     redactValue({ token, nested: [`email owner@example.com`] }),
     {
       token: "sr_live_***",
-      nested: ["email [redacted-email]"],
+      nested: ["email owner@example.com"],
     },
   );
+  const jwt = "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  assert.equal(redactText(`owner@example.com signed in with ${jwt}`), "owner@example.com signed in with jwt_***");
 });
 
 test("a redacted credential keeps no lookup segment of the live token", () => {
@@ -74,13 +76,54 @@ test("sensitive keys match embedded names, not only exact tokens", () => {
     "upload_url",
     "image_bytes",
     "pixels",
-    "prompt",
+    "private_key",
+    "privateKey",
+    "private_jwk",
+    "device_code",
+    "assertion",
+    "nonce",
   ]) {
     assert.equal(isSensitiveKey(key), true, key);
   }
   assert.equal(isSensitiveKey("capture_id"), false);
   assert.equal(isSensitiveKey("code"), false);
   assert.equal(isSensitiveKey("primitive_id"), false);
+});
+
+test("user content and anonymous identifiers are not sensitive keys", () => {
+  for (const key of ["prompt", "client_id", "email", "private", "private_note", "visibility_private"]) {
+    assert.equal(isSensitiveKey(key), false, key);
+  }
+  const request = {
+    prompt: "A lobby at dusk for owner@example.com",
+    client_id: "screenrig-cli",
+    email: "owner@example.com",
+    token: "sr_live_identifier_secret",
+  };
+  assert.deepEqual(redactValue(request), {
+    prompt: "A lobby at dusk for owner@example.com",
+    client_id: "screenrig-cli",
+    email: "owner@example.com",
+    token: "sr_live_***",
+  });
+  assert.deepEqual(redactEvent({ message: "shot_1", details: request }), {
+    message: "shot_1",
+    details: { prompt: request.prompt, client_id: request.client_id, email: request.email },
+  });
+});
+
+test("URL query values pass through; signatures and embedded passwords do not", () => {
+  assert.equal(
+    redactText("GET https://example.test/fonts.ttf?family=Inter&token_count=3 failed"),
+    "GET https://example.test/fonts.ttf?family=Inter&token_count=3 failed",
+  );
+  assert.equal(
+    redactText("GET https://storage.example.invalid/get?id=7&X-Amz-Signature=abc123&expires=60"),
+    "GET https://storage.example.invalid/get?id=7&X-Amz-Signature=***&expires=60",
+  );
+  assert.equal(redactText("https://storage.example.invalid/get?signature=abc#frag"), "https://storage.example.invalid/get?signature=***#frag");
+  assert.equal(redactText("https://user:hunter2@example.test/renderer.js"), "https://user:***@example.test/renderer.js");
+  assert.equal(redactText("https://user@example.test:8443/a"), "https://user@example.test:8443/a");
 });
 
 test("sensitive values match embedded credentials, not only at the start", () => {
@@ -133,7 +176,15 @@ test("redactEvent omits tokens, pixels, authorization, and object keys", () => {
   assert.deepEqual(redacted.details, { capture_id: "shot_1", code: "cta.pressed" });
 });
 
-test("enrollment client ids and idempotency keys are redacted by key", () => {
-  for (const key of ["client_id", "idempotency_key", "idempotency-key", "beta_key"]) assert.equal(isSensitiveKey(key), true, key);
-  assert.doesNotMatch(JSON.stringify(redactValue({ client_id: `cli_${"Z".repeat(43)}`, idempotency_key: "retry-key-value" })), /ZZZZ|retry-key-value/);
+test("enrollment client credentials are redacted by shape and idempotency keys by key", () => {
+  for (const key of ["idempotency_key", "idempotency-key", "beta_key"]) assert.equal(isSensitiveKey(key), true, key);
+  const client = `cli_${"Z".repeat(43)}`;
+  const exchange = `xchg_${"Y".repeat(43)}`;
+  assert.equal(redactText(`enrolling ${client} and ${exchange}`), "enrolling cli_*** and xchg_***");
+  assert.equal(isSensitiveValue(client), true);
+  assert.equal(isSensitiveValue(exchange), true);
+  assert.equal(isSensitiveValue("cli_version"), false);
+  assert.doesNotMatch(JSON.stringify(redactValue({ client_id: client, idempotency_key: "retry-key-value" })), /ZZZZ|retry-key-value/);
+  // A plain client id is not a credential.
+  assert.deepEqual(redactValue({ client_id: "screenrig-cli" }), { client_id: "screenrig-cli" });
 });

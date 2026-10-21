@@ -75,9 +75,10 @@ fs.createReadStream(null,{fd:3}).on('data', chunk => {
         if (mode === 'diagnostics') {
           event('Runtime.consoleAPICalled',{type:'error',args:[{value:'Renderer failed: sr_live_identifier_supersecret'}]});
           event('Runtime.exceptionThrown',{exceptionDetails:{exception:{description:'TypeError: renderer is unavailable'}}});
-          event('Network.requestWillBeSent',{requestId:'asset',request:{url:'https://user:password@example.test/renderer.js?signature=private#secret'}});
+          event('Runtime.consoleAPICalled',{type:'warning',args:[{value:'Image failed: data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB'}]});
+          event('Network.requestWillBeSent',{requestId:'asset',request:{url:'https://user:hunter2@example.test/renderer.js?v=3&signature=private-sig#frag'}});
           event('Network.loadingFailed',{requestId:'asset',type:'Script',errorText:'net::ERR_FAILED',blockedReason:'csp'});
-          event('Network.responseReceived',{response:{url:'https://example.test/fonts.ttf?token=private',status:404}});
+          event('Network.responseReceived',{response:{url:'https://example.test/fonts.ttf?family=Inter&token=sr_live_identifier_supersecret',status:404}});
           reply({exceptionDetails:{text:'Card did not render'}});
         } else reply({result:{value:{pid:process.pid,profile,args:process.argv.slice(2),navigationUrl,fulfilled}}});
         break;
@@ -185,9 +186,12 @@ test("render failures include console, exception and resource causes without cre
     assert.match(error.message, /Card did not render/);
     assert.match(error.message, /Renderer failed: sr_live_\*\*\*/);
     assert.match(error.message, /TypeError: renderer is unavailable/);
-    assert.match(error.message, /Resource failed: https:\/\/example.test\/renderer.js: net::ERR_FAILED \(csp\)/);
-    assert.match(error.message, /HTTP 404: https:\/\/example.test\/fonts.ttf/);
-    assert.doesNotMatch(error.message, /password|signature|private|#secret|supersecret|identifier/);
+    assert.match(error.message, /Console warning: Image failed: \[inline resource\]/);
+    assert.doesNotMatch(error.message, /iVBORw0KGgo/);
+    // Resource URLs keep their origin, path, query values and fragment; only credentials are masked.
+    assert.match(error.message, /Resource failed: https:\/\/user:\*\*\*@example.test\/renderer.js\?v=3&signature=\*\*\*#frag: net::ERR_FAILED \(csp\)/);
+    assert.match(error.message, /HTTP 404: https:\/\/example.test\/fonts.ttf\?family=Inter&token=sr_live_\*\*\*/);
+    assert.doesNotMatch(error.message, /hunter2|private-sig|supersecret|identifier/);
     return true;
   });
 });

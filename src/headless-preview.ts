@@ -11,14 +11,9 @@ const PREVIEW_CSP = "default-src 'self' blob: data:; script-src 'self' 'unsafe-i
 
 export interface PreviewAsset { bytes: Buffer; type: string }
 
-// Browser errors can contain resource URLs. Omit credentials, queries and fragments.
+// Browser errors can carry inline data: URIs, which are bulk; collapse them. Credentials are redacted.
 function diagnostic(value: string): string {
-  return redactText(value.replace(/\b(?:https?|file):\/\/[^\s"'<>]+/g, (raw) => {
-    try {
-      const url = new URL(raw);
-      return url.protocol === "file:" ? path.basename(url.pathname) : `${url.origin}${url.pathname}`;
-    } catch { return "[resource]"; }
-  }).replace(/data:[^\s"'<>]+/g, "[inline resource]")).slice(0, 1000);
+  return redactText(value.replace(/data:[^\s"'<>]+/g, "[inline resource]")).slice(0, 1000);
 }
 
 /** A local browser, driven over private pipes; no debugging port or installed service. */

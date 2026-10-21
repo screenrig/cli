@@ -314,6 +314,8 @@ test("redaction strips tokens, authorization, signed URLs, and pixels from seria
       upload_url: "https://storage.example.invalid/private?X-Amz-Signature=abc",
       pixels: "data:image/webp;base64,AAAA",
       email: "owner@example.com",
+      prompt: "A lobby at dusk",
+      client_id: "screenrig-cli",
     },
   });
   const line = JSON.stringify(events[0]);
@@ -321,8 +323,35 @@ test("redaction strips tokens, authorization, signed URLs, and pixels from seria
   assert.doesNotMatch(line, /Bearer eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_/);
   assert.doesNotMatch(line, /X-Amz-Signature=abc/);
   assert.doesNotMatch(line, /data:image\/webp;base64,AAAA/);
-  assert.doesNotMatch(line, /owner@example\.com/);
+  // Email addresses, prompts and client ids are not secrets: they reach the log unchanged.
+  assert.match(line, /"email":"owner@example\.com"/);
+  assert.match(line, /"prompt":"A lobby at dusk"/);
+  assert.match(line, /"client_id":"screenrig-cli"/);
   assert.equal(events[0]?.v, 1);
+});
+
+test("support bodies are logged redacted while credential-bearing bodies stay out of the log", async () => {
+  const { logger, events } = createMemoryLogger({ command: ["support", "submit"] });
+  const secret = `srkw_${"K".repeat(43)}`;
+  const transport = new FakeTransport()
+    .on("POST", "/api/support/conversations", () => ({
+      status: 201,
+      headers: { "content-type": "application/json" },
+      body: { conversation: { id: "sc_TEST" }, message: { body: "Reply to owner@example.com", sequence: 1 } },
+    }))
+    .on("POST", "/api/webhooks", () => ({
+      status: 201,
+      headers: { "content-type": "application/json" },
+      body: { id: "wh_TEST", secret: "whsec_" + "W".repeat(43), note: "webhook-answer-marker" },
+    }));
+  const client = new ApiClient({ transport, token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", logger });
+  await client.call({ method: "POST", path: "/api/support/conversations", body: { body: `Please call owner@example.com, key ${secret}` } });
+  await client.call({ method: "POST", path: "/api/webhooks", body: { url: "https://hooks.example.invalid/receiver-marker" } });
+  const serialized = events.map((event) => JSON.stringify(event)).join("\n");
+  assert.match(serialized, /Please call owner@example\.com/);
+  assert.match(serialized, /Reply to owner@example\.com/);
+  assert.doesNotMatch(serialized, /srkw_K/, "a credential inside a support body is still redacted");
+  assert.doesNotMatch(serialized, /receiver-marker|webhook-answer-marker|whsec_W/, "a webhook body never reaches the log");
 });
 
 test("pack emits start and finish without archive bytes", async () => {
