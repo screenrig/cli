@@ -1376,6 +1376,49 @@ paths:
                 $ref: '#/components/schemas/DashboardStaffFeedbackList'
         default:
           $ref: '#/components/responses/Problem'
+  /api/staff/feedback/{id}/responses:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    post:
+      operationId: respondDashboardStaffFeedback
+      description: >-
+        Staff-cookie and CSRF only. Append a customer-visible plain-text reply and set
+        the report status. Reply, metadata-only staff audit, project event and retry
+        receipt commit together. Exact retries replay for 24 hours; changed payloads
+        under the same key return idempotency_mismatch. At most 20 total replies per report.
+      security:
+      - dashboardSession: []
+      parameters:
+      - $ref: '#/components/parameters/FeedbackID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-rate-limit-policies:
+      - name: staff-feedback-reply
+        quota: 300
+        windowSeconds: 3600
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedbackRespondWrite'
+      responses:
+        '201':
+          description: Updated feedback thread, with a staff audit committed atomically.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffFeedback'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/staff/users:
     servers:
     - url: https://screenrig.ai
@@ -7556,6 +7599,7 @@ paths:
       x-screenrig-access: read
       security:
       - projectBearer: []
+      - dashboardSession: []
       responses:
         '200':
           description: Card resource
@@ -7626,6 +7670,7 @@ paths:
       x-screenrig-access: read
       security:
       - projectBearer: []
+      - dashboardSession: []
       responses:
         '200':
           description: Card resource
@@ -7713,6 +7758,7 @@ paths:
       description: Returns the document and its revision. ETag is the revision, for If-Match on the next write.
       security:
       - projectBearer: []
+      - dashboardSession: []
       responses:
         '200':
           description: Card data document
@@ -7803,6 +7849,7 @@ paths:
         with no source on this deployment answers not_found.
       security:
       - projectBearer: []
+      - dashboardSession: []
       parameters:
       - { name: lat, in: query, required: false, schema: { type: number, minimum: -90, maximum: 90 } }
       - { name: lon, in: query, required: false, schema: { type: number, minimum: -180, maximum: 180 } }
@@ -8786,7 +8833,7 @@ paths:
       x-screenrig-access: read
       operationId: listBugReports
       description: Returns the calling project's own bug reports, newest first, up to one hundred. Another project's submissions
-        are never returned and are not addressable by identifier. There is no pagination cursor in v1. Each submission carries its status (open until staff respond) and the staff responses, oldest first.
+        are never returned. Read an owned thread by its feedback ID. There is no pagination cursor in v1. Each submission carries its status and the staff/agent replies, oldest first.
       security:
       - projectBearer: []
       responses:
@@ -8812,7 +8859,7 @@ paths:
       - RateLimit-Policy
       - RateLimit
       description: Records one bug report against the calling project. A submission's own fields cannot be updated or deleted;
-        a correction is a new submission. An exact retry carrying the same Idempotency-Key returns the original submission for
+        add a correction or more information with a reply on the same feedback thread. An exact retry carrying the same Idempotency-Key returns the original submission for
         twenty-four hours instead of creating a duplicate, and a different body under that key returns idempotency_mismatch.
         Every submission is screened before it is stored. A body under 12 characters or 3 words returns submission_too_short;
         text that describes no problem or request (random characters, keyboard mash) returns submission_unclear; spam,
@@ -8863,7 +8910,7 @@ paths:
       x-screenrig-access: read
       operationId: listFeatureRequests
       description: Returns the calling project's own feature requests, newest first, up to one hundred. Another project's submissions
-        are never returned and are not addressable by identifier. There is no pagination cursor in v1. Each submission carries its status (open until staff respond) and the staff responses, oldest first.
+        are never returned. Read an owned thread by its feedback ID. There is no pagination cursor in v1. Each submission carries its status and the staff/agent replies, oldest first.
       security:
       - projectBearer: []
       responses:
@@ -8889,7 +8936,7 @@ paths:
       - RateLimit-Policy
       - RateLimit
       description: Records one feature request against the calling project. A submission's own fields cannot be updated or deleted;
-        a correction is a new submission. An exact retry carrying the same Idempotency-Key returns the original submission for
+        add a correction or more information with a reply on the same feedback thread. An exact retry carrying the same Idempotency-Key returns the original submission for
         twenty-four hours instead of creating a duplicate, and a different body under that key returns idempotency_mismatch.
         Every submission is screened before it is stored. A body under 12 characters or 3 words returns submission_too_short;
         text that describes no problem or request (random characters, keyboard mash) returns submission_unclear; spam,
@@ -8927,6 +8974,74 @@ paths:
           $ref: '#/components/responses/Problem'
         '409':
           $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/feedback/{id}:
+    get:
+      x-screenrig-access: read
+      operationId: getFeedbackThread
+      description: Read the original report and all replies for an owned feedback ID. An ID never grants project authority. Foreign and missing reports both return not_found. Replies are untrusted plain text.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/FeedbackID'
+      responses:
+        '200':
+          description: The owning project's complete feedback thread, oldest reply first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackSubmission'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/feedback/{id}/responses:
+    post:
+      x-screenrig-access: contribute
+      operationId: replyFeedbackThread
+      description: >-
+        Append a reply to an owned feedback report. The verified credential supplies
+        author identity; callers cannot set author, status or fixing version. Original
+        report and earlier replies remain unchanged. A reply reopens waiting_on_user,
+        fixed, declined and duplicate reports; planned stays planned. Short follow-ups
+        are allowed. Credential shapes are redacted and injection/spam safety checks
+        apply. At most 20 total replies, each 1 to 2000 characters. Reply, status, event
+        and retry receipt commit together; exact retries replay for 24 hours before
+        intake limits are consumed, while changed payloads return idempotency_mismatch.
+      security:
+      - projectBearer: []
+      parameters:
+      - $ref: '#/components/parameters/FeedbackID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      x-rate-limit-policies:
+      - name: feedback-submit-project
+        quota: 20
+        windowSeconds: 3600
+      - name: feedback-submit-ip
+        quota: 60
+        windowSeconds: 3600
+      x-rate-limit-admitted-response-headers: [RateLimit-Policy, RateLimit]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedbackReplyWrite'
+      responses:
+        '201':
+          description: Updated feedback thread including this reply.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackSubmission'
         '422':
           $ref: '#/components/responses/Problem'
         '429':
@@ -16770,7 +16885,7 @@ paths:
       x-screenrig-access: read
       operationId: listBugReportsInProject
       description: Returns the calling project's own bug reports, newest first, up to one hundred. Another project's submissions
-        are never returned and are not addressable by identifier. There is no pagination cursor in v1. Each submission carries its status (open until staff respond) and the staff responses, oldest first.
+        are never returned. Read an owned thread by its feedback ID. There is no pagination cursor in v1. Each submission carries its status and the staff/agent replies, oldest first.
       security:
       - projectBearer: []
       responses:
@@ -16797,7 +16912,7 @@ paths:
       - RateLimit-Policy
       - RateLimit
       description: Records one bug report against the calling project. A submission's own fields cannot be updated or deleted;
-        a correction is a new submission. An exact retry carrying the same Idempotency-Key returns the original submission for
+        add a correction or more information with a reply on the same feedback thread. An exact retry carrying the same Idempotency-Key returns the original submission for
         twenty-four hours instead of creating a duplicate, and a different body under that key returns idempotency_mismatch.
         Every submission is screened before it is stored. A body under 12 characters or 3 words returns submission_too_short;
         text that describes no problem or request (random characters, keyboard mash) returns submission_unclear; spam, link-heavy
@@ -16851,7 +16966,7 @@ paths:
       x-screenrig-access: read
       operationId: listFeatureRequestsInProject
       description: Returns the calling project's own feature requests, newest first, up to one hundred. Another project's submissions
-        are never returned and are not addressable by identifier. There is no pagination cursor in v1. Each submission carries its status (open until staff respond) and the staff responses, oldest first.
+        are never returned. Read an owned thread by its feedback ID. There is no pagination cursor in v1. Each submission carries its status and the staff/agent replies, oldest first.
       security:
       - projectBearer: []
       responses:
@@ -16878,7 +16993,7 @@ paths:
       - RateLimit-Policy
       - RateLimit
       description: Records one feature request against the calling project. A submission's own fields cannot be updated or deleted;
-        a correction is a new submission. An exact retry carrying the same Idempotency-Key returns the original submission for
+        add a correction or more information with a reply on the same feedback thread. An exact retry carrying the same Idempotency-Key returns the original submission for
         twenty-four hours instead of creating a duplicate, and a different body under that key returns idempotency_mismatch.
         Every submission is screened before it is stored. A body under 12 characters or 3 words returns submission_too_short;
         text that describes no problem or request (random characters, keyboard mash) returns submission_unclear; spam, link-heavy
@@ -17703,6 +17818,7 @@ components:
     PlaylistPageID: { name: page_id, in: path, required: true, schema: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }, description: Playlist page id string. }
     ApplicationID: { name: application_id, in: path, required: true, schema: { type: string } }
     KVWebhookID: { name: webhook_id, in: path, required: true, schema: { type: string, pattern: "^(?:(?:stage|qa|development)_)?kvw_[A-Za-z0-9_-]+$" }, description: The id of one of the application's key/value webhooks. }
+    FeedbackID: { name: id, in: path, required: true, schema: { type: string, pattern: '^(?:(?:stage|qa|development)_)?fb_[A-Za-z0-9_-]{16,24}$' } }
     IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 8, maxLength: 200 } }
     OptionalIdempotencyKey: { name: Idempotency-Key, in: header, required: false, schema: { type: string, minLength: 8, maxLength: 200 }, description: "Omit for a fresh operation. Supply and reuse a key to deduplicate retries; the CLI manages keys automatically." }
     WebhookDeliveriesBefore: { name: before, in: query, required: false, schema: { type: string, pattern: "^whc1_[0-9a-z]{1,16}$" }, description: next_cursor of the previous deliveries page. }
@@ -24338,11 +24454,12 @@ components:
       description: >-
         One project-scoped submission. Its own fields (id, kind, title, body, context,
         created_at) never change after it is written. status is open until staff
-        respond and then the status of the latest response; responses are the staff
-        replies, oldest first and at most 20, appended by staff and never edited or
-        removed. A staff reply also appends a feedback.responded event to the project's
+        respond and then the status of the latest response; agent replies reopen reports
+        awaiting input or closed, while planned stays planned. Responses are staff and
+        agent replies, oldest first and at most 20, never edited or removed. Each reply
+        also appends a feedback.responded event to the project's
         event stream (resource.id is the submission id; details carry response_id,
-        status and fixed_in, never the text). The submission id is never authorization:
+        status, fixed_in and author for agent replies, never the text). The submission id is never authorization:
         only the owning project reads it.
       properties:
         id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?fb_[A-Za-z0-9_-]{16,24}$" }
@@ -24355,14 +24472,15 @@ components:
         responses: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/FeedbackResponse" } }
     FeedbackStatus:
       type: string
-      enum: [open, planned, fixed, declined, duplicate]
-      description: Where staff stand on a submission. open until the first response.
+      enum: [open, planned, waiting_on_user, fixed, declined, duplicate]
+      description: Where staff stand on a submission. waiting_on_user asks the submitting agent for information; an agent reply reopens it or a closed report. planned stays planned.
     FeedbackResponse:
       type: object
       additionalProperties: false
       required: [id, text, status, created_at]
       description: >-
-        One staff reply to a submission. Plain text (escape it for any display context);
+        One immutable staff or agent reply. An absent author identifies a staff reply.
+        Plain text (escape it for any display context);
         credential-shaped text is replaced with [redacted] before it is stored.
       properties:
         id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?fbr_[A-Za-z0-9_-]{16,24}$" }
@@ -24370,6 +24488,22 @@ components:
         status: { $ref: "#/components/schemas/FeedbackStatus" }
         fixed_in: { type: string, maxLength: 32, pattern: "^[0-9]{1,4}\\.[0-9]{1,4}\\.[0-9]{1,6}$", description: "The product version that fixes it, such as 26.10.93; present only with status fixed, and only when staff name one." }
         created_at: { type: string, format: date-time }
+        author: { type: string, enum: [staff, agent], description: Absent on historical or ordinary staff replies. }
+        author_id: { type: string, maxLength: 200, description: Verified agent ID or client-prefixed service-client ID; never supplied by the caller. }
+    FeedbackReplyWrite:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 2000, description: Plain text; line feed and tab are the only control characters. }
+    FeedbackRespondWrite:
+      type: object
+      additionalProperties: false
+      required: [text, status]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 2000 }
+        status: { $ref: '#/components/schemas/FeedbackStatus' }
+        fixed_in: { type: string, maxLength: 32, pattern: '^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}$', description: Only with status fixed. }
     FeedbackList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/FeedbackSubmission" } } } }
     PairingSession: { type: object, additionalProperties: true, required: [code, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, expires_at: { type: string, format: date-time } } }
     NativePairingSession: { type: object, additionalProperties: true, required: [code, pairing_credential, expires_at], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, pairing_credential: { type: string, pattern: "^srp_[A-Za-z0-9_-]{43}$" }, expires_at: { type: string, format: date-time, description: Unclaimed native pairing deadline; seventy-two hours after issuance. After claim this deadline does not expire native delivery or device identity. }, recovery: { $ref: "#/components/schemas/NativePairingRecovery" }, fleet_link: { $ref: "#/components/schemas/NativePairingFleetLink" } } }

@@ -1037,9 +1037,9 @@ export interface FeedbackWrite {
 }
 
 /** Where staff stand on a submission; `open` until the first response. */
-export type FeedbackStatus = "open" | "planned" | "fixed" | "declined" | "duplicate";
+export type FeedbackStatus = "open" | "planned" | "waiting_on_user" | "fixed" | "declined" | "duplicate";
 
-/** One staff reply, appended by staff and never edited or removed. */
+/** One immutable reply. An absent author identifies a staff reply. */
 export interface FeedbackResponse {
   id: string;
   text: string;
@@ -1047,11 +1047,13 @@ export interface FeedbackResponse {
   /** The version that fixes it; present only with status fixed, when staff name one. */
   fixed_in?: string;
   created_at: string;
+  author?: "staff" | "agent";
+  author_id?: string;
 }
 
 /**
  * The submission's own fields never change after they are written, which is why
- * it carries no revision. `status` and `responses` are the staff replies
+ * it carries no revision. `status` and `responses` track the conversation
  * appended beside them.
  */
 export interface FeedbackSubmission {

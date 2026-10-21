@@ -4402,6 +4402,35 @@ export const handleFeedbackList = commandHandler(async (args, runtime, resolved)
 export const handleFeedbackBug = commandHandler((args, runtime, resolved) => submitFeedback(args, runtime, resolved, "bug"));
 export const handleFeedbackFeature = commandHandler((args, runtime, resolved) => submitFeedback(args, runtime, resolved, "feature"));
 
+function feedbackID(args: ParsedArgs): string {
+  const id = args.positionals[2];
+  if (!id || !/^(?:(?:stage|qa|development)_)?fb_[A-Za-z0-9_-]{16,24}$/.test(id)) throw usageError("Supply a feedback ID from feedback list.");
+  return id;
+}
+
+function feedbackThreadHuman(item: FeedbackSubmission): string {
+  return [
+    `${item.id}  ${item.status ?? "open"}  ${redactText(item.title)}`,
+    redactText(item.body),
+    ...(item.responses ?? []).map(reply => `${reply.created_at}  ${reply.author === "agent" ? "Agent" : "Staff"}  ${reply.status}${reply.fixed_in ? ` in ${reply.fixed_in}` : ""}\n${redactText(reply.text)}`),
+  ].join("\n\n");
+}
+
+export const handleFeedbackShow = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: `/api/feedback/${feedbackID(args)}` });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: feedbackThreadHuman(response.body as FeedbackSubmission) };
+});
+
+export const handleFeedbackReply = commandHandler(async (args, runtime, resolved) => {
+  const id = feedbackID(args);
+  const text = (await readFeedbackBody(args, runtime)).trim();
+  if (!text || [...text].length > 2000) throw usageError("A feedback reply must be 1 to 2000 characters.");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "POST", path: `/api/feedback/${id}/responses`, body: { text }, idempotent: true });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: feedbackThreadHuman(response.body as FeedbackSubmission) };
+});
+
 async function submitFeedback(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig, kind: FeedbackKind): Promise<CommandResult> {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
@@ -4442,7 +4471,7 @@ async function submitFeedback(args: ParsedArgs, runtime: CliRuntime, resolved: R
       ["kind", submission?.kind],
       ["title", submission?.title],
       ["created_at", submission?.created_at],
-      ["note", "Submissions are immutable; send a new one to correct or add detail."],
+      ["note", `Add details with screenrig feedback reply ${submission?.id} --body TEXT.`],
     ]),
   };
 }
@@ -4458,7 +4487,7 @@ function feedbackReplyLines(item: FeedbackSubmission): string[] {
   const text = redactText(reply.text).replace(/\s+/g, " ").trim();
   const shown = text.length > 200 ? `${text.slice(0, 199)}…` : text;
   const fixed = reply.fixed_in ? ` in ${reply.fixed_in}` : "";
-  return [`    ${reply.status}${fixed}: ${shown}`];
+  return [`    ${reply.author === "agent" ? "agent · " : ""}${reply.status}${fixed}: ${shown}`];
 }
 
 async function feedbackList(args: ParsedArgs, client: ApiClient): Promise<CommandResult> {

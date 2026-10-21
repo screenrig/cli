@@ -211,6 +211,8 @@ test("root help is compact and every command is discoverable through immediate c
     "feedback bug",
     "feedback feature",
     "feedback list",
+    "feedback reply",
+    "feedback show",
     "screen schedule show",
     "screen schedule set",
     "screen schedule clear",
