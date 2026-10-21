@@ -9,6 +9,7 @@ import { ExitCode } from "./exit-codes.js";
 import { run, type CliRuntime } from "./main.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import {
+  CARD_LAYOUT_LAYERS,
   CONTACT_SHEET_COLUMNS,
   CONTACT_SHEET_LABEL_HEIGHT,
   CONTACT_SHEET_TILE_HEIGHT,
@@ -20,6 +21,10 @@ import {
 } from "./playlist-preview.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport } from "./transport/fake.js";
+
+test("card layouts paint in the server's fixed layer order, with wide sharing center's layer", () => {
+  assert.deepEqual(CARD_LAYOUT_LAYERS, { full: 10, center: 20, wide: 20, strip: 30, corner: 40, chip: 50 });
+});
 
 const PNG_HEADER = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 

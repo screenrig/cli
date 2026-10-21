@@ -182,6 +182,7 @@ card takes every layout, a `fullscreen` card takes `full` only.
 | --- | --- | --- |
 | `full` | the whole canvas | none |
 | `center` | 900 x 420, centred | none |
+| `wide` | the screen inset 80 from the top and bottom and 30 from the sides | none |
 | `corner` | 270 x 270, flush to the corner | `top-left`, `top-right`, `bottom-left`, `bottom-right` |
 | `chip` | 240 x 70, 30 in from the two edges | the four corners |
 | `strip` | the whole edge by 120 | `top`, `bottom`, `left`, `right` |
@@ -190,7 +191,7 @@ card takes every layout, a `fullscreen` card takes `full` only.
 Sizes scale by min(canvas width, canvas height) / 1080, so a 4K canvas and a
 portrait canvas show the same apparent size. The server derives `rect` and
 `layer` for every layout except `free`; omit them. A page holds at most one
-`full` or `center` card, one `corner` or `chip` card per corner, and one
+`full`, `center` or `wide` card, one `corner` or `chip` card per corner, and one
 `strip` per edge (a strip with a presence condition may share an edge with a
 normal strip and takes over while it is present). Publishing refuses a wrong
 layout or anchor with `card_layout_invalid` and two cards claiming one place

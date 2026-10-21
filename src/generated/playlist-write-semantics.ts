@@ -27,7 +27,7 @@ function validCivil(value: string): boolean {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day && date.getUTCHours() === hour && date.getUTCMinutes() === minute;
 }
 
-const LAYOUTS = ["full", "free", "center", "corner", "chip", "strip"];
+const LAYOUTS = ["full", "free", "center", "wide", "corner", "chip", "strip"];
 const CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"];
 const EDGES = ["top", "bottom", "left", "right"];
 
@@ -111,8 +111,8 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
           if (!Object.hasOwn(primitive, "rect")) fail(`${itemPath}/rect`, "is required for layout free");
           if (!Object.hasOwn(primitive, "layer")) fail(`${itemPath}/layer`, "is required for layout free");
         }
-        if (layout === "full" || layout === "center") {
-          if (mainCard !== undefined) fail(`${itemPath}/layout`, "a page holds one full or center card");
+        if (layout === "full" || layout === "center" || layout === "wide") {
+          if (mainCard !== undefined) fail(`${itemPath}/layout`, "a page holds one full, center or wide card");
           mainCard = primitiveIndex;
         }
         if (layout === "corner" || layout === "chip") {

@@ -100,6 +100,17 @@ test("media_end allows a card chip beside its one video, as the server does", ()
   cardOnly.pages[0]!.primitives = [{ id: "chip", primitive: "card", card: "clock", major: 1, params: {}, layout: "full", content_fit: "fill" }] as any;
   assert.ok(playlistIssues(cardOnly).some((issue) => issue.path === "/pages/0/advance" && issue.message.includes("exactly one image or video")));
 });
+test("a wide card validates without an anchor and shares the page's one full, center or wide slot", () => {
+  const wide = (id: string, extra: Record<string, unknown> = {}) => ({ id, primitive: "card", card: "clock", major: 1, params: {}, layout: "wide", content_fit: "fill", ...extra });
+  const withCards = (...cards: Record<string, unknown>[]) => { const p = playlist(); p.pages[0]!.primitives = cards as any; return p; };
+  assert.deepEqual(playlistIssues(withCards(wide("w"))), []);
+  assert.ok(playlistIssues(withCards(wide("w", { anchor: "top" }))).some((issue) => issue.path === "/pages/0/primitives/0/anchor"));
+  assert.deepEqual(playlistIssues(withCards(wide("w"), wide("c", { layout: "chip", anchor: "top-right" }))), []);
+  for (const other of ["full", "center", "wide"]) {
+    const issues = playlistIssues(withCards(wide("w"), wide("o", { layout: other })));
+    assert.ok(issues.some((issue) => issue.path === "/pages/0/primitives/1/layout" && issue.message.includes("one full, center or wide card")), other);
+  }
+});
 
 function soundtrackDocument(page: Record<string, unknown>, audio: Record<string, unknown> = {}) {
   const pageDefaults = { id: "page", canvas: { width: 1920, height: 1080, background: "#000000FF", viewport_fit: "contain" }, transition: { type: "crossfade", duration_ms: 200 }, primitives: [{ id: "media", primitive: "image", selector: { by: "id", media_id: "med_IMAGE" }, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "contain" }] };

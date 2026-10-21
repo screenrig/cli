@@ -20,6 +20,7 @@ test("standalone card pixels occupy the reported layout rectangle, as in a playl
     corner: { x: 1650, y: 810, w: 270, h: 270, rotation: 0 },
     chip: { x: 1650, y: 980, w: 240, h: 70, rotation: 0 },
     center: { x: 510, y: 330, w: 900, h: 420, rotation: 0 },
+    wide: { x: 30, y: 80, w: 1860, h: 920, rotation: 0 },
   };
   const script = `window.ScreenRigCards={
     configure(){}, versions(){return {cards:{test:'1.0.0'}}}, manifest(){return {}},
@@ -41,6 +42,8 @@ test("standalone card pixels occupy the reported layout rectangle, as in a playl
       ...Object.entries(boxes).map(([layout, expected]) => ({ input: { layout, anchor: "bottom-right" }, expected })),
       { input: { layout: "free", placement: { rect, strips: [] } }, expected: { x: 100, y: 200, w: 400, h: 300, rotation: 0 } },
       { input: { layout: "corner", anchor: "bottom-right", placement: { strips: ["bottom"] } }, expected: { ...boxes.corner, y: 690 } },
+      // A wide card ignores the strips on the page, as center does.
+      { input: { layout: "wide", placement: { strips: ["top", "bottom", "left", "right"] } }, expected: boxes.wide },
     ];
     for (const { input, expected } of cases) {
       const standalone = await renderer.render({ card: "test", width: 1920, height: 1080, ...input });

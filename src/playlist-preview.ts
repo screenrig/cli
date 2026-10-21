@@ -32,6 +32,13 @@ export const CONTACT_SHEET_TILE_WIDTH = 320;
 export const CONTACT_SHEET_TILE_HEIGHT = 180;
 export const CONTACT_SHEET_LABEL_HEIGHT = 28;
 
+/**
+ * Fixed paint layer of each non-free card layout: full below center and wide
+ * (which share a layer) below strip below corner below chip, as the server
+ * derives it. A free card carries its own layer.
+ */
+export const CARD_LAYOUT_LAYERS: Readonly<Record<string, number>> = { full: 10, center: 20, wide: 20, strip: 30, corner: 40, chip: 50 };
+
 const MEDIA_EXTENSIONS = [".png", ".webp", ".jpg", ".jpeg", ".gif", ".mp4", ".webm"];
 const VIDEO_TYPES = new Set([".mp4", ".webm"]);
 
@@ -307,7 +314,7 @@ async function preparePages(
         media = { image: await loadImage(image.png), label: undefined };
         // The transparent raster includes its derived placement and strip rotation.
         rect = { x: 0, y: 0, width: canvas.width, height: canvas.height };
-        layer = layout === "free" ? layer : ({ full: 10, center: 20, corner: 30, chip: 40, strip: 50 }[layout] ?? layer);
+        layer = layout === "free" ? layer : (CARD_LAYOUT_LAYERS[layout] ?? layer);
         for (const reason of image.result.unrendered ?? []) placeholders.push({ page_id: id, primitive_id: primitiveId, primitive: "card", reason });
         options.renderedCards?.push({ page_id: id, primitive_id: primitiveId, card: placement.card, version: image.result.version });
       } else if (kind !== "image" && kind !== "video" && kind !== "stream") {
