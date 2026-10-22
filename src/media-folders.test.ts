@@ -186,23 +186,29 @@ const mediaRow = (id: string, folderId?: string) => ({
   ...(folderId ? { folder_id: folderId } : {}),
 });
 
-test("media list --folder keeps only files directly in that folder or at the root", async () => {
+test("media list --folder sends the folder to the API and refuses a malformed id", async () => {
   const configDir = await testTemp("media-list-folder-");
   await enrolled(configDir);
-  const transport = new FakeTransport().on("GET", "/api/media", () => json(200, {
-    items: [mediaRow(FILE, FOLDER), mediaRow(FILE_2), mediaRow("med_CCCCCCCCCCCCCCCCCCCCCCCC", OTHER)], next_cursor: null,
+  const transport = new FakeTransport().on("GET", "/api/media", (req) => json(200, {
+    items: req.query?.folder === FOLDER ? [mediaRow(FILE, FOLDER)] : req.query?.folder === "root" ? [mediaRow(FILE_2)] : [mediaRow(FILE, FOLDER), mediaRow(FILE_2)],
+    next_cursor: null,
   }));
   try {
-    const ids = async (...folder: string[]) => {
+    const list = async (...folder: string[]) => {
       const result = await withRuntime(["--json", "media", "list", ...folder], transport, configDir);
       assert.equal(result.code, ExitCode.Success, result.stdout);
       return (JSON.parse(result.stdout) as { data: { items: Array<{ id: string }> } }).data.items.map((item) => item.id);
     };
-    assert.deepEqual(await ids("--folder", FOLDER), [FILE]);
-    assert.deepEqual(await ids("--folder", "root"), [FILE_2]);
-    assert.equal((await ids()).length, 3);
+    assert.deepEqual(await list("--folder", FOLDER), [FILE]);
+    assert.equal(transport.calls.at(-1)?.query?.folder, FOLDER);
+    assert.deepEqual(await list("--folder", "root"), [FILE_2]);
+    assert.equal(transport.calls.at(-1)?.query?.folder, "root");
+    assert.equal((await list()).length, 2);
+    assert.equal(transport.calls.at(-1)?.query?.folder, undefined);
+    transport.calls.length = 0;
     const bad = await withRuntime(["--json", "media", "list", "--folder", "Menus"], transport, configDir);
     assert.equal(bad.code, ExitCode.Usage, bad.stdout);
+    assert.equal(transport.calls.length, 0);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }

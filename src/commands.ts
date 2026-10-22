@@ -3245,16 +3245,12 @@ export const handleMediaList = commandHandler(async (args, runtime, resolved) =>
   if (Object.hasOwn(args.flags, "kind")) {
     throw usageError("media list uses --primitive image|video|audio, not --kind.");
   }
-  const query = { tag: mediaTagFromArgs(args), primitive: mediaPrimitiveFromArgs(args) };
   const folder = flagString(args.flags, "folder");
-  if (folder === undefined) return simpleList(args, runtime, resolved, "/api/media", "Media", query);
-  // The API lists the whole library; the folder is read from each file, so every page is read and filtered here.
-  const inFolder = folder === "root" ? "" : mediaFolderId(folder, "--folder");
-  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.listAll("/api/media", query);
-  const listed = response.body as { items: Array<{ folder_id?: string }> };
-  const body = { ...listed, items: listed.items.filter((item) => (item.folder_id ?? "") === inFolder) };
-  return { envelope: jsonBody({ ...response, body }, client.requestId), exitCode: ExitCode.Success, human: `Media\n${JSON.stringify(body, null, 2)}` };
+  return simpleList(args, runtime, resolved, "/api/media", "Media", {
+    tag: mediaTagFromArgs(args),
+    primitive: mediaPrimitiveFromArgs(args),
+    ...(folder === undefined ? {} : { folder: folder === "root" ? folder : mediaFolderId(folder, "--folder") }),
+  });
 }, true);
 
 export const handleMediaShow = commandHandler(async (args, runtime, resolved) => {

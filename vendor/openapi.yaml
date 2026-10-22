@@ -1296,6 +1296,460 @@ paths:
                 $ref: '#/components/schemas/DashboardStaffOperationsInsights'
         default:
           $ref: '#/components/responses/Problem'
+  /api/dashboards/operational_status/feed:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: getDashboardKioskFeedOperationalStatus
+      security:
+      - kioskToken: []
+      description: >-
+        Read-only Operational Status wall feed for office signage, infrastructure only: edge traffic, components,
+        hosts, dependencies, queues and storage. refresh_seconds is 5; edge, series, nodes, hosts and dependencies
+        refresh every 5 seconds on the backend, latency, queues and traffic24h every 60 seconds, storage every 300
+        seconds. The edge counters are 10-second buckets, so the figures advance every 10 seconds. Credential:
+        Authorization: Bearer sr_dash_..., the dashboard link token a staff member issued with POST
+        /api/staff/dashboard-token, and nothing else. Cookies, query strings and every other header are ignored, and
+        the token opens no other route. The token's owner is reread on every request and must still be a verified
+        staff person. An unknown, malformed or revoked token, and a token whose owner is no longer staff, answer a
+        byte-identical 401 unauthorized. Limits: 120 requests per minute per token, and 30 failed authentications per
+        minute per client, after which the route answers 429 rate_limited with Retry-After. Poll every
+        refresh_seconds; the backend composes the body from per-section caches, so any number of screens costs one
+        refresh per section per backend instance. Sections are independent: a section whose read failed is null with
+        section_status state unavailable and the response is still 200; a section that was last read more than twice
+        its refresh interval ago reports state stale. Answers 500 dependency_unavailable only when no section has ever
+        been read. Names are shown as stored; a credential inside a name is masked and the feed carries no secret,
+        signed URL or object key. The response is private, no-store, Vary Authorization, nosniff and Referrer-Policy no-referrer;
+        If-None-Match against the ETag answers 304 with no body. The kiosk page is the dashboard route
+        /dashboard/dashboards/operational_status opened with the token in the URL fragment (#auth=...), which the
+        browser never sends.
+      parameters:
+      - { name: If-None-Match, in: header, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: The Operational Status feed.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            ETag: { schema: { type: string }, description: Strong ETag over the response body. }
+            Vary: { schema: { type: string, enum: [Authorization] } }
+            X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
+            Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardFeedOperationalStatus'
+        '304':
+          description: The ETag matches If-None-Match. No body.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            ETag: { schema: { type: string } }
+            Vary: { schema: { type: string, enum: [Authorization] } }
+        '401':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/dashboards/marketing_stats/feed:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: getDashboardKioskFeedMarketingStats
+      security:
+      - kioskToken: []
+      description: >-
+        Read-only Marketing Stats wall feed for office signage, acquisition only: visitors, enrollments, demos, the
+        acquisition funnel, channels and referrers over completed UTC days. refresh_seconds is 60; every section
+        refreshes every 300 seconds on the backend. Credential: Authorization: Bearer sr_dash_..., the dashboard link
+        token a staff member issued with POST /api/staff/dashboard-token, and nothing else. Cookies, query strings and
+        every other header are ignored, and the token opens no other route. The token's owner is reread on every
+        request and must still be a verified staff person. An unknown, malformed or revoked token, and a token whose
+        owner is no longer staff, answer a byte-identical 401 unauthorized. Limits: 120 requests per minute per token,
+        and 30 failed authentications per minute per client, after which the route answers 429 rate_limited with
+        Retry-After. Poll every refresh_seconds; the backend composes the body from per-section caches, so any number
+        of screens costs one refresh per section per backend instance. Sections are independent: a section whose read
+        failed is null with section_status state unavailable and the response is still 200; a section that was last
+        read more than twice its refresh interval ago reports state stale. Answers 500 dependency_unavailable only
+        when no section has ever been read. Names are shown as stored; a credential inside a name is masked and the
+        feed carries no secret, signed URL or object key. The response is private, no-store, Vary Authorization, nosniff and
+        Referrer-Policy no-referrer; If-None-Match against the ETag answers 304 with no body. The kiosk page is the
+        dashboard route /dashboard/dashboards/marketing_stats opened with the token in the URL fragment (#auth=...),
+        which the browser never sends.
+      parameters:
+      - { name: If-None-Match, in: header, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: The Marketing Stats feed.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            ETag: { schema: { type: string }, description: Strong ETag over the response body. }
+            Vary: { schema: { type: string, enum: [Authorization] } }
+            X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
+            Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardFeedMarketingStats'
+        '304':
+          description: The ETag matches If-None-Match. No body.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            ETag: { schema: { type: string } }
+            Vary: { schema: { type: string, enum: [Authorization] } }
+        '401':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/dashboards/system_reports/feed:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: getDashboardKioskFeedSystemReports
+      security:
+      - kioskToken: []
+      description: >-
+        Read-only System Reports wall feed for office signage, customer usage only: organizations, projects, screens,
+        plays, delivered bytes, plans, fleet health and top-N rankings by name. refresh_seconds is 60; sections
+        refresh every 60 to 300 seconds on the backend. Credential: Authorization: Bearer sr_dash_..., the dashboard
+        link token a staff member issued with POST /api/staff/dashboard-token, and nothing else. Cookies, query
+        strings and every other header are ignored, and the token opens no other route. The token's owner is reread on
+        every request and must still be a verified staff person. An unknown, malformed or revoked token, and a token
+        whose owner is no longer staff, answer a byte-identical 401 unauthorized. Limits: 120 requests per minute per
+        token, and 30 failed authentications per minute per client, after which the route answers 429 rate_limited
+        with Retry-After. Poll every refresh_seconds; the backend composes the body from per-section caches, so any
+        number of screens costs one refresh per section per backend instance. Sections are independent: a section
+        whose read failed is null with section_status state unavailable and the response is still 200; a section that
+        was last read more than twice its refresh interval ago reports state stale. Answers 500 dependency_unavailable
+        only when no section has ever been read. Names are shown as stored; a credential inside a name is masked and
+        the feed carries no secret, signed URL or object key. The response is private, no-store, Vary Authorization, nosniff
+        and Referrer-Policy no-referrer; If-None-Match against the ETag answers 304 with no body. The kiosk page is
+        the dashboard route /dashboard/dashboards/system_reports opened with the token in the URL fragment
+        (#auth=...), which the browser never sends.
+      parameters:
+      - { name: If-None-Match, in: header, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: The System Reports feed.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            ETag: { schema: { type: string }, description: Strong ETag over the response body. }
+            Vary: { schema: { type: string, enum: [Authorization] } }
+            X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
+            Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardFeedSystemReports'
+        '304':
+          description: The ETag matches If-None-Match. No body.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            ETag: { schema: { type: string } }
+            Vary: { schema: { type: string, enum: [Authorization] } }
+        '401':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/staff/dashboards/operational_status/feed:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: getDashboardStaffFeedOperationalStatus
+      security:
+      - dashboardSession: []
+      description: >-
+        Staff only: the Operational Status feed for the staff session's own browser tab, the in-app Live tab and the
+        Live dashboard preview. Staff-cookie only; the staff flag is reread for each request. A dashboard link token
+        never authenticates this route, and the staff cookie never authenticates GET
+        /api/dashboards/operational_status/feed. The body, caches, section_status and failure behavior are those of
+        GET /api/dashboards/operational_status/feed, composed by the same composer; the feed is infrastructure only:
+        edge traffic, components, hosts, dependencies, queues and storage. refresh_seconds is 5; edge, series, nodes,
+        hosts and dependencies refresh every 5 seconds on the backend, latency, queues and traffic24h every 60
+        seconds, storage every 300 seconds. The edge counters are 10-second buckets, so the figures advance every 10
+        seconds. If-None-Match against the ETag answers 304 with no body. Answers 500 dependency_unavailable only when
+        no section has ever been read.
+      parameters:
+      - { name: If-None-Match, in: header, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: The Operational Status feed.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            ETag: { schema: { type: string }, description: Strong ETag over the response body. }
+            X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
+            Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardFeedOperationalStatus'
+        '304':
+          description: The ETag matches If-None-Match. No body.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            ETag: { schema: { type: string } }
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/staff/dashboards/marketing_stats/feed:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: getDashboardStaffFeedMarketingStats
+      security:
+      - dashboardSession: []
+      description: >-
+        Staff only: the Marketing Stats feed for the staff session's own browser tab, the in-app Live tab and the Live
+        dashboard preview. Staff-cookie only; the staff flag is reread for each request. A dashboard link token never
+        authenticates this route, and the staff cookie never authenticates GET /api/dashboards/marketing_stats/feed.
+        The body, caches, section_status and failure behavior are those of GET /api/dashboards/marketing_stats/feed,
+        composed by the same composer; the feed is acquisition only: visitors, enrollments, demos, the acquisition
+        funnel, channels and referrers over completed UTC days. refresh_seconds is 60; every section refreshes every
+        300 seconds on the backend. If-None-Match against the ETag answers 304 with no body. Answers 500
+        dependency_unavailable only when no section has ever been read.
+      parameters:
+      - { name: If-None-Match, in: header, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: The Marketing Stats feed.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            ETag: { schema: { type: string }, description: Strong ETag over the response body. }
+            X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
+            Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardFeedMarketingStats'
+        '304':
+          description: The ETag matches If-None-Match. No body.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            ETag: { schema: { type: string } }
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/staff/dashboards/system_reports/feed:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: getDashboardStaffFeedSystemReports
+      security:
+      - dashboardSession: []
+      description: >-
+        Staff only: the System Reports feed for the staff session's own browser tab, the in-app Live tab and the Live
+        dashboard preview. Staff-cookie only; the staff flag is reread for each request. A dashboard link token never
+        authenticates this route, and the staff cookie never authenticates GET /api/dashboards/system_reports/feed.
+        The body, caches, section_status and failure behavior are those of GET /api/dashboards/system_reports/feed,
+        composed by the same composer; the feed is customer usage only: organizations, projects, screens, plays,
+        delivered bytes, plans, fleet health and top-N rankings by name. refresh_seconds is 60; sections refresh every
+        60 to 300 seconds on the backend. If-None-Match against the ETag answers 304 with no body. Answers 500
+        dependency_unavailable only when no section has ever been read.
+      parameters:
+      - { name: If-None-Match, in: header, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: The System Reports feed.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            ETag: { schema: { type: string }, description: Strong ETag over the response body. }
+            X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
+            Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardFeedSystemReports'
+        '304':
+          description: The ETag matches If-None-Match. No body.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            ETag: { schema: { type: string } }
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/staff/marketing/overview:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: getDashboardStaffMarketingOverview
+      security:
+      - dashboardSession: []
+      description: >-
+        Staff only: everything Staff > Marketing Stats > Overview shows, as one document composed on the server. Staff-cookie
+        only; the staff flag is reread for each request. A dashboard link token never authenticates this route. The figures are
+        those of the daily Slack report and the Marketing Stats wall feed, from the same composer and the same single read:
+        the 30 completed UTC days ending yesterday (windows end at 00:00 UTC today) against the 30 before them, the 12
+        completed UTC calendar months, the cumulative totals with their 30-day additions, and the Referrers, Campaigns and
+        Channels tables by unique browsers (up to 100 rows each, rows without unique browsers left out). Internal accounts and
+        cloud or hosting browsers are excluded by those reads. The answer comes from a server-side cache and no request reads
+        the Pipeline or the report engine: it is single-flight per backend instance, refreshed ahead every 5 minutes on the
+        report engine's background lane, computed at process start and again at about 00:30 UTC, and served stale while it
+        refreshes. Only the first request of a process that has no value yet waits for the first read, for at most 25 seconds,
+        and then answers 500 not_ready with Retry-After. A section whose reads failed is null with a reason in section_status
+        while the others are served; a section that has never been read completely is served with the figures that are known
+        (state partial) and a section that fails after it was read completely keeps its last value (state stale). A figure
+        that is not known is null, never zero. The document has no per-request member, so its ETag changes only when a
+        refresh replaces something; If-None-Match against it answers 304 with no body. The Referrers table's per-host page
+        expansion is a separate report read, not part of this document.
+      parameters:
+      - { name: If-None-Match, in: header, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: The Overview document.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            ETag: { schema: { type: string }, description: Strong ETag over the response body. }
+            X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
+            Referrer-Policy: { schema: { type: string, enum: [no-referrer] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffMarketingOverview'
+        '304':
+          description: The ETag matches If-None-Match. No body.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            ETag: { schema: { type: string } }
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/staff/dashboard-token:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: getDashboardStaffKioskToken
+      security:
+      - dashboardSession: []
+      description: >-
+        Staff only: the session's person must carry the screenrig_staff flag, reread on every request; any other session
+        answers 403 forbidden. Reports whether this person holds a dashboard link token and when it was made and last used.
+        It never returns the token or its digest; the token is shown once, by the POST that made it. Listing allows 60 requests per minute.
+      responses:
+        '200':
+          description: This person's dashboard link token state.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardKioskTokenStatus'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createDashboardStaffKioskToken
+      security:
+      - dashboardSession: []
+      description: >-
+        Staff only. Creates this person's dashboard link token, or replaces it when one exists: the old token stops working in the
+        same transaction. A person holds exactly one. The body carries a fresh passkey proof from a dashboard_token
+        reauthentication whose subject_id is the signed-in person's user id; a password proof answers 401
+        reauthentication_required, except on a development server. Requires the session's CSRF header and an Idempotency-Key. The
+        token is returned once and cannot be read again; the server keeps only a SHA-256 digest of it and a four-character hint.
+        Because the secret is not replayable, repeating an Idempotency-Key answers 409 resource_conflict. Allows 5 creations or
+        replacements per hour per person (429 rate_limited). Staff removal, deactivation, sign-in recovery and 180 days without use
+        revoke the token without notice to the screens that hold it; the kiosk then shows its link-no-longer-valid screen.
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DashboardProofRequest'
+      responses:
+        '201':
+          description: The new token, shown once.
+          headers:
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardKioskTokenCreated'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: deleteDashboardStaffKioskToken
+      security:
+      - dashboardSession: []
+      description: >-
+        Staff only. Revokes this person's dashboard link token, effective on the next poll of every screen that holds it. Requires
+        the session's CSRF header. Answers 204 whether or not a token existed.
+      responses:
+        '204':
+          description: No dashboard link token remains for this person.
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/staff/dashboard-tokens:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: listDashboardStaffKioskTokens
+      security:
+      - dashboardSession: []
+      description: >-
+        Staff only: every staff person's dashboard link token, newest first, as hint, owner and dates. It never returns a token or
+        its digest. One staff member revokes another's, or all of them, with the staff.dashboard-token.revoke and
+        staff.dashboard-tokens.revoke-all actions of POST /api/staff/actions. Allows 60 requests per minute.
+      responses:
+        '200':
+          description: Every dashboard link token.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardKioskTokenList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/staff/names:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    get:
+      operationId: getDashboardStaffNames
+      security:
+      - dashboardSession: []
+      description: >-
+        Staff only: the names of up to 100 project (prj_), screen (scr_) and organization (org_) identifiers, live or deleted. The
+        staff directories list live records only, so a report row for a deleted project prints its identifier unless this names it
+        from the record's tombstone. An identifier no record holds is left out. Uses dashboard cookie authentication.
+      parameters:
+      - name: ids
+        in: query
+        required: true
+        description: Comma-separated identifiers, at most 100.
+        schema: { type: string, maxLength: 4096 }
+      responses:
+        '200':
+          description: The names found, keyed by identifier.
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStaffNames'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/staff/reports/catalog:
     servers:
     - url: https://screenrig.ai
@@ -3525,7 +3979,8 @@ paths:
       operationId: deletePlaylistV2
       description: Tombstones one playlist owned by the authenticated project. Refused with resource_conflict (409) while any
         screen, archived or pending included, has it as its default, in its playlist schedule, or as its takeover. The
-        dashboard session may delete as well; it never creates or edits a playlist.
+        dashboard session may delete as well, and changes a playlist's structure through patchPlaylistStructure; it never
+        creates a playlist or edits a page's content.
       security:
       - projectBearer: []
       - dashboardSession: []
@@ -3543,6 +3998,74 @@ paths:
     servers:
     - url: https://screenrig.ai
       description: Backend-owned project dashboard origin
+  /api/playlists/{id}/structure:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: patchPlaylistStructure
+      description: >-
+        A signed-in person changes a playlist's structure and never what its pages
+        show: its name, the order of its pages, which pages stay, and each kept
+        page's advance and visibility. pages is the complete new order; a stored
+        page it omits is removed, and an id the playlist does not hold, or a
+        repeated one, is invalid_request at pages[i].id. A kept page's canvas,
+        transition, audio_cue, primitives and comments are always the stored ones:
+        the body has no member for them, and any other member is refused. The kept
+        pages go back through the same resolution and validation as any stored
+        playlist, so a media item deleted since is refused (resource_conflict) and
+        the playlist still keeps one ordinary page with no visibility, at most 16
+        ad slot pages and its audio_end cues. advance replaces the page's advance
+        (an ad slot page has none); visibility replaces the page's visibility when
+        an object, removes it when null and keeps it when omitted. A change that
+        leaves the playlist as stored is a no-op. If-Match carries the playlist
+        revision and is required (invalid_request when absent, revision_conflict
+        when stale). The write is live at once on every screen showing the
+        playlist and is attributed to the person on playlist.updated; it is never
+        a proposal, so the answer is never 202. A playlist no person approved yet
+        (approved_revision 0) is refused with playlist_not_approved (409): decide
+        its review first. A name another playlist of the project uses is
+        resource_conflict. The dashboard session only; agents change playlists
+        with patchPlaylist. The body is at most 64 KiB.
+      security:
+      - dashboardSession: []
+      parameters:
+      - { name: If-Match, in: header, required: true, schema: { type: string }, description: "The playlist's current revision, quoted or bare (the ETag of the last read). A stale revision is revision_conflict with current_revision." }
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaylistStructurePatch'
+      responses:
+        '200':
+          description: The playlist as stored now; ETag carries its revision.
+          headers:
+            ETag:
+              description: Quoted playlist revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistV2'
+        '409':
+          description: playlist_not_approved — the playlist has no approved version; resource_conflict — the name is in use, or a media item a kept page names is no longer ready.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/comment/screen/{id}:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
@@ -8105,15 +8628,17 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listMedia
-      description: Lists ready media newest first, at most 1000 per page. next_cursor is the position of the last returned row
-        while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the
-        last page.
+      description: Lists ready media newest first, at most 1000 per page. folder keeps only the files directly inside one media
+        folder (its ID), or with root only those at the library root; a well-formed folder ID that names no folder lists nothing.
+        next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters,
+        for the next page. next_cursor is null on the last page.
       security:
       - projectBearer: []
       - dashboardSession: []
       parameters:
       - $ref: '#/components/parameters/MediaTagQuery'
       - $ref: '#/components/parameters/MediaPrimitiveQuery'
+      - $ref: '#/components/parameters/MediaFolderQuery'
       - $ref: '#/components/parameters/ListAfter'
       responses:
         '200':
@@ -16808,14 +17333,16 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listMediaInProject
-      description: Lists ready media newest first, at most 1000 per page. next_cursor is the position of the last returned row
-        while more rows remain; pass it back as after, with the same filters, for the next page. next_cursor is null on the
-        last page.
+      description: Lists ready media newest first, at most 1000 per page. folder keeps only the files directly inside one media
+        folder (its ID), or with root only those at the library root; a well-formed folder ID that names no folder lists nothing.
+        next_cursor is the position of the last returned row while more rows remain; pass it back as after, with the same filters,
+        for the next page. next_cursor is null on the last page.
       security:
       - projectBearer: []
       parameters:
       - $ref: '#/components/parameters/MediaTagQuery'
       - $ref: '#/components/parameters/MediaPrimitiveQuery'
+      - $ref: '#/components/parameters/MediaFolderQuery'
       - $ref: '#/components/parameters/ListAfter'
       responses:
         '200':
@@ -18067,6 +18594,7 @@ components:
     PlaybackMediaID: { name: media_id, in: query, required: false, schema: { type: string, pattern: "^med_" } }
     MediaTagQuery: { name: tag, in: query, required: false, schema: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" }, description: Exact media tag. Untagged objects are omitted when this filter is present. }
     MediaPrimitiveQuery: { name: primitive, in: query, required: false, schema: { type: string, enum: [image, video, audio] } }
+    MediaFolderQuery: { name: folder, in: query, required: false, schema: { type: string, pattern: "^(root|([a-z]+_)?mfd_[A-Za-z0-9]{1,64})$" }, description: "A media folder ID keeps only the files directly inside that folder, not those of its subfolders; root keeps only the files at the library root. Omitted lists every file." }
     PlaybackDay: { name: day, in: query, required: false, schema: { type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, description: UTC calendar day of the aggregate. }
     PlaybackDayFrom: { name: day_from, in: query, required: false, schema: { type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, description: "First UTC day, inclusive. Excludes day. With day_to spans at most 366 days. CSV defaults it to 30 days before day_to." }
     PlaybackDayTo: { name: day_to, in: query, required: false, schema: { type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, description: "Last UTC day, inclusive. Excludes day. CSV defaults it to today (UTC)." }
@@ -18140,6 +18668,15 @@ components:
       in: cookie
       name: __Host-screenrig-dashboard
       description: Person session cookie. HttpOnly, Secure, SameSite=Strict, Path=/. The current project can be absent; project-scoped operations then return no_project.
+    kioskToken:
+      type: http
+      scheme: bearer
+      bearerFormat: sr_dash_
+      description: >-
+        A dashboard link token, sr_dash_ plus 43 base64url characters, issued to one staff person by POST /api/staff/dashboard-token.
+        Accepted only by the three GET /api/dashboards/{name}/feed routes; it is never a project, agent, dashboard session or staff
+        credential, and those routes accept no other credential. Sent in the Authorization header from the office signage page, never
+        in a URL, cookie or query string. The server stores only a SHA-256 digest of it.
     releaseGrantCookie: { type: apiKey, in: cookie, name: __Host-screenrig-release, description: Exact-host release/screen/generation/grant cookie; never valid on runtime or project routes. }
     releaseLaunchTicket: { type: apiKey, in: query, name: ticket, description: Random single-use 30-second ticket consumed only on its exact release host. }
     operatorBearer: { type: http, scheme: bearer }
@@ -19230,11 +19767,11 @@ components:
       type: object
       additionalProperties: false
       required: [action]
-      description: Only fields required by the selected action are accepted. project.write-mode requires a reason and the current session project; it grants ten minutes of staff write access, ending on a project switch, logout, staff revoke or unshadow. Every admitted project write has a permanent audit. project.write, project.write-mode-end, project.shadow, project.unshadow, project.member and project.member-remove are audit-only actions and cannot be proposed; project.member records a membership granted, and project.member-remove one ended, by the screenrig-admin org apply command, whose rows carry its reason. staff.grant and staff.revoke appoint an existing verified person by ID. person.free-cap sets how many free Standard organizations the person may open (free_limit; none restores one) and changes no organization they hold; organization.domain with no domain removes the claim; a domain set pulls in, after the approved change commits, the projects its verified people hold alone in their personal organizations, as domain verification does. project.owner explicitly appoints the person and adds their project membership. Admin and owner targets must be existing verified people. organization.plan with no plan_id schedules removal; project.plan-to-organization with no plan_id moves the existing plan; the organization's other projects holding plans of their own roll up into it, each paying for itself until the next UTC month boundary or the organization plan's start, whichever is later. An organization holds premium, enterprise, promo or the staff-assigned staff plan; every organization without one pays on Standard, so organization.plan standard removes the plan as no plan_id does, and project.plan-to-organization refuses standard. Organization billing must be enabled for both; the result names the actual effective time and grant. project.plan takes standard, which ends a plan the project still holds of its own at the next UTC month boundary and refuses occupancy above Standard's limits. Project-held Enterprise is accepted only before organization billing is enabled, through the retained provisioning path. person.reset-sign-in emails a one-hour sign-in reset link to the person's verified email address only; the link is never returned to staff, and the result names only the delivery and expiry. Demo actions bind the exact demo_version and demo_revision. Attendance, staff-reported outcomes and follow-up decisions are separate; completed booking never implies attendance or conversion. Offer-live and booking-link actions queue existing durable notification jobs only after approval. With revoke_passkeys it also removes every passkey of the person, ends every dashboard session and cuts off every token already issued to them, in the same approved action.
+      description: Only fields required by the selected action are accepted. project.write-mode requires a reason and the current session project; it grants ten minutes of staff write access, ending on a project switch, logout, staff revoke or unshadow. Every admitted project write has a permanent audit. project.write, project.write-mode-end, project.shadow, project.unshadow, project.member and project.member-remove are audit-only actions and cannot be proposed; project.member records a membership granted, and project.member-remove one ended, by the screenrig-admin org apply command, whose rows carry its reason. staff.grant and staff.revoke appoint an existing verified person by ID. person.free-cap sets how many free Standard organizations the person may open (free_limit; none restores one) and changes no organization they hold; organization.domain with no domain removes the claim; a domain set pulls in, after the approved change commits, the projects its verified people hold alone in their personal organizations, as domain verification does. project.owner explicitly appoints the person and adds their project membership. Admin and owner targets must be existing verified people. organization.plan with no plan_id schedules removal; project.plan-to-organization with no plan_id moves the existing plan; the organization's other projects holding plans of their own roll up into it, each paying for itself until the next UTC month boundary or the organization plan's start, whichever is later. An organization holds premium, enterprise, promo or the staff-assigned staff plan; every organization without one pays on Standard, so organization.plan standard removes the plan as no plan_id does, and project.plan-to-organization refuses standard. Organization billing must be enabled for both; the result names the actual effective time and grant. project.plan takes standard, which ends a plan the project still holds of its own at the next UTC month boundary and refuses occupancy above Standard's limits. Project-held Enterprise is accepted only before organization billing is enabled, through the retained provisioning path. person.reset-sign-in emails a one-hour sign-in reset link to the person's verified email address only; the link is never returned to staff, and the result names only the delivery and expiry. Demo actions bind the exact demo_version and demo_revision. Attendance, staff-reported outcomes and follow-up decisions are separate; completed booking never implies attendance or conversion. Offer-live and booking-link actions queue existing durable notification jobs only after approval. With revoke_passkeys it also removes every passkey of the person, ends every dashboard session and cuts off every token already issued to them, in the same approved action. staff.dashboard-token.revoke revokes the dashboard link token of the person user_id, and staff.dashboard-tokens.revoke-all revokes every dashboard link token; neither takes any other field than reason, and a screen holding a revoked link stops receiving data on its next poll.
       properties:
         action:
           type: string
-          enum: [organization.create, organization.rename, organization.admins, organization.domain, project.rename, project.move, project.owner, person.deactivate, person.reinstate, person.free-cap, person.reset-sign-in, organization.plan, project.plan-to-organization, project.plan, project.delete, organization.delete, organization.merge, staff.grant, staff.revoke, project.write-mode, project.write-mode-end, project.write, project.shadow, project.unshadow, project.member, project.member-remove, demo.claim, demo.release, demo.offer-live, demo.send-booking-link, demo.record-outcome]
+          enum: [organization.create, organization.rename, organization.admins, organization.domain, project.rename, project.move, project.owner, person.deactivate, person.reinstate, person.free-cap, person.reset-sign-in, organization.plan, project.plan-to-organization, project.plan, project.delete, organization.delete, organization.merge, staff.grant, staff.revoke, staff.dashboard-token.revoke, staff.dashboard-tokens.revoke-all, project.write-mode, project.write-mode-end, project.write, project.shadow, project.unshadow, project.member, project.member-remove, demo.claim, demo.release, demo.offer-live, demo.send-booking-link, demo.record-outcome]
         organization_id: { type: string }
         project_id: { type: string }
         user_id: { type: string }
@@ -20222,6 +20759,573 @@ components:
         window_seconds: { type: integer }
         p50_ms: { type: number, description: Time from the edge request to its record being received. }
         p95_ms: { type: number }
+    DashboardFeedSectionStatus:
+      type: object
+      required: [state, as_of, age_seconds]
+      description: >-
+        Freshness of one feed section. ok: the section's newest refresh succeeded within twice its refresh interval. stale: the
+        value is the last good read and the newest successful refresh is older than that, because later refreshes failed.
+        unavailable: the section is null because no refresh has succeeded. as_of is the instant of the data the refresh read, which
+        trails the refresh by the source's resolution: an edge counter section reads 3 to 15 seconds old when fresh, because its
+        newest complete bucket ended before the read.
+      properties:
+        state: { type: string, enum: [ok, stale, unavailable] }
+        as_of: { anyOf: [{ type: string, format: date-time }, { type: 'null' }], description: "When the section's data was read; null when unavailable." }
+        age_seconds: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "Seconds between as_of and generated_at; null when unavailable." }
+    DashboardFeedOperationalStatus:
+      type: object
+      required: [schema, dashboard, environment, generated_at, refresh_seconds, sections, section_status]
+      description: >-
+        The Operational Status feed (infrastructure only). Rates are per second, bit rates are bits per second, sizes are bytes, durations
+        are milliseconds unless the name says seconds, and instants are RFC 3339 UTC. Every section is nullable and keyed by name in
+        both sections and section_status.
+      properties:
+        schema: { type: string, enum: [screenrig.dashboard-feed/v1] }
+        dashboard: { type: string, enum: [operational_status] }
+        environment: { type: string, maxLength: 32, description: "production or stage." }
+        generated_at: { type: string, format: date-time, description: "When the backend composed this response." }
+        refresh_seconds: { type: integer, minimum: 5, maximum: 300, description: "The poll interval in seconds. 5 for this feed." }
+        sections: { $ref: '#/components/schemas/DashboardFeedOperationalStatusSections' }
+        section_status: { $ref: '#/components/schemas/DashboardFeedOperationalStatusSectionStatus' }
+    DashboardFeedOperationalStatusSections:
+      type: object
+      required: [edge, components, series, nodes, hosts, dependencies, queues, storage, traffic24h, latency, thresholds]
+      properties:
+        edge: { anyOf: [{ $ref: '#/components/schemas/DashboardFeedEdge' }, { type: 'null' }], description: "Edge totals over the last window_seconds of complete 10-second counter buckets. Refreshes every 5 seconds." }
+        components: { anyOf: [{ type: array, maxItems: 7, items: { $ref: '#/components/schemas/DashboardFeedComponent' } }, { type: 'null' }], description: "Exactly seven rows, in this order: api, media, static, streams, telemetry, other, total. A component is a group of edge lanes: api is backend; media is media; static is static (Player, site, dashboard, static resources); streams is stream; telemetry is log, otel and query; other is apps, edge and none. Refreshes every 5 seconds; p95_ms every 60 seconds." }
+        series: { anyOf: [{ $ref: '#/components/schemas/DashboardFeedSeries' }, { type: 'null' }], description: "The last 90 complete counter buckets (15 minutes), oldest first, with the per-component split. Refreshes every 5 seconds." }
+        nodes: { anyOf: [{ type: array, maxItems: 8, items: { $ref: '#/components/schemas/DashboardFeedNode' } }, { type: 'null' }], description: "Edge proxy nodes that write counters. Refreshes every 5 seconds." }
+        hosts: { anyOf: [{ type: array, maxItems: 24, items: { $ref: '#/components/schemas/DashboardFeedHost' } }, { type: 'null' }], description: "Backend, worker and proxy hosts. Hosts that are not up come first, then by role (api, worker, proxy) and id. Refreshes every 5 seconds." }
+        dependencies: { anyOf: [{ type: array, maxItems: 3, items: { $ref: '#/components/schemas/DashboardFeedDependency' } }, { type: 'null' }], description: "Data stores the backend depends on, in the order mongo, valkey, clickhouse. Refreshes every 5 seconds." }
+        queues: { anyOf: [{ type: array, maxItems: 3, items: { $ref: '#/components/schemas/DashboardFeedQueue' } }, { type: 'null' }], description: "In the order revocation_outbox, projection, ingest_lag. Refreshes every 60 seconds." }
+        storage: { anyOf: [{ type: array, maxItems: 2, items: { $ref: '#/components/schemas/DashboardFeedStorage' } }, { type: 'null' }], description: "Bytes held per object store, from accounting. Refreshes every 300 seconds." }
+        traffic24h: { anyOf: [{ $ref: '#/components/schemas/DashboardFeedTraffic24h' }, { type: 'null' }], description: "Edge traffic over the last 24 hours. Refreshes every 60 seconds." }
+        latency: { anyOf: [{ type: array, maxItems: 7, items: { $ref: '#/components/schemas/DashboardFeedLatencyRow' } }, { type: 'null' }], description: "Request latency percentiles per component over the last 15 minutes, in the same seven-row order as components. Refreshes every 60 seconds." }
+        thresholds: { anyOf: [{ $ref: '#/components/schemas/DashboardFeedThresholds' }, { type: 'null' }], description: "The limits the wall colors against. When null, a client applies no fault color." }
+    DashboardFeedOperationalStatusSectionStatus:
+      type: object
+      required: [edge, components, series, nodes, hosts, dependencies, queues, storage, traffic24h, latency, thresholds]
+      properties:
+        edge: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        components: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        series: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        nodes: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        hosts: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        dependencies: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        queues: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        storage: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        traffic24h: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        latency: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        thresholds: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+    DashboardFeedStatusRates:
+      type: object
+      required: ['2xx', '3xx', '4xx', '5xx', none]
+      description: Requests per second by status class. none is no response (status 0); it is not part of 5xx.
+      properties:
+        '2xx': { type: number, minimum: 0 }
+        '3xx': { type: number, minimum: 0 }
+        '4xx': { type: number, minimum: 0 }
+        '5xx': { type: number, minimum: 0 }
+        none: { type: number, minimum: 0 }
+    DashboardFeedEdge:
+      type: object
+      required: [through, bucket_seconds, window_seconds, requests_per_second, egress_bps, ingress_bps, mean_ms, status_per_second, server_error_rate, client_error_rate, screens_online, streams_open]
+      properties:
+        through: { type: string, format: date-time, description: "End of the newest complete counter bucket." }
+        bucket_seconds: { type: integer, description: "Counter bucket width. 10." }
+        window_seconds: { type: integer, description: "Seconds of complete buckets the rates average over. 60." }
+        requests_per_second: { type: number, minimum: 0 }
+        egress_bps: { type: number, minimum: 0, description: "Response bytes times eight, per second." }
+        ingress_bps: { type: number, minimum: 0, description: "Request bytes times eight, per second." }
+        mean_ms: { type: number, minimum: 0 }
+        status_per_second: { $ref: '#/components/schemas/DashboardFeedStatusRates' }
+        server_error_rate: { type: number, minimum: 0, maximum: 1, description: "5xx per second divided by requests_per_second, status 0 excluded as rig stats does; 0 when there are no requests." }
+        client_error_rate: { type: number, minimum: 0, maximum: 1, description: "4xx per second divided by requests_per_second; 0 when there are no requests." }
+        screens_online: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "Screens holding a live presence lease; null when the count could not be read." }
+        streams_open: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "Open event streams across the stream nodes that reported in the last 2 minutes; null when it could not be read." }
+    DashboardFeedComponent:
+      type: object
+      required: [id, label, requests_per_second, egress_bps, ingress_bps, client_errors_per_second, server_errors_per_second, mean_ms, p95_ms]
+      properties:
+        id: { type: string, enum: [api, media, static, streams, telemetry, other, total] }
+        label: { type: string, maxLength: 24, description: "API, Media, Static, Streams, Telemetry, Other or Total." }
+        requests_per_second: { type: number, minimum: 0 }
+        egress_bps: { type: number, minimum: 0 }
+        ingress_bps: { type: number, minimum: 0 }
+        client_errors_per_second: { type: number, minimum: 0, description: "Status 400 to 499." }
+        server_errors_per_second: { type: number, minimum: 0, description: "Status 500 and up; status 0 is excluded." }
+        mean_ms: { type: number, minimum: 0, description: "0 when the component had no requests." }
+        p95_ms: { anyOf: [{ type: number, minimum: 0 }, { type: 'null' }], description: "95th percentile latency over the last 15 minutes; null when the component had no requests or the latency read is not available." }
+    DashboardFeedSeriesComponentPoint:
+      type: object
+      required: [requests, bytes]
+      properties:
+        requests: { type: integer, minimum: 0 }
+        bytes: { type: integer, minimum: 0, description: "Response bytes in the bucket." }
+    DashboardFeedSeriesComponents:
+      type: object
+      required: [api, media, static, streams, telemetry, other]
+      description: The bucket's totals split by component. The six components sum to the point's requests and bytes.
+      properties:
+        api: { $ref: '#/components/schemas/DashboardFeedSeriesComponentPoint' }
+        media: { $ref: '#/components/schemas/DashboardFeedSeriesComponentPoint' }
+        static: { $ref: '#/components/schemas/DashboardFeedSeriesComponentPoint' }
+        streams: { $ref: '#/components/schemas/DashboardFeedSeriesComponentPoint' }
+        telemetry: { $ref: '#/components/schemas/DashboardFeedSeriesComponentPoint' }
+        other: { $ref: '#/components/schemas/DashboardFeedSeriesComponentPoint' }
+    DashboardFeedSeriesPoint:
+      type: object
+      required: [at, requests, bytes, client_errors, server_errors, components]
+      description: One counter bucket. Counts are for the whole bucket, not rates; divide by bucket_seconds. A bucket no node wrote is all zeros.
+      properties:
+        at: { type: string, format: date-time, description: "Bucket start." }
+        requests: { type: integer, minimum: 0 }
+        bytes: { type: integer, minimum: 0, description: "Response bytes. Bits per second is bytes times eight divided by bucket_seconds." }
+        client_errors: { type: integer, minimum: 0 }
+        server_errors: { type: integer, minimum: 0, description: "Status 500 and up; status 0 is excluded." }
+        components: { $ref: '#/components/schemas/DashboardFeedSeriesComponents' }
+    DashboardFeedSeries:
+      type: object
+      required: [bucket_seconds, points]
+      properties:
+        bucket_seconds: { type: integer, description: "10." }
+        points: { type: array, maxItems: 90, items: { $ref: '#/components/schemas/DashboardFeedSeriesPoint' }, description: "Oldest first." }
+    DashboardFeedNode:
+      type: object
+      required: [id, reporting, last_flush, requests_per_second, egress_bps]
+      properties:
+        id: { type: string, maxLength: 40 }
+        reporting: { type: boolean, description: "The node wrote one of the last 3 complete buckets." }
+        last_flush: { anyOf: [{ type: string, format: date-time }, { type: 'null' }], description: "End of the newest bucket the node wrote; null when it never wrote one." }
+        requests_per_second: { type: number, minimum: 0 }
+        egress_bps: { type: number, minimum: 0 }
+    DashboardFeedHost:
+      type: object
+      required: [id, role, state, version, commit, uptime_seconds, memory_percent, cpu_percent, disk_free_percent]
+      properties:
+        id: { type: string, maxLength: 40 }
+        role: { type: string, enum: [api, worker, proxy] }
+        state: { type: string, enum: [up, draining, down, unknown] }
+        version: { anyOf: [{ type: string, maxLength: 32 }, { type: 'null' }], description: "The release version the host reports; null when it does not report one." }
+        commit: { anyOf: [{ type: string, maxLength: 40 }, { type: 'null' }], description: "The abbreviated Git commit the host reports; null when it does not report one." }
+        uptime_seconds: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }] }
+        memory_percent: { anyOf: [{ type: number, minimum: 0, maximum: 100 }, { type: 'null' }], description: "Percent of memory in use; null when the host does not report it." }
+        cpu_percent: { anyOf: [{ type: number, minimum: 0, maximum: 100 }, { type: 'null' }], description: "Percent of CPU busy; null when the host does not report it." }
+        disk_free_percent: { anyOf: [{ type: number, minimum: 0, maximum: 100 }, { type: 'null' }], description: "Percent of the data disk free; null when the host does not report it." }
+    DashboardFeedDependency:
+      type: object
+      required: [id, state, latency_ms]
+      properties:
+        id: { type: string, enum: [mongo, valkey, clickhouse] }
+        state: { type: string, enum: [up, degraded, down] }
+        latency_ms: { anyOf: [{ type: number, minimum: 0 }, { type: 'null' }], description: "Round-trip time of the last ping; null when it did not answer." }
+    DashboardFeedQueue:
+      type: object
+      required: [id, depth, oldest_age_seconds, p95_ms]
+      properties:
+        id: { type: string, enum: [revocation_outbox, projection, ingest_lag] }
+        depth: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "Entries waiting; null for ingest_lag." }
+        oldest_age_seconds: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "Age of the oldest waiting entry; null for ingest_lag." }
+        p95_ms: { anyOf: [{ type: number, minimum: 0 }, { type: 'null' }], description: "95th percentile delay; set for ingest_lag only." }
+    DashboardFeedStorage:
+      type: object
+      required: [id, label, bytes, source, as_of]
+      properties:
+        id: { type: string, enum: [media, packages] }
+        label: { type: string, maxLength: 24 }
+        bytes: { type: integer, minimum: 0 }
+        source: { type: string, enum: [accounting], description: "Where the figure comes from. accounting is the sum of committed object sizes." }
+        as_of: { type: string, format: date-time }
+    DashboardFeedTraffic24h:
+      type: object
+      required: [bytes, requests]
+      properties:
+        bytes: { type: integer, minimum: 0, description: "Response bytes." }
+        requests: { type: integer, minimum: 0 }
+    DashboardFeedLatencyRow:
+      type: object
+      required: [component, p50_ms, p95_ms, p99_ms]
+      properties:
+        component: { type: string, enum: [api, media, static, streams, telemetry, other, total] }
+        p50_ms: { anyOf: [{ type: number, minimum: 0 }, { type: 'null' }], description: "Null when the component had no requests in the window." }
+        p95_ms: { anyOf: [{ type: number, minimum: 0 }, { type: 'null' }] }
+        p99_ms: { anyOf: [{ type: number, minimum: 0 }, { type: 'null' }] }
+    DashboardFeedThresholds:
+      type: object
+      required: [server_error_rate_fault]
+      properties:
+        server_error_rate_fault: { type: number, minimum: 0, maximum: 1, description: "A server_error_rate above this is a fault. 0.01." }
+    DashboardFeedMarketingStats:
+      type: object
+      required: [schema, dashboard, environment, generated_at, refresh_seconds, sections, section_status]
+      description: >-
+        The Marketing Stats feed (acquisition only). Counts are over completed UTC days, so figures change once a day. Every section
+        is nullable and keyed by name in both sections and section_status.
+      properties:
+        schema: { type: string, enum: [screenrig.dashboard-feed/v1] }
+        dashboard: { type: string, enum: [marketing_stats] }
+        environment: { type: string, maxLength: 32 }
+        generated_at: { type: string, format: date-time }
+        refresh_seconds: { type: integer, minimum: 5, maximum: 300, description: "60 for this feed." }
+        sections: { $ref: '#/components/schemas/DashboardFeedMarketingStatsSections' }
+        section_status: { $ref: '#/components/schemas/DashboardFeedMarketingStatsSectionStatus' }
+    DashboardFeedMarketingStatsSections:
+      type: object
+      required: [through, kpis, funnel, daily, monthly, totals, channels, referrers]
+      properties:
+        through: { anyOf: [{ type: string, format: date, pattern: '^\d{4}-\d{2}-\d{2}$' }, { type: 'null' }], description: "The last completed UTC day that kpis, funnel, daily, channels and referrers include. It is not a section and has no section_status entry; null when nothing has been read." }
+        kpis: { anyOf: [{ type: array, maxItems: 6, items: { $ref: '#/components/schemas/DashboardFeedMarketingKpi' } }, { type: 'null' }], description: "Six rows in this order: unique_browsers, agent_enrollments, new_projects, demos_requested, activated, paid_accounts. Each is the 30 completed days ending at through against the 30 days before them." }
+        funnel: { anyOf: [{ type: array, maxItems: 6, items: { $ref: '#/components/schemas/DashboardFeedFunnelStep' } }, { type: 'null' }], description: "Six steps in this order: visitor, signed_up, agent_connected, screen_paired, activated, customer. Counts cover the same 30 days as kpis." }
+        daily: { anyOf: [{ type: array, maxItems: 30, items: { $ref: '#/components/schemas/DashboardFeedMarketingDay' } }, { type: 'null' }], description: "The 30 completed UTC days ending at through, oldest first." }
+        monthly: { anyOf: [{ type: array, maxItems: 12, items: { $ref: '#/components/schemas/DashboardFeedMarketingMonth' } }, { type: 'null' }], description: "The 12 most recent completed UTC months, oldest first." }
+        totals: { anyOf: [{ $ref: '#/components/schemas/DashboardFeedMarketingTotals' }, { type: 'null' }] }
+        channels: { anyOf: [{ type: array, maxItems: 8, items: { $ref: '#/components/schemas/DashboardFeedRankedRow' } }, { type: 'null' }], description: "Top acquisition channels by unique browsers over the same 30 days as kpis, largest first." }
+        referrers: { anyOf: [{ type: array, maxItems: 8, items: { $ref: '#/components/schemas/DashboardFeedRankedRow' } }, { type: 'null' }], description: "Top referring hosts by unique browsers over the same 30 days as kpis, largest first." }
+    DashboardFeedMarketingStatsSectionStatus:
+      type: object
+      required: [kpis, funnel, daily, monthly, totals, channels, referrers]
+      properties:
+        kpis: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        funnel: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        daily: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        monthly: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        totals: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        channels: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        referrers: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+    DashboardFeedMarketingKpi:
+      type: object
+      required: [id, value, previous]
+      properties:
+        id: { type: string, enum: [unique_browsers, agent_enrollments, new_projects, demos_requested, activated, paid_accounts] }
+        value: { type: integer, minimum: 0 }
+        previous: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "The same figure for the 30 days before; null when that window has no data." }
+    DashboardFeedFunnelStep:
+      type: object
+      required: [step, count, previous, share]
+      properties:
+        step: { type: string, enum: [visitor, signed_up, agent_connected, screen_paired, activated, customer] }
+        count: { type: integer, minimum: 0 }
+        previous: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "The count for the 30 days before; null when that window has no data." }
+        share: { type: number, minimum: 0, maximum: 1, description: "count divided by the first step's count; 0 when that count is 0." }
+    DashboardFeedMarketingDay:
+      type: object
+      required: [day, unique_browsers, enrollments, demos]
+      properties:
+        day: { type: string, format: date, pattern: '^\d{4}-\d{2}-\d{2}$', description: "UTC day." }
+        unique_browsers: { type: integer, minimum: 0 }
+        enrollments: { type: integer, minimum: 0, description: "Agent enrollments." }
+        demos: { type: integer, minimum: 0, description: "Demos requested." }
+    DashboardFeedMarketingMonth:
+      type: object
+      required: [month, unique_browsers, enrollments, demos]
+      properties:
+        month: { type: string, pattern: '^\d{4}-\d{2}$', description: "UTC month, YYYY-MM." }
+        unique_browsers: { type: integer, minimum: 0 }
+        enrollments: { type: integer, minimum: 0 }
+        demos: { type: integer, minimum: 0 }
+    DashboardFeedMarketingCounts:
+      type: object
+      required: [projects, users, screens, agent_enrollments]
+      properties:
+        projects: { type: integer, minimum: 0 }
+        users: { type: integer, minimum: 0 }
+        screens: { type: integer, minimum: 0 }
+        agent_enrollments: { type: integer, minimum: 0 }
+    DashboardFeedMarketingTotals:
+      type: object
+      required: [projects, users, screens, agent_enrollments, growth_30d]
+      description: All-time counts, internal accounts excluded, and what each grew by over the 30 completed days ending at through.
+      properties:
+        projects: { type: integer, minimum: 0 }
+        users: { type: integer, minimum: 0 }
+        screens: { type: integer, minimum: 0 }
+        agent_enrollments: { type: integer, minimum: 0 }
+        growth_30d: { $ref: '#/components/schemas/DashboardFeedMarketingCounts' }
+    DashboardFeedRankedRow:
+      type: object
+      required: [key, label, value]
+      properties:
+        key: { type: string, maxLength: 80, description: "Stable identifier of the channel or referring host." }
+        label: { type: string, maxLength: 80, description: "The name to show." }
+        value: { type: integer, minimum: 0, description: "Unique browsers." }
+    DashboardFeedSystemReports:
+      type: object
+      required: [schema, dashboard, environment, generated_at, refresh_seconds, sections, section_status]
+      description: >-
+        The System Reports feed (customer usage only). Internal accounts are excluded from every section, exactly as the staff
+        pages exclude them. Project, organization and screen names and person display names are shown as stored; a credential inside one is masked.
+        Every section is nullable and keyed by name in both sections and section_status.
+      properties:
+        schema: { type: string, enum: [screenrig.dashboard-feed/v1] }
+        dashboard: { type: string, enum: [system_reports] }
+        environment: { type: string, maxLength: 32 }
+        generated_at: { type: string, format: date-time }
+        refresh_seconds: { type: integer, minimum: 5, maximum: 300, description: "60 for this feed." }
+        sections: { $ref: '#/components/schemas/DashboardFeedSystemReportsSections' }
+        section_status: { $ref: '#/components/schemas/DashboardFeedSystemReportsSectionStatus' }
+    DashboardFeedSystemReportsSections:
+      type: object
+      required: [kpis, plays_daily, delivered_daily, plan_mix, fleet_health, top_projects, top_screens, top_organizations, top_people]
+      properties:
+        kpis: { anyOf: [{ type: array, maxItems: 6, items: { $ref: '#/components/schemas/DashboardFeedSystemKpi' } }, { type: 'null' }], description: "Six rows in this order: organizations, projects, active_screens_30d, plays_24h, delivered_24h, fleet_uptime_30d. Counts are whole numbers; delivered_24h is bytes; fleet_uptime_30d is a ratio from 0 to 1." }
+        plays_daily: { anyOf: [{ type: array, maxItems: 30, items: { $ref: '#/components/schemas/DashboardFeedPlaysDay' } }, { type: 'null' }], description: "The last 30 completed UTC days, oldest first." }
+        delivered_daily: { anyOf: [{ type: array, maxItems: 30, items: { $ref: '#/components/schemas/DashboardFeedDeliveredDay' } }, { type: 'null' }], description: "The last 30 completed UTC days, oldest first." }
+        plan_mix: { anyOf: [{ type: array, maxItems: 5, items: { $ref: '#/components/schemas/DashboardFeedPlanMix' } }, { type: 'null' }], description: "One row per plan that has organizations, in the order standard, premium, enterprise, promo, staff." }
+        fleet_health: { anyOf: [{ $ref: '#/components/schemas/DashboardFeedFleetHealth' }, { type: 'null' }] }
+        top_projects: { anyOf: [{ type: array, maxItems: 8, items: { $ref: '#/components/schemas/DashboardFeedTopProject' } }, { type: 'null' }], description: "Projects by bytes delivered over the last 7 completed UTC days, largest first." }
+        top_screens: { anyOf: [{ type: array, maxItems: 8, items: { $ref: '#/components/schemas/DashboardFeedTopScreen' } }, { type: 'null' }], description: "Screens by plays over the last 7 completed UTC days, most first." }
+        top_organizations: { anyOf: [{ type: array, maxItems: 8, items: { $ref: '#/components/schemas/DashboardFeedTopOrganization' } }, { type: 'null' }], description: "Organizations by screens, most first." }
+        top_people: { anyOf: [{ type: array, maxItems: 8, items: { $ref: '#/components/schemas/DashboardFeedTopPerson' } }, { type: 'null' }], description: "People by dashboard and API events over the last 7 days, most first." }
+    DashboardFeedSystemReportsSectionStatus:
+      type: object
+      required: [kpis, plays_daily, delivered_daily, plan_mix, fleet_health, top_projects, top_screens, top_organizations, top_people]
+      properties:
+        kpis: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        plays_daily: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        delivered_daily: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        plan_mix: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        fleet_health: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        top_projects: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        top_screens: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        top_organizations: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        top_people: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+    DashboardFeedSystemKpi:
+      type: object
+      required: [id, value, previous]
+      properties:
+        id: { type: string, enum: [organizations, projects, active_screens_30d, plays_24h, delivered_24h, fleet_uptime_30d] }
+        value: { type: number, minimum: 0 }
+        previous: { anyOf: [{ type: number, minimum: 0 }, { type: 'null' }], description: "The figure for the window before it: the 30 days before for the 30-day figures, the 24 hours before for the 24-hour figures, and the count 30 days ago for organizations and projects. Null when that window has no data." }
+    DashboardFeedPlaysDay:
+      type: object
+      required: [day, plays]
+      properties:
+        day: { type: string, format: date, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        plays: { type: integer, minimum: 0 }
+    DashboardFeedDeliveredDay:
+      type: object
+      required: [day, gb]
+      properties:
+        day: { type: string, format: date, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        gb: { type: number, minimum: 0, description: "Gigabytes of 10^9 bytes, the billing unit, to at most three decimals." }
+    DashboardFeedPlanMix:
+      type: object
+      required: [plan, organizations, projects]
+      properties:
+        plan: { type: string, enum: [standard, premium, enterprise, promo, staff] }
+        organizations: { type: integer, minimum: 0 }
+        projects: { type: integer, minimum: 0 }
+    DashboardFeedFleetHealth:
+      type: object
+      required: [uptime, problems, crashing, display_disconnected]
+      properties:
+        uptime: { anyOf: [{ type: number, minimum: 0, maximum: 1 }, { type: 'null' }], description: "Fleet uptime ratio over the last 30 days; null when there is no data." }
+        problems: { type: integer, minimum: 0, description: "Screens with a problem now." }
+        crashing: { type: integer, minimum: 0, description: "Screens whose Player is crashing now." }
+        display_disconnected: { type: integer, minimum: 0, description: "Screens whose display is disconnected now." }
+    DashboardFeedTopProject:
+      type: object
+      required: [name, value, share]
+      properties:
+        name: { type: string, maxLength: 80 }
+        value: { type: integer, minimum: 0, description: "Bytes delivered." }
+        share: { type: number, minimum: 0, maximum: 1, description: "value divided by all bytes delivered in the window; 0 when that is 0." }
+    DashboardFeedTopScreen:
+      type: object
+      required: [name, project, value]
+      properties:
+        name: { type: string, maxLength: 80 }
+        project: { type: string, maxLength: 80, description: "The screen's project name." }
+        value: { type: integer, minimum: 0, description: "Plays." }
+    DashboardFeedTopOrganization:
+      type: object
+      required: [name, screens, projects]
+      properties:
+        name: { type: string, maxLength: 80 }
+        screens: { type: integer, minimum: 0 }
+        projects: { type: integer, minimum: 0 }
+    DashboardFeedTopPerson:
+      type: object
+      required: [display_name, events]
+      properties:
+        display_name: { type: string, maxLength: 80 }
+        events: { type: integer, minimum: 0 }
+    StaffMarketingOverview:
+      type: object
+      required: [schema, as_of, computed_in_ms, since, until, through, previous, funnel, totals, daily, monthly, referrers, campaigns, channels, section_status]
+      description: >-
+        Staff > Marketing Stats > Overview as one document (GET /api/staff/marketing/overview). Every section is nullable and
+        keyed by name in both the document and section_status. Counts are over completed UTC days, so they change once a day.
+        The document carries no per-request instant, so it repeats byte for byte until a refresh replaces something.
+      properties:
+        schema: { type: string, enum: [screenrig.staff-marketing-overview/v1] }
+        as_of: { type: string, format: date-time, description: "When the newest refresh finished, to the second." }
+        computed_in_ms: { type: integer, minimum: 0, description: "How long the newest refresh took to read and compose." }
+        since: { type: string, format: date-time, description: "00:00 UTC of the first of the 30 completed days." }
+        until: { type: string, format: date-time, description: "00:00 UTC today: the end of the window, exclusive." }
+        through: { type: string, format: date, pattern: '^\d{4}-\d{2}-\d{2}$', description: "The last completed UTC day, until minus one day." }
+        previous: { $ref: '#/components/schemas/StaffMarketingOverviewWindow' }
+        funnel: { anyOf: [{ $ref: '#/components/schemas/StaffMarketingOverviewFunnel' }, { type: 'null' }] }
+        totals: { anyOf: [{ $ref: '#/components/schemas/StaffMarketingOverviewTotals' }, { type: 'null' }] }
+        daily: { anyOf: [{ type: array, minItems: 30, maxItems: 30, items: { $ref: '#/components/schemas/StaffMarketingOverviewDay' } }, { type: 'null' }], description: "The 30 completed UTC days ending at through, oldest first." }
+        monthly: { anyOf: [{ type: array, minItems: 12, maxItems: 12, items: { $ref: '#/components/schemas/StaffMarketingOverviewMonth' } }, { type: 'null' }], description: "The 12 completed UTC calendar months before the current one, oldest first. There is no month to date." }
+        referrers: { anyOf: [{ $ref: '#/components/schemas/StaffMarketingOverviewSources' }, { type: 'null' }] }
+        campaigns: { anyOf: [{ $ref: '#/components/schemas/StaffMarketingOverviewSources' }, { type: 'null' }] }
+        channels: { anyOf: [{ $ref: '#/components/schemas/StaffMarketingOverviewSources' }, { type: 'null' }] }
+        section_status: { $ref: '#/components/schemas/StaffMarketingOverviewSectionStatus' }
+    StaffMarketingOverviewWindow:
+      type: object
+      required: [since, until]
+      description: A half-open UTC interval of whole days, [since, until).
+      properties:
+        since: { type: string, format: date-time }
+        until: { type: string, format: date-time }
+    StaffMarketingOverviewFunnel:
+      type: object
+      required: [steps, demos, cloud_excluded_browsers]
+      description: The acquisition chain over the 30 completed days against the 30 before them. Change is (count - previous_count) / previous_count and share is count over the previous step's count; both are null where either figure is unknown or the base is not positive.
+      properties:
+        steps: { type: array, minItems: 5, maxItems: 5, items: { $ref: '#/components/schemas/StaffMarketingOverviewStep' }, description: "In this order: unique_browsers, activations, screens, playlists, paid." }
+        demos: { $ref: '#/components/schemas/StaffMarketingOverviewDemos' }
+        cloud_excluded_browsers: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "Distinct browsers from cloud and hosting networks that would otherwise qualify. A diagnostic, not people: it is not added to unique_browsers or any step." }
+    StaffMarketingOverviewStep:
+      type: object
+      required: [key, label, count, previous_count, change, share]
+      properties:
+        key: { type: string, enum: [unique_browsers, activations, screens, playlists, paid] }
+        label: { type: string }
+        count: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }] }
+        previous_count: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "The same figure for the 30 days before; null where unknown, including a unique-browsers comparison the retained site history does not cover." }
+        change: { anyOf: [{ type: number }, { type: 'null' }] }
+        share: { anyOf: [{ type: number, minimum: 0 }, { type: 'null' }] }
+    StaffMarketingOverviewDemos:
+      type: object
+      required: [count, previous_count, change]
+      description: "The standalone Demos requested box: the enrolled-organization lead total of the Pipeline funnel, not the daily demo requests."
+      properties:
+        count: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }] }
+        previous_count: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }] }
+        change: { anyOf: [{ type: number }, { type: 'null' }] }
+    StaffMarketingOverviewTotals:
+      type: object
+      required: [as_of, cards]
+      properties:
+        as_of: { anyOf: [{ type: string, format: date-time }, { type: 'null' }], description: "The oldest creation-source watermark behind the cumulative and added figures; null when none was read." }
+        cards: { type: array, minItems: 4, maxItems: 4, items: { $ref: '#/components/schemas/StaffMarketingOverviewTotal' }, description: "In this order: agent_enrollments, projects, users, screens." }
+    StaffMarketingOverviewTotal:
+      type: object
+      required: [key, label, total, added_30d]
+      properties:
+        key: { type: string, enum: [agent_enrollments, projects, users, screens] }
+        label: { type: string }
+        total: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "All time, as of until." }
+        added_30d: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "Added over the 30 completed days." }
+    StaffMarketingOverviewDay:
+      type: object
+      required: [date, unique_browsers, activations, demos]
+      properties:
+        date: { type: string, format: date, pattern: '^\d{4}-\d{2}-\d{2}$', description: "UTC day." }
+        unique_browsers: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }] }
+        activations: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "Agent enrollments." }
+        demos: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "Demo requests." }
+    StaffMarketingOverviewMonth:
+      type: object
+      required: [month, unique_browsers, activations]
+      properties:
+        month: { type: string, pattern: '^\d{4}-\d{2}$', description: "UTC calendar month, YYYY-MM." }
+        unique_browsers: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "Merged distinct browsers over the month, never a sum of days." }
+        activations: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "Agent enrollments." }
+    StaffMarketingOverviewSources:
+      type: object
+      required: [truncated, rows]
+      description: One ranked table by unique browsers, largest first, as the report engine ranked it. A row without unique browsers is not listed.
+      properties:
+        truncated: { type: boolean, description: "The report returned only its top rows." }
+        rows: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/StaffMarketingOverviewSource' } }
+    StaffMarketingOverviewSource:
+      type: object
+      required: [key, label, unique_browsers]
+      properties:
+        key: { type: string, description: "The value as the report engine returned it: a channel, a campaign or a referring host." }
+        label: { type: string, description: "The name to show: a known category by its name, any other value as received." }
+        unique_browsers: { type: integer, minimum: 1 }
+        referrer_page_count: { type: integer, minimum: 0, description: "Referrers only: how many distinct referring pages sent browsers from this host. Absent where the report has no count." }
+        referrer_page: { type: string, description: "Referrers only: the one referring page (host and path) when referrer_page_count is 1. Absent otherwise." }
+    StaffMarketingOverviewSectionStatus:
+      type: object
+      required: [funnel, totals, daily, monthly, referrers, campaigns, channels]
+      properties:
+        funnel: { $ref: '#/components/schemas/StaffMarketingOverviewSectionState' }
+        totals: { $ref: '#/components/schemas/StaffMarketingOverviewSectionState' }
+        daily: { $ref: '#/components/schemas/StaffMarketingOverviewSectionState' }
+        monthly: { $ref: '#/components/schemas/StaffMarketingOverviewSectionState' }
+        referrers: { $ref: '#/components/schemas/StaffMarketingOverviewSectionState' }
+        campaigns: { $ref: '#/components/schemas/StaffMarketingOverviewSectionState' }
+        channels: { $ref: '#/components/schemas/StaffMarketingOverviewSectionState' }
+    StaffMarketingOverviewSectionState:
+      type: object
+      required: [state, as_of, reason]
+      description: >-
+        Freshness of one section. ok: the newest refresh renewed it and every figure is known. partial: it has never been read
+        completely, so the figures that are known are served and the others are null. stale: the value is the last complete
+        read, kept because the newest refresh failed or left figures unknown, or because it is older than two refresh
+        intervals. unavailable: the section is null because nothing has been read.
+      properties:
+        state: { type: string, enum: [ok, partial, stale, unavailable] }
+        as_of: { anyOf: [{ type: string, format: date-time }, { type: 'null' }], description: "When the section's value was read; null when unavailable." }
+        reason: { anyOf: [{ type: string, maxLength: 400 }, { type: 'null' }], description: "Which figures are unknown and which reads failed, by stable name; null when ok. It never carries a cause." }
+    DashboardKioskTokenStatus:
+      type: object
+      required: [configured, hint, created_at, rotated_at, first_used_at, last_used_at]
+      description: The signed-in staff person's dashboard link token. It never carries the token or its digest.
+      properties:
+        configured: { type: boolean }
+        hint: { anyOf: [{ type: string, minLength: 4, maxLength: 4 }, { type: 'null' }], description: "The last four characters of the token; null when none is configured." }
+        created_at: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
+        rotated_at: { anyOf: [{ type: string, format: date-time }, { type: 'null' }], description: "When the token was last replaced; null when it never was." }
+        first_used_at: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
+        last_used_at: { anyOf: [{ type: string, format: date-time }, { type: 'null' }], description: "Updated at most once a minute." }
+    DashboardKioskTokenCreated:
+      type: object
+      required: [token, hint, created_at, replaced]
+      description: The new dashboard link token. This response is the only time the token is shown.
+      properties:
+        token: { type: string, pattern: '^sr_dash_[A-Za-z0-9_-]{43}$', description: "sr_dash_ plus 43 base64url characters (256 random bits). Send it as Authorization: Bearer to the kiosk feed routes only." }
+        hint: { type: string, minLength: 4, maxLength: 4, description: "The last four characters of the token." }
+        created_at: { type: string, format: date-time }
+        replaced: { type: boolean, description: "True when this replaced an earlier token, which no longer works." }
+    DashboardKioskTokenListItem:
+      type: object
+      required: [user_id, display_name, hint, created_at, last_used_at]
+      properties:
+        user_id: { type: string }
+        display_name: { type: string, maxLength: 80 }
+        hint: { type: string, minLength: 4, maxLength: 4 }
+        created_at: { type: string, format: date-time }
+        last_used_at: { anyOf: [{ type: string, format: date-time }, { type: 'null' }], description: "Null when the token was never used." }
+    DashboardStaffName:
+      type: object
+      additionalProperties: false
+      required: [name, deleted]
+      properties:
+        name: { type: string, description: The name the record carries. }
+        deleted: { type: boolean, description: True when the record was deleted and the name comes from its tombstone. }
+    DashboardStaffNames:
+      type: object
+      additionalProperties: false
+      required: [names, as_of]
+      properties:
+        names:
+          type: object
+          description: Names keyed by identifier.
+          additionalProperties:
+            $ref: '#/components/schemas/DashboardStaffName'
+        as_of: { type: string, format: date-time }
+    DashboardKioskTokenList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/DashboardKioskTokenListItem' } }
     DashboardStaffMemberList:
       type: object
       additionalProperties: false
@@ -20888,6 +21992,7 @@ components:
           - account_delete
           - staff_grant
           - staff_action
+          - dashboard_token
           - oauth_authorization_approval
           - oauth_authorization_denial
           - service_client_change
@@ -20895,7 +22000,7 @@ components:
         subject_id:
           type: string
           minLength: 1
-          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id. kind staff_grant is staff only and requires the added person's email address. kind staff_action requires the specific prepared request_id. kinds oauth_authorization_approval and oauth_authorization_denial require the authorization id (oaz_...). kind service_client_change requires the service client id, or the project id when creating a client. kind review_policy_change requires the project id (turning Require review for agent changes off)."
+          description: "The subject the reauthentication binds to. kind account_delete requires the signed-in person's user id. kind staff_grant is staff only and requires the added person's email address. kind staff_action requires the specific prepared request_id. kind dashboard_token is staff only and requires the signed-in staff person's user id (creating or replacing a dashboard link token). kinds oauth_authorization_approval and oauth_authorization_denial require the authorization id (oaz_...). kind service_client_change requires the service client id, or the project id when creating a client. kind review_policy_change requires the project id (turning Require review for agent changes off)."
     DashboardReauthentication:
       type: object
       additionalProperties: false
@@ -22356,6 +23461,38 @@ components:
           anyOf:
           - { $ref: "#/components/schemas/PlaylistAudioWrite" }
           - { type: "null" }
+    PlaylistStructurePatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: >-
+        A playlist's structure and nothing a page shows (patchPlaylistStructure).
+        Omitted members are kept. A supplied name replaces the name. A supplied
+        pages is the complete new order of the pages the playlist holds: a stored
+        page it omits is removed. Page content (canvas, transition, audio_cue,
+        primitives, comments) and the soundtrack cannot be sent and are always the
+        stored ones.
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        pages: { type: array, minItems: 1, maxItems: 100, description: "Every page that stays, in play order. An id the playlist does not hold, or one listed twice, is invalid_request at pages[i].id. The result must still satisfy the playlist rules: at least one ordinary page with no visibility, at most 16 ad slot pages, an audio_end page keeps its audio_cue.", items: { $ref: "#/components/schemas/PlaylistPageStructure" } }
+    PlaylistPageStructure:
+      type: object
+      additionalProperties: false
+      required: [id]
+      description: >-
+        One page that stays, and the two page settings a person changes. advance
+        replaces the page's advance when present and keeps it when omitted; an ad
+        slot page has none. visibility replaces the page's visibility when an
+        object, removes it when null and keeps it when omitted. A visibility
+        object that only sets enabled true is a no-op and is rejected: send null
+        to remove the rules.
+      properties:
+        id: { type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$", description: "A page the playlist holds; listed once." }
+        advance: { $ref: "#/components/schemas/PlaylistAdvanceWrite" }
+        visibility:
+          anyOf:
+          - { $ref: "#/components/schemas/PageVisibility" }
+          - { type: "null" }
     PlaylistPage:
       type: object
       additionalProperties: false
@@ -23074,6 +24211,8 @@ components:
         audio: { $ref: "#/components/schemas/PlaylistAudio" }
         approved_revision: { type: integer, minimum: 0, description: "The revision a person approved; it equals revision for every playlist that can reach a screen. 0: proposed by a Propose credential and never approved, so no screen can use it (playlist_not_approved) and the runtime treats it as missing." }
         approval: { $ref: "#/components/schemas/PlaylistApproval" }
+        created_at: { type: string, format: date-time, description: "When the playlist was created. Read-only." }
+        updated_at: { type: string, format: date-time, description: "When the playlist's name, pages or soundtrack last changed. Read-only." }
     PlaylistV2List: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/PlaylistV2" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     PlaylistAudioWrite:
       type: object
@@ -24614,7 +25753,7 @@ components:
     MediaCommit: { type: object, additionalProperties: false, required: [content_type, bytes, sha256], description: "Declares only what the server can re-verify against the stored object byte for byte. Codec identity is not declared here: the server derives it from the container during asynchronous verification, so a client cannot assert a codec that drives player behaviour.", properties: { content_type: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg] }, bytes: { type: integer, minimum: 1, maximum: 1073741824 }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" } } }
     MediaUploadSession: { type: object, additionalProperties: false, required: [id, operation, upload_url, method, headers, expires_at], properties: { id: { type: string }, operation: { $ref: "#/components/schemas/Operation" }, upload_url: { type: string, format: uri }, method: { type: string, enum: [PUT] }, headers: { type: object, additionalProperties: { type: string }, description: Exact signed request headers; clients must send every field verbatim. }, expires_at: { type: string, format: date-time } } }
     MediaUploadSource: { type: object, additionalProperties: false, required: [filename, content_type, sha256, bytes], description: "Verified original upload identity when ingest normalized EXIF orientation. Read-only; use it to recognize retries. The ready media digest, size and type describe the normalized delivery bytes.", properties: { filename: { type: string }, source_filename: { type: string }, content_type: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer, minimum: 1 } } }
-    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { project_id: { type: string }, tags: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 10800000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, folder_id: { type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. Move files with POST /api/media/move." }, revision: { type: integer }, state: { type: string, enum: [ready] }, review_state: { type: string, enum: [pending], description: "pending: uploaded, or its tags or folder changed, by a Propose credential and waiting for a person's approval. Tag, folder and all selectors of approved playlists resolve it by the tags and folder it had when last approved (new media by none) until a person approves the change, so the change neither adds nor removes what they play. Absent means approved." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
+    Media: { type: object, additionalProperties: false, required: [id, filename, primitive, content_type, operation_id, sha256, bytes, revision, state, created_at, updated_at], properties: { project_id: { type: string }, tags: { type: array, maxItems: 32, uniqueItems: true, items: { type: string, pattern: "^[A-Za-z0-9]{1,32}$" } }, id: { type: string }, filename: { type: string, description: "Stored file name. Derived from source_filename plus the stored extension when a source_filename was declared with a different extension." }, source_filename: { type: string, description: "Original file name as declared at upload, or the uploaded filename when ingest normalizes orientation. Absent for untransformed uploads that declared none and for generated stills. This is the human handle for filename-to-id lookups." }, upload_source: { allOf: [{ $ref: '#/components/schemas/MediaUploadSource' }], readOnly: true }, primitive: { type: string, enum: [image, video, audio], description: "audio is an MP3 soundtrack track. It is referenced only by a playlist audio soundtrack, never placed on a page (docs/playlist-audio.md)." }, content_type: { type: string }, operation_id: { type: string }, sha256: { type: string, pattern: "^[a-f0-9]{64}$" }, bytes: { type: integer }, width: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic width in pixels. Non-default EXIF orientation is applied once at ingest and delivered as lossless WebP without orientation metadata. Present for image and video media; absent for audio." }, height: { type: integer, minimum: 1, description: "Verified immutable display-oriented intrinsic height in pixels. Present for image and video media; absent for audio." }, duration_ms: { type: integer, minimum: 1, description: "Verified duration; present for ready video and audio media. Audio duration is 1000 through 10800000 ms." }, codecs: { type: string, maxLength: 128, pattern: "^[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5}(,[A-Za-z0-9]{3,9}(\\.[A-Za-z0-9]{1,10}){0,5})*$", description: "Verified RFC 6381 codec list derived from the stored bytes, never declared by the client. Always present for ready video media: a video whose codec cannot be established is rejected at commit rather than stored without it. Always mp3 for ready audio media. Absent for images, which have no codec." }, tag: { type: string, pattern: "^[A-Za-z0-9]{1,32}$", description: Optional mutable selector tag. Absent when the object is untagged. }, folder_id: { type: string, description: "The media folder holding this file (GET /api/media-folders); absent at the library root. A playlist selector by:folder plays a folder's files. List a folder's files with GET /api/media?folder=ID. Move files with POST /api/media/move." }, revision: { type: integer }, state: { type: string, enum: [ready] }, review_state: { type: string, enum: [pending], description: "pending: uploaded, or its tags or folder changed, by a Propose credential and waiting for a person's approval. Tag, folder and all selectors of approved playlists resolve it by the tags and folder it had when last approved (new media by none) until a person approves the change, so the change neither adds nor removes what they play. Absent means approved." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the media was last used on glass (an accepted playback start). Absent until first use. Read-only." } } }
     MediaList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/Media" } }, next_cursor: { anyOf: [{ type: string }, { type: "null" }], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after." } } }
     SupportHours: {"type": "object", "additionalProperties": false, "required": ["timezone", "start", "end", "weekdays", "excludes_bc_holidays"], "properties": {"timezone": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "weekdays": {"type": "array", "items": {"type": "string"}}, "excludes_bc_holidays": {"type": "boolean"}}}
     SupportStatus: {"type": "object", "additionalProperties": false, "required": ["chat_allowed", "available", "staffed", "hours", "human_wait_seconds", "docs_url"], "properties": {"chat_allowed": {"type": "boolean", "description": "This project can start or continue a conversation now. False where support chat is switched off in this environment."}, "available": {"type": "boolean"}, "staffed": {"type": "boolean"}, "hours": {"$ref": "#/components/schemas/SupportHours"}, "human_wait_seconds": {"type": "integer", "minimum": 0}, "docs_url": {"type": "string"}}}
