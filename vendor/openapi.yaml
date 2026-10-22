@@ -146,6 +146,8 @@ paths:
           maxLength: 200
       operationId: previewProjectDeletionAgent
       description: Returns current confirmation details, deletion blockers and archived devices that will be disconnected.
+        allowed is false, with a reason, when the caller may not delete the project (only its owner or an administrator of its
+        organization may; for an agent, its responsible person) or a blocker remains.
       security:
       - projectBearer: []
       - dashboardSession: []
@@ -3572,10 +3574,14 @@ paths:
     delete:
       x-screenrig-access: write
       operationId: deleteProjectAgent
-      description: Requires the target membership project capability, the current name and revision, zero non-archived screens,
-        no credit, reservations or debt in its own wallet and no live advertising. A negative balance run up under free or
-        launch terms does not block; deletion writes it off with a project_delete_writeoff ledger entry. Queues member notices
-        and uses the irreversible tombstone.
+      description: Only the project's owner or an administrator of its organization may delete it; any other caller is refused
+        with forbidden. A person must also be a member of the project. An agent needs the target membership project capability
+        and deletes for its responsible person, who must be the owner or an organization administrator; an agent without a
+        responsible person cannot delete, except the agent that enrolled the project while no person has accepted its enrollment.
+        Also requires the current name and revision, zero non-archived screens, no credit,
+        reservations or debt in its own wallet and no live advertising. A negative balance run up under free or launch terms
+        does not block; deletion writes it off with a project_delete_writeoff ledger entry. Queues member notices and uses
+        the irreversible tombstone.
       security:
       - projectBearer: []
       - dashboardSession: []
@@ -15559,6 +15565,8 @@ paths:
           maxLength: 200
       operationId: previewProjectDeletionAgentInProject
       description: Returns current confirmation details, deletion blockers and archived devices that will be disconnected.
+        allowed is false, with a reason, when the caller may not delete the project (only its owner or an administrator of its
+        organization may; for an agent, its responsible person) or a blocker remains.
       security:
       - projectBearer: []
       responses:
@@ -15797,10 +15805,14 @@ paths:
     delete:
       x-screenrig-access: write
       operationId: deleteProjectAgentInProject
-      description: Requires the target membership project capability, the current name and revision, zero non-archived screens,
-        no credit, reservations or debt in its own wallet and no live advertising. A negative balance run up under free or launch
-        terms does not block; deletion writes it off with a project_delete_writeoff ledger entry. Queues member notices and
-        uses the irreversible tombstone.
+      description: Only the project's owner or an administrator of its organization may delete it; any other caller is refused
+        with forbidden. A person must also be a member of the project. An agent needs the target membership project capability
+        and deletes for its responsible person, who must be the owner or an organization administrator; an agent without a
+        responsible person cannot delete, except the agent that enrolled the project while no person has accepted its enrollment.
+        Also requires the current name and revision, zero non-archived screens, no credit,
+        reservations or debt in its own wallet and no live advertising. A negative balance run up under free or launch terms
+        does not block; deletion writes it off with a project_delete_writeoff ledger entry. Queues member notices and uses
+        the irreversible tombstone.
       security:
       - projectBearer: []
       responses:
@@ -19061,8 +19073,11 @@ components:
             $ref: '#/components/schemas/ArchivedProjectDevice'
         allowed:
           type: boolean
+          description: Whether the caller may delete the project now. False when the caller is neither the project's owner nor
+            an administrator of its organization (for an agent, its responsible person), or when a deletion blocker remains.
         reason:
           type: string
+          description: Why allowed is false.
     ArchivedProjectDevice:
       type: object
       additionalProperties: false
@@ -20844,7 +20859,7 @@ components:
         section_status: { $ref: '#/components/schemas/DashboardFeedOperationalStatusSectionStatus' }
     DashboardFeedOperationalStatusSections:
       type: object
-      required: [edge, components, series, nodes, hosts, dependencies, queues, storage, traffic24h, latency, thresholds]
+      required: [edge, components, series, nodes, hosts, dependencies, datastores, queues, storage, traffic24h, latency, thresholds]
       properties:
         edge: { anyOf: [{ $ref: '#/components/schemas/DashboardFeedEdge' }, { type: 'null' }], description: "Edge totals over the last window_seconds of complete 10-second counter buckets. Refreshes every 5 seconds." }
         components: { anyOf: [{ type: array, maxItems: 7, items: { $ref: '#/components/schemas/DashboardFeedComponent' } }, { type: 'null' }], description: "Exactly seven rows, in this order: api, media, static, streams, telemetry, other, total. A component is a group of edge lanes: api is backend; media is media; static is static (Player, site, dashboard, static resources); streams is stream; telemetry is log, otel and query; other is apps, edge and none. Refreshes every 5 seconds; p95_ms every 60 seconds." }
@@ -20852,6 +20867,7 @@ components:
         nodes: { anyOf: [{ type: array, maxItems: 8, items: { $ref: '#/components/schemas/DashboardFeedNode' } }, { type: 'null' }], description: "Edge proxy nodes that write counters. Refreshes every 5 seconds." }
         hosts: { anyOf: [{ type: array, maxItems: 24, items: { $ref: '#/components/schemas/DashboardFeedHost' } }, { type: 'null' }], description: "Backend, worker and proxy hosts. Hosts that are not up come first, then by role (api, worker, proxy) and id. Refreshes every 5 seconds." }
         dependencies: { anyOf: [{ type: array, maxItems: 3, items: { $ref: '#/components/schemas/DashboardFeedDependency' } }, { type: 'null' }], description: "Data stores the backend depends on, in the order mongo, valkey, clickhouse. Refreshes every 5 seconds." }
+        datastores: { anyOf: [{ type: array, maxItems: 3, items: { $ref: '#/components/schemas/DashboardFeedDatastore' } }, { type: 'null' }], description: "ClickHouse, MongoDB and Valkey, in that order: utilisation and detail read from each datastore itself. Refreshes every 15 seconds." }
         queues: { anyOf: [{ type: array, maxItems: 3, items: { $ref: '#/components/schemas/DashboardFeedQueue' } }, { type: 'null' }], description: "In the order revocation_outbox, projection, ingest_lag. Refreshes every 60 seconds." }
         storage: { anyOf: [{ type: array, maxItems: 2, items: { $ref: '#/components/schemas/DashboardFeedStorage' } }, { type: 'null' }], description: "Bytes held per object store, from accounting. Refreshes every 300 seconds." }
         traffic24h: { anyOf: [{ $ref: '#/components/schemas/DashboardFeedTraffic24h' }, { type: 'null' }], description: "Edge traffic over the last 24 hours. Refreshes every 60 seconds." }
@@ -20859,7 +20875,7 @@ components:
         thresholds: { anyOf: [{ $ref: '#/components/schemas/DashboardFeedThresholds' }, { type: 'null' }], description: "The limits the wall colors against. When null, a client applies no fault color." }
     DashboardFeedOperationalStatusSectionStatus:
       type: object
-      required: [edge, components, series, nodes, hosts, dependencies, queues, storage, traffic24h, latency, thresholds]
+      required: [edge, components, series, nodes, hosts, dependencies, datastores, queues, storage, traffic24h, latency, thresholds]
       properties:
         edge: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
         components: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
@@ -20867,6 +20883,7 @@ components:
         nodes: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
         hosts: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
         dependencies: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
+        datastores: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
         queues: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
         storage: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
         traffic24h: { $ref: '#/components/schemas/DashboardFeedSectionStatus' }
@@ -21010,6 +21027,71 @@ components:
       required: [server_error_rate_fault]
       properties:
         server_error_rate_fault: { type: number, minimum: 0, maximum: 1, description: "A server_error_rate above this is a fault. 0.01." }
+    DashboardFeedDatastore:
+      type: object
+      required: [id, state, version, uptime_seconds, read_at, cpu_percent, memory_percent, memory_used_bytes, memory_total_bytes, disk_percent, disk_used_bytes, disk_total_bytes, connections, operations_per_second, groups, tables]
+      description: >-
+        One datastore, read from the datastore itself: the headline utilisation, then the detail it exposes as groups of figures and
+        tables. The backend chooses the detail; a client renders groups and tables as given, formats each value by its unit and never
+        relies on a particular figure being there. A figure the datastore did not return, or that needs a second sample (a rate), is null.
+      properties:
+        id: { type: string, enum: [clickhouse, mongo, valkey] }
+        state: { type: string, enum: [up, partial, down], description: "up: every read answered. partial: the datastore answered but some reads were refused or failed; their figures are null and their groups and tables are left out. down: it did not answer; every figure is null and groups and tables are empty." }
+        version: { anyOf: [{ type: string, maxLength: 64 }, { type: 'null' }], description: "The server version the datastore reports." }
+        uptime_seconds: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }] }
+        read_at: { anyOf: [{ type: string, format: date-time }, { type: 'null' }], description: "When the datastore last answered; null when it has not since this backend started." }
+        cpu_percent: { anyOf: [{ type: number, minimum: 0, maximum: 100 }, { type: 'null' }], description: "Share of the datastore server's CPU that is busy. ClickHouse: the host's CPU. MongoDB: the mongod process over the host's cores. Valkey: the server process as a share of one core, because it runs commands on one thread. Null on the first read, which has nothing to compare against." }
+        memory_percent: { anyOf: [{ type: number, minimum: 0, maximum: 100 }, { type: 'null' }], description: "memory_used_bytes as a share of memory_total_bytes." }
+        memory_used_bytes: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "ClickHouse: host memory in use. MongoDB: mongod resident memory. Valkey: used_memory." }
+        memory_total_bytes: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "ClickHouse: host memory. MongoDB: host memory. Valkey: maxmemory, or the host's memory when maxmemory is 0." }
+        disk_percent: { anyOf: [{ type: number, minimum: 0, maximum: 100 }, { type: 'null' }], description: "disk_used_bytes as a share of disk_total_bytes. Null for Valkey, which reports no disk." }
+        disk_used_bytes: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "Bytes used on the disk that holds the datastore's data." }
+        disk_total_bytes: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }] }
+        connections: { anyOf: [{ type: integer, minimum: 0 }, { type: 'null' }], description: "Client connections open now." }
+        operations_per_second: { anyOf: [{ type: number, minimum: 0 }, { type: 'null' }], description: "ClickHouse: queries. MongoDB: operations of every counted kind. Valkey: commands." }
+        groups: { type: array, maxItems: 12, items: { $ref: '#/components/schemas/DashboardFeedDatastoreGroup' }, description: "Headline figures by topic, in display order." }
+        tables: { type: array, maxItems: 8, items: { $ref: '#/components/schemas/DashboardFeedDatastoreTable' }, description: "Detail rows, in display order." }
+    DashboardFeedDatastoreGroup:
+      type: object
+      required: [id, label, figures]
+      properties:
+        id: { type: string, maxLength: 32 }
+        label: { type: string, maxLength: 40 }
+        figures: { type: array, maxItems: 24, items: { $ref: '#/components/schemas/DashboardFeedDatastoreFigure' } }
+    DashboardFeedDatastoreFigure:
+      type: object
+      required: [id, label, unit, value, text]
+      description: >-
+        One figure. The value is raw, never formatted: bytes are bytes, rates are per second, a percent is 0 to 100 and a ratio is a
+        proportion where 1 is 100% (a share is 0 to 1; memory fragmentation can exceed 1).
+      properties:
+        id: { type: string, maxLength: 48 }
+        label: { type: string, maxLength: 48 }
+        unit: { type: string, enum: [count, bytes, bytes_per_second, per_second, percent, ratio, seconds, ms, text] }
+        value: { anyOf: [{ type: number }, { type: 'null' }], description: "Null when the figure is unknown, and for unit text." }
+        text: { anyOf: [{ type: string, maxLength: 64 }, { type: 'null' }], description: "The value of a unit text figure; null for every other unit." }
+    DashboardFeedDatastoreTable:
+      type: object
+      required: [id, label, columns, rows]
+      properties:
+        id: { type: string, maxLength: 32 }
+        label: { type: string, maxLength: 40 }
+        columns: { type: array, maxItems: 10, items: { $ref: '#/components/schemas/DashboardFeedDatastoreColumn' } }
+        rows: { type: array, maxItems: 50, items: { $ref: '#/components/schemas/DashboardFeedDatastoreRow' }, description: "Largest first; empty when there is nothing to list." }
+    DashboardFeedDatastoreColumn:
+      type: object
+      required: [id, label, unit]
+      properties:
+        id: { type: string, maxLength: 32 }
+        label: { type: string, maxLength: 32 }
+        unit: { type: string, enum: [count, bytes, bytes_per_second, per_second, percent, ratio, seconds, ms] }
+    DashboardFeedDatastoreRow:
+      type: object
+      required: [key, label, values]
+      properties:
+        key: { type: string, maxLength: 128, description: "Unique within the table." }
+        label: { type: string, maxLength: 128 }
+        values: { type: array, maxItems: 10, items: { anyOf: [{ type: number }, { type: 'null' }] }, description: "One value per column, in column order; null when unknown." }
     DashboardFeedMarketingStats:
       type: object
       required: [schema, dashboard, environment, generated_at, refresh_seconds, sections, section_status]
@@ -22660,6 +22742,18 @@ components:
               type: boolean
         sign_in_policy:
           $ref: '#/components/schemas/SignInPolicy'
+        enrollment:
+          type: object
+          additionalProperties: false
+          required:
+          - agent_name
+          properties:
+            agent_name:
+              type: string
+              description: The name the enrolling agent gave itself (untrusted text), or empty when no agent waits to be bound.
+          description: Only on an agent enrollment's invitation. Accepting makes the person responsible for the agent that enrolled,
+            which then acts with the person's authority, including creating projects in and renaming the organizations they administer;
+            the page says so before the person accepts.
       description: Non-consuming inspection. person is null for links. Never reports signup verification state. Email modes are create_login or signed_in; links offer
         both, and resets offer reset.
       allOf:
