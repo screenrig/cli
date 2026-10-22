@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { childEnv } from "./child-env.js";
 
 export type OpenUrl = (url: string) => Promise<boolean>;
 export type OpenPath = (filePath: string) => Promise<boolean>;
@@ -12,11 +13,11 @@ const OPENER_SETTLE_MS = 2000;
  * opener that cannot start or exits non-zero, as xdg-open does with no
  * desktop, did not open anything, so the caller prints the URL instead.
  */
-export function spawnDetached(command: string, argv: string[], settleMs = OPENER_SETTLE_MS): Promise<boolean> {
+export function spawnDetached(command: string, argv: string[], settleMs = OPENER_SETTLE_MS, env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     let settled = false;
     const finish = (opened: boolean) => { if (!settled) { settled = true; resolve(opened); } };
-    const child = spawn(command, argv, { detached: true, stdio: "ignore", shell: false });
+    const child = spawn(command, argv, { detached: true, stdio: "ignore", shell: false, env: childEnv(env) });
     child.once("error", () => finish(false));
     child.once("exit", (code) => finish(code === 0));
     child.once("spawn", () => {

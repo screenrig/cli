@@ -14,7 +14,7 @@ import {
 } from "./compose/lint.js";
 
 export { LOOK_AT_THE_CONTACT_SHEET };
-import { ffmpegLookup, runProcessFor } from "./media/ffmpeg.js";
+import { ffmpegLookup, inputGuardArgs, runProcessFor, sniffedDemuxer } from "./media/ffmpeg.js";
 import { assertPlaylistValid } from "./playlist-validate.js";
 import { expandPlaylistPages } from "./playlist-templates.js";
 import { usageError } from "./problems.js";
@@ -737,7 +737,7 @@ async function videoPoster(file: string, frameMs: number, runtime?: CliRuntime):
     const seconds = Math.max(0, frameMs) / 1000;
     const result = await run({
       command: lookup.ffmpeg,
-      args: ["-hide_banner", "-loglevel", "error", "-y", "-ss", String(seconds), "-i", file, "-frames:v", "1", output],
+      args: ["-hide_banner", "-loglevel", "error", "-y", "-ss", String(seconds), ...inputGuardArgs(await sniffedDemuxer(file).catch(() => undefined)), "-i", file, "-frames:v", "1", output],
       timeoutMs: 15_000,
     });
     if (result.code !== 0) return undefined;

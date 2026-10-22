@@ -4,6 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { CliError } from "../problems.js";
 import { testTemp } from "../test-temp.js";
+import { inputGuardArgs } from "./ffmpeg.js";
 import { assertDeclaredTypeMatchesBytes, sniffMediaContainer } from "./sniff.js";
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
@@ -89,4 +90,25 @@ test("an audio claim is checked against the bytes, including container aliases",
   const png = path.join(dir, "cover.png");
   await writeFile(png, PNG);
   await assert.rejects(() => assertDeclaredTypeMatchesBytes(png, "audio/mpeg"), /bytes are a PNG image/);
+});
+
+test("a recognised container names the ffmpeg demuxer to force, and an ambiguous head names none", () => {
+  const wav = Buffer.concat([Buffer.from("RIFF"), Buffer.from([16, 0, 0, 0]), Buffer.from("WAVEfmt "), Buffer.alloc(8)]);
+  const flac = Buffer.concat([Buffer.from("fLaC"), Buffer.alloc(12)]);
+  const m4a = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypM4A "), Buffer.alloc(8)]);
+  for (const [bytes, demuxer] of [
+    [PNG, "png_pipe"], [JPEG, "image2"], [GIF, "gif"], [WEBP, "webp_pipe"], [MP4, "mov"], [MOV, "mov"], [HEIC, "mov"],
+    [m4a, "mov"], [WEBM, "matroska"], [wav, "wav"], [flac, "flac"],
+  ] as const) {
+    assert.equal(sniffMediaContainer(bytes)?.demuxer, demuxer);
+  }
+  // An ID3 tag prefixes MP3, AAC and FLAC alike, so nothing is forced.
+  const id3 = Buffer.concat([Buffer.from("ID3"), Buffer.alloc(13)]);
+  assert.equal(sniffMediaContainer(id3)?.demuxer, undefined);
+  assert.equal(sniffMediaContainer(Buffer.from("#EXTM3U\nhttp://internal.example/\n"))?.demuxer, undefined);
+});
+
+test("inputGuardArgs allows only the file protocol and adds -f for a known demuxer", () => {
+  assert.deepEqual(inputGuardArgs(), ["-protocol_whitelist", "file"]);
+  assert.deepEqual(inputGuardArgs("mov"), ["-protocol_whitelist", "file", "-f", "mov"]);
 });

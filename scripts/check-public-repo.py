@@ -175,6 +175,7 @@ def check_public_tree(errors: list[str]) -> None:
         "/home/" + "gersham/",
         ".codex-" + "tmp",
         ".test" + "runs/",
+        "/api/" + "staff",
     )
     for path in worktree_files():
         relative = path.relative_to(ROOT)

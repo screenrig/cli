@@ -1035,7 +1035,9 @@ async function serviceKeyFromFile(args: ParsedArgs, runtime: CliRuntime): Promis
 
 /**
  * A new secret goes to a new 0600 file, never to stdout. The file is created
- * before the request, so an unwritable path fails before a secret exists.
+ * before the request, so an unwritable path fails before a secret exists. The
+ * handle that created it stays open and receives the secret, so a path swapped
+ * for a link or another file in the meantime is never written through.
  */
 async function reserveSecretFile(args: ParsedArgs, runtime: CliRuntime): Promise<{ path: string; write(secret: string): Promise<void>; discard(): Promise<void> } | undefined> {
   const file = flagString(args.flags, "secret-file");
@@ -1043,14 +1045,15 @@ async function reserveSecretFile(args: ParsedArgs, runtime: CliRuntime): Promise
   const target = path.resolve(runtime.cwd(), file);
   let handle;
   try { handle = await open(target, "wx", 0o600); } catch (error) { throw fileError(`Cannot create --secret-file ${file}; it must not exist yet.`, error); }
-  await handle.close();
   return {
     path: target,
     write: async (secret) => {
-      const writer = await open(target, "w", 0o600);
-      try { await writer.writeFile(`${secret}\n`, "utf8"); await writer.sync(); } finally { await writer.close(); }
+      try { await handle.writeFile(`${secret}\n`, "utf8"); await handle.sync(); } finally { await handle.close(); }
     },
-    discard: () => rm(target, { force: true }),
+    discard: async () => {
+      await handle.close().catch(() => undefined);
+      await rm(target, { force: true });
+    },
   };
 }
 

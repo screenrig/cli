@@ -69,6 +69,72 @@ function asArgv(value: unknown): string[] | undefined {
     : undefined;
 }
 
+const NEXT_COMMAND_MAX_CHARS = 2048;
+
+/**
+ * The words of a command line made only of literal words, or undefined when a
+ * shell would interpret any of it: lists, pipes, redirects, substitutions,
+ * expansions, globs, comments, escapes of control characters. Quotes group
+ * words (single quotes literally, double quotes without `$`, backtick or
+ * backslash), the way `shellQuote` writes them.
+ */
+export function literalCommandWords(command: string): string[] | undefined {
+  const words: string[] = [];
+  let current = "";
+  let inWord = false;
+  let quote: string | undefined;
+  const chars = Array.from(command);
+  for (let i = 0; i < chars.length; i += 1) {
+    const ch = chars[i]!;
+    const code = ch.codePointAt(0)!;
+    if (code < 0x20 || code === 0x7f) {
+      return undefined;
+    }
+    if (quote === "'") {
+      if (ch === "'") quote = undefined;
+      else current += ch;
+    } else if (quote === '"') {
+      if (ch === '"') quote = undefined;
+      else if (ch === "$" || ch === "`" || ch === "\\" || ch === "!") return undefined;
+      else current += ch;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      inWord = true;
+    } else if (ch === " ") {
+      if (inWord) {
+        words.push(current);
+        current = "";
+        inWord = false;
+      }
+    } else if (ch === "\\") {
+      // Only an escaped quote (the middle of the '\'' that shellQuote writes for an embedded quote) is literal.
+      const escaped = chars[i + 1];
+      if (escaped !== "'") return undefined;
+      current += escaped;
+      inWord = true;
+      i += 1;
+    } else if (/^[A-Za-z0-9_./:=@%+,-]$/.test(ch)) {
+      current += ch;
+      inWord = true;
+    } else {
+      return undefined;
+    }
+  }
+  if (quote !== undefined) {
+    return undefined;
+  }
+  if (inWord) {
+    words.push(current);
+  }
+  return words;
+}
+
+/**
+ * A server `next` is a command for the agent to run, so it is accepted only
+ * as a plain `screenrig` command line: literal words, the executable named
+ * `screenrig`, and `argv` (the words after the executable) matching the text.
+ * Anything else is dropped, and the caller falls back to the CLI's own guidance.
+ */
 function asNext(value: unknown): ProblemNext | undefined {
   const rec = asRecord(value);
   if (!rec) {
@@ -76,11 +142,19 @@ function asNext(value: unknown): ProblemNext | undefined {
   }
   const command = asString(rec.command);
   const reason = asString(rec.reason);
-  if (!command || !reason) {
+  if (!command || !reason || command.length > NEXT_COMMAND_MAX_CHARS) {
+    return undefined;
+  }
+  const words = literalCommandWords(command);
+  if (!words || words[0] !== "screenrig") {
     return undefined;
   }
   const argv = asArgv(rec.argv);
-  return argv ? { command, reason, argv } : { command, reason };
+  if (!argv) {
+    return { command, reason };
+  }
+  const rest = words.slice(1);
+  return argv.length === rest.length && argv.every((word, index) => word === rest[index]) ? { command, reason, argv } : undefined;
 }
 
 /**
@@ -182,7 +256,7 @@ export function normalizeProblem(
     ...(limitedBy ? { access_limited_by: limitedBy } : {}),
     ...(retryable !== undefined ? { retryable } : {}),
     errors,
-    // The server's own next action always wins over local guidance.
+    // A valid server next action wins over local guidance; asNext drops any that is not a plain screenrig command.
     next: code === "project_required" ? { command: "screenrig project list", reason: "Select a project with project use ID or --project-id ID, then retry." } : asNext(rec?.next) ?? (missingCapability ? {
       command: "screenrig login",
       reason: `This sign-in lacks the ${missingCapability} capability. Sign in again and ask the person approving it in the dashboard to grant ${missingCapability}.`,

@@ -80,7 +80,7 @@ fs.createReadStream(null,{fd:3}).on('data', chunk => {
           event('Network.loadingFailed',{requestId:'asset',type:'Script',errorText:'net::ERR_FAILED',blockedReason:'csp'});
           event('Network.responseReceived',{response:{url:'https://example.test/fonts.ttf?family=Inter&token=sr_live_identifier_supersecret',status:404}});
           reply({exceptionDetails:{text:'Card did not render'}});
-        } else reply({result:{value:{pid:process.pid,profile,args:process.argv.slice(2),navigationUrl,fulfilled}}});
+        } else reply({result:{value:{pid:process.pid,profile,args:process.argv.slice(2),navigationUrl,fulfilled,screenrigEnv:Object.keys(process.env).filter(name=>/^screenrig_/i.test(name))}}});
         break;
       case 'Page.captureScreenshot': reply({data:Buffer.from('png').toString('base64')}); break;
       default: reply({});
@@ -194,4 +194,19 @@ test("render failures include console, exception and resource causes without cre
     assert.doesNotMatch(error.message, /hunter2|private-sig|supersecret|identifier/);
     return true;
   });
+});
+
+test("the preview browser does not inherit SCREENRIG_ credentials", unix, async t => {
+  const saved = { token: process.env.SCREENRIG_TOKEN, secret: process.env.SCREENRIG_CLIENT_SECRET };
+  process.env.SCREENRIG_TOKEN = "sr_live_never_in_a_browser";
+  process.env.SCREENRIG_CLIENT_SECRET = "sr_cs_never_in_a_browser";
+  try {
+    const env = await browserFixture(t);
+    const result = await withPreviewBrowser(env, browser => browser.render(HTML, 320, 180));
+    assert.deepEqual(result.result.screenrigEnv, []);
+  } finally {
+    for (const [name, value] of [["SCREENRIG_TOKEN", saved.token], ["SCREENRIG_CLIENT_SECRET", saved.secret]] as const) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  }
 });

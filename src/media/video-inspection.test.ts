@@ -189,3 +189,34 @@ for (const failure of ["bad-packets", "delayed-track", "probe-errors", "no-heade
     }
   });
 }
+
+test("the inspection runs open the snapshot with only the file protocol and the sniffed demuxer", async () => {
+  resetFfmpegToolchainCache();
+  for (const [name, bytes, demuxer] of [
+    ["recognised.mp4", Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypisom"), Buffer.alloc(40, 1)]), ["-f", "mov"]],
+    ["opaque.mp4", Buffer.from("original compressed video bytes"), []],
+  ] as const) {
+    const dir = await testTemp("video-guard-");
+    const source = path.join(dir, name);
+    await writeFile(source, bytes);
+    const { runtime, calls } = fakeRuntime(dir);
+    const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() });
+    try {
+      assert.equal(result.passthrough, true);
+      const reads = calls.filter((call) => call.args.some((arg) => arg.includes("screenrig-inspect-") || arg === "trace_headers"));
+      assert.ok(reads.length >= 3, "probe, packets and headers all read the snapshot");
+      const expected = ["-protocol_whitelist", "file", ...demuxer];
+      for (const call of reads) {
+        const at = call.args.indexOf("-protocol_whitelist");
+        assert.ok(at >= 0, `${name}: ${call.args.join(" ")}`);
+        assert.deepEqual(call.args.slice(at, at + expected.length), expected);
+        const input = call.args.includes("-i") ? call.args.indexOf("-i") : call.args.length - 1;
+        assert.ok(at + expected.length <= input, "the guard precedes the input");
+        assert.equal(call.args.slice(at + 2, input).filter((arg) => arg === "-f").length, demuxer.length / 2);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      if (result.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });
+    }
+  }
+});

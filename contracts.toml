@@ -9,6 +9,8 @@ repo = "backend"
 "assets/playlist-write.schema.json" = "packages/protocol/schema/playlist-write.schema.json"
 "assets/playlist-write-v2.schema.json" = "packages/protocol/schema/playlist-write-v2.schema.json"
 "src/generated/playlist-write-semantics.ts" = "packages/protocol/src/playlist-write-semantics.ts"
-"vendor/protocol/openapi.gen.ts" = "packages/protocol/src/openapi.gen.ts"
-"vendor/openapi.yaml" = "api/openapi.yaml"
+# The public OpenAPI: the contract without the staff routes. This repository
+# is public, so it never vendors api/openapi.yaml.
+"vendor/protocol/openapi.gen.ts" = "api/public/openapi.gen.ts"
+"vendor/openapi.yaml" = "api/public/openapi.yaml"
 "assets/screenrig.runtime.js" = "contracts/sdk/dist/screenrig.runtime.js"

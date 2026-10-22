@@ -4,7 +4,7 @@ import { copyFile, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { CliRuntime, RunProcessResult } from "../runtime.js";
-import { probeMedia, runProcessFor, type FfmpegToolchain, type MediaProbe } from "./ffmpeg.js";
+import { inputGuardArgs, probeMedia, runProcessFor, type FfmpegToolchain, type MediaProbe } from "./ffmpeg.js";
 import { planVideoDelivery, validateVideoOutput, type VideoOptions } from "./video-profile.js";
 
 // High-profile limits from FFmpeg libavcodec/h264_levels.c. All these levels
@@ -237,11 +237,11 @@ export async function inspectH264Passthrough(runtime: CliRuntime, toolchain: Ffm
     if (!candidate(probe, options)) return undefined;
     const packets = new VideoPacketInspection(probe), headers = new H264HeaderInspection(probe), run = runProcessFor(runtime);
     const packetResult = await run({ command: toolchain.ffprobe,
-      args: ["-v", "error", "-show_packets", "-show_entries", "packet=stream_index,pts_time,dts_time,duration_time,size,flags", "-of", "compact=p=0:nk=0", filePath],
+      args: ["-v", "error", ...inputGuardArgs(probe.inputDemuxer), "-show_packets", "-show_entries", "packet=stream_index,pts_time,dts_time,duration_time,size,flags", "-of", "compact=p=0:nk=0", filePath],
       timeoutMs: INSPECTION_TIMEOUT_MS, maxLineChars: MAX_LINE_CHARS, onStdoutLine: (line) => packets.line(line) });
     if (!completed(packetResult) || packetResult.stderrTail.trim() !== "" || !packets.finish()) return undefined;
     const headerResult = await run({ command: toolchain.ffmpeg,
-      args: ["-hide_banner", "-nostdin", "-nostats", "-xerror", "-loglevel", "level+info", "-copyts", "-i", filePath, "-map", "0:v:0", "-c:v", "copy", "-copytb", "1", "-bsf:v", "trace_headers", "-f", "null", "-"],
+      args: ["-hide_banner", "-nostdin", "-nostats", "-xerror", "-loglevel", "level+info", "-copyts", ...inputGuardArgs(probe.inputDemuxer), "-i", filePath, "-map", "0:v:0", "-c:v", "copy", "-copytb", "1", "-bsf:v", "trace_headers", "-f", "null", "-"],
       timeoutMs: INSPECTION_TIMEOUT_MS, maxLineChars: MAX_LINE_CHARS,
       onStdoutLine: () => false, onStderrLine: (line) => headers.line(line) });
     if (!completed(headerResult) || !headers.finish() || headers.packets !== packets.video.count || headers.bytes !== packets.video.bytes) return undefined;

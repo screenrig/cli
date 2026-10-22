@@ -6,6 +6,7 @@ import { usageError } from "../problems.js";
 import { redactText } from "../redact.js";
 import type { CliRuntime } from "../runtime.js";
 import {
+  inputGuardArgs,
   probeMedia,
   resolveCwebpToolchain,
   resolveFfmpegToolchain,
@@ -424,6 +425,7 @@ export function planAudioArgs(probe: MediaProbe, filePath: string, outputPath: s
   const channels = probe.audioChannels === 1 ? 1 : 2;
   return [
     "-hide_banner", "-nostdin", "-y",
+    ...inputGuardArgs(probe.inputDemuxer),
     "-i", filePath,
     "-map", "0:a:0", "-vn", "-sn", "-dn",
     "-map_metadata", "-1",
@@ -780,6 +782,7 @@ function planVideo(
   const size = delivery;
 
   const args = [
+    ...inputGuardArgs(probe.inputDemuxer),
     "-i", input,
     "-f", "mp4",
     "-vf", filter,
@@ -920,7 +923,7 @@ function planImageFfmpeg(
   // is markedly smaller than the same animation encoded frame by frame.
   const encoder = animated && toolchain.encoders.has("libwebp_anim") ? "libwebp_anim" : "libwebp";
 
-  const args = ["-i", input, "-f", "webp", "-vf", scale];
+  const args = [...inputGuardArgs(probe.inputDemuxer), "-i", input, "-f", "webp", "-vf", scale];
   if (!animated) {
     args.push("-frames:v", "1");
   } else {

@@ -22,6 +22,11 @@ export interface SniffedMedia {
   kind: "image" | "video" | "audio";
   /** Other declared types the same container legitimately carries. */
   alsoMatches?: readonly string[];
+  /**
+   * The ffmpeg demuxer for this container, forced with `-f` so ffmpeg does not
+   * re-guess from content. Absent where the signature does not name one.
+   */
+  demuxer?: string;
 }
 
 /** Bytes needed to classify every signature below. */
@@ -43,30 +48,30 @@ export function sniffMediaContainer(input: Uint8Array): SniffedMedia | undefined
     return undefined;
   }
   if (startsWith(head, PNG)) {
-    return { contentType: "image/png", description: "a PNG image", kind: "image" };
+    return { contentType: "image/png", description: "a PNG image", kind: "image", demuxer: "png_pipe" };
   }
   if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) {
-    return { contentType: "image/jpeg", description: "a JPEG image", kind: "image" };
+    return { contentType: "image/jpeg", description: "a JPEG image", kind: "image", demuxer: "image2" };
   }
   if (startsWith(head, "GIF87a") || startsWith(head, "GIF89a")) {
-    return { contentType: "image/gif", description: "a GIF image", kind: "image" };
+    return { contentType: "image/gif", description: "a GIF image", kind: "image", demuxer: "gif" };
   }
   if (startsWith(head, "RIFF")) {
     if (startsWith(head, "WEBP", 8)) {
-      return { contentType: "image/webp", description: "a WebP image", kind: "image" };
+      return { contentType: "image/webp", description: "a WebP image", kind: "image", demuxer: "webp_pipe" };
     }
     if (startsWith(head, "AVI ", 8)) {
-      return { contentType: "video/x-msvideo", description: "an AVI video", kind: "video" };
+      return { contentType: "video/x-msvideo", description: "an AVI video", kind: "video", demuxer: "avi" };
     }
     if (startsWith(head, "WAVE", 8)) {
-      return { contentType: "audio/wav", description: "a WAV audio file", kind: "audio", alsoMatches: ["audio/x-wav", "audio/wave"] };
+      return { contentType: "audio/wav", description: "a WAV audio file", kind: "audio", alsoMatches: ["audio/x-wav", "audio/wave"], demuxer: "wav" };
     }
     return undefined;
   }
   if (startsWith(head, "ftyp", 4)) {
     const brand = head.subarray(8, 12).toString("latin1").toLowerCase();
     if (brand === "m4a " || brand === "m4b ") {
-      return { contentType: "audio/mp4", description: "an M4A (ISO BMFF) audio file", kind: "audio", alsoMatches: ["audio/x-m4a", "audio/aac"] };
+      return { contentType: "audio/mp4", description: "an M4A (ISO BMFF) audio file", kind: "audio", alsoMatches: ["audio/x-m4a", "audio/aac"], demuxer: "mov" };
     }
     if (ISO_BMFF_IMAGE_BRANDS.has(brand)) {
       const avif = brand.startsWith("avi");
@@ -74,39 +79,41 @@ export function sniffMediaContainer(input: Uint8Array): SniffedMedia | undefined
         contentType: avif ? "image/avif" : "image/heic",
         description: avif ? "an AVIF image" : "a HEIF/HEIC image",
         kind: "image",
+        demuxer: "mov",
       };
     }
     // MP4, QuickTime, and 3GPP share the ISO base media container. The server
     // accepts `video/mp4`, and the transcoder re-encodes any of them, so they
     // all count as the mp4 family here.
-    return { contentType: "video/mp4", description: "an MP4/QuickTime (ISO BMFF) video", kind: "video" };
+    return { contentType: "video/mp4", description: "an MP4/QuickTime (ISO BMFF) video", kind: "video", demuxer: "mov" };
   }
   if (startsWith(head, EBML)) {
     // Matroska and WebM share the EBML container; the server type is video/webm.
-    return { contentType: "video/webm", description: "a Matroska/WebM video", kind: "video" };
+    return { contentType: "video/webm", description: "a Matroska/WebM video", kind: "video", demuxer: "matroska" };
   }
   if (startsWith(head, "OggS")) {
     // Ogg carries audio-only (Vorbis, Opus) as often as video; either claim fits.
-    return { contentType: "video/ogg", description: "an Ogg container", kind: "video", alsoMatches: ["audio/ogg", "audio/opus"] };
+    return { contentType: "video/ogg", description: "an Ogg container", kind: "video", alsoMatches: ["audio/ogg", "audio/opus"], demuxer: "ogg" };
   }
   if (startsWith(head, "fLaC")) {
-    return { contentType: "audio/flac", description: "a FLAC audio file", kind: "audio", alsoMatches: ["audio/x-flac"] };
+    return { contentType: "audio/flac", description: "a FLAC audio file", kind: "audio", alsoMatches: ["audio/x-flac"], demuxer: "flac" };
   }
   if (startsWith(head, "ID3")) {
+    // An ID3 tag prefixes MP3, ADTS AAC and FLAC alike, so no demuxer is forced.
     return { contentType: "audio/mpeg", description: "an MP3 audio file", kind: "audio", alsoMatches: ["audio/mp3"] };
   }
   // MPEG audio frame sync: 11 set bits. Layer bits 00 are ADTS AAC; 01..11 are
   // MPEG audio Layer III..I. JPEG (FF D8) was classified above.
   if (head[0] === 0xff && (head[1]! & 0xe0) === 0xe0) {
     return (head[1]! & 0x06) === 0
-      ? { contentType: "audio/aac", description: "an ADTS AAC audio stream", kind: "audio", alsoMatches: ["audio/x-aac"] }
-      : { contentType: "audio/mpeg", description: "an MP3 audio file", kind: "audio", alsoMatches: ["audio/mp3"] };
+      ? { contentType: "audio/aac", description: "an ADTS AAC audio stream", kind: "audio", alsoMatches: ["audio/x-aac"], demuxer: "aac" }
+      : { contentType: "audio/mpeg", description: "an MP3 audio file", kind: "audio", alsoMatches: ["audio/mp3"], demuxer: "mp3" };
   }
   if (startsWith(head, "BM")) {
-    return { contentType: "image/bmp", description: "a BMP image", kind: "image" };
+    return { contentType: "image/bmp", description: "a BMP image", kind: "image", demuxer: "bmp_pipe" };
   }
   if (startsWith(head, Buffer.from([0x49, 0x49, 0x2a, 0x00])) || startsWith(head, Buffer.from([0x4d, 0x4d, 0x00, 0x2a]))) {
-    return { contentType: "image/tiff", description: "a TIFF image", kind: "image" };
+    return { contentType: "image/tiff", description: "a TIFF image", kind: "image", demuxer: "tiff_pipe" };
   }
   return undefined;
 }

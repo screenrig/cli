@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { Readable } from "node:stream";
+import { childEnv } from "./child-env.js";
 import { fetchSignedRawPut, spawnRunProcess } from "./runtime.js";
+import { spawnDetached } from "./open-url.js";
+import { readFile, rm } from "node:fs/promises";
+import path from "node:path";
+import { testTemp } from "./test-temp.js";
 
 for (const stream of ["stdout", "stderr"] as const) {
   test(`process streaming bounds unterminated ${stream} lines`, async () => {
@@ -120,4 +125,37 @@ test("the real Fetch Request consumes verified bytes with bounded read-ahead", a
   await put({ ...signedRequest, headers: { "content-length": String(bytes.length) }, body: bytes });
   assert.equal(received, bytes.length);
   assert.equal(actual.digest("hex"), expected);
+});
+
+const CREDENTIAL_ENV = {
+  SCREENRIG_TOKEN: "sr_live_never_in_a_child",
+  SCREENRIG_CLIENT_ID: "scl_AAAAAAAAAAAAAAAAAAAAAAAA",
+  SCREENRIG_CLIENT_SECRET: "sr_cs_never_in_a_child",
+  SCREENRIG_CLIENT_KEY_FILE: "/home/user/service.jwk",
+  SCREENRIG_CONFIG: "/home/user/config.json",
+  screenrig_api_url: "https://api.screenrig.ai",
+};
+
+test("childEnv drops every SCREENRIG_ variable and keeps the rest", () => {
+  const env = childEnv({ ...CREDENTIAL_ENV, PATH: "/usr/bin", HOME: "/home/user", DISPLAY: ":0", NOT_SCREENRIG_X: "1" });
+  assert.deepEqual(env, { PATH: "/usr/bin", HOME: "/home/user", DISPLAY: ":0", NOT_SCREENRIG_X: "1" });
+});
+
+test("a spawned process receives the environment without SCREENRIG_ credentials", async () => {
+  const code = "process.stdout.write(JSON.stringify(Object.keys(process.env).filter((name) => /^screenrig_/i.test(name)).concat([process.env.KEEP ?? 'missing'])))";
+  const result = await spawnRunProcess({ ...process.env, ...CREDENTIAL_ENV, KEEP: "kept" })({ command: process.execPath, args: ["-e", code] });
+  assert.equal(result.code, 0);
+  assert.deepEqual(JSON.parse(result.stdout), ["kept"]);
+});
+
+test("a detached file opener receives the environment without SCREENRIG_ credentials", async () => {
+  const dir = await testTemp("opener-env-");
+  try {
+    const out = path.join(dir, "env.json");
+    const code = "require('node:fs').writeFileSync(process.argv[1], JSON.stringify(Object.keys(process.env).filter((name) => /^screenrig_/i.test(name))))";
+    assert.equal(await spawnDetached(process.execPath, ["-e", code, out], 2000, { ...process.env, ...CREDENTIAL_ENV }), true);
+    assert.deepEqual(JSON.parse(await readFile(out, "utf8")), []);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

@@ -2,6 +2,7 @@ import { loggingRunProcess, loggerOf } from "../log/logger.js";
 import { usageError } from "../problems.js";
 import { redactText } from "../redact.js";
 import type { CliRuntime, RunProcess, RunProcessResult } from "../runtime.js";
+import { readMediaHead, sniffMediaContainer } from "./sniff.js";
 
 /** Resolved external media toolchain plus the capabilities the planner needs. */
 export interface FfmpegToolchain {
@@ -229,8 +230,26 @@ async function probeCwebp(runtime: CliRuntime): Promise<CwebpToolchain | undefin
   };
 }
 
+/**
+ * Input options for every ffmpeg or ffprobe run that opens a user file, placed
+ * before the file. `-protocol_whitelist file` keeps a playlist or reference
+ * file the sniffer does not recognise (HLS, concat, SDP) from reaching a URL or
+ * any protocol but plain files; a sniffed container is demuxed as itself
+ * (`-f`) instead of being guessed again from its content.
+ */
+export function inputGuardArgs(demuxer?: string): string[] {
+  return ["-protocol_whitelist", "file", ...(demuxer ? ["-f", demuxer] : [])];
+}
+
+/** The ffmpeg demuxer for a file's recognised container, or undefined for an unrecognised head. */
+export async function sniffedDemuxer(filePath: string): Promise<string | undefined> {
+  return sniffMediaContainer(await readMediaHead(filePath))?.demuxer;
+}
+
 /** The single video stream and container facts the transcode planner uses. */
 export interface MediaProbe {
+  /** Demuxer forced on every ffmpeg run that reads this file; set by `probeMedia` for a recognised container. */
+  inputDemuxer?: string;
   hasVideo: boolean;
   hasAudio: boolean;
   codec: string;
@@ -406,10 +425,12 @@ export async function probeMedia(
   filePath: string,
 ): Promise<MediaProbe> {
   const run = runProcessFor(runtime);
+  const demuxer = await sniffedDemuxer(filePath).catch(() => undefined);
   const result = await run({
     command: toolchain.ffprobe,
     args: [
       "-v", "quiet",
+      ...inputGuardArgs(demuxer),
       "-print_format", "json",
       "-show_streams",
       "-show_format",
@@ -424,5 +445,6 @@ export async function probeMedia(
       }.`,
     );
   }
-  return parseProbePayload(result.stdout);
+  const probe = parseProbePayload(result.stdout);
+  return demuxer ? { ...probe, inputDemuxer: demuxer } : probe;
 }

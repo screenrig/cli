@@ -3,6 +3,7 @@ import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Readable, Writable } from "node:stream";
+import { childEnv } from "./child-env.js";
 import { usageError } from "./problems.js";
 import { redactText } from "./redact.js";
 
@@ -25,7 +26,7 @@ export async function withPreviewBrowser<T>(env: NodeJS.Dict<string>, work: (bro
   const profile = await mkdtemp(path.join(env.TMPDIR ?? tmpdir(), "screenrig-preview-"));
   // Chromium cannot start its own sandbox as root. Other users keep it enabled.
   const rootFlags = process.getuid?.() === 0 ? ["--no-sandbox"] : [];
-  const child = spawn(binary, ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-extensions", "--disable-dev-shm-usage", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", ...rootFlags, "--remote-debugging-pipe", `--user-data-dir=${profile}`, "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "about:blank"], { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
+  const child = spawn(binary, ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-extensions", "--disable-dev-shm-usage", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", ...rootFlags, "--remote-debugging-pipe", `--user-data-dir=${profile}`, "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "about:blank"], { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"], detached: process.platform !== "win32", env: childEnv() });
   const closed = new Promise<void>((resolve) => { child.once("close", () => resolve()); });
   const pending = new Map<number, { resolve(value: any): void; reject(error: Error): void }>();
   const listeners = new Set<(message: any) => void>();

@@ -16,7 +16,9 @@ is not required to contribute.
 - `package.json` defines the executable, Node engine and scripts. The committed
   version stays `0.1.0`; CI stamps CalVer on the artifact (`RELEASING.md`).
 - `contracts.toml` names the backend OpenAPI/protocol inputs; `contracts.sha256`
-  pins their bytes, including the built `assets/screenrig.runtime.js`.
+  pins their bytes, including the built `assets/screenrig.runtime.js`. The
+  OpenAPI is backend's public document (`api/public/`), which leaves out the
+  staff routes; `check:public` fails on any staff route in the tree.
 - `scripts/package-release.sh` builds the deterministic `screenrig-cli.tgz`: one
   minified `dist/bin.js` with the runtime dependencies inside (except the
   `@napi-rs/canvas-*` platform packages, fetched on first render per

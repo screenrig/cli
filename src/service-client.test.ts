@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, verify, type KeyObject } from "node:crypto";
+import { renameSync, symlinkSync } from "node:fs";
 import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -235,6 +236,34 @@ test("service-client create sends only a public key and writes a generated secre
     assert.equal(revoked.code, 0, revoked.stdout);
     assert.equal((JSON.parse(revoked.stdout) as { data: { propagation: string } }).data.propagation, "applied");
     assert.equal((await cli(dir, ["--json", "service-client", "remove-key", CLIENT, "--kid", "k1"], transport)).code, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("service-client writes the secret through the file it created, not through the path it reopens", async () => {
+  const dir = await testTemp("service-secret-swap-");
+  const fs: ConfigFs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: {} };
+  try {
+    const agentToken = "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_agent_manage_secret";
+    await writeConfigAtomic(path.join(dir, "screenrig", "config.json"), { api_url: API, project_id: PROJECT, project_name: "Screens",
+      organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization", token: agentToken }, fs);
+    const view = { id: CLIENT, project_id: PROJECT, name: "CI", capabilities: ["screens"], access: "read", state: "active", created_by: "agent:agt_X",
+      keys: [], secrets: [{ id: "css_AAAA", hint: "cdef", added_at: NOW.toISOString() }],
+      created_at: NOW.toISOString(), updated_at: NOW.toISOString(), authenticated_requests: 0, tokens_issued: 0 };
+    const victim = path.join(dir, "victim.txt");
+    await writeFile(victim, "victim\n", { mode: 0o644 });
+    const transport = new FakeTransport().on("POST", "/api/service-clients", () => {
+      // Between creating the file and receiving the secret, the path is replaced by a link.
+      renameSync(path.join(dir, "ci.secret"), path.join(dir, "ci.secret.original"));
+      symlinkSync(victim, path.join(dir, "ci.secret"));
+      return json(201, { client: view, secret: SECRET });
+    });
+    const created = await cli(dir, ["--json", "service-client", "create", "--name", "CI", "--capability", "screens", "--access", "read", "--secret-file", "ci.secret"], transport);
+    assert.equal(created.code, 0, created.stdout);
+    assert.equal(await readFile(victim, "utf8"), "victim\n", "the replacement target is untouched");
+    assert.equal((await readFile(path.join(dir, "ci.secret.original"), "utf8")).trim(), SECRET);
+    assert.equal((await stat(path.join(dir, "ci.secret.original"))).mode & 0o777, 0o600);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

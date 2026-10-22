@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { Readable, type Writable } from "node:stream";
+import { childEnv } from "./child-env.js";
 import type { Transport } from "./transport/types.js";
 import type { ConfigFs } from "./config.js";
 import type { OperationLogger } from "./log/types.js";
@@ -78,7 +79,7 @@ export type RunProcess = (request: RunProcessRequest) => Promise<RunProcessResul
 
 const STDERR_TAIL_LIMIT = 8192;
 
-export function spawnRunProcess(): RunProcess {
+export function spawnRunProcess(env: NodeJS.ProcessEnv = process.env): RunProcess {
   return (request) =>
     new Promise<RunProcessResult>((resolve) => {
       let child;
@@ -86,6 +87,7 @@ export function spawnRunProcess(): RunProcess {
         child = spawn(request.command, request.args, {
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
+          env: childEnv(env),
         });
       } catch (error) {
         resolve({

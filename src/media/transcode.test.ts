@@ -1378,3 +1378,53 @@ test("audio transcode names a missing LAME encoder and out-of-range lengths", as
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+/** Every ffprobe or ffmpeg run that opens `source`, with the input options that precede it. */
+function sourceReads(calls: RunProcessRequest[], source: string): Array<{ call: RunProcessRequest; before: string[] }> {
+  return calls
+    .filter((call) => call.args.includes(source))
+    .map((call) => ({ call, before: call.args.slice(0, call.args.indexOf(source)) }));
+}
+
+const MP4_HEAD = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypisom"), Buffer.alloc(40, 1)]);
+const PNG_HEAD = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]), Buffer.alloc(40, 1)]);
+const FLAC_HEAD = Buffer.concat([Buffer.from("fLaC"), Buffer.alloc(40, 1)]);
+
+test("ffprobe and ffmpeg open a source with only the file protocol, forcing the demuxer of a recognised container", async () => {
+  const cases = [
+    { name: "clip.mp4", bytes: MP4_HEAD, demuxer: "mov", probe: probeJson({}), encoder: "-c:v" },
+    { name: "poster.png", bytes: PNG_HEAD, demuxer: "png_pipe", probe: probeJson({ codec_name: "png", width: 64, height: 64, pix_fmt: "rgba", nb_frames: "1", avg_frame_rate: "0/0" }, { duration: "0", format_name: "png_pipe" }), encoder: "libwebp" },
+    { name: "theme.flac", bytes: FLAC_HEAD, demuxer: "flac", probe: audioProbe("flac", "flac"), encoder: "libmp3lame" },
+    // Bytes the sniffer does not recognise: the file protocol only, no forced demuxer.
+    { name: "playlist.mp4", bytes: Buffer.from("#EXTM3U\n#EXTINF:1,\nhttp://internal.example/a.ts\n"), demuxer: undefined, probe: probeJson({}), encoder: "-c:v" },
+  ];
+  for (const item of cases) {
+    resetFfmpegToolchainCache();
+    const dir = await testTemp("transcode-guard-");
+    const source = path.join(dir, item.name);
+    await writeFile(source, item.bytes);
+    const { runtime, calls } = fakeRuntime({ probe: item.probe, encoders: LAME_ENCODERS, outputProbe: item.name.endsWith(".flac") ? audioProbe("mp3", "mp3") : undefined });
+    let result;
+    try {
+      result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() });
+    } catch {
+      // A fake encode of a fake file may be refused after the runs under test.
+    }
+    try {
+      const reads = sourceReads(calls, source);
+      assert.ok(reads.some(({ call }) => call.command.endsWith("ffprobe")), `${item.name} is probed`);
+      assert.ok(reads.some(({ call }) => call.command.endsWith("ffmpeg")), `${item.name} is encoded`);
+      const expected = ["-protocol_whitelist", "file", ...(item.demuxer ? ["-f", item.demuxer] : [])];
+      for (const { call, before } of reads) {
+        const at = before.indexOf("-protocol_whitelist");
+        assert.ok(at >= 0, `${item.name}: ${call.command} carries -protocol_whitelist`);
+        assert.deepEqual(before.slice(at, at + expected.length), expected, `${item.name}: ${call.command}`);
+        const inputFlags = before.slice(at);
+        assert.equal(inputFlags.filter((arg) => arg === "-f").length, item.demuxer ? 1 : 0, `${item.name}: input options`);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      if (result?.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });
+    }
+  }
+});
