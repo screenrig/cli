@@ -106,8 +106,9 @@ x-api-lifecycle:
     - Optional request members.
     - New problem codes.
     - New fields only where the published schema permits unknown fields.
+    - Removing an operation that only answers an error, or that no client calls.
   breakingWithinMajor:
-    - Route or field removal or rename.
+    - Removal or rename of a working route or field that clients call.
     - Type, meaning, or authorization changes.
     - Making optional input required.
     - Adding a member to a closed enum.
@@ -3433,18 +3434,6 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
       security: []
-  /api/agent-identity/exchange:
-    post:
-      x-screenrig-access: write
-      operationId: exchangeAgentIdentity
-      description: Retired with the legacy agent credentials (project tokens and identity credentials). Always answers 401 credential_retired with next screenrig login; an installation signs in with the device grant (POST /oauth/device_authorization).
-      security:
-      - projectBearer: []
-      responses:
-        '401':
-          $ref: '#/components/responses/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
   /api/agent-identity/revoke:
     post:
       x-screenrig-access: write
@@ -3466,75 +3455,6 @@ paths:
                 type: string
                 enum:
                 - private, no-store
-        default:
-          $ref: '#/components/responses/Problem'
-  /api/agent-connections:
-    post:
-      x-screenrig-access: write
-      operationId: startAgentConnection
-      description: Retired with the legacy agent credentials. Always answers 410 client_update_required; an agent signs in with the device grant (POST /oauth/device_authorization, screenrig login).
-      security:
-      - {}
-      - agentIdentityBearer: []
-      responses:
-        '410':
-          $ref: '#/components/responses/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-  /stream/agent-connections/{id}:
-    get:
-      x-screenrig-access: read
-      operationId: streamAgentConnectionEvents
-      description: Retired with the legacy agent connection. Always answers 410 client_update_required.
-      security:
-      - agentConnectionAuthorization: []
-      parameters:
-      - $ref: '#/components/parameters/ResourceID'
-      responses:
-        '410':
-          $ref: '#/components/responses/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-  /api/agent-connections/{id}/credential:
-    post:
-      x-screenrig-access: write
-      operationId: collectAgentCredential
-      description: Retired with the legacy agent connection. Always answers 410 client_update_required.
-      security:
-      - agentConnectionAuthorization: []
-      parameters:
-      - $ref: '#/components/parameters/ResourceID'
-      responses:
-        '410':
-          $ref: '#/components/responses/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-  /api/agent-connections/{id}/cancel:
-    post:
-      x-screenrig-access: write
-      operationId: cancelAgentConnection
-      description: Retired with the legacy agent connection. Always answers 410 client_update_required.
-      security:
-      - agentConnectionAuthorization: []
-      parameters:
-      - $ref: '#/components/parameters/ResourceID'
-      responses:
-        '410':
-          $ref: '#/components/responses/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-  /api/agents/self/activate:
-    parameters:
-    - $ref: '#/components/parameters/ProjectTarget'
-    post:
-      x-screenrig-access: write
-      operationId: activateCurrentAgent
-      description: Retired with the legacy project tokens, so no pending bearer is issued any more. Always answers 401 credential_retired with next screenrig login.
-      security:
-      - pendingAgentBearer: []
-      responses:
-        '401':
-          $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
   /api/agents/self:
@@ -9947,7 +9867,7 @@ paths:
         Append a reply to an owned feedback report. The verified credential supplies
         author identity; callers cannot set author, status or fixing version. Original
         report and earlier replies remain unchanged. A reply reopens waiting_on_user,
-        fixed, declined and duplicate reports; planned stays planned. Short follow-ups
+        fixed, declined and duplicate reports; a "planned" report keeps its status. Short follow-ups
         are allowed. Credential shapes are redacted and injection/spam safety checks
         apply. At most 20 total replies, each 1 to 2000 characters. Reply, status, event
         and retry receipt commit together; exact retries replay for 24 hours before
@@ -11118,37 +11038,6 @@ paths:
                 $ref: '#/components/schemas/RuntimeSession'
         '409':
           $ref: '#/components/responses/RuntimeProblem'
-        default:
-          $ref: '#/components/responses/RuntimeProblem'
-  /screen/keys:
-    servers:
-    - url: https://play.screenrig.ai
-      description: Trusted player/runtime origin
-    get:
-      operationId: getRuntimeSessionKeys
-      description: The public keys that verify runtime and dashboard session tokens, as a JWKS document (OKP/Ed25519, one entry
-        per key id). It carries public material only and needs no credential. An empty keys array means no session keys are
-        installed. Cache-Control is public, max-age=300, with an ETag for If-None-Match.
-      responses:
-        '200':
-          description: Public session verification keys
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                enum:
-                - public, max-age=300
-            ETag:
-              schema:
-                type: string
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SessionKeySet'
-        '304':
-          description: Key set unchanged
-        '429':
-          $ref: '#/components/responses/RuntimeRateLimitedProblem'
         default:
           $ref: '#/components/responses/RuntimeProblem'
   /screen/browser-provisioning/exchanges:
@@ -13820,8 +13709,7 @@ paths:
         Two requests are two triggers. A retry after a refusal is a second record, never a rewrite of the first.
 
         Reads are not recorded, because they change nothing and a polling agent would bury every real action. Anonymous enrollment
-        and connection creation are excluded. Requests using temporary ScreenRig-Agent-Connect authority are also excluded,
-        because that authority has not authenticated a project agent installation.
+        is excluded.
 
         Every part of the command stamp is derived from the route this server matched or from the problem registry. There is
         no argument vector, no request body, no header, and no free text anywhere in a record, so nothing needs redacting and
@@ -14433,98 +14321,6 @@ paths:
       responses:
         '404':
           description: not_found - no receipt exists.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-  /api/billing/topups:
-    servers:
-    - url: https://screenrig.ai
-      description: Backend-owned project dashboard origin
-    post:
-      operationId: createDashboardTopup
-      description: Answers billing_unavailable when payment and payout rails are not configured, rather than quoting a payment.
-      security:
-      - dashboardSession: []
-      responses:
-        '404':
-          description: billing_unavailable.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-  /api/billing/topups/{id}/checkout:
-    servers:
-    - url: https://screenrig.ai
-      description: Backend-owned project dashboard origin
-    post:
-      operationId: checkoutDashboardTopup
-      description: Answers billing_unavailable when payment rails are not configured; no payment attempt is created.
-      security:
-      - dashboardSession: []
-      parameters:
-      - $ref: '#/components/parameters/ResourceID'
-      responses:
-        '404':
-          description: billing_unavailable.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-  /api/billing/withdrawal-quotes:
-    servers:
-    - url: https://screenrig.ai
-      description: Backend-owned project dashboard origin
-    post:
-      operationId: createDashboardWithdrawalQuote
-      description: Answers billing_unavailable when payout rails are not configured.
-      security:
-      - dashboardSession: []
-      responses:
-        '404':
-          description: billing_unavailable.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-  /api/billing/withdrawals:
-    servers:
-    - url: https://screenrig.ai
-      description: Backend-owned project dashboard origin
-    post:
-      operationId: createDashboardWithdrawal
-      description: Answers billing_unavailable when payout rails are not configured; the project bearer never authorizes a cash-out.
-      security:
-      - dashboardSession: []
-      responses:
-        '404':
-          description: billing_unavailable.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-        default:
-          $ref: '#/components/responses/Problem'
-  /api/billing/payout-onboarding:
-    servers:
-    - url: https://screenrig.ai
-      description: Backend-owned project dashboard origin
-    post:
-      operationId: startDashboardPayoutOnboarding
-      description: Answers billing_unavailable when payout rails are not configured; no hosted payout onboarding is created.
-      security:
-      - dashboardSession: []
-      responses:
-        '404':
-          description: billing_unavailable.
           content:
             application/problem+json:
               schema:
@@ -15376,38 +15172,6 @@ paths:
           description: The invitation is revoked.
         default:
           $ref: '#/components/responses/Problem'
-  /api/organizations/{org_id}/domain:
-    servers:
-    - url: https://screenrig.ai
-    delete:
-      operationId: dashboardOrganizationsRemoveDomain
-      description: Remove every verified domain and pending challenge the organization holds; future placement and domain
-        discovery stop. DELETE /api/organizations/{org_id}/domains/{domain} removes one.
-      security:
-      - dashboardSession: []
-      responses:
-        '200':
-          description: Organization result.
-          headers:
-            Cache-Control:
-              schema:
-                type: string
-                enum:
-                - no-store
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrganizationDomainRemoved'
-        default:
-          $ref: '#/components/responses/Problem'
-      parameters:
-      - name: org_id
-        in: path
-        required: true
-        schema:
-          type: string
-          minLength: 1
-          maxLength: 200
   /api/organizations/{org_id}/domains/{domain}:
     servers:
     - url: https://screenrig.ai
@@ -18853,15 +18617,9 @@ components:
       in: cookie
       name: __Host-screenrig-signup
       description: Browser-bound link signup. HttpOnly, Secure, SameSite=Strict, Path=/; expires after 30 minutes. The invitation token alone cannot use a verified signup.
-    agentConnectionAuthorization:
-      type: apiKey
-      in: header
-      name: Authorization
-      description: Temporary `ScreenRig-Agent-Connect <credential>` authority returned only by connection creation. It is never accepted as a project bearer, dashboard cookie, URL parameter, or runtime credential.
-    pendingAgentBearer: { type: http, scheme: bearer, bearerFormat: JWT, description: "Legacy pending-agent transport (retired); agent access JWT accepted only for its own activation, plus the same active bearer for exact acknowledgement replay." }
     revocableAgentBearer: { type: http, scheme: bearer, bearerFormat: JWT, description: "Agent access JWT, or the same cryptographically verified revoked bearer for an idempotent self-disconnect replay." }
     agentIdentityBearer: { type: http, scheme: bearer, bearerFormat: JWT, description: "Agent access JWT with identity scope. Project authority is carried by projects grants; ScreenRig-Project is a deprecated narrowing selector and never expands those grants. It grants no arbitrary organization permissions. Identity self-revocation accepts its same verified revoked credential for an exact replay. The identity-wide routes (GET and POST /api/projects, GET /api/organizations, PATCH /api/organizations/{org_id}) also accept an agent access JWT carrying the identity scope: listing needs identity access Read only, Propose or Manage, a change needs access:manage (else 403 insufficient_access), and its grant is rechecked inside the action. Under a JWT the project list holds only the projects the grant was approved for, and a created project joins the grant instead of delivering a project token; refresh with its project_id for a token. A JWT without the identity scope is 403 forbidden." }
-    projectBearer: { type: http, scheme: bearer, bearerFormat: JWT, description: "Short-lived agent or service JWT. projects maps global project IDs to access scopes and capabilities, checked in memory after signature and Valkey revocation checks. A preceding-release prj plus scope is accepted as one grant. Flat object-less operations default only for a one-project token; object IDs select their own project; lists accept project= to narrow. Refresh uses the opaque refresh token and current database memberships. Legacy opaque API bearers remain retired on this branch." }
+    projectBearer: { type: http, scheme: bearer, bearerFormat: JWT, description: "Short-lived agent or service JWT. projects maps global project IDs to access scopes and capabilities, checked in memory after signature and Valkey revocation checks. Flat object-less operations default only for a one-project token; object IDs select their own project; lists accept project= to narrow. Refresh uses the opaque refresh token and current database memberships. Legacy opaque API bearers remain retired on this branch." }
     kvWebhookBearer: { type: http, scheme: bearer, bearerFormat: srkw, description: "A key/value webhook's own secret, the srkw_ secret create or rotate-secret returned. Accepted only by POST /api/applications/{application_id}/kv-webhooks/{webhook_id}/write; never a project credential." }
     kvWebhookBasic: { type: http, scheme: basic, description: "A key/value webhook's own credentials: username is the webhook id, password its srkw_ secret. Accepted only by POST /api/applications/{application_id}/kv-webhooks/{webhook_id}/write; never a project credential." }
     triggerBasic: { type: http, scheme: basic, description: "A CAP trigger's own credentials: username is the trigger id, password the srtg_ password create or rotate-secret returned. Accepted only by POST /api/triggers/{id}/cap; never a project credential." }
@@ -23562,7 +23320,7 @@ components:
         identity_token:
           type: string
           pattern: "^sr_live_idt_"
-          description: Global identity credential delivered with the project token. Exact enrollment retries return the same credential; retained older deliveries may omit it and use the identity exchange.
+          description: Global identity credential delivered with the project token. Exact enrollment retries return the same credential.
         issuance_id:
           type: string
           description: Opaque identifier for the encrypted exact-retry delivery envelope.
@@ -23574,7 +23332,6 @@ components:
         invitation:
           $ref: '#/components/schemas/EnrollmentInvitation'
 
-    AgentIdentityCredential: { type: object, additionalProperties: false, required: [agent_id, identity_token, issuance_expires_at], properties: { agent_id: { type: string }, identity_token: { type: string, pattern: "^sr_live_idt_" }, issuance_expires_at: { type: string, format: date-time } } }
     AgentInput: { type: object, additionalProperties: false, properties: { name: { type: string, minLength: 1, maxLength: 80, default: "Agent" }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$", default: cli }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 } } }
     AgentCapability:
       type: string
@@ -23677,12 +23434,7 @@ components:
           description: Server-maintained instant of the agent's last lifecycle or profile mutation. Absent when the agent was never mutated after creation. Read-only.
     AgentList: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Agent" } } } }
     AgentSelfStatus: { type: object, additionalProperties: false, required: [agent, connection_ready], properties: { access: { $ref: "#/components/schemas/AccessLevel" }, effective_access: { $ref: "#/components/schemas/AccessLevel" }, access_limited_by: { $ref: "#/components/schemas/AccessLimitedBy" }, agent: { $ref: "#/components/schemas/Agent" }, connection_ready: { type: boolean, description: True when at least one project member has a passkey or password and can authorize another agent. }, notes: { $ref: "#/components/schemas/NoteCounts" } } }
-    X25519PublicJWK: { type: object, additionalProperties: false, required: [kty, crv, x], properties: { kty: { type: string, enum: [OKP] }, crv: { type: string, enum: [X25519] }, x: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" } } }
-    AgentConnectionRequest: { type: object, additionalProperties: false, required: [recipient_public_key], properties: { project_id: { type: string, maxLength: 200, description: "Optional exact target, accepted only with an identity bearer. Approval against any other project is refused." }, name: { type: string, minLength: 1, maxLength: 80 }, agent_type: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$" }, platform: { type: string, maxLength: 80 }, version: { type: string, maxLength: 40 }, capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, minItems: 1, uniqueItems: true, description: "The installation's requested capability areas. Omitted requests all six. Unknown, duplicate, or empty lists are invalid_request." }, recipient_public_key: { $ref: "#/components/schemas/X25519PublicJWK" } } }
-    AgentConnectionStart: { type: object, additionalProperties: false, required: [connection_id, connection_token, approval_url, expires_at], properties: { connection_id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?acn_" }, connection_token: { type: string, pattern: "^sac_[A-Za-z0-9_-]{43}$", description: Temporary header credential. Never place in a URL or log. }, approval_url: { type: string, format: uri, description: Safe URL containing only the non-authority connection id. }, expires_at: { type: string, format: date-time } } }
     AgentConnection: { type: object, additionalProperties: false, required: [connection_id, name, agent_type, status, capabilities, expires_at, created_at], properties: { connection_id: { type: string, pattern: "^(?:(?:stage|qa|development)_)?acn_" }, name: { type: string }, agent_type: { type: string }, platform: { type: string }, version: { type: string }, status: { type: string, enum: [pending, approved, connected, denied, expired, cancelled] }, capabilities: { type: array, items: { $ref: "#/components/schemas/AgentCapability" }, minItems: 1, uniqueItems: true, description: "Capability areas the installation requested at connection start. A reviewer may approve a subset of these." }, expires_at: { type: string, format: date-time }, created_at: { type: string, format: date-time }, flow: { type: string, enum: [device], description: "device for a screenrig login sign-in, whose approval confirms the user code and chooses the access level; absent otherwise." }, access: { type: string, enum: [read, propose, manage], description: "The access level a device sign-in asked for." }, client_name: { type: string, description: "The OAuth client of a device sign-in." }, project_hint: { type: string, description: "The project a device sign-in suggested; the approver chooses." }, requested_from: { type: string, description: "The client address that started a device sign-in." }, existing_identity: { type: boolean, description: "A device sign-in by an installation that already exists, adding this project or raising its access." } } }
-    AgentCredentialEnvelope: { type: object, additionalProperties: false, required: [algorithm, ephemeral_public_key, nonce, ciphertext], properties: { algorithm: { type: string, enum: [X25519-HKDF-SHA256-A256GCM] }, ephemeral_public_key: { $ref: "#/components/schemas/X25519PublicJWK" }, nonce: { type: string, description: Unpadded base64url AES-GCM nonce. }, ciphertext: { type: string, description: Unpadded base64url ciphertext and authentication tag. Decrypt with AAD screenrig/agent-credential-envelope/aad/v1 NUL connection_id NUL agent_id. } } }
-    AgentCredentialCollection: { type: object, additionalProperties: false, required: [agent, credential_envelope, issuance_expires_at], properties: { agent: { $ref: "#/components/schemas/Agent" }, credential_envelope: { $ref: "#/components/schemas/AgentCredentialEnvelope" }, identity_credential_envelope: { $ref: "#/components/schemas/AgentCredentialEnvelope" }, issuance_expires_at: { type: string, format: date-time } } }
     AgentDisconnectRequest: { type: object, additionalProperties: false, properties: { allow_last_agent: { type: boolean, default: false, description: Explicitly accept loss of the last active agent bearer. A registered dashboard passkey remains independent administrative authority. } } }
     ApplicationRename: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string, minLength: 1, maxLength: 120, description: "Display name after trimming; controls and empty names are rejected." } } }
     Application: { type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: { project_id: { type: string }, id: { type: string }, name: { type: string }, revision: { type: integer }, latest_ready_release: { type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release." }, created_at: { type: string, format: date-time }, updated_at: { type: string, format: date-time }, last_used_at: { type: string, format: date-time, description: "Server-maintained instant the application's releases were last used on glass (playback.application_started). Absent until first use. Read-only." } } }
@@ -26520,7 +26272,7 @@ components:
         One project-scoped submission. Its own fields (id, kind, title, body, context,
         created_at) never change after it is written. status is open until staff
         respond and then the status of the latest response; agent replies reopen reports
-        awaiting input or closed, while planned stays planned. Responses are staff and
+        awaiting input or closed, while a "planned" report keeps its status. Responses are staff and
         agent replies, oldest first and at most 20, never edited or removed. Each reply
         also appends a feedback.responded event to the project's
         event stream (resource.id is the submission id; details carry response_id,
@@ -26538,7 +26290,7 @@ components:
     FeedbackStatus:
       type: string
       enum: [open, planned, waiting_on_user, fixed, declined, duplicate]
-      description: Where staff stand on a submission. waiting_on_user asks the submitting agent for information; an agent reply reopens it or a closed report. planned stays planned.
+      description: Where staff stand on a submission. waiting_on_user asks the submitting agent for information; an agent reply reopens it or a closed report. A "planned" report keeps its status.
     FeedbackResponse:
       type: object
       additionalProperties: false
@@ -27528,25 +27280,6 @@ components:
           description: 12–128 UTF-8 bytes, without whitespace. Cannot equal the email or display name or a bundled common password. Stored only as an Argon2id hash.
         proof:
           $ref: '#/components/schemas/DashboardProof'
-    SessionKeySet:
-      type: object
-      additionalProperties: false
-      required: [keys]
-      properties:
-        keys:
-          type: array
-          maxItems: 8
-          items:
-            type: object
-            additionalProperties: false
-            required: [kty, crv, kid, x]
-            properties:
-              kty: { type: string, enum: [OKP] }
-              crv: { type: string, enum: [Ed25519] }
-              kid: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,31}$" }
-              x: { type: string, pattern: "^[A-Za-z0-9_-]{43}$", description: "The 32-byte public key, base64url without padding." }
-              use: { type: string, enum: [sig] }
-              alg: { type: string, enum: [EdDSA] }
     DashboardSession:
       type: object
       additionalProperties: false
