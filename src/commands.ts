@@ -16,6 +16,7 @@ import { cacheProjectContexts, clearResultContext, contextFromProject, formatRes
 import { projectConfigFor, withProjectConfig, assertProjectCredential } from "./project-state.js";
 import { instantInZone, normalizeInstant, assignmentLine, playlistInUseProblem, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "./screen-control.js";
 import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLAYS_SETTLE_MS, unusedPath, PLAYS_ALL_MAX_PAGES, PLAYS_LIMIT_MAX, playbackExportBudget, playsCursor, playsLimit, playsRange, requireCsvResponse, writeCsvFile, writeCsvStdout } from "./playback-export.js";
+import { wallCanvas, wallFromFlags, wallLine, wallProblem } from "./screen-wall.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
 import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "./screen-manifest-upgrade.js";
@@ -4962,12 +4963,12 @@ async function playlistCreateUpdateAction(args: ParsedArgs, runtime: CliRuntime,
   if (!parsed || typeof parsed !== "object" || typeof parsed.name !== "string" || !Array.isArray(parsed.pages)) {
     throw usageError("Playlist JSON must contain string name and array pages.");
   }
-  const extra = Object.keys(parsed).filter((key) => key !== "name" && key !== "audio" && key !== "pages");
+  const extra = Object.keys(parsed).filter((key) => key !== "name" && key !== "audio" && key !== "format" && key !== "pages");
   if (extra.length > 0) {
     throw usageError(`Playlist JSON contains unsupported fields: ${extra.join(", ")}.`);
   }
   const pages = expandPlaylistPages(parsed.pages);
-  const body = { name: parsed.name, ...(parsed.audio !== undefined ? { audio: parsed.audio } : {}), pages };
+  const body = { name: parsed.name, ...(parsed.audio !== undefined ? { audio: parsed.audio } : {}), ...(parsed.format !== undefined ? { format: parsed.format } : {}), pages };
   assertPlaylistValid(body);
   await validatePlaylistCards(client, body);
   // Only a signage-capable project may place adslot pages.
@@ -5015,7 +5016,7 @@ export const handlePlaylistPatch = commandHandler(async (args, runtime, resolved
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw usageError("Playlist patch JSON must be an object.");
     body = parsed as Record<string, unknown>;
   }
-  const unknown = Object.keys(body).filter((key) => !["name", "pages", "audio"].includes(key));
+  const unknown = Object.keys(body).filter((key) => !["name", "pages", "audio", "format"].includes(key));
   if (unknown.length) throw usageError(`Playlist patch contains unsupported fields: ${unknown.join(", ")}.`);
   const name = flagString(args.flags, "name");
   if (name !== undefined) {
@@ -5039,6 +5040,9 @@ export const handlePlaylistPatch = commandHandler(async (args, runtime, resolved
   }
   if (body.audio !== undefined && body.audio !== null && (typeof body.audio !== "object" || Array.isArray(body.audio))) {
     throw usageError("audio must be a soundtrack object or null.");
+  }
+  if (body.format !== undefined && body.format !== null && (typeof body.format !== "object" || Array.isArray(body.format))) {
+    throw usageError("format must be a video wall format object or null.");
   }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   if (Array.isArray(body.pages)) {
@@ -5688,6 +5692,56 @@ export const handleScreenSetTimezone = commandHandler(async (args, runtime, reso
     body,
   });
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Set timezone ${timezone} on ${id}` };
+}, true);
+
+/** screen wall set|clear: one ScreenPatch carrying only wall; null clears it. */
+async function screenWallPatch(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig, id: string, wall: ScreenPatch["wall"]) {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const ifMatch = flagString(args.flags, "if-match");
+  const body: ScreenPatch = { wall };
+  let response;
+  try {
+    response = await client.call({
+      method: "PATCH",
+      path: `/api/screens/${encodeURIComponent(id)}`,
+      idempotent: true,
+      headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined,
+      body,
+    });
+  } catch (error) {
+    throw wallProblem(error, id);
+  }
+  return { response, client, screen: response.body as Screen | undefined };
+}
+
+export const handleScreenWallSet = commandHandler(async (args, runtime, resolved) => {
+  // positionals are [screen, wall, set, ID].
+  const id = args.positionals[3];
+  const outputs = flagString(args.flags, "outputs");
+  const arrangement = flagString(args.flags, "arrangement");
+  if (!id || !outputs || !arrangement) throw usageError("screen wall set requires <id> --outputs --arrangement.");
+  const wall = wallFromFlags(outputs, arrangement, flagString(args.flags, "rotation"));
+  const { response, client, screen } = await screenWallPatch(args, runtime, resolved, id, wall);
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [
+      `Set video wall on ${id}: ${wallLine(wall)}`,
+      "Once the screen plays a playlist with a matching format, every display shows its number and name for 20 seconds after a change; playlist init --screen-id writes that format.",
+      ...(screen?.revision !== undefined ? [`revision: ${screen.revision}`] : []),
+    ].join("\n"),
+  };
+}, true);
+
+export const handleScreenWallClear = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[3];
+  if (!id) throw usageError("screen wall clear requires <id>.");
+  const { response, client, screen } = await screenWallPatch(args, runtime, resolved, id, null);
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Cleared the video wall on ${id}`, ...(screen?.revision !== undefined ? [`revision: ${screen.revision}`] : [])].join("\n"),
+  };
 }, true);
 
 async function screenArchiveUnarchiveAction(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig, action: "archive" | "unarchive"): Promise<CommandResult> {

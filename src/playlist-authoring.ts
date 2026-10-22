@@ -1,6 +1,8 @@
 import { assertPlaylistValid } from "./playlist-validate.js";
 import type { Warning } from "./envelope.js";
 import { usageError } from "./problems.js";
+import { wallCanvas } from "./screen-wall.js";
+import type { PlaylistFormat } from "./adapters/protocol.js";
 
 /** Default hold for an image or iframe page when `--duration-ms` is omitted. */
 export const DEFAULT_PAGE_DURATION_MS = 8000;
@@ -28,6 +30,8 @@ export function editablePlaylist(value: unknown): RecordValue {
   const document = structuredClone({
     name: resource.name,
     ...(resource.audio !== undefined && resource.audio !== null ? { audio: resource.audio } : {}),
+    // Omitting the format on a PUT would turn a wall playlist into an ordinary one.
+    ...(resource.format !== undefined && resource.format !== null ? { format: resource.format } : {}),
     pages: resource.pages,
   });
   if (!Array.isArray(document.pages)) throw usageError("Playlist pages are missing.");
@@ -93,14 +97,14 @@ export function shortApplicationPageWarning(document: unknown): Warning | undefi
 }
 
 export function initializePlaylist(options: {
-  name: string; media: RecordValue[]; width: number; height: number; durationMs?: number; fit: string;
+  name: string; media: RecordValue[]; width: number; height: number; format?: PlaylistFormat; durationMs?: number; fit: string;
 }): RecordValue {
   return preparePlaylist({ ...options, content: options.media });
 }
 
 /** Build the backend-owned write document; target metadata stays outside it. */
 export function preparePlaylist(options: {
-  name: string; content: RecordValue[]; width: number; height: number; durationMs?: number; fit: string;
+  name: string; content: RecordValue[]; width: number; height: number; format?: PlaylistFormat; durationMs?: number; fit: string;
 }): RecordValue {
   // Ready audio inputs become the soundtrack in input order; every other input
   // is one page.
@@ -110,7 +114,7 @@ export function preparePlaylist(options: {
   });
   const pageContent = options.content.filter((media) => media.primitive !== "audio");
   if (pageContent.length === 0) throw usageError("A playlist needs at least one page; audio inputs only become its soundtrack.");
-  const document = { name: options.name, ...(tracks.length > 0 ? { audio: { tracks } } : {}), pages: pageContent.map((media, index) => {
+  const document = { name: options.name, ...(tracks.length > 0 ? { audio: { tracks } } : {}), ...(options.format ? { format: options.format } : {}), pages: pageContent.map((media, index) => {
     const live = media.primitive === "iframe" || media.primitive === "application";
     if (!live && (media.state !== "ready" || !["image", "video"].includes(media.primitive))) throw usageError("Every media item must be a ready image, video, or audio object.");
     const video = media.primitive === "video";
@@ -135,9 +139,17 @@ export function preparePlaylist(options: {
   return document;
 }
 
-export function targetDimensions(screen: unknown, width?: number, height?: number): { width: number; height: number } {
+/**
+ * The canvas a playlist for this target is authored on. Explicit dimensions
+ * win and make an ordinary playlist. Otherwise a screen with a video wall has
+ * the wall's canvas and the playlist format that matches it, and any other
+ * screen the single surface its Player reported.
+ */
+export function targetDimensions(screen: unknown, width?: number, height?: number): { width: number; height: number; format?: PlaylistFormat } {
   if ((width === undefined) !== (height === undefined)) throw usageError("Provide both --target-width and --target-height.");
   if (width === undefined) {
+    const wall = wallCanvas(screen);
+    if (wall) return wall;
     const surfaces = (screen as RecordValue | undefined)?.observation?.surfaces;
     if (!Array.isArray(surfaces) || surfaces.length !== 1) throw usageError("Screen dimensions are unknown or ambiguous; provide --target-width and --target-height.");
     width = surfaces[0]?.width; height = surfaces[0]?.height;

@@ -328,10 +328,35 @@ export type ScreenObservationPresentation = "output" | "windowed";
 
 export interface ScreenObservationSurface {
   height: number;
+  /** Player-local label; for a video wall output, the output name. */
   id: string;
   pixel_ratio: number;
   presentation: ScreenObservationPresentation;
+  rotation?: ScreenWallRotation;
   width: number;
+}
+
+export type ScreenWallArrangement = "row" | "column";
+export type ScreenWallRotation = 0 | 90 | 180 | 270;
+
+/**
+ * The video wall a screen's Player lays out: two or three outputs that show
+ * one canvas. `outputs` are output names as the Player reports them
+ * (observation surface ids) in physical order: left to right for a row, top
+ * to bottom for a column. `rotation` is clockwise degrees on every output
+ * (default 0); 90 and 270 mean portrait panels.
+ */
+export interface ScreenWall {
+  outputs: string[];
+  arrangement: ScreenWallArrangement;
+  rotation?: ScreenWallRotation;
+}
+
+/** The video wall a playlist is authored for: displays tiles of 1920 x 1080 (landscape) or 1080 x 1920 (portrait). */
+export interface PlaylistFormat {
+  displays: 2 | 3;
+  arrangement: ScreenWallArrangement;
+  orientation: "landscape" | "portrait";
 }
 
 /**
@@ -717,6 +742,8 @@ export interface Screen {
    */
   timezone?: string;
   updated_at: string;
+  /** The video wall the screen's Player lays out. Absent when none. Set by ScreenPatch. */
+  wall?: ScreenWall;
 }
 
 /**
@@ -733,6 +760,8 @@ export interface ScreenPatch {
   timezone?: string;
   /** Replaces the whole tag set; an empty array clears it. Bumps the screen revision. */
   tags?: ScreenTags;
+  /** An object sets the screen's video wall, null clears it. Needs a Player that declared display.wall (409 wall_unsupported otherwise). */
+  wall?: ScreenWall | null;
 }
 
 export type ScreenTags = string[];

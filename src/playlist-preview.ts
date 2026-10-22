@@ -208,7 +208,7 @@ export function contactSheetSize(pageCount: number): Size {
   };
 }
 
-function normalizePlaylist(input: unknown): { name: string; audio?: unknown; pages: unknown[] } {
+function normalizePlaylist(input: unknown): { name: string; audio?: unknown; format?: unknown; pages: unknown[] } {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw usageError("Playlist JSON must be an object with name and pages.");
   }
@@ -217,7 +217,7 @@ function normalizePlaylist(input: unknown): { name: string; audio?: unknown; pag
   if (typeof raw.name !== "string" || !pages) {
     throw usageError("Playlist JSON must contain string name and array pages.");
   }
-  return { name: raw.name, ...(raw.audio !== undefined ? { audio: raw.audio } : {}), pages };
+  return { name: raw.name, ...(raw.audio !== undefined ? { audio: raw.audio } : {}), ...(raw.format !== undefined ? { format: raw.format } : {}), pages };
 }
 
 function soundtrackOf(audio: unknown): PreviewSoundtrack | undefined {

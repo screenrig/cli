@@ -172,6 +172,8 @@ test("root help is compact and every command is discoverable through immediate c
     "screen storage-forecast",
     "screen assign",
     "screen set-timezone",
+    "screen wall set",
+    "screen wall clear",
     "screen archive",
     "screen unarchive",
     "screen delete",

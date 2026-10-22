@@ -2,9 +2,10 @@ import { addValueAlias } from "./aliases.js";
 import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes.js";
 import { NOTE_HELP, positiveInteger, reviewNoteOption, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleScreenChanges, handleScreenRevert, handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory } from "../commands.js";
+import { handleScreenChanges, handleScreenRevert, handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory } from "../commands.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
 import { untilOption } from "../screen-display.js";
+import { WALL_ARRANGEMENTS, WALL_ROTATIONS, wallOutputsOption } from "../screen-wall.js";
 import { playsInstantOption } from "../playback-export.js";
 import { type Command, Option } from "commander";
 
@@ -94,6 +95,19 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .requiredOption("--timezone <ZONE>", "Set an IANA timezone name, such as Europe/London (required)")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleScreenSetTimezone)), "Timezone:\n  ZONE is an IANA timezone name: Area/City such as America/New_York,\n  Europe/London or Asia/Tokyo, or UTC. Playlist schedules, page visibility,\n  takeovers and display schedules read their civil times in this zone, so set\n  it before any of those.");
+
+  const wall = screen.command("wall").description("Set or clear a screen's video wall: one Player driving two or three displays as one canvas");
+  wall.command("set").description("Set a screen's video wall")
+    .argument("<id>", "Screen identifier")
+    .requiredOption("--outputs <NAMES>", "Two or three comma-separated output names in physical order, as screen show lists them under observation.surfaces (required)", wallOutputsOption)
+    .addOption(new Option("--arrangement <ARRANGEMENT>", "row (outputs run left to right) or column (top to bottom) (required)").choices([...WALL_ARRANGEMENTS]).makeOptionMandatory())
+    .addOption(new Option("--rotation <DEGREES>", "Clockwise rotation of every output (default 0); 90 and 270 are portrait panels").choices([...WALL_ROTATIONS]))
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .action(bind(handleScreenWallSet));
+  wall.command("clear").description("Remove a screen's video wall")
+    .argument("<id>", "Screen identifier")
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .action(bind(handleScreenWallClear));
 
   screen.command("archive").description("Archive a screen")
     .argument("<id>", "Screen identifier")

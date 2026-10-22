@@ -27,6 +27,46 @@ function validCivil(value: string): boolean {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day && date.getUTCHours() === hour && date.getUTCMinutes() === minute;
 }
 
+interface WallFormat { displays: number; arrangement: "row" | "column"; orientation: "landscape" | "portrait" }
+/** The displays a primitive covers, first through last (1-based, inclusive). */
+interface Frame { first: number; last: number }
+
+function readFormat(value: unknown): WallFormat | undefined {
+  const { displays, arrangement, orientation } = object(value);
+  if ((displays !== 2 && displays !== 3) || (arrangement !== "row" && arrangement !== "column") || (orientation !== "landscape" && orientation !== "portrait")) return undefined;
+  return { displays, arrangement, orientation };
+}
+
+/** One display: 1920 x 1080 landscape, 1080 x 1920 portrait. */
+const tileOf = (format: WallFormat): [number, number] => format.orientation === "portrait" ? [1080, 1920] : [1920, 1080];
+
+/** The canvas every ordinary page of the format has: a row is displays tiles wide, a column displays tiles high. */
+function canvasOf(format: WallFormat): [number, number] {
+  const [width, height] = tileOf(format);
+  return format.arrangement === "column" ? [width, height * format.displays] : [width * format.displays, height];
+}
+
+/** The union of the tiles first through last, in canvas units. */
+function frameRect(format: WallFormat, frame: Frame): { x: number; y: number; width: number; height: number } {
+  const [width, height] = tileOf(format), count = frame.last - frame.first + 1;
+  return format.arrangement === "column"
+    ? { x: 0, y: (frame.first - 1) * height, width, height: count * height }
+    : { x: (frame.first - 1) * width, y: 0, width: count * width, height };
+}
+
+/** Ascending contiguous 1-based display numbers such as [2] or [1, 2, 3]; undefined for anything else. */
+function contiguousDisplays(value: unknown): Frame | undefined {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 3) return undefined;
+  const first: unknown = value[0];
+  for (const [index, display] of value.entries()) {
+    if (typeof first !== "number" || !Number.isInteger(display) || display < 1 || display > 3 || display !== first + index) return undefined;
+  }
+  return { first: value[0] as number, last: value[value.length - 1] as number };
+}
+
+const framesShare = (a: Frame, b: Frame): boolean => a.first <= b.last && b.first <= a.last;
+const sameNumber = (a: unknown, b: number): boolean => typeof a === "number" && Math.abs(a - b) < 1e-6;
+
 const LAYOUTS = ["full", "free", "center", "wide", "header", "footer", "corner", "chip", "strip"];
 const CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"];
 const EDGES = ["top", "bottom", "left", "right"];
@@ -36,6 +76,7 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
   const fail = (path: string, message: string): void => { issues.push({ path, message }); };
   const playlist = object(value);
   const pages = array(playlist.pages);
+  const format = readFormat(playlist.format);
   if (typeof playlist.name === "string" && !playlist.name.trim()) fail("/name", "must not be blank");
   const pageIds = new Set<unknown>();
   let unscheduled = 0;
@@ -43,6 +84,12 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
     const page = object(raw), path = `/pages/${index}`;
     if (pageIds.has(page.id)) fail(`${path}/id`, "must be unique within the playlist");
     pageIds.add(page.id);
+    if (format !== undefined && page.type !== "adslot") {
+      const canvas = object(page.canvas), [wantWidth, wantHeight] = canvasOf(format);
+      if (typeof canvas.width === "number" && typeof canvas.height === "number" && (canvas.width !== wantWidth || canvas.height !== wantHeight)) {
+        fail(`${path}/canvas`, `must be ${wantWidth} x ${wantHeight} canvas units, the canvas of ${format.displays} ${format.orientation} displays in a ${format.arrangement}`);
+      }
+    }
     if (!Object.hasOwn(page, "visibility")) unscheduled++;
     else {
       const visibility = object(page.visibility);
@@ -71,9 +118,12 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
     const primitives = array(page.primitives).map(object);
     const ids = new Set<unknown>();
     let controllers = 0, web = 0, streams = 0;
-    let mainCard: number | undefined;
-    const corners = new Map<unknown, number>();
-    const bars = new Set<unknown>();
+    // The slots cards hold, with the displays each holder covers: two cards conflict only when their frames
+    // share a display. A card without displays covers every display of the playlist format.
+    const mainCards: Frame[] = [];
+    const corners = new Map<unknown, Frame[]>();
+    const bars = new Map<unknown, Frame[]>();
+    const takes = (held: Frame[] | undefined, frame: Frame): boolean => held?.some(other => framesShare(other, frame)) === true;
     for (const [primitiveIndex, primitive] of primitives.entries()) {
       const itemPath = `${path}/primitives/${primitiveIndex}`;
       if (ids.has(primitive.id)) fail(`${itemPath}/id`, "must be unique within the page");
@@ -101,7 +151,23 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
         if (primitive.primitive !== "application" || mode !== "application") fail(`${itemPath}/controller`, "is valid only on an application in application advance mode");
       }
       if (primitive.primitive === "application" && typeof primitive.release_id === "string" && !primitive.release_id) fail(`${itemPath}/release_id`, "is required");
+      const named = Object.hasOwn(primitive, "displays") ? contiguousDisplays(primitive.displays) : undefined;
+      if (Object.hasOwn(primitive, "displays") && Array.isArray(primitive.displays)) {
+        if (named === undefined) fail(`${itemPath}/displays`, "must be ascending contiguous display numbers such as [2] or [1, 2]");
+        else if (format === undefined) fail(`${itemPath}/displays`, "needs a playlist format");
+        else if (named.last > format.displays) fail(`${itemPath}/displays`, `must name displays 1 through ${format.displays}, the displays of the playlist format`);
+        else if (primitive.primitive !== "card" && typeof object(primitive.rect).x === "number") {
+          const rect = object(primitive.rect), want = frameRect(format, named);
+          if (!sameNumber(rect.x, want.x) || !sameNumber(rect.y, want.y) || !sameNumber(rect.width, want.width) || !sameNumber(rect.height, want.height)) {
+            fail(`${itemPath}/rect`, `is derived from displays on this format; omit it or send x ${want.x}, y ${want.y}, width ${want.width}, height ${want.height}`);
+          }
+        }
+      }
+      if (primitive.primitive !== "card" && !Object.hasOwn(primitive, "rect") && !Object.hasOwn(primitive, "displays")) {
+        fail(`${itemPath}/rect`, "is required unless displays is set");
+      }
       if (primitive.primitive === "card") {
+        const frame: Frame = named ?? { first: 1, last: format?.displays ?? 1 };
         // Placement shape. The card's tier, the strip edges (a header takes the top edge's normal strip slot and a footer the
         // bottom edge's; a strip's presence is server knowledge) and the derived rect and layer stay server checks.
         const layout = primitive.layout;
@@ -110,20 +176,21 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
         else if (anchors.length === 0 && Object.hasOwn(primitive, "anchor")) fail(`${itemPath}/anchor`, `is not allowed for layout ${layout}`);
         else if (anchors.length > 0 && !anchors.includes(primitive.anchor as string)) fail(`${itemPath}/anchor`, `is required for layout ${layout} and must be one of ${anchors.join(", ")}`);
         if (layout === "free") {
+          if (Object.hasOwn(primitive, "displays")) fail(`${itemPath}/displays`, "is not allowed for layout free");
           if (!Object.hasOwn(primitive, "rect")) fail(`${itemPath}/rect`, "is required for layout free");
           if (!Object.hasOwn(primitive, "layer")) fail(`${itemPath}/layer`, "is required for layout free");
         }
         if (layout === "full" || layout === "center" || layout === "wide") {
-          if (mainCard !== undefined) fail(`${itemPath}/layout`, "a page holds one full, center or wide card");
-          mainCard = primitiveIndex;
+          if (takes(mainCards, frame)) fail(`${itemPath}/layout`, "a page holds one full, center or wide card");
+          mainCards.push(frame);
         }
         if (layout === "header" || layout === "footer") {
-          if (bars.has(layout)) fail(`${itemPath}/layout`, `a page holds one ${layout} card`);
-          bars.add(layout);
+          if (takes(bars.get(layout), frame)) fail(`${itemPath}/layout`, `a page holds one ${layout} card`);
+          bars.set(layout, [...bars.get(layout) ?? [], frame]);
         }
         if (layout === "corner" || layout === "chip") {
-          if (corners.has(primitive.anchor)) fail(`${itemPath}/anchor`, "a page holds one corner or chip card per corner");
-          corners.set(primitive.anchor, primitiveIndex);
+          if (takes(corners.get(primitive.anchor), frame)) fail(`${itemPath}/anchor`, "a page holds one corner or chip card per corner");
+          corners.set(primitive.anchor, [...corners.get(primitive.anchor) ?? [], frame]);
         }
       }
       if (Object.hasOwn(primitive, "motion")) {
