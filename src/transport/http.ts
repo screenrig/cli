@@ -44,13 +44,18 @@ function decodeTextBody(text: string, contentType: string): unknown {
   return text || undefined;
 }
 
-function buildUrl(base: string, path: string, query?: Record<string, string | undefined>): string {
+function buildUrl(base: string, path: string, query?: Record<string, string | undefined>, repeated?: Record<string, readonly string[]>): string {
   const url = new URL(path, base.endsWith("/") ? base : `${base}/`);
   if (query) {
     for (const [key, value] of Object.entries(query)) {
       if (value !== undefined && value !== "") {
         url.searchParams.set(key, value);
       }
+    }
+  }
+  if (repeated) {
+    for (const [key, values] of Object.entries(repeated)) {
+      for (const value of values) url.searchParams.append(key, value);
     }
   }
   return url.toString();
@@ -115,7 +120,7 @@ export class FetchTransport implements Transport {
     const requestHeaders = this.headers(req);
     const manual = carriesCredential(req, requestHeaders);
     try {
-      const response = await this.fetchImpl(buildUrl(this.apiUrl, req.path, req.query), {
+      const response = await this.fetchImpl(buildUrl(this.apiUrl, req.path, req.query, req.queryRepeated), {
         method: req.method,
         headers: requestHeaders,
         body: this.serialize(req.body),
@@ -155,7 +160,7 @@ export class FetchTransport implements Transport {
     const streamHeaders = { ...this.headers(req), accept: "text/event-stream" };
     const manual = carriesCredential(req, streamHeaders);
     try {
-      response = await this.fetchImpl(buildUrl(this.apiUrl, req.path, req.query), {
+      response = await this.fetchImpl(buildUrl(this.apiUrl, req.path, req.query, req.queryRepeated), {
         method: req.method,
         headers: streamHeaders,
         signal: req.signal,
@@ -233,7 +238,7 @@ export class FetchTransport implements Transport {
     const downloadHeaders = { ...this.headers(req), accept: "*/*" };
     const manual = carriesCredential(req, downloadHeaders);
     try {
-      response = await this.fetchImpl(buildUrl(this.apiUrl, req.path, req.query), {
+      response = await this.fetchImpl(buildUrl(this.apiUrl, req.path, req.query, req.queryRepeated), {
         method: req.method,
         headers: downloadHeaders,
         signal,

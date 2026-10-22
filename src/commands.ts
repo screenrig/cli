@@ -96,6 +96,7 @@ import {
   type FleetLinkWrite,
   type Trigger,
   type TriggerList,
+  type TriggerPull,
   type TriggerReceipt,
   type TriggerWithPassword,
   type TriggerWrite,
@@ -118,7 +119,8 @@ import {
 import { SDK_PROTOCOL_VERSION } from "./adapters/sdk-injection.js";
 import { flagBool, flagNumber, flagString, type ParsedArgs } from "./command-input.js";
 import { projectStreamQuery } from "./project-routing.js";
-import { ApiClient, RequestIds, requireToken } from "./client.js";
+import { ApiClient, RequestIds, requireToken, type ListAllOptions } from "./client.js";
+import { HEALTH_DEFAULT_WINDOW_MS, HEALTH_HOURLY_MAX_DAYS, HEALTH_RAW_MAX_DAYS, PRESENCE_DEFAULT_WINDOW_MS, PRESENCE_MAX_DAYS, SERIES_PAGE_SIZE, UPTIME_MAX_DAYS, seriesWindow } from "./series.js";
 import {
   preserveLogSocket,
   resolveConfig,
@@ -2235,6 +2237,8 @@ function adsSlotBody(args: ParsedArgs): Record<string, unknown> {
     ...plugged("max_video_duration_ms", flagNumber(args.flags, "max-video-duration-ms")),
     ...(rate === undefined ? {} : { rate_override_mcr_per_15s: rate }),
     ...(flagBool(args.flags, "clear-rate") ? { rate_override_mcr_per_15s: null } : {}),
+    ...plugged("vast_tag_url", flagString(args.flags, "vast-tag-url")),
+    ...(flagBool(args.flags, "clear-vast-tag-url") ? { vast_tag_url: null } : {}),
   };
 }
 
@@ -2271,6 +2275,8 @@ function adsSlotWriteBody(current: Record<string, unknown> | undefined, args: Pa
     max_image_duration_ms: current.max_image_duration_ms,
     max_video_duration_ms: current.max_video_duration_ms,
     rate_override_mcr_per_15s: current.rate_override_mcr_per_15s ?? null,
+    // An absent vast_tag_url clears the tag, so the stored one (shown to the owning seller) is sent back.
+    ...(typeof current.vast_tag_url === "string" && current.vast_tag_url ? { vast_tag_url: current.vast_tag_url } : {}),
     ...supplied,
   };
 }
@@ -3144,12 +3150,12 @@ async function simpleGet(
   pathName: string,
   title: string,
   query?: Record<string, string | undefined>,
-  paged = false,
+  paged: boolean | ListAllOptions = false,
 ): Promise<CommandResult> {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const response = paged
-    ? await client.listAll(pathName, query)
+    ? await client.listAll(pathName, query, paged === true ? undefined : paged)
     : await client.call({ method: "GET", path: pathName, query });
   return {
     envelope: jsonBody(response, client.requestId),
@@ -3166,8 +3172,9 @@ function simpleList(
   pathName: string,
   title: string,
   query?: Record<string, string | undefined>,
+  options?: ListAllOptions,
 ): Promise<CommandResult> {
-  return simpleGet(args, runtime, resolved, pathName, title, query, true);
+  return simpleGet(args, runtime, resolved, pathName, title, query, options ?? true);
 }
 
 const MEDIA_TAG_PATTERN = /^[A-Za-z0-9]{1,32}$/;
@@ -3238,10 +3245,16 @@ export const handleMediaList = commandHandler(async (args, runtime, resolved) =>
   if (Object.hasOwn(args.flags, "kind")) {
     throw usageError("media list uses --primitive image|video|audio, not --kind.");
   }
-  return simpleList(args, runtime, resolved, "/api/media", "Media", {
-    tag: mediaTagFromArgs(args),
-    primitive: mediaPrimitiveFromArgs(args),
-  });
+  const query = { tag: mediaTagFromArgs(args), primitive: mediaPrimitiveFromArgs(args) };
+  const folder = flagString(args.flags, "folder");
+  if (folder === undefined) return simpleList(args, runtime, resolved, "/api/media", "Media", query);
+  // The API lists the whole library; the folder is read from each file, so every page is read and filtered here.
+  const inFolder = folder === "root" ? "" : mediaFolderId(folder, "--folder");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.listAll("/api/media", query);
+  const listed = response.body as { items: Array<{ folder_id?: string }> };
+  const body = { ...listed, items: listed.items.filter((item) => (item.folder_id ?? "") === inFolder) };
+  return { envelope: jsonBody({ ...response, body }, client.requestId), exitCode: ExitCode.Success, human: `Media\n${JSON.stringify(body, null, 2)}` };
 }, true);
 
 export const handleMediaShow = commandHandler(async (args, runtime, resolved) => {
@@ -3299,6 +3312,22 @@ function mediaFolderId(value: string | undefined, label: string): string {
     throw usageError(`${label} must be a media folder ID (mfd_...); media folder list shows them.`);
   }
   return value;
+}
+
+/** `--folder` on an upload: the destination must exist before any transcode or transfer work starts. */
+async function uploadFolderFromArgs(args: ParsedArgs, client: ApiClient): Promise<string | undefined> {
+  const folder = flagString(args.flags, "folder");
+  if (folder === undefined) return undefined;
+  const id = mediaFolderId(folder, "--folder");
+  await client.call({ method: "GET", path: `/api/media-folders/${id}` });
+  return id;
+}
+
+/** Uploads land at the library root; --folder moves what the command uploaded, in requests of at most 1000 IDs. */
+async function moveIntoMediaFolder(client: ApiClient, folderId: string, mediaIds: string[]): Promise<void> {
+  for (let start = 0; start < mediaIds.length; start += 1000) {
+    await client.call({ method: "POST", path: "/api/media/move", idempotent: true, body: { folder_id: folderId, media_ids: mediaIds.slice(start, start + 1000) } });
+  }
 }
 
 export const handleMediaFolderList = commandHandler(async (args, runtime, resolved) =>
@@ -3944,8 +3973,106 @@ async function playbackPlays(
   };
 }
 
-/** --day-from/--day-to: real UTC days, from not after to, at most 366 days inclusive. */
-function aggregateDays(from: string | undefined, to: string | undefined): { day_from?: string; day_to?: string } {
+/**
+ * `playback totals` binds GET /api/playback/totals. A day series spans at most
+ * 366 days (92 narrowed to a screen or media), a ranking at most 92; top ranks
+ * at most 100 screens or media (10 for screen_day) and never applies to a day series.
+ */
+export const handlePlaybackTotals = commandHandler(async (args, runtime, resolved) => {
+  const { screenId, mediaId } = playbackFilterFlags(args);
+  for (const [name, example] of [["by", "screen"], ["day-from", "2026-09-01"], ["day-to", "2026-09-30"], ["top", "5"]] as const) {
+    requireFlagValue(args, name, example);
+  }
+  const by = flagString(args.flags, "by") ?? "day";
+  if (by !== "day" && by !== "screen" && by !== "media" && by !== "screen_day") throw usageError("--by must be day, screen, media or screen_day.");
+  const top = flagString(args.flags, "top");
+  let maxDays = 92;
+  let scope = " for a ranking";
+  if (by === "day") {
+    if (top !== undefined) throw usageError("--top ranks screens or media: use it with --by screen, media or screen_day.");
+    if (screenId === undefined && mediaId === undefined) {
+      maxDays = AGGREGATE_MAX_DAYS;
+      scope = "";
+    } else {
+      scope = " with --screen-id or --media-id";
+    }
+  } else {
+    if (screenId !== undefined || mediaId !== undefined) throw usageError("--screen-id and --media-id narrow only --by day.");
+    const topMax = by === "screen_day" ? 10 : 100;
+    if (top !== undefined && (!/^\d+$/.test(top) || Number(top) < 1 || Number(top) > topMax)) {
+      throw usageError(`--top must be a whole number from 1 to ${topMax} with --by ${by}.`);
+    }
+  }
+  const days = aggregateDays(flagString(args.flags, "day-from"), flagString(args.flags, "day-to"), maxDays, scope);
+  return simpleGet(args, runtime, resolved, "/api/playback/totals", "Playback totals", {
+    by: flagString(args.flags, "by"), screen_id: screenId, media_id: mediaId, top, ...days,
+  });
+}, true);
+
+/** The id of `screen uptime|presence|health-history ID`, checked like the other screen reads. */
+function screenSeriesId(args: ParsedArgs, command: string): string {
+  const id = args.positionals[2];
+  if (!id || !isScreenId(id)) throw usageError(`${command} requires a screen ID (scr_...); screen list shows them.`);
+  return id;
+}
+
+/** --day-from/--day-to of the daily uptime reads. */
+function uptimeDays(args: ParsedArgs): { day_from?: string; day_to?: string } {
+  for (const [name, example] of [["day-from", "2026-09-01"], ["day-to", "2026-09-30"]] as const) requireFlagValue(args, name, example);
+  return aggregateDays(flagString(args.flags, "day-from"), flagString(args.flags, "day-to"), UPTIME_MAX_DAYS);
+}
+
+export const handleScreenUptime = commandHandler(async (args, runtime, resolved) => {
+  const id = screenSeriesId(args, "screen uptime");
+  return simpleGet(args, runtime, resolved, `/api/screens/${id}/uptime`, "Screen uptime", uptimeDays(args));
+}, true);
+
+export const handleProjectUptime = commandHandler(async (args, runtime, resolved) =>
+  simpleGet(args, runtime, resolved, "/api/uptime/daily", "Project uptime", uptimeDays(args)), true);
+
+export const handleScreenPresence = commandHandler(async (args, runtime, resolved) => {
+  const id = screenSeriesId(args, "screen presence");
+  requireFlagValue(args, "since", "7d");
+  requireFlagValue(args, "until", "now");
+  const range = seriesWindow({
+    from: flagString(args.flags, "since"), to: flagString(args.flags, "until"), fromFlag: "--since", toFlag: "--until",
+    now: runtime.now(), defaultMs: PRESENCE_DEFAULT_WINDOW_MS, maxDays: PRESENCE_MAX_DAYS,
+  });
+  return simpleList(args, runtime, resolved, `/api/screens/${id}/presence`, "Screen presence",
+    { since: range.from, until: range.to, limit: SERIES_PAGE_SIZE }, { cursorParam: "before", uncapped: true });
+}, true);
+
+export const handleScreenHealthHistory = commandHandler(async (args, runtime, resolved) => {
+  const id = screenSeriesId(args, "screen health-history");
+  requireFlagValue(args, "resolution", "hour");
+  requireFlagValue(args, "from", "7d");
+  requireFlagValue(args, "to", "now");
+  const resolution = flagString(args.flags, "resolution") ?? "raw";
+  if (resolution !== "raw" && resolution !== "hour") throw usageError("--resolution must be raw or hour.");
+  const range = seriesWindow({
+    from: flagString(args.flags, "from"), to: flagString(args.flags, "to"), fromFlag: "--from", toFlag: "--to",
+    now: runtime.now(), defaultMs: HEALTH_DEFAULT_WINDOW_MS,
+    maxDays: resolution === "hour" ? HEALTH_HOURLY_MAX_DAYS : HEALTH_RAW_MAX_DAYS,
+    advice: resolution === "raw" ? ` with --resolution raw; --resolution hour spans up to ${HEALTH_HOURLY_MAX_DAYS} days` : "",
+  });
+  return simpleList(args, runtime, resolved, `/api/screens/${id}/health/history`, "Screen health history",
+    { from: range.from, to: range.to, resolution: flagString(args.flags, "resolution"), limit: SERIES_PAGE_SIZE },
+    { cursorParam: "cursor", itemsKey: resolution === "hour" ? "hours" : "samples", uncapped: true });
+}, true);
+
+export const handleProjectHealthTrend = commandHandler(async (args, runtime, resolved) => {
+  requireFlagValue(args, "from", "7d");
+  requireFlagValue(args, "to", "now");
+  const range = seriesWindow({
+    from: flagString(args.flags, "from"), to: flagString(args.flags, "to"), fromFlag: "--from", toFlag: "--to",
+    now: runtime.now(), defaultMs: HEALTH_DEFAULT_WINDOW_MS, maxDays: HEALTH_HOURLY_MAX_DAYS,
+  });
+  return simpleList(args, runtime, resolved, "/api/health/trend", "Project health trend",
+    { from: range.from, to: range.to, limit: SERIES_PAGE_SIZE }, { cursorParam: "cursor", uncapped: true });
+}, true);
+
+/** --day-from/--day-to: real UTC days, from not after to, at most `maxDays` (366 by default) inclusive. */
+function aggregateDays(from: string | undefined, to: string | undefined, maxDays = AGGREGATE_MAX_DAYS, scope = ""): { day_from?: string; day_to?: string } {
   const parse = (value: string, flag: string) => {
     const ms = PLAYBACK_DAY_PATTERN.test(value) ? Date.parse(`${value}T00:00:00Z`) : NaN;
     if (!Number.isFinite(ms) || new Date(ms).toISOString().slice(0, 10) !== value) {
@@ -3957,7 +4084,7 @@ function aggregateDays(from: string | undefined, to: string | undefined): { day_
   const toMs = to === undefined ? undefined : parse(to, "--day-to");
   if (fromMs !== undefined && toMs !== undefined) {
     if (toMs < fromMs) throw usageError("--day-from must not be after --day-to.");
-    if (toMs - fromMs >= AGGREGATE_MAX_DAYS * 86_400_000) throw usageError(`--day-from to --day-to must span at most ${AGGREGATE_MAX_DAYS} days.`);
+    if (toMs - fromMs >= maxDays * 86_400_000) throw usageError(`--day-from to --day-to must span at most ${maxDays} days${scope}.`);
   }
   return { ...(from !== undefined ? { day_from: from } : {}), ...(to !== undefined ? { day_to: to } : {}) };
 }
@@ -4164,6 +4291,10 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
   // Validate unconditionally so a typo such as --webp-quality 500 is rejected
   // whether or not transcoding runs. The result is unused under --no-transcode.
   const transcodeOptions = transcodeOptionsFromArgs(args);
+  if (flagString(args.flags, "folder") !== undefined && flagBool(args.flags, "no-wait")) {
+    throw usageError("--folder needs the media ID, so it cannot be used with --no-wait; after the upload is ready run media move ID --folder ID.");
+  }
+  const folderId = await uploadFolderFromArgs(args, client);
   const uploaded = await uploadMediaFile({
     runtime,
     client,
@@ -4178,8 +4309,10 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
     pollMs: flagNumber(args.flags, "poll-ms") ?? 1000,
   });
   const mediaId = uploaded.mediaId;
+  if (folderId && mediaId) await moveIntoMediaFolder(client, folderId, [mediaId]);
   const data = {
     ...(mediaId ? { media_id: mediaId, id: mediaId } : {}),
+    ...(folderId && mediaId ? { folder_id: folderId } : {}),
     operation: uploaded.operation,
     reused: uploaded.reused,
     upload: uploaded.upload,
@@ -4201,6 +4334,7 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
       ["source_filename", uploaded.upload.source_filename],
       ["content_type", uploaded.upload.content_type],
       ["tag", uploaded.upload.tag],
+      ["folder_id", folderId && mediaId ? folderId : undefined],
       ["transcode", typeof uploaded.transcode.duration_ms === "number" ? `${uploaded.transcode.reason} in ${uploaded.transcode.duration_ms} ms` : "skipped"],
       ["sha256", uploaded.upload.sha256],
       ["timing", Object.entries(uploaded.timing).map(([stage, ms]) => `${stage.replace(/_ms$/, "")} ${ms} ms`).join(", ")],
@@ -4233,6 +4367,7 @@ async function mediaUploadBatch(
     );
   }
   const transcodeOptions = transcodeOptionsFromArgs(args);
+  const folderId = await uploadFolderFromArgs(args, client);
   const result = await runMediaUploadBatch({
     runtime,
     client,
@@ -4250,8 +4385,10 @@ async function mediaUploadBatch(
     timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000,
     pollMs: flagNumber(args.flags, "poll-ms") ?? 1000,
   });
+  const movable = result.data.items.flatMap((item) => (item.media_id ? [item.media_id] : []));
+  if (folderId && movable.length) await moveIntoMediaFolder(client, folderId, movable);
   return {
-    envelope: successEnvelope(result.data, {
+    envelope: successEnvelope(folderId ? { ...result.data, folder_id: folderId } : result.data, {
       request_id: client.requestId,
       warnings: result.warnings,
     }),
@@ -6626,9 +6763,9 @@ export const handleCardDataDelete = commandHandler(async (args, runtime, resolve
 });
 
 export const handleFeedsGet = commandHandler(async (args, runtime, resolved) => {
-  const query = feedQuery(args);
+  const { query, repeated } = feedQuery(args);
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  const response = await client.call({ method: "GET", path: `/api/feeds/${args.positionals[2]!}`, query });
+  const response = await client.call({ method: "GET", path: `/api/feeds/${args.positionals[2]!}`, query, ...(Object.keys(repeated).length ? { queryRepeated: repeated } : {}) });
   const body = response.body as Record<string, unknown>;
   const key = response.headers["screenrig-feed-key"] ?? body.key;
   if (response.status === 202) {
@@ -8255,16 +8392,30 @@ async function triggerPasswordResult(response: Awaited<ReturnType<ApiClient["cal
   };
 }
 
+/** --pull: a JSON object (CapPull) from a file or stdin; the server validates its members. */
+async function triggerPull(file: string, runtime: CliRuntime): Promise<TriggerPull> {
+  let parsed: unknown;
+  try {
+    parsed = await readAuthoringJson(file, runtime);
+  } catch (error) {
+    throw usageError(`Cannot read the --pull JSON: ${error instanceof Error ? error.message : "invalid JSON"}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw usageError("--pull must hold a JSON object of CAP sources and filters.");
+  return parsed as TriggerPull;
+}
+
 export const handleTriggersCreate = commandHandler(async (args, runtime, resolved) => {
   const label = triggerName(flagString(args.flags, "name") ?? "");
   const tag = flagString(args.flags, "tag");
   const screenIds = flagString(args.flags, "screen-id");
   if ((tag === undefined) === (screenIds === undefined)) throw usageError("triggers create takes exactly one of --tag TAG or --screen-id ID.");
   const hold = flagString(args.flags, "for");
+  const pullFile = flagString(args.flags, "pull");
   const body: TriggerWrite = {
     label,
     target: tag !== undefined ? { tag: triggerTag(tag) } : { screen_ids: triggerScreenIds(screenIds ?? "").split(",") },
     ...(hold !== undefined ? { default_for_seconds: triggerHoldSeconds(hold) } : {}),
+    ...(pullFile !== undefined ? { pull: await triggerPull(pullFile, runtime) } : {}),
   };
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await triggerCall(client, { method: "POST", path: TRIGGERS_PATH, idempotent: true, body });

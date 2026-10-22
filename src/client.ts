@@ -56,6 +56,13 @@ const READ_METHODS = new Set(["GET", "HEAD"]);
 /** A cursor-paged list is read for at most this many pages (each one billed request). */
 export const LIST_MAX_PAGES = 50;
 
+/** listAll: no page cap (`uncapped`), and the names a route gives its cursor query parameter and items array. */
+export interface ListAllOptions {
+  uncapped?: boolean;
+  cursorParam?: string;
+  itemsKey?: string;
+}
+
 /**
  * A transport failure says what went wrong but not what the caller may do
  * about it. Whether rerunning is safe depends on the method and on whether the
@@ -422,27 +429,35 @@ export class ApiClient {
    * next_cursor null. A first answer that is not a list document comes back
    * unchanged for the caller to judge, as before paging. A later page that is
    * not a list, or a list still offering pages after LIST_MAX_PAGES, is an
-   * error: the caller never receives a truncated list.
+   * error: the caller never receives a truncated list. A route whose cursor
+   * query parameter or items array has another name (before, cursor; samples,
+   * hours) says so in `options`; a first page may already carry its cursor in
+   * `query` under that name.
    */
-  async listAll(path: string, query?: Record<string, string | undefined>, options?: { uncapped?: boolean }): Promise<TransportResponse> {
+  async listAll(path: string, query?: Record<string, string | undefined>, options?: ListAllOptions): Promise<TransportResponse> {
+    const itemsKey = options?.itemsKey ?? "items";
+    const cursorParam = options?.cursorParam ?? "after";
     const items: unknown[] = [];
     const cursors = new Set<string>();
+    const start = query?.[cursorParam];
+    if (start) cursors.add(start);
     let after: string | undefined;
     for (let page = 1; ; page += 1) {
-      const response = await this.call({ method: "GET", path, query: after === undefined ? query : { ...query, after } });
-      const body = response.body as { items?: unknown; next_cursor?: unknown } | undefined;
-      if (!body || !Array.isArray(body.items)) {
+      const response = await this.call({ method: "GET", path, query: after === undefined ? query : { ...query, [cursorParam]: after } });
+      const body = response.body as Record<string, unknown> | undefined;
+      const rows = body?.[itemsKey];
+      if (!body || !Array.isArray(rows)) {
         if (page === 1) return response;
         throw unexpectedResponseError(
-          `GET ${path} answered page ${page} without an items array, so the list was not read completely.`,
+          `GET ${path} answered page ${page} without ${itemsKey === "items" ? "an items" : `a ${itemsKey}`} array, so the list was not read completely.`,
           this.requestId,
           "Run the same command again; if it keeps happening, report the request_id with screenrig feedback bug.",
         );
       }
-      items.push(...body.items);
+      items.push(...rows);
       const next = body.next_cursor;
       if (typeof next !== "string" || next === "") {
-        return { status: response.status, headers: response.headers, body: { ...body, items, next_cursor: null } };
+        return { status: response.status, headers: response.headers, body: { ...body, [itemsKey]: items, next_cursor: null } };
       }
       if (!options?.uncapped && page >= LIST_MAX_PAGES) {
         throw unexpectedResponseError(

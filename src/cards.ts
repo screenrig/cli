@@ -2,7 +2,7 @@ import { Ajv } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import type { ApiClient } from "./client.js";
 import { usageError } from "./problems.js";
-import { flagString, type ParsedArgs } from "./command-input.js";
+import { flagBool, flagString, type ParsedArgs } from "./command-input.js";
 
 type Schema = Record<string, any>;
 export interface CardDetails {
@@ -115,29 +115,92 @@ export async function validatePlaylistCards(client: ApiClient, playlist: { pages
   }
 }
 
-export function feedQuery(args: ParsedArgs): Record<string, string> {
-  const family = args.positionals[2]!;
-  const allowed: Record<string, string[]> = {
-    weather: ["lat", "lon"], airquality: ["lat", "lon"], alerts: ["lat", "lon"],
-    earthquakes: ["lat", "lon", "radius-km"], rates: ["base"], crypto: ["symbols", "currency"], headlines: ["url"],
+/** Feed families GET /api/feeds/{family} serves. */
+export const FEED_FAMILIES = ["weather", "airquality", "alerts", "rates", "crypto", "earthquakes", "cyclones", "headlines", "cap"] as const;
+export const FEED_SEVERITIES = ["minor", "moderate", "severe", "extreme"] as const;
+export const FEED_URGENCIES = ["past", "future", "expected", "immediate"] as const;
+export const FEED_CERTAINTIES = ["unlikely", "possible", "likely", "observed"] as const;
+export const FEED_STATUSES = ["Actual", "Exercise", "Test", "System"] as const;
+export const FEED_SCOPES = ["Public", "Restricted", "Private"] as const;
+export const FEED_AREA_UNKNOWN = ["hide", "show"] as const;
+/** Flags that repeat; each value travels as its own query parameter. */
+export const FEED_REPEATABLE_FLAGS = ["url", "geocode", "event", "exclude-event", "sender", "status", "scope", "language"] as const;
+
+const FEED_FLAGS: Record<string, readonly string[]> = {
+  weather: ["lat", "lon"], airquality: ["lat", "lon"], alerts: ["lat", "lon"],
+  earthquakes: ["lat", "lon", "radius-km", "min-magnitude", "hours"],
+  cyclones: ["basins", "lat", "lon", "radius-km"],
+  rates: ["base"], crypto: ["symbols", "currency"], headlines: ["url"],
+  cap: ["url", "public", "lat", "lon", "geocode", "min-severity", "max-severity", "min-urgency", "min-certainty",
+    "event", "exclude-event", "sender", "status", "scope", "language", "area-unknown"],
+};
+const FEED_RANGES: Record<string, readonly [number, number]> = {
+  lat: [-90, 90], lon: [-180, 180], "radius-km": [10, 20000], "min-magnitude": [0, 9], hours: [1, 168],
+};
+const CYCLONE_BASINS = ["at", "ep", "cp", "wp"];
+const CAP_SOURCES_MAX = 5;
+
+/** A repeatable feed flag: each value is checked as it is read and the values accumulate newline-separated. */
+export function feedListOption(name: string, maxLength: number, choices?: readonly string[]): (value: string, previous?: string) => string {
+  return (value, previous) => {
+    if (/\p{Cc}/u.test(value)) throw usageError(`--${name} must not contain control characters.`);
+    if (value.length > maxLength) throw usageError(`--${name} takes values of at most ${maxLength} characters.`);
+    if (choices && !choices.includes(value)) throw usageError(`--${name} must be one of ${choices.join(", ")}.`);
+    return previous === undefined ? value : `${previous}\n${value}`;
   };
-  const names = allowed[family];
+}
+
+export interface FeedRequest {
+  query: Record<string, string>;
+  /** Parameters sent once per value. */
+  repeated: Record<string, string[]>;
+}
+
+export function feedQuery(args: ParsedArgs): FeedRequest {
+  const family = args.positionals[2]!;
+  const names = FEED_FLAGS[family];
   if (!names) throw usageError("Unknown feed family.");
   const query: Record<string, string> = {};
-  for (const name of ["lat", "lon", "radius-km", "base", "symbols", "currency", "url"]) {
-    const value = flagString(args.flags, name);
+  const repeated: Record<string, string[]> = {};
+  for (const name of new Set(Object.values(FEED_FLAGS).flat())) {
+    const value = name === "public" ? (flagBool(args.flags, name) ? "true" : undefined) : flagString(args.flags, name);
     if (value === undefined) continue;
     if (!names.includes(name)) throw usageError(`--${name} does not apply to ${family}.`);
-    if (["lat", "lon", "radius-km"].includes(name)) {
-      const ranges: Record<string, number[]> = { lat: [-90, 90], lon: [-180, 180], "radius-km": [10, 20000] };
-      const [min, max] = ranges[name]!;
-      if (!value.trim() || !Number.isFinite(Number(value)) || Number(value) < min! || Number(value) > max!) {
+    const range = FEED_RANGES[name];
+    if (range) {
+      const [min, max] = range;
+      if (!value.trim() || !Number.isFinite(Number(value)) || Number(value) < min || Number(value) > max) {
         throw usageError(`--${name} must be a number from ${min} to ${max}.`);
       }
     }
-    query[name.replaceAll("-", "_")] = value;
+    if (name === "basins" && (value.length > 16 || value.split(",").some(basin => !CYCLONE_BASINS.includes(basin.trim().toLowerCase())))) {
+      throw usageError(`--basins takes a comma-separated list of ${CYCLONE_BASINS.join(", ")}.`);
+    }
+    if (name === "geocode") {
+      for (const code of value.split("\n")) {
+        const colon = code.indexOf(":");
+        if (colon < 1 || colon > 40 || colon === code.length - 1 || code.length - colon - 1 > 120) {
+          throw usageError("--geocode takes NAME:VALUE, such as UGC:WAC033.");
+        }
+      }
+    }
+    const param = name.replaceAll("-", "_");
+    if ((FEED_REPEATABLE_FLAGS as readonly string[]).includes(name)) repeated[param] = value.split("\n");
+    else query[param] = value;
   }
-  const required = names.includes("lat") ? ["lat", "lon"] : family === "crypto" ? ["symbols"] : family === "headlines" ? ["url"] : [];
-  for (const name of required) if (!query[name]) throw usageError(`${family} requires --${name}.`);
-  return query;
+  const urls = repeated.url;
+  if (urls && family === "headlines") {
+    if (urls.length > 1) throw usageError("headlines takes one --url.");
+    query.url = urls[0]!;
+    delete repeated.url;
+  }
+  if (urls && family === "cap" && urls.length > CAP_SOURCES_MAX) throw usageError(`--url takes at most ${CAP_SOURCES_MAX} CAP source URLs.`);
+  const has = (param: string): boolean => query[param] !== undefined || repeated[param] !== undefined;
+  const required = ["weather", "airquality", "alerts", "earthquakes"].includes(family) ? ["lat", "lon"] : family === "crypto" ? ["symbols"] : family === "headlines" ? ["url"] : [];
+  for (const name of required) if (!has(name)) throw usageError(`${family} requires --${name}.`);
+  if (family === "cyclones" && ["lat", "lon", "radius_km"].some(has) && !["lat", "lon", "radius_km"].every(has)) {
+    throw usageError("cyclones takes --lat, --lon and --radius-km together for the storms near a place, or none of them for every storm.");
+  }
+  if (family === "cap" && !has("url") && !has("lat")) throw usageError("cap requires --url, or --lat and --lon for the public alert feeds.");
+  return { query, repeated };
 }

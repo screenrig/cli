@@ -1,4 +1,5 @@
 import { handlerOptionName } from "./cli-commands/aliases.js";
+import { FEED_REPEATABLE_FLAGS } from "./cards.js";
 import { Command, Option } from "commander";
 import type { ParsedArgs } from "./command-input.js";
 import type { CommandHandler } from "./commands.js";
@@ -43,7 +44,8 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
     const repeatable = (name === "capability" && ((command.name() === "connect" && command.parent?.name() === "agent")
       || (command.name() === "create" && command.parent?.name() === "service-client")))
       || (name === "tag" && command.parent?.name() === "fleet-links" && ["create", "update"].includes(command.name()))
-      || (name === "screen-id" && command.parent?.name() === "triggers" && command.name() === "create");
+      || (name === "screen-id" && command.parent?.name() === "triggers" && command.name() === "create")
+      || (command.parent?.name() === "feeds" && command.name() === "get" && (FEED_REPEATABLE_FLAGS as readonly string[]).includes(name));
     if (seen.has(handlerOptionName(option)) && !repeatable) throw usageError(`--${name} may be supplied only once.`);
     seen.add(handlerOptionName(option));
   });

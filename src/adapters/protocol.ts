@@ -1252,6 +1252,7 @@ export interface Trigger {
   label: string;
   target: TriggerTarget;
   default_for_seconds: number;
+  pull?: TriggerPull;
   url: string;
   username: string;
   playlist_id?: string;
@@ -1270,10 +1271,14 @@ export interface TriggerList {
   items: Trigger[];
 }
 
+/** CapPull: the CAP sources the platform reads for a trigger and which alerts count; the server validates every member. */
+export type TriggerPull = Record<string, unknown>;
+
 export interface TriggerWrite {
   label: string;
   target: TriggerTarget;
   default_for_seconds?: number;
+  pull?: TriggerPull;
 }
 
 /** POST /api/triggers/{id}/test answers the receipt a CAP message gets. */

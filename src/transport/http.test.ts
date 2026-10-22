@@ -283,3 +283,23 @@ test("every request kind carries the screenrig-cli User-Agent", async () => {
     assert.match(agent ?? "", new RegExp(`^screenrig-cli/\\d{2}\\.\\d{2}\\.\\d+(-dev)? \\(${process.platform}; ${process.arch}\\)$`));
   }
 });
+
+test("queryRepeated sends one query parameter per value after the single-value query", async () => {
+  let requested = "";
+  const transport = new FetchTransport("https://api.screenrig.ai/", "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_test", async (input) => {
+    requested = String(input);
+    return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+  });
+  await transport.request({
+    method: "GET",
+    path: "/api/feeds/cap",
+    query: { lat: "49.25", lon: "-123" },
+    queryRepeated: { url: ["https://example.com/a.xml?x=1,2", "https://example.com/b.xml"], geocode: ["UGC:WAC033"] },
+  });
+  const url = new URL(requested);
+  assert.equal(url.pathname, "/api/feeds/cap");
+  assert.deepEqual(url.searchParams.getAll("url"), ["https://example.com/a.xml?x=1,2", "https://example.com/b.xml"]);
+  assert.deepEqual(url.searchParams.getAll("geocode"), ["UGC:WAC033"]);
+  assert.equal(url.searchParams.get("lat"), "49.25");
+  assert.equal(url.searchParams.get("lon"), "-123");
+});

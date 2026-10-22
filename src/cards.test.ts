@@ -152,6 +152,104 @@ test("feeds get covers each family, maps query names and returns fetchedAt/attri
   }
 });
 
+test("feeds get sends earthquake, cyclone and CAP filters, repeating the repeatable flags", async t => {
+  const f = await fixture(t);
+  const doc = { schema: "screenrig.cap/v1", fetchedAt: "2026-10-15T11:58:00Z", attribution: { text: "Data provider" } };
+  const cases: Array<[string, string[], Record<string, string>, Record<string, string[]> | undefined]> = [
+    ["earthquakes", ["--lat", "49", "--lon", "-123", "--min-magnitude", "4.5", "--hours", "72"], { lat: "49", lon: "-123", min_magnitude: "4.5", hours: "72" }, undefined],
+    ["cyclones", [], {}, undefined],
+    ["cyclones", ["--basins", "at,EP"], { basins: "at,EP" }, undefined],
+    ["cyclones", ["--lat", "25", "--lon", "-80", "--radius-km", "800", "--basins", "at"], { lat: "25", lon: "-80", radius_km: "800", basins: "at" }, undefined],
+    ["cap", ["--lat", "49.25", "--lon", "-123"], { lat: "49.25", lon: "-123" }, undefined],
+    ["cap", ["--url", "https://example.com/a.xml?bbox=1,2", "--url", "https://example.com/b.xml"], {}, { url: ["https://example.com/a.xml?bbox=1,2", "https://example.com/b.xml"] }],
+    ["cap", ["--url", "https://example.com/a.xml", "--public", "--lat", "49.25", "--lon", "-123"], { public: "true", lat: "49.25", lon: "-123" }, { url: ["https://example.com/a.xml"] }],
+    [
+      "cap",
+      [
+        "--lat", "47.6", "--lon", "-122.3", "--geocode", "UGC:WAC033", "--geocode", "SAME:053033",
+        "--min-severity", "moderate", "--max-severity", "extreme", "--min-urgency", "expected", "--min-certainty", "likely",
+        "--event", "*Warning", "--event", "Flood Watch", "--exclude-event", "Test*", "--sender", "w-nws.webmaster@noaa.gov",
+        "--status", "Actual", "--status", "Exercise", "--scope", "Public", "--language", "fr-CA", "--language", "en", "--area-unknown", "show",
+      ],
+      { lat: "47.6", lon: "-122.3", min_severity: "moderate", max_severity: "extreme", min_urgency: "expected", min_certainty: "likely", area_unknown: "show" },
+      {
+        geocode: ["UGC:WAC033", "SAME:053033"], event: ["*Warning", "Flood Watch"], exclude_event: ["Test*"], sender: ["w-nws.webmaster@noaa.gov"],
+        status: ["Actual", "Exercise"], scope: ["Public"], language: ["fr-CA", "en"],
+      },
+    ],
+  ];
+  let expected: { query: Record<string, string>; repeated: Record<string, string[]> | undefined } = { query: {}, repeated: undefined };
+  for (const family of ["earthquakes", "cyclones", "cap"]) {
+    f.transport.on("GET", `/api/feeds/${family}`, request => {
+      assert.deepEqual(request.query, expected.query);
+      assert.deepEqual(request.queryRepeated, expected.repeated);
+      return ok(doc, { "screenrig-feed-key": `feed:${family}:example` });
+    });
+  }
+  for (const [family, flags, query, repeated] of cases) {
+    expected = { query, repeated };
+    const result = await f.invoke(["feeds", "get", family, ...flags]);
+    assert.equal(result.code, 0, `${family} ${flags.join(" ")}: ${result.stdout}`);
+    assert.equal(result.body.data.fetchedAt, doc.fetchedAt);
+  }
+  assert.equal(f.transport.calls.length, cases.length);
+});
+
+test("feeds get refuses CAP, cyclone and earthquake flags that break their rules before any request", async t => {
+  const f = await fixture(t);
+  const refused: Array<[string[], RegExp]> = [
+    [["cap"], /cap requires --url, or --lat and --lon/],
+    [["cap", "--public"], /--public requires --lat and --lon/],
+    [["cap", "--url", "https://example.com/a.xml", "--public"], /--public requires --lat and --lon/],
+    [["cap", "--url", "https://example.com/a.xml", "--geocode", "UGC:WAC033"], /--geocode requires --lat and --lon/],
+    [["cap", "--lat", "1", "--lon", "1", "--geocode", "WAC033"], /--geocode takes NAME:VALUE/],
+    [["cap", "--lat", "1", "--lon", "1", "--geocode", ":WAC033"], /--geocode takes NAME:VALUE/],
+    [["cap", "--lat", "1", "--lon", "1", "--geocode", "UGC:"], /--geocode takes NAME:VALUE/],
+    [["cap", ...Array.from({ length: 6 }, (_, index) => ["--url", `https://example.com/${index}.xml`]).flat()], /at most 5 CAP source URLs/],
+    [["cap", "--lat", "1", "--lon", "1", "--min-severity", "catastrophic"], /min-severity/],
+    [["cap", "--lat", "1", "--lon", "1", "--status", "Draft"], /--status must be one of Actual, Exercise, Test, System/],
+    [["cap", "--lat", "1", "--lon", "1", "--scope", "Secret"], /--scope must be one of Public, Restricted, Private/],
+    [["cap", "--lat", "1", "--lon", "1", "--area-unknown", "maybe"], /area-unknown/],
+    [["cap", "--lat", "1", "--lon", "1", "--event", "x".repeat(121)], /--event takes values of at most 120 characters/],
+    [["cap", "--lat", "1", "--lon", "1", "--radius-km", "100"], /--radius-km does not apply to cap/],
+    [["cap", "--url", "https://example.com/a.xml", "--min-magnitude", "3"], /--min-magnitude does not apply to cap/],
+    [["weather", "--lat", "1", "--lon", "1", "--min-severity", "minor"], /--min-severity does not apply to weather/],
+    [["weather", "--lat", "1", "--lon", "1", "--hours", "5"], /--hours does not apply to weather/],
+    [["headlines", "--url", "https://example.com/a.xml", "--url", "https://example.com/b.xml"], /headlines takes one --url/],
+    [["cyclones", "--lat", "25", "--lon", "-80"], /cyclones takes --lat, --lon and --radius-km together/],
+    [["cyclones", "--radius-km", "800"], /--radius-km requires --lat and --lon/],
+    [["cyclones", "--basins", "xx"], /--basins takes a comma-separated list of at, ep, cp, wp/],
+    [["cyclones", "--basins", "all"], /--basins takes a comma-separated list/],
+    [["cyclones", "--url", "https://example.com/a.xml"], /--url does not apply to cyclones/],
+    [["earthquakes", "--lat", "1", "--lon", "1", "--min-magnitude", "10"], /--min-magnitude must be a number from 0 to 9/],
+    [["earthquakes", "--lat", "1", "--lon", "1", "--hours", "0"], /--hours must be a number from 1 to 168/],
+    [["earthquakes", "--lat", "1", "--lon", "1", "--hours", "169"], /--hours must be a number from 1 to 168/],
+    [["earthquakes", "--lat", "1", "--lon", "1", "--basins", "at"], /--basins does not apply to earthquakes/],
+  ];
+  for (const [argv, message] of refused) {
+    const result = await f.invoke(["feeds", "get", ...argv]);
+    assert.equal(result.code, 2, `${argv.join(" ")}: ${result.stdout}`);
+    assert.match(result.body.error.detail, message, argv.join(" "));
+  }
+  assert.equal(f.transport.calls.length, 0);
+});
+
+test("feeds get help names the new families, choices, repeatable flags and relationships", () => {
+  const help = commandHelp(["feeds", "get"]);
+  const option = (name: string) => help.options.find(candidate => candidate.name === name);
+  assert.deepEqual(help.arguments[0]!.choices, ["weather", "airquality", "alerts", "rates", "crypto", "earthquakes", "cyclones", "headlines", "cap"]);
+  for (const name of ["--min-magnitude", "--hours", "--basins", "--public", "--geocode", "--min-severity", "--max-severity", "--min-urgency", "--min-certainty",
+    "--event", "--exclude-event", "--sender", "--status", "--scope", "--language", "--area-unknown"]) assert.ok(option(name), name);
+  assert.deepEqual(option("--min-severity")!.choices, ["minor", "moderate", "severe", "extreme"]);
+  assert.deepEqual(option("--status")!.choices, ["Actual", "Exercise", "Test", "System"]);
+  assert.deepEqual(option("--scope")!.choices, ["Public", "Restricted", "Private"]);
+  assert.deepEqual(option("--area-unknown")!.choices, ["hide", "show"]);
+  assert.ok(help.relationships.some(group => group.kind === "requires" && group.options.join() === "--public,--lat,--lon"));
+  assert.ok(help.relationships.some(group => group.kind === "requires" && group.options.join() === "--geocode,--lat,--lon"));
+  assert.throws(() => parseArgv(["feeds", "get", "cap", "--lat", "1", "--lon", "1", "--public", "--public"]), /only once/);
+  assert.throws(() => parseArgv(["feeds", "get", "cap", "--lat", "1", "--lon", "1", "--min-severity", "minor", "--min-severity", "severe"]), /only once/);
+});
+
 test("pending feed returns retry seconds/time with one read and no polling", async t => {
   const f = await fixture(t);
   f.transport.on("GET", "/api/feeds/rates", () => ({ status: 202, headers: { "retry-after": "60" }, body: { key: "feed:rates.v1:EUR", state: "pending", retry_after_seconds: 60 } }));

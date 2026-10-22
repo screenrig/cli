@@ -1813,12 +1813,13 @@ export function memoryBackend(options: {
   const publicTrigger = (trigger: Record<string, unknown>) => ({ ...trigger });
   transport.on("GET", "/api/triggers", () => ({ status: 200, headers: { "cache-control": "no-store" }, body: { items: [...triggers.values()].map(publicTrigger) } }));
   transport.on("POST", "/api/triggers", (req) => triggerReplay(req, () => {
-    const body = (req.body ?? {}) as { label?: string; target?: { tag?: string; screen_ids?: string[] }; default_for_seconds?: number };
+    const body = (req.body ?? {}) as { label?: string; target?: { tag?: string; screen_ids?: string[] }; default_for_seconds?: number; pull?: Record<string, unknown> };
     if (triggers.size >= 20) return problem(409, "trigger_limit_reached", "The project has the maximum of 20 triggers.");
     triggerSequence += 1;
     const id = `trg_${String(triggerSequence).padStart(16, "A")}`;
     const trigger: Record<string, unknown> = {
       id, kind: "cap", label: body.label, target: body.target ?? {}, default_for_seconds: body.default_for_seconds ?? 3600,
+      ...(body.pull ? { pull: body.pull } : {}),
       url: `https://api.screenrig.ai/api/triggers/${id}/cap`, username: id, revision: 1,
       created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
     };

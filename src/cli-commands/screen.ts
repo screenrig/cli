@@ -2,9 +2,10 @@ import { addValueAlias } from "./aliases.js";
 import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes.js";
 import { NOTE_HELP, positiveInteger, reviewNoteOption, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleScreenChanges, handleScreenRevert, handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear } from "../commands.js";
+import { handleScreenChanges, handleScreenRevert, handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory } from "../commands.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
 import { untilOption } from "../screen-display.js";
+import { playsInstantOption } from "../playback-export.js";
 import { type Command, Option } from "commander";
 
 export function registerScreenCommands(root: Command, bind: CommandActionBinder): void {
@@ -54,6 +55,25 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   screen.command("show").description("Inspect a screen")
     .argument("<id>", "Screen identifier")
     .action(bind(handleScreenShow));
+
+  screen.command("uptime").description("Read a screen's daily availability over UTC days")
+    .argument("<id>", "Screen identifier")
+    .option("--day-from <YYYY-MM-DD>", "First UTC day, inclusive (default 29 days before --day-to)")
+    .option("--day-to <YYYY-MM-DD>", "Last UTC day, inclusive (default today); at most 366 days after --day-from")
+    .action(bind(handleScreenUptime));
+
+  screen.command("presence").description("List a screen's online and offline transitions, newest first")
+    .argument("<id>", "Screen identifier")
+    .option("--since <TIME>", "Inclusive start of the transition time: RFC 3339, now, or an age such as 7d, 12h, 30m (default 30 days before --until)", playsInstantOption("--since"))
+    .option("--until <TIME>", "Exclusive end of the transition time: RFC 3339, now, or an age (default now); at most 366 days after --since", playsInstantOption("--until"))
+    .action(bind(handleScreenPresence));
+
+  screen.command("health-history").description("List the health a screen reported over time, each report or one summary per hour")
+    .argument("<id>", "Screen identifier")
+    .option("--from <TIME>", "Inclusive start of the report time: RFC 3339, now, or an age such as 7d, 12h, 30m (default 24 hours before --to)", playsInstantOption("--from"))
+    .option("--to <TIME>", "Exclusive end of the report time: RFC 3339, now, or an age (default now); at most 31 days after --from, 93 with --resolution hour", playsInstantOption("--to"))
+    .addOption(new Option("--resolution <RESOLUTION>", "raw (default) lists each report; hour summarizes each UTC hour").choices(["raw", "hour"]))
+    .action(bind(handleScreenHealthHistory));
 
   screen.command("storage-forecast").description("Dry-run whether a playlist fits a screen's reported storage")
     .argument("<id>", "Screen identifier")

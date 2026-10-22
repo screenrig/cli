@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, open, rename, rm, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { chmod, mkdir, open, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
@@ -174,6 +175,82 @@ test("media move refuses a missing destination, both destinations and unknown id
       assert.equal(result.code, ExitCode.Usage, `${argv.join(" ")}: ${result.stdout}`);
     }
     assert.equal(transport.calls.length, 0);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+const mediaRow = (id: string, folderId?: string) => ({
+  id, filename: `${id}.png`, source_filename: `${id}.png`, primitive: "image", content_type: "image/png", operation_id: "op_EARLIER",
+  sha256: "0".repeat(64), bytes: 4, revision: 1, state: "ready", created_at: "2026-10-21T17:00:00Z", updated_at: "2026-10-21T17:00:00Z",
+  ...(folderId ? { folder_id: folderId } : {}),
+});
+
+test("media list --folder keeps only files directly in that folder or at the root", async () => {
+  const configDir = await testTemp("media-list-folder-");
+  await enrolled(configDir);
+  const transport = new FakeTransport().on("GET", "/api/media", () => json(200, {
+    items: [mediaRow(FILE, FOLDER), mediaRow(FILE_2), mediaRow("med_CCCCCCCCCCCCCCCCCCCCCCCC", OTHER)], next_cursor: null,
+  }));
+  try {
+    const ids = async (...folder: string[]) => {
+      const result = await withRuntime(["--json", "media", "list", ...folder], transport, configDir);
+      assert.equal(result.code, ExitCode.Success, result.stdout);
+      return (JSON.parse(result.stdout) as { data: { items: Array<{ id: string }> } }).data.items.map((item) => item.id);
+    };
+    assert.deepEqual(await ids("--folder", FOLDER), [FILE]);
+    assert.deepEqual(await ids("--folder", "root"), [FILE_2]);
+    assert.equal((await ids()).length, 3);
+    const bad = await withRuntime(["--json", "media", "list", "--folder", "Menus"], transport, configDir);
+    assert.equal(bad.code, ExitCode.Usage, bad.stdout);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("media upload --folder checks the folder first and moves the ready upload into it", async () => {
+  const configDir = await testTemp("media-upload-folder-");
+  await enrolled(configDir);
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+  const file = path.join(configDir, "menu.png");
+  await writeFile(file, bytes);
+  const earlier = { ...mediaRow(FILE), filename: "menu.png", source_filename: "menu.png", sha256: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length };
+  const transport = new FakeTransport()
+    .on("GET", `/api/media-folders/${FOLDER}`, () => json(200, folder(FOLDER, "Menus", null)))
+    .on("GET", "/api/media", () => json(200, { items: [earlier], next_cursor: null }))
+    .on("GET", "/api/operations/op_EARLIER", () => json(200, { id: "op_EARLIER", kind: "media.upload", state: "succeeded", created_at: earlier.created_at, updated_at: earlier.updated_at, result: { media_id: FILE } }))
+    .on("POST", "/api/media/move", () => json(200, { media: 1, folders: 0 }));
+  try {
+    const uploaded = await withRuntime(["--json", "media", "upload", file, "--no-transcode", "--folder", FOLDER], transport, configDir);
+    assert.equal(uploaded.code, ExitCode.Success, uploaded.stdout);
+    const data = (JSON.parse(uploaded.stdout) as { data: { media_id: string; folder_id: string } }).data;
+    assert.equal(data.media_id, FILE);
+    assert.equal(data.folder_id, FOLDER);
+    const paths = transport.calls.map((call) => `${call.method} ${call.path}`);
+    assert.ok(paths.indexOf(`GET /api/media-folders/${FOLDER}`) < paths.indexOf("GET /api/media"), "the folder is checked before any upload work");
+    assert.deepEqual(transport.calls.find((call) => call.path === "/api/media/move")?.body, { folder_id: FOLDER, media_ids: [FILE] });
+
+    transport.calls.length = 0;
+    const noWait = await withRuntime(["--json", "media", "upload", file, "--no-transcode", "--no-wait", "--folder", FOLDER], transport, configDir);
+    assert.equal(noWait.code, ExitCode.Usage, noWait.stdout);
+    const malformed = await withRuntime(["--json", "media", "upload", file, "--no-transcode", "--folder", "Menus"], transport, configDir);
+    assert.equal(malformed.code, ExitCode.Usage, malformed.stdout);
+    assert.equal(transport.calls.length, 0);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("media upload --folder stops before any upload when the folder does not exist", async () => {
+  const configDir = await testTemp("media-upload-folder-missing-");
+  await enrolled(configDir);
+  const file = path.join(configDir, "menu.png");
+  await writeFile(file, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  const transport = new FakeTransport().on("GET", `/api/media-folders/${FOLDER}`, () => json(404, { type: "about:blank", title: "Not found", status: 404, code: "not_found", detail: "media folder not found" }));
+  try {
+    const result = await withRuntime(["--json", "media", "upload", file, "--no-transcode", "--folder", FOLDER], transport, configDir);
+    assert.notEqual(result.code, ExitCode.Success, result.stdout);
+    assert.equal(transport.calls.some((call) => call.path === "/api/media/uploads" || call.path === "/api/media/move"), false);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }

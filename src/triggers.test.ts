@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { PassThrough } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import { test } from "node:test";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
+import { commandHelp } from "./help.js";
 import { createMemoryLogger } from "./log/logger.js";
 import type { OperationLogger } from "./log/types.js";
 import { run, type CliRuntime } from "./main.js";
@@ -43,7 +44,7 @@ async function enrolled(): Promise<Env> {
   return { fs, cwd, configPath };
 }
 
-async function cli(argv: string[], transport: FakeTransport, env: Env, logger?: OperationLogger): Promise<{ code: number; stdout: string; stderr: string; envelope: Envelope }> {
+async function cli(argv: string[], transport: FakeTransport, env: Env, logger?: OperationLogger, stdin?: string): Promise<{ code: number; stdout: string; stderr: string; envelope: Envelope }> {
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   const outP = collect(stdout);
@@ -54,6 +55,7 @@ async function cli(argv: string[], transport: FakeTransport, env: Env, logger?: 
     sleep: async () => undefined,
     homedir: env.fs.homedir, cwd: () => env.cwd, fs: env.fs, transport,
     ...(logger ? { logger } : {}),
+    ...(stdin !== undefined ? { stdin: Readable.from([stdin]), isStdinTty: () => false } : {}),
   };
   const code = await run(runtime);
   stdout.end();
@@ -129,6 +131,50 @@ test("triggers create refuses a bad target or hold before any request", async ()
   assert.equal(triggerHoldSeconds("1m"), 60);
   assert.equal(triggerHoldSeconds("7d"), 604_800);
   assert.equal(triggerHoldSeconds("1d12h"), 129_600);
+});
+
+test("triggers create --pull sends the CAP sources from a file or stdin and the trigger keeps them", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const pull = {
+    sources: ["https://alerts.example.com/cap.atom"],
+    location: { name: "Campus", latitude: 49.25, longitude: -123, geocodes: [{ name: "UGC", value: "WAC033" }] },
+    minSeverity: "moderate", events: ["*Warning"], statuses: ["Actual", "Exercise"], areaUnknown: "show",
+  };
+  await writeFile(path.join(env.cwd, "pull.json"), JSON.stringify(pull));
+  const fromFile = await cli(["--json", "triggers", "create", "--name", "Campus alerts", "--tag", "Campus", "--for", "2h", "--pull", "pull.json"], transport, env);
+  assert.equal(fromFile.code, 0, fromFile.stdout);
+  assert.deepEqual(triggerCalls(transport).at(-1)!.body, { label: "Campus alerts", target: { tag: "Campus" }, default_for_seconds: 7200, pull });
+  assert.deepEqual(fromFile.envelope.data.pull, pull);
+
+  const fromStdin = await cli(["--json", "triggers", "create", "--name", "Lobby", "--screen-id", "scr_AAAAAAAAAAAAAAAA", "--pull", "-"], transport, env, undefined, JSON.stringify({ location: { latitude: 1, longitude: 2 } }));
+  assert.equal(fromStdin.code, 0, fromStdin.stdout);
+  assert.deepEqual(triggerCalls(transport).at(-1)!.body, { label: "Lobby", target: { screen_ids: ["scr_AAAAAAAAAAAAAAAA"] }, pull: { location: { latitude: 1, longitude: 2 } } });
+
+  const shown = await cli(["--json", "triggers", "show", fromFile.envelope.data.id], transport, env);
+  assert.deepEqual(shown.envelope.data.pull, pull);
+});
+
+test("triggers create help names --pull with its stdin form", () => {
+  const pull = commandHelp(["triggers", "create"]).options.find((option) => option.name === "--pull");
+  assert.ok(pull);
+  assert.match(pull.description, /for stdin/);
+});
+
+test("triggers create --pull refuses unreadable or non-object input before any request", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  await writeFile(path.join(env.cwd, "list.json"), "[]");
+  await writeFile(path.join(env.cwd, "text.json"), '"sources"');
+  await writeFile(path.join(env.cwd, "broken.json"), "{ not json");
+  for (const file of ["list.json", "text.json", "broken.json", "missing.json"]) {
+    const result = await cli(["--json", "triggers", "create", "--name", "x", "--tag", "Lobby", "--pull", file], transport, env);
+    assert.equal(result.code, ExitCode.Usage, `${file}: ${result.stdout}`);
+  }
+  const piped = await cli(["--json", "triggers", "create", "--name", "x", "--tag", "Lobby", "--pull", "-"], transport, env, undefined, "null");
+  assert.equal(piped.code, ExitCode.Usage, piped.stdout);
+  assert.match(piped.envelope.error?.detail ?? "", /--pull must hold a JSON object/);
+  assert.equal(triggerCalls(transport).length, 0);
 });
 
 test("triggers list, show, test and clear report the alert; test and delete refuse while it is active", async () => {

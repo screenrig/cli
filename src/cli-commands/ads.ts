@@ -35,7 +35,7 @@ import {
 } from "../commands.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
-import { decisionNoteOption, positiveInteger, revision } from "./options.js";
+import { decisionNoteOption, positiveInteger, revision, vastTagUrl } from "./options.js";
 
 /**
  * Advertising commands. Buyer operations act through invited memberships;
@@ -92,6 +92,7 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
   const slots = ads.command("slots").description("Manage the reusable ad slots this seller offers");
   slots.command("list").description("List this seller project's slot definitions")
     .action(bind(handleAdsSlotsList));
+  const VAST_HELP = "The seller's own VAST 2-4 ad tag (HTTPS), tried when no invited campaign fills this slot; the slot must accept video";
   const slotFields = (command: Command, create: boolean): Command => command
     .addOption(new Option("--enabled", "Enable this slot (the default for a new slot)").conflicts("disabled"))
     .addOption(new Option("--disabled", "Keep this slot unavailable for paid playback").conflicts("enabled"))
@@ -104,12 +105,16 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     .option("--max-image-duration-ms <MS>", "Longest accepted image duration", positiveInteger("max-image-duration-ms"))
     .option("--max-video-duration-ms <MS>", "Longest accepted finite video duration", positiveInteger("max-video-duration-ms"))
     .addOption(new Option("--rate-mcr-per-15s <MCR>", "Positive integer mcr rate override for this slot").argParser(positiveInteger("rate-mcr-per-15s")).conflicts("clearRate"))
-    .addOption(new Option("--clear-rate", "Remove this slot's rate override and inherit the screen or project rate").conflicts("rateMcrPer15s"));
+    .addOption(new Option("--clear-rate", "Remove this slot's rate override and inherit the screen or project rate").conflicts("rateMcrPer15s"))
+    .addOption(create
+      ? new Option("--vast-tag-url <URL>", VAST_HELP).argParser(vastTagUrl)
+      : new Option("--vast-tag-url <URL>", VAST_HELP).argParser(vastTagUrl).conflicts("clearVastTagUrl"));
   const slotsCreate = slotFields(slots.command("create").description("Create a reusable slot definition")
     .action(bind(handleAdsSlotsCreate)), true);
   const slotsUpdate = slotFields(slots.command("update").description("Update a reusable slot definition")
     .argument("<slot-id>", "Slot identifier")
     .requiredOption("--expect-rev <REVISION>", "Current slot revision (required)", revision)
+    .addOption(new Option("--clear-vast-tag-url", "Remove this slot's VAST tag").conflicts("vastTagUrl"))
     .action(bind(handleAdsSlotsUpdate)), false);
   addCommandNotes(slotsCreate, "Creating a slot definition does not put an ad break into any playlist: place an adslot page through playlist authoring. Omitted duration limits adopt the server defaults: images up to 30000 ms and finite videos up to 30000 ms.");
   addCommandNotes(slotsUpdate, "The stored definition is read first, then written as a whole record: flags you omit keep the current accepted formats, duration limits, and rate override. A changed effective rate installs a pricing barrier that pauses affected campaigns with price_change_pending until each buyer accepts a fresh quote.");

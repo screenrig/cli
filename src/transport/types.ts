@@ -4,6 +4,8 @@ export interface TransportRequest {
   method: HttpMethod;
   path: string;
   query?: Record<string, string | undefined>;
+  /** Query parameters sent once per value (?url=a&url=b), after `query`. */
+  queryRepeated?: Record<string, readonly string[]>;
   headers?: Record<string, string>;
   body?: unknown;
   json?: boolean;

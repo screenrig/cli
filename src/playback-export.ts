@@ -35,7 +35,7 @@ function isoUtc(ms: number): string {
  * `--from`/`--to`: an RFC 3339 instant with seconds and an offset, normalized
  * to UTC, `now`, or a relative age such as 7d, 12h, or 30m before now.
  */
-export function playsInstant(value: string, flag: "--from" | "--to", now: Date): number {
+export function playsInstant(value: string, flag: string, now: Date): number {
   const trimmed = value.trim();
   if (trimmed === "now") return now.getTime();
   const relative = RELATIVE.exec(trimmed);
@@ -49,7 +49,7 @@ export function playsInstant(value: string, flag: "--from" | "--to", now: Date):
   return Date.parse(normalized);
 }
 
-export function playsInstantOption(flag: "--from" | "--to"): (value: string) => string {
+export function playsInstantOption(flag: string): (value: string) => string {
   return (value: string) => {
     playsInstant(value, flag, new Date());
     return value;

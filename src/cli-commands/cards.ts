@@ -1,5 +1,7 @@
-import { type Command, Argument } from "commander";
-import { cardId, cardUid, cardDataKey } from "../cards.js";
+import { type Command, Argument, Option } from "commander";
+import {
+  cardId, cardUid, cardDataKey, feedListOption, FEED_AREA_UNKNOWN, FEED_CERTAINTIES, FEED_FAMILIES, FEED_SCOPES, FEED_SEVERITIES, FEED_STATUSES, FEED_URGENCIES,
+} from "../cards.js";
 import { handleCardPreview, handleCardCreate, handleCardList, handleCardShow, handleCardParams, handleCardDelete, handleCardInstanceDataGet, handleCardInstanceDataPut, handleCardsList, handleCardsShow, handleCardDataGet, handleCardDataPut, handleCardDataList, handleCardDataDelete, handleFeedsGet } from "../commands.js";
 import { positiveInteger, revision } from "./options.js";
 import { requireOptionGroup } from "./notes.js";
@@ -72,15 +74,33 @@ export function registerCardsCommands(root: Command, bind: CommandActionBinder):
 
   const feeds = root.command("feeds").description("Read third-party data fetched and cached by screenRIG");
   const get = feeds.command("get").description("Read a feed once; report pending and its retry time")
-    .addArgument(new Argument("<family>", "Feed family").choices(["weather", "airquality", "alerts", "rates", "crypto", "earthquakes", "headlines"]))
-    .option("--lat <DEGREES>", "Latitude for weather, airquality, alerts or earthquakes")
-    .option("--lon <DEGREES>", "Longitude for weather, airquality, alerts or earthquakes")
-    .option("--radius-km <KM>", "Earthquake radius, 10–20000 km (default 500)")
+    .addArgument(new Argument("<family>", "Feed family").choices([...FEED_FAMILIES]))
+    .option("--lat <DEGREES>", "Latitude for weather, airquality, alerts, earthquakes, cyclones or cap")
+    .option("--lon <DEGREES>", "Longitude for weather, airquality, alerts, earthquakes, cyclones or cap")
+    .option("--radius-km <KM>", "Earthquake radius (default 500) or cyclone area, 10–20000 km")
+    .option("--min-magnitude <MAGNITUDE>", "Earthquakes: least magnitude, 0–9 (default 2.5)")
+    .option("--hours <HOURS>", "Earthquakes: window in hours, 1–168 (default 24)")
+    .option("--basins <LIST>", "Cyclones: comma-separated basins at, ep, cp, wp (default all)")
     .option("--base <CODE>", "Rates base currency (default EUR)")
     .option("--symbols <IDS>", "Comma-separated crypto ids or tickers, at most 20")
     .option("--currency <CODE>", "Crypto quote currency (default usd)")
-    .option("--url <URL>", "RSS or Atom feed URL for headlines")
+    .addOption(new Option("--url <URL>", "RSS or Atom feed URL for headlines; for cap, a CAP alert or ATOM/RSS index URL (repeatable, at most 5)").argParser(feedListOption("url", 2048)))
+    .option("--public", "Cap: also read the public alert feeds that cover --lat and --lon (the default without --url)")
+    .addOption(new Option("--geocode <NAME:VALUE>", "Cap: an area code of the location, such as UGC:WAC033 (repeatable)").argParser(feedListOption("geocode", 140)))
+    .addOption(new Option("--min-severity <LEVEL>", "Cap: only alerts at or above this severity").choices([...FEED_SEVERITIES]))
+    .addOption(new Option("--max-severity <LEVEL>", "Cap: only alerts at or below this severity").choices([...FEED_SEVERITIES]))
+    .addOption(new Option("--min-urgency <LEVEL>", "Cap: only alerts at least this urgent").choices([...FEED_URGENCIES]))
+    .addOption(new Option("--min-certainty <LEVEL>", "Cap: only alerts at least this certain").choices([...FEED_CERTAINTIES]))
+    .addOption(new Option("--event <NAME>", "Cap: only this event, * matches any run of characters (repeatable)").argParser(feedListOption("event", 120)))
+    .addOption(new Option("--exclude-event <NAME>", "Cap: leave out this event (repeatable)").argParser(feedListOption("exclude-event", 120)))
+    .addOption(new Option("--sender <NAME>", "Cap: only alerts from this sender (repeatable)").argParser(feedListOption("sender", 120)))
+    .addOption(new Option("--status <STATUS>", "Cap: alert status to read, default Actual (repeatable)").choices([...FEED_STATUSES]).argParser(feedListOption("status", 16, FEED_STATUSES)))
+    .addOption(new Option("--scope <SCOPE>", "Cap: alert scope to read, default Public (repeatable)").choices([...FEED_SCOPES]).argParser(feedListOption("scope", 16, FEED_SCOPES)))
+    .addOption(new Option("--language <TAG>", "Cap: language preference, the first present wins (repeatable)").argParser(feedListOption("language", 35)))
+    .addOption(new Option("--area-unknown <MODE>", "Cap: an alert told only by area codes the location lacks: hide (default) or show").choices([...FEED_AREA_UNKNOWN]))
     .action(bind(handleFeedsGet));
   requireOptionGroup(get, "together", ["--lat", "--lon"]);
   requireOptionGroup(get, "requires", ["--radius-km", "--lat", "--lon"]);
+  requireOptionGroup(get, "requires", ["--public", "--lat", "--lon"]);
+  requireOptionGroup(get, "requires", ["--geocode", "--lat", "--lon"]);
 }

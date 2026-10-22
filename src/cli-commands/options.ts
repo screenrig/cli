@@ -59,6 +59,16 @@ export function screenTagListOption(flag: string): (value: string) => string {
   };
 }
 
+/** AdvertisingSlotWrite.vast_tag_url: an HTTPS URL of at most 2048 characters; the server judges port, host and the tag itself. */
+export function vastTagUrl(value: string): string {
+  let protocol: string | undefined;
+  try { protocol = new URL(value).protocol; } catch { /* reported below */ }
+  if (protocol !== "https:" || value.length > 2048) {
+    throw usageError("--vast-tag-url must be an HTTPS URL of at most 2048 characters.");
+  }
+  return value;
+}
+
 /** --note help on every review-class write. */
 export const NOTE_HELP = "Note for the person who reviews this change when it waits for review (at most 280 characters)";
 

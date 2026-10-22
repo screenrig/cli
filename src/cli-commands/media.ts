@@ -26,6 +26,7 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .argument("<file>", "Local input file")
     .option("--content-type <TYPE>", "Declare the content MIME type")
     .option("--tag <TAG>", "Set the media tag")
+    .option("--folder <ID>", "Move the uploaded media into this folder (mfd_...) once it is ready")
     .option("--no-wait", "Return after acceptance without waiting for processing")
     .option("--poll-ms <MS>", "Set the operation polling interval", positiveInteger("poll-ms"))
     .addOption(new Option("--no-transcode", "Upload accepted source bytes unchanged").conflicts(["codec", "maxFps", "maxEdge", "webpQuality", "preset", "audio"]))
@@ -44,6 +45,7 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .option("--concurrency <N>", "Set concurrent batch uploads", positiveInteger("concurrency"))
     .addOption(new Option("--no-transcode", "Upload accepted source bytes unchanged").conflicts(["codec", "maxFps", "maxEdge", "webpQuality", "preset", "audio"]))
     .option("--tag <TAG>", "Set the media tag")
+    .option("--folder <ID>", "Move every uploaded item into this folder (mfd_...)")
     .option("--no-progress", "Suppress stderr progress")
     .option("--poll-ms <MS>", "Set the operation polling interval", positiveInteger("poll-ms"))
     .addOption(new Option("--codec <h264|hevc>", "Choose the video codec").choices(["h264", "hevc"]).default("h264").conflicts(["transcode"]))
@@ -66,6 +68,7 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
   media.command("list").description("List media")
     .option("--tag <TAG>", "Filter media by tag")
     .addOption(new Option("--primitive <image|video|audio>", "Filter by media primitive").choices(["image", "video", "audio"]))
+    .option("--folder <ID|root>", "Only files directly in this folder (mfd_...), or root for the library root")
     .action(bind(handleMediaList));
 
   const selectorPreview = media.command("selector-preview").description("Preview current selector matches without advancing playback")

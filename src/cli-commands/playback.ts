@@ -1,7 +1,8 @@
 import { type Command, Option } from "commander";
-import { addCommandNotes } from "./notes.js";
+import { addCommandNotes, requireOptionGroup } from "./notes.js";
+import { positiveInteger } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handlePlaybackList, handlePlaybackPlays } from "../commands.js";
+import { handlePlaybackList, handlePlaybackPlays, handlePlaybackTotals } from "../commands.js";
 import { playsCursor, playsInstantOption, playsLimit } from "../playback-export.js";
 
 const formatOption = () => new Option("--format <FORMAT>", "json (default) or csv").choices(["json", "csv"]);
@@ -33,4 +34,15 @@ export function registerPlaybackCommands(root: Command, bind: CommandActionBinde
     .addOption(formatOption())
     .addOption(outputOption())
     .action(bind(handlePlaybackPlays));
+
+  const totals = playback.command("totals").description("Total plays per UTC day, or rank the busiest screens or media")
+    .addOption(new Option("--by <GROUPING>", "day (default) one row per day; screen or media ranks the busiest; screen_day the day series of the top screens").choices(["day", "screen", "media", "screen_day"]))
+    .option("--day-from <YYYY-MM-DD>", "First UTC day, inclusive (default 29 days before --day-to); at most 366 days, 92 with --screen-id, --media-id or a ranking")
+    .option("--day-to <YYYY-MM-DD>", "Last UTC day, inclusive (default today)")
+    .option("--screen-id <ID>", "With --by day: only this screen")
+    .option("--media-id <ID>", "With --by day: only this media")
+    .option("--top <N>", "Rows of a ranking, 1 to 100 (1 to 10 with --by screen_day; default 10)", positiveInteger("top"))
+    .action(bind(handlePlaybackTotals));
+  requireOptionGroup(totals, "atMostOne", ["--screen-id", "--media-id"]);
+  requireOptionGroup(totals, "requires", ["--top", "--by"]);
 }

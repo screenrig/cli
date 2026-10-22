@@ -1,9 +1,10 @@
 import type { CommandActionBinder } from "./types.js";
-import { handleProjectToken, handleProjectShow, handleProjectCapabilities, handleProjectRename, handleProjectList, handleProjectCreate, handleProjectUse, handleProjectMoves, handleProjectMove, handleProjectOwnerTransfer, handleProjectDeletionPreview, handleProjectDelete } from "../commands.js";
+import { handleProjectToken, handleProjectShow, handleProjectCapabilities, handleProjectRename, handleProjectList, handleProjectCreate, handleProjectUse, handleProjectMoves, handleProjectMove, handleProjectOwnerTransfer, handleProjectDeletionPreview, handleProjectDelete, handleProjectUptime, handleProjectHealthTrend } from "../commands.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes } from "./notes.js";
 import { positiveInteger, projectSubset } from "./options.js";
 import { CREDIT_HELP } from "../help-text.js";
+import { playsInstantOption } from "../playback-export.js";
 
 export function registerProjectCommands(root: Command, bind: CommandActionBinder): void {
   const project = root.command("project").description("Create, select, and manage projects");
@@ -32,6 +33,14 @@ export function registerProjectCommands(root: Command, bind: CommandActionBinder
     .action(bind(handleProjectShow)), CREDIT_HELP);
   project.command("capabilities").description("Read this project's plan, feature flags, and effective capabilities")
     .action(bind(handleProjectCapabilities));
+  project.command("uptime").description("Read the project's daily screen availability over UTC days")
+    .option("--day-from <YYYY-MM-DD>", "First UTC day, inclusive (default 29 days before --day-to)")
+    .option("--day-to <YYYY-MM-DD>", "Last UTC day, inclusive (default today); at most 366 days after --day-from")
+    .action(bind(handleProjectUptime));
+  project.command("health-trend").description("List the fleet's health by UTC hour: screens reporting, hot, display disconnected, crashing")
+    .option("--from <TIME>", "Inclusive start of the hour: RFC 3339, now, or an age such as 7d, 12h, 30m (default 24 hours before --to)", playsInstantOption("--from"))
+    .option("--to <TIME>", "Exclusive end: RFC 3339, now, or an age (default now); at most 93 days after --from", playsInstantOption("--to"))
+    .action(bind(handleProjectHealthTrend));
   project.command("rename").description("Rename this project")
     .argument("<NAME>", "Project display name")
     .action(bind(handleProjectRename));

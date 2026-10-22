@@ -18,6 +18,7 @@ export function registerTriggersCommands(root: Command, bind: CommandActionBinde
     .addOption(new Option("--tag <TAG>", "Target every active screen with this tag when an alert arrives").argParser(triggerTag).conflicts(["screenId"]))
     .addOption(new Option("--screen-id <ID>", "Target this screen (repeatable, or comma-separated; at most 500)").argParser(triggerScreenIds).conflicts(["tag"]))
     .option("--for <DURATION>", "Hold an alert that has no <expires> this long, 1m to 7d (default: 1h)", triggerHoldOption)
+    .option("--pull <FILE>", "Also read CAP alert sources the platform pulls: a JSON object (sources, location, filters) from a file, or - for stdin")
     .action(bind(handleTriggersCreate));
   requireOptionGroup(create, "exactlyOne", ["--tag", "--screen-id"]);
 
