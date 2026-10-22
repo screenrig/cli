@@ -1000,6 +1000,106 @@ paths:
           description: The membership ended.
         default:
           $ref: '#/components/responses/Problem'
+  /api/members/{user_id}/activity:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - name: user_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+    get:
+      operationId: listMemberActivity
+      description: 'One person''s activity in the current project, newest first: their sign-ins (and refused sign-ins
+        naming their address or passkey), sign-outs, switches into the project, credential changes, reauthentication proofs
+        and every change they made through the dashboard, refused and failed ones included. Reads are never recorded. Agent
+        and CLI requests are on their agents (listDashboardAgentEvents). A staff member''s shadow of the project records
+        nothing; a change made under an approved staff write lease is a row of that staff member with source staff.
+
+
+        The person themself, the project''s owner, an admin of the project''s organization and a staff member shadowing
+        the project may read it. Anyone else is answered not_found, as is a person who is neither a member nor has rows
+        here, so the answer never tells who belongs; a former member''s rows stay readable. The project is the session''s,
+        never the request''s, and only that project''s rows are ever returned.
+
+
+        Every value is server-derived: the action from the route the server matched (or a named account action such as
+        session.sign_in or passkey.add), the resource from the route''s first path value when it is a server-minted
+        identifier, status, problem_code and error from the problem registry, the client parsed from the User-Agent and
+        platform hint (the raw User-Agent is not kept). No request body, password, token or cookie is stored. client_ip
+        and email are shown as recorded.
+
+
+        Paging keys on (at, id) descending. Pass next_cursor as after to continue; it is null at the end. A row written
+        meanwhile only lands ahead of the first page and retention removes the oldest rows, so a cursor never repeats or
+        skips a surviving row. A malformed cursor or filter is refused with invalid_request; a limit outside 1-100 is the
+        default. Rows expire on the project''s event retention window at the time they were written. recorded_since is
+        the time of the project''s oldest surviving row, or, before any, when this server began recording; nothing before
+        it is reconstructed.'
+      security:
+      - dashboardSession: []
+      parameters:
+      - name: after
+        in: query
+        description: Cursor from a previous page's next_cursor.
+        schema:
+          type: string
+          pattern: ^ua1_
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      - name: kind
+        in: query
+        description: Only these kinds; repeat the parameter or separate kinds with commas.
+        style: form
+        explode: true
+        schema:
+          type: array
+          items:
+            type: string
+      - name: outcome
+        in: query
+        schema:
+          $ref: '#/components/schemas/MemberActivityOutcome'
+      - name: resource_type
+        in: query
+        description: Exact kind of object the request acted on.
+        schema:
+          type: string
+          pattern: ^[a-z_]{1,32}$
+      - name: resource_id
+        in: query
+        description: Exact identifier of the object the request acted on.
+        schema:
+          type: string
+          pattern: ^[a-z]+_[A-Za-z0-9_-]{1,60}$
+      - name: since
+        in: query
+        schema:
+          type: string
+          format: date-time
+      - name: until
+        in: query
+        schema:
+          type: string
+          format: date-time
+      responses:
+        '200':
+          description: The person's activity in the current project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberActivityList'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/staff/projects/{id}/deletion-preview:
     servers:
     - url: https://screenrig.ai
@@ -4667,6 +4767,58 @@ paths:
     servers:
     - url: https://screenrig.ai
       description: Backend-owned project dashboard origin
+  /api/screens/{id}/tags:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: patchScreenTags
+      description: >-
+        A signed-in person sets a screen's tags. tags is the complete new set:
+        an empty array clears it, and a malformed or repeated tag is
+        invalid_request at tags[i]. It is the tag change updateScreen makes, on
+        the dashboard session: the screen revision moves by one, screen.updated
+        carries details.tags and the person as its actor, and the manifest
+        revision never changes. A pairing_pending, active or archived screen
+        accepts it. The body has no other member, so a session cannot change a
+        screen's name, playlist or timezone here. If-Match carries the screen
+        revision and is required (invalid_request when absent, revision_conflict
+        when stale). The dashboard session only; agents change tags with
+        updateScreen or a set_tags, add_tags or remove_tags fleet action.
+        listScreens with tag finds the screen by its new tags.
+      security:
+      - dashboardSession: []
+      parameters:
+      - { name: If-Match, in: header, required: true, schema: { type: string }, description: "The screen's current revision, quoted or bare (the ETag of the last read). A stale revision is revision_conflict with current_revision." }
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenTagsPatch'
+      responses:
+        '200':
+          description: The screen as stored now; ETag carries its revision.
+          headers:
+            ETag:
+              description: Quoted screen revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/screens/{id}/public-id/rotate:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
@@ -9072,6 +9224,69 @@ paths:
     servers:
     - url: https://screenrig.ai
       description: Backend-owned project dashboard origin
+  /api/media/{id}/tags:
+    servers:
+    - url: https://screenrig.ai
+      description: Backend-owned project dashboard origin
+    parameters:
+    - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: patchMediaTags
+      description: >-
+        A signed-in person sets a media item's tags. tags is the complete new
+        set, kept sorted: an item's single tag, when it has one, counts as one of
+        its tags and is replaced with the rest, so send it again to keep it. An
+        empty array clears every tag, and a malformed or repeated tag, or more
+        than 32, is invalid_request. It is the tag change
+        patchMedia makes under a Manage credential, on the dashboard session: the
+        media revision moves by one and media.updated carries the person as its
+        actor, whether or not the set changed. A person's change is live, never
+        a review. Media waiting for a person's review (review_state pending,
+        left by a Propose credential's upload or change) is refused with
+        media_pending_review (409) and nothing changes: decide its review in
+        Reviews first, so a tag edit never approves an agent's proposal.
+        Playlist selectors by tag observe the new tags at their next
+        playlist-loop refresh. The body has no other member. If-Match carries the media
+        revision and is required (invalid_request when absent, revision_conflict
+        when stale). The dashboard session only; agents change tags with
+        patchMedia. listMedia with tag finds the item by its new tags.
+      security:
+      - dashboardSession: []
+      parameters:
+      - { name: If-Match, in: header, required: true, schema: { type: string }, description: "The media item's current revision, quoted or bare (the ETag of the last read). A stale revision is revision_conflict with current_revision." }
+      - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MediaTagsPatch'
+      responses:
+        '200':
+          description: The ready media item as stored now; ETag carries its revision.
+          headers:
+            ETag:
+              description: Quoted media revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Media'
+        '409':
+          description: media_pending_review — the item waits for a person's review; decide it first.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/media/{id}/content:
     parameters:
     - $ref: '#/components/parameters/ProjectTarget'
@@ -9801,7 +10016,7 @@ paths:
       description: >-
         Creates a service client owned by the project with a name, capabilities (omitted means all six; each must be one
         the manager holds, else 403), access (read, the default, or manage), and a public JWK key (OKP Ed25519, EC P-256 or RSA of at least 2048 bits) and/or secret true. The
-        secret is returned once, here only. At most 50 live clients per project. Agents need identity scope, live identity Manage and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
+        secret is returned once, here only. At most 50 live clients per project. Agents need identity scope, live identity Manage, their own Manage grant with the project capability on the project, and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
       security:
       - agentIdentityBearer: []
       - dashboardSession: []
@@ -9847,7 +10062,7 @@ paths:
       operationId: updateServiceClient
       description: >-
         Renames a service client or changes its capabilities (within the manager's) or access. Narrowing either ends the
-        client's current tokens within seconds. Agents need identity scope, live identity Manage and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
+        client's current tokens within seconds. Agents need identity scope, live identity Manage, their own Manage grant with the project capability on the project, and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
       security:
       - agentIdentityBearer: []
       - dashboardSession: []
@@ -9875,7 +10090,7 @@ paths:
       x-screenrig-access: write
       operationId: addServiceClientKey
       description: >-
-        Registers a second public JWK (key in the body) for a zero-downtime rotation; a client holds at most two. Agents need identity scope, live identity Manage and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
+        Registers a second public JWK (key in the body) for a zero-downtime rotation; a client holds at most two. Agents need identity scope, live identity Manage, their own Manage grant with the project capability on the project, and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
       security:
       - agentIdentityBearer: []
       - dashboardSession: []
@@ -9903,7 +10118,7 @@ paths:
       x-screenrig-access: write
       operationId: removeServiceClientKey
       description: >-
-        Removes a key; the client's current tokens end within seconds. A client keeps at least one key or secret. Agents need identity scope, live identity Manage and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
+        Removes a key; the client's current tokens end within seconds. A client keeps at least one key or secret. Agents need identity scope, live identity Manage, their own Manage grant with the project capability on the project, and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
       security:
       - agentIdentityBearer: []
       - dashboardSession: []
@@ -9932,7 +10147,7 @@ paths:
       x-screenrig-access: write
       operationId: addServiceClientSecret
       description: >-
-        Generates a second secret, returned once, for a zero-downtime rotation; a client holds at most two. Agents need identity scope, live identity Manage and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
+        Generates a second secret, returned once, for a zero-downtime rotation; a client holds at most two. Agents need identity scope, live identity Manage, their own Manage grant with the project capability on the project, and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
       security:
       - agentIdentityBearer: []
       - dashboardSession: []
@@ -9960,7 +10175,7 @@ paths:
       x-screenrig-access: write
       operationId: removeServiceClientSecret
       description: >-
-        Removes a secret; the client's current tokens end within seconds. Agents need identity scope, live identity Manage and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
+        Removes a secret; the client's current tokens end within seconds. Agents need identity scope, live identity Manage, their own Manage grant with the project capability on the project, and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
       security:
       - agentIdentityBearer: []
       - dashboardSession: []
@@ -9990,7 +10205,7 @@ paths:
       operationId: revokeServiceClient
       description: >-
         Revokes a service client permanently: its keys and secret digests are deleted, the record stays for audit, and
-        its tokens end within seconds (propagation applied or pending). Agents need identity scope, live identity Manage and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
+        its tokens end within seconds (propagation applied or pending). Agents need identity scope, live identity Manage, their own Manage grant with the project capability on the project, and a live organization admin role; a person uses the dashboard session with project_id and a fresh proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token is refused 403.
       security:
       - agentIdentityBearer: []
       - dashboardSession: []
@@ -17795,7 +18010,7 @@ paths:
       description: Creates a service client owned by the project with a name, capabilities (omitted means all six; each must
         be one the manager holds, else 403), access (read, the default, or manage), and a public JWK key (OKP Ed25519, EC P-256
         or RSA of at least 2048 bits) and/or secret true. The secret is returned once, here only. At most 50 live clients per
-        project. Agents need identity scope, live identity Manage and a live organization admin role; a person uses the dashboard session with project_id and a fresh
+        project. Agents need identity scope, live identity Manage, their own Manage grant with the project capability on the project, and a live organization admin role; a person uses the dashboard session with project_id and a fresh
         proof (kind service_client_change, subject the client id, or the project id when creating) in the body. A service token
         is refused 403.
       security:
@@ -19741,6 +19956,88 @@ components:
           description: This member decides reviews and may grant agents Manage access. Always true for the owner. A member who
             cannot approve has their agents held to Propose. A member joining by invitation can approve only when a person
             who can approve invited them; the owner changes it later.
+        last_active_at:
+          type: string
+          format: date-time
+          description: The time of this member's latest activity in the project other than a refused sign-in (listMemberActivity).
+            Present only where the viewer may read that activity (themself; every member for the owner, an organization
+            admin or a staff shadow) and the member has any.
+    MemberActivityKind:
+      type: string
+      enum: [sign_in, sign_in_failed, sign_out, project_switched, credential_changed, reauthenticated, mutation]
+      description: sign_in and sign_in_failed carry auth_method; credential_changed is a passkey added, renamed or removed,
+        a password set, or an email change requested or verified; reauthenticated is one checked proof (action
+        reauthentication.<proof kind>); mutation is any other dashboard change.
+    MemberActivityOutcome:
+      type: string
+      enum: [ok, refused, failed]
+      description: ok below status 400, refused for a 4xx answer, failed for a 5xx one.
+    MemberActivityResource:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type: { type: string, pattern: '^[a-z_]{1,32}$' }
+        id: { type: string }
+    MemberActivityClient:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      description: The client as the edge request log names it, parsed from the User-Agent and Sec-CH-UA-Platform.
+      properties:
+        kind: { type: string, description: 'A browser family (chrome, edge, firefox, safari, opera, samsung), a ScreenRig tool, or other.' }
+        version: { type: string, description: "The browser's major version or the tool's version." }
+        platform: { type: string, description: 'windows, macos, linux, android, chromeos, ios, tvos or tizen.' }
+    MemberActivity:
+      type: object
+      additionalProperties: false
+      required: [id, project_id, user_id, display_name, at, kind, action, outcome, status, source]
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        organization_id: { type: string, description: "The project's organization when the row was written." }
+        user_id: { type: string }
+        display_name: { type: string, description: "The person's name when the row was written." }
+        at: { type: string, format: date-time }
+        kind: { $ref: '#/components/schemas/MemberActivityKind' }
+        action:
+          type: string
+          pattern: '^[a-z0-9_-]+(\.[a-z0-9_-]+)*$'
+          description: Stable server code. A dashboard change is the matched route's command name, with the verb wherever
+            the name alone would not tell two routes apart (screens.archive, playlists.structure.patch, screens.display.delete,
+            advertising.slots.update); account actions are named (session.sign_in, session.sign_out, session.project_switch,
+            password.set, passkey.add, passkey.rename, passkey.remove, email.change, email.verify, account.delete,
+            reauthentication.<proof kind>).
+        method: { type: string }
+        route: { type: string, description: "The route pattern the server matched, never the request URL." }
+        outcome: { $ref: '#/components/schemas/MemberActivityOutcome' }
+        status: { type: integer, minimum: 100, maximum: 599 }
+        problem_code: { type: string, description: "The stable problem code of a refused or failed request." }
+        error: { type: string, description: "The problem registry title of problem_code, never the answer's detail." }
+        resource: { $ref: '#/components/schemas/MemberActivityResource' }
+        request_id: { type: string }
+        client_ip: { type: string, description: "The client address under the server's trusted-proxy rule." }
+        client: { $ref: '#/components/schemas/MemberActivityClient' }
+        auth_method: { type: string, enum: [password, passkey], description: "How a sign-in, refused sign-in or proof was made." }
+        email: { type: string, description: "The normalized address a refused password sign-in named." }
+        source: { type: string, enum: [dashboard, staff], description: "staff is a change made by a staff member under an approved write lease of a project they shadow." }
+    MemberActivityList:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor, recorded_since]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MemberActivity'
+        next_cursor:
+          oneOf: [{ type: string }, { type: "null" }]
+          description: Cursor of the last returned row when more rows exist; pass it back as after. null at the end.
+        recorded_since:
+          type: string
+          format: date-time
+          description: Where the project's log begins. Nothing before it is recorded or reconstructed.
     DashboardMemberList:
       type: object
       additionalProperties: false
@@ -24559,6 +24856,16 @@ components:
         guards it) and appends screen.updated with details.tags; it never
         changes the manifest revision. Tags are never on the runtime
         manifest and never authorization.
+    ScreenTagsPatch:
+      type: object
+      additionalProperties: false
+      required: [tags]
+      description: >-
+        A screen's complete new tag set (patchScreenTags). The array replaces
+        every tag the screen carries and an empty array clears them. The body
+        has no other member.
+      properties:
+        tags: { $ref: "#/components/schemas/ScreenTags" }
     PairScreen: { type: object, additionalProperties: false, required: [code], properties: { code: { type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$" }, label: { type: string, minLength: 1, maxLength: 120 } } }
     ProvisionScreen: { type: object, additionalProperties: false, properties: { label: { type: string, minLength: 1, maxLength: 120 } } }
     ScreenProvisioning: { type: object, additionalProperties: false, required: [screen, public_url, provisioning_url, expires_at], properties: { screen: { $ref: "#/components/schemas/Screen" }, public_url: { type: string, format: uri }, provisioning_url: { type: string, pattern: "^https?://[^#]+/s/[^#]+#provision=[A-Za-z0-9_-]{43}$" }, expires_at: { type: string, format: date-time } } }
@@ -27888,6 +28195,7 @@ x-problem-codes:
 - review_stale
 - review_blocked
 - playlist_not_approved
+- media_pending_review
 - not_found
 - method_not_allowed
 - idempotency_mismatch
