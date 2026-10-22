@@ -126,6 +126,12 @@ test("root help is compact and every command is discoverable through immediate c
     "media selector-preview",
     "media update",
     "media delete",
+    "media move",
+    "media folder list",
+    "media folder show",
+    "media folder create",
+    "media folder update",
+    "media folder delete",
     "compose catalog",
     "compose batch",
     "compose render",
@@ -252,7 +258,7 @@ test("group help stays focused and still names descendant leaf paths", () => {
   assert.match(media.usage, /Usage: screenrig media \[options\] \[command\]/);
   assert.ok(media.commands.every((child) => child.path[0] === "media" && child.path.length === 2));
   assert.deepEqual(media.commands.map((child) => child.name), [
-    "generate", "upload", "upload-batch", "show", "download", "list", "selector-preview", "update", "delete",
+    "generate", "upload", "upload-batch", "show", "download", "list", "selector-preview", "update", "delete", "move", "folder",
   ]);
   for (const path of leafCommandPaths(findCommand(createCommandTree().root, ["media"])!)) {
     assert.ok(media.usage.includes(path), path);

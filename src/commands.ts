@@ -3292,6 +3292,85 @@ export const handleMediaDelete = commandHandler(async (args, runtime, resolved) 
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted media ${id}` };
 }, true);
 
+const MEDIA_FOLDER_ID_PATTERN = /^(?:(?:stage|qa|development)_)?mfd_[A-Za-z0-9]{1,64}$/;
+
+function mediaFolderId(value: string | undefined, label: string): string {
+  if (!value || !MEDIA_FOLDER_ID_PATTERN.test(value)) {
+    throw usageError(`${label} must be a media folder ID (mfd_...); media folder list shows them.`);
+  }
+  return value;
+}
+
+export const handleMediaFolderList = commandHandler(async (args, runtime, resolved) =>
+  simpleGet(args, runtime, resolved, "/api/media-folders", "Media folders"), true);
+
+export const handleMediaFolderShow = commandHandler(async (args, runtime, resolved) =>
+  simpleGet(args, runtime, resolved, `/api/media-folders/${mediaFolderId(args.positionals[3], "media folder show <id>")}`, "Media folder"), true);
+
+export const handleMediaFolderCreate = commandHandler(async (args, runtime, resolved) => {
+  const parent = flagString(args.flags, "parent");
+  const body: { name: string; parent_id?: string } = { name: flagString(args.flags, "name")! };
+  if (parent !== undefined) body.parent_id = mediaFolderId(parent, "--parent");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "POST", path: "/api/media-folders", idempotent: true, body });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Created media folder ${(response.body as { id: string }).id}` };
+}, true);
+
+export const handleMediaFolderUpdate = commandHandler(async (args, runtime, resolved) => {
+  const id = mediaFolderId(args.positionals[3], "media folder update <id>");
+  const name = flagString(args.flags, "name");
+  const parent = flagString(args.flags, "parent");
+  const root = flagBool(args.flags, "root");
+  const revision = flagString(args.flags, "if-match");
+  if (name === undefined && parent === undefined && !root) {
+    throw usageError("media folder update requires --name NAME, --parent ID, or --root.");
+  }
+  const body: { name?: string; parent_id?: string | null } = {};
+  if (name !== undefined) body.name = name;
+  if (parent !== undefined) body.parent_id = mediaFolderId(parent, "--parent");
+  if (root) body.parent_id = null;
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({
+    method: "PATCH", path: `/api/media-folders/${id}`, idempotent: true, body,
+    headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
+  });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Updated media folder ${id}` };
+}, true);
+
+export const handleMediaFolderDelete = commandHandler(async (args, runtime, resolved) => {
+  const id = mediaFolderId(args.positionals[3], "media folder delete <id>");
+  const revision = flagString(args.flags, "if-match");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({
+    method: "DELETE", path: `/api/media-folders/${id}`, idempotent: true,
+    headers: revision ? { "if-match": quotedRevision(revision) } : undefined,
+  });
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted media folder ${id}; its contents moved up one level` };
+}, true);
+
+export const handleMediaMove = commandHandler(async (args, runtime, resolved) => {
+  const destination = flagString(args.flags, "folder");
+  const toRoot = flagBool(args.flags, "root");
+  if ((destination === undefined) === !toRoot) throw usageError("media move requires exactly one of --folder ID or --root.");
+  const media_ids: string[] = [];
+  const folder_ids: string[] = [];
+  for (const id of args.positionals.slice(2)) {
+    if (MEDIA_FOLDER_ID_PATTERN.test(id)) folder_ids.push(id);
+    else if (MEDIA_ID_PATTERN.test(id)) media_ids.push(id);
+    else throw usageError(`media move takes media IDs (med_...) and folder IDs (mfd_...), not ${JSON.stringify(id)}.`);
+  }
+  if (!media_ids.length && !folder_ids.length) throw usageError("media move requires at least one media or folder ID.");
+  const body = {
+    folder_id: destination === undefined ? null : mediaFolderId(destination, "--folder"),
+    ...(media_ids.length ? { media_ids } : {}),
+    ...(folder_ids.length ? { folder_ids } : {}),
+  };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "POST", path: "/api/media/move", idempotent: true, body });
+  const moved = response.body as { media: number; folders: number };
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Moved ${moved.media} files and ${moved.folders} folders` };
+}, true);
+
 export const handleMediaGenerate = commandHandler(async (args, runtime, resolved) => {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);

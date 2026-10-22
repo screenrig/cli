@@ -1,6 +1,6 @@
 import { positiveInteger, positiveNumber, revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleSelectorPreview, handleMediaGenerate, handleMediaUpload, handleMediaUploadBatch, handleMediaShow, handleMediaDownload, handleMediaList, handleMediaUpdate, handleMediaDelete } from "../commands.js";
+import { handleSelectorPreview, handleMediaGenerate, handleMediaUpload, handleMediaUploadBatch, handleMediaShow, handleMediaDownload, handleMediaList, handleMediaUpdate, handleMediaDelete, handleMediaMove, handleMediaFolderList, handleMediaFolderShow, handleMediaFolderCreate, handleMediaFolderUpdate, handleMediaFolderDelete } from "../commands.js";
 import { type Command, Option } from "commander";
 import { addCommandNotes, addCommandExamples, requireOptionGroup } from "./notes.js";
 import { CREDIT_HELP } from "../help-text.js";
@@ -88,4 +88,34 @@ export function registerMediaCommands(root: Command, bind: CommandActionBinder):
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleMediaDelete));
   requireOptionGroup(media.commands.find(command => command.name() === "update")!, "exactlyOne", ["--tag", "--tags", "--clear-tag"]);
+
+  const move = media.command("move").description("Move media files and folders into a folder, or back to the library root")
+    .argument("<ids...>", "Media (med_...) and folder (mfd_...) identifiers, at most 1000")
+    .option("--folder <ID>", "Destination folder (mfd_...)")
+    .option("--root", "Move to the library root")
+    .action(bind(handleMediaMove));
+  requireOptionGroup(move, "exactlyOne", ["--folder", "--root"]);
+
+  const folder = media.command("folder").description("List, create, rename, move, and delete media library folders");
+  folder.command("list").description("List the project's media folders; parent_id builds the tree")
+    .action(bind(handleMediaFolderList));
+  folder.command("show").description("Inspect a media folder")
+    .argument("<id>", "Media folder identifier (mfd_...)")
+    .action(bind(handleMediaFolderShow));
+  folder.command("create").description("Create a media folder at the library root or inside another folder")
+    .requiredOption("--name <NAME>", "Folder name, 1 to 100 characters")
+    .option("--parent <ID>", "Create it inside this folder (mfd_...); omitted creates it at the library root")
+    .action(bind(handleMediaFolderCreate));
+  const update = folder.command("update").description("Rename a media folder or move it, with everything inside, into another folder")
+    .argument("<id>", "Media folder identifier (mfd_...)")
+    .option("--name <NAME>", "New folder name, 1 to 100 characters")
+    .addOption(new Option("--parent <ID>", "Move it inside this folder (mfd_...)").conflicts("root"))
+    .addOption(new Option("--root", "Move it to the library root").conflicts("parent"))
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .action(bind(handleMediaFolderUpdate));
+  requireOptionGroup(update, "atLeastOne", ["--name", "--parent", "--root"]);
+  folder.command("delete").description("Delete a media folder; its files and folders move up one level")
+    .argument("<id>", "Media folder identifier (mfd_...)")
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .action(bind(handleMediaFolderDelete));
 }
