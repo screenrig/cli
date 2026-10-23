@@ -18,7 +18,6 @@ export interface Project {
   created_at: string;
   credit_remaining: number;
   email: string;
-  email_verified: false;
   feature_revision?: number;
   features?: ProjectFeatures;
   id: string;

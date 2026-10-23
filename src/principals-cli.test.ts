@@ -23,7 +23,7 @@ const TOKEN_A = access(A), IDENTITY = TOKEN_A, TOKEN_B = TOKEN_A;
 const REFRESH = fakeSessionJwt({ sub: `agent:${AGENT.id}`, sid: "grt_PRINCIPALS", gen: 1, exp: 4102444800 });
 const GRANT = { issuer: API, client_id: "screenrig-cli", refresh_token: REFRESH, identity: true };
 function context(id: string, name: string, organizationName = "Acme"): ProjectContext {
-  return { project: { id, name, organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: organizationName, revision: 1, status: "active", email: "contact@example.com", email_verified: false, used_bytes: 0, reserved_bytes: 0, screen_count: 0, screen_limit: 100, content_limit_bytes: 0, credit_remaining: 0, created_at: "2026-10-04T12:00:00Z", updated_at: "2026-10-04T12:00:00Z" }, organization: { id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", name: organizationName } };
+  return { project: { id, name, organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: organizationName, revision: 1, status: "active", email: "contact@example.com", used_bytes: 0, reserved_bytes: 0, screen_count: 0, screen_limit: 100, content_limit_bytes: 0, credit_remaining: 0, created_at: "2026-10-04T12:00:00Z", updated_at: "2026-10-04T12:00:00Z" }, organization: { id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", name: organizationName } };
 }
 async function fixture(t: TestContext, config?: ScreenRigConfig) {
   const home = await testTemp("principals-cli-");
