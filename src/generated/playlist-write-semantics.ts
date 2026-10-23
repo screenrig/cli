@@ -17,6 +17,15 @@ function httpsWithoutCredentials(value: unknown): boolean {
   } catch { return false; }
 }
 
+/** An iframe page a sign shows: http or https, any host, credentials allowed (server signageWebURL). */
+function signageWebUrl(value: unknown): boolean {
+  if (typeof value !== "string" || value.length > 2048) return false;
+  try {
+    const url = new URL(value);
+    return (url.protocol === "https:" || url.protocol === "http:") && url.hostname !== "";
+  } catch { return false; }
+}
+
 function validCivil(value: string): boolean {
   const parts = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
   if (!parts) return false;
@@ -129,8 +138,8 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
       if (ids.has(primitive.id)) fail(`${itemPath}/id`, "must be unique within the page");
       ids.add(primitive.id);
       if (primitive.primitive === "application" || primitive.primitive === "iframe") web++;
-      if (primitive.primitive === "iframe" && !httpsWithoutCredentials(primitive.src)) {
-        fail(`${itemPath}/src`, "must be a valid HTTPS URL without credentials");
+      if (primitive.primitive === "iframe" && !signageWebUrl(primitive.src)) {
+        fail(`${itemPath}/src`, "must be an http or https URL");
       }
       if (primitive.primitive === "stream") {
         streams++;

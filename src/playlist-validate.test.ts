@@ -58,15 +58,18 @@ test("local canonical validation rejects spin on an iframe", () => {
   assert.ok(issues.some((issue) => issue.path === "/pages/0/primitives/0/motion" && issue.message.includes("spin")));
 });
 
-test("local canonical validation rejects iframe userinfo without rejecting path at-signs", () => {
-  for (const src of ["https://user:pass@example.com/page", "https://user@example.com/", "https://%75ser:%70ass@example.com/", "https://@example.com/"]) {
+test("local canonical validation accepts LAN, http and logged-in iframe pages and refuses other schemes", () => {
+  const iframe = (src: string) => {
     const value = playlist();
     value.pages[0]!.primitives = [{ id: "web", primitive: "iframe", src, title: "Example", rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "fill" }] as any;
-    assert.deepEqual(playlistIssues(value).map((issue) => issue.path), ["/pages/0/primitives/0/src"], src);
+    return playlistIssues(value);
+  };
+  for (const src of ["https://user:pass@example.com/page", "http://user@printer.local/", "http://192.168.1.20:8080/status", "https://example.com/@user", "http://intranet/menu"]) {
+    assert.deepEqual(iframe(src), [], src);
   }
-  const value = playlist();
-  value.pages[0]!.primitives = [{ id: "web", primitive: "iframe", src: "https://example.com/@user", title: "Example", rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "fill" }] as any;
-  assert.deepEqual(playlistIssues(value), []);
+  for (const src of ["ftp://example.com/", "javascript:alert(1)"]) {
+    assert.deepEqual(iframe(src).map((issue) => issue.path), ["/pages/0/primitives/0/src"], src);
+  }
 });
 
 test("off-canvas bleed rectangles remain valid under the canvas clipping contract", () => {

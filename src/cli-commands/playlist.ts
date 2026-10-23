@@ -9,8 +9,8 @@ import { LOOK_AT_THE_CONTACT_SHEET } from "../playlist-preview.js";
 export function registerPlaylistCommands(root: Command, bind: CommandActionBinder): void {
   const playlist = root.command("playlist").description("Author, validate, preview, and manage playlists");
 
-  const init = playlist.command("init").description("Prepare an editable playlist from files, ready media, application releases, or HTTPS URLs")
-    .argument("<inputs...>", "Local image/video/audio files, med_ IDs, rel_ IDs, or HTTPS URLs in playback order; audio becomes the soundtrack")
+  const init = playlist.command("init").description("Prepare an editable playlist from files, ready media, application releases, or http(s) URLs")
+    .argument("<inputs...>", "Local image/video/audio files, med_ IDs, rel_ IDs, or http(s) URLs (iframe pages) in playback order; audio becomes the soundtrack")
     .requiredOption("--name <NAME>", "Playlist name")
     .requiredOption("--output <FILE>", "Write an editable playlist file")
     .option("--overwrite", "Replace an existing output file atomically with a document built from these inputs")

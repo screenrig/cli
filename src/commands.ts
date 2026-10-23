@@ -7914,13 +7914,13 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
       content.push({ primitive: "application", release_id: input });
     } else if (/^[a-z][a-z0-9+.-]*:/i.test(input)) {
       let url: URL;
-      try { url = new URL(input); } catch { throw usageError("Provide a valid HTTPS iframe URL."); }
-      if (url.protocol !== "https:" || url.username || url.password) throw usageError("Iframe URLs must use HTTPS without credentials.");
+      try { url = new URL(input); } catch { throw usageError("Provide a valid http or https iframe URL."); }
+      if ((url.protocol !== "https:" && url.protocol !== "http:") || !url.hostname) throw usageError("Iframe URLs must use http or https.");
       content.push({ primitive: "iframe", src: url.href, title: url.hostname.slice(0, 200) });
     } else {
       const sourcePath = path.resolve(runtime.cwd(), input);
       try { if (!(await stat(sourcePath)).isFile()) throw new Error(); }
-      catch { throw usageError("Each input must be a readable image/video/audio file, media ID, release ID, or HTTPS URL."); }
+      catch { throw usageError("Each input must be a readable image/video/audio file, media ID, release ID, or http(s) URL."); }
       files.set(content.length, sourcePath);
       // Audio files become soundtrack tracks, not pages, so the preflight
       // shape check must see them as audio before anything uploads.

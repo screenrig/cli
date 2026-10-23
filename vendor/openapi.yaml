@@ -34,6 +34,7 @@ x-api-lifecycle:
     - New problem codes.
     - New fields only where the published schema permits unknown fields.
     - Removing an operation that only answers an error, or that no client calls.
+    - Removing a response field no client acts on.
   breakingWithinMajor:
     - Removal or rename of a working route or field that clients call.
     - Type, meaning, or authorization changes.
@@ -17581,7 +17582,6 @@ components:
         - revision
         - status
         - email
-        - email_verified
         - used_bytes
         - reserved_bytes
         - screen_count
@@ -17611,11 +17611,6 @@ components:
           minLength: 3
           maxLength: 254
           description: 'Required contact address supplied at enrollment, preserving its capitalization after surrounding whitespace is trimmed. Read-only: no route updates it, and it is published only on an authenticated read of the caller''s own project.'
-        email_verified:
-          type: boolean
-          enum:
-            - false
-          description: Always false. The address is stored unverified; enrollment queues one invitation delivery to it, but no route treats a delivery as proof of possession and no flow sets this true. It is published so a later recovery feature cannot mistake an unverified string for authority. It is not an authorization factor.
         used_bytes:
           type: integer
           description: Durable bytes the project owns across media, expanded application release trees, and application key/value entries.
@@ -19061,11 +19056,11 @@ components:
     PlaylistApplicationPrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, release_id, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [application]}, application_id: {type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id.}, release_id: {type: string}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, default: false}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistImagePrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, selector, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [image]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, alt: {type: string, maxLength: 300}, dwell_ms: {type: integer, minimum: 1000, maximum: 86400000, description: Required on media_end image primitives. Forbidden on duration and application pages.}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistVideoPrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, selector, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, muted: {type: boolean, enum: [true], default: true}, loop: {type: boolean, default: false}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
-    PlaylistIframePrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, src, title, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [iframe]}, src: {type: string, format: uri, pattern: "^https://"}, title: {type: string, minLength: 1, maxLength: 200}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistIframePrimitiveWrite: {type: object, additionalProperties: false, required: [id, primitive, src, title, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [iframe]}, src: {type: string, format: uri, pattern: "^https?://", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials. Native Players show all of these; the web Player only https pages without credentials."}, title: {type: string, minLength: 1, maxLength: 200}, rect: {$ref: "#/components/schemas/PlaylistRect", description: "Required unless displays is set. With displays, omit it or send the rect derived from them."}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistApplicationPrimitive: {type: object, additionalProperties: false, required: [id, primitive, release_id, rect, layer, content_fit], properties: {id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [application]}, application_id: {type: string, description: Optional ownership assertion; the server resolves the authoritative application from release_id.}, release_id: {type: string}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, default: false}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistImagePrimitive: {type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [image]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, resolved_media: {type: array, minItems: 0, maxItems: 1024, items: {$ref: "#/components/schemas/PlaylistResolvedMedia"}, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field.}, alt: {type: string, maxLength: 300}, dwell_ms: {type: integer, minimum: 1000, maximum: 86400000}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     PlaylistVideoPrimitive: {type: object, additionalProperties: false, required: [id, primitive, selector, resolved_media, muted, loop, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [video]}, selector: {$ref: "#/components/schemas/PlaylistMediaSelector"}, resolved_media: {type: array, minItems: 0, maxItems: 1024, items: {$ref: "#/components/schemas/PlaylistResolvedMedia"}, description: Static ID matches; all/tag/folder selectors carry an empty array and resolve at runtime. Clients must not send this field.}, muted: {type: boolean, enum: [true]}, loop: {type: boolean}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [contain, cover, fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
-    PlaylistIframePrimitive: {type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [iframe]}, src: {type: string, format: uri, pattern: "^https://"}, title: {type: string, minLength: 1, maxLength: 200}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
+    PlaylistIframePrimitive: {type: object, additionalProperties: false, required: [id, primitive, src, title, rect, layer, content_fit, controller], properties: {id: {type: string}, primitive: {type: string, enum: [iframe]}, src: {type: string, format: uri, pattern: "^https?://", description: "An http or https page, any host including the screen's LAN, with optional user:pass@ credentials. Native Players show all of these; the web Player only https pages without credentials."}, title: {type: string, minLength: 1, maxLength: 200}, rect: {$ref: "#/components/schemas/PlaylistRect"}, displays: {$ref: "#/components/schemas/PlaylistDisplays"}, layer: {type: integer, minimum: 0, maximum: 1024}, content_fit: {type: string, enum: [fill]}, controller: {type: boolean, enum: [false]}, enter: {$ref: "#/components/schemas/PrimitiveEnter"}, motion: {$ref: "#/components/schemas/PrimitiveMotion"}}}
     MediaSelectorTagFilter: {type: object, additionalProperties: false, minProperties: 1, properties: {all: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}, any: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}, none: {type: array, minItems: 1, maxItems: 32, uniqueItems: true, items: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}}}
     SelectorPreviewInput: {type: object, additionalProperties: false, required: [primitive, selector], properties: {primitive: {type: string, enum: [image, video]}, selector: {oneOf: [{$ref: "#/components/schemas/PlaylistMediaSelectorByAll"}, {$ref: "#/components/schemas/PlaylistMediaSelectorByTag"}, {$ref: "#/components/schemas/PlaylistMediaSelectorByFolder"}]}}}
     SelectorPreviewMedia: {type: object, required: [media_id, filename, tags], properties: {media_id: {type: string}, filename: {type: string}, tags: {type: array, items: {type: string}}}}
@@ -21817,7 +21812,6 @@ components:
         - status
         - created_at
         - email
-        - email_verified
         - screen_count
         - screen_limit
         - used_bytes
@@ -21841,11 +21835,6 @@ components:
           minLength: 3
           maxLength: 254
           description: Unverified project contact address supplied at enrollment. It grants no sign-in authority and is independent of every person's verified email.
-        email_verified:
-          type: boolean
-          enum:
-            - false
-          description: Always false. The project contact address stays unverified; invitation acceptance verifies a person's email, not the project contact field.
         screen_count:
           type: integer
           minimum: 0

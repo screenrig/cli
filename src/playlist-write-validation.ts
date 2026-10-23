@@ -1,5 +1,4 @@
 import { RESOURCE_ID_PATTERNS } from "./generated/resource-ids.js";
-import { isIP } from "node:net";
 import { usageError } from "./problems.js";
 import { PLAYLIST_TRANSITION_TYPES } from "./playlist-templates.js";
 
@@ -258,25 +257,12 @@ function validateIframe(value: JsonRecord, name: string): void {
   exact(value, ["type", "src", "title"], name);
   const src = string(value, "src", name, 4096);
   string(value, "title", name, 200);
+  // A sign shows what its owner points it at: http or https, any host including
+  // the screen's LAN, with user:pass@ credentials for a page behind a login.
   let parsed: URL;
-  try { parsed = new URL(src); } catch { throw usageError(`${name}.src must be a public HTTPS URL.`); }
-  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  const ipv4 = isIP(hostname) === 4 ? hostname.split(".").map(Number) : undefined;
-  const privateIpv4 = ipv4 && (
-    ipv4[0] === 10 || ipv4[0] === 127 ||
-    (ipv4[0] === 169 && ipv4[1] === 254) ||
-    (ipv4[0] === 172 && (ipv4[1] ?? 0) >= 16 && (ipv4[1] ?? 0) <= 31) ||
-    (ipv4[0] === 192 && ipv4[1] === 168)
-  );
-  const privateIpv6 = isIP(hostname) === 6 && (
-    hostname === "::1" || hostname.startsWith("fc") || hostname.startsWith("fd") || /^fe[89ab]/.test(hostname)
-  );
-  if (
-    parsed.protocol !== "https:" || parsed.username || parsed.password || !hostname ||
-    hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") ||
-    privateIpv4 || privateIpv6
-  ) {
-    throw usageError(`${name}.src must be a public HTTPS URL without credentials.`);
+  try { parsed = new URL(src); } catch { throw usageError(`${name}.src must be an http or https URL.`); }
+  if ((parsed.protocol !== "https:" && parsed.protocol !== "http:") || !parsed.hostname) {
+    throw usageError(`${name}.src must be an http or https URL.`);
   }
 }
 

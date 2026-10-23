@@ -361,8 +361,13 @@ for (const prefix of ["", "development_", "qa_", "stage_"]) test(`mixed preparat
  const longer=await invoke(['med_IMAGE',`${prefix}rel_TEST`],'longer.json',['--duration-ms','60000']);
  assert.equal(longer.code,0); assert.deepEqual(longer.body.warnings,[]);
  assert.equal(parseArgv(result.body.data.preview.argv).positionals[2],dir+'/prepared.json');
- assert.equal((await invoke(['https://user:secret@example.com'],'bad.json')).code,2);
- assert.equal((await invoke(['http://example.com'],'bad.json')).code,2);
+ // A sign shows LAN pages over http and pages behind a login, stored as authored.
+ for (const [src, output] of [['http://user:secret@192.168.1.20:8080/status','lan.json'],['http://printer.local/','local.json']] as const) {
+  const lan = await invoke([src], output);
+  assert.equal(lan.code,0,JSON.stringify(lan.body));
+  assert.equal(JSON.parse(await readFile(`${dir}/${output}`,'utf8')).pages[0].primitives[0].src,src);
+ }
+ assert.equal((await invoke(['ftp://example.com/'],'bad.json')).code,2);
  assert.equal((await invoke(['med_IMAGE'])).code,2);
  mediaState = 'processing';
  assert.equal((await invoke(['med_IMAGE'],'not-ready.json')).code,2);

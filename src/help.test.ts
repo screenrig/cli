@@ -343,7 +343,7 @@ test("negative switches are documented as booleans without value placeholders", 
 
 test("structured discovery exposes positional cardinality, choices, defaults and examples", () => {
   const init = invoke(["playlist", "init", "--help"]).data;
-  assert.deepEqual(init.arguments, [{ name: "inputs", description: "Local image/video/audio files, med_ IDs, rel_ IDs, or HTTPS URLs in playback order; audio becomes the soundtrack", required: true, variadic: true }]);
+  assert.deepEqual(init.arguments, [{ name: "inputs", description: "Local image/video/audio files, med_ IDs, rel_ IDs, or http(s) URLs (iframe pages) in playback order; audio becomes the soundtrack", required: true, variadic: true }]);
   assert.deepEqual(init.options.find((option) => option.name === "--fit")?.choices, ["contain", "cover", "fill"]);
   assert.equal(init.options.find((option) => option.name === "--duration-ms")?.default, undefined);
   assert.match(init.options.find((option) => option.name === "--duration-ms")?.description ?? "", /8000.*86400000 for application pages/);
