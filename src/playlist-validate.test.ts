@@ -169,3 +169,11 @@ test("soundtrack 128 tracks is the limit and 129 tracks is refused", () => {
   assert.ok(issues.some((issue) => issue.path === "/audio/tracks" && issue.message.includes("128")));
   assert.ok(playlistIssues(soundtrackDocument({}, { tracks: [] })).some((issue) => issue.path === "/audio/tracks"));
 });
+test("local canonical validation accepts a camera's rtsp URL as given, or a bare url that implies the protocol", () => {
+  const stream = (sources: unknown[]) => playlist({ primitive: "stream", selector: undefined, fallback_media_id: "med_FALLBACK", sources });
+  const strip = (value: ReturnType<typeof playlist>) => { delete (value.pages[0]!.primitives[0] as Record<string, unknown>).selector; return value; };
+  assert.deepEqual(playlistIssues(strip(stream([{ protocol: "rtsp", url: "rtsps://user:pass@192.168.1.1:7441/AbCdEf?enableSrtp" }]))), []);
+  assert.deepEqual(playlistIssues(strip(stream([{ url: "rtsp://camera.local:554/stream1" }, { url: "https://example.com/live.m3u8" }]))), []);
+  assert.notDeepEqual(playlistIssues(strip(stream([{ protocol: "rtsp", url: "http://192.168.1.1/stream" }]))), []);
+  assert.notDeepEqual(playlistIssues(strip(stream([{ url: "rtsp://camera.local/one" }, { protocol: "rtsp", url: "rtsps://camera.local/two" }]))), []);
+});

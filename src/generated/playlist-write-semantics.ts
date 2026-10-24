@@ -18,12 +18,18 @@ function httpsWithoutCredentials(value: unknown): boolean {
 }
 
 /** An iframe page a sign shows: http or https, any host, credentials allowed (server signageWebURL). */
-function signageWebUrl(value: unknown): boolean {
+function signageUrl(value: unknown, protocols: readonly string[]): boolean {
   if (typeof value !== "string" || value.length > 2048) return false;
   try {
     const url = new URL(value);
-    return (url.protocol === "https:" || url.protocol === "http:") && url.hostname !== "";
+    return protocols.includes(url.protocol) && url.hostname !== "";
   } catch { return false; }
+}
+
+// A stream source that names no protocol takes it from its URL's scheme.
+function impliedStreamProtocol(value: unknown): string | undefined {
+  const scheme = typeof value === "string" ? /^([a-z][a-z0-9+.-]*):\/\//i.exec(value)?.[1]?.toLowerCase() : undefined;
+  return scheme === "https" ? "hls" : scheme === "rtsp" || scheme === "rtsps" ? "rtsp" : undefined;
 }
 
 function validCivil(value: string): boolean {
@@ -138,7 +144,7 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
       if (ids.has(primitive.id)) fail(`${itemPath}/id`, "must be unique within the page");
       ids.add(primitive.id);
       if (primitive.primitive === "application" || primitive.primitive === "iframe") web++;
-      if (primitive.primitive === "iframe" && !signageWebUrl(primitive.src)) {
+      if (primitive.primitive === "iframe" && !signageUrl(primitive.src, ["http:", "https:"])) {
         fail(`${itemPath}/src`, "must be an http or https URL");
       }
       if (primitive.primitive === "stream") {
@@ -147,12 +153,14 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
         const protocols = new Set<unknown>();
         for (const [sourceIndex, rawSource] of array(primitive.sources).entries()) {
           const source = object(rawSource), sourcePath = `${itemPath}/sources/${sourceIndex}`;
-          if (protocols.has(source.protocol)) fail(sourcePath, "source protocols must be unique");
-          protocols.add(source.protocol);
-          if (source.protocol === "udp-mpegts" && (typeof source.group !== "string" || !/^239\.(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2})$/.test(source.group) || source.group.split(".").some(part => Number(part) > 255))) fail(`${sourcePath}/group`, "must be an IPv4 multicast address in 239.0.0.0/8");
-          if (source.protocol === "hls") {
+          const protocol = Object.hasOwn(source, "protocol") ? source.protocol : impliedStreamProtocol(source.url);
+          if (protocols.has(protocol)) fail(sourcePath, "source protocols must be unique");
+          protocols.add(protocol);
+          if (protocol === "udp-mpegts" && (typeof source.group !== "string" || !/^239\.(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2})\.(?:0|[1-9]\d{0,2})$/.test(source.group) || source.group.split(".").some(part => Number(part) > 255))) fail(`${sourcePath}/group`, "must be an IPv4 multicast address in 239.0.0.0/8");
+          if (protocol === "hls") {
             if (!httpsWithoutCredentials(source.url)) fail(`${sourcePath}/url`, "must be a valid HTTPS URL without credentials");
           }
+          if (protocol === "rtsp" && !signageUrl(source.url, ["rtsp:", "rtsps:"])) fail(`${sourcePath}/url`, "must be an rtsp or rtsps URL");
         }
       }
       if (primitive.controller === true) {
