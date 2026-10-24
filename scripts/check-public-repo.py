@@ -49,7 +49,7 @@ def check_metadata(errors: list[str]) -> None:
         "version": PLACEHOLDER_VERSION,
         "private": False,
         "license": "Apache-2.0",
-        "engines": {"node": ">=22.11"},
+        "engines": {"node": "^22.23.4 || ^24.22.1 || >=26.12.1"},
     }
     for field, value in expected.items():
         if package.get(field) != value:
@@ -102,8 +102,8 @@ def check_public_tree(errors: list[str]) -> None:
             "npm run check",
             "npm audit --audit-level=high --package-lock-only",
             "name: screenrig-cli",
-            "name: npm install (${{ matrix.os }}, Node 22.11.0)",
-            'node-version: "22.11.0"',
+            "name: npm install (${{ matrix.os }}, Node 22.23.4)",
+            'node-version: "22.23.4"',
             "os: [ubuntu-24.04, macos-14, windows-2022]",
             "npm run check:npm-install",
             "gitleaks\" git",
@@ -146,7 +146,7 @@ def check_public_tree(errors: list[str]) -> None:
             "npm publish --access public",
             "screenrig@${{ needs.publish.outputs.version }}",
             "ubuntu-24.04, macos-14, windows-2022",
-            'node-version: "22.11.0"',
+            'node-version: "22.23.4"',
             "gh release upload",
         ):
             if fact not in npm_release:

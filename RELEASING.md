@@ -26,7 +26,7 @@ the same SHA reuses the tag, and a failed job does not tag.
    tag. Do not retag. `npm-release.yml` rejects any other tag shape, publishes,
    and attaches the archive and its SHA-256 file to the release.
 3. The Linux, macOS and Windows clean-install jobs must pass: each installs the
-   exact registry version on Node 22.11.0 and runs `screenrig --json version`
+   exact registry version on Node 22.23.4 and runs `screenrig --json version`
    and `screenrig --json compose catalog`.
 4. Confirm the npm page shows provenance before announcing.
 
