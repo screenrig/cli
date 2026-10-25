@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, open, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, rm, writeFile, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import type { MediaUploadSession } from "./adapters/protocol.js";
@@ -258,7 +258,7 @@ test("signed PUT never retries a one-shot stream or beyond session expiry", asyn
 
 test("media admission rejects oversized files before reading or allocating their payload", async (t) => {
   const dir = await testTemp("media-limit-");
-  const file = path.join(dir, "oversized.mp4");
+  const file = path.join(dir, "oversized.png");
   const handle = await open(file, "w");
   const prototype = Object.getPrototypeOf(handle);
   await handle.truncate(1_073_741_825);
@@ -268,6 +268,64 @@ test("media admission rejects oversized files before reading or allocating their
     await assert.rejects(prepareMediaUpload(file), /1 GiB per-upload transport ceiling/);
     assert.equal(reads.mock.callCount(), 0);
     await assert.rejects(prepareMediaUpload(dir, "video/mp4"), /regular file/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+/** The prototype of a file handle, whose `read` the tests mock. */
+async function fileHandlePrototype(dir: string): Promise<FileHandle> {
+  const handle = await open(path.join(dir, "prototype"), "w");
+  await handle.close();
+  return Object.getPrototypeOf(handle);
+}
+
+test("a video over the server's 500,000,000-byte cap is rejected before its payload is read", async (t) => {
+  const dir = await testTemp("media-video-limit-");
+  const prototype = await fileHandlePrototype(dir);
+  try {
+    for (const [name, contentType] of [["clip.mp4", undefined], ["clip.webm", undefined], ["clip.bin", "video/mp4"]] as const) {
+      const file = path.join(dir, name);
+      const handle = await open(file, "w");
+      await handle.truncate(500_000_001);
+      await handle.close();
+      const reads = t.mock.method(prototype, "read", () => { throw new Error("oversized payload must not be read"); });
+      await assert.rejects(prepareMediaUpload(file, contentType), (error: unknown) => {
+        assert.ok(error instanceof CliError);
+        assert.equal(
+          error.problem.detail,
+          "Video exceeds the 500,000,000-byte (500 MB) limit for one video upload. Trim the video to a shorter clip, then run the upload again.",
+        );
+        return true;
+      });
+      assert.equal(reads.mock.callCount(), 0);
+      reads.mock.restore();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a video of exactly 500,000,000 bytes is within the cap, and other types keep the 1 GiB transport bound", async (t) => {
+  const dir = await testTemp("media-video-boundary-");
+  const prototype = await fileHandlePrototype(dir);
+  // The payload's content is not under test, only its admission; skip the 500 MB of real reads.
+  t.mock.method(prototype, "read", async (...args: unknown[]) => ({ bytesRead: args[2] as number, buffer: args[0] }));
+  try {
+    const video = path.join(dir, "exact.mp4");
+    const videoHandle = await open(video, "w");
+    await videoHandle.truncate(500_000_000);
+    await videoHandle.close();
+    const prepared = await prepareMediaUpload(video);
+    assert.equal(prepared.declaration.bytes, 500_000_000);
+    assert.equal(prepared.declaration.content_type, "video/mp4");
+
+    // Audio and images stay under the transport bound as before; the server holds them to their own limits.
+    const audio = path.join(dir, "long.mp3");
+    const audioHandle = await open(audio, "w");
+    await audioHandle.truncate(500_000_001);
+    await audioHandle.close();
+    assert.equal((await prepareMediaUpload(audio)).declaration.bytes, 500_000_001);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

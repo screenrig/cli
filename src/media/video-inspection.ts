@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { CliRuntime, RunProcessResult } from "../runtime.js";
 import { inputGuardArgs, probeMedia, runProcessFor, type FfmpegToolchain, type MediaProbe } from "./ffmpeg.js";
-import { planVideoDelivery, validateVideoOutput, type VideoOptions } from "./video-profile.js";
+import { MAX_VIDEO_UPLOAD_BYTES, planVideoDelivery, validateVideoOutput, type VideoOptions } from "./video-profile.js";
 
 // High-profile limits from FFmpeg libavcodec/h264_levels.c. All these levels
 // permit the policy's 8 Mbit/s rate and 16 Mbit buffer. Encoder floors stay separate.
@@ -16,7 +16,8 @@ const LEVELS: Record<number, [number, number, number]> = {
   51: [36864, 983040, 184320], 52: [36864, 2073600, 184320],
 };
 const INSPECTION_TIMEOUT_MS = 15_000;
-const MAX_MEDIA_BYTES = 1_073_741_824;
+// A passthrough uploads the source bytes as they are, so a source over the server's video cap is re-encoded instead.
+const MAX_MEDIA_BYTES = MAX_VIDEO_UPLOAD_BYTES;
 const MAX_LINES = 2_000_000;
 const MAX_LINE_CHARS = 16_384;
 

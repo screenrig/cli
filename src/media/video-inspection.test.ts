@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, rm, stat, writeFile } from "node:fs/promises";
+import { readFile, rm, stat, truncate, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import { PassThrough } from "node:stream";
@@ -9,6 +9,7 @@ import type { CliRuntime, RunProcessRequest } from "../runtime.js";
 import { parseProbePayload, resetFfmpegToolchainCache } from "./ffmpeg.js";
 import { defaultTranscodeOptions, transcodeForUpload } from "./transcode.js";
 import { H264HeaderInspection, VideoPacketInspection } from "./video-inspection.js";
+import { MAX_VIDEO_UPLOAD_BYTES } from "./video-profile.js";
 
 function probeJson(video: Record<string, unknown> = {}, audio = false): string {
   return JSON.stringify({ streams: [{ index: 0, codec_type: "video", codec_name: "h264", codec_tag_string: "avc1",
@@ -166,6 +167,24 @@ test("valid input skips the encoder, snapshots original bytes, and binds the upl
     assert.deepEqual(prepared.bytes, original);
     assert.equal(prepared.declaration.sha256, result.verifiedSha256);
     assert.deepEqual(await readFile(result.filePath), original);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    if (result.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });
+  }
+});
+
+test("a conforming source over the server's video cap is re-encoded rather than passed through", async () => {
+  resetFfmpegToolchainCache();
+  const dir = await testTemp("video-over-cap-");
+  const source = path.join(dir, "long.mp4");
+  await writeFile(source, "");
+  await truncate(source, MAX_VIDEO_UPLOAD_BYTES + 1);
+  const { runtime, calls, snapshots } = fakeRuntime(dir);
+  const result = await transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() });
+  try {
+    assert.equal(result.passthrough, false);
+    assert.equal(calls.filter((call) => call.args.includes("-progress")).length, 1);
+    assert.equal(snapshots.length, 0, "the source was never copied for inspection");
   } finally {
     await rm(dir, { recursive: true, force: true });
     if (result.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });

@@ -10,6 +10,7 @@ import { lowInformationFilenameWarning } from "./media-filename.js";
 import type { ProgressReporter } from "./media/progress.js";
 import { transcodeForUpload, type TranscodeOptions, type TranscodeResult } from "./media/transcode.js";
 import { assertDeclaredTypeMatchesBytes } from "./media/sniff.js";
+import { MAX_VIDEO_UPLOAD_BYTES } from "./media/video-profile.js";
 import { readWebpContainer } from "./media/webp.js";
 import { CliError, networkError, usageError } from "./problems.js";
 import { fetchSignedRawPut, type CliRuntime, type SignedRawPut } from "./runtime.js";
@@ -28,6 +29,31 @@ export const SUPPORTED_MEDIA_CONTENT_TYPES = [
 ] as const;
 
 export type SupportedMediaContentType = (typeof SUPPORTED_MEDIA_CONTENT_TYPES)[number];
+
+/** Every type is held to this transport bound; a video is held to the server's lower cap (`MAX_VIDEO_UPLOAD_BYTES`). */
+const MAX_TRANSPORT_BYTES = 1_073_741_824;
+
+interface UploadCeiling {
+  bytes: number;
+  message: string;
+}
+
+const TRANSPORT_CEILING: UploadCeiling = {
+  bytes: MAX_TRANSPORT_BYTES,
+  message:
+    "Media file exceeds the 1 GiB per-upload transport ceiling. Run screenrig project show " +
+    "to inspect used_bytes, any content_limit_bytes ceiling, and credit_remaining.",
+};
+
+const VIDEO_CEILING: UploadCeiling = {
+  bytes: MAX_VIDEO_UPLOAD_BYTES,
+  message: "Video exceeds the 500,000,000-byte (500 MB) limit for one video upload. Trim the video to a shorter clip, then run the upload again.",
+};
+
+/** The size ceiling for one upload of this content type. */
+function uploadCeiling(contentType: string): UploadCeiling {
+  return contentType.startsWith("video/") ? VIDEO_CEILING : TRANSPORT_CEILING;
+}
 
 export interface PreparedMediaUpload {
   bytes: Buffer;
@@ -65,7 +91,7 @@ export async function prepareMediaUpload(filePath: string, explicitContentType?:
   if (!contentType || !supported(contentType)) {
     throw usageError(`Unsupported media type; use one of: ${SUPPORTED_MEDIA_CONTENT_TYPES.join(", ")}.`);
   }
-  const bytes = await readMediaSnapshot(filePath);
+  const bytes = await readMediaSnapshot(filePath, uploadCeiling(contentType));
   if (contentType === "image/webp" && readWebpContainer(bytes)?.lossless) {
     throw usageError(
       "Lossless WebP (VP8L) is not accepted. Encode lossy WebP that keeps alpha, then upload with --no-transcode.",
@@ -79,7 +105,7 @@ export async function prepareMediaUpload(filePath: string, explicitContentType?:
   return { bytes, commit, declaration: { filename, ...commit } };
 }
 
-async function readMediaSnapshot(filePath: string): Promise<Buffer> {
+async function readMediaSnapshot(filePath: string, ceiling: UploadCeiling = TRANSPORT_CEILING): Promise<Buffer> {
   // Open first so admission and reads address the same file. NONBLOCK lets us
   // reject FIFOs without waiting for a writer; regular file reads are unaffected.
   let handle;
@@ -92,12 +118,7 @@ async function readMediaSnapshot(filePath: string): Promise<Buffer> {
     const before = await handle.stat();
     if (!before.isFile()) throw usageError("Media input must be a regular file.");
     if (before.size < 1) throw usageError("Media file must not be empty.");
-    if (before.size > 1_073_741_824) {
-      throw usageError(
-        "Media file exceeds the 1 GiB per-upload transport ceiling. Run screenrig project show " +
-          "to inspect used_bytes, any content_limit_bytes ceiling, and credit_remaining.",
-      );
-    }
+    if (before.size > ceiling.bytes) throw usageError(ceiling.message);
     const bytes = Buffer.allocUnsafe(before.size);
     let offset = 0;
     while (offset < bytes.length) {
