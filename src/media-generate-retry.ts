@@ -6,13 +6,13 @@ import type { EnrollmentRuntime } from "./enrollment.js";
 import { usageError } from "./problems.js";
 
 /**
- * `media generate` is one blocking, billed call. When it times out or the
- * connection drops, the caller cannot tell whether the still was created and
- * billed. The key that made the request is therefore persisted before the
- * request goes out, so re-running the identical command retries under the same
- * Idempotency-Key and the server replays the original MediaGeneration instead
- * of generating and billing a second still. The record is cleared as soon as a
- * generation returns.
+ * `media generate` is one billed generation. When the request times out, the
+ * connection drops or the wait for the still ends first, the caller cannot tell
+ * whether the still was created and billed. The key that made the request is
+ * therefore persisted before the request goes out, so re-running the identical
+ * command retries under the same Idempotency-Key and the server answers with the
+ * original operation instead of generating and billing a second still. The
+ * record is cleared as soon as a generation ends.
  */
 export interface GenerateRetryState {
   idempotency_key: string;

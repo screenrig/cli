@@ -83,25 +83,61 @@ async function enrolled(configDir: string): Promise<ConfigFs> {
   return fsLike;
 }
 
-function generateTransport(): FakeTransport {
-  return new FakeTransport().on("POST", "/api/media/generations", (req) => {
-    const body = (req.body ?? {}) as { quality?: string; aspect_ratio?: string };
-    const quality = body.quality === "low" || body.quality === "high" ? body.quality : "medium";
-    const debit = GENERATE_DEBITS[quality];
-    return {
-      status: 201,
-      headers: { "content-type": "application/json", etag: '"1"' },
-      body: {
-        media: GENERATED_MEDIA,
-        usage: {
-          quality,
-          aspect_ratio: body.aspect_ratio ?? "16:9",
-          credits: debit.credits,
-          usd: debit.usd,
-        },
-      },
-    };
-  });
+const GENERATE_OPERATION = "op_01EXAMPLEGENERATE0000000";
+
+function generationOperation(state: string, extra: Record<string, unknown> = {}) {
+  return {
+    id: GENERATE_OPERATION,
+    kind: "media.generate",
+    state,
+    created_at: "2026-08-14T17:00:00Z",
+    updated_at: "2026-08-14T17:00:00Z",
+    ...extra,
+  };
+}
+
+/**
+ * The server as `Prefer: respond-async` meets it: the POST answers 202 with the
+ * operation at once, the operation is polled until it succeeds, and the stored
+ * still is read for the envelope. `running` is how many polls see it unfinished.
+ */
+function generateTransport(options: { running?: number } = {}): FakeTransport {
+  let quality = "medium";
+  let polls = 0;
+  return new FakeTransport()
+    .on("POST", "/api/media/generations", (req) => {
+      const body = (req.body ?? {}) as { quality?: string };
+      quality = body.quality === "low" || body.quality === "high" ? body.quality : "medium";
+      return { status: 202, headers: { "content-type": "application/json", "preference-applied": "respond-async" }, body: generationOperation("queued") };
+    })
+    .on("GET", `/api/operations/${GENERATE_OPERATION}`, () => {
+      polls += 1;
+      if (polls <= (options.running ?? 0)) {
+        return { status: 200, headers: { "content-type": "application/json" }, body: generationOperation("running") };
+      }
+      const debit = GENERATE_DEBITS[quality as keyof typeof GENERATE_DEBITS];
+      return {
+        status: 200,
+        headers: { "content-type": "application/json" },
+        body: generationOperation("succeeded", {
+          result: { media_id: GENERATED_MEDIA.id, usage: { quality, credits: debit.credits, usd: debit.usd } },
+        }),
+      };
+    })
+    .on("GET", `/api/media/${GENERATED_MEDIA.id}`, () => ({ status: 200, headers: { "content-type": "application/json" }, body: GENERATED_MEDIA }));
+}
+
+/** A server that predates the operation and answers the POST with the finished still. */
+function legacyGenerateTransport(): FakeTransport {
+  return new FakeTransport().on("POST", "/api/media/generations", () => ({
+    status: 201,
+    headers: { "content-type": "application/json", etag: '"1"' },
+    body: { media: GENERATED_MEDIA, usage: { quality: "medium", credits: 1200, usd: "0.12" } },
+  }));
+}
+
+function operationCalls(transport: FakeTransport) {
+  return transport.calls.filter((call) => call.path.startsWith("/api/operations"));
 }
 
 test("USAGE lists media generate", () => {
@@ -140,13 +176,13 @@ test("media generate stores the still and returns med_… plus usage", async () 
     assert.equal(envelope.data.id, "med_01EXAMPLEGENERATED0000000");
     assert.equal(envelope.data.media_id, envelope.data.id);
     assert.equal(envelope.data.media.id, envelope.data.id);
+    assert.equal((envelope.data.media as { filename?: string }).filename, GENERATED_MEDIA.filename, "the envelope still carries the stored still");
     assert.equal(envelope.data.usage.quality, "medium");
     assert.equal(envelope.data.usage.credits, 1200);
     assert.equal(envelope.data.usage.usd, "0.12");
     assert.doesNotMatch(result.stdout, /gpt-image-2|\$30|billed_as|image_output_tokens/);
     assert.doesNotMatch(result.stdout, /b64_json|data:image|iVBOR/);
     assert.doesNotMatch(result.stdout, new RegExp(PROMPT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-    assert.equal(transport.calls.length, 1);
     assert.equal(transport.calls[0]?.method, "POST");
     assert.equal(transport.calls[0]?.path, "/api/media/generations");
     assert.deepEqual(transport.calls[0]?.body, {
@@ -156,10 +192,12 @@ test("media generate stores the still and returns med_… plus usage", async () 
       tag: "LobbyDusk",
     });
     assert.ok(transport.calls[0]?.headers?.["idempotency-key"]);
-    assert.equal(transport.calls[0]?.timeout_ms, 150_000);
+    assert.equal(transport.calls[0]?.headers?.prefer, "respond-async", "the POST asks for the operation, not a held-open request");
+    assert.equal(transport.calls[0]?.timeout_ms, 30_000, "the POST is an ordinary short request");
+    assert.equal(operationCalls(transport).length, 1);
+    assert.equal(operationCalls(transport)[0]?.path, `/api/operations/${GENERATE_OPERATION}`);
     assert.equal(transport.calls.filter((call) => call.path === "/api/media/uploads").length, 0);
     assert.equal(transport.calls.filter((call) => call.method === "PUT").length, 0);
-    assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/operations")).length, 0);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
@@ -241,15 +279,14 @@ test("media generate rejects auto quality before any request", async () => {
   }
 });
 
-test("media generate rejects a 201 without usage.usd", async () => {
-  const transport = new FakeTransport().on("POST", "/api/media/generations", () => ({
-    status: 201,
-    headers: { "content-type": "application/json", etag: '"1"' },
-    body: {
-      media: GENERATED_MEDIA,
-      usage: { quality: "medium", aspect_ratio: "16:9", credits: 1200 },
-    },
-  }));
+test("media generate rejects an operation result without usage.usd", async () => {
+  const transport = new FakeTransport()
+    .on("POST", "/api/media/generations", () => ({ status: 202, headers: { "content-type": "application/json" }, body: generationOperation("queued") }))
+    .on("GET", `/api/operations/${GENERATE_OPERATION}`, () => ({
+      status: 200,
+      headers: { "content-type": "application/json" },
+      body: generationOperation("succeeded", { result: { media_id: GENERATED_MEDIA.id, usage: { quality: "medium", credits: 1200 } } }),
+    }));
   const configDir = await testTemp("media-generate-usd-");
   const fsLike = await enrolled(configDir);
   try {
@@ -268,15 +305,14 @@ test("media generate rejects a 201 without usage.usd", async () => {
   }
 });
 
-test("media generate rejects a 201 without usage.credits", async () => {
-  const transport = new FakeTransport().on("POST", "/api/media/generations", () => ({
-    status: 201,
-    headers: { "content-type": "application/json", etag: '"1"' },
-    body: {
-      media: GENERATED_MEDIA,
-      usage: { quality: "medium", aspect_ratio: "16:9" },
-    },
-  }));
+test("media generate rejects an operation result without usage.credits", async () => {
+  const transport = new FakeTransport()
+    .on("POST", "/api/media/generations", () => ({ status: 202, headers: { "content-type": "application/json" }, body: generationOperation("queued") }))
+    .on("GET", `/api/operations/${GENERATE_OPERATION}`, () => ({
+      status: 200,
+      headers: { "content-type": "application/json" },
+      body: generationOperation("succeeded", { result: { media_id: GENERATED_MEDIA.id, usage: { quality: "medium" } } }),
+    }));
   const configDir = await testTemp("media-generate-credits-");
   const fsLike = await enrolled(configDir);
   try {
@@ -358,33 +394,157 @@ test("media generate maps 402 to payment_required and does not retry", async () 
   }
 });
 
-test("media generate does not poll a 202", async () => {
-  const transport = new FakeTransport().on("POST", "/api/media/generations", () => ({
-    status: 202,
-    headers: { "content-type": "application/json" },
-    body: { id: "op_AAAAAAAAAAAAAAAAAAAAAAAA", state: "queued" },
-  }));
+test("media generate polls the operation of a 202 until it succeeds", async () => {
+  const transport = generateTransport({ running: 2 });
   const configDir = await testTemp("media-generate-202-");
   const fsLike = await enrolled(configDir);
+  let slept = 0;
   try {
     const result = await withRuntime(
       ["--json", "media", "generate", "--prompt", PROMPT],
       transport,
-      { configDir, fs: fsLike },
+      { configDir, fs: fsLike, sleep: async () => { slept += 1; } },
     );
-    assert.equal(result.code, ExitCode.Unexpected, result.stdout);
-    const envelope = JSON.parse(result.stdout) as { error: { code: string; detail: string; hint?: string } };
-    assert.equal(envelope.error.code, "unexpected_response");
-    assert.match(envelope.error.detail, /expected HTTP 201 .* got HTTP 202/);
-    assert.match(envelope.error.hint ?? "", /unknown whether one was created/);
-    assert.equal(transport.calls.filter((call) => call.path.startsWith("/api/operations")).length, 0);
+    assert.equal(result.code, ExitCode.Success, result.stdout);
+    assert.equal(operationCalls(transport).length, 3, "two polls see it running, the third sees it succeeded");
+    assert.equal(slept, 2);
+    const envelope = JSON.parse(result.stdout) as { operation_id?: string; data: { media_id: string; usage: { credits: number } } };
+    assert.equal(envelope.data.media_id, GENERATED_MEDIA.id);
+    assert.equal(envelope.data.usage.credits, GENERATE_DEBITS.medium.credits);
+    assert.equal(envelope.operation_id, GENERATE_OPERATION);
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
 });
 
-test("the generate budget sits above the backend's 90 s vendor timeout while short calls keep 30 s", async () => {
-  const transport = generateTransport().on("GET", "/api/media", () => ({
+test("media generate follows an operation whose id carries the environment marker", async () => {
+  const id = "stage_op_01EXAMPLEGENERATE0000000";
+  const transport = new FakeTransport()
+    .on("POST", "/api/media/generations", () => ({ status: 202, headers: { "content-type": "application/json" }, body: { ...generationOperation("queued"), id } }))
+    .on("GET", `/api/operations/${id}`, () => ({
+      status: 200,
+      headers: { "content-type": "application/json" },
+      body: {
+        ...generationOperation("succeeded", { result: { media_id: GENERATED_MEDIA.id, usage: { quality: "medium", credits: 1200, usd: "0.12" } } }),
+        id,
+      },
+    }))
+    .on("GET", `/api/media/${GENERATED_MEDIA.id}`, () => ({ status: 200, headers: { "content-type": "application/json" }, body: GENERATED_MEDIA }));
+  const configDir = await testTemp("media-generate-stage-op-");
+  const fsLike = await enrolled(configDir);
+  try {
+    const result = await withRuntime(["--json", "media", "generate", "--prompt", PROMPT], transport, { configDir, fs: fsLike });
+    assert.equal(result.code, ExitCode.Success, result.stdout);
+    assert.equal((JSON.parse(result.stdout) as { operation_id?: string }).operation_id, id);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("media generate still accepts a server that answers the POST with the finished still", async () => {
+  const transport = legacyGenerateTransport();
+  const configDir = await testTemp("media-generate-legacy-");
+  const fsLike = await enrolled(configDir);
+  try {
+    const result = await withRuntime(["--json", "media", "generate", "--prompt", PROMPT], transport, { configDir, fs: fsLike });
+    assert.equal(result.code, ExitCode.Success, result.stdout);
+    const envelope = JSON.parse(result.stdout) as { data: { media_id: string; usage: { credits: number } } };
+    assert.equal(envelope.data.media_id, GENERATED_MEDIA.id);
+    assert.equal(envelope.data.usage.credits, 1200);
+    assert.equal(operationCalls(transport).length, 0);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("a 202 without an operation id leaves the outcome unknown and says how to check", async () => {
+  const transport = new FakeTransport().on("POST", "/api/media/generations", () => ({
+    status: 202,
+    headers: { "content-type": "application/json" },
+    body: { state: "queued" },
+  }));
+  const configDir = await testTemp("media-generate-202-noid-");
+  const fsLike = await enrolled(configDir);
+  try {
+    const result = await withRuntime(["--json", "media", "generate", "--prompt", PROMPT], transport, { configDir, fs: fsLike });
+    assert.equal(result.code, ExitCode.Unexpected, result.stdout);
+    const envelope = JSON.parse(result.stdout) as { error: { code: string; hint?: string } };
+    assert.equal(envelope.error.code, "unexpected_response");
+    assert.match(envelope.error.hint ?? "", /unknown whether one was created/);
+    assert.equal(operationCalls(transport).length, 0);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("a generation the server fails surfaces its problem and releases the key", async () => {
+  const configDir = await testTemp("media-generate-failed-op-");
+  const fsLike = await enrolled(configDir);
+  const failing = new FakeTransport()
+    .on("POST", "/api/media/generations", () => ({ status: 202, headers: { "content-type": "application/json" }, body: generationOperation("queued") }))
+    .on("GET", `/api/operations/${GENERATE_OPERATION}`, () => ({
+      status: 200,
+      headers: { "content-type": "application/json" },
+      body: generationOperation("failed", {
+        error: {
+          code: "dependency_timeout",
+          detail: "Image generation timed out: nothing was billed.",
+          next: { command: "screenrig media generate --quality medium PROMPT", reason: "a shorter prompt finishes well inside the limit" },
+        },
+      }),
+    }));
+  try {
+    const first = await withRuntime(["--json", "media", "generate", "--prompt", PROMPT, "--quality", "high"], failing, { configDir, fs: fsLike });
+    assert.equal(first.code, ExitCode.OperationFailed, first.stdout);
+    const envelope = JSON.parse(first.stdout) as { error: { code: string; detail: string; operation_id?: string; next?: { command: string } } };
+    assert.equal(envelope.error.code, "dependency_timeout");
+    assert.match(envelope.error.detail, /nothing was billed/);
+    assert.equal(envelope.error.operation_id, GENERATE_OPERATION);
+    assert.match(envelope.error.next?.command ?? "", /media generate/);
+    const failedKey = failing.calls[0]?.headers?.["idempotency-key"];
+    assert.ok(failedKey);
+
+    const retry = generateTransport();
+    const second = await withRuntime(["--json", "media", "generate", "--prompt", PROMPT, "--quality", "high"], retry, { configDir, fs: fsLike });
+    assert.equal(second.code, ExitCode.Success, second.stdout);
+    assert.notEqual(retry.calls[0]?.headers?.["idempotency-key"], failedKey, "the server ended that operation, so a new run starts a new generation");
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("a wait that ends while the generation runs keeps the key, and the identical command resumes it", async () => {
+  const configDir = await testTemp("media-generate-wait-");
+  const fsLike = await enrolled(configDir);
+  const stuck = new FakeTransport()
+    .on("POST", "/api/media/generations", () => ({ status: 202, headers: { "content-type": "application/json" }, body: generationOperation("queued") }))
+    .on("GET", `/api/operations/${GENERATE_OPERATION}`, () => ({ status: 200, headers: { "content-type": "application/json" }, body: generationOperation("running") }));
+  try {
+    const first = await withRuntime(
+      ["--json", "--timeout", "40", "media", "generate", "--prompt", PROMPT, "--quality", "high"],
+      stuck,
+      { configDir, fs: fsLike, sleep: () => new Promise((resolve) => setTimeout(resolve, 5)) },
+    );
+    assert.equal(first.code, ExitCode.Timeout, first.stdout);
+    const envelope = JSON.parse(first.stdout) as { error: { code: string; hint?: string; next?: { command: string } } };
+    assert.equal(envelope.error.code, "timeout");
+    assert.match(envelope.error.hint ?? "", /operations wait op_01EXAMPLEGENERATE0000000/);
+    assert.match(envelope.error.hint ?? "", /identical media generate command/);
+    assert.equal(envelope.error.next?.command, `screenrig operations wait ${GENERATE_OPERATION}`);
+    const firstKey = stuck.calls[0]?.headers?.["idempotency-key"];
+    assert.ok(firstKey);
+
+    const resumed = generateTransport();
+    const second = await withRuntime(["--json", "media", "generate", "--prompt", PROMPT, "--quality", "high"], resumed, { configDir, fs: fsLike });
+    assert.equal(second.code, ExitCode.Success, second.stdout);
+    assert.equal(resumed.calls[0]?.headers?.["idempotency-key"], firstKey, "the identical command replays under the key, which returns the same operation");
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("no generate request is held open: the POST and every poll keep the 30 s request budget", async () => {
+  const transport = generateTransport({ running: 1 }).on("GET", "/api/media", () => ({
     status: 200,
     headers: { "content-type": "application/json" },
     body: { items: [], next_cursor: null },
@@ -398,24 +558,15 @@ test("the generate budget sits above the backend's 90 s vendor timeout while sho
       { configDir, fs: fsLike },
     );
     assert.equal(generated.code, ExitCode.Success, generated.stdout);
-    const generate = transport.calls.find((call) => call.path === "/api/media/generations");
-    assert.ok(generate?.timeout_ms !== undefined);
-    assert.ok(
-      generate.timeout_ms > 90_000,
-      `the blocking generate budget must exceed the server's 90 s vendor timeout, got ${generate.timeout_ms}`,
-    );
-    assert.equal(generate.timeout_ms, 150_000);
-
-    const listed = await withRuntime(["--json", "media", "list"], transport, { configDir, fs: fsLike });
-    assert.equal(listed.code, ExitCode.Success, listed.stdout);
-    const list = transport.calls.find((call) => call.path === "/api/media");
-    assert.equal(list?.timeout_ms, 30_000, "the generic request budget is unchanged by the generate budget");
+    for (const call of transport.calls) {
+      assert.ok(call.timeout_ms !== undefined && call.timeout_ms <= 30_000, `${call.method} ${call.path} held open for ${call.timeout_ms} ms`);
+    }
   } finally {
     await rm(configDir, { recursive: true, force: true });
   }
 });
 
-test("media generate reports elapsed_ms and announces that it blocks", async () => {
+test("media generate reports elapsed_ms and announces that it waits", async () => {
   const transport = generateTransport();
   const configDir = await testTemp("media-generate-elapsed-");
   const fsLike = await enrolled(configDir);
@@ -437,7 +588,7 @@ test("media generate reports elapsed_ms and announces that it blocks", async () 
     assert.equal(notice.event, "media_generate_started");
     assert.equal(notice.quality, "high");
     assert.ok(notice.typical_seconds > 0);
-    assert.equal(notice.timeout_ms, 150_000);
+    assert.equal(notice.timeout_ms, 180_000);
     assert.doesNotMatch(result.stderr, new RegExp(PROMPT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   } finally {
     await rm(configDir, { recursive: true, force: true });
@@ -464,7 +615,7 @@ test("media generate --no-progress suppresses the notice while returning the gen
     assert.equal(envelope.data.media.id, GENERATED_MEDIA.id);
     assert.equal(envelope.data.usage.credits, GENERATE_DEBITS.medium.credits);
     assert.equal(envelope.data.usage.usd, GENERATE_DEBITS.medium.usd);
-    assert.equal(transport.calls.length, 1);
+    assert.equal(transport.calls.length, 3, "the POST, one poll and the read of the stored still");
     assert.equal(transport.calls[0]?.method, "POST");
     assert.equal(transport.calls[0]?.path, "/api/media/generations");
     assert.deepEqual(transport.calls[0]?.body, {

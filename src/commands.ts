@@ -3430,16 +3430,17 @@ const GENERATE_QUALITIES = ["low", "medium", "high"] as const;
 const GENERATE_PROMPT_MAX = 4000;
 
 /**
- * `media generate` is a single blocking call with no poll, and the server's own
- * vendor budget for the image is ninety seconds. The client budget therefore
- * has to sit above ninety seconds plus the store-and-commit tail, so the
- * server's timeout is what binds and the CLI never abandons a still the project
- * has already been billed for. This is deliberately not the generic request
- * timeout, which stays at thirty seconds for ordinary calls.
+ * `media generate` asks the server to answer with the generation's operation
+ * (`Prefer: respond-async`) and then waits on that operation. One request that
+ * stays open while the image vendor works would be cut off by the proxy in front
+ * of the API after 100 s without a byte. The server's own budget for the vendor,
+ * the render, the store and the debit is 165 s, so the wait sits above it and the
+ * CLI never abandons a still the project has already been billed for. `--timeout`
+ * sets the wait, as it does for the other operations.
  */
-const GENERATE_BLOCKING_TIMEOUT_MS = 150_000;
+const GENERATE_WAIT_MS = 180_000;
 
-/** Measured blocking durations per tier, for the up-front notice only. */
+/** Measured durations per tier, for the up-front notice only. */
 const GENERATE_TYPICAL_SECONDS: Record<MediaGenerationQuality, number> = {
   low: 15,
   medium: 35,
@@ -3486,7 +3487,7 @@ function mediaGenerationFromBody(body: unknown): MediaGeneration {
 }
 
 /**
- * A billed blocking call that did not return a result leaves the caller unable
+ * A billed generation whose answer never arrived leaves the caller unable
  * to say whether the still exists. Name both ways to find out: the identical
  * re-run replays under the stored key, and the listing shows what the project
  * actually holds.
@@ -3547,13 +3548,13 @@ function writeGenerateNotice(
         event: "media_generate_started",
         quality,
         typical_seconds: seconds,
-        timeout_ms: GENERATE_BLOCKING_TIMEOUT_MS,
+        timeout_ms: GENERATE_WAIT_MS,
       })}\n`,
     );
     return;
   }
   runtime.stderr.write(
-    `screenrig: media generate blocks until the still is ready; ${quality} quality usually takes about ${seconds} s.\n`,
+    `screenrig: media generate waits until the still is ready; ${quality} quality usually takes about ${seconds} s.\n`,
   );
 }
 
@@ -3586,7 +3587,7 @@ async function mediaGenerate(
     quality,
     ...(tag ? { tag } : {}),
   };
-  const timeoutMs = flagNumber(args.flags, "timeout") ?? GENERATE_BLOCKING_TIMEOUT_MS;
+  const waitMs = flagNumber(args.flags, "timeout") ?? GENERATE_WAIT_MS;
   const retry = await generateRetryState({
     resolved,
     runtime,
@@ -3602,7 +3603,7 @@ async function mediaGenerate(
       path: "/api/media/generations",
       idempotent: true,
       idempotencyKey: retry.state.idempotency_key,
-      timeout_ms: timeoutMs,
+      headers: { prefer: "respond-async" },
       body,
     });
   } catch (error) {
@@ -3616,28 +3617,51 @@ async function mediaGenerate(
     }
     throw unusableGenerateAnswer(ambiguous, tag);
   }
-  const elapsedMs = runtime.now().getTime() - startedAt;
-  if (response.status !== 201) {
-    await clearGenerateRetryState(resolved, runtime, retry.state.idempotency_key);
-    throw unusableGenerateAnswer(unexpectedResponseError(
-      `media generate expected HTTP 201 with a MediaGeneration document and got HTTP ${response.status}.`,
-      response.headers["x-request-id"] ?? client.requestId,
-    ), tag);
-  }
   let generated: MediaGeneration;
+  let operationId: string | undefined;
   try {
-    generated = mediaGenerationFromBody(response.body);
+    if (response.status === 202) {
+      const accepted = acceptedGenerationOperation(response.body);
+      operationId = accepted;
+      const operation = await client.waitForOperation(accepted, {
+        timeoutMs: waitMs,
+        pollMs: flagNumber(args.flags, "poll-ms") ?? 1000,
+        sleep: runtime.sleep,
+      });
+      generated = mediaGenerationFromBody({ media: { id: operation.result?.media_id }, usage: operation.result?.usage });
+      generated = { ...generated, media: await generatedMedia(client, generated.media.id) };
+    } else if (response.status === 201) {
+      // A server that predates the operation answers with the finished still.
+      generated = mediaGenerationFromBody(response.body);
+    } else {
+      throw unexpectedResponseError(
+        `media generate expected HTTP 202 with an operation and got HTTP ${response.status}.`,
+        response.headers["x-request-id"] ?? client.requestId,
+      );
+    }
   } catch (error) {
-    await clearGenerateRetryState(resolved, runtime, retry.state.idempotency_key);
-    throw unusableGenerateAnswer(error instanceof CliError
-      ? unexpectedResponseError(error.problem.detail, response.headers["x-request-id"] ?? client.requestId)
-      : error, tag);
+    // Only a wait that ended without an answer keeps the key: the operation is
+    // still running, and the identical command resumes it. Anything the server
+    // decided (a failed operation, a refusal, an unusable answer) has nothing
+    // left to replay.
+    if (!(error instanceof CliError && (error.problem.code === "timeout" || error.problem.code === "transport_error") && operationId !== undefined)) {
+      await clearGenerateRetryState(resolved, runtime, retry.state.idempotency_key);
+    }
+    throw unusableGenerateAnswer(waitingForGeneration(error, operationId), tag);
   }
+  const elapsedMs = runtime.now().getTime() - startedAt;
   const mediaId = generated.media.id;
   // The generation resolved, so the stored key has nothing left to replay.
   await clearGenerateRetryState(resolved, runtime, retry.state.idempotency_key);
   return {
-    envelope: jsonBody(response, client.requestId, { id: mediaId, media_id: mediaId, elapsed_ms: elapsedMs }),
+    envelope: successEnvelope(
+      { media: generated.media, usage: generated.usage, id: mediaId, media_id: mediaId, elapsed_ms: elapsedMs },
+      {
+        request_id: client.requestId,
+        ...(operationId ? { operation_id: operationId } : {}),
+        warnings: response.headers.warning ? [{ code: "server_warning", message: response.headers.warning }] : [],
+      },
+    ),
     exitCode: ExitCode.Success,
     human: humanLines("Generated media", [
       ["media_id", mediaId],
@@ -3647,6 +3671,47 @@ async function mediaGenerate(
       ["elapsed_ms", String(elapsedMs)],
     ]),
   };
+}
+
+/**
+ * The operation id of a 202 answer, or the unusable-answer error that says the
+ * outcome is unknown. A random id may carry an environment marker (stage_op_…),
+ * as the other resource ids do.
+ */
+function acceptedGenerationOperation(body: unknown): string {
+  const id = body && typeof body === "object" ? (body as { id?: unknown }).id : undefined;
+  if (typeof id !== "string" || !/^(?:(?:stage|qa|development)_)?op_[A-Za-z0-9_-]+$/.test(id)) {
+    throw unexpectedResponseError("media generate expected an op_… operation id in the HTTP 202 answer.");
+  }
+  return id;
+}
+
+/**
+ * The finished still, for the envelope's `media`. The operation names only the
+ * media id; the still is already stored and billed, so a failed read falls back
+ * to the id instead of failing the command.
+ */
+async function generatedMedia(client: ApiClient, mediaId: string): Promise<MediaGeneration["media"]> {
+  try {
+    const response = await client.call({ method: "GET", path: `/api/media/${mediaId}` });
+    return response.body as MediaGeneration["media"];
+  } catch {
+    // The client's operation log already holds the failed read.
+    return { id: mediaId } as MediaGeneration["media"];
+  }
+}
+
+/**
+ * A wait that ended while the generation was still running leaves the still
+ * unfinished, not lost: say that the identical command resumes it.
+ */
+function waitingForGeneration(error: unknown, operationId: string | undefined): unknown {
+  if (operationId === undefined || !(error instanceof CliError)) return error;
+  if (error.problem.code !== "timeout" && error.problem.code !== "transport_error") return error;
+  return new CliError({
+    ...error.problem,
+    hint: `${error.problem.hint ?? ""} Or rerun the identical media generate command: it resumes operation ${operationId} under the same idempotency key and never bills a second still.`.trim(),
+  }, error.exitCode, error.warnings);
 }
 
 async function mediaUpdate(args: ParsedArgs, client: ApiClient): Promise<CommandResult> {
