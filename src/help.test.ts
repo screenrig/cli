@@ -452,3 +452,8 @@ test("every operational command has examples that parse and stdin help matches i
   }
   assert.match(commandHelp(["screen", "publish"]).usage, /does not update an existing playlist/);
 });
+
+test("media upload help states the 500,000,000-byte video limit", () => {
+  const help = JSON.stringify(commandHelp(["media", "upload"]));
+  assert.match(help, /500,000,000 bytes \(500 MB\)/);
+});

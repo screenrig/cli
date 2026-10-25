@@ -431,7 +431,7 @@ export function withPaymentGuidance(problem: NormalizedProblem): NormalizedProbl
     return problem;
   }
   return withGuidance(problem, {
-    hint: "This operation needs credit the project does not have, so retrying it is refused the same way. Stop retrying it, tell the user it was refused for lack of credit, and continue the task by other means where you can: for an image, create it with your own tools and add it with screenrig media upload.",
+    hint: "This operation needs credit the project does not have, so retrying it is refused the same way. Stop retrying it, tell the user it was refused for lack of credit, and continue the task by other means where you can: for an image, create it with your own tools and add it with screenrig media upload. For an upload that would store more than 1 GB on Standard with no credit left, do not upload again and tell the user to add credit or delete content to get back under 1 GB.",
     next: {
       command: "screenrig billing balance",
       reason: "Shows remaining, reserved, and available credits so you can tell the user exactly what is left.",

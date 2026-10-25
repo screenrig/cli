@@ -14,7 +14,7 @@ info:
 
     Public remaining is whole credits, never millicredits. Authenticated /api and /api/playlists JSON and problem responses to a project bearer include ScreenRig-Credits-Remaining, ScreenRig-Credits-Reset, ScreenRig-Credits-Included and ScreenRig-Credits-Low. Player runtime responses never carry them (a screen is never refused for its balance), and SSE, content and unauthenticated responses omit them. The ledger unit remains millicredits (1000 mcr = 1 credit); published remaining is floored.
 
-    Authenticated user or agent /api and /api/playlists requests cost 1 credit, debited immediately against this server request id, after the first 10,000 API or billed listen-stream taxes in the UTC month. On Standard, remaining below the intro floor of negative 1,000,000 credits (zero from 2027-01-01) is payment_required; that includes the /api/playlists routes. Premium, Enterprise, Staff and Promo are never refused for their balance: usage is charged in full and remaining may go negative. GET /api/project, POST /api/agents/self/disconnect and the GET /api/billing reads do not debit, so a zero-remaining project can recover. Reading project notes (GET /api/notes and GET /api/notes/{id}) does not debit either; writing them does. Screen messages are exempt from this meter: POST /api/screens/{id}/toast, POST /api/screens/{id}/play-page, POST /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot, and GET /api/screens/{id}/screenshot/status. Runtime, pairing, content, health, and unauthenticated routes are not this meter. Inbound media commit, application accept, and K/V put bytes, outbound runtime media/package/release and K/V get bytes, and stored bytes settle hourly against remaining. Public remaining stays whole credits.
+    Authenticated user or agent /api and /api/playlists requests cost 1 credit, debited immediately against this server request id, after the first 10,000 API or billed listen-stream taxes in the UTC month. On Standard, remaining below the intro floor of negative 1,000,000 credits (zero from 2027-01-01) is payment_required; that includes the /api/playlists routes. Premium, Enterprise, Staff and Promo are never refused for their balance: usage is charged in full and remaining may go negative. GET /api/project, POST /api/agents/self/disconnect and the GET /api/billing reads do not debit, so a zero-remaining project can recover. Reading project notes (GET /api/notes and GET /api/notes/{id}) does not debit either; writing them does. Screen messages are exempt from this meter: POST /api/screens/{id}/toast, POST /api/screens/{id}/play-page, POST /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot, and GET /api/screens/{id}/screenshot/status. Runtime, pairing, content, health, and unauthenticated routes are not this meter. Inbound media commit, application accept, and K/V put bytes, outbound runtime media/package/release and K/V get bytes are recorded, never charged: bandwidth is free on every plan. Stored bytes settle hourly against remaining, and only the bytes a payer stores above its free 1 GB (1,000,000,000 bytes) count. Public remaining stays whole credits.
 
     Opening GET /stream/project costs 1 credit as the listen subscribe. Later billed events on that stream cost 1 credit each. Screen conversation events are exempt: screen.*, runtime.*, and application.event. Heartbeats and the retry preamble never charge. playlist.*, media.*, kv.*, application.published, operation.*, project.*, feedback.*, stream.cursor, and stream.resync_required are billed. GET /stream/project bills arriving events under this same per-event meter and the same exemption set; like every SSE response it omits the ScreenRig-Credits-* headers. A dashboard session reads the same whole-credit balance through GET /api/balance, which never debits and remains available at zero. SSE debit idempotency is sse-event:<project_id>:<sequence>; reconnect replay is free. An unpaid billed event is not written and the stream closes.
 
@@ -4392,7 +4392,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: getBillingUsage
-      description: The calling project's use of its monthly allowance (10 GB bandwidth, 1 GB-month storage, and 10,000 API requests, billed project stream events and webhook delivery attempts) for one UTC month. A project paying for itself reads its own pool. A project another payer pays for shares that payer's pool with the payer's other projects; it reads its own share, and payer names the payer. The payer's pool total stays on the payer's billing reads.
+      description: The calling project's use for one UTC month, with the bytes served and received (never charged), the storage charged above the free 1 GB stored, and the API requests, billed project stream events and webhook delivery attempts counted against the free 10,000 a month. A project paying for itself reads its own pool. A project another payer pays for shares that payer's pool with the payer's other projects; it reads its own share, and payer names the payer. The payer's pool total stays on the payer's billing reads.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -4406,7 +4406,7 @@ paths:
           description: UTC month in YYYY-MM form; defaults to the current month.
       responses:
         '200':
-          description: Project allowance usage.
+          description: Project usage.
           headers:
             Cache-Control:
               schema:
@@ -11460,7 +11460,7 @@ paths:
         description: Backend-owned dashboard origin
     get:
       operationId: getOrganizationBillingUsage
-      description: The organization allowance pool and each project share for a UTC month. Covers usage paid by this organization; other payer costs are in the organization statement.
+      description: The organization's usage pool and each project's share for a UTC month. Covers usage paid by this organization; other payer costs are in the organization statement.
       security:
         - dashboardSession: []
       parameters:
@@ -13560,7 +13560,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: getBillingUsageInProject
-      description: The calling project's use of its monthly allowance (10 GB bandwidth, 1 GB-month storage, and 10,000 API requests, billed project stream events and webhook delivery attempts) for one UTC month. A project paying for itself reads its own pool. A project another payer pays for shares that payer's pool with the payer's other projects; it reads its own share, and payer names the payer. The payer's pool total stays on the payer's billing reads.
+      description: The calling project's use for one UTC month, with the bytes served and received (never charged), the storage charged above the free 1 GB stored, and the API requests, billed project stream events and webhook delivery attempts counted against the free 10,000 a month. A project paying for itself reads its own pool. A project another payer pays for shares that payer's pool with the payer's other projects; it reads its own share, and payer names the payer. The payer's pool total stays on the payer's billing reads.
       security:
         - projectBearer: []
       parameters:
@@ -13573,7 +13573,7 @@ paths:
           description: UTC month in YYYY-MM form; defaults to the current month.
       responses:
         '200':
-          description: Project allowance usage.
+          description: Project usage.
           headers:
             Cache-Control:
               schema:
@@ -16309,7 +16309,7 @@ components:
           $ref: '#/components/schemas/ProjectName'
         personal:
           $ref: '#/components/schemas/OrganizationPersonal'
-    DemoSource: {type: string, enum: [home_hero, home_paid_plans, pricing_premium, pricing_enterprise, direct]}
+    DemoSource: {type: string, enum: [home_hero, home_paid_plans, pricing_premium, pricing_enterprise, resellers, direct]}
     DemoRequestInput:
       type: object
       additionalProperties: false
@@ -17499,7 +17499,7 @@ components:
     Capabilities:
       type: object
       additionalProperties: false
-      required: [api_version, protocol_version, application_compressed_bytes, application_expanded_bytes, application_package_bytes, application_file_count, application_file_bytes, application_path_depth, application_path_bytes, media_image_bytes, media_audio_bytes, playlist_max_pages, playlist_max_items_per_page, playlist_max_media_per_selector, transition_max_duration_ms, screens_per_project, project_content_bytes, features]
+      required: [api_version, protocol_version, application_compressed_bytes, application_expanded_bytes, application_package_bytes, application_file_count, application_file_bytes, application_path_depth, application_path_bytes, media_image_bytes, media_audio_bytes, media_video_bytes, playlist_max_pages, playlist_max_items_per_page, playlist_max_media_per_selector, transition_max_duration_ms, screens_per_project, project_content_bytes, features]
       properties:
         api_version: {type: string}
         protocol_version: {type: string}
@@ -17510,8 +17510,9 @@ components:
         application_file_bytes: {type: integer, enum: [33554432]}
         application_path_depth: {type: integer, enum: [16]}
         application_path_bytes: {type: integer, enum: [255]}
-        media_image_bytes: {type: integer, enum: [20971520], description: "Maximum declared byte size of one image upload, 20 MiB. It is a byte-only gate rejected with invalid_request before any byte is transferred; declaration does not decode the image, and the bound applies to animated GIF and animated WebP exactly as it applies to a still. Commit verifies dimensions up to 8192 pixels per axis and normalizes non-default EXIF orientation. A video declaration is bounded only by the plan-independent transport ceiling."}
+        media_image_bytes: {type: integer, enum: [20971520], description: "Maximum declared byte size of one image upload, 20 MiB. It is a byte-only gate rejected with invalid_request before any byte is transferred; declaration does not decode the image, and the bound applies to animated GIF and animated WebP exactly as it applies to a still. Commit verifies dimensions up to 8192 pixels per axis and normalizes non-default EXIF orientation. A video declaration is bounded by media_video_bytes."}
         media_audio_bytes: {type: integer, enum: [178257920], description: "Maximum declared byte size of one audio/mpeg (MP3) upload, 170 MiB: the three-hour maximum at 128 kbit/s, with room for tags. It is a byte-only gate rejected with invalid_request before any byte is transferred. Audio media is the playlist soundtrack (docs/playlist-audio.md)."}
+        media_video_bytes: {type: integer, enum: [500000000], description: "Maximum declared byte size of one video/mp4 or video/webm upload, 500000000 bytes, 500 MB. It is a byte-only gate rejected with invalid_request before any byte is transferred."}
         playlist_max_pages: {type: integer, enum: [100]}
         playlist_max_items_per_page: {type: integer, enum: [24]}
         playlist_max_media_per_selector: {type: integer, enum: [1024], description: Maximum ready media objects one image or video selector may resolve to.}
@@ -17628,7 +17629,7 @@ components:
         credit_remaining:
           type: integer
           minimum: 0
-          description: Remaining prepaid credits as a whole integer. Never negative. Standard includes no monthly credit grant. Every project waives the first 10 GB of bandwidth, 1 GB-month of storage, and 10,000 API or billed listen-stream taxes each UTC month.
+          description: Remaining prepaid credits as a whole integer. Never negative. Standard includes no monthly credit grant. Bandwidth is never charged. Every project stores its first 1 GB free, and the first 10,000 API or billed listen-stream taxes each UTC month are waived.
         created_at:
           type: string
           format: date-time
@@ -18167,16 +18168,19 @@ components:
     OrganizationBillingUsage:
       type: object
       additionalProperties: false
-      required: [org_id, period, pool, allowance, screens, projects, next_cursor]
+      required: [org_id, period, pool, allowance, stored_bytes, screens, projects, next_cursor]
       properties:
         org_id: {type: string}
         period: {type: string}
         pool:
           $ref: "#/components/schemas/BillingUsageAmounts"
-          description: The organization's allowance pool this month, shared by every project it pays for.
+          description: The organization's usage pool this month, shared by every project it pays for.
         allowance:
           $ref: "#/components/schemas/BillingUsageAllowance"
-          description: The monthly allowance the pool waives, one per organization however many projects it has.
+          description: What the organization gets free, once however many projects it has.
+        stored_bytes:
+          $ref: "#/components/schemas/McrString"
+          description: Bytes the organization's live projects store now. Compare it with allowance.storage_bytes.
         screens:
           type: object
           additionalProperties: false
@@ -18192,7 +18196,7 @@ components:
               description: The plan's screen limit across the organization; null when unlimited or while each project still has its own limit.
         edge_media_bytes:
           $ref: "#/components/schemas/McrString"
-          description: Media bytes the edge delivered this month for every project the organization paid for, refreshed about once a minute. Add it to pool.bandwidth_bytes for the organization's total bandwidth. Absent when the edge usage source is unavailable.
+          description: Media bytes the edge delivered this month for every project the organization paid for, refreshed about once a minute. Add it to pool.bandwidth_bytes for the organization's total bandwidth, which is counted and never charged. Absent when the edge usage source is unavailable.
         projects:
           type: array
           items:
@@ -18214,41 +18218,51 @@ components:
     ProjectBillingUsage:
       type: object
       additionalProperties: false
-      required: [period, usage, allowance]
+      required: [period, usage, stored_bytes, allowance]
       properties:
         period: {type: string, description: UTC month in YYYY-MM form.}
         payer:
           $ref: "#/components/schemas/BillingPayer"
-          description: Present when an organization or reseller pays for the project. Its allowance pool is shared across the projects it pays for, and usage is this project's share of it. Absent when the project pays for itself.
+          description: Present when an organization or reseller pays for the project. Its usage pool is shared across the projects it pays for, and usage is this project's share of it. Absent when the project pays for itself.
         usage:
           $ref: "#/components/schemas/BillingUsageAmounts"
-          description: Usage counted against the pool this month. bandwidth_bytes counts the bytes the control plane served or received (uploads and downloads it served itself), not media the edge delivers; total bandwidth is usage.bandwidth_bytes plus edge_media_bytes. bandwidth_bytes and storage_mcr count settled hours, each closed hour once it settles; waived_bandwidth_bytes and waived_storage_mcr are the parts the allowance waived. api_events counts each metered API request, billed project stream event and webhook delivery attempt as it is metered, including those billed after the allowance is spent, so it can exceed allowance.api_events.
+          description: Usage counted against the pool this month. bandwidth_bytes counts the bytes the control plane served or received (uploads and downloads it served itself), not media the edge delivers; total bandwidth is usage.bandwidth_bytes plus edge_media_bytes. bandwidth_bytes and storage_mcr count settled hours, each closed hour once it settles. api_events counts each metered API request, billed project stream event and webhook delivery attempt as it is metered, including those billed after the allowance is spent, so it can exceed allowance.api_events.
         edge_media_bytes:
           $ref: "#/components/schemas/McrString"
-          description: Media bytes the edge delivered for this project this month, across every payer that paid for it, refreshed about once a minute. Add it to usage.bandwidth_bytes for the project's total bandwidth. Absent when the edge usage source is unavailable.
+          description: Media bytes the edge delivered for this project this month, across every payer that paid for it, refreshed about once a minute. Add it to usage.bandwidth_bytes for the project's total bandwidth, which is counted and never charged. Absent when the edge usage source is unavailable.
+        stored_bytes:
+          $ref: "#/components/schemas/McrString"
+          description: Bytes this project stores now. A payer's free allowance.storage_bytes covers all the projects it pays for together.
         allowance: {$ref: "#/components/schemas/BillingUsageAllowance"}
     BillingUsageAllowance:
       type: object
       additionalProperties: false
-      description: The monthly allowance one payer's pool waives, as canonical decimal strings. Unused allowance does not roll over.
-      required: [bandwidth_bytes, storage_mcr, api_events, storage_mcr_per_gb_month]
+      description: What one payer gets free, as canonical decimal strings. Bandwidth is never charged, so it has no allowance.
+      required: [storage_bytes, api_events, storage_mcr_per_gb_month]
       properties:
-        bandwidth_bytes: {$ref: "#/components/schemas/McrString"}
-        storage_mcr: {$ref: "#/components/schemas/McrString"}
-        api_events: {$ref: "#/components/schemas/McrString"}
+        storage_bytes:
+          $ref: "#/components/schemas/McrString"
+          description: Bytes the payer may store free at any time, across all its projects. Only the bytes above it accrue storage_mcr_per_gb_month. A Standard payer with no credit left is refused new storage that would take it past it (payment_required); what it already stores stays.
+        api_events:
+          $ref: "#/components/schemas/McrString"
+          description: API requests, billed project stream events and webhook delivery attempts waived each UTC month. Unused allowance does not roll over.
         storage_mcr_per_gb_month:
           $ref: "#/components/schemas/McrString"
-          description: Millicredits one GB of storage costs for a month; storage_mcr divided by it is GB-months.
+          description: Millicredits one GB stored above storage_bytes costs for a month; usage.storage_mcr divided by it is GB-months.
     BillingUsageAmounts:
       type: object
       additionalProperties: false
-      required: [bandwidth_bytes, waived_bandwidth_bytes, storage_mcr, waived_storage_mcr, api_events]
+      required: [bandwidth_bytes, storage_mcr, api_events]
       properties:
-        bandwidth_bytes: {$ref: "#/components/schemas/McrString"}
-        waived_bandwidth_bytes: {$ref: "#/components/schemas/McrString"}
-        storage_mcr: {$ref: "#/components/schemas/McrString"}
-        waived_storage_mcr: {$ref: "#/components/schemas/McrString"}
-        api_events: {$ref: "#/components/schemas/McrString"}
+        bandwidth_bytes:
+          $ref: "#/components/schemas/McrString"
+          description: Bytes served and received. Counted, never charged.
+        storage_mcr:
+          $ref: "#/components/schemas/McrString"
+          description: Millicredits charged for storage above the free allowance.storage_bytes. A month settled before the free 1 GB stored took effect shows what its monthly storage allowance left charged.
+        api_events:
+          $ref: "#/components/schemas/McrString"
+          description: Metered API requests, billed project stream events and webhook delivery attempts.
     BillingBalance:
       type: object
       additionalProperties: false
@@ -20092,7 +20106,7 @@ components:
         quality: {type: string, enum: [low, medium, high]}
         credits: {type: integer, minimum: 1}
         usd: {type: string}
-    MediaUploadDeclaration: {type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: declaration never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. Remaining prepaid credit of zero rejects declare and commit with payment_required. An audio/mpeg (MP3) declaration is bounded at 178257920 bytes, 170 MiB, and a larger one is rejected the same way; read media_audio_bytes to preflight it. Read media_image_bytes from the capabilities document to preflight the image bound, and project_content_bytes there, or content_limit_bytes on the project, to know any custom storage ceiling. An optional tag is stored on the ready media object and is not redeclared at commit. An optional source_filename records the caller's original file name when the client transcoded the bytes before upload; the ready object's filename is then derived from it so distinct sources never collide (photo.png uploaded as photo.webp is stored as photo.png.webp, photo.jpg as photo.jpg.webp, and a source photo.webp stays photo.webp).", properties: {filename: {type: string, minLength: 1, maxLength: 255, description: "Name of the bytes being uploaded, as they will be sent."}, source_filename: {type: string, minLength: 1, maxLength: 255, description: "Caller's original file name before any client-side transcode. Bare file name only. Stored verbatim on the ready media as source_filename and used to derive filename."}, content_type: {type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg]}, bytes: {type: integer, minimum: 1, maximum: 1073741824}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}}
+    MediaUploadDeclaration: {type: object, additionalProperties: false, required: [filename, content_type, bytes, sha256], description: "Declares one upload. The bytes maximum is a plan-independent transport ceiling, not an achievable size. An image content type is bounded further at 20971520 bytes, 20 MiB, and a larger image declaration is rejected with invalid_request before any byte is transferred. That image bound is a byte-only gate: declaration never decodes the image to enforce it, and it applies to animated GIF and animated WebP exactly as it applies to a still. The default plan has no product storage cap. A custom storage ceiling, when present, is checked first and a declaration it cannot hold is rejected with quota_exceeded before any byte is transferred. A Standard project with no credit left is refused declare and commit with payment_required when the bytes its payer stores, with this upload, pass 1000000000 bytes (1 GB); bandwidth is never charged. An audio/mpeg (MP3) declaration is bounded at 178257920 bytes, 170 MiB, and a larger one is rejected the same way; read media_audio_bytes to preflight it. A video/mp4 or video/webm declaration is bounded at 500000000 bytes, 500 MB, and a larger one is rejected the same way; read media_video_bytes to preflight it. Read media_image_bytes from the capabilities document to preflight the image bound, and project_content_bytes there, or content_limit_bytes on the project, to know any custom storage ceiling. An optional tag is stored on the ready media object and is not redeclared at commit. An optional source_filename records the caller's original file name when the client transcoded the bytes before upload; the ready object's filename is then derived from it so distinct sources never collide (photo.png uploaded as photo.webp is stored as photo.png.webp, photo.jpg as photo.jpg.webp, and a source photo.webp stays photo.webp).", properties: {filename: {type: string, minLength: 1, maxLength: 255, description: "Name of the bytes being uploaded, as they will be sent."}, source_filename: {type: string, minLength: 1, maxLength: 255, description: "Caller's original file name before any client-side transcode. Bare file name only. Stored verbatim on the ready media as source_filename and used to derive filename."}, content_type: {type: string, enum: [image/png, image/jpeg, image/webp, image/gif, video/mp4, video/webm, audio/mpeg]}, bytes: {type: integer, minimum: 1, maximum: 1073741824}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}}}
     MediaFolder: {type: object, additionalProperties: false, required: [id, name, parent_id, revision, created_at, updated_at], description: "One media library folder. A playlist selector by:folder plays the ready files directly inside it, not those of its subfolders.", properties: {project_id: {type: string}, id: {type: string}, name: {type: string, minLength: 1, maxLength: 100}, parent_id: {anyOf: [{type: string}, {type: "null"}], description: "The folder holding this one; null at the library root."}, revision: {type: integer}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}}}
     MediaFolderList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 1000, items: {$ref: "#/components/schemas/MediaFolder"}}}}
     MediaFolderCreate: {type: object, additionalProperties: false, required: [name], properties: {name: {type: string, minLength: 1, maxLength: 100, description: "Trimmed; 1 to 100 Unicode characters, no controls, not . or .."}, parent_id: {anyOf: [{type: string}, {type: "null"}], description: "The folder to create it in; null or absent for the library root."}}}
