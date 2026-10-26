@@ -52,7 +52,7 @@ x-api-lifecycle:
     - Link with rel=deprecation to migration documentation.
   migrationChannels:
     - OpenAPI
-    - /docs/api/#deprecations
+    - /docs/api#deprecations
     - /docs/api.md#deprecations
   currentDeprecatedOperations: []
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
@@ -2084,9 +2084,10 @@ paths:
     post:
       x-screenrig-access: review
       operationId: createPlaylistV2
-      description: Authoring entry for the adslot page union. At most 16 adslot pages, at least one ordinary page with no visibility, and the reuse of one slot definition on different pages remain server checks. Reference resolution and DNS stay server checks.
+      description: Authoring entry for the adslot page union. At most 16 adslot pages, at least one ordinary page with no visibility, and the reuse of one slot definition on different pages remain server checks. Reference resolution and DNS stay server checks. A dashboard session (the page editor) creates the playlist live, never as a proposal, attributed to the person, and needs the project owner or a member who can approve (approver_required otherwise); media it names that waits for its review is media_pending_review (409), where an agent's live write approves it. A write that carries an iframe page the Player web app cannot frame is stored all the same, and its answer carries warnings (PlaylistWarning) and the project's event log gets one playlist.iframe_framing_refused event per such page.
       security:
         - projectBearer: []
+        - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/ReviewNote'
         - $ref: '#/components/parameters/OptionalIdempotencyKey'
@@ -2133,9 +2134,10 @@ paths:
     put:
       x-screenrig-access: review
       operationId: updatePlaylistV2
-      description: Versioned update accepting the adslot page union. If-Match carries the playlist revision.
+      description: Versioned update accepting the adslot page union. If-Match carries the playlist revision. A dashboard session (the page editor) replaces the playlist live, never as a proposal, attributed to the person; it needs the project owner or a member who can approve (approver_required otherwise) and If-Match (invalid_request when absent); a playlist no person approved yet is playlist_not_approved (409), as for patchPlaylistStructure, and media a page names that waits for its review is media_pending_review (409). A write that carries an iframe page the Player web app cannot frame is stored all the same, and its answer carries warnings (PlaylistWarning) and the project's event log gets one playlist.iframe_framing_refused event per such page.
       security:
         - projectBearer: []
+        - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/ReviewNote'
         - $ref: '#/components/parameters/ResourceID'
@@ -2162,7 +2164,7 @@ paths:
       x-screenrig-access: review
       operationId: patchPlaylist
       description: >-
-        Change only supplied top-level fields: name, pages, audio or format. Omitted fields are preserved from the same transaction snapshot. Supplied pages, audio and format replace the complete value; audio null removes the soundtrack and format null removes the format. Nested array elements are not merged. A name-only edit of an approved playlist does not revalidate or re-resolve its unchanged content, including older stored page formats. Supplied content and audio/page cue relationships are validated. If-Match optionally guards the revision; identical patches are no-ops and idempotent retries replay the original answer. Propose access and review policy behave as for PUT. PUT remains a complete document replacement.
+        Change only supplied top-level fields: name, pages, audio or format. Omitted fields are preserved from the same transaction snapshot. Supplied pages, audio and format replace the complete value; audio null removes the soundtrack and format null removes the format. Nested array elements are not merged. A name-only edit of an approved playlist does not revalidate or re-resolve its unchanged content, including older stored page formats. Supplied content and audio/page cue relationships are validated. If-Match optionally guards the revision; identical patches are no-ops and idempotent retries replay the original answer. Propose access and review policy behave as for PUT, including the warnings a supplied pages value earns for an iframe page the Player web app cannot frame. PUT remains a complete document replacement.
       security:
         - projectBearer: []
       parameters:
@@ -2190,7 +2192,7 @@ paths:
     delete:
       x-screenrig-access: write
       operationId: deletePlaylistV2
-      description: Tombstones one playlist owned by the authenticated project. Refused with resource_conflict (409) while any screen, archived or pending included, has it as its default, in its playlist schedule, or as its takeover. The dashboard session may delete as well, and changes a playlist's structure through patchPlaylistStructure; it never creates a playlist or edits a page's content.
+      description: Tombstones one playlist owned by the authenticated project. Refused with resource_conflict (409) while any screen, archived or pending included, has it as its default, in its playlist schedule, or as its takeover. The dashboard session may delete as well; it creates and replaces playlists with createPlaylistV2 and updatePlaylistV2 and changes their structure through patchPlaylistStructure.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -2217,7 +2219,7 @@ paths:
     patch:
       operationId: patchPlaylistStructure
       description: >-
-        A signed-in person changes a playlist's structure and never what its pages show: its name, the order of its pages, which pages stay, and each kept page's advance and visibility. pages is the complete new order; a stored page it omits is removed, and an id the playlist does not hold, or a repeated one, is invalid_request at pages[i].id. A kept page's canvas, transition, audio_cue, primitives and comments are always the stored ones: the body has no member for them, and any other member is refused. The kept pages go back through the same resolution and validation as any stored playlist, so a media item deleted since is refused (resource_conflict) and the playlist still keeps one ordinary page with no visibility, at most 16 ad slot pages and its audio_end cues. advance replaces the page's advance (an ad slot page has none); visibility replaces the page's visibility when an object, removes it when null and keeps it when omitted. A change that leaves the playlist as stored is a no-op. If-Match carries the playlist revision and is required (invalid_request when absent, revision_conflict when stale). The write is live at once on every screen showing the playlist and is attributed to the person on playlist.updated; it is never a proposal, so the answer is never 202. A playlist no person approved yet (approved_revision 0) is refused with playlist_not_approved (409): decide its review first. A name another playlist of the project uses is resource_conflict. The dashboard session only; agents change playlists with patchPlaylist. The body is at most 64 KiB.
+        A signed-in person changes a playlist's structure and never what its pages show: its name, the order of its pages, which pages stay, and each kept page's advance and visibility. pages is the complete new order; a stored page it omits is removed, and an id the playlist does not hold, or a repeated one, is invalid_request at pages[i].id. A kept page's canvas, transition, audio_cue, primitives and comments are always the stored ones: the body has no member for them, and any other member is refused. The kept pages go back through the same resolution and validation as any stored playlist, so a media item deleted since is refused (resource_conflict) and the playlist still keeps one ordinary page with no visibility, at most 16 ad slot pages and its audio_end cues. advance replaces the page's advance (an ad slot page has none); visibility replaces the page's visibility when an object, removes it when null and keeps it when omitted. A change that leaves the playlist as stored is a no-op. If-Match carries the playlist revision and is required (invalid_request when absent, revision_conflict when stale). The write is live at once on every screen showing the playlist and is attributed to the person on playlist.updated; it is never a proposal, so the answer is never 202. A playlist no person approved yet (approved_revision 0) is refused with playlist_not_approved (409): decide its review first. A name another playlist of the project uses is resource_conflict. The dashboard session only; agents change playlists with patchPlaylist, and a person changes what pages show with updatePlaylistV2. The body is at most 64 KiB.
       security:
         - dashboardSession: []
       parameters:
@@ -3798,7 +3800,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Posts one transient stage-chrome toast to the named screen. A toast is not a primitive: it does not occupy a canvas slot, has no layer, and never participates in readiness or crossfade. The durable event type is screen.toast on the existing runtime SSE stream. Runtime scan never delivers a toast after expires_at, so a persisted cursor cannot replay it later. Level colours are player chrome and are not API fields. Text is 1 to 120 characters, line feed is the only accepted line break, and at most three lines are accepted. Recognizable ScreenRig credential material and other control characters are rejected. duration_ms defaults to 10000 and must be between 2000 and 60000 inclusive. An exact Idempotency-Key retry returns the original expires_at for twenty-four hours. Latest-wins: there is no queue and no cancel verb. Screen messages are exempt from the 1-credit API meter.'
+      description: 'Posts one transient stage-chrome toast to the named screen. A toast is not a primitive: it does not occupy a canvas slot, has no layer, and never participates in readiness or crossfade. The durable event type is screen.toast on the existing runtime SSE stream. Runtime scan never delivers a toast after expires_at, so a persisted cursor cannot replay it later. Level colours are player chrome and are not API fields. Text is 1 to 120 characters, line feed is the only accepted line break, and at most three lines are accepted; a Player shows a toast on one line, a line feed as a space. Recognizable ScreenRig credential material and other control characters are rejected. duration_ms defaults to 60000 and must be between 2000 and 60000 inclusive. An exact Idempotency-Key retry returns the original expires_at for twenty-four hours. Latest-wins: there is no queue and no cancel verb. Screen messages are exempt from the 1-credit API meter.'
       security:
         - projectBearer: []
       parameters:
@@ -9676,6 +9678,59 @@ paths:
           $ref: '#/components/responses/RuntimeRateLimitedProblem'
         default:
           $ref: '#/components/responses/RuntimeProblem'
+  /screen/status:
+    servers:
+      - url: https://play.screenrig.ai
+        description: Trusted player/runtime origin
+    put:
+      operationId: putRuntimeStatus
+      x-rate-limit-policies:
+        - name: runtime-status
+          quota: 12
+          windowSeconds: 60
+        - name: runtime-status-ip
+          quota: 120
+          windowSeconds: 60
+          condition: anonymous_or_archived
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: >-
+        Reports the status chip the paired Player shows on glass: the screenrig.overlay/v1 condition that wins its rank, or null when no chip shows. Path does not name screen_id; the paired runtime session binds it. Body is JSON RuntimeStatusWrite {observed_at, chip}; unknown members are ignored (docs/player-compatibility.md §1.1). chip must be the id of a condition in the backend's catalogue (packages/overlay/overlay.json, the file Players vendor); the upgrade notice and the start messages are not chips. A missing chip, a value of another type or an id the catalogue does not list is 400 invalid_request with errors[0].field chip, and nothing is stored. The stored value is the project ScreenStatus: level and icon are the catalogue's for chip, never the Player's, and received_at is the server receipt time. Last write wins and replaces the whole status. A report that changes none of chip, level and icon is a no-op: it keeps the stored observed_at and received_at and appends nothing. A change appends the project-only screen.status_changed with details {chip, level, icon}, never delivered on GET /screen/events. Unpaired and anonymous public sessions are forbidden. Native cookies are rejected; browser must not adopt header profiles. Prepaid remaining credit is not a gate. Status is absent from GET /api/screens until the first accepted report and is cleared on identity reset, unpair, and archive. ScreenPatch cannot write it. An archived screen answers 409 screen_archived. At most 12 reports per minute per paired session (runtime-status): a 429 means retry no sooner than Retry-After. A backend without this route answers 404: keep playing and stop reporting status for that session. Status is never authorization or admission. The Player rules are docs/player-compatibility.md §9.5.
+      security:
+        - pairedRuntimeCookie: []
+        - nativeSessionAuthorization: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeStatusWrite'
+      responses:
+        '204':
+          description: Status stored, or unchanged.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+        '400':
+          $ref: '#/components/responses/RuntimeProblem'
+        '401':
+          $ref: '#/components/responses/RuntimeProblem'
+        '403':
+          $ref: '#/components/responses/RuntimeProblem'
+        '409':
+          $ref: '#/components/responses/RuntimeProblem'
+        '429':
+          $ref: '#/components/responses/RuntimeRateLimitedProblem'
+        default:
+          $ref: '#/components/responses/RuntimeProblem'
   /screen/screen-label:
     servers:
       - url: https://play.screenrig.ai
@@ -13174,7 +13229,7 @@ paths:
     post:
       x-screenrig-access: review
       operationId: createPlaylistV2InProject
-      description: Authoring entry for the adslot page union. At most 16 adslot pages, at least one ordinary page with no visibility, and the reuse of one slot definition on different pages remain server checks. Reference resolution and DNS stay server checks.
+      description: Authoring entry for the adslot page union. At most 16 adslot pages, at least one ordinary page with no visibility, and the reuse of one slot definition on different pages remain server checks. Reference resolution and DNS stay server checks. A write that carries an iframe page the Player web app cannot frame is stored all the same, and its answer carries warnings (PlaylistWarning) and the project's event log gets one playlist.iframe_framing_refused event per such page.
       security:
         - projectBearer: []
       parameters:
@@ -15658,6 +15713,19 @@ components:
       properties:
         state: {type: string, enum: [pending]}
         review_id: {type: string}
+    PlaylistWarning:
+      type: object
+      additionalProperties: false
+      required: [code, message, page_id, primitive_id, src, reason]
+      description: >-
+        Something the author of a successful playlist write should act on. The write stored what it carried; a warning never fails it. The one code is iframe_framing_refused: a public https page named by an iframe primitive sends X-Frame-Options (DENY, SAMEORIGIN or the obsolete ALLOW-FROM) or a Content-Security-Policy frame-ancestors list that does not admit the Player web app's origin. The Player web app and the macOS, Samsung Tizen and BrightSign Players frame the page, so they cannot show it; Android, Linux and Windows Players open an iframe page as a whole page and are not affected. The backend reads the page's response headers once the write commits, for at most 8 distinct pages per write; a page it cannot reach in time, or that answers an error, is not reported. Each distinct page appears once, naming the first primitive that uses it, and appends one playlist.iframe_framing_refused event (warning) to the project's event log.
+      properties:
+        code: {type: string, enum: [iframe_framing_refused]}
+        message: {type: string, description: "What is refused and by which header, which Players it affects, and the next step: use a page that allows framing from the Player origin, or ask its owner to allow that origin."}
+        page_id: {type: string, description: "The page of the first iframe primitive that uses src."}
+        primitive_id: {type: string, description: "The first iframe primitive that uses src."}
+        src: {type: string, description: "The iframe page as authored."}
+        reason: {type: string, enum: [x_frame_options, frame_ancestors], description: "Which header refused: X-Frame-Options, or the Content-Security-Policy frame-ancestors directive."}
     ReviewPolicy:
       type: object
       additionalProperties: false
@@ -15889,6 +15957,7 @@ components:
         status: {type: string, enum: [pending_review]}
         review: {$ref: "#/components/schemas/ReviewSummary"}
         playlist: {$ref: "#/components/schemas/PlaylistV2", description: "The playlist resource as GET returns it: for a create the new playlist (approved_revision 0), for an update the live version with approval set."}
+        warnings: {type: array, maxItems: 8, items: {$ref: "#/components/schemas/PlaylistWarning"}, description: "About the pages the proposal carries, which for a change to an approved playlist wait in the review and are not in playlist. Absent when there is nothing to act on."}
     ReviewApproveRequest:
       type: object
       additionalProperties: false
@@ -16514,7 +16583,7 @@ components:
       properties:
         email: {type: string, format: email, maxLength: 254}
         country: {type: string, pattern: "^[A-Z]{2}$", description: "ISO 3166-1 country code; retained separately from timezone."}
-        screen_range: {type: string, enum: ["1_10", "11_100", "101_500", "501_plus", unknown]}
+        screen_range: {type: string, enum: ["1_10", "11_50", "51_250", "251_plus", unknown]}
         organization: {type: string, enum: [small_mid, large_corporation, agency_network]}
         budget: {type: string, enum: [under_2995, "2995_19994", "19995_plus", unknown], description: "Self-reported annual signage budget in USD."}
         timezone: {type: string, maxLength: 100, description: "IANA timezone, or empty when browser detection is unavailable; scheduling requires explicit timezone."}
@@ -17714,7 +17783,7 @@ components:
         playlist_max_items_per_page: {type: integer, enum: [24]}
         playlist_max_media_per_selector: {type: integer, enum: [1024], description: Maximum ready media objects one image or video selector may resolve to.}
         transition_max_duration_ms: {type: integer, enum: [60000]}
-        screens_per_project: {type: integer, enum: [100], description: "Screen limit of the default plan. Unarchived pairing_pending and active screens count. Archived screens do not. Zero on a project means no screen cap."}
+        screens_per_project: {type: integer, enum: [50], description: "Screen limit of the default plan. Unarchived pairing_pending and active screens count. Archived screens do not. Zero on a project means no screen cap."}
         project_content_bytes: {type: integer, enum: [0], description: "Storage limit of the default plan. Zero means no product storage cap. A custom storage ceiling, when present, still counts committed media, expanded application release trees, and application key/value entries together, including bytes reserved by an upload in flight. The per-request ceilings above are plan-independent transport bounds."}
         features: {type: object, additionalProperties: {type: boolean}, description: "Server features. application_direct_uploads is true where POST /api/applications/uploads, POST /api/applications/{id}/uploads and POST /api/applications/uploads/{id}/commit are served."}
     CLIEnrollmentRequest:
@@ -19031,6 +19100,7 @@ components:
         approval: {$ref: "#/components/schemas/PlaylistApproval"}
         created_at: {type: string, format: date-time, description: "When the playlist was created. Read-only."}
         updated_at: {type: string, format: date-time, description: "When the playlist's name, pages, soundtrack or format last changed. Read-only."}
+        warnings: {type: array, maxItems: 8, items: {$ref: "#/components/schemas/PlaylistWarning"}, description: "Only on the answer to a write that succeeded: what its author should act on. Absent when there is nothing to act on, and on every read."}
     PlaylistV2List: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/PlaylistV2"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
     PlaylistAudioWrite:
       type: object
@@ -19480,6 +19550,7 @@ components:
         tags: {$ref: "#/components/schemas/ScreenTags"}
         fleet_link_id: {type: string, description: "The fleet link that created this screen. Read-only; it stays after the link is deleted."}
         observation: {$ref: "#/components/schemas/ScreenObservation"}
+        status: {$ref: "#/components/schemas/ScreenStatus"}
         last_page_failure: {$ref: "#/components/schemas/PageFailure"}
         manifest_upgrade: {$ref: "#/components/schemas/ScreenManifestUpgrade"}
         comments: {type: object, additionalProperties: true, description: "Opaque agent JSON object, compact UTF-8 ≤ 1024 bytes. Absent when unset. ScreenRig never reads or uses it. ScreenPatch cannot write it. Not on the runtime manifest and never authorization."}
@@ -19503,7 +19574,7 @@ components:
         manifest_revision: {type: integer}
         content_access_generation: {type: integer}
         state: {type: string, enum: [pairing_pending, active, archived]}
-        deletable: {type: boolean, description: "True when DELETE removes this screen: no native Player key is bound to it (a browser Player's screen, paired or still pending). False means archive is the only removal: a native Player's key stays bound to its screen, archived or not (docs/player-compatibility.md §5.7). Descriptive only: the delete itself decides. Absent from older servers; treat absent as false."}
+        deletable: {type: boolean, description: "True when DELETE removes this screen: no Player key is bound to it, as for a screen set up through a browser handoff (paired by cookie or still pending). False means archive is the only removal: a Player that pairs by code, native or browser, holds a key that stays bound to its screen, archived or not (docs/player-compatibility.md §5.7). Descriptive only: the delete itself decides. Absent from older servers; treat absent as false."}
         storage: {$ref: "#/components/schemas/ScreenStorage"}
         storage_shortfall: {$ref: "#/components/schemas/ScreenStorageShortfall"}
         storage_forecast: {$ref: "#/components/schemas/ScreenStorageForecast"}
@@ -19889,6 +19960,36 @@ components:
         pixel_ratio: {type: number, exclusiveMinimum: 0, maximum: 32}
         presentation: {type: string, minLength: 1, description: "output or windowed. Another value is recorded as output, because the project ScreenObservation knows only those two."}
         rotation: {type: integer, description: "0, 90, 180, or 270. Omit when the platform does not report display rotation. Another value is dropped on its own; the observation is still stored."}
+    RuntimeStatusWrite:
+      type: object
+      additionalProperties: true
+      required: [observed_at, chip]
+      description: >-
+        The PUT /screen/status body. Unknown members are ignored (docs/player-compatibility.md §1.1). The stored value is the project ScreenStatus.
+      properties:
+        observed_at: {type: string, format: date-time, description: "Player clock when the chip last changed, or when the session started."}
+        chip: {oneOf: [{type: string, minLength: 1, maxLength: 64}, {type: "null"}], description: "The id of the screenrig.overlay/v1 condition the Player shows (conditions[].id in packages/overlay/overlay.json), or null when it shows no chip, as on a suppressed surface (fatal, starting, pairing). Required. An id the backend's catalogue does not list is refused."}
+    ScreenStatus:
+      type: object
+      additionalProperties: false
+      required: [chip, observed_at, received_at]
+      description: >-
+        The status chip the screen's Player last reported with PUT /screen/status (docs/player-compatibility.md §9.5): the screenrig.overlay/v1 condition that wins its rank, or null when the Player shows no chip. Absent until the first accepted report. Cleared on identity reset, unpair, and archive. It is the Player's last report, so consumers treat it as stale when the screen is not online (Screen.online), like every Player report. level and icon come from the backend's catalogue for chip, never from the Player, and are absent when chip is null. Read-only on the project API. Never authorization or admission. ScreenPatch cannot write it.
+      properties:
+        chip: {oneOf: [{type: string, minLength: 1, maxLength: 64}, {type: "null"}], description: "The overlay condition id the Player showed, or null when it showed no chip."}
+        level: {type: string, enum: [error, alert, info], description: "The chip's level in the catalogue, the ink the Player draws it in. Absent when chip is null."}
+        icon: {type: string, minLength: 1, description: "The chip's icon name in the catalogue (packages/overlay/icons). Absent when chip is null."}
+        observed_at: {type: string, format: date-time, description: Player clock at the report. Last write wins; a report that changes nothing keeps the stored value.}
+        received_at: {type: string, format: date-time, description: Server receipt time of the stored report. Not taken from the player clock.}
+    ScreenStatusChangedDetails:
+      type: object
+      additionalProperties: false
+      required: [chip]
+      description: details object on a durable project-only screen.status_changed event, appended when PUT /screen/status changes the stored chip, level or icon. level and icon are absent when chip is null. This type is not a runtime audience command and is not delivered on GET /screen/events.
+      properties:
+        chip: {oneOf: [{type: string, minLength: 1, maxLength: 64}, {type: "null"}]}
+        level: {type: string, enum: [error, alert, info]}
+        icon: {type: string, minLength: 1}
     RuntimeStorageWrite:
       type: object
       additionalProperties: true
@@ -20015,8 +20116,8 @@ components:
       required: [level, text]
       properties:
         level: {type: string, enum: [error, alert, info], description: Closed severity token. Player chrome chooses the fill; the API never carries a colour.}
-        text: {type: string, minLength: 1, maxLength: 120, description: "1 to 120 characters. Line feed is the only accepted line break. At most three lines. Other control characters and recognizable ScreenRig credential material are rejected."}
-        duration_ms: {type: integer, minimum: 2000, maximum: 60000, default: 10000, description: Visible duration in milliseconds. Omitted values default to 10000.}
+        text: {type: string, minLength: 1, maxLength: 120, description: "1 to 120 characters. Line feed is the only accepted line break. At most three lines; a Player shows the toast on one line, a line feed as a space. Other control characters and recognizable ScreenRig credential material are rejected."}
+        duration_ms: {type: integer, minimum: 2000, maximum: 60000, default: 60000, description: Visible duration in milliseconds. Omitted values default to 60000.}
     ScreenReloadAccepted:
       type: object
       additionalProperties: false
