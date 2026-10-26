@@ -1,8 +1,8 @@
 # cli
 
 Public noninteractive ScreenRig CLI and deterministic static-application packer.
-Agents run the CLI bundled by `screenrig/plugin` from current `main`; developer
-shells install an exact npm release. This repository does not own plugin
+Agents run the CLI bundled by `screenrig/plugin` from current `main`; developers
+can build this checkout. This repository does not own plugin
 installation, Players, backend services or the site. It is a public maintainer
 guide: the optional workspace-parent AGENTS.md adds shared operational rules but
 is not required to contribute.

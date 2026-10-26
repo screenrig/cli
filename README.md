@@ -1,18 +1,17 @@
-# ScreenRig CLI
+# screenRIG CLI
 
 Noninteractive control-plane CLI and deterministic web-application packer for
 [screenRIG](https://screenrig.ai). Full command reference:
 [screenrig.ai/docs/cli.md](https://screenrig.ai/docs/cli.md).
+[Digital signage for developers](https://screenrig.ai/developers) ·
+[Publish content to a TV](https://screenrig.ai/guides/publish-content-to-tv-programmatically) ·
+[Headless digital signage](https://screenrig.ai/headless-digital-signage)
 
 Agents use the CLI bundled by the
 [`screenrig/plugin`](https://github.com/screenrig/plugin) plugin through the
-plugin's launcher. Developer shells install the public npm package `screenrig`
-at an exact CalVer (`YY.MM.SERIAL`, UTC):
-
-```sh
-npm install --global screenrig@<YY.MM.SERIAL>
-screenrig version
-```
+plugin's launcher. For development from this repository, see
+[AGENTS.md](https://github.com/screenrig/cli/blob/main/AGENTS.md) for the
+source layout, build and verification commands.
 
 Requires Node.js 22.23.4+, 24.22.1+, or 26.12.1+ (excluding 23.x and 25.x). `media upload` needs `ffmpeg` and `ffprobe`
 (`--no-transcode` uploads the accepted bytes unchanged); `screenrig doctor`
