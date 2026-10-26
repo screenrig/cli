@@ -1492,7 +1492,9 @@ export interface Review {
 export interface ReviewList { items: Review[]; next_cursor: string | null; pending_count: number }
 export interface ReviewSummary { id: string; kind: "playlist_change" | "screen_change"; state: "pending"; url: string; subject: ReviewSubject; impact: ReviewImpact }
 /** HTTP 202 from a review-class write under Propose access: the change is not on glass. */
-export interface ReviewPending { status: "pending_review"; review: ReviewSummary; playlist?: Record<string, unknown> }
+export interface ReviewPending { status: "pending_review"; review: ReviewSummary; playlist?: Record<string, unknown>;
+  /** A playlist write's warnings (PlaylistWarning items); the CLI lifts them into the envelope. */
+  warnings?: unknown[] }
 export interface ReviewDecisionResult { review: Review; dependents?: Array<{ id: string; state: ReviewState; problem?: Record<string, unknown> }> }
 /** One seller's decision on one creative revision, as the buyer reads it on the creative. */
 export interface AdvertisingCreativeReview {

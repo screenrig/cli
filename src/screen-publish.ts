@@ -11,6 +11,7 @@ import { isAdSlotPage } from "./playlist-authoring.js";
 import { CliError, makeProblem, usageError } from "./problems.js";
 import { manifestUpgradeOf } from "./screen-manifest-upgrade.js";
 import { pendingReviewOf, reviewNoteHeaders } from "./reviews.js";
+import { playlistWarningItems, type PlaylistWarningItem } from "./playlist-warnings.js";
 import type { Review } from "./adapters/protocol.js";
 import type { CliRuntime } from "./runtime.js";
 
@@ -21,6 +22,8 @@ interface Journal {
   version: 1; created_at: number; fingerprint: string; create_key: string; assign_key: string; playlist?: Resource; assigned?: boolean;
   /** The assignment became a review: nothing is on glass until a person approves it. */
   proposed?: boolean; reviews?: PublishReview[];
+  /** What the server said about the playlist this publish created (a page the Player web app cannot frame), kept so a rerun reports it again. */
+  warnings?: PlaylistWarningItem[];
 }
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 function resource(value: unknown, kind: ResourceIDKind): Resource {
@@ -93,7 +96,7 @@ async function awaitPlayback(options: {
   }
 }
 
-/** Multi-request publishing is resumable, not atomic. The journal contains no authored content. */
+/** Multi-request publishing is resumable, not atomic. The journal holds no playlist content; its warnings name only the pages the server flagged. */
 export async function publishScreen(options: {
   client: ApiClient; runtime: CliRuntime; configPath: string; apiUrl: string;
   screenId: string; revision?: string; document: any; requestedKey?: string;
@@ -155,13 +158,15 @@ export async function publishScreen(options: {
       state = JSON.parse(await readFile(journalPath, "utf8"));
       if (state?.version !== 1 || state.fingerprint !== fingerprint || !Number.isFinite(state.created_at) || !state.create_key || !state.assign_key) throw usageError("Publish journal is invalid.");
       if (state.playlist) resource(state.playlist, "playlist");
+      if (state.warnings !== undefined && (!Array.isArray(state.warnings) || state.warnings.some((item) => typeof item?.code !== "string" || typeof item.message !== "string"))) throw usageError("Publish journal is invalid.");
       if (state.reviews !== undefined && (!Array.isArray(state.reviews) || state.reviews.some((review) => typeof review?.id !== "string" || typeof review.url !== "string"))) throw usageError("Publish journal is invalid.");
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     const noteHeaders = reviewNoteHeaders(options.note);
     const pendingResult = (reviews: PublishReview[]) => {
       options.progress?.("pending_review");
       return { playlist_id: state!.playlist!.id, playlist_revision: state!.playlist!.revision, screen_id: screenId,
-        stage: "pending_review" as const, assignment_verified: false, playback_verified: false, reviews, journal: journalPath };
+        stage: "pending_review" as const, assignment_verified: false, playback_verified: false, reviews, journal: journalPath,
+        ...(state!.warnings?.length ? { warnings: state!.warnings } : {}) };
     };
     if (state?.proposed && state.playlist) {
       // A proposed publish changes nothing until a person approves it. An
@@ -242,6 +247,8 @@ export async function publishScreen(options: {
       state.playlist = resource(pending ? pending.playlist : response.body, "playlist");
       // Persist identity only, never the returned playlist or resolved media.
       state.playlist = { id: state.playlist.id, revision: state.playlist.revision };
+      const warnings = playlistWarningItems((pending ?? (response.body as { warnings?: unknown } | undefined))?.warnings);
+      if (warnings.length) state.warnings = warnings;
       await save();
     }
     if (!state.assigned) {
@@ -262,7 +269,7 @@ export async function publishScreen(options: {
     if (playback.playing) options.progress?.("playing", playback.state);
     return { playlist_id: state.playlist.id, playlist_revision: state.playlist.revision, screen_id: screenId, screen_revision: screen.revision,
       stage: (playback.playing ? "playing" : "assigned") as "playing" | "assigned", assignment_verified: true, playback_verified: playback.playing, playback, journal: journalPath,
-      ...(alreadyPublished ? { already_published: true } : {}) };
+      ...(alreadyPublished ? { already_published: true } : {}), ...(state.warnings?.length ? { warnings: state.warnings } : {}) };
   } catch (error) {
     if (error instanceof CliError) {
       error.problem.errors.push({ stage: state?.assigned ? "verify" : state?.playlist ? "assign" : "create", playlist_id: state?.playlist?.id, journal: journalPath });

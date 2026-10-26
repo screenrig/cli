@@ -67,7 +67,8 @@ export async function replacePlaylistRelease(options: {
     headers: { ...reviewNoteHeaders(options.note), ...(options.revision ? { "if-match": quotedRevision(options.revision) } : {}) }, body: document });
   // Under Propose access the replacement waits for a person: nothing changed on glass.
   const pending = pendingReviewOf(updated);
-  if (pending) return { ...review, impact, applied: false, status: "pending_review", review: pending.review, playlist: pending.playlist };
+  if (pending) return { ...review, impact, applied: false, status: "pending_review", review: pending.review, playlist: pending.playlist,
+    ...(pending.warnings ? { warnings: pending.warnings } : {}) };
   // The top-level revision is the playlist's revision now; the reviewed one stays as previous_revision.
   const written = (updated.body as { revision?: unknown } | undefined)?.revision;
   return { ...review, ...(Number.isSafeInteger(written) ? { revision: written as number, previous_revision: review.revision } : {}), impact, applied: true, playlist: updated.body };

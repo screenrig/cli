@@ -9,6 +9,7 @@ import { assertOutputAvailable, readAuthoringJson, readAuthoringText, writeAutho
 import { publishScreen } from "./screen-publish.js";
 import { fleetHumanLines, fleetOutcome, rejectFleetRevision, screenActionResult, screenTag, screenTagList, screenTarget, SCREEN_TAGS_MAX, type FleetItem } from "./screen-fleet.js";
 import { canonicalPairingCode } from "./pairing-code.js";
+import { playlistAnswerWarnings, playlistWarnings, hasFramingRefusal, withoutAnswerWarnings } from "./playlist-warnings.js";
 import { editablePlaylist, isAdSlotPage, preparePlaylist, shortApplicationPageWarning, targetDimensions } from "./playlist-authoring.js";
 import { callPlaylist } from "./playlist-api.js";
 import { WriteRecovery } from "./write-recovery.js";
@@ -628,10 +629,25 @@ function reviewNoteFrom(args: ParsedArgs): Record<string, string> {
  * pending_review): a success, exit 0, data is the answer plus next.
  */
 function pendingReviewResult(response: { body: unknown; headers: Record<string, string> }, pending: ReviewPending, requestId: string, extra?: Record<string, unknown>): CommandResult {
+  const lifted = playlistAnswerWarnings(response.body);
   return {
-    envelope: jsonBody(response, requestId, { ...extra, next: reviewNext(pending.review.id) }, [pendingReviewWarning(pending.review)]),
+    envelope: jsonBody({ ...response, body: withoutAnswerWarnings(response.body) }, requestId, { ...extra, next: reviewNext(pending.review.id) }, [pendingReviewWarning(pending.review), ...lifted]),
     exitCode: ExitCode.Success,
-    human: pendingReviewLines(pending.review).join("\n"),
+    human: [...pendingReviewLines(pending.review), ...lifted.map((warning) => `warning: ${warning.message}`)].join("\n"),
+  };
+}
+
+/**
+ * A playlist write that applied live. The answer's warnings (a page the
+ * Player web app cannot frame) move from data into the envelope's warnings and
+ * the human output, so an agent reads them like every other warning.
+ */
+function playlistWriteResult(response: { body: unknown; headers: Record<string, string> }, requestId: string, title: string): CommandResult {
+  const lifted = playlistAnswerWarnings(response.body);
+  return {
+    envelope: jsonBody({ ...response, body: withoutAnswerWarnings(response.body) }, requestId, undefined, lifted),
+    exitCode: ExitCode.Success,
+    human: [title, ...lifted.map((warning) => `warning: ${warning.message}`)].join("\n"),
   };
 }
 
@@ -5010,19 +5026,32 @@ export const handlePlaylistImport = commandHandler(async (args, runtime, resolve
     ["media_reused", String(result.media.reused)],
     ["media_uploaded", String(result.media.uploaded)],
   ];
+  const lifted = releaseWarnings(result);
+  const { warnings: _raw, ...rest } = result as typeof result & { warnings?: unknown };
+  const data = { ...rest, playlist: withoutAnswerWarnings(result.playlist) };
+  const warningLines = lifted.map((warning) => `warning: ${warning.message}`);
   if (result.review) {
     return {
-      envelope: successEnvelope({ ...result, next: reviewNext(result.review.id) }, { request_id: client.requestId, warnings: [pendingReviewWarning(result.review)] }),
+      envelope: successEnvelope({ ...data, next: reviewNext(result.review.id) }, { request_id: client.requestId, warnings: [pendingReviewWarning(result.review), ...lifted] }),
       exitCode: ExitCode.Success,
-      human: [...pendingReviewLines(result.review), ...media.map(([key, value]) => `${key}: ${value}`)].join("\n"),
+      human: [...pendingReviewLines(result.review), ...media.map(([key, value]) => `${key}: ${value}`), ...warningLines].join("\n"),
     };
   }
   return {
-    envelope: successEnvelope(result, { request_id: client.requestId }),
+    envelope: successEnvelope(data, { request_id: client.requestId, warnings: lifted }),
     exitCode: ExitCode.Success,
-    human: humanLines(`Playlist ${result.mode === "create" ? "imported" : "updated from bundle"}`, media),
+    human: [humanLines(`Playlist ${result.mode === "create" ? "imported" : "updated from bundle"}`, media), ...warningLines].join("\n"),
   };
 }, true);
+
+/** The warnings a library result carried (its `warnings` member, or its playlist answer's), as envelope warnings. */
+function releaseWarnings(result: { warnings?: unknown; playlist?: unknown }): Warning[] {
+  const playlist = result.playlist as { id?: unknown } | undefined;
+  const id = typeof playlist?.id === "string" ? playlist.id : undefined;
+  return result.warnings !== undefined
+    ? playlistWarnings(result.warnings, id, true)
+    : playlistAnswerWarnings(result.playlist);
+}
 
 async function playlistCreateUpdateAction(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig, action: "create" | "update"): Promise<CommandResult> {
   const token = requireToken(resolved.token);
@@ -5074,7 +5103,7 @@ async function playlistCreateUpdateAction(args: ParsedArgs, runtime: CliRuntime,
     });
   const pending = pendingReviewOf(response);
   if (pending) return pendingReviewResult(response, pending, client.requestId);
-  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Playlist ${action}d.` };
+  return playlistWriteResult(response, client.requestId, `Playlist ${action}d.`);
 
 }
 
@@ -5135,7 +5164,7 @@ export const handlePlaylistPatch = commandHandler(async (args, runtime, resolved
   });
   const pending = pendingReviewOf(response);
   if (pending) return pendingReviewResult(response, pending, client.requestId);
-  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Playlist ${id} updated.` };
+  return playlistWriteResult(response, client.requestId, `Playlist ${id} updated.`);
 }, true);
 
 export const handlePlaylistReplaceRelease = commandHandler(async (args, runtime, resolved) => {
@@ -5146,14 +5175,19 @@ export const handlePlaylistReplaceRelease = commandHandler(async (args, runtime,
     apply: flagBool(args.flags, "apply"), revision: flagString(args.flags, "if-match"),
     impact: flagString(args.flags, "expect-impact"), note: flagString(args.flags, "note"),
   });
+  const answer = result as { warnings?: unknown; playlist?: unknown };
+  const lifted = releaseWarnings(answer);
+  const data = { ...result, ...(answer.playlist ? { playlist: withoutAnswerWarnings(answer.playlist) } : {}) };
+  delete (data as { warnings?: unknown }).warnings;
+  const warningLines = lifted.map((warning) => `warning: ${warning.message}`);
   if ("review" in result && result.review) {
     return {
-      envelope: successEnvelope({ ...result, next: reviewNext(result.review.id) }, { request_id: client.requestId, warnings: [pendingReviewWarning(result.review)] }),
+      envelope: successEnvelope({ ...data, next: reviewNext(result.review.id) }, { request_id: client.requestId, warnings: [pendingReviewWarning(result.review), ...lifted] }),
       exitCode: ExitCode.Success,
-      human: pendingReviewLines(result.review).join("\n"),
+      human: [...pendingReviewLines(result.review), ...warningLines].join("\n"),
     };
   }
-  return { envelope: successEnvelope(result, { request_id: client.requestId }), exitCode: ExitCode.Success, human: JSON.stringify(result, null, 2) };
+  return { envelope: successEnvelope(data, { request_id: client.requestId, warnings: lifted }), exitCode: ExitCode.Success, human: [JSON.stringify(data, null, 2), ...warningLines].join("\n") };
 }, true);
 
 export const handlePlaylistDelete = commandHandler(async (args, runtime, resolved) => {
@@ -8098,8 +8132,10 @@ export const handleScreenPublish = commandHandler(async (args, runtime, resolved
     // The playlist review decides the content (approving it can approve the
     // assignment too), so it is the one to check first.
     const first = result.reviews.find((review) => review.kind === "playlist_change") ?? result.reviews[0]!;
+    const { warnings: raw, ...pendingData } = result;
+    const framing = playlistWarnings(raw, result.playlist_id, true);
     return {
-      envelope: successEnvelope({ ...result, next: reviewNext(first.id) }, { request_id: client.requestId, warnings: [...(shortApplication ? [shortApplication] : []), ...result.reviews.map(pendingReviewWarning)] }),
+      envelope: successEnvelope({ ...pendingData, next: reviewNext(first.id) }, { request_id: client.requestId, warnings: [...(shortApplication ? [shortApplication] : []), ...result.reviews.map(pendingReviewWarning), ...framing] }),
       exitCode: ExitCode.Success,
       human: [
         "Publish waiting for review",
@@ -8108,20 +8144,26 @@ export const handleScreenPublish = commandHandler(async (args, runtime, resolved
         ...result.reviews.map((review) => `review: ${review.id} ${review.kind} ${review.state} ${review.url}`),
         `next: screenrig reviews show ${first.id}`,
         PENDING_REVIEW_SENTENCE,
+        ...framing.map((item) => `warning: ${item.message}`),
       ].join("\n"),
     };
   }
   const warning = publishPlaybackWarning(result);
+  // playback_verified stays what the Player reported; a page the Player web app
+  // cannot frame is reported beside it, in the same result.
+  const { warnings: raw, ...data } = result;
+  const framing = playlistWarnings(raw, result.playlist_id);
   return {
-    envelope: successEnvelope(result, { request_id: client.requestId, warnings: [...(shortApplication ? [shortApplication] : []), ...(warning ? [warning] : [])] }),
+    envelope: successEnvelope(data, { request_id: client.requestId, warnings: [...(shortApplication ? [shortApplication] : []), ...(warning ? [warning] : []), ...framing] }),
     exitCode: ExitCode.Success,
-    human: humanLines(result.playback_verified ? "Published and playing" : "Published and assigned", [
+    human: humanLines(`${result.playback_verified ? "Published and playing" : "Published and assigned"}${hasFramingRefusal(framing) ? "; see the framing warning" : ""}`, [
       ["playlist_id", result.playlist_id],
       ["screen_id", result.screen_id],
       ["stage", result.stage],
       ["waited", `${result.playback.waited_ms} ms`],
       ...(warning ? [["warning", warning.message] as [string, string]] : []),
       ...(shortApplication ? [["warning", shortApplication.message] as [string, string]] : []),
+      ...framing.map((item) => ["warning", item.message] as [string, string]),
     ]),
   };
 });

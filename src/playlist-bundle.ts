@@ -1106,6 +1106,7 @@ export async function importPlaylistBundle(options: {
       mode: options.updateId ? "update" : "create",
       media: { total: bundle.manifest.media.length, reused, uploaded: uploaded.length },
       ...(pending ? { status: "pending_review" as const, review: pending.review } : {}),
+      ...(pending?.warnings ? { warnings: pending.warnings } : {}),
     };
   } catch (error) {
     rethrowRateLimitedImport(error, { uploaded, mutationStarted, playlistWriteStarted });
