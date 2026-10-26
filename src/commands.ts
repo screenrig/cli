@@ -128,6 +128,7 @@ import {
   resolveConfig,
   describeTokenPresence,
   hasToken,
+  isRetiredCredential,
   readConfigFile,
   sameCredential,
   withConfigLock,
@@ -564,7 +565,7 @@ const STORED_CREDENTIAL_COMMANDS = new Set(["logout", "agent enroll", "agent dis
 /** A config that holds only a token from before sign-in: no request accepts it, so nothing is sent. */
 function credentialRetiredError(): CliError {
   return new CliError(makeProblem("credential_retired", "Credential retired", 401,
-    "This installation's stored credential is no longer accepted. Run screenrig login to sign it in; a person approves it in the dashboard. Nothing was sent.", {
+    "This installation's stored credential is no longer accepted. Run screenrig login to sign it in; a person approves it in the dashboard. To create a new project instead, screenrig agent enroll --email ADDRESS --organization NAME replaces it. Nothing was sent.", {
       next: { command: "screenrig login", reason: "Signs this installation in; a person approves it in the dashboard." },
     }), ExitCode.Auth);
 }
@@ -763,7 +764,8 @@ function commandHandler(
     }
     await attachOperationLogger(runtime, args, resolved);
     const commandName = args.command.slice(0, 2).join(" ");
-    if (resolved.retiredCredential && (authenticated || CREDENTIAL_COMMANDS.has(commandName)
+    // agent enroll replaces a retired credential itself (agentEnroll).
+    if (resolved.retiredCredential && commandName !== "agent enroll" && (authenticated || CREDENTIAL_COMMANDS.has(commandName)
       || STORED_CREDENTIAL_COMMANDS.has(commandName) || STORED_CREDENTIAL_COMMANDS.has(args.command[0] ?? ""))) {
       throw credentialRetiredError();
     }
@@ -1497,7 +1499,14 @@ async function agentEnroll(
   if (name && name.length > 80) throw usageError("agent enroll --name is at most 80 characters.");
   const enrollIntent = enrollmentPurpose(flagString(args.flags, "intent"));
   let enrollmentConfig = resolved;
-  if (resolved.enrollment && flagBool(args.flags, "force")) {
+  // A stored credential the server no longer accepts has nothing left to lose:
+  // with enrollment input, a new enrollment replaces it.
+  let replacedCredential = false;
+  if (resolved.retiredCredential) {
+    if (!freshEnrollmentInput(args)) throw credentialRetiredError();
+    enrollmentConfig = await dropDeadCredential(runtime, args, resolved);
+    replacedCredential = true;
+  } else if (resolved.enrollment && flagBool(args.flags, "force")) {
     const forceEmail = flagString(args.flags, "email");
     const forceClaim = flagString(args.flags, "agentid-claim");
     if (forceEmail !== undefined) enrollmentEmail(forceEmail);
@@ -1509,25 +1518,39 @@ async function agentEnroll(
       fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir },
     });
   }
-  const enrolled = await enrollForCommand(args, runtime, enrollmentConfig, {
-    ...(name ? { name } : {}),
-    ...(enrollIntent ? { intent: enrollIntent } : {}),
-    explicit: true,
-  });
-  const token = requireToken(enrolled.token);
-  setResultContext(runtime, enrolled);
-  const client = clientFor(runtime, args, enrolled.apiUrl, token);
-  const response = await client.call({ method: "GET", path: "/api/agents/self" });
-  requirePrivateNoStore(response.headers, "Agent enrollment verification response");
-  const self = validateAgentSelfStatus(response.body, "active");
-  const agent = self.agent;
-  let project: Pick<Project, "id" | "name">;
-  if (!resolved.token && enrolled.projectId && enrolled.projectName) {
-    project = { id: enrolled.projectId, name: enrolled.projectName };
-  } else {
-    const projectResponse = await client.call({ method: "GET", path: "/api/project" });
-    project = projectResponse.body as Project;
+  const enrollOnce = async (config: Awaited<ReturnType<typeof resolveConfig>>) => {
+    const enrolled = await enrollForCommand(args, runtime, config, {
+      ...(name ? { name } : {}),
+      ...(enrollIntent ? { intent: enrollIntent } : {}),
+      explicit: true,
+    });
+    const token = requireToken(enrolled.token);
+    setResultContext(runtime, enrolled);
+    const client = clientFor(runtime, args, enrolled.apiUrl, token);
+    const response = await client.call({ method: "GET", path: "/api/agents/self" });
+    requirePrivateNoStore(response.headers, "Agent enrollment verification response");
+    const self = validateAgentSelfStatus(response.body, "active");
+    let project: Pick<Project, "id" | "name">;
+    if (!config.token && enrolled.projectId && enrolled.projectName) {
+      project = { id: enrolled.projectId, name: enrolled.projectName };
+    } else {
+      const projectResponse = await client.call({ method: "GET", path: "/api/project" });
+      project = projectResponse.body as Project;
+    }
+    return { client, self, project };
+  };
+  let outcome: Awaited<ReturnType<typeof enrollOnce>>;
+  try {
+    outcome = await enrollOnce(enrollmentConfig);
+  } catch (err) {
+    // A stored credential the server refuses as dead is replaced; a live one keeps its project.
+    if (!enrollmentConfig.token || enrollmentConfig.enrollment || !deadCredentialRefusal(err) || !freshEnrollmentInput(args)) throw err;
+    enrollmentConfig = await dropDeadCredential(runtime, args, enrollmentConfig);
+    replacedCredential = true;
+    outcome = await enrollOnce(enrollmentConfig);
   }
+  const { client, self, project } = outcome;
+  const agent = self.agent;
   return {
     envelope: successEnvelope({
       status: "active",
@@ -1535,9 +1558,11 @@ async function agentEnroll(
       agent: safeAgentSummary(agent),
       project: { id: project.id, name: project.name },
       invitation: "emailed to the contact address",
-    }, { request_id: client.requestId }),
+      ...(replacedCredential ? { replaced_credential: true } : {}),
+    }, { request_id: client.requestId, ...(replacedCredential ? { warnings: [CREDENTIAL_REPLACED] } : {}) }),
     exitCode: ExitCode.Success,
     human: humanLines("Agent enrolled", [
+      ...(replacedCredential ? [["replaced", "the retired stored credential; this installation now uses the new project"] as [string, string]] : []),
       ["status", "active"],
       ["id", agent.id],
       ["name", agent.name],
@@ -1548,6 +1573,64 @@ async function agentEnroll(
       ["invitation", "emailed to the contact address"],
     ]),
   };
+}
+
+const CREDENTIAL_REPLACED = {
+  code: "credential_replaced",
+  message: "The stored credential was retired (the server no longer accepts it), so this enrollment replaced it with the new project's credential.",
+};
+
+/** Whether this invocation names what a new enrollment needs: an email or AgentID claim. */
+function freshEnrollmentInput(args: ParsedArgs): boolean {
+  return flagString(args.flags, "email") !== undefined || flagString(args.flags, "agentid-claim") !== undefined;
+}
+
+/**
+ * A refusal that says the stored credential itself is dead, not that a request
+ * lacked access: a 401 credential_retired or unauthorized, or a sign-in the
+ * server ended (its refresh refused, or a renewed token refused again).
+ */
+function deadCredentialRefusal(err: unknown): boolean {
+  if (!(err instanceof CliError)) return false;
+  return err.problem.code === "session_ended"
+    || (err.problem.status === 401 && ["credential_retired", "unauthorized"].includes(err.problem.code));
+}
+
+/**
+ * Drop a dead stored credential so enrollment starts a new installation, as
+ * screenrig login does: nothing of it, its projects or its state carries over.
+ * The enrollment input is checked first, so a usage error leaves the file as it was.
+ */
+async function dropDeadCredential(
+  runtime: CliRuntime,
+  args: ParsedArgs,
+  resolved: Awaited<ReturnType<typeof resolveConfig>>,
+): Promise<Awaited<ReturnType<typeof resolveConfig>>> {
+  const email = flagString(args.flags, "email");
+  const claim = flagString(args.flags, "agentid-claim");
+  if (email !== undefined) enrollmentEmail(email);
+  if (claim !== undefined) agentidClaim(claim);
+  const organization = flagString(args.flags, "organization");
+  if (organization === undefined) throw usageError("agent enroll requires --organization NAME.");
+  validateDisplayName(organization, "Organization name");
+  const fsLike = { ...runtime.fs, env: runtime.env, homedir: runtime.homedir };
+  await withConfigLock(resolved.configPath, fsLike, { sleep: runtime.sleep, now: () => runtime.now().getTime() }, async () => {
+    const current = await readConfigFile(resolved.configPath, fsLike);
+    if (!current) return;
+    // Another process may have signed this installation in meanwhile: keep a credential that is not the dead one.
+    if (current.token && !isRetiredCredential(current.token) && !sameCredential(current.token, resolved.token)) {
+      throw configError("The stored credential changed during enrollment. Run the command again.");
+    }
+    await writeConfigAtomic(resolved.configPath, preserveLogSocket(current, {
+      api_url: current.api_url,
+      ...(current.enrollment ? { enrollment: current.enrollment } : {}),
+      updated_at: runtime.now().toISOString(),
+    }), fsLike);
+  });
+  oauthSessions.delete(runtime);
+  const next = await resolveConfig({ flags: args.flags, fs: fsLike });
+  oauthSessionFor(runtime, next);
+  return next;
 }
 
 async function clearPendingEnrollment(

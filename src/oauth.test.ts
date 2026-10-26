@@ -345,7 +345,7 @@ test("a config holding only a retired credential names screenrig login, sends no
   const transport = withDiscovery(new FakeTransport());
   try {
     for (const argv of [["screen", "list"], ["project", "list"], ["project", "use", PROJECT], ["agent", "status"], ["logout"],
-      ["agent", "disconnect", "--yes"], ["agent", "revoke-identity", "--yes"], ["agent", "enroll", "--email", "owner@example.com", "--organization", "Acme"]]) {
+      ["agent", "disconnect", "--yes"], ["agent", "revoke-identity", "--yes"], ["agent", "enroll"], ["agent", "enroll", "--force"]]) {
       const result = await h.cli(["--json", ...argv], transport);
       assert.equal(result.code, ExitCode.Auth, `${argv.join(" ")}: ${result.stdout}`);
       const error = (JSON.parse(result.stdout) as { error: { code: string; detail: string; next: { command: string } } }).error;
@@ -385,6 +385,155 @@ test("screenrig login from a config holding a retired credential starts a new in
     assert.equal(JSON.stringify(stored).includes("sr_live_"), false);
     assert.equal(stored?.project_id, PROJECT);
     assert.equal(stored?.projects?.[OTHER_PROJECT], undefined);
+  } finally {
+    await h.done();
+  }
+});
+
+function enrollmentBody(pair: { access: string; refresh: string }, project = OTHER_PROJECT): TransportResponse {
+  return json(201, {
+    project: { id: project, name: "Screens", organization_id: "org_BBBBBBBBBBBBBBBBBBBBBBBB", organization_name: "Acme" },
+    invitation: { id: "inv_AAAAAAAAAAAAAAAAAAAAAAAA", delivery: "queued" },
+    agent: { id: AGENT, name: "ScreenRig CLI", agent_type: "cli", capabilities: ["screens", "content", "playlists", "advertising", "reports", "project"], state: "active", authenticated_requests: 0, metered_credits: 0, created_at: NOW.toISOString(), connected_at: NOW.toISOString() },
+    connection_ready: false, issuance_id: "iss_AAAA", issuance_expires_at: "2026-08-14T17:10:00.000Z",
+    access_token: pair.access, token_type: "Bearer", expires_in: 900, refresh_token: pair.refresh,
+    refresh_expires_at: NOW_S + 90 * 86400, scope: "access:manage screens content playlists advertising reports project identity",
+  }, { "cache-control": "private, no-store" });
+}
+
+function agentSelf(): TransportResponse {
+  return json(200, {
+    agent: { id: AGENT, name: "ScreenRig CLI", agent_type: "cli", capabilities: ["screens", "content", "playlists", "advertising", "reports", "project"], state: "active", authenticated_requests: 1, metered_credits: 0, created_at: NOW.toISOString(), connected_at: NOW.toISOString() },
+    connection_ready: false,
+  }, { "cache-control": "private, no-store" });
+}
+
+test("agent enroll over a retired credential creates a new project, replaces the credential and says so", async () => {
+  for (const extra of [[], ["--force"]]) {
+    const h = await harness({
+      api_url: API, project_id: PROJECT, project_name: "Screens", token: RETIRED_PROJECT, identity_token: RETIRED_IDENTITY,
+      projects: { [PROJECT]: { token: RETIRED_PROJECT, project_name: "Lobby" } }, agent_id: AGENT, log_socket: "/tmp/screenrig.sock",
+    });
+    const pair = { access: access({ project: OTHER_PROJECT, sid: "grt_BBBB" }), refresh: "opaque-new-family" };
+    const transport = new FakeTransport()
+      .on("POST", "/api/enrollments", (req) => {
+        assert.equal(req.headers?.authorization, undefined, "the retired credential is never sent");
+        return enrollmentBody(pair);
+      })
+      .on("GET", "/api/project", () => ({ ...projectBody(OTHER_PROJECT), headers: { "content-type": "application/json", "cache-control": "private, no-store" } }))
+      .on("GET", "/api/agents/self", (req) => {
+        assert.equal(req.headers?.authorization, `Bearer ${pair.access}`);
+        return agentSelf();
+      });
+    try {
+      const result = await h.cli(["--json", "agent", "enroll", "--email", "owner@example.com", "--organization", "Acme", ...extra], transport);
+      assert.equal(result.code, 0, result.stdout);
+      const envelope = JSON.parse(result.stdout) as { data: { project: { id: string }; replaced_credential?: boolean }; warnings: Array<{ code: string; message: string }> };
+      assert.equal(envelope.data.project.id, OTHER_PROJECT);
+      assert.equal(envelope.data.replaced_credential, true);
+      assert.equal(envelope.warnings[0]?.code, "credential_replaced");
+      assert.match(envelope.warnings[0]!.message, /retired/);
+      assert.ok(!result.stdout.includes(RETIRED_PROJECT) && !result.stdout.includes(RETIRED_IDENTITY));
+      const stored = await h.read();
+      assert.equal(JSON.stringify(stored).includes("sr_live_"), false, "nothing of the retired credential is kept");
+      assert.equal(stored?.token, pair.access);
+      assert.equal(stored?.project_id, OTHER_PROJECT);
+      assert.equal(stored?.oauth?.refresh_token, pair.refresh);
+      assert.equal(stored?.projects?.[PROJECT], undefined);
+      assert.equal(stored?.log_socket, "/tmp/screenrig.sock");
+      const human = await h.cli(["agent", "status"], new FakeTransport().on("GET", "/api/agents/self", () => agentSelf()));
+      assert.notEqual(human.code, ExitCode.Auth, "the replaced installation is no longer retired");
+    } finally {
+      await h.done();
+    }
+  }
+});
+
+test("agent enroll over a retired credential checks its input before replacing anything", async () => {
+  const config = { api_url: API, project_id: PROJECT, token: RETIRED_PROJECT, agent_id: AGENT };
+  const h = await harness(config);
+  const transport = new FakeTransport();
+  try {
+    const result = await h.cli(["--json", "agent", "enroll", "--email", "owner@example.com"], transport);
+    assert.equal(result.code, ExitCode.Usage, result.stdout);
+    assert.equal((await h.read())?.token, RETIRED_PROJECT);
+    assert.equal(transport.calls.length, 0);
+  } finally {
+    await h.done();
+  }
+});
+
+test("agent enroll over a sign-in the server ended replaces it with a new project", async () => {
+  const h = await harness(grantConfig());
+  const pair = { access: access({ project: OTHER_PROJECT, sid: "grt_BBBB" }), refresh: "opaque-new-family" };
+  let enrolled = false;
+  const transport = withDiscovery(new FakeTransport())
+    .on("POST", "/oauth/token", () => oauthError("invalid_grant"))
+    .on("POST", "/api/enrollments", (req) => {
+      assert.equal(req.headers?.authorization, undefined);
+      enrolled = true;
+      return enrollmentBody(pair);
+    })
+    .on("GET", "/api/agents/self", (req) => req.headers?.authorization === `Bearer ${pair.access}`
+      ? agentSelf()
+      : { status: 401, headers: { "content-type": "application/problem+json", "www-authenticate": 'Bearer error="invalid_token"' }, body: { status: 401, code: "unauthorized", title: "Unauthorized", detail: "The access token is expired, revoked or not valid here." } })
+    .on("GET", "/api/project", () => ({ ...projectBody(OTHER_PROJECT), headers: { "content-type": "application/json", "cache-control": "private, no-store" } }));
+  try {
+    const result = await h.cli(["--json", "agent", "enroll", "--email", "owner@example.com", "--organization", "Acme"], transport);
+    assert.equal(result.code, 0, result.stdout);
+    assert.ok(enrolled);
+    const envelope = JSON.parse(result.stdout) as { data: { project: { id: string }; replaced_credential?: boolean }; warnings: Array<{ code: string }> };
+    assert.equal(envelope.data.project.id, OTHER_PROJECT);
+    assert.equal(envelope.data.replaced_credential, true);
+    assert.equal(envelope.warnings[0]?.code, "credential_replaced");
+    const stored = await h.read();
+    assert.equal(stored?.token, pair.access);
+    assert.equal(stored?.oauth?.refresh_token, pair.refresh);
+    assert.equal(stored?.signed_out_at, undefined);
+  } finally {
+    await h.done();
+  }
+});
+
+test("agent enroll over a live credential keeps it and its project", async () => {
+  for (const extra of [[], ["--force"]]) {
+    const live = access();
+    const h = await harness(grantConfig({}, live));
+    const before = await h.read();
+    const transport = withDiscovery(new FakeTransport())
+      .on("POST", "/api/enrollments", () => {
+        throw new Error("a live credential must not be enrolled over");
+      })
+      .on("GET", "/api/agents/self", (req) => {
+        assert.equal(req.headers?.authorization, `Bearer ${live}`);
+        return agentSelf();
+      })
+      .on("GET", "/api/project", () => projectBody());
+    try {
+      const result = await h.cli(["--json", "agent", "enroll", "--email", "owner@example.com", "--organization", "Acme", ...extra], transport);
+      assert.equal(result.code, 0, result.stdout);
+      const envelope = JSON.parse(result.stdout) as { data: { project: { id: string }; replaced_credential?: boolean }; warnings: unknown[] };
+      assert.equal(envelope.data.project.id, PROJECT);
+      assert.equal(envelope.data.replaced_credential, undefined);
+      assert.deepEqual(envelope.warnings, []);
+      assert.deepEqual(await h.read(), before, "the live credential is untouched");
+    } finally {
+      await h.done();
+    }
+  }
+});
+
+test("agent enroll keeps a credential refused for another reason", async () => {
+  const live = access();
+  const h = await harness(grantConfig({}, live));
+  const before = await h.read();
+  const transport = withDiscovery(new FakeTransport())
+    .on("GET", "/api/agents/self", () => json(503, { status: 503, code: "service_unavailable", title: "Unavailable", detail: "down" }));
+  try {
+    const result = await h.cli(["--json", "agent", "enroll", "--email", "owner@example.com", "--organization", "Acme"], transport);
+    assert.notEqual(result.code, 0);
+    assert.deepEqual(await h.read(), before);
+    assert.equal(transport.calls.some((call) => call.path === "/api/enrollments"), false);
   } finally {
     await h.done();
   }
