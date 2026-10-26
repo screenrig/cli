@@ -487,8 +487,14 @@ interface PendingItem {
   attempt?: number;
 }
 
+/**
+ * The server's answer to a declaration or commit of an upload that already
+ * finished (succeeded, failed or expired), which takes a new upload. Older
+ * servers said "operation is terminal"; current ones say "This upload already
+ * finished". A conflict is never retried as it is.
+ */
 function isTerminalOperationConflict(error: CliError): boolean {
-  return error.problem.code === "resource_conflict" && error.problem.status === 409 && /terminal/i.test(error.problem.detail);
+  return error.problem.code === "resource_conflict" && error.problem.status === 409 && /terminal|upload already finished/i.test(error.problem.detail);
 }
 
 function mediaMatchFromList(body: unknown, sha256: string): { mediaId: string; revision?: number } | undefined {

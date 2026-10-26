@@ -756,7 +756,11 @@ for (const pageSize of [undefined, 1]) test(`409 resource_conflict on a terminal
   }
 });
 
-test("409 resource_conflict on a terminal operation re-declares with a fresh key when no media exists", async () => {
+// Older servers said "operation is terminal"; current ones say the upload already finished.
+for (const finished of [
+  "operation is terminal",
+  "This upload already finished, so it takes no more bytes or commits; start a new upload to send the file again.",
+]) test(`409 resource_conflict "${finished.slice(0, 32)}" re-declares with a fresh key when no media exists`, async () => {
   const configDir = await testTemp("batch-409-rekey-cfg-");
   const cwdDir = await testTemp("batch-409-rekey-cwd-");
   const fsLike = await enrolled(configDir);
@@ -779,7 +783,7 @@ test("409 resource_conflict on a terminal operation re-declares with a fresh key
           status: 409,
           code: "resource_conflict",
           title: "Resource state conflicts with the request",
-          detail: "operation is terminal",
+          detail: finished,
         },
       };
     }
