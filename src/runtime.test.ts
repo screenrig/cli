@@ -144,6 +144,45 @@ test("a signed upload whose answer never comes ends thirty minutes after its las
   await assert.rejects(pending, (error: Error & { code?: string }) => error.code === "UPLOAD_UNANSWERED");
 });
 
+/** R2's answer to a PUT whose signature did not match: the message, then the signed request it computed. */
+const SIGNATURE_REFUSAL = '<?xml version="1.0" encoding="UTF-8"?><Error><Code>SignatureDoesNotMatch</Code>'
+  + "<Message>The request signature we calculated does not match the signature you provided. Check your secret access key and signing method.</Message>"
+  + "<StringToSign>AWS4-HMAC-SHA256\n20261026T022959Z\n20261026/us-east-1/s3/aws4_request\nb4babbdc0cca0596610cac7457e4050e</StringToSign>"
+  + "<CanonicalRequest>PUT\n/bucket/staging/obj\nX-Amz-Credential=AKIDEXAMPLE%2F20261026&amp;X-Amz-Signature=0123456789abcdef</CanonicalRequest></Error>";
+
+test("a storage refusal reports its error code and message, and nothing else from its body", async () => {
+  const answer = (status: number, body: string) => fetchSignedRawPut(async () => new Response(body, { status, headers: { "content-type": "application/xml" } }));
+  const signature = await answer(403, SIGNATURE_REFUSAL)({ ...signedRequest, body: Buffer.from([1]) });
+  assert.deepEqual(signature, {
+    status: 403,
+    errorCode: "SignatureDoesNotMatch",
+    errorMessage: "The request signature we calculated does not match the signature you provided. Check your secret access key and signing method",
+  });
+  assert.doesNotMatch(JSON.stringify(signature), /StringToSign|AWS4|Credential|Signature=|bucket/);
+
+  const digest = await answer(400, "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Error><Code>BadDigest</Code><Message>The SHA-256 checksum you specified did not match what we received.\nYou provided a SHA-256 checksum with value: 8539f10d\nActual SHA-256 was: 58af0375</Message></Error>")({ ...signedRequest, body: Buffer.from([1]) });
+  assert.deepEqual(digest, {
+    status: 400,
+    errorCode: "BadDigest",
+    errorMessage: "The SHA-256 checksum you specified did not match what we received. You provided a SHA-256 checksum with value: 8539f10d Actual SHA-256 was: 58af0375",
+  });
+  const expired = await answer(403, "<Error><Code>ExpiredRequest</Code><Message>Request has expired at https://storage.example.invalid/obj?X-Amz-Signature=abc</Message></Error>")({ ...signedRequest, body: Buffer.from([1]) });
+  assert.deepEqual(expired, { status: 403, errorCode: "ExpiredRequest", errorMessage: "Request has expired at [url]" });
+  assert.deepEqual(await answer(502, "<html><body>Bad gateway</body></html>")({ ...signedRequest, body: Buffer.from([1]) }), { status: 502 });
+});
+
+test("a refusal whose body never ends is read only as far as its first 8 KiB", async () => {
+  let cancelled = false;
+  const endless = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new TextEncoder().encode("<Error><Code>SlowDown</Code><Message>Please reduce your request rate.</Message>")); },
+    pull(controller) { controller.enqueue(new Uint8Array(1024).fill(32)); },
+    cancel() { cancelled = true; },
+  });
+  const put = fetchSignedRawPut(async () => new Response(endless, { status: 503 }));
+  assert.deepEqual(await put({ ...signedRequest, body: Buffer.from([1]) }), { status: 503, errorCode: "SlowDown", errorMessage: "Please reduce your request rate" });
+  assert.equal(cancelled, true);
+});
+
 test("a signed upload asks Node's fetch for no headers or body timeout of its own", async () => {
   const key = Symbol.for("undici.globalDispatcher.1");
   const global = globalThis as Record<symbol, unknown>;

@@ -231,6 +231,31 @@ test("a dropped connection sends the whole PUT again with the same binding and s
   assert.equal(attempts, 4, "a connection that keeps failing still ends after a bounded number of PUTs");
 });
 
+test("a storage refusal names storage's error code and message, never the URL", async () => {
+  const bytes = Buffer.from([1, 2]);
+  const prepared = {
+    bytes,
+    declaration: { filename: "x.png", content_type: "image/png" as const, bytes: 2, sha256: "a".repeat(64) },
+    commit: { content_type: "image/png" as const, bytes: 2, sha256: "a".repeat(64) },
+  };
+  const validated = validateMediaUploadSession(session());
+  await assert.rejects(performSignedMediaPut(prepared, validated, async () => ({
+    status: 403, errorCode: "ExpiredRequest", errorMessage: "Request has expired", bodyText: "secret",
+  }), noWait), (error: unknown) => {
+    assert.ok(error instanceof CliError);
+    assert.equal(error.problem.detail, "Private media upload was refused by storage: HTTP 403 ExpiredRequest: Request has expired.");
+    assert.equal(error.problem.operation_id, "op_1");
+    assert.doesNotMatch(JSON.stringify(error.problem), /secret|signature|storage\.example/);
+    return true;
+  });
+  let attempts = 0;
+  await assert.rejects(performSignedMediaPut(prepared, validated, async () => {
+    attempts += 1;
+    return { status: 503, errorCode: "SlowDown", errorMessage: "Please reduce your request rate" };
+  }, noWait), /interrupted: storage answered HTTP 503 SlowDown: Please reduce your request rate\. It did not finish after 4 attempts\./);
+  assert.equal(attempts, 4);
+});
+
 test("a stalled PUT is sent again and reported as a stall", async () => {
   const bytes = Buffer.from([1, 2]);
   const prepared = {

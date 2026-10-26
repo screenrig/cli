@@ -63,6 +63,11 @@ function retryablePutStatus(status: number): boolean {
   return status >= 500 || status === 408 || status === 429;
 }
 
+/** What storage answered: the status, with its error code and message when it sent them. */
+function storageAnswer(response: SignedRawPutResponse): string {
+  return `HTTP ${response.status}${response.errorCode ? ` ${response.errorCode}` : ""}${response.errorMessage ? `: ${response.errorMessage}` : ""}`;
+}
+
 /**
  * A signed PUT that did not finish. It never reached the API, so the API's
  * network guidance (screenrig doctor) does not apply. The operation id names
@@ -301,9 +306,9 @@ export async function performSignedBodyPut(
     if (response) {
       if (response.status >= 200 && response.status < 300) return;
       if (!retryablePutStatus(response.status)) {
-        throw putFailed(`${label} was refused by storage: HTTP ${response.status}.`, session.operationId);
+        throw putFailed(`${label} was refused by storage: ${storageAnswer(response)}.`, session.operationId);
       }
-      reason = `storage answered HTTP ${response.status}`;
+      reason = `storage answered ${storageAnswer(response)}`;
     }
     const why = reason ?? "the connection failed";
     if (attempt >= maxAttempts) throw putFailed(failed(why, attempt), session.operationId);

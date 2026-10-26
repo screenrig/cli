@@ -6,6 +6,7 @@ import { childEnv } from "./child-env.js";
 import type { Transport } from "./transport/types.js";
 import type { ConfigFs } from "./config.js";
 import type { OperationLogger } from "./log/types.js";
+import { redactText } from "./redact.js";
 import { USER_AGENT } from "./user-agent.js";
 import { openExternalUrl, openLocalPath, type OpenPath, type OpenUrl } from "./open-url.js";
 
@@ -47,7 +48,12 @@ export interface SignedRawPutRequest {
 
 export interface SignedRawPutResponse {
   status: number;
+  /** Never read: a storage body can carry signed request material. */
   bodyText?: string;
+  /** A refusal's error code from storage (ExpiredRequest, BadDigest, SignatureDoesNotMatch, ...). */
+  errorCode?: string;
+  /** That refusal's message, redacted and bounded. */
+  errorMessage?: string;
 }
 
 export type SignedRawPut = (request: SignedRawPutRequest) => Promise<SignedRawPutResponse>;
@@ -224,6 +230,50 @@ function stalled(code: "UPLOAD_STALLED" | "UPLOAD_UNANSWERED"): Error {
   return Object.assign(new Error(code === "UPLOAD_STALLED" ? "No upload bytes moved." : "Storage did not answer the upload."), { code });
 }
 
+/** How much of a refusal's body is read for its error code and message. */
+const STORAGE_ERROR_BYTES = 8 * 1024;
+
+const XML_ENTITIES: Record<string, string> = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" };
+
+/**
+ * The Code and Message of an object store's XML error, and nothing else from
+ * it: a signature refusal goes on to quote the signed request. The message is
+ * redacted, loses any URL, and is kept short.
+ */
+export function storageError(text: string): Pick<SignedRawPutResponse, "errorCode" | "errorMessage"> {
+  const field = (name: string) => new RegExp(`<${name}>([^<]{1,2000})</${name}>`).exec(text)?.[1]
+    ?.replace(/&(lt|gt|amp|quot|apos);/g, (_entity, name: string) => XML_ENTITIES[name] ?? "")
+    .replace(/\s+/g, " ").trim();
+  const code = field("Code");
+  const message = field("Message");
+  const cleaned = message === undefined ? "" : redactText(message).replace(/\bhttps?:\/\/\S+/gi, "[url]").replace(/\.$/, "");
+  return {
+    ...(code && /^[A-Za-z][A-Za-z0-9.]{0,63}$/.test(code) ? { errorCode: code } : {}),
+    ...(cleaned ? { errorMessage: cleaned.length > 300 ? `${cleaned.slice(0, 300)}…` : cleaned } : {}),
+  };
+}
+
+/** The start of a refusal's body, read for `storageError`; a body that cannot be read leaves the status alone. */
+async function readStorageError(response: Response): Promise<Pick<SignedRawPutResponse, "errorCode" | "errorMessage">> {
+  const reader = response.body?.getReader();
+  if (!reader) return {};
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (size < STORAGE_ERROR_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parts.push(value);
+      size += value.byteLength;
+    }
+  } catch {
+    return {};
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  return storageError(Buffer.concat(parts).subarray(0, STORAGE_ERROR_BYTES).toString("utf8"));
+}
+
 /**
  * One signed PUT. It never starts after `expiresAt`, and it is ended only when
  * it stalls: no body bytes handed over for SIGNED_PUT_IDLE_MS, or no answer
@@ -273,10 +323,15 @@ export function fetchSignedRawPut(fetchImpl: typeof fetch = fetch): SignedRawPut
         duplex: "half",
         ...(dispatcher ? { dispatcher } : {}),
       } as RequestInit);
-      // Only status is part of the PUT contract. Do not buffer an untrusted,
-      // potentially unending storage response or retain its signed diagnostics.
-      await response.body?.cancel();
-      return { status: response.status };
+      // Do not buffer an untrusted, potentially unending storage response or
+      // retain its signed diagnostics: a success is its status, a refusal its
+      // status, error code and message from the first 8 KiB.
+      if (response.status >= 200 && response.status < 300) {
+        await response.body?.cancel();
+        return { status: response.status };
+      }
+      arm(SIGNED_PUT_IDLE_MS, "UPLOAD_STALLED");
+      return { status: response.status, ...(await readStorageError(response)) };
     } catch (error) {
       // A stall is reported as itself, not as the abort it caused.
       throw controller.signal.aborted && controller.signal.reason instanceof Error ? controller.signal.reason : error;
