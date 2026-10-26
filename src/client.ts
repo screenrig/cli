@@ -12,6 +12,7 @@ import {
   bodySnippet,
   normalizeProblem,
   parseRetryAfter,
+  problemCodeOf,
   timeoutError,
   unexpectedResponseError,
   usageError,
@@ -501,19 +502,22 @@ export class ApiClient {
         span.progress({ operation_id: operation.id, state: operation.state });
         if (operation.state === "succeeded" || operation.state === "failed" || operation.state === "cancelled") {
           if (operation.state !== "succeeded") {
+            const refused = REFUSED_UPLOAD_CODES.has(problemCodeOf(operation.error) ?? "");
             const problem = normalizeProblem(operation.error, {
-              status: 500,
+              status: refused ? 400 : 500,
               request_id: operation.request_id ?? this.requestId,
             });
             if (operation.error === undefined || operation.error === null) {
               problem.detail = `Operation ${operation.id} ended ${operation.state} without an error report.`;
             }
+            const upload = refused && (operation.kind === "media.upload" || operation.kind === "application.publish");
             const err = new CliError(
               {
                 ...problem,
                 operation_id: operation.id,
                 request_id: problem.request_id ?? this.requestId,
                 code: problem.code === "http_error" ? "operation_failed" : problem.code,
+                ...(upload && !problem.hint ? { hint: REFUSED_UPLOAD_HINT } : {}),
               },
               ExitCode.OperationFailed,
             );
@@ -528,6 +532,18 @@ export class ApiClient {
     });
   }
 }
+
+/**
+ * What a failed operation reports when the uploaded bytes themselves were
+ * refused (they did not match the declaration, are not the declared type, or
+ * expired before they could be checked). Such an operation is over: it never
+ * finishes later, so waiting and retrying it cannot help. It is a client
+ * error (400) whether or not the server sends a status; older servers send
+ * media_upload_failed without one.
+ */
+const REFUSED_UPLOAD_CODES = new Set(["media_upload_failed", "invalid_request"]);
+
+const REFUSED_UPLOAD_HINT = "This upload is over and nothing was stored, so waiting cannot help. Fix the file if detail says what is wrong with it, then run the upload again.";
 
 /** 2xx answers that must carry a JSON document: not 204/205, not HEAD, not bytes, not an explicit non-JSON read. */
 function expectsJsonBody(req: TransportRequest | Omit<TransportRequest, "headers">, status: number): boolean {

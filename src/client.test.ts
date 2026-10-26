@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ApiClient } from "./client.js";
 import { ExitCode } from "./exit-codes.js";
-import { CliError, networkError, timeoutError } from "./problems.js";
+import { CliError, networkError, timeoutError, withDefaultHint } from "./problems.js";
 import { FakeTransport } from "./transport/fake.js";
 
 const operation = (state: string) => ({ id: "op_test", state });
@@ -75,6 +75,53 @@ test("failed upload operations preserve the server's client-error status and det
   assert.equal(problem.code, "invalid_request");
   assert.equal(problem.detail, detail);
   assert.equal(problem.operation_id, "op_test");
+});
+
+/** The problem a failed operation of `kind` reports for `error`, with the hint the output adds when it has none. */
+async function failedOperation(kind: string, error: Record<string, unknown>) {
+  const transport = new FakeTransport().on("GET", "/api/operations/op_test", () => ({
+    status: 200, headers: {}, body: { ...operation("failed"), kind, error },
+  }));
+  try {
+    await new ApiClient({ transport }).waitForOperation("op_test", { timeoutMs: 1000, pollMs: 1, sleep: async () => assert.fail("a failed operation is not polled again") });
+  } catch (caught) {
+    assert.ok(caught instanceof CliError);
+    assert.equal(caught.exitCode, ExitCode.OperationFailed);
+    return withDefaultHint(caught.problem);
+  }
+  assert.fail("expected the failed operation to throw");
+}
+
+test("a failed upload whose bytes were refused is a client error with a re-upload hint, never wait and retry", async () => {
+  // Today's server: media_upload_failed carries no status.
+  const unverified = await failedOperation("media.upload", { code: "media_upload_failed", detail: "The staged media object could not be verified." });
+  assert.equal(unverified.status, 400);
+  assert.equal(unverified.code, "media_upload_failed");
+  assert.equal(unverified.detail, "The staged media object could not be verified.");
+  assert.equal(unverified.operation_id, "op_test");
+  assert.equal(unverified.hint, "This upload is over and nothing was stored, so waiting cannot help. Fix the file if detail says what is wrong with it, then run the upload again.");
+  // A server moving these failures to invalid_request, with or without a status.
+  for (const error of [
+    { code: "invalid_request", detail: "The uploaded bytes are not the declared content_type." },
+    { code: "invalid_request", status: 400, detail: "The uploaded bytes are not the declared content_type." },
+  ]) {
+    const refused = await failedOperation("media.upload", error);
+    assert.equal(refused.status, 400);
+    assert.equal(refused.code, "invalid_request");
+    assert.match(refused.hint ?? "", /nothing was stored/);
+    assert.doesNotMatch(refused.hint ?? "", /Wait a minute|retry the same command/);
+  }
+});
+
+test("a failed operation that met an outage keeps its retry guidance", async () => {
+  const outage = await failedOperation("media.upload", { code: "dependency_unavailable", detail: "The object store could not be reached." });
+  assert.equal(outage.status, 500);
+  assert.equal(outage.code, "dependency_unavailable");
+  assert.match(outage.hint ?? "", /Wait a minute and retry the same command/);
+  // invalid_request on an operation that is not an upload keeps the general refusal hint.
+  const generate = await failedOperation("media.generate", { code: "invalid_request", detail: "The prompt was refused." });
+  assert.equal(generate.status, 400);
+  assert.doesNotMatch(generate.hint ?? "", /upload/);
 });
 
 test("an empty 2xx where JSON is expected is unexpected_response, not success", async () => {
