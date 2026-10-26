@@ -37,7 +37,11 @@ export interface SignedRawPutRequest {
   body: Uint8Array | AsyncIterable<Uint8Array>;
   credentials: "omit";
   redirect: "error";
-  /** End the transfer when its signed upload session expires. */
+  /**
+   * Do not start the transfer once its signed upload session has expired.
+   * Storage checks the URL when the request starts, so a transfer already
+   * sending is never cut off at this time.
+   */
   expiresAt?: number;
 }
 
@@ -185,9 +189,59 @@ export function spawnRunProcess(env: NodeJS.ProcessEnv = process.env): RunProces
     });
 }
 
+/**
+ * A signed PUT that hands no body bytes to the connection for this long has
+ * stalled. On a slow link the connection takes bytes in bursts, each time the
+ * operating system has sent about half of what it holds (a few MB), so
+ * minutes can pass between them while the upload keeps moving.
+ */
+export const SIGNED_PUT_IDLE_MS = 10 * 60_000;
+
+/**
+ * How long storage may take to answer once the whole body has been handed to
+ * the connection. The operating system, and any proxy on the way, may still
+ * be sending megabytes they accepted: at a few KB/s that takes many minutes,
+ * and none of it can be seen from here.
+ */
+export const SIGNED_PUT_ANSWER_MS = 30 * 60_000;
+
+type Dispatcher = { dispatch(options: object, handler: object): boolean };
+
+/**
+ * Node's fetch gives up on an answer that has not started 300 seconds after
+ * the body was handed to the operating system, however much of it is still
+ * on its way. A signed PUT has the limits above instead, so it asks for no
+ * headers or body timeout of its own. Undefined when this Node keeps no
+ * global dispatcher to wrap. `timeouts` exists for its test.
+ */
+export function signedPutDispatcher(timeouts = { headersTimeout: 0, bodyTimeout: 0 }): Dispatcher | undefined {
+  const base = (globalThis as Record<symbol, unknown>)[Symbol.for("undici.globalDispatcher.1")] as Partial<Dispatcher> | undefined;
+  if (typeof base?.dispatch !== "function") return undefined;
+  return { dispatch: (options, handler) => base.dispatch!({ ...options, ...timeouts }, handler) };
+}
+
+function stalled(code: "UPLOAD_STALLED" | "UPLOAD_UNANSWERED"): Error {
+  return Object.assign(new Error(code === "UPLOAD_STALLED" ? "No upload bytes moved." : "Storage did not answer the upload."), { code });
+}
+
+/**
+ * One signed PUT. It never starts after `expiresAt`, and it is ended only when
+ * it stalls: no body bytes handed over for SIGNED_PUT_IDLE_MS, or no answer
+ * SIGNED_PUT_ANSWER_MS after the last one. There is no limit on its total time.
+ */
 export function fetchSignedRawPut(fetchImpl: typeof fetch = fetch): SignedRawPut {
   return async (request) => {
     const source = request.body;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let finished = false;
+    const arm = (ms: number, code: "UPLOAD_STALLED" | "UPLOAD_UNANSWERED") => {
+      clearTimeout(timer);
+      if (finished) return;
+      // The open connection keeps the process alive; the limit itself never does.
+      timer = setTimeout(() => controller.abort(stalled(code)), ms);
+      timer.unref?.();
+    };
     // Fetch copies BufferSource bodies. Stream views of the held, verified
     // bytes instead, keeping read-ahead bounded without reopening the path.
     const chunks = source instanceof Uint8Array ? (function* () {
@@ -195,14 +249,20 @@ export function fetchSignedRawPut(fetchImpl: typeof fetch = fetch): SignedRawPut
         yield source.subarray(offset, Math.min(offset + 256 * 1024, source.byteLength));
       }
     })() : source;
-    const body = Readable.from(chunks, { objectMode: false, highWaterMark: 256 * 1024 });
-    const controller = new AbortController();
-    const remaining = request.expiresAt === undefined ? undefined : request.expiresAt - Date.now();
-    const timer = remaining === undefined ? undefined : setTimeout(
-      () => controller.abort(), Math.max(1, Math.min(remaining, 2_147_483_647)),
-    );
+    // The connection takes a chunk only when it can send more, so each one
+    // taken is progress.
+    const watched = (async function* () {
+      for await (const chunk of chunks) {
+        arm(SIGNED_PUT_IDLE_MS, "UPLOAD_STALLED");
+        yield chunk;
+      }
+      arm(SIGNED_PUT_ANSWER_MS, "UPLOAD_UNANSWERED");
+    })();
+    const body = Readable.from(watched, { objectMode: false, highWaterMark: 256 * 1024 });
     try {
-      if (remaining !== undefined && remaining <= 0) throw new Error("Media upload session expired.");
+      if (request.expiresAt !== undefined && request.expiresAt <= Date.now()) throw new Error("Media upload session expired.");
+      arm(SIGNED_PUT_IDLE_MS, "UPLOAD_STALLED");
+      const dispatcher = signedPutDispatcher();
       const response = await fetchImpl(request.url, {
         method: request.method,
         headers: { "user-agent": USER_AGENT, ...request.headers },
@@ -211,13 +271,18 @@ export function fetchSignedRawPut(fetchImpl: typeof fetch = fetch): SignedRawPut
         redirect: request.redirect,
         signal: controller.signal,
         duplex: "half",
+        ...(dispatcher ? { dispatcher } : {}),
       } as RequestInit);
       // Only status is part of the PUT contract. Do not buffer an untrusted,
       // potentially unending storage response or retain its signed diagnostics.
       await response.body?.cancel();
       return { status: response.status };
+    } catch (error) {
+      // A stall is reported as itself, not as the abort it caused.
+      throw controller.signal.aborted && controller.signal.reason instanceof Error ? controller.signal.reason : error;
     } finally {
-      if (timer) clearTimeout(timer);
+      finished = true;
+      clearTimeout(timer);
       body.destroy();
       // Readable.from may not start its input before a rejected fetch. Close a
       // caller-owned stream as well so an unopened wrapper cannot leak its fd.

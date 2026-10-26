@@ -14,10 +14,18 @@ import { assertDeclaredTypeMatchesBytes } from "./media/sniff.js";
 import { MAX_VIDEO_UPLOAD_BYTES } from "./media/video-profile.js";
 import { readWebpContainer } from "./media/webp.js";
 import { CliError, makeProblem, usageError } from "./problems.js";
-import { fetchSignedRawPut, type CliRuntime, type SignedRawPut, type SignedRawPutResponse } from "./runtime.js";
+import {
+  fetchSignedRawPut, SIGNED_PUT_ANSWER_MS, SIGNED_PUT_IDLE_MS, type CliRuntime, type SignedRawPut, type SignedRawPutResponse,
+} from "./runtime.js";
 
 /** How many times a declared upload's bytes are sent before the failure is reported. */
 const PUT_ATTEMPTS = 4;
+
+/** The stall limits of `fetchSignedRawPut`, in words. */
+const PUT_STALLS: Record<string, string> = {
+  UPLOAD_STALLED: `the transfer stalled: no bytes moved for ${SIGNED_PUT_IDLE_MS / 60_000} minutes`,
+  UPLOAD_UNANSWERED: `storage did not answer within ${SIGNED_PUT_ANSWER_MS / 60_000} minutes of the last byte`,
+};
 
 /** Plain words for the connection error codes a failed PUT reports. */
 const PUT_FAILURES: Record<string, string> = {
@@ -41,6 +49,8 @@ const PUT_FAILURES: Record<string, string> = {
 function putFailure(error: unknown): string {
   for (let current = error, depth = 0; current && typeof current === "object" && depth < 8; depth += 1) {
     const code = (current as { code?: unknown }).code;
+    const stall = typeof code === "string" ? PUT_STALLS[code] : undefined;
+    if (stall) return stall;
     if (typeof code === "string" && /^[A-Z][A-Z0-9_]{1,40}$/.test(code)) return `${PUT_FAILURES[code] ?? "the connection failed"} (${code})`;
     if ((current as { name?: unknown }).name === "AbortError") return "the transfer was stopped";
     current = (current as { cause?: unknown }).cause;

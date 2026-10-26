@@ -231,6 +231,29 @@ test("a dropped connection sends the whole PUT again with the same binding and s
   assert.equal(attempts, 4, "a connection that keeps failing still ends after a bounded number of PUTs");
 });
 
+test("a stalled PUT is sent again and reported as a stall", async () => {
+  const bytes = Buffer.from([1, 2]);
+  const prepared = {
+    bytes,
+    declaration: { filename: "x.png", content_type: "image/png" as const, bytes: 2, sha256: "a".repeat(64) },
+    commit: { content_type: "image/png" as const, bytes: 2, sha256: "a".repeat(64) },
+  };
+  const validated = validateMediaUploadSession(session());
+  let attempts = 0;
+  await assert.rejects(performSignedMediaPut(prepared, validated, async () => {
+    attempts += 1;
+    throw Object.assign(new Error("No upload bytes moved."), { code: attempts % 2 ? "UPLOAD_STALLED" : "UPLOAD_UNANSWERED" });
+  }, noWait), (error: unknown) => {
+    assert.ok(error instanceof CliError);
+    assert.equal(error.problem.detail, "Private media upload to storage was interrupted: storage did not answer within 30 minutes of the last byte. It did not finish after 4 attempts.");
+    return true;
+  });
+  assert.equal(attempts, 4);
+  await assert.rejects(performSignedMediaPut(prepared, validated, async () => {
+    throw Object.assign(new Error("No upload bytes moved."), { code: "UPLOAD_STALLED" });
+  }, noWait), /interrupted: the transfer stalled: no bytes moved for 10 minutes\. It did not finish after 4 attempts\./);
+});
+
 test("commit idempotency key is deterministic, distinct, valid, and honored per call", async () => {
   const base = "base-idempotency-key";
   const derived = deriveCommitIdempotencyKey(base);

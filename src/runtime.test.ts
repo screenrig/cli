@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { createServer } from "node:http";
 import { test } from "node:test";
 import { Readable } from "node:stream";
 import { childEnv } from "./child-env.js";
-import { fetchSignedRawPut, spawnRunProcess } from "./runtime.js";
+import { fetchSignedRawPut, SIGNED_PUT_ANSWER_MS, SIGNED_PUT_IDLE_MS, signedPutDispatcher, spawnRunProcess } from "./runtime.js";
 import { spawnDetached } from "./open-url.js";
 import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
@@ -73,21 +74,113 @@ test("signed upload destroys its source even when fetch fails before consuming i
   assert.equal(source.destroyed, true);
 });
 
-test("signed upload aborts at session expiry and releases the source", async (t) => {
+/** A fetch that waits until its signal aborts, as a stalled connection does. */
+function stalledFetch(onStart: (init: RequestInit) => Promise<void> = async () => undefined): typeof fetch {
+  return async (_url, init) => {
+    await onStart(init!);
+    const signal = init!.signal!;
+    return new Promise<Response>((_resolve, reject) => {
+      if (signal.aborted) reject(signal.reason);
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+  };
+}
+
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+test("a signed upload already sending is not cut off at session expiry, only after it moves no bytes for ten minutes", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1000 });
   const source = new Readable({ read() {} });
   let signal: AbortSignal | null | undefined;
-  const put = fetchSignedRawPut(async (_url, init) => {
-    signal = init?.signal;
-    return new Promise<Response>((_resolve, reject) => {
-      signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
-    });
-  });
-  const rejected = assert.rejects(put({ ...signedRequest, body: source, expiresAt: 1005 }), /abort/i);
-  t.mock.timers.tick(5);
-  await rejected;
-  assert.equal(signal?.aborted, true);
+  const put = fetchSignedRawPut(stalledFetch(async (init) => { signal = init.signal; }));
+  const pending = put({ ...signedRequest, body: source, expiresAt: 1005 });
+  pending.catch(() => undefined);
+  await settle();
+  t.mock.timers.tick(10);
+  assert.equal(signal?.aborted, false, "storage checks the URL when the PUT starts, so expiry does not end it");
+  t.mock.timers.tick(SIGNED_PUT_IDLE_MS - 20);
+  assert.equal(signal?.aborted, false);
+  t.mock.timers.tick(10);
+  await assert.rejects(pending, (error: Error & { code?: string }) => error.code === "UPLOAD_STALLED");
   assert.equal(source.destroyed, true);
+});
+
+test("every chunk the connection takes restarts the stall limit, and after the last one storage gets thirty minutes to answer", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1000 });
+  const bytes = Buffer.alloc(4 * 256 * 1024, 1);
+  let chunks = 0;
+  const put = fetchSignedRawPut(async (_url, init) => {
+    for await (const _chunk of init!.body as Readable) {
+      chunks += 1;
+      // The last chunk is taken at once; storage's answer then has its own limit.
+      if (chunks === 4) continue;
+      t.mock.timers.tick(SIGNED_PUT_IDLE_MS - 1000);
+      assert.equal(init!.signal!.aborted, false, "a slow link that keeps moving is never ended");
+    }
+    t.mock.timers.tick(SIGNED_PUT_ANSWER_MS - 1000);
+    assert.equal(init!.signal!.aborted, false, "the operating system may still be sending what it accepted");
+    return new Response(null, { status: 200 });
+  });
+  assert.ok(SIGNED_PUT_IDLE_MS < SIGNED_PUT_ANSWER_MS);
+  assert.deepEqual(await put({ ...signedRequest, body: bytes, expiresAt: 1005 }), { status: 200 });
+  assert.equal(chunks, 4);
+});
+
+test("a signed upload whose answer never comes ends thirty minutes after its last byte", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1000 });
+  let signal: AbortSignal | undefined;
+  let drained = false;
+  const put = fetchSignedRawPut(stalledFetch(async (init) => {
+    signal = init.signal!;
+    for await (const _chunk of init.body as Readable) { /* a fast link takes every byte */ }
+    drained = true;
+  }));
+  const pending = put({ ...signedRequest, body: Buffer.alloc(1024, 2) });
+  pending.catch(() => undefined);
+  while (!drained) await settle();
+  t.mock.timers.tick(SIGNED_PUT_ANSWER_MS - 1);
+  assert.equal(signal?.aborted, false);
+  t.mock.timers.tick(1);
+  await assert.rejects(pending, (error: Error & { code?: string }) => error.code === "UPLOAD_UNANSWERED");
+});
+
+test("a signed upload asks Node's fetch for no headers or body timeout of its own", async () => {
+  const key = Symbol.for("undici.globalDispatcher.1");
+  const global = globalThis as Record<symbol, unknown>;
+  const saved = global[key];
+  const seen: object[] = [];
+  global[key] = { dispatch: (options: object) => { seen.push(options); return true; } };
+  try {
+    const put = fetchSignedRawPut(async (_url, init) => {
+      (init as { dispatcher: { dispatch(options: object, handler: object): boolean } }).dispatcher.dispatch({ method: "PUT", path: "/upload" }, {});
+      return new Response(null, { status: 200 });
+    });
+    await put({ ...signedRequest, body: Buffer.from([1]) });
+  } finally {
+    global[key] = saved;
+  }
+  assert.deepEqual(seen, [{ method: "PUT", path: "/upload", headersTimeout: 0, bodyTimeout: 0 }]);
+});
+
+test("this Node's fetch applies the signed upload's own timeouts per request", async (t) => {
+  const answers = new Set<ReturnType<typeof setTimeout>>();
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on("end", () => { answers.add(setTimeout(() => res.end("ok"), req.url === "/slow" ? 3000 : 0)); });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => { answers.forEach(clearTimeout); server.closeAllConnections(); server.close(); });
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  void fetch;
+  const short = signedPutDispatcher({ headersTimeout: 100, bodyTimeout: 0 });
+  assert.ok(short, "Node keeps a global fetch dispatcher to wrap");
+  await assert.rejects(
+    fetch(`${origin}/slow`, { method: "PUT", body: "x", dispatcher: short } as RequestInit),
+    (error: Error & { cause?: { code?: string } }) => error.cause?.code === "UND_ERR_HEADERS_TIMEOUT",
+  );
+  const response = await fetch(`${origin}/fast`, { method: "PUT", body: "x", dispatcher: signedPutDispatcher() } as RequestInit);
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "ok");
 });
 
 test("expired signed upload sessions do not contact storage", async () => {
