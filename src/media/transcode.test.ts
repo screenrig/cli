@@ -115,6 +115,8 @@ interface FakeOptions {
   outputProbe?: string;
   /** Fail the post-encode measurement probe, to exercise the planned fallback. */
   failOutputProbe?: boolean;
+  /** Fail the probe of the source the way ffprobe fails on a file it cannot read. */
+  failSourceProbe?: { code: number; stderr: string };
   /** Overrides the encoder listing, to model a build without a needed encoder. */
   encoders?: string;
   encodeExit?: number;
@@ -194,6 +196,9 @@ function fakeRuntime(options: FakeOptions): { runtime: CliRuntime; calls: RunPro
       const measuring = encodedOutput !== "" && request.args.at(-1) === encodedOutput;
       if (measuring && options.failOutputProbe) {
         return { code: 1, signal: null, stdout: "", stderrTail: "" };
+      }
+      if (!measuring && options.failSourceProbe) {
+        return { code: options.failSourceProbe.code, signal: null, stdout: "", stderrTail: options.failSourceProbe.stderr };
       }
       if (measuring && options.outputProbe !== undefined) {
         return { code: 0, signal: null, stdout: options.outputProbe, stderrTail: "" };
@@ -1130,6 +1135,53 @@ test("reported dimensions are measured from the output, not predicted from the p
   } finally {
     await rm(dir, { recursive: true, force: true });
     if (result.cleanupDir) await rm(result.cleanupDir, { recursive: true, force: true });
+  }
+});
+
+test("a source ffprobe cannot read names ffprobe's first error line and says the file may be truncated", async () => {
+  resetFfmpegToolchainCache();
+  const dir = await testTemp("transcode-unreadable-");
+  const source = path.join(dir, "clip.mp4");
+  await writeFile(source, Buffer.alloc(256, 7));
+  const stderr = `[mov,mp4,m4a,3gp,3g2,mj2 @ 0x55b0ebd41bc0] moov atom not found\n${source}: Invalid data found when processing input\n`;
+  const { runtime, calls } = fakeRuntime({ probe: probeJson(), failSourceProbe: { code: 1, stderr } });
+  try {
+    await assert.rejects(() => transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() }), (error: unknown) => {
+      assert.ok(error instanceof CliError);
+      assert.equal(error.problem.code, "usage_error");
+      assert.equal(error.problem.detail, "ffprobe could not read the media file: [mov,mp4,m4a,3gp,3g2,mj2] moov atom not found (exit status 1).");
+      assert.equal(error.problem.hint, "The file may be truncated or not a media file. Check that it plays in a media player, or export or download it again, then run the upload again.");
+      return true;
+    });
+    const probe = calls.find((call) => call.command.endsWith("ffprobe") && !call.args.includes("-version"));
+    assert.deepEqual(probe?.args.slice(0, 2), ["-v", "error"], "ffprobe must say why it failed");
+    assert.equal(encodeCall(calls), undefined, "nothing is encoded from an unreadable source");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("only the file's name reaches ffprobe's error line, and a silent failure still names its exit status", async () => {
+  resetFfmpegToolchainCache();
+  const dir = await testTemp("transcode-unreadable-path-");
+  const source = path.join(dir, "clip.mp4");
+  await writeFile(source, Buffer.alloc(256, 7));
+  try {
+    for (const [stderr, detail] of [
+      [`\n${source}: Invalid data found when processing input\n`, "ffprobe could not read the media file: clip.mp4: Invalid data found when processing input (exit status 1)."],
+      ["", "ffprobe could not read the media file: exit status 1."],
+    ] as const) {
+      resetFfmpegToolchainCache();
+      const { runtime } = fakeRuntime({ probe: probeJson(), failSourceProbe: { code: 1, stderr } });
+      await assert.rejects(() => transcodeForUpload({ runtime, filePath: source, options: defaultTranscodeOptions() }), (error: unknown) => {
+        assert.ok(error instanceof CliError);
+        assert.equal(error.problem.detail, detail);
+        assert.ok(!error.problem.detail.includes(dir), "the directory stays out of the error");
+        return true;
+      });
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 });
 

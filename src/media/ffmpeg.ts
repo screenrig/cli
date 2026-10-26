@@ -1,3 +1,4 @@
+import path from "node:path";
 import { loggingRunProcess, loggerOf } from "../log/logger.js";
 import { usageError } from "../problems.js";
 import { redactText } from "../redact.js";
@@ -419,6 +420,20 @@ export function parseRate(rate: string | undefined): number {
   return Number.isFinite(den) && den !== 0 ? num / den : 0;
 }
 
+/**
+ * The first line ffprobe wrote about a file it could not read, such as
+ * "[mov,mp4,m4a,3gp,3g2,mj2] moov atom not found": without the decoder's
+ * memory address, with the file named by its base name, redacted and short.
+ */
+function firstProbeError(stderr: string, filePath: string): string | undefined {
+  const line = stderr.split("\n").map((text) => text.trim()).find((text) => text.length > 0);
+  if (!line) return undefined;
+  const plain = redactText(line.split(filePath).join(path.basename(filePath))).replace(/ @ 0x[0-9a-f]+\]/gi, "]");
+  return plain.length > 300 ? `${plain.slice(0, 300)}…` : plain;
+}
+
+const UNREADABLE_MEDIA_HINT = "The file may be truncated or not a media file. Check that it plays in a media player, or export or download it again, then run the upload again.";
+
 export async function probeMedia(
   runtime: CliRuntime,
   toolchain: FfmpegToolchain,
@@ -429,7 +444,8 @@ export async function probeMedia(
   const result = await run({
     command: toolchain.ffprobe,
     args: [
-      "-v", "quiet",
+      // Errors only: the line that says why a file cannot be read.
+      "-v", "error",
       ...inputGuardArgs(demuxer),
       "-print_format", "json",
       "-show_streams",
@@ -438,12 +454,13 @@ export async function probeMedia(
     ],
     timeoutMs: 120_000,
   });
-  if (result.spawnError || result.code !== 0) {
-    throw usageError(
-      `ffprobe could not read the media file: ${
-        result.spawnError ? redactText(result.spawnError) : `exit status ${result.code ?? "unknown"}`
-      }.`,
-    );
+  if (result.spawnError) {
+    throw usageError(`ffprobe could not read the media file: ${redactText(result.spawnError)}.`);
+  }
+  if (result.code !== 0) {
+    const status = `exit status ${result.code ?? "unknown"}`;
+    const said = firstProbeError(result.stderrTail, filePath);
+    throw usageError(`ffprobe could not read the media file: ${said ? `${said} (${status})` : status}.`, undefined, UNREADABLE_MEDIA_HINT);
   }
   const probe = parseProbePayload(result.stdout);
   return demuxer ? { ...probe, inputDemuxer: demuxer } : probe;
