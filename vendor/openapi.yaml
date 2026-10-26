@@ -1731,7 +1731,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Streams one CLI-produced tar.gz directly into bounded durable staging. Metadata is carried in headers so the archive is never base64-wrapped or materialized as JSON by the server.
+      description: Streams one CLI-produced tar.gz directly into bounded durable staging. Metadata is carried in headers so the archive is never base64-wrapped or materialized as JSON by the server. The proxy in front of the API ends a request it has not answered within about 100 s, so a large archive on a slow uplink fails here; POST /api/applications/uploads sends the archive straight to the object store instead.
       security:
         - projectBearer: []
       parameters:
@@ -1781,7 +1781,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Publishes an immutable new release of an owned application using the same bounded tar.gz upload pipeline. If-Match guards the application revision; acceptance increments it, and successful publication increments it again when latest_ready_release changes. Name and application identity are preserved. Existing playlist release pins are not changed. An identical idempotent retry returns the original operation even after revision changes.
+      description: Publishes an immutable new release of an owned application using the same bounded tar.gz upload pipeline. If-Match guards the application revision; acceptance increments it, and successful publication increments it again when latest_ready_release changes. Name and application identity are preserved. Existing playlist release pins are not changed. An identical idempotent retry returns the original operation even after revision changes. The proxy in front of the API ends a request it has not answered within about 100 s, so a large archive on a slow uplink fails here; POST /api/applications/{id}/uploads sends the archive straight to the object store instead.
       security:
         - projectBearer: []
       parameters:
@@ -1813,6 +1813,121 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationAccepted'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/applications/uploads:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: createApplicationUpload
+      x-rate-limit-policies:
+        - name: application-upload
+          quota: 10
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: Declares a direct upload of one CLI-produced tar.gz that creates a new application. The answer is a signed authorization for exactly one object PUT of the archive, so the bytes go straight to the object store and never through the API, whose proxy ends a request it has not answered within about 100 s. PUT the archive to upload_url, then commit with POST /api/applications/uploads/{id}/commit and wait on the operation. The application, its release and the receiving operation exist from this answer on, as after POST /api/applications. An upload not committed within 24 hours fails, and an application that never published a release is removed. The same Idempotency-Key and body answer the same upload with a freshly signed URL. GET /api/capabilities sets features.application_direct_uploads where these routes are served.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationUploadDeclaration'
+      responses:
+        '201':
+          description: Signed authorization for exactly one object PUT of the archive. Send the returned method and every returned header verbatim; the PUT must start before expires_at, two hours after the declaration.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - private, no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationUploadSession'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/applications/{id}/uploads:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: createApplicationReleaseUpload
+      x-rate-limit-policies:
+        - name: application-upload
+          quota: 10
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: Declares a direct upload of a new immutable release of an owned application, answered as POST /api/applications/uploads is. If-Match guards the application revision as on POST /api/applications/{id}/releases, and acceptance increments it. The body carries no name; a release keeps its application's name. Existing playlist release pins are not changed.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationUploadDeclaration'
+      responses:
+        '201':
+          description: Signed authorization for exactly one object PUT of the archive. Send the returned method and every returned header verbatim; the PUT must start before expires_at, two hours after the declaration.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - private, no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationUploadSession'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/applications/uploads/{id}/commit:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: commitApplicationUpload
+      description: Commits a direct application upload once its PUT has finished. The server checks the staged archive against the declaration (its size and the SHA-256 checksum the object store took with the PUT), copies it into its own upload staging and queues publication. Wait on the returned Operation with GET /api/operations/{id} until it is succeeded or failed, as after POST /api/applications. A commit before the PUT finished answers invalid_request and changes nothing, so it can be sent again; staged bytes that differ from the declaration fail the upload. A repeated commit answers the same operation.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationUploadCommit'
+      responses:
+        '202':
+          description: The archive is staged and its publication is queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
         default:
           $ref: '#/components/responses/Problem'
   /api/applications/{id}:
@@ -12951,7 +13066,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Streams one CLI-produced tar.gz directly into bounded durable staging. Metadata is carried in headers so the archive is never base64-wrapped or materialized as JSON by the server.
+      description: Streams one CLI-produced tar.gz directly into bounded durable staging. Metadata is carried in headers so the archive is never base64-wrapped or materialized as JSON by the server. The proxy in front of the API ends a request it has not answered within about 100 s, so a large archive on a slow uplink fails here; POST /api/applications/uploads sends the archive straight to the object store instead.
       security:
         - projectBearer: []
       parameters:
@@ -12983,6 +13098,53 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperationAccepted'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/applications/uploads:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      x-screenrig-access: write
+      operationId: createApplicationUploadInProject
+      x-rate-limit-policies:
+        - name: application-upload
+          quota: 10
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: Declares a direct upload of one CLI-produced tar.gz that creates a new application. The answer is a signed authorization for exactly one object PUT of the archive, so the bytes go straight to the object store and never through the API, whose proxy ends a request it has not answered within about 100 s. PUT the archive to upload_url, then commit with POST /api/applications/uploads/{id}/commit and wait on the operation. The application, its release and the receiving operation exist from this answer on, as after POST /api/applications. An upload not committed within 24 hours fails, and an application that never published a release is removed. The same Idempotency-Key and body answer the same upload with a freshly signed URL. GET /api/capabilities sets features.application_direct_uploads where these routes are served.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplicationUploadDeclaration'
+      responses:
+        '201':
+          description: Signed authorization for exactly one object PUT of the archive. Send the returned method and every returned header verbatim; the PUT must start before expires_at, two hours after the declaration.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - private, no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationUploadSession'
         default:
           $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/playlists:
@@ -17554,7 +17716,7 @@ components:
         transition_max_duration_ms: {type: integer, enum: [60000]}
         screens_per_project: {type: integer, enum: [100], description: "Screen limit of the default plan. Unarchived pairing_pending and active screens count. Archived screens do not. Zero on a project means no screen cap."}
         project_content_bytes: {type: integer, enum: [0], description: "Storage limit of the default plan. Zero means no product storage cap. A custom storage ceiling, when present, still counts committed media, expanded application release trees, and application key/value entries together, including bytes reserved by an upload in flight. The per-request ceilings above are plan-independent transport bounds."}
-        features: {type: object, additionalProperties: {type: boolean}}
+        features: {type: object, additionalProperties: {type: boolean}, description: "Server features. application_direct_uploads is true where POST /api/applications/uploads, POST /api/applications/{id}/uploads and POST /api/applications/uploads/{id}/commit are served."}
     CLIEnrollmentRequest:
       type: object
       additionalProperties: false
@@ -18045,10 +18207,13 @@ components:
     AgentConnection: {type: object, additionalProperties: false, required: [connection_id, name, agent_type, status, capabilities, expires_at, created_at], properties: {connection_id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?acn_"}, name: {type: string}, agent_type: {type: string}, platform: {type: string}, version: {type: string}, status: {type: string, enum: [pending, approved, connected, denied, expired, cancelled]}, capabilities: {type: array, items: {$ref: "#/components/schemas/AgentCapability"}, minItems: 1, uniqueItems: true, description: "Capability areas the installation requested at connection start. A reviewer may approve a subset of these."}, expires_at: {type: string, format: date-time}, created_at: {type: string, format: date-time}, flow: {type: string, enum: [device], description: "device for a screenrig login sign-in, whose approval confirms the user code and chooses the access level; absent otherwise."}, access: {type: string, enum: [read, propose, manage], description: "The access level a device sign-in asked for."}, client_name: {type: string, description: "The OAuth client of a device sign-in."}, project_hint: {type: string, description: "The project a device sign-in suggested; the approver chooses."}, requested_from: {type: string, description: "The client address that started a device sign-in."}, existing_identity: {type: boolean, description: "A device sign-in by an installation that already exists, adding this project or raising its access."}}}
     AgentDisconnectRequest: {type: object, additionalProperties: false, properties: {allow_last_agent: {type: boolean, default: false, description: Explicitly accept loss of the last active agent bearer. A registered dashboard passkey remains independent administrative authority.}}}
     ApplicationRename: {type: object, additionalProperties: false, required: [name], properties: {name: {type: string, minLength: 1, maxLength: 120, description: "Display name after trimming; controls and empty names are rejected."}}}
+    ApplicationUploadDeclaration: {type: object, additionalProperties: false, required: [sha256, compressed_bytes, expanded_bytes, file_count], description: "Declares one CLI-produced tar.gz, with the metadata a streamed upload sends as headers.", properties: {name: {type: string, maxLength: 120, description: "Name of a new application, trimmed; at most 120 Unicode characters and no controls. Omitted or empty selects a generated name. A release declaration (POST /api/applications/{id}/uploads) must not carry one."}, sha256: {type: string, pattern: "^[0-9a-f]{64}$", description: SHA-256 of the archive bytes.}, compressed_bytes: {type: integer, minimum: 1, maximum: 104857600, description: Size of the archive in bytes.}, expanded_bytes: {type: integer, minimum: 1, maximum: 262144000}, file_count: {type: integer, minimum: 1, maximum: 5000}, sdk_version: {type: string, maxLength: 64}}}
+    ApplicationUploadSession: {type: object, additionalProperties: false, required: [id, application_id, release_id, operation, upload_url, method, headers, expires_at], properties: {id: {type: string, description: "Upload identifier, the receiving operation's id. Commit it with POST /api/applications/uploads/{id}/commit."}, application_id: {type: string, description: Application the upload publishes to.}, release_id: {type: string, description: "Release this upload creates. Pin it into a playlist once the operation succeeds."}, operation: {$ref: "#/components/schemas/Operation"}, upload_url: {type: string, format: uri}, method: {type: string, enum: [PUT]}, headers: {type: object, additionalProperties: {type: string}, description: Exact signed request headers; send every field verbatim.}, expires_at: {type: string, format: date-time, description: The PUT must start before this instant.}}}
+    ApplicationUploadCommit: {type: object, additionalProperties: false, required: [sha256, compressed_bytes], description: "Names the declared archive again; a commit naming other bytes is refused with invalid_request.", properties: {sha256: {type: string, pattern: "^[0-9a-f]{64}$"}, compressed_bytes: {type: integer, minimum: 1, maximum: 104857600}}}
     Application: {type: object, additionalProperties: false, required: [id, name, revision, created_at, updated_at], properties: {project_id: {type: string}, id: {type: string}, name: {type: string}, revision: {type: integer}, latest_ready_release: {type: string, description: "Release identifier of the newest ready release. Absent until a first publish reaches the ready state. An application has no state of its own; publish state lives on the operation and the release."}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}, last_used_at: {type: string, format: date-time, description: "Server-maintained instant the application's releases were last used on glass (playback.application_started). Absent until first use. Read-only."}}}
     ApplicationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/Application"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: "Opaque position of the last returned row while more rows remain; null on the last page. Pass it back as after."}}}
     OperationAccepted: {type: object, additionalProperties: false, required: [id, release_id, operation_id], properties: {id: {type: string, description: Application identifier the upload was attributed to.}, release_id: {type: string, description: "Release identifier created by this upload. Poll the operation and pin this release into a playlist once the operation succeeds."}, operation_id: {type: string}}}
-    Operation: {type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: {project_id: {type: string}, id: {type: string}, kind: {type: string}, state: {type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the bounded upload body is still being durably staged. Terminal values are succeeded, failed, and cancelled."}, request_id: {type: string}, created_at: {type: string}, updated_at: {type: string}, result: {type: object, additionalProperties: true, description: "A succeeded media.upload carries media_id. A succeeded media.generate carries media_id and usage: {quality, credits, usd}."}, error: {type: object, additionalProperties: true}}}
+    Operation: {type: object, additionalProperties: true, required: [id, kind, state, created_at, updated_at], properties: {project_id: {type: string}, id: {type: string}, kind: {type: string}, state: {type: string, enum: [receiving, queued, running, succeeded, failed, cancelled], description: "Receiving means the upload's archive has not arrived yet: a streamed body is still being durably staged, or a direct upload waits for its PUT and commit. Terminal values are succeeded, failed, and cancelled."}, request_id: {type: string}, created_at: {type: string}, updated_at: {type: string}, result: {type: object, additionalProperties: true, description: "A succeeded media.upload carries media_id. A succeeded media.generate carries media_id and usage: {quality, credits, usd}."}, error: {type: object, additionalProperties: true}}}
     PlaylistFormat:
       type: object
       additionalProperties: false

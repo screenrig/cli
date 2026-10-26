@@ -168,6 +168,7 @@ import { kvWriteFromArgs } from "./kv-write.js";
 import { commentsWriteFromArgs } from "./comments-write.js";
 import { quotedRevision } from "./if-match.js";
 import { applicationNameHeaders, normalizeApplicationName } from "./application-name.js";
+import { directApplicationUploads, uploadApplicationDirect } from "./app-upload.js";
 import { loadCanvas } from "./canvas.js";
 import { composeBatch } from "./compose/batch.js";
 import { assertPlaylistValid, PLAYLIST_SERVER_CHECKS, playlistLint } from "./playlist-validate.js";
@@ -3089,31 +3090,42 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
   if (update && args.flags.name !== undefined) throw usageError("app update preserves the application name; use app rename <id> --name NAME to rename it.");
   const ifMatch = update && revision ? quotedRevision(revision) : undefined;
   requireFlagValue(args, "name", "Lobby board");
-  const nameHeaders = applicationNameHeaders(flagString(args.flags, "name"));
+  const name = flagString(args.flags, "name");
+  const nameHeaders = applicationNameHeaders(name);
   const root = await requireAppDirectory(runtime, dir, update ? `app update ${id} ./DIRECTORY` : "app upload ./DIRECTORY");
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
   const capabilitiesResponse = await client.call({ method: "GET", path: "/api/capabilities" });
+  const capabilities = capabilitiesResponse.body as Capabilities;
   const packed = await packDirectory(root, {
-    limits: limitsFromCapabilities(capabilitiesResponse.body as Capabilities),
+    limits: limitsFromCapabilities(capabilities),
     logger: loggerOf(runtime),
   });
-  const response = await client.call({
-    method: "POST",
-    path: update ? `/api/applications/${encodeURIComponent(id!)}/releases` : "/api/applications",
-    idempotent: true,
-    headers: {
-      "content-type": "application/gzip",
-      "screenrig-archive-sha256": packed.sha256,
-      "screenrig-expanded-bytes": String(packed.expanded_bytes),
-      "screenrig-file-count": String(packed.file_count),
-      "screenrig-sdk-version": SDK_PROTOCOL_VERSION,
-      ...(ifMatch ? { "if-match": ifMatch } : {}),
-      ...nameHeaders,
-    },
-    body: packed.archive,
-  });
-  const body = response.body as OperationAccepted;
+  // Where the server takes them, the archive goes straight to the object
+  // store (declare, signed PUT, commit), so a slow uplink is not cut off by
+  // the API's proxy. Older servers take the streamed POST.
+  const { accepted: body, response } = directApplicationUploads(capabilities)
+    ? await uploadApplicationDirect({
+      runtime, client, packed, sdkVersion: SDK_PROTOCOL_VERSION,
+      ...(update ? { applicationId: id! } : {}),
+      ...(ifMatch ? { ifMatch } : {}),
+      ...(name !== undefined ? { name: normalizeApplicationName(name) } : {}),
+    })
+    : await client.call({
+      method: "POST",
+      path: update ? `/api/applications/${encodeURIComponent(id!)}/releases` : "/api/applications",
+      idempotent: true,
+      headers: {
+        "content-type": "application/gzip",
+        "screenrig-archive-sha256": packed.sha256,
+        "screenrig-expanded-bytes": String(packed.expanded_bytes),
+        "screenrig-file-count": String(packed.file_count),
+        "screenrig-sdk-version": SDK_PROTOCOL_VERSION,
+        ...(ifMatch ? { "if-match": ifMatch } : {}),
+        ...nameHeaders,
+      },
+      body: packed.archive,
+    }).then((streamed) => ({ accepted: streamed.body as OperationAccepted, response: streamed }));
   const operation = !flagBool(args.flags, "no-wait") && body.operation_id
     ? await client.waitForOperation(body.operation_id, {
       timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000,
@@ -3122,7 +3134,9 @@ async function appUpload(args: ParsedArgs, runtime: CliRuntime, resolved: Awaite
     })
     : null;
   return {
-    envelope: jsonBody(response, client.requestId, {
+    // The accepted body, whichever way the archive traveled: a direct upload's
+    // commit answers the operation, not the accepted application.
+    envelope: jsonBody({ body, headers: response.headers }, client.requestId, {
       // Keep the historical flat accepted fields and sha256 as aliases while
       // exposing the same canonical paths regardless of waiting mode.
       application: body,

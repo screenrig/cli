@@ -11,7 +11,8 @@ export type EnrollmentIntent = "advertising" | "signage";
  * declarations.
  */
 
-export type OperationState = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+/** receiving: an upload's archive has not arrived yet (a direct upload waits for its PUT and commit). */
+export type OperationState = "receiving" | "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
 export interface Project {
   content_limit_bytes: number;
@@ -991,6 +992,36 @@ export interface MediaUploadSession {
   method: "PUT";
   operation: Operation;
   upload_url: string;
+}
+
+/**
+ * POST /api/applications/uploads (a new application) and
+ * POST /api/applications/{id}/uploads (a new release): the metadata a
+ * streamed upload sends as headers. A release declaration carries no name.
+ */
+export interface ApplicationUploadDeclaration {
+  name?: string;
+  sha256: string;
+  compressed_bytes: number;
+  expanded_bytes: number;
+  file_count: number;
+  sdk_version?: string;
+}
+
+/**
+ * 201 answer to an application upload declaration: one signed PUT of the
+ * archive. `id` is the upload (and its operation); commit it with
+ * POST /api/applications/uploads/{id}/commit.
+ */
+export interface ApplicationUploadSession extends MediaUploadSession {
+  application_id: string;
+  release_id: string;
+}
+
+/** POST /api/applications/uploads/{id}/commit names the declared archive again. */
+export interface ApplicationUploadCommit {
+  sha256: string;
+  compressed_bytes: number;
 }
 
 export interface KVWrite {

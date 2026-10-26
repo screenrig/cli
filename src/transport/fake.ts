@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import type {
+  ApplicationUploadCommit,
+  ApplicationUploadDeclaration,
   Project,
   ProjectEvent,
   CLIEnrollmentRequest,
@@ -231,6 +233,8 @@ export function memoryBackend(options: {
   now?: () => Date;
   listPageSize?: number;
   agentidClaims?: Record<string, "invalid" | "already_enrolled">;
+  /** Extra capabilities features, such as application_direct_uploads. */
+  features?: Record<string, boolean>;
 } = {}): FakeTransport {
   const clock = options.now ?? (() => new Date());
   const pageSize = (serverSize: number) => options.listPageSize ?? serverSize;
@@ -329,7 +333,7 @@ export function memoryBackend(options: {
       application_file_count: 5000,
       application_path_bytes: 255,
       application_path_depth: 16,
-      features: { feedback: true },
+      features: { feedback: true, ...options.features },
       media_image_bytes: 20971520,
       playlist_max_items_per_page: 24,
       playlist_max_media_per_selector: 32,
@@ -804,6 +808,64 @@ export function memoryBackend(options: {
       headers: { "x-request-id": req.headers?.["x-request-id"] ?? "req_app" },
       body: { id, release_id: releaseId, operation_id: operationId },
     };
+  });
+
+  // Direct application uploads: declare, signed PUT (runtime.signedRawPut),
+  // commit. The commit publishes at once, as the streamed POST does here.
+  const applicationUploads = new Map<string, { declaration: ApplicationUploadDeclaration; applicationId: string; releaseId: string }>();
+  const declareApplicationUpload = (req: TransportRequest, existing?: string): TransportResponse => {
+    const declaration = req.body as ApplicationUploadDeclaration;
+    const applicationId = existing ?? "app_AAAAAAAAAAAAAAAAAAAAAAAA";
+    const releaseId = existing ? "rel_NEW" : "rel_AAAAAAAAAAAAAAAAAAAAAAAA";
+    const operation: Operation = {
+      id: "op_AAAAAAAAAAAAAAAAAAAAAAAA",
+      kind: "application.publish",
+      state: "receiving",
+      created_at: "2026-08-14T17:00:00.000Z",
+      updated_at: "2026-08-14T17:00:00.000Z",
+    };
+    operations.set(operation.id, operation);
+    applicationUploads.set(operation.id, { declaration, applicationId, releaseId });
+    return {
+      status: 201,
+      headers: { "cache-control": "private, no-store", "x-request-id": req.headers?.["x-request-id"] ?? "req_app_upload" },
+      body: {
+        id: operation.id,
+        application_id: applicationId,
+        release_id: releaseId,
+        operation,
+        upload_url: "https://storage.example.invalid/signed/application-upload",
+        method: "PUT",
+        headers: { "content-type": "application/gzip", "content-length": String(declaration.compressed_bytes) },
+        expires_at: "2099-08-14T19:00:00.000Z",
+      },
+    };
+  };
+  transport.on("POST", "/api/applications/uploads", (req) => declareApplicationUpload(req));
+  transport.on("POST", /^\/api\/applications\/[^/]+\/uploads$/, (req) => declareApplicationUpload(req, req.path.split("/")[3]));
+  transport.on("POST", /^\/api\/applications\/uploads\/[^/]+\/commit$/, (req): TransportResponse => {
+    const uploadId = req.path.split("/").at(-2) ?? "";
+    const upload = applicationUploads.get(uploadId);
+    const commit = req.body as ApplicationUploadCommit | undefined;
+    if (!upload) return problem(404, "not_found", "Application upload was not found.");
+    if (commit?.sha256 !== upload.declaration.sha256 || commit.compressed_bytes !== upload.declaration.compressed_bytes) {
+      return problem(400, "invalid_request", "The uploaded application package does not match the upload declaration.");
+    }
+    applications.set(upload.applicationId, {
+      id: upload.applicationId,
+      name: upload.declaration.name ?? "uploaded-application",
+      revision: 1,
+      latest_ready_release: upload.releaseId,
+      created_at: "2026-08-14T17:00:00.000Z",
+      updated_at: "2026-08-14T17:00:01.000Z",
+    });
+    const queued: Operation = { ...operations.get(uploadId)!, state: "queued", updated_at: "2026-08-14T17:00:01.000Z" };
+    operations.set(uploadId, {
+      ...queued,
+      state: "succeeded",
+      result: { application_id: upload.applicationId, release_id: upload.releaseId },
+    });
+    return { status: 202, headers: { "x-request-id": req.headers?.["x-request-id"] ?? "req_app_commit" }, body: queued };
   });
 
   transport.on("GET", "/api/applications", (req) => listPage(

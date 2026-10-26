@@ -15,8 +15,10 @@ import { readWebpContainer } from "./media/webp.js";
 import { CliError, networkError, usageError } from "./problems.js";
 import { fetchSignedRawPut, type CliRuntime, type SignedRawPut } from "./runtime.js";
 
-const MEDIA_PUT_NOT_READY =
-  "Private media upload did not complete because the service is not ready. Run screenrig doctor and check the ready result before retrying.";
+/** What a failed signed PUT reports; `label` names the upload ("Private media upload"). */
+function putNotReady(label: string): string {
+  return `${label} did not complete because the service is not ready. Run screenrig doctor and check the ready result before retrying.`;
+}
 
 export const SUPPORTED_MEDIA_CONTENT_TYPES = [
   "image/png",
@@ -139,29 +141,33 @@ async function readMediaSnapshot(filePath: string, ceiling: UploadCeiling = TRAN
   }
 }
 
-export function validateMediaUploadSession(input: MediaUploadSession, nowMs = Date.now()): ValidatedMediaUploadSession {
+/**
+ * Checks a declared upload's signed PUT session. Application package uploads
+ * get the same session shape; `label` names the upload in errors.
+ */
+export function validateMediaUploadSession(input: MediaUploadSession, nowMs = Date.now(), label = "Media upload"): ValidatedMediaUploadSession {
   if (!input || typeof input !== "object" || typeof input.id !== "string" || input.id.length === 0 ||
       !input.operation || typeof input.operation.id !== "string" || input.operation.id.length === 0) {
-    throw usageError("Media upload declaration returned an invalid binding.");
+    throw usageError(`${label} declaration returned an invalid binding.`);
   }
-  if (input.method !== "PUT") throw usageError("Media upload declaration returned an unsupported method.");
+  if (input.method !== "PUT") throw usageError(`${label} declaration returned an unsupported method.`);
   let parsed: URL;
-  try { parsed = new URL(input.upload_url); } catch { throw usageError("Media upload declaration returned an invalid URL."); }
+  try { parsed = new URL(input.upload_url); } catch { throw usageError(`${label} declaration returned an invalid URL.`); }
   if (!/^(https?:)$/.test(parsed.protocol) || !parsed.host || parsed.username || parsed.password) {
-    throw usageError("Media upload declaration returned an unsafe URL.");
+    throw usageError(`${label} declaration returned an unsafe URL.`);
   }
   if (!input.headers || typeof input.headers !== "object" || Array.isArray(input.headers)) {
-    throw usageError("Media upload declaration returned invalid signed headers.");
+    throw usageError(`${label} declaration returned invalid signed headers.`);
   }
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(input.headers)) {
     if (!name || typeof value !== "string" || !value || /[\r\n]/.test(name) || /[\r\n]/.test(value)) {
-      throw usageError("Media upload declaration returned invalid signed headers.");
+      throw usageError(`${label} declaration returned invalid signed headers.`);
     }
     headers[name] = value;
   }
   const expiresAt = Date.parse(input.expires_at);
-  if (!Number.isFinite(expiresAt) || expiresAt <= nowMs) throw usageError("Media upload declaration is expired or invalid.");
+  if (!Number.isFinite(expiresAt) || expiresAt <= nowMs) throw usageError(`${label} declaration is expired or invalid.`);
   return { id: input.id, operationId: input.operation.id, uploadUrl: input.upload_url, headers, expiresAt };
 }
 
@@ -170,7 +176,7 @@ export async function performSignedMediaPut(
   session: ValidatedMediaUploadSession,
   signedRawPut: SignedRawPut,
 ): Promise<void> {
-  return performSignedMediaBodyPut(prepared.bytes, session, signedRawPut);
+  return performSignedBodyPut(prepared.bytes, session, signedRawPut);
 }
 
 export async function performSignedMediaFilePut(
@@ -178,7 +184,7 @@ export async function performSignedMediaFilePut(
   session: ValidatedMediaUploadSession,
   signedRawPut: SignedRawPut,
 ): Promise<void> {
-  return performSignedMediaBodyPut(createReadStream(filePath), session, signedRawPut);
+  return performSignedBodyPut(createReadStream(filePath), session, signedRawPut);
 }
 
 export async function performSignedMediaStreamPut(
@@ -186,19 +192,24 @@ export async function performSignedMediaStreamPut(
   session: ValidatedMediaUploadSession,
   signedRawPut: SignedRawPut,
 ): Promise<void> {
-  return performSignedMediaBodyPut(body, session, signedRawPut);
+  return performSignedBodyPut(body, session, signedRawPut);
 }
 
-async function performSignedMediaBodyPut(
+/**
+ * The signed PUT of a declared upload's bytes, retried on 503 while the bytes
+ * are buffered and the URL is valid. `label` names the upload in errors.
+ */
+export async function performSignedBodyPut(
   body: Uint8Array | AsyncIterable<Uint8Array>,
   session: ValidatedMediaUploadSession,
   signedRawPut: SignedRawPut,
+  label = "Private media upload",
 ): Promise<void> {
   // A signed PUT of the same buffered bytes is safe to replay. One-shot
   // streams cannot be replayed; their existing recovery path remains in charge.
   const maxAttempts = body instanceof Uint8Array ? 4 : 1;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    if (Date.now() >= session.expiresAt) throw networkError(MEDIA_PUT_NOT_READY);
+    if (Date.now() >= session.expiresAt) throw networkError(putNotReady(label));
     let response;
     try {
       response = await signedRawPut({
@@ -211,13 +222,13 @@ async function performSignedMediaBodyPut(
         expiresAt: session.expiresAt,
       });
     } catch {
-      throw networkError(MEDIA_PUT_NOT_READY);
+      throw networkError(putNotReady(label));
     }
     if (response.status >= 200 && response.status < 300) return;
-    if (response.status !== 503) throw networkError(`Private media upload returned HTTP ${response.status}.`);
-    if (attempt + 1 >= maxAttempts) throw networkError(MEDIA_PUT_NOT_READY);
+    if (response.status !== 503) throw networkError(`${label} returned HTTP ${response.status}.`);
+    if (attempt + 1 >= maxAttempts) throw networkError(putNotReady(label));
     const waitMs = Math.ceil(1000 * 2 ** attempt * (0.5 + Math.random() * 0.5));
-    if (Date.now() + waitMs >= session.expiresAt) throw networkError(MEDIA_PUT_NOT_READY);
+    if (Date.now() + waitMs >= session.expiresAt) throw networkError(putNotReady(label));
     await sleep(waitMs);
   }
 }
