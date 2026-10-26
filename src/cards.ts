@@ -105,7 +105,7 @@ export async function validatePlaylistCards(client: ApiClient, playlist: { pages
         cardDataKey(item.data);
         const dynamic = Object.keys(cardProperties(card).dynamic);
         for (const name of dynamic) {
-          if (Object.hasOwn(item.params ?? {}, name)) throw usageError(`${field}.${name} is dynamic; write it with card-data put for a bound placement.`);
+          if (Object.hasOwn(item.params ?? {}, name)) throw usageError(`${field}.${name} is dynamic; write it to the bound data document with card-data put, or use a card instance (card create, then card data put crd_ID).`);
           delete schema.properties?.[name];
         }
         schema.required = (schema.required ?? []).filter((name: string) => !dynamic.includes(name));
