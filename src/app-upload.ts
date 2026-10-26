@@ -64,7 +64,10 @@ export async function uploadApplicationDirect(input: DirectApplicationUpload): P
   if (typeof body.application_id !== "string" || !body.application_id || typeof body.release_id !== "string" || !body.release_id) {
     throw usageError("Application upload declaration returned an invalid binding.");
   }
-  await performSignedBodyPut(packed.archive, session, runtime.signedRawPut ?? fetchSignedRawPut(), "Application package upload");
+  // A failed PUT keeps the declared upload: the declaration's saved key lets
+  // the same command, run again, resume it with a new upload URL.
+  await performSignedBodyPut(packed.archive, session, runtime.signedRawPut ?? fetchSignedRawPut(),
+    { label: "Application package upload", sleep: runtime.sleep });
   const commit: ApplicationUploadCommit = { sha256: packed.sha256, compressed_bytes: packed.compressed_bytes };
   const response = await commitUpload(client, runtime, session.id, commit);
   return {

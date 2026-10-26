@@ -2,22 +2,67 @@ import { createHash } from "node:crypto";
 import { constants, createReadStream } from "node:fs";
 import { open, rm } from "node:fs/promises";
 import path from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import type { MediaCommit, MediaUploadDeclaration, MediaUploadSession, Operation } from "./adapters/protocol.js";
 import type { ApiClient } from "./client.js";
-import { isValidIdempotencyKey } from "./ids.js";
+import { ExitCode } from "./exit-codes.js";
+import { isValidIdempotencyKey, newIdempotencyKey } from "./ids.js";
 import { lowInformationFilenameWarning } from "./media-filename.js";
 import type { ProgressReporter } from "./media/progress.js";
 import { transcodeForUpload, type TranscodeOptions, type TranscodeResult } from "./media/transcode.js";
 import { assertDeclaredTypeMatchesBytes } from "./media/sniff.js";
 import { MAX_VIDEO_UPLOAD_BYTES } from "./media/video-profile.js";
 import { readWebpContainer } from "./media/webp.js";
-import { CliError, networkError, usageError } from "./problems.js";
-import { fetchSignedRawPut, type CliRuntime, type SignedRawPut } from "./runtime.js";
+import { CliError, makeProblem, usageError } from "./problems.js";
+import { fetchSignedRawPut, type CliRuntime, type SignedRawPut, type SignedRawPutResponse } from "./runtime.js";
 
-/** What a failed signed PUT reports; `label` names the upload ("Private media upload"). */
-function putNotReady(label: string): string {
-  return `${label} did not complete because the service is not ready. Run screenrig doctor and check the ready result before retrying.`;
+/** How many times a declared upload's bytes are sent before the failure is reported. */
+const PUT_ATTEMPTS = 4;
+
+/** Plain words for the connection error codes a failed PUT reports. */
+const PUT_FAILURES: Record<string, string> = {
+  ECONNRESET: "the connection was reset",
+  EPIPE: "the connection was closed",
+  UND_ERR_SOCKET: "the connection was closed",
+  ECONNREFUSED: "the connection was refused",
+  ETIMEDOUT: "the connection timed out",
+  UND_ERR_CONNECT_TIMEOUT: "the connection timed out",
+  UND_ERR_HEADERS_TIMEOUT: "storage did not answer in time",
+  ENOTFOUND: "the storage host was not found",
+  EAI_AGAIN: "the storage host was not found",
+  ENETUNREACH: "the network is unreachable",
+  EHOSTUNREACH: "the network is unreachable",
+};
+
+/**
+ * Why a PUT failed, from the error codes in its cause chain. The messages are
+ * never used: they can carry the host or the signed URL.
+ */
+function putFailure(error: unknown): string {
+  for (let current = error, depth = 0; current && typeof current === "object" && depth < 8; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string" && /^[A-Z][A-Z0-9_]{1,40}$/.test(code)) return `${PUT_FAILURES[code] ?? "the connection failed"} (${code})`;
+    if ((current as { name?: unknown }).name === "AbortError") return "the transfer was stopped";
+    current = (current as { cause?: unknown }).cause;
+  }
+  return "the connection failed";
+}
+
+/** Storage answers worth sending the same PUT again: a server error, a timeout or a rate limit. */
+function retryablePutStatus(status: number): boolean {
+  return status >= 500 || status === 408 || status === 429;
+}
+
+/**
+ * A signed PUT that did not finish. It never reached the API, so the API's
+ * network guidance (screenrig doctor) does not apply. The operation id names
+ * the declared upload.
+ */
+function putFailed(detail: string, operationId: string): CliError {
+  return new CliError(makeProblem("transport_error", "Upload to storage failed", 503, detail, {
+    operation_id: operationId,
+    hint: "Run the same command again to upload it again.",
+  }), ExitCode.Network);
 }
 
 export const SUPPORTED_MEDIA_CONTENT_TYPES = [
@@ -175,8 +220,9 @@ export async function performSignedMediaPut(
   prepared: PreparedMediaUpload,
   session: ValidatedMediaUploadSession,
   signedRawPut: SignedRawPut,
+  options: SignedPutOptions = {},
 ): Promise<void> {
-  return performSignedBodyPut(prepared.bytes, session, signedRawPut);
+  return performSignedBodyPut(prepared.bytes, session, signedRawPut, options);
 }
 
 export async function performSignedMediaFilePut(
@@ -195,22 +241,40 @@ export async function performSignedMediaStreamPut(
   return performSignedBodyPut(body, session, signedRawPut);
 }
 
+export interface SignedPutOptions {
+  /** Names the upload in errors ("Private media upload"). */
+  label?: string;
+  /** Waits between attempts; the runtime's sleep in commands. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
 /**
- * The signed PUT of a declared upload's bytes, retried on 503 while the bytes
- * are buffered and the URL is valid. `label` names the upload in errors.
+ * The signed PUT of a declared upload's bytes. A dropped connection or a
+ * storage server error sends the whole PUT again, with a growing wait, while
+ * the bytes are buffered and the URL is valid: a PUT that never finished
+ * stored nothing, so sending it again is safe. A failure names the declared
+ * upload's operation and says to run the same command again.
  */
 export async function performSignedBodyPut(
   body: Uint8Array | AsyncIterable<Uint8Array>,
   session: ValidatedMediaUploadSession,
   signedRawPut: SignedRawPut,
-  label = "Private media upload",
+  options: SignedPutOptions = {},
 ): Promise<void> {
-  // A signed PUT of the same buffered bytes is safe to replay. One-shot
-  // streams cannot be replayed; their existing recovery path remains in charge.
-  const maxAttempts = body instanceof Uint8Array ? 4 : 1;
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    if (Date.now() >= session.expiresAt) throw networkError(putNotReady(label));
-    let response;
+  const label = options.label ?? "Private media upload";
+  const sleep = options.sleep ?? ((ms: number) => delay(ms));
+  // One-shot streams cannot be sent again; their own recovery path stays in charge.
+  const maxAttempts = body instanceof Uint8Array ? PUT_ATTEMPTS : 1;
+  const failed = (reason: string, attempts: number) =>
+    `${label} to storage was interrupted: ${reason}.${attempts > 1 ? ` It did not finish after ${attempts} attempts.` : ""}`;
+  let reason: string | undefined;
+  for (let attempt = 1; ; attempt += 1) {
+    if (Date.now() >= session.expiresAt) {
+      throw putFailed(reason === undefined
+        ? `${label} could not start: its upload URL had expired.`
+        : `${failed(reason, attempt - 1)} Its upload URL expired before it could be sent again.`, session.operationId);
+    }
+    let response: SignedRawPutResponse | undefined;
     try {
       response = await signedRawPut({
         url: session.uploadUrl,
@@ -221,16 +285,51 @@ export async function performSignedBodyPut(
         redirect: "error",
         expiresAt: session.expiresAt,
       });
-    } catch {
-      throw networkError(putNotReady(label));
+    } catch (error) {
+      reason = putFailure(error);
     }
-    if (response.status >= 200 && response.status < 300) return;
-    if (response.status !== 503) throw networkError(`${label} returned HTTP ${response.status}.`);
-    if (attempt + 1 >= maxAttempts) throw networkError(putNotReady(label));
-    const waitMs = Math.ceil(1000 * 2 ** attempt * (0.5 + Math.random() * 0.5));
-    if (Date.now() + waitMs >= session.expiresAt) throw networkError(putNotReady(label));
+    if (response) {
+      if (response.status >= 200 && response.status < 300) return;
+      if (!retryablePutStatus(response.status)) {
+        throw putFailed(`${label} was refused by storage: HTTP ${response.status}.`, session.operationId);
+      }
+      reason = `storage answered HTTP ${response.status}`;
+    }
+    const why = reason ?? "the connection failed";
+    if (attempt >= maxAttempts) throw putFailed(failed(why, attempt), session.operationId);
+    const waitMs = Math.ceil(1000 * 2 ** (attempt - 1) * (0.5 + Math.random() * 0.5));
+    if (Date.now() + waitMs >= session.expiresAt) {
+      throw putFailed(`${failed(why, attempt)} Its upload URL expired before it could be sent again.`, session.operationId);
+    }
     await sleep(waitMs);
   }
+}
+
+/**
+ * A declared upload holds its bytes against the project's storage until it is
+ * committed, cancelled, or swept after 24 hours. When running the same command
+ * again declares a new upload, cancel the one whose bytes could not be sent,
+ * so the two never both count. Best effort: a refused cancel is reported in
+ * the hint, never thrown.
+ */
+async function cancelInterruptedUpload(client: ApiClient, error: CliError): Promise<CliError> {
+  const id = error.problem.operation_id;
+  if (!id) return error;
+  let hint: string;
+  let next = error.problem.next;
+  try {
+    await client.call({ method: "POST", path: `/api/operations/${encodeURIComponent(id)}/cancel`, idempotent: true, idempotencyKey: newIdempotencyKey() });
+    hint = `Upload ${id} was cancelled, so it holds no storage. Run the same command again to upload it again.`;
+  } catch (cancelError) {
+    if (cancelError instanceof CliError && cancelError.problem.status === 409) {
+      hint = `Upload ${id} had already ended, so it holds no storage. Run the same command again to upload it again.`;
+    } else {
+      const code = cancelError instanceof CliError ? cancelError.problem.code : "unexpected_error";
+      hint = `Run the same command again to upload it again. Upload ${id} could not be cancelled (${code}), so it keeps its storage reserved until it is cancelled or the server releases it after 24 hours.`;
+      next = { command: `screenrig operations cancel ${id}`, argv: ["operations", "cancel", id], reason: "Releases the storage the interrupted upload still holds." };
+    }
+  }
+  return new CliError({ ...error.problem, hint, ...(next ? { next } : {}) }, error.exitCode, error.warnings);
 }
 
 export function deriveCommitIdempotencyKey(base: string): string {
@@ -265,6 +364,12 @@ export interface MediaFileUploadInput {
   pollMs?: number;
   /** Declare key; commit is derived from this. Defaults to `client.idempotencyKey`. */
   idempotencyKey?: string;
+  /**
+   * Running the same command again reuses this upload's keys (an explicit
+   * --idempotency-key, or a batch state file), and with them the declared
+   * upload. A failed transfer then keeps that upload instead of cancelling it.
+   */
+  resumable?: boolean;
   /** Called after declare succeeds and before the signed PUT. */
   onDeclared?: (session: ValidatedMediaUploadSession) => Promise<void>;
 }
@@ -445,7 +550,12 @@ export async function submitPreparedMedia(
     await input.onDeclared(session);
   }
   lap();
-  await performSignedMediaPut(prepared, session, runtime.signedRawPut ?? fetchSignedRawPut());
+  try {
+    await performSignedMediaPut(prepared, session, runtime.signedRawPut ?? fetchSignedRawPut(), { sleep: runtime.sleep });
+  } catch (error) {
+    if (input.resumable || !(error instanceof CliError)) throw error;
+    throw await cancelInterruptedUpload(client, error);
+  }
   const transfer_ms = lap();
   const commitResponse = await client.call({
     method: "POST",

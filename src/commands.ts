@@ -4386,6 +4386,7 @@ async function mediaUpload(args: ParsedArgs, runtime: CliRuntime, client: ApiCli
     noWait: flagBool(args.flags, "no-wait"),
     timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000,
     pollMs: flagNumber(args.flags, "poll-ms") ?? 1000,
+    resumable: flagString(args.flags, "idempotency-key") !== undefined,
   });
   const mediaId = uploaded.mediaId;
   if (folderId && mediaId) await moveIntoMediaFolder(client, folderId, [mediaId]);
@@ -8029,7 +8030,7 @@ export const handlePlaylistInit = commandHandler(async (args, runtime, resolved)
       const client = await remote();
       const uploaded = await loggerOf(runtime).withLocal({ op: "media.upload", message: "media upload" }, () => uploadMediaFile({ runtime, client, sourcePath, idempotencyKey,
         transcodeOptions: transcodeOptionsFromArgs(args), noTranscode: flagBool(args.flags, "no-transcode"),
-        reporter: progressReporterFor(args, runtime), noWait: false,
+        reporter: progressReporterFor(args, runtime), noWait: false, resumable: flagString(args.flags, "idempotency-key") !== undefined,
         timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000, pollMs: flagNumber(args.flags, "poll-ms") ?? 1000 }));
       warnings.push(...uploaded.warnings);
       if (!uploaded.mediaId) throw usageError("Upload completed without a media identifier.");

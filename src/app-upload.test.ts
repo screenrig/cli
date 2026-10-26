@@ -32,6 +32,7 @@ async function runApp(
   transport: FakeTransport,
   puts: SignedRawPutRequest[],
   putStatus = 200,
+  put?: () => Promise<{ status: number }>,
 ): Promise<{ code: number; envelope: Record<string, any> }> {
   let output = "";
   const stdout = new Writable({ write(chunk, _encoding, callback) { output += chunk; callback(); } });
@@ -40,7 +41,7 @@ async function runApp(
     argv: ["--json", ...argv], env: fixture.fs.env, stdout, stderr, fs: fixture.fs, homedir: fixture.fs.homedir,
     cwd: () => fixture.configDir, transport,
     now: () => new Date("2026-09-10T00:00:00Z"), sleep: async () => undefined,
-    signedRawPut: async (request) => { puts.push(request); return { status: putStatus }; },
+    signedRawPut: async (request) => { puts.push(request); return put ? put() : { status: putStatus }; },
   });
   return { code, envelope: JSON.parse(output) };
 }
@@ -145,7 +146,37 @@ test("app upload does not commit when the signed PUT is refused", async (t) => {
   const result = await runApp(fixture, ["app", "upload", fixture.appDir, "--no-wait"], transport, puts, 403);
   assert.notEqual(result.code, 0);
   assert.equal(result.envelope.error.code, "transport_error");
-  assert.match(result.envelope.error.detail, /Application package upload returned HTTP 403/);
+  assert.match(result.envelope.error.detail, /Application package upload was refused by storage: HTTP 403/);
   assert.equal(puts.length, 1);
   assert.equal(transport.calls.some((call) => call.path.endsWith("/commit")), false);
+});
+
+test("app upload sends the package again after a dropped connection, and the same command resumes an upload it could not finish", async (t) => {
+  const fixture = await appFixture(t);
+  const reset = () => Promise.reject(Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }) }));
+
+  let calls = 0;
+  const once = memoryBackend({ features: DIRECT });
+  const recovered = await runApp(fixture, ["app", "upload", fixture.appDir, "--no-wait"], once, [], 200,
+    () => (calls += 1) === 1 ? reset() : Promise.resolve({ status: 200 }));
+  assert.equal(recovered.code, 0, JSON.stringify(recovered.envelope));
+  assert.equal(calls, 2, "one dropped connection costs one more PUT, not the command");
+
+  const transport = memoryBackend({ features: DIRECT });
+  const puts: SignedRawPutRequest[] = [];
+  const failed = await runApp(fixture, ["app", "upload", fixture.appDir, "--no-wait"], transport, puts, 200, reset);
+  assert.equal(failed.code, 10, JSON.stringify(failed.envelope));
+  assert.equal(puts.length, 4);
+  assert.equal(failed.envelope.error.operation_id, "op_AAAAAAAAAAAAAAAAAAAAAAAA");
+  assert.equal(failed.envelope.error.detail, "Application package upload to storage was interrupted: the connection was closed (UND_ERR_SOCKET). It did not finish after 4 attempts.");
+  assert.equal(failed.envelope.error.hint, "Run the same command again to upload it again.");
+  assert.ok(failed.envelope.warnings.some((warning: { code: string }) => warning.code === "write_recovery_saved"));
+  assert.equal(transport.calls.some((call) => call.path.endsWith("/cancel") || call.path.endsWith("/commit")), false);
+  const declareKey = (path: string) => transport.calls.filter((call) => call.path === path).map((call) => call.headers?.["idempotency-key"]);
+
+  const resumed = await runApp(fixture, ["app", "upload", fixture.appDir, "--no-wait"], transport, puts);
+  assert.equal(resumed.code, 0, JSON.stringify(resumed.envelope));
+  const keys = declareKey("/api/applications/uploads");
+  assert.equal(keys.length, 2);
+  assert.equal(keys[1], keys[0], "the rerun replays the saved declaration, which answers the same upload with a new URL");
 });

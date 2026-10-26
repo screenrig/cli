@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdir, open, rm, writeFile, type FileHandle } from "node:fs/promises";
+import { chmod, mkdir, open, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import path from "node:path";
+import { Writable } from "node:stream";
 import { test } from "node:test";
 import type { MediaUploadSession } from "./adapters/protocol.js";
 import { ApiClient } from "./client.js";
+import { writeConfigAtomic } from "./config.js";
+import { ExitCode } from "./exit-codes.js";
 import { isValidIdempotencyKey } from "./ids.js";
+import { run } from "./main.js";
 import {
   deriveCommitIdempotencyKey,
   performSignedMediaPut,
@@ -13,8 +17,12 @@ import {
   validateMediaUploadSession,
 } from "./media-upload.js";
 import { CliError } from "./problems.js";
+import type { SignedRawPut } from "./runtime.js";
 import { testTemp } from "./test-temp.js";
-import { FakeTransport } from "./transport/fake.js";
+import { FakeTransport, memoryBackend } from "./transport/fake.js";
+
+/** Retries without waiting, so a test does not sleep between attempts. */
+const noWait = { sleep: async () => undefined };
 
 function webpChunk(id: string, data: Buffer): Buffer {
   const size = Buffer.alloc(4);
@@ -153,30 +161,74 @@ test("signed PUT preserves exact raw bytes and headers without project credentia
     assert.ok(error instanceof CliError);
     assert.ok(!error.message.includes("secret"));
     assert.ok(!error.message.includes("signature="));
-    assert.match(error.message, /HTTP 403/);
+    assert.match(error.message, /refused by storage: HTTP 403/);
     return true;
   });
   await assert.rejects(() => performSignedMediaPut(prepared, validated, async () => {
-    throw new Error("connect refused");
-  }), (error) => {
+    throw new Error("connect refused to https://storage.example.invalid/private?signature=secret");
+  }, noWait), (error) => {
     assert.ok(error instanceof CliError);
     assert.equal(error.problem.code, "transport_error");
     assert.equal(error.problem.status, 503);
-    assert.match(error.message, /not ready/);
-    assert.match(error.message, /doctor/);
-    assert.match(error.message, /ready/);
-    assert.ok(!error.message.includes("connect refused"));
+    assert.equal(error.problem.operation_id, "op_1");
+    assert.equal(error.message, "Private media upload to storage was interrupted: the connection failed. It did not finish after 4 attempts.");
+    assert.equal(error.problem.hint, "Run the same command again to upload it again.");
+    assert.equal(error.problem.next, undefined, "screenrig doctor sends no requests, so it is not the next step");
+    assert.doesNotMatch(JSON.stringify(error.problem), /secret|signature|storage\.example|connect refused|doctor|not ready/);
     return true;
   });
-  await assert.rejects(() => performSignedMediaPut(prepared, validated, async () => ({ status: 503, bodyText: "secret" })), (error) => {
+  await assert.rejects(() => performSignedMediaPut(prepared, validated, async () => ({ status: 503, bodyText: "secret" }), noWait), (error) => {
     assert.ok(error instanceof CliError);
     assert.equal(error.problem.code, "transport_error");
     assert.equal(error.problem.status, 503);
-    assert.match(error.message, /not ready/);
-    assert.match(error.message, /doctor/);
+    assert.match(error.message, /interrupted: storage answered HTTP 503\. It did not finish after 4 attempts\./);
     assert.ok(!error.message.includes("secret"));
     return true;
   });
+});
+
+/** A connection the network cut, the way Node's fetch reports it. */
+function connectionReset(): Error {
+  return Object.assign(new TypeError("fetch failed"), {
+    cause: Object.assign(new Error("read ECONNRESET from storage.example.invalid"), { code: "ECONNRESET" }),
+  });
+}
+
+test("a dropped connection sends the whole PUT again with the same binding and stops at success", async () => {
+  const bytes = Buffer.from([0, 255, 3, 4]);
+  const prepared = {
+    bytes,
+    declaration: { filename: "x.png", content_type: "image/png" as const, bytes: bytes.length, sha256: "a".repeat(64) },
+    commit: { content_type: "image/png" as const, bytes: bytes.length, sha256: "a".repeat(64) },
+  };
+  const validated = validateMediaUploadSession(session());
+  const waits: number[] = [];
+  let attempts = 0;
+  await performSignedMediaPut(prepared, validated, async (request) => {
+    attempts += 1;
+    assert.equal(request.body, bytes, "every attempt sends the same held bytes from the start");
+    assert.equal(request.url, validated.uploadUrl);
+    assert.deepEqual(request.headers, validated.headers);
+    if (attempts < 3) throw connectionReset();
+    return { status: 200 };
+  }, { sleep: async (ms) => { waits.push(ms); } });
+  assert.equal(attempts, 3);
+  assert.equal(waits.length, 2);
+  assert.ok(waits[0]! >= 500 && waits[0]! <= 1000 && waits[1]! >= 1000 && waits[1]! <= 2000, `the wait grows and stays bounded: ${waits.join(", ")}`);
+
+  attempts = 0;
+  await assert.rejects(performSignedMediaPut(prepared, validated, async () => {
+    attempts += 1;
+    throw connectionReset();
+  }, noWait), (error) => {
+    assert.ok(error instanceof CliError);
+    assert.equal(error.exitCode, ExitCode.Network);
+    assert.equal(error.problem.operation_id, "op_1");
+    assert.equal(error.problem.detail, "Private media upload to storage was interrupted: the connection was reset (ECONNRESET). It did not finish after 4 attempts.");
+    assert.doesNotMatch(JSON.stringify(error.problem), /storage\.example|signature/);
+    return true;
+  });
+  assert.equal(attempts, 4, "a connection that keeps failing still ends after a bounded number of PUTs");
 });
 
 test("commit idempotency key is deterministic, distinct, valid, and honored per call", async () => {
@@ -210,19 +262,19 @@ test("buffered signed PUT retries transient 503s with the exact binding and stop
     assert.equal(request.redirect, "error");
     assert.equal(request.expiresAt, validated.expiresAt);
     return { status: attempts < 3 ? 503 : 204 };
-  });
+  }, noWait);
   assert.equal(attempts, 3);
   attempts = 0;
   await assert.rejects(performSignedMediaPut(prepared, validated, async () => {
     attempts += 1;
     return { status: 503 };
-  }), /not ready/);
+  }, noWait), /storage answered HTTP 503\. It did not finish after 4 attempts\./);
   assert.equal(attempts, 4, "persistent failures still fail after a bounded number of real PUTs");
   attempts = 0;
   await assert.rejects(performSignedMediaPut(prepared, validated, async () => {
     attempts += 1;
     return { status: 403 };
-  }), /HTTP 403/);
+  }, noWait), /refused by storage: HTTP 403/);
   assert.equal(attempts, 1, "authorization failures are never retried");
 });
 
@@ -233,7 +285,7 @@ test("signed PUT never retries a one-shot stream or beyond session expiry", asyn
   await assert.rejects(performSignedMediaStreamPut(stream, validated, async () => {
     attempts += 1;
     return { status: 503 };
-  }), /not ready/);
+  }), /^CliError: Private media upload to storage was interrupted: storage answered HTTP 503\.$/);
   assert.equal(attempts, 1);
   const prepared = {
     bytes: Buffer.from([1]),
@@ -244,15 +296,69 @@ test("signed PUT never retries a one-shot stream or beyond session expiry", asyn
   attempts = 0;
   await assert.rejects(performSignedMediaPut(prepared, expiring, async () => {
     attempts += 1;
-    return { status: 503 };
-  }), /not ready/);
+    throw connectionReset();
+  }, noWait), /reset \(ECONNRESET\)\. Its upload URL expired before it could be sent again\./);
   assert.equal(attempts, 1, "a retry wait cannot outlive the signed session");
   attempts = 0;
   await assert.rejects(performSignedMediaPut(prepared, { ...validated, expiresAt: 0 }, async () => {
     attempts += 1;
     return { status: 204 };
-  }), /not ready/);
+  }), /could not start: its upload URL had expired/);
   assert.equal(attempts, 0);
+});
+
+/** Runs the CLI against `transport` with an enrolled config in `dir` and returns the exit code and envelope. */
+async function runCli(dir: string, argv: string[], transport: FakeTransport, signedRawPut: SignedRawPut): Promise<{ code: number; envelope: Record<string, any> }> {
+  const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: { XDG_CONFIG_HOME: dir } };
+  let output = "";
+  const stdout = new Writable({ write(chunk, _encoding, callback) { output += chunk; callback(); } });
+  const stderr = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
+  const code = await run({
+    argv: ["--json", ...argv], env: fs.env, stdout, stderr, fs, homedir: fs.homedir, cwd: () => dir, transport,
+    now: () => new Date("2026-08-14T17:00:00Z"), sleep: async () => undefined, signedRawPut,
+  });
+  return { code, envelope: JSON.parse(output) };
+}
+
+test("media upload cancels the declared upload whose bytes could not be sent, so the rerun starts clean", async (t) => {
+  const dir = await testTemp("media-put-cut-");
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const fs = { mkdir, open, rename, rm, chmod, stat, homedir: () => dir, env: { XDG_CONFIG_HOME: dir } };
+  await writeConfigAtomic(path.join(dir, "screenrig", "config.json"), {
+    api_url: "https://api.screenrig.ai", project_id: "prj_AAAAAAAAAAAAAAAAAAAAAAAA", project_name: "Screens",
+    organization_id: "org_AAAAAAAAAAAAAAAAAAAAAAAA", organization_name: "Example organization",
+    token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_tokidAAAAAAAAAAAAAAAA_secretsecretsecretsecretsecr",
+  }, fs);
+  const file = path.join(dir, "lobby-loop.mp4");
+  await writeFile(file, Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
+  const operation = "op_MEDIAAAAAAAAAAAAAAAAAAAAA";
+  let puts = 0;
+  const cut: SignedRawPut = async () => { puts += 1; throw connectionReset(); };
+
+  const transport = memoryBackend();
+  const failed = await runCli(dir, ["media", "upload", file, "--no-transcode"], transport, cut);
+  assert.equal(failed.code, ExitCode.Network, JSON.stringify(failed.envelope));
+  assert.equal(puts, 4);
+  const error = failed.envelope.error;
+  assert.equal(error.code, "transport_error");
+  assert.equal(error.operation_id, operation);
+  assert.equal(error.detail, "Private media upload to storage was interrupted: the connection was reset (ECONNRESET). It did not finish after 4 attempts.");
+  assert.equal(error.hint, `Upload ${operation} was cancelled, so it holds no storage. Run the same command again to upload it again.`);
+  assert.equal(error.next, undefined);
+  const writes = () => transport.calls.filter((call) => call.method === "POST").map((call) => call.path);
+  assert.deepEqual(writes(), ["/api/media/uploads", `/api/operations/${operation}/cancel`]);
+
+  const rerun = await runCli(dir, ["media", "upload", file, "--no-transcode"], transport, async () => ({ status: 200 }));
+  assert.equal(rerun.code, 0, JSON.stringify(rerun.envelope));
+  assert.equal(rerun.envelope.data.media_id, "med_AAAAAAAAAAAAAAAAAAAAAAAA");
+
+  // An explicit --idempotency-key replays the same declaration on the rerun, so the upload is kept for it.
+  const keyed = memoryBackend();
+  const kept = await runCli(dir, ["media", "upload", file, "--no-transcode", "--idempotency-key", "lobby-loop-upload-1"], keyed, cut);
+  assert.equal(kept.code, ExitCode.Network);
+  assert.equal(kept.envelope.error.operation_id, operation);
+  assert.equal(kept.envelope.error.hint, "Run the same command again to upload it again.");
+  assert.equal(keyed.calls.some((call) => call.path.endsWith("/cancel")), false);
 });
 
 

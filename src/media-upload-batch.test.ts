@@ -874,6 +874,8 @@ test("declare records the operation id in state before the signed PUT", async ()
     assert.equal(state.items[digest]?.media_id, undefined);
     assert.match(state.items[digest]?.operation_id ?? "", /^op_/);
     assert.equal(state.items[digest]?.idempotency_key, deriveBatchIdempotencyKey(digest));
+    // The state file resumes this upload, so a failed transfer never cancels it.
+    assert.equal(backend.transport.calls.some((call) => call.path.endsWith("/cancel")), false);
   } finally {
     await rm(configDir, { recursive: true, force: true });
     await rm(cwdDir, { recursive: true, force: true });

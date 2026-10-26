@@ -747,6 +747,8 @@ async function uploadPendingItem(
     noWait: false,
     timeoutMs: input.timeoutMs,
     pollMs: input.pollMs,
+    // The state file keeps each item's keys, so a retry resumes its declared upload.
+    resumable: true,
   };
   let prepared: PreparedMediaFile | undefined;
   try {
