@@ -393,6 +393,32 @@ test("editable card placements preserve static params, data and major while stri
   assert.equal((resource.pages[0]!.primitives[0] as any).feed, "feed:weather.v1:49.25:-123.00");
 });
 
+test("playlist show --output keeps card instance placements, so show, edit and update round trip without the inline form", async t => {
+  const f = await fixture(t);
+  const placement = { id: "clock", primitive: "card", card: "crd_INSTANCE", layout: "corner", anchor: "top-left", content_fit: "fill" };
+  // A read expands the instance into the deprecated inline members and the derived rect.
+  const stored = { id: "pl_MENU", revision: 4, name: "Menu", pages: [{ id: "lobby", canvas: { width: 1920, height: 1080, viewport_fit: "contain", background: "#000000FF" },
+    transition: { type: "crossfade", duration_ms: 200 }, advance: { mode: "duration", after_ms: 8000 }, primitives: [
+      { ...placement, type: "clock", major: 1, params: { title: "Stored" }, data: "feed-key", rect: { x: 30, y: 30, width: 270, height: 270 }, layer: 40, controller: false },
+    ] }] };
+  f.transport.on("GET", "/api/playlists/pl_MENU", () => ok(stored));
+  let put: any;
+  f.transport.on("PUT", "/api/playlists/pl_MENU", request => { put = request.body; return ok({ ...(request.body as object), id: "pl_MENU", revision: 5 }); });
+  f.transport.on("GET", "/api/screens", () => ok({ items: [], next_cursor: null }));
+  const file = path.join(f.dir, "menu.json");
+  assert.equal((await f.invoke(["playlist", "show", "pl_MENU", "--output", file])).code, 0);
+  const exported = JSON.parse(await readFile(file, "utf8"));
+  assert.deepEqual(exported.pages[0].primitives, [placement]);
+  exported.pages[0].primitives[0].anchor = "bottom-right";
+  await writeFile(file, JSON.stringify(exported));
+  const updated = await f.invoke(["playlist", "update", "pl_MENU", file, "--if-match", "4"]);
+  assert.equal(updated.code, 0, updated.stdout);
+  assert.deepEqual(put.pages[0].primitives, [{ ...placement, anchor: "bottom-right" }]);
+  assert.deepEqual(updated.body.warnings ?? [], []);
+  // The read-only display still shows what the server expanded.
+  assert.equal((await f.invoke(["playlist", "show", "pl_MENU"])).body.data.pages[0].primitives[0].params.title, "Stored");
+});
+
 test("screen publish checks cards before its create, preserves replay and refuses invalid params without writes", async t => {
   const f = await fixture(t);
   const screenId = "scr_AAAAAAAAAAAAAAAAAAAAAAAA", playlistId = "pl_AAAAAAAAAAAAAAAAAAAAAAAA";

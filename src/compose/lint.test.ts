@@ -189,6 +189,27 @@ test("playlist lint still flags motion overuse and identical rect sets", () => {
   assert.match(repeat.find((finding) => finding.code === "adjacent_repeat")!.message, /same media at the same rects as one/);
 });
 
+test("playlist lint judges only geometry the document carries", () => {
+  const page = (card: Record<string, unknown>) => ({
+    id: "p1",
+    canvas: { width: 1920, height: 1080, background: "#000000FF" },
+    primitives: [
+      { id: "photo", primitive: "image", selector: { by: "id", media_id: "med_01" }, rect: { x: 0, y: 0, width: 1920, height: 1080 }, layer: 0, content_fit: "cover" },
+      { id: "clock", primitive: "card", card: "crd_01", content_fit: "fill", ...card },
+    ],
+  });
+  // Placed by layout, no rect in the document: nothing to judge.
+  const placed = lintPlaylistPages([page({ layout: "corner", anchor: "top-left" })]);
+  assert.equal(codes(placed).includes("safe_margin"), false, JSON.stringify(placed));
+  assert.equal(codes(placed).includes("collision"), false, JSON.stringify(placed));
+  // The same card with a rect against the edge still gets the finding.
+  const edge = lintPlaylistPages([page({ layout: "free", layer: 5, rect: { x: 10, y: 10, width: 300, height: 100 } })]);
+  assert.ok(codes(edge).includes("safe_margin"), JSON.stringify(edge));
+  // A derived rect the document carries is judged like any other.
+  const derived = lintPlaylistPages([page({ layout: "corner", anchor: "top-left", layer: 40, rect: { x: 0, y: 0, width: 270, height: 270 } })]);
+  assert.ok(codes(derived).includes("safe_margin"), JSON.stringify(derived));
+});
+
 test("temp cleanup", async () => {
   const dir = await testTemp("lint-cleanup-");
   await rm(dir, { recursive: true, force: true });

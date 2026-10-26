@@ -240,7 +240,7 @@ function lintPlaylistPage(page: PlaylistPage, pixels?: PixelBuffer): LintFinding
       });
     }
   }
-  const enters = page.primitives.filter((primitive) => primitive.enter && !isFullBleed(primitive.rect, canvas));
+  const enters = page.primitives.filter((primitive) => primitive.enter && !(primitive.rect && isFullBleed(primitive.rect, canvas)));
   if (enters.length > 2) {
     for (const extra of enters.slice(2)) {
       findings.push({
@@ -255,6 +255,7 @@ function lintPlaylistPage(page: PlaylistPage, pixels?: PixelBuffer): LintFinding
     for (let j = i + 1; j < page.primitives.length; j++) {
       const first = page.primitives[i]!;
       const second = page.primitives[j]!;
+      if (!first.rect || !second.rect) continue;
       if (isFullBleed(first.rect, canvas) || isFullBleed(second.rect, canvas)) continue;
       const overlap = overlapBox(first.rect, second.rect);
       if (!overlap) continue;
@@ -270,8 +271,9 @@ function lintPlaylistPage(page: PlaylistPage, pixels?: PixelBuffer): LintFinding
     }
   }
   for (const primitive of page.primitives) {
-    if (isFullBleed(primitive.rect, canvas)) continue;
-    if (withinSafeMargin(primitive.rect, canvas)) {
+    const rect = primitive.rect;
+    if (!rect || isFullBleed(rect, canvas)) continue;
+    if (withinSafeMargin(rect, canvas)) {
       findings.push({
         page_id: page.id,
         code: "safe_margin",
@@ -279,10 +281,10 @@ function lintPlaylistPage(page: PlaylistPage, pixels?: PixelBuffer): LintFinding
         message: `${page.id}: ${primitive.id} sits within 4% of a canvas edge.`,
       });
     }
-    if (pixels && primitive.kind === "image" && !isFullBleed(primitive.rect, canvas)) {
-      const stddev = luminanceStddev(pixels, primitive.rect);
+    if (pixels && primitive.kind === "image") {
+      const stddev = luminanceStddev(pixels, rect);
       if (stddev > BUSY_STDDEV) {
-        const overlay = page.primitives.find((other) => other.id !== primitive.id && overlapBox(other.rect, primitive.rect));
+        const overlay = page.primitives.find((other) => other.id !== primitive.id && other.rect && overlapBox(other.rect, rect));
         if (overlay) {
           findings.push({
             page_id: page.id,
@@ -304,7 +306,8 @@ interface PlaylistPage {
   primitives: Array<{
     id: string;
     kind: string;
-    rect: Box;
+    /** Absent when the document carries no rect (a layout or displays placement the server derives); no geometry is judged then. */
+    rect?: Box;
     /** What the primitive shows: media ids, a tag, or a URL. Empty when unknown. */
     content: string;
     motion?: unknown;
@@ -352,16 +355,16 @@ function pageRecord(value: unknown): PlaylistPage | undefined {
     const rectValue = primitive.rect;
     const rectRecord = rectValue && typeof rectValue === "object" && !Array.isArray(rectValue)
       ? rectValue as Record<string, unknown>
-      : {};
+      : undefined;
     return [{
       id: typeof primitive.id === "string" ? primitive.id : "primitive",
       kind: typeof primitive.primitive === "string" ? primitive.primitive : "image",
-      rect: {
+      ...(rectRecord ? { rect: {
         x: numberOf(rectRecord.x, 0),
         y: numberOf(rectRecord.y, 0),
         width: numberOf(rectRecord.width, 0),
         height: numberOf(rectRecord.height, 0),
-      },
+      } } : {}),
       content: primitiveContent(primitive),
       motion: primitive.motion,
       enter: primitive.enter,
@@ -372,7 +375,7 @@ function pageRecord(value: unknown): PlaylistPage | undefined {
 
 function contentSet(page: PlaylistPage): string {
   return page.primitives
-    .map((primitive) => `${primitive.content}@${primitive.rect.x},${primitive.rect.y},${primitive.rect.width},${primitive.rect.height}`)
+    .map((primitive) => `${primitive.content}@${primitive.rect ? `${primitive.rect.x},${primitive.rect.y},${primitive.rect.width},${primitive.rect.height}` : "derived"}`)
     .sort()
     .join("|");
 }
