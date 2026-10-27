@@ -18,7 +18,7 @@ import { projectConfigFor, withProjectConfig, assertProjectCredential } from "./
 import { instantInZone, normalizeInstant, assignmentLine, playlistInUseProblem, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "./screen-control.js";
 import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLAYS_SETTLE_MS, unusedPath, PLAYS_ALL_MAX_PAGES, PLAYS_LIMIT_MAX, csvByteStream, csvRecord, isoUtc, playbackExportBudget, playsCursor, playsInstant, playsLimit, playsRange, requireCsvResponse, writeCsvFile, writeCsvStdout } from "./playback-export.js";
 import { wallCanvas, wallFromFlags, wallLine, wallProblem } from "./screen-wall.js";
-import { screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "./screen-facts.js";
+import { fieldMap, screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "./screen-facts.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
 import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines } from "./screen-commands.js";
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
@@ -9038,6 +9038,7 @@ function fleetLinkResult(response: Awaited<ReturnType<ApiClient["call"]>>, clien
 export const handleFleetLinksCreate = commandHandler(async (args, runtime, resolved) => {
   const label = fleetLinkName(flagString(args.flags, "name") ?? "");
   const tags = fleetLinkTagList(args);
+  const fields = fieldMap(flagString(args.flags, "field"));
   const playlistId = flagString(args.flags, "playlist-id");
   const maxScreens = flagString(args.flags, "max-screens");
   const expiresAt = flagString(args.flags, "expires-at");
@@ -9045,6 +9046,7 @@ export const handleFleetLinksCreate = commandHandler(async (args, runtime, resol
     label,
     ...(flagBool(args.flags, "disabled") ? { enabled: false } : {}),
     ...(tags !== undefined ? { tags } : {}),
+    ...(fields !== undefined ? { fields } : {}),
     ...(playlistId !== undefined ? { playlist_id: fleetLinkPlaylistId(playlistId) } : {}),
     ...(maxScreens !== undefined ? { max_screens: Number(fleetLinkMaxScreens(maxScreens)) } : {}),
     ...(expiresAt !== undefined ? { expires_at: fleetLinkExpiresAt(expiresAt) } : {}),
@@ -9078,6 +9080,7 @@ export const handleFleetLinksUpdate = commandHandler(async (args, runtime, resol
   const id = fleetLinkId(args.positionals[2], "update");
   const name = flagString(args.flags, "name");
   const tags = fleetLinkTagList(args);
+  const fields = fieldMap(flagString(args.flags, "field"));
   const playlistId = flagString(args.flags, "playlist-id");
   const maxScreens = flagString(args.flags, "max-screens");
   const expiresAt = flagString(args.flags, "expires-at");
@@ -9087,6 +9090,8 @@ export const handleFleetLinksUpdate = commandHandler(async (args, runtime, resol
     ...(flagBool(args.flags, "disable") ? { enabled: false } : {}),
     ...(tags !== undefined ? { tags } : {}),
     ...(flagBool(args.flags, "clear-tags") ? { tags: [] } : {}),
+    ...(fields !== undefined ? { fields } : {}),
+    ...(flagBool(args.flags, "clear-fields") ? { fields: null } : {}),
     ...(playlistId !== undefined ? { playlist_id: fleetLinkPlaylistId(playlistId) } : {}),
     ...(flagBool(args.flags, "clear-playlist") ? { playlist_id: null } : {}),
     ...(maxScreens !== undefined ? { max_screens: Number(fleetLinkMaxScreens(maxScreens)) } : {}),
@@ -9095,7 +9100,7 @@ export const handleFleetLinksUpdate = commandHandler(async (args, runtime, resol
     ...(flagBool(args.flags, "clear-expires-at") ? { expires_at: null } : {}),
   };
   if (!Object.keys(patch).length) {
-    throw usageError("fleet-links update requires at least one of --name, --enable, --disable, --tag, --clear-tags, --playlist-id, --clear-playlist, --max-screens, --clear-max-screens, --expires-at, or --clear-expires-at.");
+    throw usageError("fleet-links update requires at least one of --name, --enable, --disable, --tag, --clear-tags, --field, --clear-fields, --playlist-id, --clear-playlist, --max-screens, --clear-max-screens, --expires-at, or --clear-expires-at.");
   }
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await fleetLinkCall(client, {

@@ -183,6 +183,7 @@ export function fleetLinkLines(link: FleetLink | undefined, now: Date): string[]
     `label: ${link.label}`,
     `enabled: ${link.enabled}`,
     `tags: ${(link.tags ?? []).join(", ")}`,
+    ...when(Object.entries(link.fields ?? {}).map(([name, value]) => `${name}=${value}`).join(", "), "fields"),
     ...when(link.playlist_id, "playlist_id"),
     `screens_created: ${link.screens_created ?? 0}`,
     ...when(link.max_screens, "max_screens"),

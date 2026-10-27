@@ -1438,6 +1438,8 @@ export interface FleetLink {
   url?: string;
   /** Present and true when url was withheld from a Read only credential. */
   url_redacted?: boolean;
+  /** Fields each screen the link creates starts with; absent when none. */
+  fields?: Record<string, string>;
 }
 
 export interface FleetLinkList {
@@ -1451,6 +1453,7 @@ export interface FleetLinkWrite {
   playlist_id?: string;
   max_screens?: number;
   expires_at?: string;
+  fields?: Record<string, string>;
 }
 
 export interface FleetLinkPatch {
@@ -1463,6 +1466,8 @@ export interface FleetLinkPatch {
   max_screens?: number | null;
   /** null removes the expiry. */
   expires_at?: string | null;
+  /** Replaces the whole preset; null clears it. */
+  fields?: Record<string, string> | null;
 }
 
 /** Exactly one of tag and screen_ids. */

@@ -6,7 +6,7 @@ import { test } from "node:test";
 import type { Screen } from "./adapters/protocol.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
-import { fleetLinkExpiresAt, fleetLinkUrlProblem } from "./fleet-links.js";
+import { fleetLinkExpiresAt, fleetLinkLines, fleetLinkUrlProblem } from "./fleet-links.js";
 import { createMemoryLogger } from "./log/logger.js";
 import type { OperationLogger } from "./log/types.js";
 import { run, type CliRuntime } from "./main.js";
@@ -495,7 +495,7 @@ test("fleet-links update sets, moves and clears the expiry", async () => {
     [["--expires-at", "2027-04-01"], /RFC 3339 time with seconds and a zone/],
     [["--expires-at", "2027-04-01T00:00:00"], /RFC 3339 time with seconds and a zone/],
     [["--expires-at", "2027-04-01T00:00:00Z", "--expires-at", "2027-05-01T00:00:00Z"], /only once/],
-    [[], /at least one of --name or --enable or --disable or --tag or --clear-tags or --playlist-id or --clear-playlist or --max-screens or --clear-max-screens or --expires-at or --clear-expires-at/],
+    [[], /at least one of --name or --enable or --disable or --tag or --clear-tags or --field or --clear-fields or --playlist-id or --clear-playlist or --max-screens or --clear-max-screens or --expires-at or --clear-expires-at/],
   ] as Array<[string[], RegExp]>) {
     const refused = await cli(["--json", "fleet-links", "update", id, ...args], transport, env);
     assert.equal(refused.code, ExitCode.Usage, `${args.join(" ")}: ${refused.stdout}`);
@@ -628,4 +628,39 @@ test("screen show names the fleet link that created the screen", async () => {
 test("redaction masks fleet link secrets and #fleet= fragments in free text", () => {
   assert.equal(redactText(`open ${SAFE_URL} now`), "open https://play.screenrig.ai/player/#fleet=*** now");
   assert.equal(redactText(`secret ${SECRET} end`), "secret srfl_*** end");
+});
+
+test("fleet-links create and update preset the fields every new screen starts with", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const created = await cli(["--json", "fleet-links", "create", "--name", "Stores", "--field", "region=north", "--field", "chain= Acme Foods "], transport, env);
+  assert.equal(created.code, 0, created.stdout);
+  assert.deepEqual(linkCalls(transport).at(-1)!.body, { label: "Stores", fields: { region: "north", chain: "Acme Foods" } });
+  const id = created.envelope.data.id as string;
+
+  const replaced = await cli(["--json", "fleet-links", "update", id, "--field", "region=south"], transport, env);
+  assert.equal(replaced.code, 0, replaced.stdout);
+  assert.deepEqual(linkCalls(transport).at(-1)!.body, { fields: { region: "south" } });
+  const cleared = await cli(["--json", "fleet-links", "update", id, "--clear-fields"], transport, env);
+  assert.equal(cleared.code, 0, cleared.stdout);
+  assert.deepEqual(linkCalls(transport).at(-1)!.body, { fields: null });
+
+  const before = transport.calls.length;
+  for (const [args, message] of [
+    [["create", "--name", "Bad", "--field", "Region=north"], /lower case letters, digits or underscores/],
+    [["create", "--name", "Bad", "--field", "region"], /NAME=VALUE/],
+    [["create", "--name", "Bad", "--field", "region=a", "--field", "region=b"], /more than once/],
+    [["update", id, "--field", "region=a", "--clear-fields"], /--clear-fields cannot be used with --field|--field cannot be used with --clear-fields/],
+  ] as Array<[string[], RegExp]>) {
+    const refused = await cli(["--json", "fleet-links", ...args], transport, env);
+    assert.equal(refused.code, ExitCode.Usage, `${args.join(" ")}: ${refused.stdout}`);
+    assert.match(refused.envelope.error!.detail, message);
+  }
+  assert.equal(transport.calls.length, before, "invalid input never reaches the server");
+});
+
+test("a fleet link's preset fields print as one line", () => {
+  const link = { id: "flk_1", label: "Stores", enabled: true, tags: [], fields: { region: "north", chain: "Acme" }, screens_created: 0, revision: 1 } as unknown as Parameters<typeof fleetLinkLines>[0];
+  assert.ok(fleetLinkLines(link, new Date(0)).includes("fields: region=north, chain=Acme"));
+  assert.ok(!fleetLinkLines({ ...link!, fields: undefined }, new Date(0)).some((line) => line.startsWith("fields:")));
 });

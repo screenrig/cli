@@ -2896,6 +2896,88 @@ paths:
                 $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/screens/{id}/fields:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: patchScreenFields
+      description: >-
+        A signed-in person changes a screen's fields with updateScreen's merge patch: a string sets a field, null removes it, and a null fields clears every field. A refused name or value, or a thirty-third field, is invalid_request at fields or fields.NAME. The screen revision moves by one, a screen that shows a playlist gets a new manifest revision, and the event carries details.fields and the person as its actor. The body has no other member. If-Match carries the screen revision and is required (invalid_request when absent, revision_conflict when stale). The dashboard session only; agents use PATCH /api/screens/{id} (updateScreen).
+      security:
+        - dashboardSession: []
+      parameters:
+        - {name: If-Match, in: header, required: true, schema: {type: string}, description: "The screen's current revision, quoted or bare (the ETag of the last read). A stale revision is revision_conflict with current_revision."}
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenFieldsPatch'
+      responses:
+        '200':
+          description: The screen as stored now; ETag carries its revision.
+          headers:
+            ETag:
+              description: Quoted screen revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/screens/{id}/location:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: patchScreenLocation
+      description: >-
+        A signed-in person sets or clears where a screen is with updateScreen's location: an object with latitude, longitude and an optional name and address replaces the location whole, and null clears it. A missing or mistyped member, a coordinate out of range, a name over 40 characters or an address over 200 is invalid_request at location.MEMBER. The screen revision moves by one, a screen that shows a playlist gets a new manifest revision, and the event carries details.location and the person as its actor. The body has no other member. If-Match carries the screen revision and is required (invalid_request when absent, revision_conflict when stale). The dashboard session only; agents use PATCH /api/screens/{id} (updateScreen).
+      security:
+        - dashboardSession: []
+      parameters:
+        - {name: If-Match, in: header, required: true, schema: {type: string}, description: "The screen's current revision, quoted or bare (the ETag of the last read). A stale revision is revision_conflict with current_revision."}
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenLocationPatch'
+      responses:
+        '200':
+          description: The screen as stored now; ETag carries its revision.
+          headers:
+            ETag:
+              description: Quoted screen revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/screens/{id}/public-id/rotate:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -12681,6 +12763,62 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/billing/portal-sessions:
+    servers:
+      - url: https://screenrig.ai
+    post:
+      operationId: createOrganizationPortal
+      description: Requires a designated admin of a live organization, exact same-origin cookie authentication and JWT CSRF. Actor and return URL are server-owned. Response is private and no-store.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: org_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyPaymentRequest'
+      responses:
+        '201':
+          description: Billing management result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingPortalSession'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/billing/auto-top-up:
+    servers:
+      - url: https://screenrig.ai
+    put:
+      operationId: setOrganizationAutoTopUp
+      description: Requires a designated admin of a live organization, exact same-origin cookie authentication and JWT CSRF. The actor is server-owned. Disabling preserves saved amounts and monthly spend; amount fields are ignored when disabled. Response is private and no-store. Changing settings clears a recoverable pause only after any failed payable invoice is safely voided.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: org_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutoTopUpSettings'
+      responses:
+        '200':
+          description: Billing management result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutoTopUpView'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/organizations/{org_id}/billing/payments:
     servers:
       - url: https://screenrig.ai
@@ -19830,6 +19968,56 @@ components:
         api_events:
           $ref: "#/components/schemas/McrString"
           description: Metered API requests, billed project stream events and webhook delivery attempts.
+    EmptyPaymentRequest:
+      type: object
+      additionalProperties: false
+    BillingPortalSession:
+      type: object
+      required: [url]
+      properties:
+        url: {type: string, description: Short-lived hosted portal capability. Never log or cache it.}
+    AutoTopUpSettings:
+      oneOf:
+        - $ref: '#/components/schemas/AutoTopUpEnabledSettings'
+        - $ref: '#/components/schemas/AutoTopUpDisabledSettings'
+    AutoTopUpEnabledSettings:
+      type: object
+      additionalProperties: false
+      required: [enabled, threshold_cents, amount_cents, monthly_limit_cents]
+      properties:
+        enabled: {type: boolean, enum: [true]}
+        threshold_cents: {type: integer, format: int64, minimum: 100, maximum: 1000000, multipleOf: 100}
+        amount_cents: {type: integer, format: int64, minimum: 10000, maximum: 1000000, multipleOf: 100}
+        monthly_limit_cents: {type: integer, format: int64, minimum: 0, maximum: 100000000, multipleOf: 100, description: Zero explicitly selects unlimited. A nonzero limit must cover at least one top-up.}
+    AutoTopUpDisabledSettings:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      description: Disabling preserves saved amounts and monthly spend. Optional amount fields are ignored, including unfinished drafts.
+      properties:
+        enabled: {type: boolean, enum: [false]}
+        threshold_cents: {type: integer, format: int64, nullable: true}
+        amount_cents: {type: integer, format: int64, nullable: true}
+        monthly_limit_cents: {type: integer, format: int64, nullable: true}
+    AutoTopUpView:
+      type: object
+      required: [enabled, threshold_cents, amount_cents, monthly_limit_cents, paused, this_month_cents]
+      properties:
+        enabled: {type: boolean}
+        threshold_cents: {type: integer, format: int64}
+        amount_cents: {type: integer, format: int64}
+        monthly_limit_cents: {type: integer, format: int64}
+        paused: {type: boolean}
+        paused_reason: {type: string}
+        this_month_cents: {type: integer, format: int64}
+    BillingPaymentMethod:
+      type: object
+      required: [brand, last4, exp_month, exp_year]
+      properties:
+        brand: {type: string}
+        last4: {type: string}
+        exp_month: {type: integer}
+        exp_year: {type: integer}
     CreditPurchase:
       type: object
       required: [id, status, amount_cents, credits, credited]
@@ -19853,6 +20041,13 @@ components:
       type: object
       required: [organization_id, available, local_simulation, purchases]
       properties:
+        billing_account: {type: boolean}
+        payment_method:
+          allOf: [{$ref: '#/components/schemas/BillingPaymentMethod'}]
+          nullable: true
+        auto_top_up:
+          allOf: [{$ref: '#/components/schemas/AutoTopUpView'}]
+          nullable: true
         organization_id:
           type: string
         available:
@@ -20953,6 +21148,30 @@ components:
         A screen's complete new tag set (patchScreenTags). The array replaces every tag the screen carries and an empty array clears them. The body has no other member.
       properties:
         tags: {$ref: "#/components/schemas/ScreenTags"}
+    ScreenFieldsPatch:
+      type: object
+      additionalProperties: false
+      required: [fields]
+      description: >-
+        A change of a screen's fields (patchScreenFields). The body has no other member.
+      properties:
+        fields:
+          anyOf:
+            - type: object
+              propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}
+              additionalProperties: {anyOf: [{type: string, minLength: 1, maxLength: 200}, {type: "null"}]}
+            - type: "null"
+          description: "Merges into the screen's own values, such as a store number or a region: a string sets a field, null removes it, and a null fields clears every field. Names are 1 to 32 lower case letters, digits or underscores; values 1 to 200 characters after trimming; a screen carries at most 32 fields."
+    ScreenLocationPatch:
+      type: object
+      additionalProperties: false
+      required: [location]
+      description: >-
+        A change of where a screen is (patchScreenLocation). The body has no other member.
+      properties:
+        location:
+          anyOf: [{$ref: "#/components/schemas/ScreenLocation"}, {type: "null"}]
+          description: "Where the screen is: the object replaces the whole location and null clears it."
     PairScreen: {type: object, additionalProperties: false, required: [code], properties: {code: {type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$"}, label: {type: string, minLength: 1, maxLength: 120}}}
     ProvisionScreen: {type: object, additionalProperties: false, properties: {label: {type: string, minLength: 1, maxLength: 120}}}
     ScreenProvisioning: {type: object, additionalProperties: false, required: [screen, public_url, provisioning_url, expires_at], properties: {screen: {$ref: "#/components/schemas/Screen"}, public_url: {type: string, format: uri}, provisioning_url: {type: string, pattern: "^https?://[^#]+/s/[^#]+#provision=[A-Za-z0-9_-]{43}$"}, expires_at: {type: string, format: date-time}}}
