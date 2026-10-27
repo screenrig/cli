@@ -2,6 +2,7 @@ import type { Warning } from "./envelope.js";
 import { CliError, usageError } from "./problems.js";
 import type { FleetLink } from "./adapters/protocol.js";
 import { isResourceID } from "./generated/resource-ids.js";
+import { normalizeInstant } from "./screen-control.js";
 import { SCREEN_TAGS_MAX, screenTagList } from "./screen-fleet.js";
 
 /** Backend FleetLink.id shape (vendor/openapi.yaml). */
@@ -56,6 +57,18 @@ export function fleetLinkMaxScreens(value: string): string {
     throw usageError(`--max-screens must be a whole number from 1 to ${FLEET_LINK_MAX_SCREENS}.`);
   }
   return value;
+}
+
+/**
+ * --expires-at: an RFC 3339 date-time with seconds and a zone, sent as the UTC
+ * instant it names. A time already past is allowed: the link expires at once.
+ */
+export function fleetLinkExpiresAt(value: string): string {
+  const instant = normalizeInstant(value);
+  if (instant === undefined) {
+    throw usageError("--expires-at takes an RFC 3339 time with seconds and a zone, such as 2026-12-31T23:59:59Z or 2026-12-31T18:00:00-05:00.");
+  }
+  return instant;
 }
 
 /**
@@ -151,17 +164,30 @@ function screensCell(link: FleetLink): string {
   return link.max_screens === undefined ? created : `${created}/${link.max_screens}`;
 }
 
+/** Whether the link is past its expires_at (it expires at that instant); false without one or when it cannot be read. */
+function fleetLinkExpired(link: FleetLink, now: Date): boolean {
+  const expires = link.expires_at ? Date.parse(link.expires_at) : Number.NaN;
+  return Number.isFinite(expires) && expires <= now.getTime();
+}
+
+/** expires_at as the server returned it, marked once it has passed; empty when the link never expires. */
+function expiryText(link: FleetLink, now: Date): string {
+  return link.expires_at ? `${link.expires_at}${fleetLinkExpired(link, now) ? " (expired)" : ""}` : "";
+}
+
 /** Every field except url, which is printed apart under its own sensitive label. */
-export function fleetLinkLines(link: FleetLink | undefined): string[] {
+export function fleetLinkLines(link: FleetLink | undefined, now: Date): string[] {
   if (!link) return [];
   return [
     `id: ${link.id}`,
     `label: ${link.label}`,
     `enabled: ${link.enabled}`,
     `tags: ${(link.tags ?? []).join(", ")}`,
+    ...when(Object.entries(link.fields ?? {}).map(([name, value]) => `${name}=${value}`).join(", "), "fields"),
     ...when(link.playlist_id, "playlist_id"),
     `screens_created: ${link.screens_created ?? 0}`,
     ...when(link.max_screens, "max_screens"),
+    ...when(expiryText(link, now), "expires_at"),
     ...when(link.last_used_at, "last_used_at"),
     `revision: ${link.revision}`,
     ...when(link.created_at, "created_at"),
@@ -195,10 +221,13 @@ function table(header: string[], rows: string[][]): string[] {
   return [render(header), ...rows.map(render)];
 }
 
-/** The list table never prints url. */
-export function fleetLinkTableLines(items: FleetLink[]): string[] {
+/** The list table never prints url. EXPIRES appears only while a listed link has an expiry, and marks a link past it. */
+export function fleetLinkTableLines(items: FleetLink[], now: Date): string[] {
   if (!items.length) return ["No fleet links"];
-  return table(["ID", "LABEL", "ENABLED", "SCREENS", "TAGS", "LAST_USED"], items.map((item) => [
-    item.id ?? "", item.label ?? "", String(item.enabled), screensCell(item), (item.tags ?? []).join(","), item.last_used_at ?? "",
+  const expiry = items.some((item) => item.expires_at);
+  return table(["ID", "LABEL", "ENABLED", "SCREENS", ...(expiry ? ["EXPIRES"] : []), "TAGS", "LAST_USED"], items.map((item) => [
+    item.id ?? "", item.label ?? "", String(item.enabled), screensCell(item),
+    ...(expiry ? [expiryText(item, now)] : []),
+    (item.tags ?? []).join(","), item.last_used_at ?? "",
   ]));
 }

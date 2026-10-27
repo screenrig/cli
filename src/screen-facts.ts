@@ -93,6 +93,14 @@ function fieldOption(hint: string): (input: string, previous?: string) => string
 export const screenFieldSetOption = fieldOption(" --unset-field NAME removes a field.");
 /** screen list --field NAME=VALUE: every one must match. */
 export const screenFieldFilterOption = fieldOption("");
+/** fleet-links create|update --field NAME=VALUE: the fields every screen the link creates starts with. */
+export const fleetLinkFieldOption = fieldOption("");
+
+/** An accumulated --field value as a name-to-value map; undefined without one. */
+export function fieldMap(accumulated: string | undefined): Record<string, string> | undefined {
+  if (accumulated === undefined) return undefined;
+  return Object.fromEntries(fieldEntries(accumulated).map((entry) => [entry.name, entry.value]));
+}
 
 /** screen update --unset-field NAME, repeatable: names accumulate newline-separated. */
 export function screenUnsetFieldOption(input: string, previous?: string): string {

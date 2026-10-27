@@ -16,7 +16,7 @@ info:
 
     Authenticated user or agent /api and /api/playlists requests cost 1 credit, debited immediately against this server request id, after the first 10,000 API or billed listen-stream taxes in the UTC month. On Standard, remaining below the intro floor of negative 1,000,000 credits (zero from 2027-01-01) is payment_required; that includes the /api/playlists routes. Premium, Enterprise, Staff and Promo are never refused for their balance: usage is charged in full and remaining may go negative. GET /api/project, POST /api/agents/self/disconnect and the GET /api/billing reads do not debit, so a zero-remaining project can recover. Reading project notes (GET /api/notes and GET /api/notes/{id}) does not debit either; writing them does. Screen messages are exempt from this meter: POST /api/screens/{id}/toast, POST /api/screens/{id}/play-page, POST /api/screens/{id}/identify, POST /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot, and GET /api/screens/{id}/screenshot/status. Runtime, pairing, content, health, and unauthenticated routes are not this meter. Inbound media commit, application accept, and K/V put bytes, outbound runtime media/package/release and K/V get bytes are recorded, never charged: bandwidth is free on every plan. Stored bytes settle hourly against remaining, and only the bytes a payer stores above its free 1 GB (1,000,000,000 bytes) count. Public remaining stays whole credits.
 
-    Opening GET /stream/project costs 1 credit as the listen subscribe. Later billed events on that stream cost 1 credit each. Screen conversation events are exempt: screen.*, runtime.*, and application.event. Heartbeats and the retry preamble never charge. playlist.*, media.*, kv.*, application.published, operation.*, project.*, feedback.*, stream.cursor, and stream.resync_required are billed. GET /stream/project bills arriving events under this same per-event meter and the same exemption set; like every SSE response it omits the ScreenRig-Credits-* headers. A dashboard session reads the same whole-credit balance through GET /api/balance, which never debits and remains available at zero. SSE debit idempotency is sse-event:<project_id>:<sequence>; reconnect replay is free. An unpaid billed event is not written and the stream closes.
+    Opening GET /stream/project costs 1 credit as the listen subscribe. Later billed events on that stream cost 1 credit each. Screen conversation events are exempt: screen.*, runtime.*, alert_mute.*, and application.event. Heartbeats and the retry preamble never charge. playlist.*, media.*, kv.*, application.published, operation.*, project.*, feedback.*, stream.cursor, and stream.resync_required are billed. GET /stream/project bills arriving events under this same per-event meter and the same exemption set; like every SSE response it omits the ScreenRig-Credits-* headers. A dashboard session reads the same whole-credit balance through GET /api/balance, which never debits and remains available at zero. SSE debit idempotency is sse-event:<project_id>:<sequence>; reconnect replay is free. An unpaid billed event is not written and the stream closes.
 
     The URL major is the compatibility boundary for the /api, /screen, /media, and /api families. This document's info.version is the contract-document version, not a URL or product API major. The lifecycle policy is recorded in x-api-lifecycle below.
 
@@ -2896,6 +2896,88 @@ paths:
                 $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/screens/{id}/fields:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: patchScreenFields
+      description: >-
+        A signed-in person changes a screen's fields with updateScreen's merge patch: a string sets a field, null removes it, and a null fields clears every field. A refused name or value, or a thirty-third field, is invalid_request at fields or fields.NAME. The screen revision moves by one, a screen that shows a playlist gets a new manifest revision, and the event carries details.fields and the person as its actor. The body has no other member. If-Match carries the screen revision and is required (invalid_request when absent, revision_conflict when stale). The dashboard session only; agents use PATCH /api/screens/{id} (updateScreen).
+      security:
+        - dashboardSession: []
+      parameters:
+        - {name: If-Match, in: header, required: true, schema: {type: string}, description: "The screen's current revision, quoted or bare (the ETag of the last read). A stale revision is revision_conflict with current_revision."}
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenFieldsPatch'
+      responses:
+        '200':
+          description: The screen as stored now; ETag carries its revision.
+          headers:
+            ETag:
+              description: Quoted screen revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/screens/{id}/location:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: patchScreenLocation
+      description: >-
+        A signed-in person sets or clears where a screen is with updateScreen's location: an object with latitude, longitude and an optional name and address replaces the location whole, and null clears it. A missing or mistyped member, a coordinate out of range, a name over 40 characters or an address over 200 is invalid_request at location.MEMBER. The screen revision moves by one, a screen that shows a playlist gets a new manifest revision, and the event carries details.location and the person as its actor. The body has no other member. If-Match carries the screen revision and is required (invalid_request when absent, revision_conflict when stale). The dashboard session only; agents use PATCH /api/screens/{id} (updateScreen).
+      security:
+        - dashboardSession: []
+      parameters:
+        - {name: If-Match, in: header, required: true, schema: {type: string}, description: "The screen's current revision, quoted or bare (the ETag of the last read). A stale revision is revision_conflict with current_revision."}
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenLocationPatch'
+      responses:
+        '200':
+          description: The screen as stored now; ETag carries its revision.
+          headers:
+            ETag:
+              description: Quoted screen revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/screens/{id}/public-id/rotate:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -4876,7 +4958,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: streamEvents
-      description: Replayable project listen stream. Player log records (runtime.reported) are read with GET /api/events?source=log and are not on this stream. Opening this request costs 1 credit as the listen subscribe. Credit headers are omitted. Later billed events cost 1 credit each; screen.*, runtime.*, and application.event are exempt screen-conversation messages. Heartbeats and the retry preamble never charge. stream.cursor and stream.resync_required are billed. Debit idempotency is sse-event:<project_id>:<sequence>, so reconnect replay is free. An unpaid billed event is not written and the stream closes. A stream opened with a dashboard session bills nothing (neither the open nor its events), like the dashboard's API requests; it still takes one of the project's stream slots.
+      description: Replayable project listen stream. Player log records (runtime.reported) are read with GET /api/events?source=log and are not on this stream. Opening this request costs 1 credit as the listen subscribe. Credit headers are omitted. Later billed events cost 1 credit each; screen.*, runtime.*, alert_mute.*, and application.event are exempt. Heartbeats and the retry preamble never charge. stream.cursor and stream.resync_required are billed. Debit idempotency is sse-event:<project_id>:<sequence>, so reconnect replay is free. An unpaid billed event is not written and the stream closes. A stream opened with a dashboard session bills nothing (neither the open nor its events), like the dashboard's API requests; it still takes one of the project's stream slots.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -9116,6 +9198,179 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/alerts:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listAlerts
+      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema: {type: string, enum: [open, resolved, all], default: open}
+        - name: screen_id
+          in: query
+          required: false
+          schema: {type: string, maxLength: 200}
+        - name: before
+          in: query
+          required: false
+          description: next_cursor of the previous page.
+          schema: {type: string, maxLength: 200}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 100}
+      responses:
+        '200':
+          description: One page of alerts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertList'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/alerts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getAlert
+      description: One alert.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The alert.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/alerts/{id}/acknowledge:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: acknowledgeAlert
+      description: 'Acknowledges an open alert: someone is on it. Without until it stays acknowledged until it resolves; with until (at most 30 days ahead) it is snoozed and needs attention again at that instant if it is still open. While acknowledged or snoozed, a notification''s notice about it that is still in its hold is skipped (acknowledged). A later acknowledge replaces the earlier one. Appends screen.alert_acknowledged. A resolved alert is alert_not_open.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertAcknowledge'
+      responses:
+        '200':
+          description: The acknowledged alert.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+        '409':
+          description: alert_not_open.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/alert-mutes:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listAlertMutes
+      description: Lists the project's mutes that have not ended, soonest end first (at most 50).
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The project's current mutes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createAlertMute
+      description: 'Mutes screens for maintenance until an instant at most 30 days ahead: the screens named by screen_ids, and every screen carrying any of tags at the time a notice is due. Their alerts still open and resolve, marked muted, and never need attention; every notification''s notices about them are skipped (muted). A project has at most 50 current mutes (alert_mute_limit_reached). Appends alert_mute.created.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertMuteWrite'
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMute'
+        '409':
+          description: alert_mute_limit_reached or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/alert-mutes/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteAlertMute
+      description: Ends a mute now and appends alert_mute.deleted.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Ended.
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/notifications:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -12679,6 +12934,62 @@ paths:
                 $ref: '#/components/schemas/DashboardSummary'
         '401':
           $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/billing/portal-sessions:
+    servers:
+      - url: https://screenrig.ai
+    post:
+      operationId: createOrganizationPortal
+      description: Requires a designated admin of a live organization, exact same-origin cookie authentication and JWT CSRF. Actor and return URL are server-owned. Response is private and no-store.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: org_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyPaymentRequest'
+      responses:
+        '201':
+          description: Billing management result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingPortalSession'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/organizations/{org_id}/billing/auto-top-up:
+    servers:
+      - url: https://screenrig.ai
+    put:
+      operationId: setOrganizationAutoTopUp
+      description: Requires a designated admin of a live organization, exact same-origin cookie authentication and JWT CSRF. The actor is server-owned. Disabling preserves saved amounts and monthly spend; amount fields are ignored when disabled. Response is private and no-store. Changing settings clears a recoverable pause only after any failed payable invoice is safely voided.
+      security:
+        - dashboardSession: []
+      parameters:
+        - name: org_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutoTopUpSettings'
+      responses:
+        '200':
+          description: Billing management result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutoTopUpView'
         default:
           $ref: '#/components/responses/Problem'
   /api/organizations/{org_id}/billing/payments:
@@ -16290,6 +16601,97 @@ paths:
                 $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/alerts:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listAlertsInProject
+      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
+      security:
+        - projectBearer: []
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema: {type: string, enum: [open, resolved, all], default: open}
+        - name: screen_id
+          in: query
+          required: false
+          schema: {type: string, maxLength: 200}
+        - name: before
+          in: query
+          required: false
+          description: next_cursor of the previous page.
+          schema: {type: string, maxLength: 200}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 100}
+      responses:
+        '200':
+          description: One page of alerts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertList'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/alert-mutes:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listAlertMutesInProject
+      description: Lists the project's mutes that have not ended, soonest end first (at most 50).
+      security:
+        - projectBearer: []
+      responses:
+        '200':
+          description: The project's current mutes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMuteList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createAlertMuteInProject
+      description: 'Mutes screens for maintenance until an instant at most 30 days ahead: the screens named by screen_ids, and every screen carrying any of tags at the time a notice is due. Their alerts still open and resolve, marked muted, and never need attention; every notification''s notices about them are skipped (muted). A project has at most 50 current mutes (alert_mute_limit_reached). Appends alert_mute.created.'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertMuteWrite'
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertMute'
+        '409':
+          description: alert_mute_limit_reached or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/notifications:
     parameters:
       - name: project_id
@@ -19830,6 +20232,56 @@ components:
         api_events:
           $ref: "#/components/schemas/McrString"
           description: Metered API requests, billed project stream events and webhook delivery attempts.
+    EmptyPaymentRequest:
+      type: object
+      additionalProperties: false
+    BillingPortalSession:
+      type: object
+      required: [url]
+      properties:
+        url: {type: string, description: Short-lived hosted portal capability. Never log or cache it.}
+    AutoTopUpSettings:
+      oneOf:
+        - $ref: '#/components/schemas/AutoTopUpEnabledSettings'
+        - $ref: '#/components/schemas/AutoTopUpDisabledSettings'
+    AutoTopUpEnabledSettings:
+      type: object
+      additionalProperties: false
+      required: [enabled, threshold_cents, amount_cents, monthly_limit_cents]
+      properties:
+        enabled: {type: boolean, enum: [true]}
+        threshold_cents: {type: integer, format: int64, minimum: 100, maximum: 1000000, multipleOf: 100}
+        amount_cents: {type: integer, format: int64, minimum: 10000, maximum: 1000000, multipleOf: 100}
+        monthly_limit_cents: {type: integer, format: int64, minimum: 0, maximum: 100000000, multipleOf: 100, description: Zero explicitly selects unlimited. A nonzero limit must cover at least one top-up.}
+    AutoTopUpDisabledSettings:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      description: Disabling preserves saved amounts and monthly spend. Optional amount fields are ignored, including unfinished drafts.
+      properties:
+        enabled: {type: boolean, enum: [false]}
+        threshold_cents: {type: integer, format: int64, nullable: true}
+        amount_cents: {type: integer, format: int64, nullable: true}
+        monthly_limit_cents: {type: integer, format: int64, nullable: true}
+    AutoTopUpView:
+      type: object
+      required: [enabled, threshold_cents, amount_cents, monthly_limit_cents, paused, this_month_cents]
+      properties:
+        enabled: {type: boolean}
+        threshold_cents: {type: integer, format: int64}
+        amount_cents: {type: integer, format: int64}
+        monthly_limit_cents: {type: integer, format: int64}
+        paused: {type: boolean}
+        paused_reason: {type: string}
+        this_month_cents: {type: integer, format: int64}
+    BillingPaymentMethod:
+      type: object
+      required: [brand, last4, exp_month, exp_year]
+      properties:
+        brand: {type: string}
+        last4: {type: string}
+        exp_month: {type: integer}
+        exp_year: {type: integer}
     CreditPurchase:
       type: object
       required: [id, status, amount_cents, credits, credited]
@@ -19853,6 +20305,13 @@ components:
       type: object
       required: [organization_id, available, local_simulation, purchases]
       properties:
+        billing_account: {type: boolean}
+        payment_method:
+          allOf: [{$ref: '#/components/schemas/BillingPaymentMethod'}]
+          nullable: true
+        auto_top_up:
+          allOf: [{$ref: '#/components/schemas/AutoTopUpView'}]
+          nullable: true
         organization_id:
           type: string
         available:
@@ -20953,6 +21412,30 @@ components:
         A screen's complete new tag set (patchScreenTags). The array replaces every tag the screen carries and an empty array clears them. The body has no other member.
       properties:
         tags: {$ref: "#/components/schemas/ScreenTags"}
+    ScreenFieldsPatch:
+      type: object
+      additionalProperties: false
+      required: [fields]
+      description: >-
+        A change of a screen's fields (patchScreenFields). The body has no other member.
+      properties:
+        fields:
+          anyOf:
+            - type: object
+              propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}
+              additionalProperties: {anyOf: [{type: string, minLength: 1, maxLength: 200}, {type: "null"}]}
+            - type: "null"
+          description: "Merges into the screen's own values, such as a store number or a region: a string sets a field, null removes it, and a null fields clears every field. Names are 1 to 32 lower case letters, digits or underscores; values 1 to 200 characters after trimming; a screen carries at most 32 fields."
+    ScreenLocationPatch:
+      type: object
+      additionalProperties: false
+      required: [location]
+      description: >-
+        A change of where a screen is (patchScreenLocation). The body has no other member.
+      properties:
+        location:
+          anyOf: [{$ref: "#/components/schemas/ScreenLocation"}, {type: "null"}]
+          description: "Where the screen is: the object replaces the whole location and null clears it."
     PairScreen: {type: object, additionalProperties: false, required: [code], properties: {code: {type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$"}, label: {type: string, minLength: 1, maxLength: 120}}}
     ProvisionScreen: {type: object, additionalProperties: false, properties: {label: {type: string, minLength: 1, maxLength: 120}}}
     ScreenProvisioning: {type: object, additionalProperties: false, required: [screen, public_url, provisioning_url, expires_at], properties: {screen: {$ref: "#/components/schemas/Screen"}, public_url: {type: string, format: uri}, provisioning_url: {type: string, pattern: "^https?://[^#]+/s/[^#]+#provision=[A-Za-z0-9_-]{43}$"}, expires_at: {type: string, format: date-time}}}
@@ -22086,7 +22569,7 @@ components:
       additionalProperties: false
       required: [id, url, event_types, enabled, revision, status, created_at, updated_at]
       description: >-
-        A project webhook. Player log records (runtime.reported) are not delivered. Each matching project event is POSTed to url as the same JSON object GET /api/events returns, with headers ScreenRig-Webhook-Id, ScreenRig-Event-Id (the event cursor, stable across retries), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; any other status, a redirect (never followed), a timeout, or a connection or TLS failure is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed. After three consecutive timeouts the attempt timeout drops to 5 seconds until a response arrives. A webhook has at most one attempt in flight and a project at most two, across all servers. Delivery is at least once and unordered; deduplicate on ScreenRig-Event-Id. Each attempt is metered like a listen-stream event (1 credit after the monthly 10,000 API/SSE allowance), and the same events that are free on the listen stream are free here: screen.*, runtime.*, application.event, playback.page_failed, and agent.command. An attempt refused before anything is sent (url_rejected, dns_failed) is not billed. payment_required and secret_unavailable back off but never count toward failing or auto-disable. status is failing while no delivery has succeeded since failing_since; after 72 hours of continuous failure the webhook is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
+        A project webhook. Player log records (runtime.reported) are not delivered. Each matching project event is POSTed to url as the same JSON object GET /api/events returns, with headers ScreenRig-Webhook-Id, ScreenRig-Event-Id (the event cursor, stable across retries), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; any other status, a redirect (never followed), a timeout, or a connection or TLS failure is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed. After three consecutive timeouts the attempt timeout drops to 5 seconds until a response arrives. A webhook has at most one attempt in flight and a project at most two, across all servers. Delivery is at least once and unordered; deduplicate on ScreenRig-Event-Id. Each attempt is metered like a listen-stream event (1 credit after the monthly 10,000 API/SSE allowance), and the same events that are free on the listen stream are free here: screen.*, runtime.*, alert_mute.*, application.event, playback.page_failed, and agent.command. An attempt refused before anything is sent (url_rejected, dns_failed) is not billed. payment_required and secret_unavailable back off but never count toward failing or auto-disable. status is failing while no delivery has succeeded since failing_since; after 72 hours of continuous failure the webhook is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
       properties:
         project_id: {type: string}
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?whk_[A-Za-z0-9_-]{16,24}$"}
@@ -22222,12 +22705,12 @@ components:
     WebhookDeliveryAttemptList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/WebhookDeliveryAttempt"}}}}
     NotificationCondition:
       type: string
-      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, crashing]
+      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, crashing]
       description: >-
-        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. Readers treat an unknown value as absent.
+        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. Readers treat an unknown value as absent.
     NotificationConditions:
       type: array
-      maxItems: 6
+      maxItems: 7
       uniqueItems: true
       items: {$ref: "#/components/schemas/NotificationCondition"}
     NotificationRecipients:
@@ -22280,7 +22763,7 @@ components:
       additionalProperties: false
       required: [id, channel, conditions, screen_tags, hold_minutes, enabled, revision, status, created_at, updated_at]
       description: >-
-        A project notification. Each condition is tracked per screen: it opens when its event arrives for a screen in scope, and a notice goes out once it has lasted hold_minutes and the screen is still in that state; when it clears after a notice went out, a resolved notice follows. A condition that clears within the hold sends nothing. Email: one email per recipient for everything that falls due within about two minutes, listing each screen and condition, with links to the screen and to this notification in the dashboard; notification emails are free. Webhook: each notice is POSTed as JSON {type: alert.opened or alert.resolved, id, notification_id, project_id, condition, screen {id, name}, since, at, event_id}, where id is the delivery id, since is when the condition began, at is when it held long enough (opened) or cleared (resolved), and event_id is the cursor of the event behind it. event_types are POSTed as the same JSON object GET /api/events returns. Every POST carries ScreenRig-Webhook-Id (the notification id), ScreenRig-Event-Id (the delivery id for a notice, the event cursor for an event; stable across retries, deduplicate on it), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; anything else is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed; email failures retry the same way. Screen notices and screen.* events are free; other events are metered like a listen-stream event. status is failing while nothing has succeeded since failing_since; after 72 hours of continuous failure the notification is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
+        A project notification. Each condition is tracked per screen: it opens when its event arrives for a screen in scope, and a notice goes out once it has lasted hold_minutes and the screen is still in that state; when it clears after a notice went out, a resolved notice follows. A condition that clears within the hold sends nothing, and neither does one whose alert is acknowledged or snoozed during the hold, or one on a screen a mute covers. Email: one email per recipient for everything that falls due within about two minutes, listing each screen and condition, with links to the screen and to this notification in the dashboard; notification emails are free. Webhook: each notice is POSTed as JSON {type: alert.opened or alert.resolved, id, notification_id, project_id, condition, screen {id, name}, since, at, event_id}, where id is the delivery id, since is when the condition began, at is when it held long enough (opened) or cleared (resolved), and event_id is the cursor of the event behind it. event_types are POSTed as the same JSON object GET /api/events returns. Every POST carries ScreenRig-Webhook-Id (the notification id), ScreenRig-Event-Id (the delivery id for a notice, the event cursor for an event; stable across retries, deduplicate on it), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; anything else is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed; email failures retry the same way. Screen notices and screen.* events are free; other events are metered like a listen-stream event. status is failing while nothing has succeeded since failing_since; after 72 hours of continuous failure the notification is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
       properties:
         project_id: {type: string}
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?(?:whk|ntf)_[A-Za-z0-9_-]{16,24}$"}
@@ -22332,7 +22815,7 @@ components:
         last_error:
           type: string
           description: >-
-            Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable, email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed, no_recipients (no recipient is a member with a verified address). Readers treat an unknown value as absent.
+            Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable, email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed (the notification is snoozed), acknowledged (someone acknowledged or snoozed the screen's alert during the hold), muted (a mute covers the screen), no_recipients (no recipient is a member with a verified address). Readers treat an unknown value as absent.
         last_duration_ms: {type: integer, minimum: 0}
         completed_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
@@ -22352,6 +22835,77 @@ components:
           description: Why the attempt failed, one of NotificationDelivery.last_error's failure classes; null when it succeeded.
         duration_ms: {type: integer, minimum: 0}
     NotificationDeliveryAttemptList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/NotificationDeliveryAttempt"}}}}
+    Alert:
+      type: object
+      additionalProperties: false
+      required: [id, screen_id, condition, state, since, muted, attention]
+      description: One screen condition while it lasts. Readers treat an unknown condition as a condition they cannot name.
+      properties:
+        project_id: {type: string}
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?alr_[A-Za-z0-9_-]{16,24}$"}
+        screen_id: {type: string}
+        screen_name: {type: string}
+        condition: {type: string, description: "A NotificationCondition other than crashing."}
+        state: {type: string, enum: [open, resolved]}
+        since: {type: string, format: date-time, description: When the condition began.}
+        resolved_at: {type: string, format: date-time}
+        acknowledged_at: {type: string, format: date-time}
+        acknowledged_by: {$ref: "#/components/schemas/AlertActor"}
+        snoozed_until: {type: string, format: date-time, description: Present on a snoozed alert; it needs attention again at this instant if still open.}
+        muted: {type: boolean, description: A current mute covers the screen.}
+        attention: {type: boolean, description: "Open, and not acknowledged, snoozed or muted."}
+    AlertActor:
+      type: object
+      additionalProperties: false
+      required: [kind, id]
+      properties:
+        kind: {type: string, description: "person or agent. Readers treat another value as unnamed."}
+        id: {type: string}
+        name: {type: string}
+    AlertList:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor, counts]
+      properties:
+        items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/Alert"}}
+        next_cursor: {anyOf: [{type: string}, {type: "null"}], description: Pass back as before for the next page; null at the end.}
+        counts:
+          type: object
+          additionalProperties: false
+          required: [open, attention]
+          description: The whole project's open alerts, whatever the page and filters.
+          properties:
+            open: {type: integer, minimum: 0}
+            attention: {type: integer, minimum: 0}
+    AlertAcknowledge:
+      type: object
+      additionalProperties: false
+      properties:
+        until: {type: string, format: date-time, description: "Snooze until this instant, at most 30 days ahead. Absent: acknowledged until the alert resolves."}
+    AlertMute:
+      type: object
+      additionalProperties: false
+      required: [id, screen_ids, tags, until, created_at]
+      properties:
+        project_id: {type: string}
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?amt_[A-Za-z0-9_-]{16,24}$"}
+        screen_ids: {type: array, items: {type: string}}
+        tags: {type: array, items: {type: string}}
+        until: {type: string, format: date-time}
+        note: {type: string}
+        created_by: {$ref: "#/components/schemas/AlertActor"}
+        created_at: {type: string, format: date-time}
+    AlertMuteWrite:
+      type: object
+      additionalProperties: false
+      required: [until]
+      description: At least one screen id or tag.
+      properties:
+        screen_ids: {type: array, maxItems: 100, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 200}}
+        tags: {$ref: "#/components/schemas/ScreenTags"}
+        until: {type: string, format: date-time, description: At most 30 days ahead.}
+        note: {type: string, maxLength: 200}
+    AlertMuteList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/AlertMute"}}}}
     NoteWrite:
       type: object
       additionalProperties: false
@@ -24277,6 +24831,8 @@ x-problem-codes:
   - playlist_format_mismatch
   - webhook_limit_reached
   - notification_limit_reached
+  - alert_not_open
+  - alert_mute_limit_reached
   - fleet_link_limit_reached
   - webhook_url_rejected
   - note_contains_credential
