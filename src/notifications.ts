@@ -16,6 +16,16 @@ export const NOTIFICATION_HOLD_MAX = 1440;
 /** The server allows a snooze at most 30 days ahead of its clock; --snooze DURATION keeps a minute of headroom. */
 export const NOTIFICATION_SNOOZE_MAX_MS = 30 * 86_400_000 - 60_000;
 
+/** NotificationDeliveriesBefore (vendor/openapi.yaml): a page can end among the notices of one event, so the cursor may name a condition. */
+export const NOTIFICATION_DELIVERY_CURSOR_PATTERN = /^whc[12]_[0-9a-z]{1,16}(_[a-z][a-z_]{0,39})?$/;
+
+export function notificationDeliveryCursor(value: string): string {
+  if (!NOTIFICATION_DELIVERY_CURSOR_PATTERN.test(value)) {
+    throw usageError("--before takes the next_cursor of a previous notifications deliveries page (whc2_…).");
+  }
+  return value;
+}
+
 export function notificationId(value: string | undefined, command: string): string {
   if (!value) throw usageError(`notifications ${command} requires <id>.`);
   if (!NOTIFICATION_ID_PATTERN.test(value)) {

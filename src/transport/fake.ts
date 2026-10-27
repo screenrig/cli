@@ -1886,9 +1886,9 @@ export function memoryBackend(options: {
     if (!notification) return notFound("Resource was not found.");
     const rows = notificationDeliveries.get(notification.id as string) ?? [];
     const limit = Number(req.query?.limit ?? 50);
-    const start = typeof req.query?.before === "string" ? Number(req.query.before.slice(5)) : 0;
+    const start = typeof req.query?.before === "string" ? Number(req.query.before.slice(5).split("_")[0]) : 0;
     const items = rows.slice(start, start + limit);
-    const next = start + limit < rows.length ? `whc1_${start + limit}` : null;
+    const next = start + limit < rows.length ? `whc2_${start + limit}_screen_offline` : null;
     return { status: 200, headers: {}, body: { items, next_cursor: next } };
   });
 

@@ -6,15 +6,15 @@ import {
   handleNotificationsCreate, handleNotificationsDeliveries, handleNotificationsDelete, handleNotificationsList,
   handleNotificationsRotateSecret, handleNotificationsShow, handleNotificationsTest, handleNotificationsUpdate,
 } from "../commands.js";
-import { NOTIFICATION_CONDITIONS, notificationConditions, notificationHold, notificationRecipients, notificationSnooze, notificationTags } from "../notifications.js";
-import { webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookUrl } from "../webhooks.js";
+import { NOTIFICATION_CONDITIONS, notificationConditions, notificationDeliveryCursor, notificationHold, notificationRecipients, notificationSnooze, notificationTags } from "../notifications.js";
+import { webhookDeliveriesLimit, webhookDescription, webhookEventTypes, webhookUrl } from "../webhooks.js";
 
 const conditionsOption = (value: string): string => { notificationConditions(value); return value; };
 const recipientsOption = (value: string): string => { notificationRecipients(value); return value; };
 const eventsOption = (value: string): string => { webhookEventTypes(value, "--events"); return value; };
 const webhookOption = (value: string): string => webhookUrl(value, "--webhook");
 const urlOption = (value: string): string => webhookUrl(value);
-const cursorOption = (value: string): string => webhookDeliveryCursor(value, "notifications");
+const cursorOption = (value: string): string => notificationDeliveryCursor(value);
 
 const CONDITIONS = NOTIFICATION_CONDITIONS.join(", ");
 const RECIPIENTS = "comma-separated, at most 20: owner (whoever owns the project when a notice sends) and project members' user ids";

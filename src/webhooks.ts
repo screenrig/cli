@@ -65,9 +65,9 @@ export function webhookDescription(value: string): string {
   return value;
 }
 
-export function webhookDeliveryCursor(value: string, group = "webhooks"): string {
+export function webhookDeliveryCursor(value: string): string {
   if (!WEBHOOK_DELIVERY_CURSOR_PATTERN.test(value)) {
-    throw usageError(`--before takes the next_cursor of a previous ${group} deliveries page (whc1_…).`);
+    throw usageError("--before takes the next_cursor of a previous webhooks deliveries page (whc1_…).");
   }
   return value;
 }

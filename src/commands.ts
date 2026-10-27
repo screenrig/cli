@@ -27,7 +27,7 @@ import { KV_WEBHOOK_ID_PATTERN, KV_WEBHOOK_SECRET_PATTERN, kvWebhookDescription,
 import { TRIGGER_ID_PATTERN, TRIGGER_PASSWORD_PATTERN, alertLines, triggerHoldSeconds, triggerId, triggerLines, triggerName, triggerPasswordWarning, triggerProblem, triggerScreenIds, triggerTableLines, triggerTag } from "./triggers.js";
 import { fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
-import { NOTIFICATION_ID_PATTERN, notificationConditions, notificationDeliveryTableLines, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationSecretWarning, notificationTableLines, snoozedUntil } from "./notifications.js";
+import { NOTIFICATION_ID_PATTERN, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationSecretWarning, notificationTableLines, snoozedUntil } from "./notifications.js";
 import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { memoryConfigFs } from "./memory-config.js";
@@ -8673,7 +8673,7 @@ export const handleNotificationsDeliveries = commandHandler(async (args, runtime
   const response = await notificationCall(client, {
     method: "GET", path: `${NOTIFICATIONS_PATH}/${id}/deliveries`,
     query: {
-      ...(before !== undefined ? { before: webhookDeliveryCursor(before, "notifications") } : {}),
+      ...(before !== undefined ? { before: notificationDeliveryCursor(before) } : {}),
       ...(limit !== undefined ? { limit: webhookDeliveriesLimit(limit) } : {}),
     },
   }, id);

@@ -545,14 +545,14 @@ test("notifications test queues one delivery and deliveries pages the log", asyn
   assert.equal(page.code, 0, page.stdout);
   assert.deepEqual(notificationCalls(transport).at(-1)!.query, { limit: "1" });
   assert.equal(page.envelope.data.items.length, 1);
-  assert.equal(page.envelope.data.next_cursor, "whc1_1");
-  const nextPage = await cli(["--json", "notifications", "deliveries", id, "--before", "whc1_1"], transport, env);
-  assert.deepEqual(notificationCalls(transport).at(-1)!.query, { before: "whc1_1" });
+  assert.equal(page.envelope.data.next_cursor, "whc2_1_screen_offline");
+  const nextPage = await cli(["--json", "notifications", "deliveries", id, "--before", "whc2_1_screen_offline"], transport, env);
+  assert.deepEqual(notificationCalls(transport).at(-1)!.query, { before: "whc2_1_screen_offline" });
   assert.equal(nextPage.envelope.data.next_cursor, null);
   const table = await cli(["--human", "notifications", "deliveries", id, "--limit", "1"], transport, env);
   assert.match(table.stdout, /ID\s+EVENT_TYPE\s+STATE\s+ATTEMPTS\s+LAST_STATUS\s+LAST_ERROR\s+CREATED_AT/);
   assert.match(table.stdout, /notification\.test \(test\)\s+pending\s+0/);
-  assert.match(table.stdout, new RegExp(`^next: screenrig notifications deliveries ${id} --before whc1_1 --limit 1$`, "m"));
+  assert.match(table.stdout, new RegExp(`^next: screenrig notifications deliveries ${id} --before whc2_1_screen_offline --limit 1$`, "m"));
 
   const before = transport.calls.length;
   for (const args of [["--before", "cursor"], ["--limit", "0"], ["--limit", "201"], ["--limit", "1.5"]]) {
