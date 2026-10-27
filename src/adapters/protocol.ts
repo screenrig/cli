@@ -689,6 +689,20 @@ export interface Screen {
   comments?: Record<string, unknown>;
   /** The fleet link that created this screen. Read-only; it stays after the link is deleted. */
   fleet_link_id?: string;
+  /**
+   * The project's own values for this screen, such as a store number or a
+   * region: up to 32 fields, names matching ^[a-z0-9_]{1,32}$, values of 1 to
+   * 200 characters. Absent when none are set. Set by ScreenPatch. Card
+   * placements read them through {screen.field.NAME} tokens. Never
+   * authorization.
+   */
+  fields?: Record<string, string>;
+  /**
+   * Where the screen is. Absent when unset. Set by ScreenPatch. A card
+   * placement reads it through the {screen.location} token, and screen list
+   * filters by distance from a point. Never authorization.
+   */
+  location?: ScreenLocation;
   public_id: string;
   /** Read-only recovery offer awaiting confirmation. Absent once confirmed, lapsed, or claimed as a new screen. */
   recovery_pending?: ScreenRecoveryPending;
@@ -762,6 +776,26 @@ export interface ScreenPatch {
   tags?: ScreenTags;
   /** An object sets the screen's video wall, null clears it. Needs a Player that declared display.wall (409 wall_unsupported otherwise). */
   wall?: ScreenWall | null;
+  /**
+   * Merges into the screen's fields: a string sets one, null removes it. A null
+   * fields clears every field. Changing fields remints the manifest revision of
+   * a screen that shows a playlist.
+   */
+  fields?: Record<string, string | null> | null;
+  /** Replaces the whole location; null clears it. Changing it remints the manifest revision of a screen that shows a playlist. */
+  location?: ScreenLocation | null;
+}
+
+/** Where a screen is, in decimal degrees: Screen.location and the ScreenPatch location. */
+export interface ScreenLocation {
+  /** -90 to 90. */
+  latitude: number;
+  /** -180 to 180. */
+  longitude: number;
+  /** The short place name a card shows, at most 40 characters. Absent when empty. */
+  name?: string;
+  /** Free text for people and agents, at most 200 characters. Absent when empty. */
+  address?: string;
 }
 
 export type ScreenTags = string[];

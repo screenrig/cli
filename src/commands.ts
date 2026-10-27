@@ -18,6 +18,7 @@ import { projectConfigFor, withProjectConfig, assertProjectCredential } from "./
 import { instantInZone, normalizeInstant, assignmentLine, playlistInUseProblem, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "./screen-control.js";
 import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLAYS_SETTLE_MS, unusedPath, PLAYS_ALL_MAX_PAGES, PLAYS_LIMIT_MAX, csvByteStream, csvRecord, isoUtc, playbackExportBudget, playsCursor, playsInstant, playsLimit, playsRange, requireCsvResponse, writeCsvFile, writeCsvStdout } from "./playback-export.js";
 import { wallCanvas, wallFromFlags, wallLine, wallProblem } from "./screen-wall.js";
+import { screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "./screen-facts.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
 import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "./screen-manifest-upgrade.js";
@@ -3560,10 +3561,11 @@ function mediaPrimitiveFromArgs(args: ParsedArgs): "image" | "video" | "audio" |
   return primitive;
 }
 
-function screenListQuery(args: ParsedArgs): Record<string, string> {
+function screenListQuery(args: ParsedArgs): { query: Record<string, string>; repeated?: Record<string, string[]> } {
   const state = screenListStateFromArgs(args);
   const tag = screenListTagFromArgs(args);
-  return { ...(state ? { state } : {}), ...(tag ? { tag } : {}) };
+  const facts = screenListFacts(args.flags);
+  return { query: { ...(state ? { state } : {}), ...(tag ? { tag } : {}), ...facts.query }, ...(facts.repeated ? { repeated: facts.repeated } : {}) };
 }
 
 function screenListTagFromArgs(args: ParsedArgs): string | undefined {
@@ -5594,7 +5596,8 @@ async function assertAssignedScreensHaveZone(client: ApiClient, playlistId: stri
 export const handleScreenList = commandHandler(async (args, runtime, resolved) => {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
-  const response = await client.listAll("/api/screens", screenListQuery(args));
+  const { query, repeated } = screenListQuery(args);
+  const response = await client.listAll("/api/screens", query, repeated ? { queryRepeated: repeated } : undefined);
   const items = (response.body as { items?: Screen[] } | undefined)?.items;
   const warnings = Array.isArray(items) ? items.flatMap((screen) => screenStorageWarnings(screen.id, screen, runtime.now())) : [];
   return {
@@ -5608,7 +5611,8 @@ export const handleScreenList = commandHandler(async (args, runtime, resolved) =
  * One row per screen. The platform column appears only when at least one
  * screen reports a host, and the reason column only when at least one
  * archived screen reports why it was archived, and the tags column only when
- * at least one screen carries a tag, and the upgrade column only when at
+ * at least one screen carries a tag, and the fields and location columns only
+ * when at least one screen carries them, and the upgrade column only when at
  * least one screen has a manifest upgrade story, so a fleet without any
  * keeps the table it had. The JSON body follows unchanged in both output modes.
  */
@@ -5617,6 +5621,9 @@ function screenTableLines(items: Screen[], now: Date): string[] {
   const withPlatform = items.some((screen) => typeof screen?.host?.platform === "string");
   const withReason = items.some((screen) => archiveReason(screen) !== undefined);
   const withTags = items.some((screen) => screenTags(screen).length > 0);
+  // Only when a listed screen carries fields or a location, so plain fleets keep their table.
+  const withFields = items.some((screen) => screenFieldsCell(screen) !== "");
+  const withLocation = items.some((screen) => screenLocationCell(screen) !== "");
   // Only when something overrides the assigned default, so plain fleets keep their table.
   const withAssignment = items.some((screen) => screen?.effective_playlist && screen.effective_playlist.source !== "default");
   // Only when a listed screen has a manifest upgrade story: a target versus
@@ -5629,13 +5636,15 @@ function screenTableLines(items: Screen[], now: Date): string[] {
     ...(withPlatform ? [screen?.host?.platform ?? ""] : []),
     ...(withReason ? [archiveReason(screen) ?? ""] : []),
     ...(withTags ? [screenTags(screen).join(",")] : []),
+    ...(withFields ? [screenFieldsCell(screen)] : []),
+    ...(withLocation ? [screenLocationCell(screen)] : []),
     ...(withAssignment ? [effectivePlaylistText(screen?.effective_playlist, screen?.takeover, screen?.timezone) ?? ""] : []),
     ...(withHealth ? [screenHealthIssues(screen).join(", ") || (screen?.health ? "ok" : "")] : []),
     ...(withUpgrade ? [manifestUpgradeCell(screen, now) ?? ""] : []),
     ...(screen?.recovery_pending?.expires_at ? [`recovery pending until ${screen.recovery_pending.expires_at}`] : []),
     ...(applicationsUnsupportedAt(screen) ? ["applications unsupported"] : []),
   ]);
-  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : []), ...(withReason ? ["REASON"] : []), ...(withTags ? ["TAGS"] : []), ...(withAssignment ? ["ASSIGNED"] : []), ...(withHealth ? ["HEALTH"] : []), ...(withUpgrade ? ["UPGRADE"] : [])];
+  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : []), ...(withReason ? ["REASON"] : []), ...(withTags ? ["TAGS"] : []), ...(withFields ? ["FIELDS"] : []), ...(withLocation ? ["LOCATION"] : []), ...(withAssignment ? ["ASSIGNED"] : []), ...(withHealth ? ["HEALTH"] : []), ...(withUpgrade ? ["UPGRADE"] : [])];
   const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => (row[index] ?? "").length)));
   const render = (row: string[]) => row.map((cell, index) => index < widths.length ? cell.padEnd(widths[index]!) : cell).join("  ").trimEnd();
   return [render(header), ...rows.map(render)];
@@ -5961,6 +5970,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       "Screen",
       JSON.stringify(response.body, null, 2),
       ...(screenTags(screen).length ? [`Tags: ${screenTags(screen).join(", ")}`] : []),
+      ...screenFactsLines(screen),
       ...(screen?.fleet_link_id ? [`Created by fleet link: ${screen.fleet_link_id}`] : []),
       ...assignmentLine(screen?.effective_playlist, screen?.takeover, screen?.timezone),
       ...takeoverLine(screen?.takeover, screen?.timezone),
@@ -6027,8 +6037,10 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
   const name = flagString(args.flags, "name");
   const playlistId = flagString(args.flags, "playlist-id");
   const timezone = flagString(args.flags, "timezone");
-  if (!id || (!name && !playlistId && !timezone)) {
-    throw usageError("screen update requires <id>, and --name, --playlist-id, or --timezone.");
+  const facts = screenFactsPatch(args.flags);
+  const changesFacts = facts.fields !== undefined || facts.location !== undefined;
+  if (!id || (!name && !playlistId && !timezone && !changesFacts)) {
+    throw usageError("screen update requires <id>, and --name, --playlist-id, --timezone, --field, --unset-field, --clear-fields, --location, or --clear-location.");
   }
   // A patch that sets both a playlist and a timezone satisfies the schedule
   // rule in one request, so only check when the patch leaves the screen
@@ -6049,6 +6061,7 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
     ...(name ? { name } : {}),
     ...(playlistId ? { playlist_id: playlistId } : {}),
     ...(timezone ? { timezone } : {}),
+    ...facts,
   };
   const response = await client.call({ method: "PATCH", path: `/api/screens/${id}`, idempotent: true, headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined, body });
   // A playlist-only change under Propose access waits for review.
@@ -6061,7 +6074,8 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
   return {
     envelope: jsonBody(response, client.requestId, undefined, warnings),
     exitCode: ExitCode.Success,
-    human: [`Updated screen ${id}`, ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
+    // The merged fields and the location the screen now holds, when this update changed them.
+    human: [`Updated screen ${id}`, ...(changesFacts ? screenFactsLines(response.body as Screen | undefined) : []), ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
   };
 }, true);
 

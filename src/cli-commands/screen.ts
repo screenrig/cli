@@ -7,6 +7,7 @@ import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-c
 import { untilOption } from "../screen-display.js";
 import { WALL_ARRANGEMENTS, WALL_ROTATIONS, wallOutputsOption } from "../screen-wall.js";
 import { playsInstantOption } from "../playback-export.js";
+import { screenAddressOption, screenFieldFilterOption, screenFieldSetOption, screenLocationNameOption, screenLocationOption, screenNearOption, screenUnsetFieldOption } from "../screen-facts.js";
 import { type Command, Option } from "commander";
 
 export function registerScreenCommands(root: Command, bind: CommandActionBinder): void {
@@ -45,12 +46,21 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--name <NAME>", "Set the screen name")
     .option("--playlist-id <ID>", "Select the playlist to assign")
     .option("--timezone <ZONE>", "Set an IANA timezone")
+    .addOption(new Option("--field <NAME=VALUE>", "Set a field: NAME is 1 to 32 lower case letters, digits or underscores, VALUE 1 to 200 characters (repeatable; at most 32 fields)").argParser(screenFieldSetOption).conflicts(["clearFields"]))
+    .addOption(new Option("--unset-field <NAME>", "Remove a field (repeatable)").argParser(screenUnsetFieldOption).conflicts(["clearFields"]))
+    .addOption(new Option("--clear-fields", "Remove every field").conflicts(["field", "unsetField"]))
+    .addOption(new Option("--location <LAT,LON>", "Set where the screen is, in decimal degrees; replaces the whole location").argParser(screenLocationOption).conflicts(["clearLocation"]))
+    .option("--location-name <NAME>", "Name the location, at most 40 characters: the place name a card shows (with --location)", screenLocationNameOption)
+    .option("--address <TEXT>", "Give the location an address, at most 200 characters (with --location)", screenAddressOption)
+    .addOption(new Option("--clear-location", "Remove the location").conflicts(["location"]))
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleScreenUpdate));
 
   screen.command("list").description("List screens")
     .addOption(new Option("--state <STATE>", "List archived screens; omitted lists active screens").choices(["archived"]))
     .option("--tag <TAG>", "List only screens carrying this exact tag", screenTagOption)
+    .addOption(new Option("--field <NAME=VALUE>", "List only screens whose field NAME holds exactly VALUE (repeatable; every one must match)").argParser(screenFieldFilterOption))
+    .addOption(new Option("--near <LAT,LON,KM>", "List only screens located within KM kilometres of the point; screens with no location are left out").argParser(screenNearOption))
     .action(bind(handleScreenList));
 
   screen.command("show").description("Inspect a screen")
@@ -269,5 +279,9 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   addCommandExamples(displaySchedule.commands.find((command) => command.name() === "clear")!,
     "screenrig screen display-schedule clear scr_LOBBY", "screenrig screen display-schedule clear --tag Cafe");
   for (const name of ["pair", "provision"]) addValueAlias(screen.commands.find(command => command.name() === name)!, "--name", "--label", "Set the screen name");
-  requireOptionGroup(screen.commands.find(command => command.name() === "update")!, "atLeastOne", ["--name", "--playlist-id", "--timezone"]);
+  const update = screen.commands.find(command => command.name() === "update")!;
+  // The dependency checks run first, so a lone --address is told it needs --location rather than that nothing was asked.
+  requireOptionGroup(update, "requires", ["--location-name", "--location"]);
+  requireOptionGroup(update, "requires", ["--address", "--location"]);
+  requireOptionGroup(update, "atLeastOne", ["--name", "--playlist-id", "--timezone", "--field", "--unset-field", "--clear-fields", "--location", "--clear-location"]);
 }
