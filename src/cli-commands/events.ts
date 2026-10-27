@@ -16,7 +16,7 @@ export function registerEventsCommands(root: Command, bind: CommandActionBinder)
     .option("--screen-id <ID>", "Only the events of this screen (with --source log, its Player log records)")
     .option("--playlist-id <ID>", "Only the project events of this playlist (not with --source log)")
     .action(bind(handleEventsList));
-  addValueAlias(events.commands.find((command) => command.name() === "list")!, "--app-id", "--application-id", "Only the project events of this application (not with --source log)");
+  addValueAlias(events.commands.find((command) => command.name() === "list")!, "--app-id", "--application-id", "Only application resource, release and K/V events (not SDK emits or --source log)");
 
   events.command("follow").description("Stream project events")
     .addOption(new Option("--after <CURSOR>", "Read events after this cursor").conflicts(["cursor"]))
