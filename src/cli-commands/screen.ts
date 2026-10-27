@@ -105,7 +105,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("<id>", "Screen identifier")
     .requiredOption("--timezone <ZONE>", "Set an IANA timezone name, such as Europe/London (required)")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
-    .action(bind(handleScreenSetTimezone)), "Timezone:\n  ZONE is an IANA timezone name: Area/City such as America/New_York,\n  Europe/London or Asia/Tokyo, or UTC. Playlist schedules, page visibility,\n  takeovers and display schedules read their civil times in this zone, so set\n  it before any of those.");
+    .action(bind(handleScreenSetTimezone)), "Timezone:\n  ZONE is an IANA timezone name: Area/City such as America/New_York,\n  Europe/London or Asia/Tokyo, or UTC. Playlist schedules, takeovers and\n  display schedules read their civil times in this zone. Page visibility\n  needs it for from, until or windows; data-only visibility needs no zone.");
 
   const wall = screen.command("wall").description("Set or clear a screen's video wall: one Player driving two or three displays as one canvas");
   wall.command("set").description("Set a screen's video wall")

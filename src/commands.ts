@@ -204,6 +204,7 @@ import { directApplicationUploads, uploadApplicationDirect } from "./app-upload.
 import { loadCanvas } from "./canvas.js";
 import { composeBatch } from "./compose/batch.js";
 import { assertPlaylistValid, PLAYLIST_SERVER_CHECKS, playlistLint } from "./playlist-validate.js";
+import { playlistNeedsTimezone } from "./generated/playlist-write-semantics.js";
 import {
   lintComposedPage,
   pageSpecForLint,
@@ -5570,26 +5571,9 @@ export const handlePlaylistDelete = commandHandler(async (args, runtime, resolve
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: `Deleted playlist ${id}` };
 }, true);
 
-/**
- * A page schedule is civil, so it means nothing without a zone to read it in.
- * The server carries that zone on the screen and refuses assignment, playlist
- * update, and manifest resolution while a scheduled playlist points at a screen
- * that has none.
- *
- * Presence of the `visibility` key is the whole test, exactly as the server
- * counts it. A page that sets `enabled: false` still counts as scheduled.
- */
-function usesPageVisibility(playlist: unknown): boolean {
-  const pages = (playlist as { pages?: unknown } | undefined)?.pages;
-  if (!Array.isArray(pages)) {
-    return false;
-  }
-  return pages.some((page) => typeof page === "object" && page !== null && "visibility" in page);
-}
-
 function scheduleZoneError(screenId: string): CliError {
   return usageError(
-    `Screen ${screenId} has no timezone, and the playlist schedules pages with visibility. Page visibility rules are civil times, so the screen needs an IANA zone before it can run them.`,
+    `Screen ${screenId} has no timezone, and the playlist has civil-time visibility bounds. Set the screen's IANA timezone before assigning it.`,
     {
       command: `screenrig screen set-timezone ${screenId} --timezone America/Los_Angeles --expect-rev REVISION`,
       reason: "Set the screen timezone first, then assign the playlist. Read the current revision from screen show.",
@@ -5605,7 +5589,7 @@ function scheduleZoneError(screenId: string): CliError {
  */
 async function assertScheduledPlaylistHasZone(client: ApiClient, screenId: string, playlistId: string): Promise<unknown> {
   const playlist = await callPlaylist(client, { method: "GET", id: playlistId });
-  if (!usesPageVisibility(playlist.body)) {
+  if (!playlistNeedsTimezone(playlist.body)) {
     return playlist.body;
   }
   const screen = await client.call({ method: "GET", path: `/api/screens/${screenId}` });
@@ -5616,12 +5600,12 @@ async function assertScheduledPlaylistHasZone(client: ApiClient, screenId: strin
 }
 
 /**
- * The same rule reached from the playlist side. Adding visibility to a playlist
- * that screens already run breaks their manifests, so check every screen the
- * playlist is assigned to rather than waiting for rematerialize to refuse.
+ * The same rule reached from the playlist side. Adding civil-time bounds to a
+ * playlist that screens already run breaks their manifests, so check every screen
+ * the playlist is assigned to rather than waiting for rematerialize to refuse.
  */
 async function assertAssignedScreensHaveZone(client: ApiClient, playlistId: string, pages: unknown): Promise<void> {
-  if (!usesPageVisibility({ pages })) {
+  if (!playlistNeedsTimezone({ pages })) {
     return;
   }
   const response = await client.listAll("/api/screens");

@@ -6,6 +6,14 @@ type ObjectValue = Record<string, unknown>;
 const object = (value: unknown): ObjectValue => value !== null && typeof value === "object" && !Array.isArray(value) ? value as ObjectValue : {};
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 
+/** Whether any page has civil-time bounds that require a screen timezone. */
+export function playlistNeedsTimezone(value: unknown): boolean {
+  return array(object(value).pages).some(rawPage => {
+    const visibility = object(object(rawPage).visibility);
+    return ["from", "until", "windows"].some(key => Object.hasOwn(visibility, key));
+  });
+}
+
 function httpsWithoutCredentials(value: unknown): boolean {
   if (typeof value !== "string") return false;
   try {
@@ -112,7 +120,7 @@ export function validatePlaylistWriteSemantics(value: unknown): PlaylistWriteIss
         if (typeof visibility[key] === "string" && !validCivil(visibility[key])) fail(`${path}/visibility/${key}`, "must be a valid civil date and time");
       }
       if (typeof visibility.from === "string" && typeof visibility.until === "string" && visibility.from >= visibility.until) fail(`${path}/visibility/until`, "must be later than from");
-      if (visibility.enabled === true && visibility.from === undefined && visibility.until === undefined && visibility.windows === undefined) fail(`${path}/visibility`, "an always-visible page must omit visibility");
+      if (visibility.enabled === true && visibility.from === undefined && visibility.until === undefined && visibility.windows === undefined && visibility.data === undefined) fail(`${path}/visibility`, "an always-visible page must omit visibility");
       for (const [windowIndex, rawWindow] of array(visibility.windows).entries()) {
         const window = object(rawWindow);
         if (Object.hasOwn(window, "start") !== Object.hasOwn(window, "end")) fail(`${path}/visibility/windows/${windowIndex}`, "start and end must both be present or both absent");

@@ -34,6 +34,40 @@ const TWO_IFRAMES = [
   iframePrimitive("web_b", "https://example.org/"),
 ];
 
+function playlistWithVisibility(visibility: unknown) {
+  const value = playlistWithPrimitives(TWO_IFRAMES);
+  return { ...value, pages: [...value.pages, { ...value.pages[0], id: "conditional", visibility }] };
+}
+
+test("authoring and bundle validators accept data-only and mixed visibility without changing predicates", () => {
+  for (const data of [{ key: "agenda" }, { key: "agenda", path: "/a~1b/~0c", equals: true }, { key: "agenda", equals: false }, { key: "agenda", equals: null }, { key: "agenda", equals: 0 }]) {
+    for (const bounds of [{}, { from: "2026-10-27T09:00" }]) {
+      const value = playlistWithVisibility({ enabled: true, data, ...bounds });
+      const original = structuredClone(value);
+      assert.deepEqual(playlistIssues(value), [], JSON.stringify(data));
+      assert.deepEqual(validatePlaylistWrite(value, new Map()), new Set());
+      assert.deepEqual(value, original);
+    }
+  }
+  assert.throws(() => validatePlaylistWrite(playlistWithVisibility({ enabled: true }), new Map()), CliError);
+  const noFallback = playlistWithVisibility({ enabled: true, data: { key: "agenda" } });
+  noFallback.pages.shift();
+  assert.throws(() => validatePlaylistWrite(noFallback, new Map()), CliError);
+});
+
+test("bundle predicates keep the backend's key, scalar and RFC 6901 limits", () => {
+  const path256 = "/" + "é".repeat(127) + "x";
+  for (const data of [{ key: "agenda", path: path256 }, { key: "agenda", path: "/x".repeat(16) }, { key: "agenda", equals: "🧀".repeat(256) }]) {
+    assert.doesNotThrow(() => validatePlaylistWrite(playlistWithVisibility({ enabled: true, data }), new Map()));
+  }
+  for (const data of [null, {}, { key: "bad key" }, { key: "agenda\n" }, { key: "feed:private" }, { key: "agenda", extra: true },
+    { key: "agenda", path: "active" }, { key: "agenda", path: "/bad~2escape" }, { key: "agenda", path: "/bad~" },
+    { key: "agenda", path: path256 + "x" }, { key: "agenda", path: "/x".repeat(17) },
+    { key: "agenda", equals: [] }, { key: "agenda", equals: {} }, { key: "agenda", equals: "🧀".repeat(256) + "x" }]) {
+    assert.throws(() => validatePlaylistWrite(playlistWithVisibility({ enabled: true, data }), new Map()), CliError, JSON.stringify(data));
+  }
+});
+
 function playlistWithTransition(transition: unknown) {
   const value = playlistWithPrimitives(TWO_IFRAMES);
   return { ...value, pages: value.pages.map((page) => ({ ...page, transition })) };

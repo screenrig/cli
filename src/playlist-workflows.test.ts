@@ -15,6 +15,28 @@ const media = [{ id: "med_IMAGE", primitive: "image", state: "ready" }, { id: "m
 const document = () => initializePlaylist({ name: "Lobby", media, width: 1080, height: 1920, durationMs: 8000, fit: "contain" });
 const response = (body: unknown) => ({ status: 200, headers: {}, body });
 
+test("publish accepts data-only visibility without a zone and refuses mixed civil bounds before writes", async t => {
+ for (const civil of [false, true]) {
+  const dir = await mkdtemp(path.join(tmpdir(), "publish-data-")); t.after(() => rm(dir, { recursive: true, force: true }));
+  const authored = document();
+  authored.pages[1].visibility = { enabled: true, data: { key: "agenda", equals: false }, ...(civil ? { from: "2026-10-27T09:00" } : {}) };
+  let assigned = false;
+  const transport = new FakeTransport()
+   .on("GET", "/api/project", () => response({ id: "prj_TEST" }))
+   .on("GET", "/api/screens/scr_TEST", () => response({ id: "scr_TEST", revision: assigned ? 2 : 1, ...(assigned ? { playlist_id: "pl_TEST" } : {}) }))
+   .on("POST", "/api/playlists", req => { assert.deepEqual(req.body, authored); return response({ id: "pl_TEST", revision: 1 }); })
+   .on("PATCH", "/api/screens/scr_TEST", () => { assigned = true; return response({ id: "scr_TEST", revision: 2, playlist_id: "pl_TEST" }); });
+  const options = { client: new ApiClient({ transport, token: "test-token" }), runtime: processRuntime(), configPath: dir + "/config.json", apiUrl: "https://api.screenrig.ai", screenId: "scr_TEST", document: authored };
+  if (civil) {
+   await assert.rejects(() => publishScreen(options), /screen timezone/);
+   assert.equal(transport.calls.some(call => call.method === "POST" || call.method === "PATCH"), false);
+  } else {
+   assert.equal((await publishScreen(options)).assignment_verified, true);
+   assert.equal(assigned, true);
+  }
+ }
+});
+
 test("init preserves media order, portrait geometry and video completion", () => {
  const result = document();
  assert.equal(result.pages[0].canvas.height, 1920);

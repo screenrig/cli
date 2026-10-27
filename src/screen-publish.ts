@@ -1,4 +1,5 @@
 import { RESOURCE_ID_PATTERNS, isResourceID, type ResourceIDKind } from "./generated/resource-ids.js";
+import { playlistNeedsTimezone } from "./generated/playlist-write-semantics.js";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -224,7 +225,7 @@ export async function publishScreen(options: {
       const screen = resource((await client.call({ method: "GET", path: `/api/screens/${screenId}` })).body, "screen");
       if (screen.id !== screenId) throw usageError("Screen response identity did not match.");
       if (expected !== undefined && screen.revision !== expected) staleRevision("Screen changed before publishing. Inspect it and retry with its intended revision.", screen.revision);
-      if (document.pages.some((page: any) => page.visibility !== undefined) && !screen.timezone) throw usageError("Set the screen timezone before publishing a scheduled playlist.");
+      if (playlistNeedsTimezone(document) && !screen.timezone) throw usageError("Set the screen timezone before publishing a scheduled playlist.");
       state = { version: 1, created_at: options.runtime.now().getTime(), fingerprint, create_key: newIdempotencyKey(), assign_key: newIdempotencyKey() };
       await save();
     }

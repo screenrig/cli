@@ -319,9 +319,9 @@ export function limitsFromCapabilities(capabilities: Capabilities): ArchiveLimit
  * not mirrored here except for the fields that expander writes. Mirror a schema
  * only when the CLI builds or reads its fields.
  *
- * Page `visibility` is inspected only for key presence. That is exactly what
- * decides whether a playlist needs the target screen to carry a timezone, so
- * no member of the schedule object is mirrored either.
+ * The backend-owned playlist semantics decide whether page visibility has
+ * civil-time bounds and needs a screen timezone. Data-only rules need no zone;
+ * no member of the schedule object is mirrored here.
  */
 
 export type ScreenObservationPresentation = "output" | "windowed";
@@ -810,8 +810,8 @@ export interface Screen {
    */
   tags?: ScreenTags;
   /**
-   * IANA time zone identifier. Absent until it is set. Page visibility rules
-   * are civil, so they are evaluated in this zone.
+   * IANA time zone identifier. Absent until it is set. Civil-time page visibility
+   * bounds are evaluated in this zone; data-only predicates need no zone.
    */
   timezone?: string;
   updated_at: string;

@@ -155,8 +155,29 @@ function validCivil(value: string): boolean {
 
 function validateVisibility(value: unknown, name: string): void {
   const visibility = record(value, name);
-  exact(visibility, ["enabled", "from", "until", "windows"], name);
+  exact(visibility, ["enabled", "from", "until", "windows", "data"], name);
   if (typeof visibility.enabled !== "boolean") throw usageError(`${name}.enabled must be boolean.`);
+  if (visibility.data !== undefined) {
+    const dataName = `${name}.data`;
+    const data = record(visibility.data, dataName);
+    exact(data, ["key", "path", "equals"], dataName);
+    const key = string(data, "key", dataName, 256, /^[A-Za-z0-9]/);
+    if (/[^A-Za-z0-9._:/-]/.test(key) || key.startsWith("feed:")) throw usageError(`${dataName}.key must name card data, not a feed.`);
+    if (data.path !== undefined && (typeof data.path !== "string" || Buffer.byteLength(data.path, "utf8") > 256 ||
+      (data.path !== "" && !data.path.startsWith("/")) || /~(?:[^01]|$)/.test(data.path) || data.path.split("/").length > 17)) {
+      throw usageError(`${dataName}.path must be an RFC 6901 pointer of at most 256 bytes and 16 segments.`);
+    }
+    if (Object.hasOwn(data, "equals")) {
+      const expected = data.equals;
+      if (expected !== null && typeof expected !== "string" && typeof expected !== "boolean" &&
+        !(typeof expected === "number" && Number.isFinite(expected))) {
+        throw usageError(`${dataName}.equals must be a JSON scalar.`);
+      }
+      if (typeof expected === "string" && Buffer.byteLength(expected, "utf8") > 1024) {
+        throw usageError(`${dataName}.equals must be at most 1024 bytes.`);
+      }
+    }
+  }
   for (const key of ["from", "until"] as const) {
     if (visibility[key] !== undefined && (typeof visibility[key] !== "string" || !validCivil(visibility[key] as string))) {
       throw usageError(`${name}.${key} must be a valid civil YYYY-MM-DDTHH:MM value.`);
@@ -185,7 +206,7 @@ function validateVisibility(value: unknown, name: string): void {
       }
     }
   }
-  if (visibility.enabled === true && visibility.from === undefined && visibility.until === undefined && visibility.windows === undefined) {
+  if (visibility.enabled === true && visibility.from === undefined && visibility.until === undefined && visibility.windows === undefined && visibility.data === undefined) {
     throw usageError(`${name} with enabled true must bound visibility.`);
   }
 }

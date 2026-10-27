@@ -4725,12 +4725,12 @@ test("readConfigFile can repair permissions", async () => {
 });
 
 /**
- * Page visibility is a civil rule, so it is meaningless without a zone. The
+ * Civil-time page visibility is meaningless without a zone. The
  * server refuses assignment, playlist update, and manifest resolution while a
  * scheduled playlist points at a screen with no timezone. These tests cover the
  * local refusal that turns that rejection into an actionable message.
  */
-async function scheduledPlaylistFixture(scheduled: boolean, dir: string) {
+async function scheduledPlaylistFixture(scheduled: boolean, dir: string, visibility: unknown = { enabled: true, windows: [{ days: ["fri", "sat"], start: "18:00", end: "02:00" }] }) {
   const configDir = await testTemp(dir);
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
   await writeConfigAtomic(
@@ -4758,7 +4758,7 @@ async function scheduledPlaylistFixture(scheduled: boolean, dir: string) {
   // Every playlist keeps one page with no visibility field at all, so eligible
   // content always exists. The scheduled variant adds a second, bounded page.
   const pages = scheduled
-    ? [page("always"), page("evenings", { enabled: true, windows: [{ days: ["fri", "sat"], start: "18:00", end: "02:00" }] })]
+    ? [page("always"), page("evenings", visibility)]
     : [page("always")];
   const file = path.join(configDir, "playlist.json");
   await writeFile(file, JSON.stringify({ name: "Lobby", pages }));
@@ -4841,7 +4841,7 @@ test("assigning a scheduled playlist to a screen with no timezone is refused bef
   await rm(configDir, { recursive: true, force: true });
 });
 
-test("a page disabled outright still counts as scheduled", async () => {
+test("a page disabled outright assigns without a screen timezone", async () => {
   const transport = memoryBackend();
   const configDir = await testTemp("tz-disabled-");
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
@@ -4879,8 +4879,26 @@ test("a page disabled outright still counts as scheduled", async () => {
     transport,
     { fs: fsLike },
   );
-  assert.equal(result.code, ExitCode.Usage, result.stdout);
+  assert.equal(result.code, ExitCode.Success, result.stdout);
   await rm(configDir, { recursive: true, force: true });
+});
+
+test("data-only playlists create, assign and update on an unzoned screen", async t => {
+  const transport = memoryBackend();
+  const { configDir, fsLike, file } = await scheduledPlaylistFixture(true, "data-only-", { enabled: true, data: { key: "agenda", path: "/active", equals: true } });
+  t.after(() => rm(configDir, { recursive: true, force: true }));
+  for (const argv of [
+    ["screen", "pair", "ABC234"],
+    ["playlist", "create", file],
+    ["screen", "assign", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--playlist-id", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--expect-rev", "1"],
+    ["playlist", "update", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", file, "--expect-rev", "1"],
+  ]) {
+    const result = await withRuntime(["--json", ...argv], transport, { fs: fsLike });
+    assert.equal(result.code, ExitCode.Success, result.stdout);
+  }
+  const writes = transport.calls.filter(call => call.path === "/api/playlists" || call.path === "/api/playlists/pl_AAAAAAAAAAAAAAAAAAAAAAAA").filter(call => call.method !== "GET");
+  assert.equal(writes.length, 2);
+  for (const write of writes) assert.deepEqual((write.body as any).pages[1].visibility.data, { key: "agenda", path: "/active", equals: true });
 });
 
 test("an unscheduled playlist assigns to a screen with no timezone", async () => {
