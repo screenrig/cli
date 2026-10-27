@@ -8,3 +8,10 @@ description = "unsigned test JWT fixtures"
 condition = "AND"
 paths = ['''^src/.*\.test\.ts$''']
 regexes = ['''^eyJhbGciOiJub25lIn0\.eyJ0ZXN0Ijp0cnVlfQ\.signature_[A-Za-z0-9_]*$''']
+
+# The campaign retry test uses a fixed client request identifier, not an API credential.
+[[allowlists]]
+description = "campaign retry idempotency fixture"
+condition = "AND"
+paths = ['''^src/campaigns\.test\.ts$''']
+regexes = ['''^campaign-key-0001$''']
