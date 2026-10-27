@@ -217,7 +217,12 @@ export function instantInZone(value: string, timezone: string | undefined): stri
   return render("UTC");
 }
 
-/** "pl_X (takeover until …)", "pl_X (schedule entry lunch until …)", "pl_X (default)". */
+/**
+ * What a screen plays and why, in the server's order of precedence: "pl_X
+ * (takeover until …)", "pl_X (campaign cmp_Y until …)", "pl_X (schedule entry
+ * lunch until …)", "pl_X (default)". A default carries until when a campaign or
+ * schedule boundary is next to change it.
+ */
 export function effectivePlaylistText(effective: ScreenEffectivePlaylist | undefined, takeover?: ScreenTakeover, timezone?: string): string | undefined {
   if (!effective || typeof effective.id !== "string") return undefined;
   const until = typeof effective.until === "string" ? ` until ${instantInZone(effective.until, timezone)}` : "";
@@ -225,10 +230,13 @@ export function effectivePlaylistText(effective: ScreenEffectivePlaylist | undef
     const end = until || (typeof takeover?.until === "string" ? ` until ${instantInZone(takeover.until, timezone)}` : " until cleared");
     return `${effective.id} (takeover${end})`;
   }
+  if (effective.source === "campaign") {
+    return `${effective.id} (campaign${effective.entry_id ? ` ${effective.entry_id}` : ""}${until})`;
+  }
   if (effective.source === "schedule") {
     return `${effective.id} (schedule${effective.entry_id ? ` entry ${effective.entry_id}` : ""}${until})`;
   }
-  return `${effective.id} (default${until ? `, schedule changes it${until}` : ""})`;
+  return `${effective.id} (default${until ? `, a campaign or schedule changes it${until}` : ""})`;
 }
 
 export function assignmentLine(effective: ScreenEffectivePlaylist | undefined, takeover?: ScreenTakeover, timezone?: string): string[] {
@@ -301,7 +309,7 @@ export function playlistInUseProblem(error: unknown): unknown {
     ...error.problem,
     next: {
       command: "screenrig screen list",
-      reason: "A screen can still show this playlist: it is assigned, named by a playlist schedule entry, held by a takeover, or effective. screen show ID reports playlist_id, playlist_schedule, takeover, and effective_playlist; change those first.",
+      reason: "A screen can still show this playlist: it is assigned, named by a playlist schedule entry, held by a takeover, shown by a campaign, or effective. screen show ID reports playlist_id, playlist_schedule, takeover, and effective_playlist, and campaign explain ID names the campaign a screen plays; change those first.",
     },
   }, error.exitCode, error.warnings);
 }

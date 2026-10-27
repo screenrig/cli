@@ -186,11 +186,44 @@ test("rejects application primitives before any media lookup or local output", a
   const client = new ApiClient({ transport, token: "token" });
   await assert.rejects(
     () => exportPlaylistBundle({ playlistId: "pl_SOURCE", outputDirectory: output, client }),
-    (error: unknown) => error instanceof CliError && error.problem.code === "usage_error" && /--skip-applications/.test(error.problem.detail),
+    (error: unknown) => error instanceof CliError && error.problem.code === "usage_error" && /--skip-applications/.test(error.problem.detail)
+      && error.problem.next?.command === "screenrig playlist show pl_SOURCE --output playlist.json",
   );
   assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), ["GET /api/playlists/pl_SOURCE"]);
   await assert.rejects(() => lstat(output), /ENOENT/);
   await rm(dir, { recursive: true, force: true });
+});
+
+for (const skipApplications of [false, true]) {
+  test(`card export gives recovery without media lookup or local output (skip applications: ${skipApplications})`, async () => {
+    const dir = await testTemp("bundle-card-");
+    try {
+      const output = path.join(dir, "export");
+      const source = playlist({ id: "clock", primitive: "card", card: "crd_CLOCK", layout: "full" });
+      const transport = new FakeTransport().on("GET", "/api/playlists/pl_SOURCE", () => ({ status: 200, headers: {}, body: source }));
+      await assert.rejects(
+        () => exportPlaylistBundle({ playlistId: "pl_SOURCE", outputDirectory: output, client: new ApiClient({ transport, token: "token" }), skipApplications }),
+        (error: unknown) => error instanceof CliError && error.problem.code === "usage_error"
+          && /card instances/.test(error.problem.detail)
+          && error.problem.next?.command === "screenrig playlist show pl_SOURCE --output playlist.json",
+      );
+      assert.deepEqual(transport.calls.map(call => `${call.method} ${call.path}`), ["GET /api/playlists/pl_SOURCE"]);
+      assert.deepEqual(await readdir(dir), []);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test("an application-only export refuses an empty bundle and offers an editable document", () => {
+  const source = playlist({ id: "app", primitive: "application", release_id: "rel_APP" });
+  source.pages[0]!.primitives.pop(); // Remove the iframe so skipping the application leaves no page.
+  assert.throws(
+    () => normalizePlaylistForBundle(source, { skipApplications: true }),
+    (error: unknown) => error instanceof CliError && error.problem.code === "usage_error"
+      && /no pages/.test(error.problem.detail)
+      && error.problem.next?.command === "screenrig playlist show pl_SOURCE --output playlist.json",
+  );
 });
 
 test("--skip-applications exports the remaining pages and reports what it dropped", async () => {

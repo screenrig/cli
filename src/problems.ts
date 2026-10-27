@@ -418,6 +418,24 @@ export function withQuotaGuidance(problem: NormalizedProblem): NormalizedProblem
   });
 }
 
+/**
+ * A direct campaign goal larger than the availability estimate is refused with
+ * goal_overbooked. Point at the estimate, and at the draft's overbook flag for
+ * a deliberate booking, unless the server already supplied its own guidance.
+ */
+export function withOverbookingGuidance(problem: NormalizedProblem): NormalizedProblem {
+  if (problem.code !== "goal_overbooked") {
+    return problem;
+  }
+  return withGuidance(problem, {
+    hint: "The goal is larger than the plays the selected screens are estimated to have left in the flight. Lower goal_plays or widen the targeting, or set \"overbook\": true in the draft to book it anyway.",
+    next: {
+      command: "screenrig ads direct availability --help",
+      reason: "Shows how to estimate the plays still available: the query document takes the draft's targeting, dayparts, flight_start and flight_end.",
+    },
+  });
+}
+
 /** Both 402 codes: prepaid credit is spent, or eligible credit cannot cover this debit. */
 const PAYMENT_CODES = new Set(["payment_required", "insufficient_credits"]);
 

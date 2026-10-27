@@ -31,8 +31,9 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
     const parser = option.parseArg;
     option.argParser((value: string, previous: unknown) => {
       // An option-looking token is usually a missing value. Explicit '=' permits it,
-      // and a lone - is stdin where the help documents it, or stdout for the playback CSV --output.
-      const dash = value === "-" && (/\bstdin\b/.test(option.description) || (name === "output" && command.parent?.name() === "playback"));
+      // and a lone - is stdin where the help documents it, or stdout for the playback and direct report CSV --output.
+      const csvOutput = name === "output" && (command.parent?.name() === "playback" || (command.name() === "report" && command.parent?.name() === "direct"));
+      const dash = value === "-" && (/\bstdin\b/.test(option.description) || csvOutput);
       if ((!value.length && name !== "value-base64") ||
           (value.startsWith("-") && !dash && !/^-\d/.test(value) && !argv.includes(`--${name}=${value}`))) {
         throw usageError(`--${name} requires a value. Use --${name}=VALUE for a value starting with a dash.`);
@@ -45,6 +46,8 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
       || (command.name() === "create" && command.parent?.name() === "service-client")))
       || (name === "tag" && ["fleet-links", "notifications"].includes(command.parent?.name() ?? "") && ["create", "update"].includes(command.name()))
       || (name === "screen-id" && command.parent?.name() === "triggers" && command.name() === "create")
+      || (command.parent?.name() === "screen" && ((command.name() === "update" && (name === "field" || name === "unset-field")) || (command.name() === "list" && name === "field")))
+      || (["tag", "any-tag", "screen-id", "window"].includes(name) && command.parent?.name() === "campaign" && ["create", "update"].includes(command.name()))
       || (command.parent?.name() === "feeds" && command.name() === "get" && (FEED_REPEATABLE_FLAGS as readonly string[]).includes(name));
     if (seen.has(handlerOptionName(option)) && !repeatable) throw usageError(`--${name} may be supplied only once.`);
     seen.add(handlerOptionName(option));

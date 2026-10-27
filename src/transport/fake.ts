@@ -2130,5 +2130,175 @@ export function memoryBackend(options: {
     return { status: 200, headers: { "cache-control": "no-store" }, body: { ...webhook, secret: kvWebhookSecret() } };
   }));
 
+  // Content campaigns: at most 100 per project, listed in precedence order
+  // (priority, then newest). A write bumps the revision, If-Match guards it,
+  // and an exact Idempotency-Key replay returns the same answer. A playlist id
+  // starting pl_UNAPPROVED has no approved version. A screen's standing is
+  // simplified from the server's: no clock is read, so from, until and windows
+  // always hold, and the first unpaused campaign that applies plays unless the
+  // screen has a takeover.
+  const campaigns = new Map<string, Record<string, unknown>>();
+  const campaignReplays = new Map<string, { request: string; response: TransportResponse }>();
+  let campaignSequence = 0;
+  const campaignReplay = (req: TransportRequest, work: () => TransportResponse): TransportResponse => {
+    const key = req.headers?.["idempotency-key"];
+    const request = JSON.stringify([req.method, req.path, req.body ?? null]);
+    const replay = key ? campaignReplays.get(key) : undefined;
+    if (replay) return replay.request === request ? replay.response : problem(409, "idempotency_mismatch", "idempotency key does not match original request");
+    const response = work();
+    if (key && response.status < 400) campaignReplays.set(key, { request, response });
+    return response;
+  };
+  const campaignFor = (req: TransportRequest): Record<string, unknown> | undefined => campaigns.get(decodeURIComponent(req.path.split("/")[3] ?? ""));
+  const campaignInvalid = (field: string, detail: string): TransportResponse => ({
+    status: 400,
+    headers: { "content-type": "application/problem+json" },
+    body: { status: 400, code: "invalid_request", title: "Invalid request", detail: `${field} ${detail}.`, errors: [{ field, code: "invalid", detail: `${detail}.` }] },
+  });
+  const staleCampaign = (req: TransportRequest, campaign: Record<string, unknown>): TransportResponse | undefined => {
+    const ifMatch = req.headers?.["if-match"];
+    if (!ifMatch || ifMatch === `"${campaign.revision}"`) return undefined;
+    return { status: 412, headers: { "content-type": "application/problem+json" }, body: { status: 412, code: "revision_conflict", title: "Revision conflict", detail: "The campaign revision does not match If-Match.", current_revision: campaign.revision } };
+  };
+  const campaignAudienceProblem = (value: unknown, path = "audience", depth = 1): TransportResponse | undefined => {
+    const entries = value && typeof value === "object" && !Array.isArray(value) ? Object.entries(value) : [];
+    if (entries.length !== 1) return campaignInvalid(path, "must be an object with exactly one of all, any, tag or screen_id");
+    const [key, member] = entries[0]!;
+    if (key === "tag") return typeof member === "string" && /^[A-Za-z0-9]{1,32}$/.test(member) ? undefined : campaignInvalid(`${path}.tag`, "must match ^[A-Za-z0-9]{1,32}$");
+    if (key === "screen_id") return typeof member === "string" && member ? undefined : campaignInvalid(`${path}.screen_id`, "must be an ID");
+    if (key !== "all" && key !== "any") return campaignInvalid(`${path}.${key}`, "is not allowed; use all, any, tag or screen_id");
+    if (depth > 3) return campaignInvalid(path, "nests deeper than 3 levels");
+    if (!Array.isArray(member)) return campaignInvalid(`${path}.${key}`, "must be an array of rules");
+    if (member.length === 0 && (key === "any" || depth > 1)) return campaignInvalid(`${path}.${key}`, "must list at least one rule");
+    for (const [index, child] of member.entries()) {
+      const failure = campaignAudienceProblem(child, `${path}.${key}[${index}]`, depth + 1);
+      if (failure) return failure;
+    }
+    return undefined;
+  };
+  const inCampaignAudience = (audience: Record<string, unknown>, screen: Screen): boolean => {
+    if (Array.isArray(audience.all)) return audience.all.every((rule) => inCampaignAudience(rule as Record<string, unknown>, screen));
+    if (Array.isArray(audience.any)) return audience.any.some((rule) => inCampaignAudience(rule as Record<string, unknown>, screen));
+    if (typeof audience.tag === "string") return (screen.tags ?? []).includes(audience.tag);
+    return audience.screen_id === screen.id;
+  };
+  const campaignsInOrder = (): Record<string, unknown>[] => [...campaigns.values()]
+    .sort((a, b) => (b.priority as number) - (a.priority as number) || (b.sequence as number) - (a.sequence as number));
+  const publicCampaign = (campaign: Record<string, unknown>): Record<string, unknown> => {
+    const { sequence: _sequence, ...rest } = campaign;
+    return rest;
+  };
+  const campaignStandings = (screen: Screen): Array<Record<string, unknown>> => {
+    let winner: string | undefined;
+    return campaignsInOrder().map((campaign) => {
+      const standing = { campaign_id: campaign.id as string, screen_id: screen.id, screen_name: screen.label };
+      const bounded = campaign.from !== undefined || campaign.until !== undefined || campaign.windows !== undefined;
+      const playlistId = campaign.playlist_id as string;
+      if (!inCampaignAudience(campaign.audience as Record<string, unknown>, screen)) return { ...standing, status: "not_in_audience" };
+      if (campaign.paused) return { ...standing, status: "paused" };
+      if (!screen.playlist_id) return { ...standing, status: "blocked", reason: "no_default_playlist" };
+      if (bounded && !screen.timezone) return { ...standing, status: "blocked", reason: "no_timezone" };
+      if (!playlists.has(playlistId) || playlistId.startsWith("pl_UNAPPROVED")) return { ...standing, status: "blocked", reason: "playlist_unavailable" };
+      if (screen.takeover) return { ...standing, status: "outranked", reason: "takeover" };
+      if (winner) return { ...standing, status: "outranked", reason: "campaign", by: winner };
+      winner = campaign.id as string;
+      return { ...standing, status: "playing" };
+    });
+  };
+  transport.on("GET", "/api/campaigns", () => ({ status: 200, headers: { "cache-control": "no-store" }, body: { items: campaignsInOrder().map(publicCampaign) } }));
+  transport.on("POST", "/api/campaigns", (req) => campaignReplay(req, () => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (typeof body.name !== "string" || !body.name.trim()) return campaignInvalid("name", "is required");
+    if (typeof body.playlist_id !== "string") return campaignInvalid("playlist_id", "is required");
+    if (body.audience === undefined) return campaignInvalid("audience", "is required; {\"all\": []} is every screen of the project");
+    const audience = campaignAudienceProblem(body.audience);
+    if (audience) return audience;
+    if (typeof body.from === "string" && typeof body.until === "string" && body.until <= body.from) return campaignInvalid("until", "must be later than from");
+    if (campaigns.size >= 100) return problem(409, "campaign_limit_reached", "The project already has the maximum of 100 campaigns.");
+    const unknown = unknownPlaylist(body.playlist_id);
+    if (unknown) return unknown;
+    if (body.playlist_id.startsWith("pl_UNAPPROVED")) return problem(409, "playlist_not_approved", "The playlist has no approved version: a person approves its review before any screen uses it.");
+    campaignSequence += 1;
+    const campaign: Record<string, unknown> = {
+      id: `cmp_${String(campaignSequence).padStart(16, "A")}`, sequence: campaignSequence,
+      name: body.name.trim(), playlist_id: body.playlist_id, audience: body.audience,
+      ...(body.from !== undefined ? { from: body.from } : {}),
+      ...(body.until !== undefined ? { until: body.until } : {}),
+      ...(body.windows !== undefined ? { windows: body.windows } : {}),
+      priority: body.priority ?? 0, paused: body.paused ?? false, revision: 1,
+      created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
+    };
+    campaigns.set(campaign.id as string, campaign);
+    return { status: 201, headers: { "cache-control": "no-store", etag: '"1"' }, body: publicCampaign(campaign) };
+  }));
+  transport.on("GET", /^\/api\/campaigns\/[^/]+$/, (req) => {
+    const campaign = campaignFor(req);
+    return campaign ? { status: 200, headers: { etag: `"${campaign.revision}"`, "cache-control": "no-store" }, body: publicCampaign(campaign) } : notFound("The campaign was not found in this project.");
+  });
+  transport.on("PATCH", /^\/api\/campaigns\/[^/]+$/, (req) => campaignReplay(req, () => {
+    const campaign = campaignFor(req);
+    if (!campaign) return notFound("The campaign was not found in this project.");
+    const stale = staleCampaign(req, campaign);
+    if (stale) return stale;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (!Object.keys(body).length) return campaignInvalid("body", "must set at least one of name, playlist_id, audience, from, until, windows, priority or paused");
+    if (body.audience !== undefined) {
+      const audience = campaignAudienceProblem(body.audience);
+      if (audience) return audience;
+    }
+    if (typeof body.playlist_id === "string") {
+      const unknown = unknownPlaylist(body.playlist_id);
+      if (unknown) return unknown;
+      if (body.playlist_id.startsWith("pl_UNAPPROVED")) return problem(409, "playlist_not_approved", "The playlist has no approved version: a person approves its review before any screen uses it.");
+    }
+    const next = { ...campaign };
+    for (const [key, value] of Object.entries(body)) {
+      if (value === null) delete next[key];
+      else next[key] = key === "name" && typeof value === "string" ? value.trim() : value;
+    }
+    if (typeof next.from === "string" && typeof next.until === "string" && next.until <= next.from) return campaignInvalid("until", "must be later than from");
+    for (const key of Object.keys(campaign)) if (!(key in next)) delete campaign[key];
+    Object.assign(campaign, next, { revision: (next.revision as number) + 1, updated_at: "2026-08-14T17:00:30.000Z" });
+    return { status: 200, headers: { etag: `"${campaign.revision}"` }, body: publicCampaign(campaign) };
+  }));
+  transport.on("DELETE", /^\/api\/campaigns\/[^/]+$/, (req) => campaignReplay(req, () => {
+    const campaign = campaignFor(req);
+    if (!campaign) return notFound("The campaign was not found in this project.");
+    const stale = staleCampaign(req, campaign);
+    if (stale) return stale;
+    campaigns.delete(campaign.id as string);
+    return { status: 204, headers: {}, body: undefined };
+  }));
+  transport.on("GET", /^\/api\/campaigns\/[^/]+\/screens$/, (req) => {
+    const campaign = campaignFor(req);
+    if (!campaign) return notFound("The campaign was not found in this project.");
+    const limit = req.query?.limit === undefined ? 100 : Number(req.query.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) return campaignInvalid("limit", "must be an integer from 1 to 500");
+    const cursor = req.query?.cursor ?? "";
+    const reach = [...screens.values()]
+      .filter((screen) => (screen.state === "active" || screen.state === "pairing_pending") && inCampaignAudience(campaign.audience as Record<string, unknown>, screen))
+      .sort((a, b) => (a.id < b.id ? -1 : 1));
+    const counts: Record<string, number> = { audience: reach.length };
+    const standings = reach.map((screen) => {
+      const standing = campaignStandings(screen).find((item) => item.campaign_id === campaign.id)!;
+      counts[standing.status as string] = (counts[standing.status as string] ?? 0) + 1;
+      return standing;
+    });
+    const rest = standings.filter((standing) => (standing.screen_id as string) > cursor);
+    const items = rest.slice(0, limit);
+    return { status: 200, headers: {}, body: { campaign_id: campaign.id, counts, items, ...(rest.length > limit ? { next_cursor: items[items.length - 1]!.screen_id } : {}) } };
+  });
+  transport.on("GET", /^\/api\/screens\/[^/]+\/campaigns$/, (req) => {
+    const screen = screenOf(req);
+    if (!screen) return notFound("The screen was not found in this project.");
+    const items = campaignStandings(screen);
+    const playing = items.find((item) => item.status === "playing");
+    const playingCampaign = playing ? campaigns.get(playing.campaign_id as string) : undefined;
+    const effective = screen.takeover ? { id: screen.takeover.playlist_id, source: "takeover" }
+      : playingCampaign ? { id: playingCampaign.playlist_id, source: "campaign", entry_id: playingCampaign.id }
+      : screen.playlist_id ? { id: screen.playlist_id, source: "default" } : null;
+    return { status: 200, headers: {}, body: { screen_id: screen.id, effective_playlist: effective, items } };
+  });
+
   return transport;
 }

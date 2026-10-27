@@ -16,8 +16,9 @@ import { WriteRecovery } from "./write-recovery.js";
 import { cacheProjectContexts, clearResultContext, contextFromProject, formatResultContext, projectName as validateDisplayName, resultContext, setResultContext, validateProjectContext } from "./project-context.js";
 import { projectConfigFor, withProjectConfig, assertProjectCredential } from "./project-state.js";
 import { instantInZone, normalizeInstant, assignmentLine, playlistInUseProblem, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "./screen-control.js";
-import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLAYS_SETTLE_MS, unusedPath, PLAYS_ALL_MAX_PAGES, PLAYS_LIMIT_MAX, playbackExportBudget, playsCursor, playsLimit, playsRange, requireCsvResponse, writeCsvFile, writeCsvStdout } from "./playback-export.js";
+import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLAYS_SETTLE_MS, unusedPath, PLAYS_ALL_MAX_PAGES, PLAYS_LIMIT_MAX, csvByteStream, csvRecord, isoUtc, playbackExportBudget, playsCursor, playsInstant, playsLimit, playsRange, requireCsvResponse, writeCsvFile, writeCsvStdout } from "./playback-export.js";
 import { wallCanvas, wallFromFlags, wallLine, wallProblem } from "./screen-wall.js";
+import { screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "./screen-facts.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
 import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "./screen-manifest-upgrade.js";
@@ -25,6 +26,7 @@ import { forecastStorageWarnings, isStorageFailureCode, screenStorageWarnings, s
 import { openTempFile, removeOnSignal, shellQuote, tempPathFor } from "./temp-file.js";
 import { KV_WEBHOOK_ID_PATTERN, KV_WEBHOOK_SECRET_PATTERN, kvWebhookDescription, kvWebhookExample, kvWebhookId, kvWebhookKey, kvWebhookLines, kvWebhookProblem, kvWebhookSecretWarning, kvWebhookTableLines } from "./kv-webhooks.js";
 import { TRIGGER_ID_PATTERN, TRIGGER_PASSWORD_PATTERN, alertLines, triggerHoldSeconds, triggerId, triggerLines, triggerName, triggerPasswordWarning, triggerProblem, triggerScreenIds, triggerTableLines, triggerTag } from "./triggers.js";
+import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignAllScreensAudience, campaignAnyTagAudience, campaignAudienceJson, campaignBounds, campaignExplainLines, campaignId, campaignLines, campaignName, campaignPlaylistId, campaignProblem, campaignScreenAudience, campaignScreenId, campaignScreensLines, campaignTableLines, campaignTagAudience, campaignWindowList } from "./campaigns.js";
 import { fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
 import { NOTIFICATION_ID_PATTERN, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationSecretWarning, notificationTableLines, snoozedUntil } from "./notifications.js";
@@ -103,6 +105,13 @@ import {
   type TriggerReceipt,
   type TriggerWithPassword,
   type TriggerWrite,
+  type Campaign,
+  type CampaignAudience,
+  type CampaignList,
+  type CampaignPatch,
+  type CampaignScreens,
+  type CampaignWrite,
+  type ScreenCampaigns,
   type KVWebhookCreate,
   type KVWebhookList,
   type KVWebhookWithSecret,
@@ -805,7 +814,7 @@ function commandHandler(
         (group === "media" && ["update", "delete"].includes(action ?? "")) ||
         // A screenshot is an observation: every run requests a new capture.
         (group === "screen" && !["provision", "publish", "screenshot"].includes(action ?? "")) ||
-        group === "invitations" || group === "webhooks" || group === "notifications" || group === "fleet-links" || group === "triggers" || (group === "project" && ["rename", "create"].includes(action ?? ""))
+        group === "invitations" || group === "webhooks" || group === "notifications" || group === "fleet-links" || group === "triggers" || group === "campaign" || (group === "project" && ["rename", "create"].includes(action ?? ""))
       ));
     let recovery: WriteRecovery | undefined;
     try {
@@ -3006,6 +3015,231 @@ export const handleAdsReportsDelivery = commandHandler(async (args, runtime, res
   };
 });
 
+const DIRECT_CAMPAIGNS = "/api/advertising/direct-campaigns";
+/** Fill statistics cover at most this many days of the seller's ad slots. */
+const FILL_MAX_RANGE_MS = 35 * 86_400_000;
+
+function directCampaignPath(args: ParsedArgs, command: string): string {
+  const id = args.positionals[3];
+  if (!id) throw usageError(`ads direct ${command} requires <campaign-id>.`);
+  return `${DIRECT_CAMPAIGNS}/${encodeURIComponent(id)}`;
+}
+
+/**
+ * Read one JSON document for the direct commands, `-` for stdin. The server
+ * validates every field, including the category list, goal and price; this only
+ * refuses what is not a JSON object or lacks the fields every draft needs.
+ */
+async function directDocument(file: string | undefined, runtime: CliRuntime, what: string): Promise<Record<string, unknown>> {
+  if (!file) throw usageError(`ads direct requires a ${what} JSON document.`);
+  let parsed: unknown;
+  try {
+    parsed = await readAuthoringJson(file, runtime);
+  } catch (error) {
+    throw usageError(`Cannot read the ${what} JSON: ${error instanceof Error ? error.message : "invalid JSON"}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw usageError(`A ${what} must be a JSON object.`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+async function directDraft(file: string | undefined, runtime: CliRuntime): Promise<Record<string, unknown>> {
+  const draft = await directDocument(file, runtime, "direct campaign draft");
+  const fail = (field: string, expectation: string): never => {
+    throw usageError(`Direct campaign draft field ${field} ${expectation}`);
+  };
+  for (const field of ["name", "advertiser", "flight_start", "flight_end"] as const) {
+    if (typeof draft[field] !== "string" || draft[field].trim().length === 0) {
+      fail(field, field === "name" || field === "advertiser" ? "must be a non-empty string." : "must be an RFC 3339 timestamp string.");
+    }
+  }
+  if (!Array.isArray(draft.media_ids) || draft.media_ids.length === 0 || draft.media_ids.some((item) => typeof item !== "string")) {
+    fail("media_ids", "must be a non-empty array of media identifiers.");
+  }
+  if (draft.goal_plays !== undefined && (typeof draft.goal_plays !== "number" || !Number.isSafeInteger(draft.goal_plays) || draft.goal_plays < 0)) {
+    fail("goal_plays", "must be a whole number of plays when present; 0 or omitted takes every eligible slot during the flight.");
+  }
+  if (draft.overbook !== undefined && typeof draft.overbook !== "boolean") {
+    fail("overbook", "must be true or false when present.");
+  }
+  return draft;
+}
+
+/** --from/--to of the direct reports: RFC 3339, now or an age such as 7d, sent as RFC 3339. Each is optional. */
+function adsWindow(args: ParsedArgs, runtime: CliRuntime, maxMs?: number): { from?: string; to?: string } {
+  requireFlagValue(args, "from", "7d");
+  requireFlagValue(args, "to", "now");
+  const now = runtime.now();
+  const from = flagString(args.flags, "from");
+  const to = flagString(args.flags, "to");
+  const fromMs = from === undefined ? undefined : playsInstant(from, "--from", now);
+  const toMs = to === undefined ? undefined : playsInstant(to, "--to", now);
+  if (fromMs !== undefined && toMs !== undefined) {
+    if (fromMs >= toMs) throw usageError("--from must be before --to.");
+    if (maxMs !== undefined && toMs - fromMs > maxMs) {
+      throw usageError(`--from to --to must span at most ${maxMs / 86_400_000} days.`);
+    }
+  }
+  return { ...(fromMs === undefined ? {} : { from: isoUtc(fromMs) }), ...(toMs === undefined ? {} : { to: isoUtc(toMs) }) };
+}
+
+export const handleAdsDirectList = commandHandler((args, runtime, resolved) =>
+  simpleGet(args, runtime, resolved, DIRECT_CAMPAIGNS, "Direct campaigns"));
+
+export const handleAdsDirectShow = commandHandler((args, runtime, resolved) =>
+  simpleGet(args, runtime, resolved, directCampaignPath(args, "show"), "Direct campaign"));
+
+export const handleAdsDirectCreate = commandHandler(async (args, runtime, resolved) =>
+  adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: DIRECT_CAMPAIGNS,
+    body: await directDraft(args.positionals[3], runtime),
+    human: "Direct campaign created. It fills this project's own ad slots before marketplace campaigns and moves no money through screenRIG: you bill the advertiser.",
+  }));
+
+export const handleAdsDirectUpdate = commandHandler(async (args, runtime, resolved) => {
+  const target = directCampaignPath(args, "update");
+  return adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: target,
+    body: await directDraft(args.positionals[4], runtime),
+    ifMatch: flagString(args.flags, "if-match"),
+    human: `Direct campaign ${args.positionals[3]} replaced from the draft. Every writable field now holds the draft's value.`,
+  });
+});
+
+const directTransition = (verb: "pause" | "resume" | "end", human: (id: string) => string) =>
+  commandHandler(async (args, runtime, resolved) => {
+    const target = directCampaignPath(args, verb);
+    return adsMutation(args, runtime, resolved, {
+      method: "POST",
+      path: `${target}/${verb}`,
+      ifMatch: flagString(args.flags, "if-match"),
+      human: human(args.positionals[3]!),
+    });
+  });
+
+export const handleAdsDirectPause = directTransition("pause", (id) => `Paused direct campaign ${id}. It stops taking ad slots until it is resumed.`);
+export const handleAdsDirectResume = directTransition("resume", (id) => `Resumed direct campaign ${id}. It takes eligible ad slots again within its flight.`);
+export const handleAdsDirectEnd = directTransition("end", (id) => `Ended direct campaign ${id}. Ending is final: create a new direct campaign to run it again. Its report stays readable.`);
+
+/** Availability is a read: the POST carries the query document and changes nothing. */
+export const handleAdsDirectAvailability = commandHandler(async (args, runtime, resolved) => {
+  const query = await directDocument(args.positionals[3], runtime, "availability query");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "POST", path: "/api/advertising/availability", body: query });
+  requirePrivateNoStore(response.headers, "Advertising availability response");
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: reportLines("Ad availability", response.body,
+      ["estimated_plays", "booked_plays", "available_plays", "screens", "observed_from", "observed_to", "flight_start", "flight_end"]),
+  };
+});
+
+const DIRECT_REPORT_ROW_FIELDS = ["day", "screen_id", "slot_id", "media_id", "plays", "played_ms"] as const;
+
+/** The money value of a report, `12.50 USD (cpm)`, or undefined when the campaign records no price. */
+function directValueLine(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const { amount, currency, model } = value as Record<string, unknown>;
+  return typeof amount === "string" ? `${amount}${typeof currency === "string" ? ` ${currency}` : ""}${typeof model === "string" ? ` (${model})` : ""}` : undefined;
+}
+
+export const handleAdsDirectReport = commandHandler(async (args, runtime, resolved) => {
+  const target = directCampaignPath(args, "report");
+  const id = args.positionals[3]!;
+  const format = playbackFormat(args, "ads direct report");
+  const window = adsWindow(args, runtime);
+  const toStdout = flagString(args.flags, "output") === "-";
+  const outputPath = format === "csv" && !toStdout
+    ? await resolveDownloadOutput(runtime.cwd(), `./direct-report-${id}.csv`, args.flags)
+    : undefined;
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: `${target}/report`, query: window });
+  requirePrivateNoStore(response.headers, "Advertising report response");
+  const report = response.body && typeof response.body === "object" && !Array.isArray(response.body) ? response.body as Record<string, unknown> : {};
+  const rows = (Array.isArray(report.rows) ? report.rows : []).filter((row): row is Record<string, unknown> =>
+    !!row && typeof row === "object" && !Array.isArray(row));
+  const truncated = report.truncated === true;
+  const truncation: Warning = { code: "direct_report_truncated", message: "The report holds only part of the rows for this period. Narrow --from and --to and run it again for the rest." };
+
+  if (format === "json") {
+    const envelope = jsonBody(response, client.requestId, undefined, truncated ? [truncation] : []);
+    const lines = humanLines("Direct campaign report", [
+      ["campaign_id", typeof report.campaign_id === "string" ? report.campaign_id : undefined],
+      ["name", typeof report.name === "string" ? report.name : undefined],
+      ["advertiser", typeof report.advertiser === "string" ? report.advertiser : undefined],
+      ["period", typeof report.from === "string" && typeof report.to === "string" ? `${report.from} to ${report.to}` : undefined],
+      ...(["goal_plays", "delivered_plays", "plays", "played_ms", "not_played"] as const).map((field): [string, string | undefined] =>
+        [field, typeof report[field] === "number" ? String(report[field]) : undefined]),
+      ["value", directValueLine(report.value)],
+    ]).split("\n");
+    if (rows.length > 0) {
+      lines.push("rows:");
+      for (const row of rows) lines.push(`  ${DIRECT_REPORT_ROW_FIELDS.map((field) => `${field}=${row[field] ?? ""}`).join(" ")}`);
+    }
+    if (truncated) lines.push(`warning: ${truncation.message}`);
+    return { envelope, exitCode: ExitCode.Success, human: lines.join("\n") };
+  }
+
+  const csv = [
+    csvRecord(DIRECT_REPORT_ROW_FIELDS),
+    ...rows.map((row) => csvRecord(DIRECT_REPORT_ROW_FIELDS.map((field) => row[field] as string | number | undefined))),
+  ].join("");
+  const what = "direct campaign report";
+  if (toStdout) {
+    if (formatResultContext(runtime)) runtime.stderr.write(`${formatResultContext(runtime)}\n`);
+    await writeCsvStdout(csvByteStream(csv), runtime.stdout, what, client.requestId);
+    if (truncated) runtime.stderr.write(`warning: ${truncation.message}\n`);
+    return { envelope: successEnvelope({}), exitCode: ExitCode.Success, human: "", output: "stream" };
+  }
+  const file = await writeCsvFile(csvByteStream(csv), outputPath!, what, client.requestId);
+  const data = {
+    path: file.path, bytes: file.bytes, rows: file.rows, sha256: file.sha256, content_type: "text/csv",
+    campaign_id: id,
+    ...(typeof report.from === "string" ? { from: report.from } : {}),
+    ...(typeof report.to === "string" ? { to: report.to } : {}),
+  };
+  return {
+    envelope: successEnvelope(data, { request_id: client.requestId, warnings: truncated ? [truncation] : [] }),
+    exitCode: ExitCode.Success,
+    human: [
+      humanLines("Direct campaign report exported", [
+        ["path", file.path], ["rows", String(file.rows)], ["bytes", String(file.bytes)], ["sha256", file.sha256],
+      ]),
+      ...(truncated ? [`warning: ${truncation.message}`] : []),
+    ].join("\n"),
+  };
+});
+
+export const handleAdsReportsFill = commandHandler(async (args, runtime, resolved) => {
+  const window = adsWindow(args, runtime, FILL_MAX_RANGE_MS);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: "/api/advertising/reports/fill", query: window });
+  requirePrivateNoStore(response.headers, "Advertising report response");
+  const report = response.body && typeof response.body === "object" && !Array.isArray(response.body) ? response.body as Record<string, unknown> : {};
+  const lines = humanLines("Ad slot fill", [
+    ["period", typeof report.from === "string" && typeof report.to === "string" ? `${report.from} to ${report.to}` : undefined],
+    ...(["occurrences", "direct", "marketplace", "vast", "unfilled", "fill_rate"] as const).map((field): [string, string | undefined] =>
+      [field, typeof report[field] === "number" ? String(report[field]) : undefined]),
+  ]).split("\n");
+  const reasons = report.unfilled_reasons;
+  if (reasons && typeof reasons === "object" && !Array.isArray(reasons)) {
+    lines.push(`unfilled_reasons: ${Object.entries(reasons).map(([reason, count]) => `${reason}=${count}`).join(" ")}`);
+  }
+  if (Array.isArray(report.days)) {
+    lines.push("days:");
+    for (const value of report.days) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const day = value as Record<string, unknown>;
+      lines.push(`  ${["day", "occurrences", "direct", "marketplace", "vast", "unfilled", "fill_rate"].map((field) => `${field}=${day[field] ?? ""}`).join(" ")}`);
+    }
+  }
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: lines.join("\n") };
+});
+
 /**
  * Read this project's shared balance. The withdrawal section is reported as the
  * server states it: while payment rails are unconfigured the balance explains
@@ -3335,10 +3569,11 @@ function mediaPrimitiveFromArgs(args: ParsedArgs): "image" | "video" | "audio" |
   return primitive;
 }
 
-function screenListQuery(args: ParsedArgs): Record<string, string> {
+function screenListQuery(args: ParsedArgs): { query: Record<string, string>; repeated?: Record<string, string[]> } {
   const state = screenListStateFromArgs(args);
   const tag = screenListTagFromArgs(args);
-  return { ...(state ? { state } : {}), ...(tag ? { tag } : {}) };
+  const facts = screenListFacts(args.flags);
+  return { query: { ...(state ? { state } : {}), ...(tag ? { tag } : {}), ...facts.query }, ...(facts.repeated ? { repeated: facts.repeated } : {}) };
 }
 
 function screenListTagFromArgs(args: ParsedArgs): string | undefined {
@@ -4192,6 +4427,27 @@ export const handlePlaybackTotals = commandHandler(async (args, runtime, resolve
   const days = aggregateDays(flagString(args.flags, "day-from"), flagString(args.flags, "day-to"), maxDays, scope);
   return simpleGet(args, runtime, resolved, "/api/playback/totals", "Playback totals", {
     by: flagString(args.flags, "by"), screen_id: screenId, media_id: mediaId, top, ...days,
+  });
+}, true);
+
+/**
+ * `playback completeness` binds GET /api/playback/completeness: how many of the
+ * plays Players numbered reached screenRIG, per UTC day and for the window, and
+ * the gaps where numbered plays went missing (newest first). A window spans at
+ * most 92 days; --limit caps the gaps listed.
+ */
+export const handlePlaybackCompleteness = commandHandler(async (args, runtime, resolved) => {
+  const { screenId } = playbackFilterFlags(args);
+  for (const [name, example] of [["day-from", "2026-09-01"], ["day-to", "2026-09-30"], ["limit", "100"]] as const) {
+    requireFlagValue(args, name, example);
+  }
+  const limit = flagString(args.flags, "limit");
+  if (limit !== undefined && (!/^\d+$/.test(limit) || Number(limit) < 1 || Number(limit) > 500)) {
+    throw usageError("--limit must be a whole number from 1 to 500.");
+  }
+  const days = aggregateDays(flagString(args.flags, "day-from"), flagString(args.flags, "day-to"), 92, "");
+  return simpleGet(args, runtime, resolved, "/api/playback/completeness", "Playback completeness", {
+    screen_id: screenId, limit, ...days,
   });
 }, true);
 
@@ -5369,7 +5625,8 @@ async function assertAssignedScreensHaveZone(client: ApiClient, playlistId: stri
 export const handleScreenList = commandHandler(async (args, runtime, resolved) => {
   const token = requireToken(resolved.token);
   const client = clientFor(runtime, args, resolved.apiUrl, token);
-  const response = await client.listAll("/api/screens", screenListQuery(args));
+  const { query, repeated } = screenListQuery(args);
+  const response = await client.listAll("/api/screens", query, repeated ? { queryRepeated: repeated } : undefined);
   const items = (response.body as { items?: Screen[] } | undefined)?.items;
   const warnings = Array.isArray(items) ? items.flatMap((screen) => screenStorageWarnings(screen.id, screen, runtime.now())) : [];
   return {
@@ -5383,7 +5640,8 @@ export const handleScreenList = commandHandler(async (args, runtime, resolved) =
  * One row per screen. The platform column appears only when at least one
  * screen reports a host, and the reason column only when at least one
  * archived screen reports why it was archived, and the tags column only when
- * at least one screen carries a tag, and the upgrade column only when at
+ * at least one screen carries a tag, and the fields and location columns only
+ * when at least one screen carries them, and the upgrade column only when at
  * least one screen has a manifest upgrade story, so a fleet without any
  * keeps the table it had. The JSON body follows unchanged in both output modes.
  */
@@ -5392,6 +5650,9 @@ function screenTableLines(items: Screen[], now: Date): string[] {
   const withPlatform = items.some((screen) => typeof screen?.host?.platform === "string");
   const withReason = items.some((screen) => archiveReason(screen) !== undefined);
   const withTags = items.some((screen) => screenTags(screen).length > 0);
+  // Only when a listed screen carries fields or a location, so plain fleets keep their table.
+  const withFields = items.some((screen) => screenFieldsCell(screen) !== "");
+  const withLocation = items.some((screen) => screenLocationCell(screen) !== "");
   // Only when something overrides the assigned default, so plain fleets keep their table.
   const withAssignment = items.some((screen) => screen?.effective_playlist && screen.effective_playlist.source !== "default");
   // Only when a listed screen has a manifest upgrade story: a target versus
@@ -5404,13 +5665,15 @@ function screenTableLines(items: Screen[], now: Date): string[] {
     ...(withPlatform ? [screen?.host?.platform ?? ""] : []),
     ...(withReason ? [archiveReason(screen) ?? ""] : []),
     ...(withTags ? [screenTags(screen).join(",")] : []),
+    ...(withFields ? [screenFieldsCell(screen)] : []),
+    ...(withLocation ? [screenLocationCell(screen)] : []),
     ...(withAssignment ? [effectivePlaylistText(screen?.effective_playlist, screen?.takeover, screen?.timezone) ?? ""] : []),
     ...(withHealth ? [screenHealthIssues(screen).join(", ") || (screen?.health ? "ok" : "")] : []),
     ...(withUpgrade ? [manifestUpgradeCell(screen, now) ?? ""] : []),
     ...(screen?.recovery_pending?.expires_at ? [`recovery pending until ${screen.recovery_pending.expires_at}`] : []),
     ...(applicationsUnsupportedAt(screen) ? ["applications unsupported"] : []),
   ]);
-  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : []), ...(withReason ? ["REASON"] : []), ...(withTags ? ["TAGS"] : []), ...(withAssignment ? ["ASSIGNED"] : []), ...(withHealth ? ["HEALTH"] : []), ...(withUpgrade ? ["UPGRADE"] : [])];
+  const header = ["ID", "LABEL", "STATE", ...(withPlatform ? ["PLATFORM"] : []), ...(withReason ? ["REASON"] : []), ...(withTags ? ["TAGS"] : []), ...(withFields ? ["FIELDS"] : []), ...(withLocation ? ["LOCATION"] : []), ...(withAssignment ? ["ASSIGNED"] : []), ...(withHealth ? ["HEALTH"] : []), ...(withUpgrade ? ["UPGRADE"] : [])];
   const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => (row[index] ?? "").length)));
   const render = (row: string[]) => row.map((cell, index) => index < widths.length ? cell.padEnd(widths[index]!) : cell).join("  ").trimEnd();
   return [render(header), ...rows.map(render)];
@@ -5736,6 +5999,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       "Screen",
       JSON.stringify(response.body, null, 2),
       ...(screenTags(screen).length ? [`Tags: ${screenTags(screen).join(", ")}`] : []),
+      ...screenFactsLines(screen),
       ...(screen?.fleet_link_id ? [`Created by fleet link: ${screen.fleet_link_id}`] : []),
       ...assignmentLine(screen?.effective_playlist, screen?.takeover, screen?.timezone),
       ...takeoverLine(screen?.takeover, screen?.timezone),
@@ -5802,8 +6066,10 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
   const name = flagString(args.flags, "name");
   const playlistId = flagString(args.flags, "playlist-id");
   const timezone = flagString(args.flags, "timezone");
-  if (!id || (!name && !playlistId && !timezone)) {
-    throw usageError("screen update requires <id>, and --name, --playlist-id, or --timezone.");
+  const facts = screenFactsPatch(args.flags);
+  const changesFacts = facts.fields !== undefined || facts.location !== undefined;
+  if (!id || (!name && !playlistId && !timezone && !changesFacts)) {
+    throw usageError("screen update requires <id>, and --name, --playlist-id, --timezone, --field, --unset-field, --clear-fields, --location, or --clear-location.");
   }
   // A patch that sets both a playlist and a timezone satisfies the schedule
   // rule in one request, so only check when the patch leaves the screen
@@ -5824,6 +6090,7 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
     ...(name ? { name } : {}),
     ...(playlistId ? { playlist_id: playlistId } : {}),
     ...(timezone ? { timezone } : {}),
+    ...facts,
   };
   const response = await client.call({ method: "PATCH", path: `/api/screens/${id}`, idempotent: true, headers: ifMatch ? { "if-match": quotedRevision(ifMatch) } : undefined, body });
   // A playlist-only change under Propose access waits for review.
@@ -5836,7 +6103,8 @@ export const handleScreenUpdate = commandHandler(async (args, runtime, resolved)
   return {
     envelope: jsonBody(response, client.requestId, undefined, warnings),
     exitCode: ExitCode.Success,
-    human: [`Updated screen ${id}`, ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
+    // The merged fields and the location the screen now holds, when this update changed them.
+    human: [`Updated screen ${id}`, ...(changesFacts ? screenFactsLines(response.body as Screen | undefined) : []), ...warnings.map((warning) => `warning: ${warning.message}`)].join("\n"),
   };
 }, true);
 
@@ -8272,7 +8540,7 @@ function publishPlaybackWarning(result: Extract<Awaited<ReturnType<typeof publis
     case "screen_offline":
       return { code: "screen_offline", message: `The screen is offline, so its Player has not picked up the playlist. It plays when the Player reconnects. ${rerun}` };
     case "playlist_not_effective":
-      return { code: "playlist_not_effective", message: `A takeover or playlist schedule shows ${playback.effective_playlist_id} on this screen. The published playlist is its default and plays when that ends; screen show ${screen} reports effective_playlist.` };
+      return { code: "playlist_not_effective", message: `A takeover, campaign or playlist schedule shows ${playback.effective_playlist_id} on this screen. The published playlist is its default and plays when that ends; screen show ${screen} reports effective_playlist, and campaign explain ${screen} says which campaigns apply.` };
     case "playback_failed":
       return { code: "playback_failed", message: `The Player could not switch to the playlist${playback.code ? ` (${playback.code})` : ""}. screen show ${screen} reports the reason; fix it, then screen reload ${screen}.` };
     case "playback_pending":
@@ -8982,6 +9250,201 @@ export const handleTriggersDelete = commandHandler(async (args, runtime, resolve
     envelope: successEnvelope({ id, deleted: true }, { request_id: response.headers["x-request-id"] ?? client.requestId }),
     exitCode: ExitCode.Success,
     human: `Deleted trigger ${id}. Its URL stopped accepting alerts.`,
+  };
+});
+
+// Content campaigns: /api/campaigns switch every screen of an audience to a
+// playlist while from, until and windows hold in each screen's timezone.
+// campaign explain reads /api/screens/{id}/campaigns. Advertising campaigns
+// (ads campaigns) are a different resource that shares the cmp_ id prefix.
+const CAMPAIGNS_PATH = "/api/campaigns";
+
+async function campaignCall(
+  client: ApiClient,
+  request: Parameters<ApiClient["call"]>[0],
+  id?: string,
+  subject: "campaign" | "screen" = "campaign",
+): Promise<Awaited<ReturnType<ApiClient["call"]>>> {
+  try {
+    return await client.call(request);
+  } catch (error) {
+    throw campaignProblem(error, id, subject);
+  }
+}
+
+function campaignRevisionHeaders(args: ParsedArgs): Record<string, string> | undefined {
+  const revision = flagString(args.flags, "if-match");
+  return revision ? { "if-match": quotedRevision(revision) } : undefined;
+}
+
+/**
+ * The audience the flags name, or undefined when none is given: --tag (every
+ * listed tag), --any-tag (at least one), --screen-id, --all-screens, or
+ * --audience (a raw rule: inline JSON, @FILE, or - for stdin).
+ */
+async function campaignAudienceFlag(args: ParsedArgs, runtime: CliRuntime): Promise<CampaignAudience | undefined> {
+  const tags = flagString(args.flags, "tag");
+  const anyTags = flagString(args.flags, "any-tag");
+  const screenIds = flagString(args.flags, "screen-id");
+  const raw = flagString(args.flags, "audience");
+  const all = flagBool(args.flags, "all-screens");
+  if ([tags, anyTags, screenIds, raw].filter((value) => value !== undefined).length + (all ? 1 : 0) > 1) {
+    throw usageError("Provide at most one of --tag, --any-tag, --screen-id, --all-screens or --audience.");
+  }
+  if (tags !== undefined) return campaignTagAudience(tags.split(","));
+  if (anyTags !== undefined) return campaignAnyTagAudience(anyTags.split(","));
+  if (screenIds !== undefined) return campaignScreenAudience(screenIds.split(","));
+  if (all) return campaignAllScreensAudience();
+  if (raw === undefined) return undefined;
+  const source = raw.trim();
+  const text = source === "-" || source.startsWith("@")
+    ? await readAuthoringText(source === "-" ? source : source.slice(1), runtime, CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES)
+    : raw;
+  return campaignAudienceJson(text);
+}
+
+function campaignResult(response: Awaited<ReturnType<ApiClient["call"]>>, client: ApiClient, title: string): CommandResult {
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [title, ...campaignLines(response.body as Campaign | undefined)].join("\n"),
+  };
+}
+
+export const handleCampaignCreate = commandHandler(async (args, runtime, resolved) => {
+  const name = campaignName(flagString(args.flags, "name") ?? "");
+  const playlistId = campaignPlaylistId(flagString(args.flags, "playlist-id") ?? "");
+  const audience = await campaignAudienceFlag(args, runtime);
+  if (!audience) throw usageError("campaign create takes exactly one of --tag, --any-tag, --screen-id, --all-screens or --audience.");
+  const from = flagString(args.flags, "from");
+  const until = flagString(args.flags, "until");
+  campaignBounds(from, until);
+  const windows = flagString(args.flags, "window");
+  const priority = flagString(args.flags, "priority");
+  const paused = flagBool(args.flags, "paused");
+  const body: CampaignWrite = {
+    name,
+    playlist_id: playlistId,
+    audience,
+    ...(from !== undefined ? { from } : {}),
+    ...(until !== undefined ? { until } : {}),
+    ...(windows !== undefined ? { windows: campaignWindowList(windows) } : {}),
+    ...(priority !== undefined ? { priority: Number(priority) } : {}),
+    ...(paused ? { paused: true } : {}),
+  };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await campaignCall(client, { method: "POST", path: CAMPAIGNS_PATH, idempotent: true, body });
+  const id = (response.body as Campaign | undefined)?.id ?? "";
+  return campaignResult(response, client, paused
+    ? `Created campaign ${id}, paused. No screen changes until screenrig campaign resume ${id}.`
+    : `Created campaign ${id}. Screens in its audience switch to the playlist within a minute while it holds; screenrig campaign screens ${id} shows each screen's standing.`);
+});
+
+export const handleCampaignList = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await campaignCall(client, { method: "GET", path: CAMPAIGNS_PATH });
+  const items = (response.body as CampaignList | undefined)?.items;
+  const list = Array.isArray(items) ? items : [];
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Campaigns (${list.length}), in the order screens read them`, ...campaignTableLines(list)].join("\n"),
+  };
+});
+
+export const handleCampaignShow = commandHandler(async (args, runtime, resolved) => {
+  const id = campaignId(args.positionals[2], "show");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await campaignCall(client, { method: "GET", path: `${CAMPAIGNS_PATH}/${id}` }, id);
+  return campaignResult(response, client, "Campaign");
+});
+
+export const handleCampaignUpdate = commandHandler(async (args, runtime, resolved) => {
+  const id = campaignId(args.positionals[2], "update");
+  const name = flagString(args.flags, "name");
+  const playlistId = flagString(args.flags, "playlist-id");
+  const from = flagString(args.flags, "from");
+  const until = flagString(args.flags, "until");
+  const windows = flagString(args.flags, "window");
+  const priority = flagString(args.flags, "priority");
+  const clears = (["clear-from", "clear-until", "clear-windows"] as const).filter((flag) => flagBool(args.flags, flag));
+  const audience = await campaignAudienceFlag(args, runtime);
+  campaignBounds(from, until);
+  const patch: CampaignPatch = {
+    ...(name !== undefined ? { name: campaignName(name) } : {}),
+    ...(playlistId !== undefined ? { playlist_id: campaignPlaylistId(playlistId) } : {}),
+    ...(audience ? { audience } : {}),
+    ...(from !== undefined ? { from } : {}),
+    ...(clears.includes("clear-from") ? { from: null } : {}),
+    ...(until !== undefined ? { until } : {}),
+    ...(clears.includes("clear-until") ? { until: null } : {}),
+    ...(windows !== undefined ? { windows: campaignWindowList(windows) } : {}),
+    ...(clears.includes("clear-windows") ? { windows: null } : {}),
+    ...(priority !== undefined ? { priority: Number(priority) } : {}),
+  };
+  if (!Object.keys(patch).length) {
+    throw usageError("campaign update requires at least one of --name, --playlist-id, an audience (--tag, --any-tag, --screen-id, --all-screens or --audience), --from, --clear-from, --until, --clear-until, --window, --clear-windows, or --priority.");
+  }
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await campaignCall(client, {
+    method: "PATCH", path: `${CAMPAIGNS_PATH}/${id}`, idempotent: true, body: patch, headers: campaignRevisionHeaders(args),
+  }, id);
+  return campaignResult(response, client, `Updated campaign ${id}. Every screen of its old and new audience re-resolves within a minute.`);
+});
+
+async function campaignPaused(args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig, paused: boolean): Promise<CommandResult> {
+  const id = campaignId(args.positionals[2], paused ? "pause" : "resume");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const body: CampaignPatch = { paused };
+  const response = await campaignCall(client, {
+    method: "PATCH", path: `${CAMPAIGNS_PATH}/${id}`, idempotent: true, body, headers: campaignRevisionHeaders(args),
+  }, id);
+  return campaignResult(response, client, paused
+    ? `Paused campaign ${id}. Screens that showed it return to what they would show without it within a minute; screenrig campaign resume ${id} starts it again.`
+    : `Resumed campaign ${id}. Screens in its audience switch to the playlist within a minute while it holds; screenrig campaign screens ${id} shows each screen's standing.`);
+}
+
+export const handleCampaignPause = commandHandler((args, runtime, resolved) => campaignPaused(args, runtime, resolved, true));
+
+export const handleCampaignResume = commandHandler((args, runtime, resolved) => campaignPaused(args, runtime, resolved, false));
+
+export const handleCampaignDelete = commandHandler(async (args, runtime, resolved) => {
+  const id = campaignId(args.positionals[2], "delete");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await campaignCall(client, {
+    method: "DELETE", path: `${CAMPAIGNS_PATH}/${id}`, idempotent: true, headers: campaignRevisionHeaders(args),
+  }, id);
+  return {
+    envelope: successEnvelope({ id, deleted: true }, { request_id: response.headers["x-request-id"] ?? client.requestId }),
+    exitCode: ExitCode.Success,
+    human: `Deleted campaign ${id}. Screens that showed it return to what they would show without it within a minute.`,
+  };
+});
+
+export const handleCampaignScreens = commandHandler(async (args, runtime, resolved) => {
+  const id = campaignId(args.positionals[2], "screens");
+  const limit = flagString(args.flags, "limit");
+  const cursor = flagString(args.flags, "cursor");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await campaignCall(client, {
+    method: "GET", path: `${CAMPAIGNS_PATH}/${id}/screens`,
+    query: { ...(limit !== undefined ? { limit } : {}), ...(cursor !== undefined ? { cursor } : {}) },
+  }, id);
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: campaignScreensLines(id, response.body as CampaignScreens | undefined, limit).join("\n"),
+  };
+});
+
+export const handleCampaignExplain = commandHandler(async (args, runtime, resolved) => {
+  const screenId = campaignScreenId(args.positionals[2]);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await campaignCall(client, { method: "GET", path: `/api/screens/${screenId}/campaigns` }, screenId, "screen");
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: campaignExplainLines(screenId, response.body as ScreenCampaigns | undefined).join("\n"),
   };
 });
 

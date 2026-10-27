@@ -1,0 +1,478 @@
+import { CliError, usageError } from "./problems.js";
+import type {
+  Campaign,
+  CampaignAudience,
+  CampaignScreens,
+  CampaignStatus,
+  ScreenCampaigns,
+  ScreenScheduleDay,
+  ScreenScheduleWindow,
+} from "./adapters/protocol.js";
+import { isResourceID } from "./generated/resource-ids.js";
+import { effectivePlaylistText, scheduleWindow } from "./screen-control.js";
+import { SCREEN_TAG_PATTERN } from "./screen-fleet.js";
+
+/** Backend Campaign.id shape (vendor/openapi.yaml). Advertising campaigns share the cmp_ prefix but are a different resource. */
+export const CAMPAIGN_ID_PATTERN = /^(?:(?:stage|qa|development)_)?cmp_[A-Za-z0-9_-]+$/;
+export const CAMPAIGNS_MAX = 100;
+export const CAMPAIGN_NAME_MAX = 120;
+export const CAMPAIGN_PRIORITY_MAX = 100;
+export const CAMPAIGN_WINDOWS_MAX = 16;
+export const CAMPAIGN_SCREENS_LIMIT_MAX = 500;
+/** An audience has at most 500 rules, groups included, so a group of N tags or screens is N + 1 rules. */
+export const CAMPAIGN_AUDIENCE_RULES_MAX = 500;
+const AUDIENCE_LEAVES_MAX = CAMPAIGN_AUDIENCE_RULES_MAX - 1;
+/** The API reads a request body of at most 64 KiB. */
+export const CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES = 64 * 1024;
+const CURSOR_MAX = 200;
+
+const DAYS: readonly ScreenScheduleDay[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
+const CIVIL = /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):([0-5]\d)$/;
+
+export function campaignId(value: string | undefined, command: string): string {
+  if (!value) throw usageError(`campaign ${command} requires <id>.`);
+  if (!CAMPAIGN_ID_PATTERN.test(value)) {
+    throw usageError("A campaign id looks like cmp_ followed by letters, digits, - or _.", {
+      command: "screenrig campaign list",
+      reason: "List this project's campaigns and their ids. Advertising campaigns (screenrig ads campaigns list) are a different resource.",
+    });
+  }
+  return value;
+}
+
+export function campaignScreenId(value: string | undefined): string {
+  if (!value) throw usageError("campaign explain requires <screen-id>.");
+  if (!isResourceID(value, "screen")) {
+    throw usageError("A screen id looks like scr_ followed by letters, digits, - or _.", {
+      command: "screenrig screen list",
+      reason: "List this project's screens and their ids.",
+    });
+  }
+  return value;
+}
+
+/** Campaign.name: 1 to 120 characters after trimming, no control characters. */
+export function campaignName(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || [...trimmed].length > CAMPAIGN_NAME_MAX || /\p{Cc}/u.test(value)) {
+    throw usageError(`--name must contain 1 to ${CAMPAIGN_NAME_MAX} characters without controls.`);
+  }
+  return trimmed;
+}
+
+export function campaignPlaylistId(value: string): string {
+  if (!isResourceID(value, "playlist")) {
+    throw usageError("--playlist-id must be a playlist id (pl_…).", {
+      command: "screenrig playlist list",
+      reason: "List this project's playlists and their ids.",
+    });
+  }
+  return value;
+}
+
+/** --priority: a whole number from 0 to 100; higher wins when two campaigns hold on one screen. */
+export function campaignPriority(value: string): string {
+  if (!/^\d+$/.test(value) || Number(value) > CAMPAIGN_PRIORITY_MAX) {
+    throw usageError(`--priority must be a whole number from 0 to ${CAMPAIGN_PRIORITY_MAX}.`);
+  }
+  return value;
+}
+
+export function campaignScreensLimit(value: string): string {
+  const number = Number(value);
+  if (!/^\d+$/.test(value) || number < 1 || number > CAMPAIGN_SCREENS_LIMIT_MAX) {
+    throw usageError(`--limit must be a whole number from 1 to ${CAMPAIGN_SCREENS_LIMIT_MAX}.`);
+  }
+  return value;
+}
+
+export function campaignScreensCursor(value: string): string {
+  if (!value.trim() || value.length > CURSOR_MAX || /\p{Cc}/u.test(value)) {
+    throw usageError("--cursor takes the data.next_cursor of the previous page.");
+  }
+  return value;
+}
+
+function accumulate(value: string, previous: string | undefined): string[] {
+  return [...(previous ? previous.split(",") : []), ...value.split(",").map((item) => item.trim())];
+}
+
+function tagList(value: string, previous: string | undefined, flag: string): string {
+  const tags = accumulate(value, previous);
+  if (tags.some((tag) => !SCREEN_TAG_PATTERN.test(tag))) {
+    throw usageError(`${flag} takes tags of 1 to 32 letters or digits, repeated or comma-separated, for example ${flag} Lobby,Floor2.`);
+  }
+  if (new Set(tags).size !== tags.length) throw usageError(`${flag} lists a tag more than once.`);
+  if (tags.length > AUDIENCE_LEAVES_MAX) throw usageError(`${flag} accepts at most ${AUDIENCE_LEAVES_MAX} tags: an audience has at most ${CAMPAIGN_AUDIENCE_RULES_MAX} rules.`);
+  return tags.join(",");
+}
+
+/** Repeatable --tag: the screen carries every listed tag. Returns the accumulated list joined by commas. */
+export function campaignTags(value: string, previous?: string): string {
+  return tagList(value, previous, "--tag");
+}
+
+/** Repeatable --any-tag: the screen carries at least one listed tag. Returns the accumulated list joined by commas. */
+export function campaignAnyTags(value: string, previous?: string): string {
+  return tagList(value, previous, "--any-tag");
+}
+
+/** Repeatable --screen-id; each value may also list comma-separated ids. Returns the accumulated list joined by commas. */
+export function campaignScreenIds(value: string, previous?: string): string {
+  const ids = accumulate(value, previous);
+  if (ids.some((id) => !isResourceID(id, "screen"))) {
+    throw usageError("--screen-id takes screen ids (scr_…), repeated or comma-separated.", {
+      command: "screenrig screen list",
+      reason: "List this project's screens and their ids.",
+    });
+  }
+  if (new Set(ids).size !== ids.length) throw usageError("--screen-id lists a screen more than once.");
+  if (ids.length > AUDIENCE_LEAVES_MAX) {
+    throw usageError(`--screen-id accepts at most ${AUDIENCE_LEAVES_MAX} screens: an audience has at most ${CAMPAIGN_AUDIENCE_RULES_MAX} rules. Tag the screens and use --tag for a larger fleet.`);
+  }
+  return ids.join(",");
+}
+
+/** --tag TAG[,TAG…] → {"tag": T}, or {"all": [{"tag": T}, …]} for several. */
+export function campaignTagAudience(tags: readonly string[]): CampaignAudience {
+  return tags.length === 1 ? { tag: tags[0]! } : { all: tags.map((tag) => ({ tag })) };
+}
+
+/** --any-tag TAG[,TAG…] → {"any": [{"tag": T}, …]}. */
+export function campaignAnyTagAudience(tags: readonly string[]): CampaignAudience {
+  return { any: tags.map((tag) => ({ tag })) };
+}
+
+/** --screen-id ID[,ID…] → {"screen_id": ID}, or {"any": [{"screen_id": ID}, …]} for several. */
+export function campaignScreenAudience(ids: readonly string[]): CampaignAudience {
+  return ids.length === 1 ? { screen_id: ids[0]! } : { any: ids.map((id) => ({ screen_id: id })) };
+}
+
+/** --all-screens: {"all": []}, every screen of the project. */
+export function campaignAllScreensAudience(): CampaignAudience {
+  return { all: [] };
+}
+
+/** --audience as JSON text. The server checks the rule's members; this checks it is one JSON object. */
+export function campaignAudienceJson(text: string): CampaignAudience {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw usageError('--audience is not valid JSON. Pass a rule such as {"tag":"Lobby"}, @FILE to read it from a file, or - for stdin.');
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw usageError('--audience must be a JSON object with exactly one of all, any, tag or screen_id, such as {"all":[{"tag":"Lobby"},{"tag":"Floor2"}]}; {"all":[]} is every screen.');
+  }
+  return parsed as CampaignAudience;
+}
+
+/** --audience is inline JSON, @FILE or - (stdin); the handler reads the file or stdin. */
+export function campaignAudienceOption(value: string): string {
+  if (!value.trim() || value.trim() === "@") {
+    throw usageError("--audience takes a JSON rule, @FILE to read it from a file, or - for stdin.");
+  }
+  return value;
+}
+
+function windowError(spec: string, detail: string): CliError {
+  return usageError(`--window ${JSON.stringify(spec)}: ${detail} A window is DAYS or DAYS@HH:MM-HH:MM, such as mon-fri@09:00-17:00, sat,sun or daily@22:00-06:00.`);
+}
+
+function dayIndex(name: string, spec: string): number {
+  const index = DAYS.indexOf(name as ScreenScheduleDay);
+  if (index < 0) {
+    throw windowError(spec, name === "" ? "A day is missing." : `${JSON.stringify(name)} is not a day; use mon, tue, wed, thu, fri, sat or sun (daily stands alone).`);
+  }
+  return index;
+}
+
+function windowDays(text: string, spec: string): ScreenScheduleDay[] {
+  if (text === "daily") return [...DAYS];
+  const selected = new Set<number>();
+  for (const item of text.split(",")) {
+    const bounds = item.split("-").map((name) => name.trim());
+    if (bounds.length > 2) throw windowError(spec, `${JSON.stringify(item)} is not a day or a range such as mon-fri.`);
+    const first = dayIndex(bounds[0]!, spec);
+    const last = bounds.length === 2 ? dayIndex(bounds[1]!, spec) : first;
+    // A range runs forward from its first day and wraps past sun, so fri-mon is fri, sat, sun and mon.
+    for (let index = first; ; index = (index + 1) % DAYS.length) {
+      selected.add(index);
+      if (index === last) break;
+    }
+  }
+  return DAYS.filter((_, index) => selected.has(index));
+}
+
+/**
+ * One --window: DAYS or DAYS@HH:MM-HH:MM. DAYS is daily, a day (mon), a range
+ * (mon-fri; fri-mon wraps past the week's end) or a comma list (sat,sun).
+ * Without a time the window is the whole day; an end at or before the start
+ * crosses midnight and belongs to the start day. Days are returned in mon to
+ * sun order without duplicates.
+ */
+export function campaignWindow(spec: string): ScreenScheduleWindow {
+  const text = spec.trim();
+  const at = text.indexOf("@");
+  const days = windowDays((at < 0 ? text : text.slice(0, at)).trim().toLowerCase(), spec);
+  const window: ScreenScheduleWindow = { days };
+  if (at >= 0) {
+    const times = /^(\d{2}:\d{2})-(\d{2}:\d{2})$/.exec(text.slice(at + 1).trim());
+    if (!times || !CLOCK.test(times[1]!) || !CLOCK.test(times[2]!)) {
+      throw windowError(spec, "The time of day after @ must be HH:MM-HH:MM in 24-hour time, such as 09:00-17:00.");
+    }
+    window.start = times[1]!;
+    window.end = times[2]!;
+  }
+  // The same check screen schedules and display schedules apply to a window.
+  return scheduleWindow(window, "--window", (_path, message) => windowError(spec, message)) as ScreenScheduleWindow;
+}
+
+/** The days of a window in --window spelling: daily, runs of three or more as ranges (mon-fri), the rest listed. */
+function daysText(days: readonly string[]): string {
+  const indexes = DAYS.flatMap((day, index) => (days.includes(day) ? [index] : []));
+  if (indexes.length !== days.length) return days.join(",");
+  if (indexes.length === DAYS.length) return "daily";
+  const parts: string[] = [];
+  for (let start = 0; start < indexes.length;) {
+    let end = start;
+    while (end + 1 < indexes.length && indexes[end + 1] === indexes[end]! + 1) end += 1;
+    if (end - start >= 2) parts.push(`${DAYS[indexes[start]!]}-${DAYS[indexes[end]!]}`);
+    else for (let index = start; index <= end; index += 1) parts.push(DAYS[indexes[index]!]!);
+    start = end + 1;
+  }
+  return parts.join(",");
+}
+
+/** A window in --window spelling, such as mon-fri@09:00-17:00 or sat,sun. */
+export function campaignWindowSpec(window: ScreenScheduleWindow): string {
+  const days = daysText(window.days ?? []);
+  return window.start !== undefined && window.end !== undefined ? `${days}@${window.start}-${window.end}` : days;
+}
+
+/** Repeatable --window; returns the accumulated canonical specs joined by semicolons. */
+export function campaignWindows(value: string, previous?: string): string {
+  const specs = [...(previous ? previous.split(";") : []), campaignWindowSpec(campaignWindow(value))];
+  if (specs.length > CAMPAIGN_WINDOWS_MAX) throw usageError(`--window accepts at most ${CAMPAIGN_WINDOWS_MAX} windows.`);
+  return specs.join(";");
+}
+
+/** The windows a --window accumulation names, in the order given. */
+export function campaignWindowList(accumulated: string): ScreenScheduleWindow[] {
+  return accumulated.split(";").map(campaignWindow);
+}
+
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28;
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+/** --from and --until: a civil YYYY-MM-DDTHH:MM, read in each screen's timezone, on a real calendar day. */
+export function campaignInstant(flag: "--from" | "--until"): (value: string) => string {
+  return (value) => {
+    const match = CIVIL.exec(value);
+    const year = Number(match?.[1]);
+    const month = Number(match?.[2]);
+    const day = Number(match?.[3]);
+    if (!match || month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) {
+      throw usageError(`${flag} takes a civil date and time in each screen's timezone as YYYY-MM-DDTHH:MM, such as 2026-12-24T18:00 (no offset, no seconds).`);
+    }
+    return value;
+  };
+}
+
+/** until is exclusive and must come after from. Civil minutes compare as text. */
+export function campaignBounds(from: string | undefined, until: string | undefined): void {
+  if (from !== undefined && until !== undefined && until <= from) throw usageError("--until must be later than --from.");
+}
+
+/**
+ * Map campaign problems to actionable guidance; exit codes stay status-derived
+ * (400 → 8, 404 → 4, 409 → 5, 412 → 6). `subject` names what a not_found id
+ * was: a campaign, or the screen of campaign explain.
+ */
+export function campaignProblem(error: unknown, id?: string, subject: "campaign" | "screen" = "campaign"): unknown {
+  if (!(error instanceof CliError)) return error;
+  const problem = error.problem;
+  if (problem.code === "campaign_limit_reached") {
+    return new CliError({
+      ...problem,
+      detail: `This project already has the maximum of ${CAMPAIGNS_MAX} campaigns. Nothing was created.`,
+      next: problem.next ?? {
+        command: "screenrig campaign list",
+        reason: "Delete a campaign you no longer need with screenrig campaign delete ID, then rerun create.",
+      },
+    }, error.exitCode, error.warnings);
+  }
+  if (problem.next) return error;
+  if (problem.code === "revision_conflict" && id) {
+    return new CliError({
+      ...problem,
+      next: { command: `screenrig campaign show ${id}`, reason: "Read the current revision and state, then rerun with --expect-rev REVISION if the change still applies." },
+    }, error.exitCode, error.warnings);
+  }
+  if (problem.code === "not_found" && id) {
+    return new CliError({
+      ...problem,
+      next: subject === "screen"
+        ? { command: "screenrig screen list", reason: "List this project's screens and their ids." }
+        : { command: "screenrig campaign list", reason: "List this project's campaigns; a deleted campaign does not come back. An id from screenrig ads campaigns list names an advertising campaign, not this resource." },
+    }, error.exitCode, error.warnings);
+  }
+  if (problem.code === "playlist_not_approved") {
+    return new CliError({
+      ...problem,
+      next: { command: "screenrig reviews list", reason: "A campaign shows only an approved playlist. Its review waits for a person; choose an approved playlist with --playlist-id, or rerun once the review is approved." },
+    }, error.exitCode, error.warnings);
+  }
+  if (problem.code === "invalid_request" && problem.errors.some((item) => (item as { field?: unknown } | null)?.field === "playlist_id")) {
+    return new CliError({
+      ...problem,
+      next: { command: "screenrig playlist list", reason: "Choose a playlist id from this project for --playlist-id." },
+    }, error.exitCode, error.warnings);
+  }
+  return error;
+}
+
+function when(value: string | number | undefined, label: string): string[] {
+  return value === undefined || value === "" ? [] : [`${label}: ${value}`];
+}
+
+function clip(text: string, width: number): string {
+  const characters = [...text];
+  return characters.length <= width ? text : `${characters.slice(0, width - 1).join("")}…`;
+}
+
+/** "every screen", "tag Lobby", "tag Lobby and tag Floor2", "screen scr_A or screen scr_B". */
+export function campaignAudienceText(audience: CampaignAudience | undefined, nested = false): string {
+  if (!audience) return "";
+  const group = (rules: CampaignAudience[], word: string): string => {
+    const parts = rules.map((rule) => campaignAudienceText(rule, true));
+    const text = parts.join(` ${word} `);
+    return nested && parts.length > 1 ? `(${text})` : text;
+  };
+  if (audience.all) return audience.all.length ? group(audience.all, "and") : "every screen";
+  if (audience.any) return group(audience.any, "or");
+  if (audience.tag !== undefined) return `tag ${audience.tag}`;
+  if (audience.screen_id !== undefined) return `screen ${audience.screen_id}`;
+  return JSON.stringify(audience);
+}
+
+/** The campaign's clock: "always", or its bounds and windows ("from …; until …; mon-fri@09:00-17:00"). */
+export function campaignWhenText(campaign: Pick<Campaign, "from" | "until" | "windows">): string {
+  const parts = [
+    ...(campaign.from ? [`from ${campaign.from}`] : []),
+    ...(campaign.until ? [`until ${campaign.until}`] : []),
+    ...(campaign.windows ?? []).map(campaignWindowSpec),
+  ];
+  return parts.length ? parts.join("; ") : "always";
+}
+
+/** Every field of a campaign, one per line. */
+export function campaignLines(campaign: Campaign | undefined): string[] {
+  if (!campaign) return [];
+  const clock = campaignWhenText(campaign);
+  return [
+    `id: ${campaign.id}`,
+    `name: ${campaign.name}`,
+    `playlist_id: ${campaign.playlist_id}`,
+    `audience: ${campaignAudienceText(campaign.audience)}`,
+    `when: ${clock}${clock === "always" ? "" : " (civil times in each screen's timezone)"}`,
+    `priority: ${campaign.priority}`,
+    `paused: ${campaign.paused}`,
+    `revision: ${campaign.revision}`,
+    ...when(campaign.created_at, "created_at"),
+    ...when(campaign.updated_at, "updated_at"),
+  ];
+}
+
+function table(header: string[], rows: string[][]): string[] {
+  const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => (row[index] ?? "").length)));
+  const render = (row: string[]) => row.map((cell, index) => cell.padEnd(widths[index]!)).join("  ").trimEnd();
+  return [render(header), ...rows.map(render)];
+}
+
+/** The list table, in the precedence order the API returns. */
+export function campaignTableLines(items: Campaign[]): string[] {
+  if (!items.length) return ["No campaigns"];
+  return table(["ID", "NAME", "PLAYLIST", "AUDIENCE", "WHEN", "PRIORITY", "PAUSED"], items.map((item) => [
+    item.id ?? "", clip(item.name ?? "", 40), item.playlist_id ?? "", clip(campaignAudienceText(item.audience), 48),
+    clip(campaignWhenText(item), 56), String(item.priority ?? 0), item.paused ? "yes" : "no",
+  ]));
+}
+
+const STANDING_ORDER = ["playing", "pending", "waiting", "ended", "outranked", "paused", "blocked", "not_in_audience"];
+
+/** "8 playing, 2 waiting, 1 blocked": the per-standing counts of a campaign's audience. */
+export function campaignCountsText(counts: Record<string, number> | undefined): string {
+  const rank = (name: string) => { const index = STANDING_ORDER.indexOf(name); return index < 0 ? STANDING_ORDER.length : index; };
+  return Object.entries(counts ?? {})
+    .filter(([name, count]) => name !== "audience" && count > 0)
+    .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
+    .map(([name, count]) => `${count} ${name.replaceAll("_", " ")}`)
+    .join(", ");
+}
+
+/** What a campaign's standing on a screen means, with the command that fixes it when the screen is known. */
+export function campaignStandingDetail(status: CampaignStatus, screenId?: string): string {
+  switch (status.status) {
+    case "playing": return "";
+    case "pending": return "the switch lands within a minute";
+    case "waiting": return status.next_start ? `outside from, until and windows now; starts ${status.next_start}` : "outside from, until and windows now; no start within eight days";
+    case "ended": return "until has passed";
+    case "paused": return "the campaign is paused";
+    case "not_in_audience": return "the screen is not in the audience";
+    case "outranked":
+      return status.reason === "takeover" ? "a screen takeover wins"
+        : status.reason === "campaign" ? (status.by ? `campaign ${status.by} wins` : "another campaign wins")
+        : "outranked";
+    case "blocked":
+      switch (status.reason) {
+        case "no_default_playlist":
+          return `the screen has no default playlist: screenrig screen assign ${screenId ?? "SCREEN_ID"} --playlist-id PLAYLIST_ID`;
+        case "no_timezone":
+          return `the screen has no timezone: screenrig screen set-timezone ${screenId ?? "SCREEN_ID"} --timezone ZONE`;
+        case "playlist_unavailable":
+          return "the playlist is missing, unapproved or does not fit the screen";
+        default:
+          return "blocked";
+      }
+    default:
+      return status.reason ?? "";
+  }
+}
+
+/** campaign screens: the reach headline, the counts, one row per screen of the page, and the command for the next page. */
+export function campaignScreensLines(id: string, page: CampaignScreens | undefined, limit?: string): string[] {
+  const audience = page?.counts?.audience ?? 0;
+  const items = Array.isArray(page?.items) ? page.items : [];
+  const counts = campaignCountsText(page?.counts);
+  const next = typeof page?.next_cursor === "string" ? page.next_cursor : undefined;
+  return [
+    `Campaign ${id} reaches ${audience} screen${audience === 1 ? "" : "s"}`,
+    ...(counts ? [`counts: ${counts}`] : []),
+    ...(items.length
+      ? table(["SCREEN", "NAME", "STATUS", "DETAIL"], items.map((item) => [
+        item.screen_id ?? "", clip(item.screen_name ?? "", 32), item.status ?? "", campaignStandingDetail(item),
+      ]))
+      : [audience === 0
+        ? `No live screen is in the audience. screenrig campaign show ${id} prints the audience, and screenrig screen tag sets a screen's tags.`
+        : "No screens on this page."]),
+    ...(next ? [`next: screenrig campaign screens ${id} --cursor ${next}${limit ? ` --limit ${limit}` : ""}`] : []),
+  ];
+}
+
+/** campaign explain: what the screen plays and every campaign's standing on it, in precedence order. */
+export function campaignExplainLines(screenId: string, view: ScreenCampaigns | undefined): string[] {
+  const effective = effectivePlaylistText(view?.effective_playlist ?? undefined);
+  const items = Array.isArray(view?.items) ? view.items : [];
+  return [
+    effective ? `Screen ${screenId} plays ${effective}` : `Screen ${screenId} plays no playlist`,
+    ...(items.length
+      ? [`Campaigns, in precedence order (${items.length})`, ...table(["CAMPAIGN", "STATUS", "DETAIL"], items.map((item) => [
+        item.campaign_id ?? "", item.status ?? "", campaignStandingDetail(item, screenId),
+      ]))]
+      : ["No campaigns in this project"]),
+  ];
+}

@@ -7,7 +7,7 @@ import { formatEventLine } from "./commands.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
 import { run, type CliRuntime } from "./main.js";
-import { durationMs, scheduleEntries, takeoverUntil } from "./screen-control.js";
+import { durationMs, effectivePlaylistText, scheduleEntries, takeoverUntil } from "./screen-control.js";
 import { testTemp } from "./test-temp.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import type { TransportRequest } from "./transport/types.js";
@@ -431,6 +431,20 @@ test("screen show and list surface effective_playlist, takeover, and schedule", 
 
 });
 
+test("effective playlist text names the takeover, campaign, schedule entry or default that decides", () => {
+  const zone = "America/Los_Angeles";
+  const until = "2026-12-24T18:00:00Z";
+  assert.equal(effectivePlaylistText(undefined), undefined);
+  assert.equal(effectivePlaylistText({ id: "pl_X", source: "takeover" }), "pl_X (takeover until cleared)");
+  assert.equal(effectivePlaylistText({ id: "pl_X", source: "takeover", until }, undefined, zone), "pl_X (takeover until 2026-12-24 10:00 America/Los_Angeles)");
+  assert.equal(effectivePlaylistText({ id: "pl_X", source: "campaign", entry_id: "cmp_HOLIDAY" }), "pl_X (campaign cmp_HOLIDAY)");
+  assert.equal(effectivePlaylistText({ id: "pl_X", source: "campaign", entry_id: "cmp_HOLIDAY", until }, undefined, zone), "pl_X (campaign cmp_HOLIDAY until 2026-12-24 10:00 America/Los_Angeles)");
+  assert.equal(effectivePlaylistText({ id: "pl_X", source: "campaign" }), "pl_X (campaign)");
+  assert.equal(effectivePlaylistText({ id: "pl_X", source: "schedule", entry_id: "lunch", until }, undefined, zone), "pl_X (schedule entry lunch until 2026-12-24 10:00 America/Los_Angeles)");
+  assert.equal(effectivePlaylistText({ id: "pl_X", source: "default" }), "pl_X (default)");
+  assert.equal(effectivePlaylistText({ id: "pl_X", source: "default", until }, undefined, zone), "pl_X (default, a campaign or schedule changes it until 2026-12-24 10:00 America/Los_Angeles)");
+});
+
 test("playlist delete in use points at the screens that can still show it", async () => {
   const env = await enrolled();
   const transport = await backend(env);
@@ -440,6 +454,7 @@ test("playlist delete in use points at the screens that can still show it", asyn
   assert.equal(refused.envelope.error!.code, "resource_conflict");
   assert.equal(refused.envelope.error!.next!.command, "screenrig screen list");
   assert.match(refused.envelope.error!.next!.reason, /effective_playlist/);
+  assert.match(refused.envelope.error!.next!.reason, /shown by a campaign.*campaign explain ID names the campaign a screen plays/);
 });
 
 test("effective-playlist events render in human event output", () => {

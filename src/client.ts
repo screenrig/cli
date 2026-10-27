@@ -16,6 +16,7 @@ import {
   timeoutError,
   unexpectedResponseError,
   usageError,
+  withOverbookingGuidance,
   withPaymentGuidance,
   withQuotaGuidance,
   withRetryAfter,
@@ -62,6 +63,8 @@ export interface ListAllOptions {
   uncapped?: boolean;
   cursorParam?: string;
   itemsKey?: string;
+  /** Query parameters sent once per value (?field=a:1&field=b:2) with every page, beside `query`. */
+  queryRepeated?: Record<string, readonly string[]>;
 }
 
 /**
@@ -300,7 +303,9 @@ export class ApiClient {
       const wrapped = new CliError(
         withPaymentGuidance(
           withQuotaGuidance(
-            withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
+            withOverbookingGuidance(
+              withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
+            ),
           ),
         ),
         undefined,
@@ -398,7 +403,9 @@ export class ApiClient {
       const wrapped = new CliError(
         withPaymentGuidance(
           withQuotaGuidance(
-            withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
+            withOverbookingGuidance(
+              withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
+            ),
           ),
         ),
         undefined,
@@ -444,7 +451,7 @@ export class ApiClient {
     if (start) cursors.add(start);
     let after: string | undefined;
     for (let page = 1; ; page += 1) {
-      const response = await this.call({ method: "GET", path, query: after === undefined ? query : { ...query, [cursorParam]: after } });
+      const response = await this.call({ method: "GET", path, query: after === undefined ? query : { ...query, [cursorParam]: after }, ...(options?.queryRepeated ? { queryRepeated: options.queryRepeated } : {}) });
       const body = response.body as Record<string, unknown> | undefined;
       const rows = body?.[itemsKey];
       if (!body || !Array.isArray(rows)) {

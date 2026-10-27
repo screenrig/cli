@@ -674,11 +674,11 @@ export interface Screen {
    * connect. Read-only; not a player heartbeat.
    */
   online: boolean;
-  /** Assigned default playlist. A takeover or a matching schedule entry takes precedence; effective_playlist names what is shown. */
+  /** Assigned default playlist. A takeover, a campaign that holds or a matching schedule entry takes precedence, in that order; effective_playlist names what is shown. */
   playlist_id?: string;
   /** Server-evaluated playlist schedule (never on the runtime manifest). */
   playlist_schedule?: ScreenPlaylistSchedule;
-  /** The playlist that wins over the schedule and the assignment. */
+  /** The playlist that wins over campaigns, the schedule and the assignment. */
   takeover?: ScreenTakeover;
   /** What the runtime manifest is built from; absent when the screen shows no playlist. */
   effective_playlist?: ScreenEffectivePlaylist;
@@ -689,6 +689,20 @@ export interface Screen {
   comments?: Record<string, unknown>;
   /** The fleet link that created this screen. Read-only; it stays after the link is deleted. */
   fleet_link_id?: string;
+  /**
+   * The project's own values for this screen, such as a store number or a
+   * region: up to 32 fields, names matching ^[a-z0-9_]{1,32}$, values of 1 to
+   * 200 characters. Absent when none are set. Set by ScreenPatch. Card
+   * placements read them through {screen.field.NAME} tokens. Never
+   * authorization.
+   */
+  fields?: Record<string, string>;
+  /**
+   * Where the screen is. Absent when unset. Set by ScreenPatch. A card
+   * placement reads it through the {screen.location} token, and screen list
+   * filters by distance from a point. Never authorization.
+   */
+  location?: ScreenLocation;
   public_id: string;
   /** Read-only recovery offer awaiting confirmation. Absent once confirmed, lapsed, or claimed as a new screen. */
   recovery_pending?: ScreenRecoveryPending;
@@ -762,6 +776,26 @@ export interface ScreenPatch {
   tags?: ScreenTags;
   /** An object sets the screen's video wall, null clears it. Needs a Player that declared display.wall (409 wall_unsupported otherwise). */
   wall?: ScreenWall | null;
+  /**
+   * Merges into the screen's fields: a string sets one, null removes it. A null
+   * fields clears every field. Changing fields remints the manifest revision of
+   * a screen that shows a playlist.
+   */
+  fields?: Record<string, string | null> | null;
+  /** Replaces the whole location; null clears it. Changing it remints the manifest revision of a screen that shows a playlist. */
+  location?: ScreenLocation | null;
+}
+
+/** Where a screen is, in decimal degrees: Screen.location and the ScreenPatch location. */
+export interface ScreenLocation {
+  /** -90 to 90. */
+  latitude: number;
+  /** -180 to 180. */
+  longitude: number;
+  /** The short place name a card shows, at most 40 characters. Absent when empty. */
+  name?: string;
+  /** Free text for people and agents, at most 200 characters. Absent when empty. */
+  address?: string;
 }
 
 export type ScreenTags = string[];
@@ -1502,9 +1536,96 @@ export interface ScreenTakeoverWrite {
 
 export interface ScreenEffectivePlaylist {
   id: string;
-  source: "takeover" | "schedule" | "default";
+  source: "takeover" | "campaign" | "schedule" | "default";
+  /** The campaign id for source campaign, the schedule entry id for source schedule. */
   entry_id?: string;
   until?: string;
+}
+
+/**
+ * CampaignAudience: exactly one member. all (every rule matches) and any (at
+ * least one matches) nest at most 3 deep; {"all": []} is every screen.
+ */
+export interface CampaignAudience {
+  all?: CampaignAudience[];
+  any?: CampaignAudience[];
+  tag?: string;
+  screen_id?: string;
+}
+
+/** GET /api/campaigns/{id}: a content campaign. from and until are civil YYYY-MM-DDTHH:MM in each screen's timezone. */
+export interface Campaign {
+  project_id?: string;
+  id: string;
+  name: string;
+  playlist_id: string;
+  audience: CampaignAudience;
+  from?: string;
+  until?: string;
+  windows?: ScreenScheduleWindow[];
+  priority: number;
+  paused: boolean;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CampaignList {
+  items: Campaign[];
+}
+
+export interface CampaignWrite {
+  name: string;
+  playlist_id: string;
+  audience: CampaignAudience;
+  from?: string;
+  until?: string;
+  windows?: ScreenScheduleWindow[];
+  priority?: number;
+  paused?: boolean;
+}
+
+export interface CampaignPatch {
+  name?: string;
+  playlist_id?: string;
+  audience?: CampaignAudience;
+  /** null clears from, until or windows. */
+  from?: string | null;
+  until?: string | null;
+  windows?: ScreenScheduleWindow[] | null;
+  priority?: number;
+  paused?: boolean;
+}
+
+export type CampaignStanding = "playing" | "pending" | "waiting" | "ended" | "outranked" | "paused" | "blocked" | "not_in_audience";
+
+/** One campaign's standing on one screen. */
+export interface CampaignStatus {
+  campaign_id: string;
+  screen_id: string;
+  screen_name?: string;
+  status: CampaignStanding;
+  /** Why a campaign is outranked (takeover, campaign) or blocked (no_default_playlist, no_timezone, playlist_unavailable). */
+  reason?: "takeover" | "campaign" | "no_default_playlist" | "no_timezone" | "playlist_unavailable";
+  /** The campaign that outranks this one. */
+  by?: string;
+  next_start?: string;
+}
+
+/** GET /api/campaigns/{id}/screens: counts cover the whole audience, items one page of it. */
+export interface CampaignScreens {
+  campaign_id: string;
+  /** "audience", then one count per standing present. */
+  counts: Record<string, number>;
+  items: CampaignStatus[];
+  next_cursor?: string;
+}
+
+/** GET /api/screens/{id}/campaigns: every campaign's standing on one screen, in precedence order. */
+export interface ScreenCampaigns {
+  screen_id: string;
+  effective_playlist?: ScreenEffectivePlaylist | null;
+  items: CampaignStatus[];
 }
 
 /** Backend-owned principals contracts mirrored from the reviewed snapshot. */

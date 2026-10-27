@@ -429,6 +429,10 @@ export function normalizePlaylistForBundle(
   const id = stringField(source, "id", "Playlist");
   const revision = integerField(source, "revision", "Playlist");
   const name = stringField(source, "name", "Playlist");
+  const editableNext = {
+    command: `screenrig playlist show ${id} --output playlist.json`,
+    reason: "Write an editable document with the existing card and application references in this project.",
+  };
   if (!Array.isArray(source.pages)) throw usageError("Playlist.pages must be an array.");
   const mediaIds = new Set<string>();
   const skipped: PlaylistBundleSkipSummary = { primitives: [], pages: [] };
@@ -445,9 +449,12 @@ export function normalizePlaylistForBundle(
     page.primitives.forEach((primitiveValue, primitiveIndex) => {
       const primitive = record(primitiveValue, `Playlist.pages[${pageIndex}].primitives[${primitiveIndex}]`);
       const category = primitive.primitive;
+      if (category === "card") {
+        throw usageError("Playlist bundles do not carry card instances or their data. Use playlist show --output for an editable document in the same project. Export stopped before media download.", editableNext);
+      }
       if (category === "application") {
         if (!options.skipApplications) {
-          throw usageError("Playlist export does not support application primitives; pass --skip-applications to export the rest or detach them first. Export stopped before media download.");
+          throw usageError("Playlist export does not support application primitives; pass --skip-applications to export the remaining supported content, or use playlist show --output for an editable document in the same project. Export stopped before media download.", editableNext);
         }
         skipped.primitives.push(stringField(primitive, "id", "Playlist primitive"));
         skippedApplications = true;
@@ -504,7 +511,7 @@ export function normalizePlaylistForBundle(
     });
   });
   if (pages.length === 0 && skipped.pages.length > 0) {
-    throw usageError("Playlist export would produce no pages after --skip-applications; detach the application primitives instead.");
+    throw usageError("Playlist export would produce no pages after --skip-applications. Use playlist show --output for an editable document in the same project.", editableNext);
   }
   const audio = source.audio === undefined || source.audio === null ? undefined : normalizedAudio(source.audio);
   for (const track of (audio?.tracks as JsonRecord[] | undefined) ?? []) mediaIds.add(track.media_id as string);

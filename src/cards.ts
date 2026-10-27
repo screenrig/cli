@@ -3,6 +3,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import type { ApiClient } from "./client.js";
 import { usageError } from "./problems.js";
 import { flagBool, flagString, type ParsedArgs } from "./command-input.js";
+import { SCREEN_LOCATION_TOKEN, screenKeyPlaceholder, screenTextPlaceholders } from "./screen-facts.js";
 
 type Schema = Record<string, any>;
 export interface CardDetails {
@@ -31,9 +32,27 @@ export function cardUid(value: string): string {
   return value;
 }
 
+function validCardDataKey(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/.test(value) && !value.startsWith("feed:");
+}
+
 export function cardDataKey(value: string): string {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/.test(value) || value.startsWith("feed:")) {
+  if (!validCardDataKey(value)) {
     throw usageError("Card data key must follow the K/V key grammar and may not start with feed:.");
+  }
+  return value;
+}
+
+/**
+ * A placement's data key: a card data key, or a template whose
+ * {screen.field.NAME} tokens each stand for one value of the screen's field
+ * (menu-{screen.field.store_number}). A template is checked with each token as
+ * the letter x; card-data get, put and delete name concrete keys and use
+ * cardDataKey.
+ */
+export function cardDataKeyTemplate(value: string): string {
+  if (!validCardDataKey(screenKeyPlaceholder(value))) {
+    throw usageError("Card data key must follow the K/V key grammar and may not start with feed:. It may carry {screen.field.NAME} tokens, where NAME is 1 to 32 lower case letters, digits or underscores.");
   }
   return value;
 }
@@ -82,6 +101,49 @@ function assertParams(schema: Schema, params: unknown, field: string): void {
   }
 }
 
+/** The schema's object form: itself, or the first anyOf branch that is one. References resolve as property() does. */
+function objectForm(schema: Schema | undefined, root: Schema, depth = 0): Schema | undefined {
+  if (!schema || typeof schema !== "object" || depth > 8) return undefined;
+  const resolved = property(schema, root);
+  const types: unknown[] = Array.isArray(resolved.type) ? resolved.type : resolved.type === undefined ? [] : [resolved.type];
+  if (resolved.properties && typeof resolved.properties === "object" && (types.length === 0 || types.includes("object"))) return resolved;
+  for (const branch of Array.isArray(resolved.anyOf) ? resolved.anyOf : []) {
+    const found = objectForm(branch, root, depth + 1);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/**
+ * The location {screen.location} stands for when a card's params are checked:
+ * latitude 0 and longitude 0, plus an empty name when the card's location takes
+ * one. Undefined when the card's location is not an object with latitude and
+ * longitude, which is a card that refuses {screen.location}.
+ */
+export function screenLocationStandIn(card: Pick<CardDetails, "params_schema">): Record<string, unknown> | undefined {
+  const root = card.params_schema;
+  const place = objectForm(root?.properties?.location, root);
+  if (!place?.properties?.latitude || !place.properties.longitude) return undefined;
+  return { latitude: 0, longitude: 0, ...(place.properties.name ? { name: "" } : {}) };
+}
+
+/**
+ * A placement's params as the card's schema reads them before any screen is
+ * known: each text token ({screen.name}, {screen.timezone}, {screen.field.NAME})
+ * in any string is the letter x, and a location that is the whole string
+ * {screen.location} is the stand-in location in the card's own shape.
+ */
+function screenFactParams(card: CardDetails, params: unknown, field: string): unknown {
+  if (params === null || typeof params !== "object" || Array.isArray(params)) return params;
+  const checked = screenTextPlaceholders(params) as Record<string, unknown>;
+  if ((params as Record<string, unknown>).location === SCREEN_LOCATION_TOKEN) {
+    const standIn = screenLocationStandIn(card);
+    if (!standIn) throw usageError(`${field}.location cannot be ${SCREEN_LOCATION_TOKEN}: the ${card.id} card's location is not a latitude and longitude.`);
+    checked.location = standIn;
+  }
+  return checked;
+}
+
 /** One catalogue read per card, before uploading a playlist. Older pinned majors are server-validated. */
 export async function validatePlaylistCards(client: ApiClient, playlist: { pages: any[] }): Promise<void> {
   const cards = new Map<string, CardDetails>();
@@ -102,7 +164,7 @@ export async function validatePlaylistCards(client: ApiClient, playlist: { pages
       const schema = structuredClone(card.params_schema);
       const field = `pages[${pageIndex}].primitives[${index}].params`;
       if (item.data !== undefined) {
-        cardDataKey(item.data);
+        cardDataKeyTemplate(item.data);
         const dynamic = Object.keys(cardProperties(card).dynamic);
         for (const name of dynamic) {
           if (Object.hasOwn(item.params ?? {}, name)) throw usageError(`${field}.${name} is dynamic; write it to the bound data document with card-data put, or use a card instance (card create, then card data put crd_ID).`);
@@ -110,7 +172,7 @@ export async function validatePlaylistCards(client: ApiClient, playlist: { pages
         }
         schema.required = (schema.required ?? []).filter((name: string) => !dynamic.includes(name));
       }
-      assertParams(schema, item.params ?? {}, field);
+      assertParams(schema, screenFactParams(card, item.params ?? {}, field), field);
     }
   }
 }

@@ -16,8 +16,8 @@ function invoke(args: string[]): { data: ReturnType<typeof commandHelp> & { vers
 test("root help is compact and every command is discoverable through immediate children", () => {
   const root = commandHelp();
   const commanderHelp = root.usage.split(/\n\nAll commands:\n/)[0]!;
-  // Service status, support, notes, fleet links, triggers, reviews and notifications add seven immediate root groups.
-  assert.ok(commanderHelp.split("\n").length <= 56);
+  // Service status, support, notes, fleet links, triggers, reviews, campaigns and notifications add eight immediate root groups.
+  assert.ok(commanderHelp.split("\n").length <= 57);
   assert.doesNotMatch(root.usage, /localhost|log_socket|--token/);
   const discovered: string[] = [];
   function visit(path: string[]): void {
@@ -91,6 +91,16 @@ test("root help is compact and every command is discoverable through immediate c
     "ads reviews show",
     "ads reports spend",
     "ads reports delivery",
+    "ads reports fill",
+    "ads direct list",
+    "ads direct show",
+    "ads direct create",
+    "ads direct update",
+    "ads direct pause",
+    "ads direct resume",
+    "ads direct end",
+    "ads direct report",
+    "ads direct availability",
     "billing balance",
     "billing statement",
     "agent enroll",
@@ -166,6 +176,15 @@ test("root help is compact and every command is discoverable through immediate c
     "triggers clear",
     "triggers rotate-secret",
     "triggers delete",
+    "campaign list",
+    "campaign show",
+    "campaign create",
+    "campaign update",
+    "campaign pause",
+    "campaign resume",
+    "campaign delete",
+    "campaign screens",
+    "campaign explain",
     "screen update",
     "screen list",
     "screen show",
@@ -211,6 +230,7 @@ test("root help is compact and every command is discoverable through immediate c
     "playback list",
     "playback plays",
     "playback totals",
+    "playback completeness",
     "screen uptime",
     "screen presence",
     "screen health-history",
