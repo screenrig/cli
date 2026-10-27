@@ -20,6 +20,7 @@ import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLA
 import { wallCanvas, wallFromFlags, wallLine, wallProblem } from "./screen-wall.js";
 import { screenFactsLines, screenFactsPatch, screenFieldsCell, screenListFacts, screenLocationCell } from "./screen-facts.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
+import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines } from "./screen-commands.js";
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
 import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "./screen-manifest-upgrade.js";
 import { forecastStorageWarnings, isStorageFailureCode, screenStorageWarnings, storageFullWarning } from "./screen-storage.js";
@@ -76,9 +77,14 @@ import {
   type ScreenAction,
   type ScreenActionRequest,
   type ScreenActionSelector,
+  type ScreenCommandWrite,
+  type ScreenIdentifyAccepted,
+  type ScreenIdentifyWrite,
   type ScreenPatch,
   type ScreenProvisioning,
   type ScreenReloadAccepted,
+  type ScreenReplaceWrite,
+  type ScreenSuspendWrite,
   type ScreenScreenshotAccepted,
   type ScreenScreenshotStatus,
   type ScreenStorageForecastDryRun,
@@ -5695,6 +5701,7 @@ const ARCHIVE_REASON_TEXT: Record<string, string> = {
   project: "An project or dashboard request archived it.",
   device_reset: "The player was reset on the display. Its key is still bound to this screen. If the display now shows a pairing code, screen show may report recovery_pending: screen recover moves this screen to the display's new key and retires the old one, and the screen stays archived until screen unarchive.",
   device_unpair: "The paired browser unpaired itself. Its device credential is still bound to this screen.",
+  replaced: "A screen replace moved this screen's device onto another screen, so this screen keeps no device binding.",
 };
 
 /**
@@ -5710,7 +5717,10 @@ function archivedLines(screen: Screen | undefined): string[] {
   return [
     `Archived${reason ? ` (${reason})` : ""}${at ? ` at ${at}` : ""}`,
     ...(reason && ARCHIVE_REASON_TEXT[reason] ? [ARCHIVE_REASON_TEXT[reason]] : []),
-    `Restore with screen unarchive ${id}. It re-admits the same key, so a display that still holds it resumes without re-pairing.`,
+    // A replaced screen holds no key, so there is nothing for unarchive to re-admit.
+    reason === "replaced"
+      ? `screen unarchive cannot restore it; screen delete ${id} removes it.`
+      : `Restore with screen unarchive ${id}. It re-admits the same key, so a display that still holds it resumes without re-pairing.`,
   ];
 }
 
@@ -6005,8 +6015,10 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...takeoverLine(screen?.takeover, screen?.timezone),
       ...(screen?.playlist_schedule?.entries?.length
         ? [`Playlist schedule: ${screen.playlist_schedule.entries.length} entr${screen.playlist_schedule.entries.length === 1 ? "y" : "ies"} (screen schedule show ${screen.id})`] : []),
+      ...suspensionLines(screen),
       ...hostLines(screen?.host, screen?.host_updated_at),
       ...archivedLines(screen),
+      ...replacedByLines(screen),
       ...applicationsUnsupportedLines(screen),
       ...recoveryPendingLine(screen),
       ...warnings.map((warning) => `warning: ${warning.message}`),
@@ -6014,6 +6026,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...manifestUpgradeLines(screen, runtime.now()),
       ...displayLines(screen?.display, screen?.timezone),
       ...healthLines(screen?.health),
+      ...commandLines(screen),
       ...notes.lines,
     ].join("\n"),
   };
@@ -6343,9 +6356,10 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
   const client = clientFor(runtime, args, resolved.apiUrl, token);
 
   const target = screenTarget(args, "screen reload");
+  const lifetime = commandLifetime(args);
   if (target.kind === "fleet") {
     rejectFleetRevision(args, "screen reload");
-    return screenFleetAction(client, runtime, "Fleet reload", target.selector, { type: "reload" });
+    return screenFleetAction(client, runtime, "Fleet reload", target.selector, { type: "reload", ...lifetime });
   }
   const id = target.id;
   const revision = flagString(args.flags, "if-match");
@@ -6355,6 +6369,7 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
       method: "POST",
       path: `/api/screens/${encodeURIComponent(id)}/reload`,
       idempotent: true,
+      ...(lifetime.expires_in_s === undefined ? {} : { body: lifetime }),
       ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
     });
   } catch (error) {
@@ -6379,7 +6394,7 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
   }
   const accepted = (response.body ?? {}) as Partial<ScreenReloadAccepted>;
   if (typeof accepted.reload_id !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(accepted.reload_id)
-    || serverInstant(accepted.expires_at) === undefined) {
+    || serverInstant(accepted.expires_at) === undefined || !validDelivery(accepted.state)) {
     throw usageError("Screen reload response does not match the generated ScreenReloadAccepted contract.");
   }
   return {
@@ -6389,12 +6404,26 @@ export const handleScreenReload = commandHandler(async (args, runtime, resolved)
       humanLines("Reload accepted", [
         ["screen_id", id],
         ["reload_id", accepted.reload_id],
+        ["state", accepted.state],
         ["expires_at", accepted.expires_at],
       ]),
-      "The Player reloads once; a Player that reloaded in the last ten minutes ignores it.",
+      accepted.state === "queued"
+        ? `The screen is offline, so the reload waits: it is sent when the screen comes online before expires_at. Cancel it with screen command cancel ${id} ${accepted.reload_id}.`
+        : "The Player reloads once; a Player that reloaded in the last ten minutes ignores it.",
     ].join("\n"),
   };
 }, true);
+
+/** --expires-in as the expires_in_s of a reboot or reload; empty when the flag is absent, so the server's 24 hours applies. */
+function commandLifetime(args: ParsedArgs): ScreenCommandWrite {
+  const value = flagString(args.flags, "expires-in");
+  return value === undefined ? {} : { expires_in_s: expiresInSeconds(value) };
+}
+
+/** The state of a reboot or reload answer: absent from a server that predates queueing, else queued or sent. */
+function validDelivery(state: unknown): boolean {
+  return state === undefined || state === "queued" || state === "sent";
+}
 
 /**
  * One fleet action for any number of screens: one metered action across
@@ -6472,7 +6501,8 @@ async function screenFleetAction(client: ApiClient, runtime: CliRuntime, title: 
       fleetHumanLines(title, result, (item) => {
         if (Array.isArray(item.tags)) return `tags ${item.tags.filter((tag) => /^[A-Za-z0-9]{1,32}$/.test(tag)).join(",") || "(none)"}`;
         if (typeof item.revision === "number") return `revision ${item.revision}`;
-        if (item.reload && serverInstant(item.reload.expires_at)) return `reload expires ${item.reload.expires_at}`;
+        const command = commandResultText("reload", item.reload) ?? commandResultText("reboot", item.reboot);
+        if (command) return command;
         if (item.toast && serverInstant(item.toast.expires_at)) return `toast expires ${item.toast.expires_at}`;
         return undefined;
       }),
@@ -7724,6 +7754,10 @@ const CANNED_EVENT_MESSAGES = new Set([
   "A scheduled playlist cannot be shown; its entries were skipped",
   "Screen health changed",
   "Screen reboot requested",
+  // screen.suspended carries the notice as details.message, so its own message must not repeat the key.
+  "Screen suspended",
+  "Screen resumed",
+  "Screen replaced by another device",
   "Screen display override set",
   "Screen display schedule updated",
   "Screen display schedule cleared",
@@ -9646,29 +9680,33 @@ export const handleScreenReboot = commandHandler(async (args, runtime, resolved)
       });
     }
   }
+  const lifetime = commandLifetime(args);
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
-  if (target.kind === "fleet") return screenFleetAction(client, runtime, "Fleet reboot", target.selector, { type: "reboot" });
+  if (target.kind === "fleet") return screenFleetAction(client, runtime, "Fleet reboot", target.selector, { type: "reboot", ...lifetime });
   const id = target.id;
   const revision = flagString(args.flags, "if-match");
   let response;
   try {
     response = await client.call({
       method: "POST", path: `/api/screens/${encodeURIComponent(id)}/reboot`, idempotent: true,
+      ...(lifetime.expires_in_s === undefined ? {} : { body: lifetime }),
       ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
     });
   } catch (error) {
     throw rebootProblem(error, id);
   }
   const accepted = (response.body ?? {}) as Partial<ScreenRebootAccepted>;
-  if (typeof accepted.reboot_id !== "string" || !/^rbt_[A-Za-z0-9_-]{8,64}$/.test(accepted.reboot_id) || serverInstant(accepted.expires_at) === undefined) {
+  if (typeof accepted.reboot_id !== "string" || !/^rbt_[A-Za-z0-9_-]{8,64}$/.test(accepted.reboot_id) || serverInstant(accepted.expires_at) === undefined || !validDelivery(accepted.state)) {
     throw usageError("Screen reboot response does not match the generated ScreenRebootAccepted contract.");
   }
   return {
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
     human: [
-      humanLines("Reboot accepted", [["screen_id", id], ["reboot_id", accepted.reboot_id], ["expires_at", accepted.expires_at]]),
-      "The Player reboots the device when it receives this before expires_at. Confirm it came back with screen show (online, health uptime).",
+      humanLines("Reboot accepted", [["screen_id", id], ["reboot_id", accepted.reboot_id], ["state", accepted.state], ["expires_at", accepted.expires_at]]),
+      accepted.state === "queued"
+        ? `The screen is offline, so the reboot waits: it is sent when the screen comes online before expires_at, and screen show lists it under commands (done once the device reports it booted). Cancel it with screen command cancel ${id} ${accepted.reboot_id}.`
+        : "The Player reboots the device when it receives this before expires_at. Confirm it came back with screen show (online, health uptime).",
     ].join("\n"),
   };
 }, true);
@@ -9698,6 +9736,152 @@ export const handleScreenPlayPage = commandHandler(async (args, runtime, resolve
     envelope: jsonBody(response, client.requestId),
     exitCode: ExitCode.Success,
     human: humanLines("Play-page accepted", [["screen_id", id], ["playlist_id", accepted.playlist_id], ["page_id", accepted.page_id], ["expires_at", accepted.expires_at]]),
+  };
+}, true);
+
+// Show the screen's name over its content. Single screen only.
+export const handleScreenIdentify = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[2];
+  if (!id) throw usageError("screen identify requires <id>.");
+  const duration = flagString(args.flags, "duration");
+  // The server's 60 seconds applies unless --duration is given.
+  const body: ScreenIdentifyWrite | undefined = duration === undefined ? undefined : { duration_ms: identifyDurationMs(duration) };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  let response;
+  try {
+    response = await client.call({ method: "POST", path: `/api/screens/${encodeURIComponent(id)}/identify`, idempotent: true, ...(body ? { body } : {}) });
+  } catch (error) {
+    throw identifyProblem(error, id);
+  }
+  const accepted = (response.body ?? {}) as Partial<ScreenIdentifyAccepted>;
+  if (typeof accepted.identify_id !== "string" || !/^idf_[A-Za-z0-9_-]{8,64}$/.test(accepted.identify_id) || serverInstant(accepted.expires_at) === undefined) {
+    throw unexpectedResponseError("Screen identify response does not match the generated ScreenIdentifyAccepted contract.");
+  }
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [
+      humanLines("Identify accepted", [
+        ["screen_id", id],
+        ["identify_id", accepted.identify_id],
+        ["duration_ms", Number.isSafeInteger(accepted.duration_ms) ? String(accepted.duration_ms) : undefined],
+        ["expires_at", accepted.expires_at],
+      ]),
+      "The Player shows the screen's name over its content for the duration, counted from when it receives this; playback continues underneath. Run it again to replace the overlay.",
+    ].join("\n"),
+  };
+}, true);
+
+// Put a notice on a screen instead of its content. Single screen only.
+export const handleScreenSuspend = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[2];
+  const message = flagString(args.flags, "message");
+  if (!id || message === undefined) throw usageError("screen suspend requires <id> and --message TEXT.");
+  const body: ScreenSuspendWrite = { message: suspendMessage(message) };
+  const revision = flagString(args.flags, "if-match");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  let response;
+  try {
+    response = await client.call({
+      method: "POST", path: `/api/screens/${encodeURIComponent(id)}/suspend`, idempotent: true, body,
+      ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+    });
+  } catch (error) {
+    throw suspendProblem(error, id);
+  }
+  const screen = response.body as Screen | undefined;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [
+      humanLines(`Suspended screen ${id}`, [
+        ["since", serverInstant(screen?.suspension?.since)],
+        ["revision", screen?.revision === undefined ? undefined : String(screen.revision)],
+      ]),
+      `The screen shows your notice instead of its content until screen resume ${id}; its playlist, schedule and settings are unchanged.`,
+    ].join("\n"),
+  };
+}, true);
+
+// End a suspension. Single screen only.
+export const handleScreenResume = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[2];
+  if (!id) throw usageError("screen resume requires <id>.");
+  const revision = flagString(args.flags, "if-match");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  let response;
+  try {
+    response = await client.call({
+      method: "POST", path: `/api/screens/${encodeURIComponent(id)}/resume`, idempotent: true,
+      ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+    });
+  } catch (error) {
+    throw suspendProblem(error, id);
+  }
+  const screen = response.body as Screen | undefined;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [
+      humanLines(`Resumed screen ${id}`, [["revision", screen?.revision === undefined ? undefined : String(screen.revision)]]),
+      "The screen shows its own content again.",
+    ].join("\n"),
+  };
+}, true);
+
+// Move the device paired as another screen onto this one. Always carries an
+// idempotency key, like recovery confirm: it retires a key and archives a screen.
+export const handleScreenReplace = commandHandler(async (args, runtime, resolved) => {
+  const id = args.positionals[2];
+  const withId = flagString(args.flags, "with");
+  if (!id || !withId) throw usageError("screen replace requires <id> and --with ID.");
+  if (withId === id) throw usageError("--with must name another screen than <id>: the screen whose paired device takes over.");
+  const body: ScreenReplaceWrite = { with: withId };
+  const revision = flagString(args.flags, "if-match");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  let response;
+  try {
+    response = await client.call({
+      method: "POST", path: `/api/screens/${encodeURIComponent(id)}/replace`, idempotent: true, body,
+      ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+    });
+  } catch (error) {
+    throw replaceProblem(error, id, withId);
+  }
+  const screen = response.body as Screen | undefined;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [
+      humanLines(`Replaced the device of screen ${id} with the one paired as ${withId}`, [
+        ["revision", screen?.revision === undefined ? undefined : String(screen.revision)],
+      ]),
+      `${id} keeps its name, tags, playlist, schedules and history on the new device. ${withId} is archived as replaced, and any key ${id} held retires after a fifteen-minute grace window.`,
+    ].join("\n"),
+  };
+}, true);
+
+// Cancel a reboot or reload that is still queued for an offline screen.
+export const handleScreenCommandCancel = commandHandler(async (args, runtime, resolved) => {
+  // positionals are [screen, command, cancel, ID, COMMAND_ID].
+  const id = args.positionals[3];
+  const commandId = args.positionals[4];
+  if (!id || !commandId) throw usageError("screen command cancel requires <id> and <command_id>.");
+  const revision = flagString(args.flags, "if-match");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  let response;
+  try {
+    response = await client.call({
+      method: "POST", path: `/api/screens/${encodeURIComponent(id)}/commands/${encodeURIComponent(commandId)}/cancel`, idempotent: true,
+      ...(revision ? { headers: { "if-match": quotedRevision(revision) } } : {}),
+    });
+  } catch (error) {
+    throw commandCancelProblem(error, id);
+  }
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: `Cancelled command ${commandId} on ${id}: it is never sent.`,
   };
 }, true);
 
