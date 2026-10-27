@@ -8670,7 +8670,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createFleetLink
-      description: 'Creates a fleet link: one Player URL (https://play.<domain>/player/#fleet=<secret>) that turns every device opening it into its own screen in this project, without a pairing code. Put it in a device manager, such as a Google Admin console kiosk app. Each new screen gets the link''s tags and playlist, and a label from the device (its administrator asset ID, then location), else the next default label. A Player that already holds a screen never makes another: its key stays the screen''s identity across reloads and relaunches. After a powerwash or reinstall, a device that reports the serial or DUID of a screen a fleet link of this project created recovers that screen (screen.recovered) instead of creating a new one, once the old key has been silent for ten minutes. The secret travels in the URL fragment, which browsers never send to a server. max_screens caps the screens the link creates and expires_at ends the link at that time, as disabling it does; the project''s screen limit applies as for any screen. A project has at most 50 fleet links (fleet_link_limit_reached). Appends fleet_link.created. An exact retry with the same Idempotency-Key returns this same answer for twenty-four hours.'
+      description: 'Creates a fleet link: one Player URL (https://play.<domain>/player/#fleet=<secret>) that turns every device opening it into its own screen in this project, without a pairing code. Put it in a device manager, such as a Google Admin console kiosk app. Each new screen gets the link''s tags, fields and playlist, and a label from the device (its administrator asset ID, then location), else the next default label. A Player that already holds a screen never makes another: its key stays the screen''s identity across reloads and relaunches. After a powerwash or reinstall, a device that reports the serial or DUID of a screen a fleet link of this project created recovers that screen (screen.recovered) instead of creating a new one, once the old key has been silent for ten minutes. The secret travels in the URL fragment, which browsers never send to a server. max_screens caps the screens the link creates and expires_at ends the link at that time, as disabling it does; the project''s screen limit applies as for any screen. A project has at most 50 fleet links (fleet_link_limit_reached). Appends fleet_link.created. An exact retry with the same Idempotency-Key returns this same answer for twenty-four hours.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -8696,7 +8696,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/FleetLink'
         '400':
-          description: invalid_request, including an unknown playlist_id or a malformed tag.
+          description: invalid_request, including an unknown playlist_id or a malformed tag or field.
           content:
             application/problem+json:
               schema:
@@ -8741,7 +8741,7 @@ paths:
     patch:
       x-screenrig-access: write
       operationId: updateFleetLink
-      description: Changes any of label, enabled, tags, playlist_id, max_screens and expires_at; null clears playlist_id, max_screens or expires_at. A disabled or expired link creates and recovers no screens; a device opening it shows its pairing code instead. Changes apply to screens the link creates from now on, never to screens it already created. Appends fleet_link.updated. If-Match guards the revision.
+      description: Changes any of label, enabled, tags, fields, playlist_id, max_screens and expires_at; null clears fields, playlist_id, max_screens or expires_at. A disabled or expired link creates and recovers no screens; a device opening it shows its pairing code instead. Changes apply to screens the link creates from now on, never to screens it already created. Appends fleet_link.updated. If-Match guards the revision.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -8782,7 +8782,7 @@ paths:
     delete:
       x-screenrig-access: write
       operationId: deleteFleetLink
-      description: Deletes the fleet link. Its URL stops working at once; screens it created stay, with their playlists and tags. Appends fleet_link.deleted. If-Match guards the revision.
+      description: Deletes the fleet link. Its URL stops working at once; screens it created stay, with their playlists, tags and fields. Appends fleet_link.deleted. If-Match guards the revision.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -16188,7 +16188,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createFleetLinkInProject
-      description: 'Creates a fleet link: one Player URL (https://play.<domain>/player/#fleet=<secret>) that turns every device opening it into its own screen in this project, without a pairing code. Put it in a device manager, such as a Google Admin console kiosk app. Each new screen gets the link''s tags and playlist, and a label from the device (its administrator asset ID, then location), else the next default label. A Player that already holds a screen never makes another: its key stays the screen''s identity across reloads and relaunches. After a powerwash or reinstall, a device that reports the serial or DUID of a screen a fleet link of this project created recovers that screen (screen.recovered) instead of creating a new one, once the old key has been silent for ten minutes. The secret travels in the URL fragment, which browsers never send to a server. max_screens caps the screens the link creates and expires_at ends the link at that time, as disabling it does; the project''s screen limit applies as for any screen. A project has at most 50 fleet links (fleet_link_limit_reached). Appends fleet_link.created. An exact retry with the same Idempotency-Key returns this same answer for twenty-four hours.'
+      description: 'Creates a fleet link: one Player URL (https://play.<domain>/player/#fleet=<secret>) that turns every device opening it into its own screen in this project, without a pairing code. Put it in a device manager, such as a Google Admin console kiosk app. Each new screen gets the link''s tags, fields and playlist, and a label from the device (its administrator asset ID, then location), else the next default label. A Player that already holds a screen never makes another: its key stays the screen''s identity across reloads and relaunches. After a powerwash or reinstall, a device that reports the serial or DUID of a screen a fleet link of this project created recovers that screen (screen.recovered) instead of creating a new one, once the old key has been silent for ten minutes. The secret travels in the URL fragment, which browsers never send to a server. max_screens caps the screens the link creates and expires_at ends the link at that time, as disabling it does; the project''s screen limit applies as for any screen. A project has at most 50 fleet links (fleet_link_limit_reached). Appends fleet_link.created. An exact retry with the same Idempotency-Key returns this same answer for twenty-four hours.'
       security:
         - projectBearer: []
       parameters:
@@ -16213,7 +16213,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/FleetLink'
         '400':
-          description: invalid_request, including an unknown playlist_id or a malformed tag.
+          description: invalid_request, including an unknown playlist_id or a malformed tag or field.
           content:
             application/problem+json:
               schema:
@@ -22138,6 +22138,7 @@ components:
         url: {type: string, maxLength: 512, description: "The Player URL to put in a device manager: https://play.<domain>/player/#fleet=<secret>. Empty, with url_redacted true, below effective Manage. It is a credential that creates screens: share it only with the device manager."}
         url_redacted: {type: boolean, description: "Present and true when url was withheld below effective Manage."}
         tags: {$ref: "#/components/schemas/ScreenTags"}
+        fields: {type: object, maxProperties: 32, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {type: string, minLength: 1, maxLength: 200}, description: "Fields each screen the link creates starts with; card placements read them through {screen.field.NAME}. Absent when none."}
         playlist_id: {type: string, description: Playlist assigned to each screen the link creates.}
         max_screens: {type: integer, minimum: 1, maximum: 10000, description: Most screens this link creates. Absent means only the project's screen limit applies.}
         expires_at: {type: string, format: date-time, description: "When the link expires (RFC 3339). From then on it creates and recovers no screens, like a disabled link, and a device opening it shows its pairing code. Absent means it never expires."}
@@ -22155,6 +22156,7 @@ components:
         label: {type: string, minLength: 1, maxLength: 80}
         enabled: {type: boolean, description: Defaults to true.}
         tags: {$ref: "#/components/schemas/ScreenTags"}
+        fields: {type: object, maxProperties: 32, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {type: string, minLength: 1, maxLength: 200}, description: "Fields each screen the link creates starts with; card placements read them through {screen.field.NAME}."}
         playlist_id: {type: string}
         max_screens: {type: integer, minimum: 1, maximum: 10000}
         expires_at: {type: string, format: date-time, description: "When the link expires (RFC 3339); a link past it creates and recovers no screens. Absent means it never expires. A time already past is accepted and expires the link at once."}
@@ -22166,6 +22168,7 @@ components:
         label: {type: string, minLength: 1, maxLength: 80}
         enabled: {type: boolean}
         tags: {$ref: "#/components/schemas/ScreenTags"}
+        fields: {type: object, nullable: true, maxProperties: 32, propertyNames: {pattern: "^[a-z0-9_]{1,32}$"}, additionalProperties: {type: string, minLength: 1, maxLength: 200}, description: "replaces the whole preset; {} or null clears it."}
         playlist_id: {type: string, nullable: true, description: null clears the playlist.}
         max_screens: {type: integer, nullable: true, minimum: 1, maximum: 10000, description: null removes the cap.}
         expires_at: {type: string, format: date-time, nullable: true, description: null removes the expiry.}
