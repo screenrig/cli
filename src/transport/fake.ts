@@ -91,6 +91,8 @@ export class FakeTransport implements Transport {
   setPlaybackExportBudget?: (value: number) => void;
   /** memoryBackend hook: add a delivery row (a screen notice, say) to a stored notification's log, newest first. */
   putNotificationDelivery?: (notificationId: string, delivery: Record<string, unknown>) => void;
+  /** memoryBackend hook: seed or replace a screen alert (id, screen_id, condition, state and since are enough); muted and attention are derived on every read. */
+  putAlert?: (alert: Record<string, unknown> & { id: string }) => void;
   /** Test hook: merged onto every `request` response (not SSE stream frames). */
   extraResponseHeaders?: Record<string, string>;
 
@@ -1922,7 +1924,7 @@ export function memoryBackend(options: {
   const notificationDeliveries = new Map<string, Array<Record<string, unknown>>>();
   transport.putNotificationDelivery = (id, delivery) => { notificationDeliveries.get(id)?.unshift(delivery); };
   let notificationSequence = 0;
-  const conditionNames = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "crashing"];
+  const conditionNames = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "crashing"];
   const invalidRequest = (detail: string, field: string): TransportResponse => ({
     status: 400,
     headers: { "content-type": "application/problem+json" },
@@ -2043,6 +2045,105 @@ export function memoryBackend(options: {
     const next = start + limit < rows.length ? `whc2_${start + limit}_screen_offline` : null;
     return { status: 200, headers: {}, body: { items, next_cursor: next } };
   });
+
+  // Screen alerts and mutes. An alert's muted and attention are derived on every
+  // read from its acknowledgement, its snooze and the current mutes, as the
+  // server derives them. Acknowledge is for an open alert (alert_not_open), an
+  // end is at most 30 days ahead, a project has at most 50 current mutes, and an
+  // exact Idempotency-Key replay returns the same answer.
+  const alerts = new Map<string, Record<string, unknown>>();
+  const alertMutes = new Map<string, Record<string, unknown>>();
+  let alertMuteSequence = 0;
+  transport.putAlert = (alert) => { alerts.set(alert.id, { ...alert }); };
+  const alertActor = () => ({ kind: "agent", id: currentAgent.id, name: currentAgent.name });
+  const currentMutes = () => [...alertMutes.values()]
+    .filter((mute) => Date.parse(mute.until as string) > clock().getTime())
+    .sort((a, b) => Date.parse(a.until as string) - Date.parse(b.until as string));
+  const alertView = (alert: Record<string, unknown>): Record<string, unknown> => {
+    const tags = screens.get(alert.screen_id as string)?.tags ?? [];
+    const muted = currentMutes().some((mute) => (mute.screen_ids as string[]).includes(alert.screen_id as string) || (mute.tags as string[]).some((tag) => tags.includes(tag)));
+    const snoozed = typeof alert.snoozed_until === "string" && Date.parse(alert.snoozed_until) > clock().getTime();
+    const acknowledged = alert.acknowledged_at !== undefined && (alert.snoozed_until === undefined || snoozed);
+    return { ...alert, muted, attention: alert.state === "open" && !muted && !acknowledged };
+  };
+  const alertEndRefusal = (value: unknown): TransportResponse | undefined => {
+    const at = typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(value) ? Date.parse(value) : NaN;
+    if (!Number.isFinite(at)) return invalidRequest("until must be an RFC 3339 instant.", "until");
+    if (at <= clock().getTime()) return invalidRequest("until must be in the future.", "until");
+    if (at > clock().getTime() + 30 * 86_400_000) return invalidRequest("until must be at most 30 days ahead.", "until");
+    return undefined;
+  };
+  const alertFor = (req: TransportRequest): Record<string, unknown> | undefined => alerts.get(decodeURIComponent(req.path.split("/")[3] ?? ""));
+  transport.on("GET", "/api/alerts", (req) => {
+    const state = req.query?.state ?? "open";
+    if (!["open", "resolved", "all"].includes(state)) return invalidRequest("state must be open, resolved or all.", "state");
+    const limit = req.query?.limit === undefined ? 100 : Number(req.query.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) return invalidRequest("limit must be a whole number from 1 to 200.", "limit");
+    const before = req.query?.before;
+    if (before !== undefined && !/^alc1_\d+$/.test(before)) return invalidRequest("before is not a next_cursor of this list.", "before");
+    const all = [...alerts.values()].map(alertView);
+    const rows = all
+      .filter((alert) => (state === "all" || alert.state === state) && (req.query?.screen_id === undefined || alert.screen_id === req.query.screen_id))
+      .sort((a, b) => (a.state === b.state ? 0 : a.state === "open" ? -1 : 1) || Date.parse(b.since as string) - Date.parse(a.since as string));
+    const start = before === undefined ? 0 : Number(before.slice(5));
+    const items = rows.slice(start, start + limit);
+    const end = start + items.length;
+    const open = all.filter((alert) => alert.state === "open");
+    return {
+      status: 200, headers: {},
+      body: { items, next_cursor: end < rows.length ? `alc1_${end}` : null, counts: { open: open.length, attention: open.filter((alert) => alert.attention).length } },
+    };
+  });
+  transport.on("GET", /^\/api\/alerts\/[^/]+$/, (req) => {
+    const alert = alertFor(req);
+    return alert ? { status: 200, headers: {}, body: alertView(alert) } : notFound("Resource was not found.");
+  });
+  transport.on("POST", /^\/api\/alerts\/[^/]+\/acknowledge$/, (req) => webhookReplay(req, () => {
+    const alert = alertFor(req);
+    if (!alert) return notFound("Resource was not found.");
+    if (alert.state !== "open") return problem(409, "alert_not_open", "The alert is not open.");
+    const body = (req.body ?? {}) as { until?: unknown };
+    const unknown = Object.keys(body).find((key) => key !== "until");
+    if (unknown) return invalidRequest(`${unknown} is not a field of an acknowledgement.`, unknown);
+    if (body.until !== undefined) {
+      const refusal = alertEndRefusal(body.until);
+      if (refusal) return refusal;
+    }
+    const next: Record<string, unknown> = { ...alert, acknowledged_at: clock().toISOString(), acknowledged_by: alertActor() };
+    if (body.until === undefined) delete next.snoozed_until;
+    else next.snoozed_until = body.until;
+    alerts.set(alert.id as string, next);
+    return { status: 200, headers: {}, body: alertView(next) };
+  }));
+  transport.on("GET", "/api/alert-mutes", () => ({ status: 200, headers: {}, body: { items: currentMutes() } }));
+  transport.on("POST", "/api/alert-mutes", (req) => webhookReplay(req, () => {
+    const body = (req.body ?? {}) as { screen_ids?: unknown; tags?: unknown; until?: unknown; note?: unknown };
+    const unknown = Object.keys(body).find((key) => !["screen_ids", "tags", "until", "note"].includes(key));
+    if (unknown) return invalidRequest(`${unknown} is not a field of a mute.`, unknown);
+    const refusal = alertEndRefusal(body.until);
+    if (refusal) return refusal;
+    const screenIds = Array.isArray(body.screen_ids) ? body.screen_ids as string[] : [];
+    const tags = Array.isArray(body.tags) ? body.tags as string[] : [];
+    if (!screenIds.length && !tags.length) return invalidRequest("A mute needs at least one screen id or tag.", "screen_ids");
+    if (screenIds.length > 100) return invalidRequest("screen_ids takes at most 100 screens.", "screen_ids");
+    if (typeof body.note === "string" && [...body.note].length > 200) return invalidRequest("note takes at most 200 characters.", "note");
+    if (currentMutes().length >= 50) return problem(409, "alert_mute_limit_reached", "The project already has the maximum of 50 current mutes.");
+    alertMuteSequence += 1;
+    const mute: Record<string, unknown> = {
+      id: `amt_${String(alertMuteSequence).padStart(20, "D")}`, screen_ids: screenIds, tags, until: body.until,
+      ...(typeof body.note === "string" && body.note ? { note: body.note } : {}),
+      created_by: alertActor(), created_at: clock().toISOString(),
+    };
+    alertMutes.set(mute.id as string, mute);
+    return { status: 201, headers: {}, body: mute };
+  }));
+  transport.on("DELETE", /^\/api\/alert-mutes\/[^/]+$/, (req) => webhookReplay(req, () => {
+    const id = decodeURIComponent(req.path.split("/")[3] ?? "");
+    const mute = alertMutes.get(id);
+    if (!mute || Date.parse(mute.until as string) <= clock().getTime()) return notFound("Resource was not found.");
+    alertMutes.delete(id);
+    return { status: 204, headers: { "cache-control": "no-store" }, body: undefined };
+  }));
 
   // Fleet links: at most 50 per project; url carries the secret in the
   // #fleet= fragment, rotate replaces it, and an exact Idempotency-Key replay

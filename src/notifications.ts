@@ -9,11 +9,11 @@ import { table } from "./webhooks.js";
 export const NOTIFICATION_ID_PATTERN = /^(?:(?:stage|qa|development)_)?(?:whk|ntf)_[A-Za-z0-9_-]{16,24}$/;
 export const NOTIFICATIONS_MAX = 20;
 /** NotificationCondition (vendor/openapi.yaml): the screen state changes a notification fires on. */
-export const NOTIFICATION_CONDITIONS = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "crashing"] as const;
+export const NOTIFICATION_CONDITIONS = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "crashing"] as const;
 export const NOTIFICATION_RECIPIENTS_MAX = 20;
 const RECIPIENT_MAX_LENGTH = 200;
 export const NOTIFICATION_HOLD_MAX = 1440;
-/** The server allows a snooze at most 30 days ahead of its clock; --snooze DURATION keeps a minute of headroom. */
+/** The server allows a snooze at most 30 days ahead of its clock; --snooze DURATION (and alerts --for) keeps a minute of headroom. */
 export const NOTIFICATION_SNOOZE_MAX_MS = 30 * 86_400_000 - 60_000;
 
 /** NotificationDeliveriesBefore (vendor/openapi.yaml): a page can end among the notices of one event, so the cursor may name a condition. */
@@ -77,8 +77,8 @@ export function notificationHold(value: string): string {
 
 const SNOOZE_FORMS = "--snooze takes a duration such as 30m, 1h, 4h or 2d (up to 30 days), an RFC 3339 instant with seconds and an offset such as 2026-11-01T09:00:00Z, or off.";
 
-/** `30m`, `1h30m`, `2d`, `90s`: whole units; undefined when the text is not a duration. */
-function snoozeDurationMs(text: string): number | undefined {
+/** `30m`, `1h30m`, `2d`, `90s`: whole units; undefined when the text is not a duration. Alerts snoozed and muted with --for read durations the same way. */
+export function snoozeDurationMs(text: string): number | undefined {
   const match = /^(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(text);
   if (!match || !text) return undefined;
   return (Number(match[1] ?? 0) * 86_400 + Number(match[2] ?? 0) * 3_600 + Number(match[3] ?? 0) * 60 + Number(match[4] ?? 0)) * 1000;

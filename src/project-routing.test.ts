@@ -9,10 +9,10 @@ const id = "prj_SELECTED";
 const prefix = `/api/projects/${id}`;
 
 test("object-less writes and local names use project parents, while object IDs remain global", () => {
-  for (const [method, path] of [["POST", "/api/applications"], ["POST", "/api/playlists"], ["POST", "/api/cards"], ["POST", "/api/media/uploads"], ["POST", "/api/media/generations"], ["PUT", "/api/card-data/menu"], ["GET", "/api/feeds/weather"], ["GET", "/api/project"], ["POST", "/api/service-clients"], ["GET", "/api/campaigns"], ["POST", "/api/campaigns"], ["GET", "/api/advertising/direct-campaigns"], ["POST", "/api/advertising/direct-campaigns"], ["POST", "/api/advertising/availability"], ["GET", "/api/advertising/reports/fill"], ["GET", "/api/notifications"], ["POST", "/api/notifications"]] as const) {
+  for (const [method, path] of [["POST", "/api/applications"], ["POST", "/api/playlists"], ["POST", "/api/cards"], ["POST", "/api/media/uploads"], ["POST", "/api/media/generations"], ["PUT", "/api/card-data/menu"], ["GET", "/api/feeds/weather"], ["GET", "/api/project"], ["POST", "/api/service-clients"], ["GET", "/api/campaigns"], ["POST", "/api/campaigns"], ["GET", "/api/advertising/direct-campaigns"], ["POST", "/api/advertising/direct-campaigns"], ["POST", "/api/advertising/availability"], ["GET", "/api/advertising/reports/fill"], ["GET", "/api/notifications"], ["POST", "/api/notifications"], ["GET", "/api/alerts"], ["GET", "/api/alert-mutes"], ["POST", "/api/alert-mutes"]] as const) {
     assert.equal(projectRequest({ method, path }, id).path, prefix + path.slice(4));
   }
-  for (const path of ["/api/cards/crd_CARD", "/api/cards/crd_CARD/data", "/api/screens/scr_SCREEN", "/api/applications/app_APP/kv/name", "/api/playlists/pl_PLAYLIST", "/api/operations/op_OPERATION", "/api/service-clients/scl_CLIENT/revoke", "/api/advertising/direct-campaigns/adc_CAMPAIGN", "/api/advertising/direct-campaigns/adc_CAMPAIGN/report", "/api/projects", "/api/organizations", "/api/campaigns/cmp_CAMPAIGN", "/api/campaigns/cmp_CAMPAIGN/screens", "/api/screens/scr_SCREEN/campaigns", "/api/notifications/ntf_NOTIFICATION", "/api/notifications/ntf_NOTIFICATION/deliveries"]) {
+  for (const path of ["/api/cards/crd_CARD", "/api/cards/crd_CARD/data", "/api/screens/scr_SCREEN", "/api/applications/app_APP/kv/name", "/api/playlists/pl_PLAYLIST", "/api/operations/op_OPERATION", "/api/service-clients/scl_CLIENT/revoke", "/api/advertising/direct-campaigns/adc_CAMPAIGN", "/api/advertising/direct-campaigns/adc_CAMPAIGN/report", "/api/projects", "/api/organizations", "/api/campaigns/cmp_CAMPAIGN", "/api/campaigns/cmp_CAMPAIGN/screens", "/api/screens/scr_SCREEN/campaigns", "/api/notifications/ntf_NOTIFICATION", "/api/notifications/ntf_NOTIFICATION/deliveries", "/api/alerts/alr_ALERT", "/api/alerts/alr_ALERT/acknowledge", "/api/alert-mutes/amt_MUTE"]) {
     assert.equal(projectRequest({ method: "GET", path }, id).path, path);
   }
 });
@@ -51,6 +51,28 @@ test("a subset client lists and creates notifications under its project and addr
   ]);
 });
 
+
+test("a subset client lists alerts and creates mutes under its project and addresses one alert or mute by id", async () => {
+  const token = fakeSessionJwt({ exp: 4102444800, projects: { [id]: ["content"] }, scope: "identity" });
+  const transport = new FakeTransport()
+    .on("GET", `${prefix}/alerts`, () => ({ status: 200, headers: {}, body: { items: [], next_cursor: null, counts: { open: 0, attention: 0 } } }))
+    .on("GET", `${prefix}/alert-mutes`, () => ({ status: 200, headers: {}, body: { items: [] } }))
+    .on("POST", `${prefix}/alert-mutes`, () => ({ status: 201, headers: {}, body: { id: "amt_MUTEAAAAAAAAAAAAAAAA" } }))
+    .on("GET", "/api/alerts/alr_ALERTAAAAAAAAAAAAAAA", () => ({ status: 200, headers: {}, body: { id: "alr_ALERTAAAAAAAAAAAAAAA" } }))
+    .on("POST", "/api/alerts/alr_ALERTAAAAAAAAAAAAAAA/acknowledge", () => ({ status: 200, headers: {}, body: { id: "alr_ALERTAAAAAAAAAAAAAAA" } }))
+    .on("DELETE", "/api/alert-mutes/amt_MUTEAAAAAAAAAAAAAAAA", () => ({ status: 204, headers: {}, body: undefined }));
+  const client = new ApiClient({ token, projectId: id, transport });
+  await client.call({ method: "GET", path: "/api/alerts" });
+  await client.call({ method: "GET", path: "/api/alert-mutes" });
+  await client.call({ method: "POST", path: "/api/alert-mutes", body: { tags: ["Lobby"], until: "2026-11-01T16:00:00Z" }, idempotent: true });
+  await client.call({ method: "GET", path: "/api/alerts/alr_ALERTAAAAAAAAAAAAAAA" });
+  await client.call({ method: "POST", path: "/api/alerts/alr_ALERTAAAAAAAAAAAAAAA/acknowledge", idempotent: true });
+  await client.call({ method: "DELETE", path: "/api/alert-mutes/amt_MUTEAAAAAAAAAAAAAAAA", idempotent: true });
+  assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), [
+    `GET ${prefix}/alerts`, `GET ${prefix}/alert-mutes`, `POST ${prefix}/alert-mutes`, "GET /api/alerts/alr_ALERTAAAAAAAAAAAAAAA",
+    "POST /api/alerts/alr_ALERTAAAAAAAAAAAAAAA/acknowledge", "DELETE /api/alert-mutes/amt_MUTEAAAAAAAAAAAAAAAA",
+  ]);
+});
 
 test("project token native options reject invalid subsets before authentication", () => {
   for (const value of [" ", "bad", "prj_A,prj_A", Array.from({length: 65}, (_, i) => `prj_${i}`).join(",")]) {

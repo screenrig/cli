@@ -202,7 +202,7 @@ test("notifications create validates input and declared relationships before any
     [["--webhook", "not a url", "--conditions", "screen_offline"], /--webhook must be an absolute https URL/],
     [["--webhook", "https://user:pass@hooks.example.com/x", "--conditions", "screen_offline"], /--webhook must not carry credentials/],
     [["--webhook", "https://hooks.example.com/x#frag", "--conditions", "screen_offline"], /--webhook must not carry a fragment/],
-    [["--email", "owner", "--conditions", "screen_offline,bogus"], /--conditions does not take "bogus"; use screen_offline, display_disconnected, running_hot, storage_full, content_stuck, crashing/],
+    [["--email", "owner", "--conditions", "screen_offline,bogus"], /--conditions does not take "bogus"; use screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, crashing/],
     [["--email", "owner", "--conditions", "Screen_Offline"], /--conditions does not take "Screen_Offline"/],
     [["--email", "owner", "--conditions", "screen_offline,,running_hot"], /--conditions takes comma-separated conditions with no empty entries/],
     [["--email", "owner", "--conditions", "screen_offline,screen_offline"], /--conditions must not repeat a condition/],
@@ -237,6 +237,27 @@ test("notifications create validates input and declared relationships before any
     assert.match(refused.envelope.error!.detail, message, args.join(" "));
   }
   assert.equal(notificationCalls(transport).length, 0, "invalid input never reaches the server");
+});
+
+test("--conditions accepts not_playing on create and update, beside the other conditions", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const created = await cli(["--json", "notifications", "create", "--email", "owner", "--conditions", "screen_offline,not_playing"], transport, env);
+  assert.equal(created.code, 0, created.stdout);
+  assert.deepEqual(notificationCalls(transport).at(-1)!.body, { channel: "email", recipients: ["owner"], conditions: ["screen_offline", "not_playing"] });
+  assert.deepEqual(created.envelope.data.conditions, ["screen_offline", "not_playing"]);
+
+  const updated = await cli(["--json", "notifications", "update", created.envelope.data.id, "--conditions", "not_playing,crashing"], transport, env);
+  assert.equal(updated.code, 0, updated.stdout);
+  assert.deepEqual(notificationCalls(transport).at(-1)!.body, { conditions: ["not_playing", "crashing"] });
+
+  const webhook = await cli(["--json", "notifications", "create", "--webhook", URL_OK, "--conditions", "not_playing"], transport, env);
+  assert.equal(webhook.code, 0, webhook.stdout);
+  assert.deepEqual(webhook.envelope.data.conditions, ["not_playing"]);
+
+  const repeated = await cli(["--json", "notifications", "create", "--email", "owner", "--conditions", "not_playing,not_playing"], transport, env);
+  assert.equal(repeated.code, ExitCode.Usage, repeated.stdout);
+  assert.match(repeated.envelope.error!.detail, /--conditions must not repeat a condition/);
 });
 
 test("webhook_url_rejected shows the server's reason, exits 8, and clears the recovery key", async () => {
@@ -594,6 +615,25 @@ test("deliveries shows screen notices with their condition, phase, screen and re
   assert.match(narrow[0]!, /^ID\s+EVENT_TYPE\s+STATE\s+ATTEMPTS\s+LAST_STATUS\s+LAST_ERROR\s+CREATED_AT$/);
   assert.match(narrow[1]!, /playlist\.updated\s+failed\s+3\s+502\s+http_status/);
   assert.deepEqual(notificationDeliveryTableLines([]), ["No deliveries"]);
+});
+
+test("deliveries names the acknowledged and muted skip reasons as the server sends them", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const { id } = await createEmail(transport, env);
+  for (const [deliveryId, reason] of [["whd_ACKEDAAAAAAAAAAAAAAAA", "acknowledged"], ["whd_MUTEDAAAAAAAAAAAAAAAA", "muted"]] as const) {
+    transport.putNotificationDelivery!(id, {
+      id: deliveryId, notification_id: id, event_id: "ev1_7", event_type: "screen.offline", condition: "not_playing", phase: "opened",
+      screen_id: "scr_LOBBYAAAAAAAAAAAAAAAA", screen_name: "Lobby TV", state: "skipped", attempts: 0, last_error: reason, created_at: "2026-08-14T16:55:00.000Z",
+    });
+  }
+  const json = await cli(["--json", "notifications", "deliveries", id], transport, env);
+  assert.deepEqual(json.envelope.data.items.map((item: { last_error: string }) => item.last_error), ["muted", "acknowledged"]);
+  const human = await cli(["--human", "notifications", "deliveries", id], transport, env);
+  assert.match(human.stdout, /not_playing\s+opened\s+Lobby TV\s+skipped\s+0\s+muted/);
+  assert.match(human.stdout, /not_playing\s+opened\s+Lobby TV\s+skipped\s+0\s+acknowledged/);
+  const help = await cli(["--human", "notifications", "deliveries", "--help"], transport, env);
+  assert.match(help.stdout, /acknowledged \(someone acknowledged or snoozed the screen's alert during the hold\), muted \(a mute covers the screen\)/);
 });
 
 test("notification test rate limiting keeps the exit-7 convention", async () => {

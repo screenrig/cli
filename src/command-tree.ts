@@ -46,6 +46,7 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
       || (command.name() === "create" && command.parent?.name() === "service-client")))
       || (name === "tag" && ["fleet-links", "notifications"].includes(command.parent?.name() ?? "") && ["create", "update"].includes(command.name()))
       || (name === "screen-id" && command.parent?.name() === "triggers" && command.name() === "create")
+      || (["screen-id", "tag"].includes(name) && command.parent?.name() === "alerts" && command.name() === "mute")
       || (command.parent?.name() === "screen" && ((command.name() === "update" && (name === "field" || name === "unset-field")) || (command.name() === "list" && name === "field")))
       || (["tag", "any-tag", "screen-id", "window"].includes(name) && command.parent?.name() === "campaign" && ["create", "update"].includes(command.name()))
       || (command.parent?.name() === "feeds" && command.name() === "get" && (FEED_REPEATABLE_FLAGS as readonly string[]).includes(name));

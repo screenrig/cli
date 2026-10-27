@@ -11,8 +11,8 @@ type Ledger = NonNullable<ScreenRigConfig["pending_writes"]>;
 // Server replay records last 24 hours. Stop earlier rather than silently
 // replaying a mutation after the server may have forgotten its key.
 const SAFE_REPLAY_MS = 23 * 60 * 60 * 1000;
-const commandGroups = ["kv", "comment", "feedback", "support", "operations", "app", "playlist", "media", "screen", "project", "invitations", "dashboard", "webhooks", "notifications"];
-const commandActions = ["create", "update", "delete", "upload", "set", "put", "assign", "pair", "unpair", "clear", "toast", "screenshot", "reload", "restart", "cancel", "submit", "set-timezone", "archive", "unarchive", "rotate-public-id", "tag", "bug", "feature", "rename", "revoke", "reset-sign-in", "rotate-secret", "test", "schedule", "takeover"];
+const commandGroups = ["kv", "comment", "feedback", "support", "operations", "app", "playlist", "media", "screen", "project", "invitations", "dashboard", "webhooks", "notifications", "alerts"];
+const commandActions = ["create", "update", "delete", "upload", "set", "put", "assign", "pair", "unpair", "clear", "toast", "screenshot", "reload", "restart", "cancel", "submit", "set-timezone", "archive", "unarchive", "rotate-public-id", "tag", "bug", "feature", "rename", "revoke", "reset-sign-in", "rotate-secret", "test", "schedule", "takeover", "ack", "snooze", "mute", "unmute"];
 function safeCommand(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const parts = value.split(" ");

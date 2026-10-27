@@ -31,6 +31,7 @@ import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignAllScreensAudience, campaign
 import { fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
 import { NOTIFICATION_ID_PATTERN, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationSecretWarning, notificationTableLines, snoozedUntil } from "./notifications.js";
+import { alertEnd, alertId, alertMuteId, alertMuteLines, alertMuteTableLines, alertNote, alertProblem, alertScreenId, alertsCursor, alertsLimit, screenAlertLines, screenAlertListLines } from "./alerts.js";
 import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { memoryConfigFs } from "./memory-config.js";
@@ -39,6 +40,12 @@ import path from "node:path";
 import {
   limitsFromCapabilities,
   TEMPORARY_PROTOCOL_VERSION,
+  type Alert,
+  type AlertAcknowledge,
+  type AlertList,
+  type AlertMute,
+  type AlertMuteList,
+  type AlertMuteWrite,
   type Project,
   type ProjectEvent,
   type Invitation,
@@ -820,7 +827,7 @@ function commandHandler(
         (group === "media" && ["update", "delete"].includes(action ?? "")) ||
         // A screenshot is an observation: every run requests a new capture.
         (group === "screen" && !["provision", "publish", "screenshot"].includes(action ?? "")) ||
-        group === "invitations" || group === "webhooks" || group === "notifications" || group === "fleet-links" || group === "triggers" || group === "campaign" || (group === "project" && ["rename", "create"].includes(action ?? ""))
+        group === "invitations" || group === "webhooks" || group === "notifications" || group === "alerts" || group === "fleet-links" || group === "triggers" || group === "campaign" || (group === "project" && ["rename", "create"].includes(action ?? ""))
       ));
     let recovery: WriteRecovery | undefined;
     try {
@@ -8990,6 +8997,136 @@ export const handleNotificationsDeliveries = commandHandler(async (args, runtime
       ...notificationDeliveryTableLines(items),
       ...(next ? [`next: screenrig notifications deliveries ${id} --before ${next}${limit ? ` --limit ${limit}` : ""}`] : []),
     ].join("\n"),
+  };
+});
+
+// Alerts: /api/alerts, one screen's condition while it lasts (acknowledge or
+// snooze it while it is open), and /api/alert-mutes, screens muted for
+// maintenance. Nothing here is secret. A snooze or mute made with --for derives
+// its instant from the clock, so a rerun fingerprints differently; the obsolete
+// saved key is superseded instead of left behind, as for notifications update
+// --snooze.
+const ALERTS_PATH = "/api/alerts";
+const ALERT_MUTES_PATH = "/api/alert-mutes";
+
+async function alertCall(
+  client: ApiClient,
+  request: Parameters<ApiClient["call"]>[0],
+  id?: string,
+): Promise<Awaited<ReturnType<ApiClient["call"]>>> {
+  try {
+    return await client.call(request);
+  } catch (error) {
+    throw alertProblem(error, id);
+  }
+}
+
+export const handleAlertsList = commandHandler(async (args, runtime, resolved) => {
+  const state = flagString(args.flags, "state");
+  const screenId = flagString(args.flags, "screen-id");
+  const before = flagString(args.flags, "before");
+  const limit = flagString(args.flags, "limit");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await alertCall(client, {
+    method: "GET", path: ALERTS_PATH,
+    query: {
+      ...(state !== undefined ? { state } : {}),
+      ...(screenId !== undefined ? { screen_id: alertScreenId(screenId) } : {}),
+      ...(before !== undefined ? { before: alertsCursor(before) } : {}),
+      ...(limit !== undefined ? { limit: alertsLimit(limit) } : {}),
+    },
+  });
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: screenAlertListLines(response.body as AlertList | undefined, runtime.now(), { state, screenId, limit }).join("\n"),
+  };
+});
+
+export const handleAlertsShow = commandHandler(async (args, runtime, resolved) => {
+  const id = alertId(args.positionals[2], "show");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await alertCall(client, { method: "GET", path: `${ALERTS_PATH}/${id}` }, id);
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: ["Alert", ...screenAlertLines(response.body as Alert | undefined, runtime.now())].join("\n"),
+  };
+});
+
+export const handleAlertsAck = commandHandler(async (args, runtime, resolved) => {
+  const id = alertId(args.positionals[2], "ack");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await alertCall(client, { method: "POST", path: `${ALERTS_PATH}/${id}/acknowledge`, idempotent: true }, id);
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Acknowledged alert ${id}. It stays acknowledged until it resolves.`, ...screenAlertLines(response.body as Alert | undefined, runtime.now())].join("\n"),
+  };
+});
+
+export const handleAlertsSnooze = commandHandler(async (args, runtime, resolved) => {
+  const id = alertId(args.positionals[2], "snooze");
+  const forValue = flagString(args.flags, "for");
+  const until = alertEnd(forValue, flagString(args.flags, "until"), runtime.now());
+  const body: AlertAcknowledge = { until };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await alertCall(client, {
+    method: "POST", path: `${ALERTS_PATH}/${id}/acknowledge`, idempotent: true, body,
+    ...(forValue !== undefined ? { recoverySupersede: JSON.stringify(["alerts snooze", id]) } : {}),
+  }, id);
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Snoozed alert ${id} until ${until}. It needs attention again then if it is still open.`, ...screenAlertLines(response.body as Alert | undefined, runtime.now())].join("\n"),
+  };
+});
+
+export const handleAlertsMute = commandHandler(async (args, runtime, resolved) => {
+  const screenIds = flagString(args.flags, "screen-id");
+  const tags = flagString(args.flags, "tag");
+  const note = flagString(args.flags, "note");
+  const forValue = flagString(args.flags, "for");
+  if (screenIds === undefined && tags === undefined) throw usageError("alerts mute requires --screen-id or --tag.");
+  const body: AlertMuteWrite = {
+    ...(screenIds !== undefined ? { screen_ids: screenIds.split(",") } : {}),
+    ...(tags !== undefined ? { tags: tags.split(",") } : {}),
+    until: alertEnd(forValue, flagString(args.flags, "until"), runtime.now()),
+    ...(note !== undefined ? { note: alertNote(note) } : {}),
+  };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await alertCall(client, {
+    method: "POST", path: ALERT_MUTES_PATH, idempotent: true, body,
+    ...(forValue !== undefined ? { recoverySupersede: JSON.stringify(["alerts mute", body.screen_ids ?? [], body.tags ?? [], body.note ?? null]) } : {}),
+  });
+  const created = response.body as AlertMute | undefined;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Created mute ${created?.id ?? ""}`.trimEnd(), ...alertMuteLines(created)].join("\n"),
+  };
+});
+
+export const handleAlertsMutes = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await alertCall(client, { method: "GET", path: ALERT_MUTES_PATH });
+  const items = (response.body as AlertMuteList | undefined)?.items;
+  const list = Array.isArray(items) ? items : [];
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Mutes (${list.length})`, ...alertMuteTableLines(list)].join("\n"),
+  };
+});
+
+export const handleAlertsUnmute = commandHandler(async (args, runtime, resolved) => {
+  const id = alertMuteId(args.positionals[2], "unmute");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await alertCall(client, { method: "DELETE", path: `${ALERT_MUTES_PATH}/${id}`, idempotent: true }, id);
+  return {
+    envelope: successEnvelope({ id, deleted: true }, { request_id: response.headers["x-request-id"] ?? client.requestId }),
+    exitCode: ExitCode.Success,
+    human: `Ended mute ${id}. Open alerts on its screens need attention again unless they are acknowledged or snoozed.`,
   };
 });
 

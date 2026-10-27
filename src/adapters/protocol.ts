@@ -1313,7 +1313,7 @@ export interface WebhookDeliveryList {
 }
 
 /** The screen state changes a notification fires on (NotificationCondition). */
-export type NotificationCondition = "screen_offline" | "display_disconnected" | "running_hot" | "storage_full" | "content_stuck" | "crashing";
+export type NotificationCondition = "screen_offline" | "display_disconnected" | "running_hot" | "storage_full" | "content_stuck" | "not_playing" | "crashing";
 
 /**
  * GET/PATCH /api/notifications/{id}: an email or webhook notification. The
@@ -1414,6 +1414,69 @@ export interface NotificationDelivery {
 export interface NotificationDeliveryList {
   items: NotificationDelivery[];
   next_cursor: string | null;
+}
+
+/** Who acknowledged an alert or created a mute. Readers treat a kind other than person or agent as unnamed. */
+export interface AlertActor {
+  id: string;
+  kind: string;
+  name?: string;
+}
+
+/** GET /api/alerts/{id}: one screen and one condition while it lasts. */
+export interface Alert {
+  acknowledged_at?: string;
+  acknowledged_by?: AlertActor;
+  /** Open, and not acknowledged, snoozed or muted. */
+  attention: boolean;
+  /** A NotificationCondition other than crashing. */
+  condition: string;
+  id: string;
+  /** A current mute covers the screen. */
+  muted: boolean;
+  project_id?: string;
+  resolved_at?: string;
+  screen_id: string;
+  screen_name?: string;
+  since: string;
+  /** Present on a snoozed alert; it needs attention again at this instant if still open. */
+  snoozed_until?: string;
+  state: "open" | "resolved";
+}
+
+/** GET /api/alerts: counts cover the whole project's open alerts, whatever the page and filters. */
+export interface AlertList {
+  counts: { attention: number; open: number };
+  items: Alert[];
+  next_cursor: string | null;
+}
+
+/** POST /api/alerts/{id}/acknowledge: until snoozes; absent, the alert stays acknowledged until it resolves. */
+export interface AlertAcknowledge {
+  until?: string;
+}
+
+export interface AlertMute {
+  created_at: string;
+  created_by?: AlertActor;
+  id: string;
+  note?: string;
+  project_id?: string;
+  screen_ids: string[];
+  tags: string[];
+  until: string;
+}
+
+export interface AlertMuteList {
+  items: AlertMute[];
+}
+
+/** POST /api/alert-mutes: at least one screen id or tag, and until at most 30 days ahead. */
+export interface AlertMuteWrite {
+  note?: string;
+  screen_ids?: string[];
+  tags?: string[];
+  until: string;
 }
 
 /**
