@@ -31,8 +31,9 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
     const parser = option.parseArg;
     option.argParser((value: string, previous: unknown) => {
       // An option-looking token is usually a missing value. Explicit '=' permits it,
-      // and a lone - is stdin where the help documents it, or stdout for the playback CSV --output.
-      const dash = value === "-" && (/\bstdin\b/.test(option.description) || (name === "output" && command.parent?.name() === "playback"));
+      // and a lone - is stdin where the help documents it, or stdout for the playback and direct report CSV --output.
+      const csvOutput = name === "output" && (command.parent?.name() === "playback" || (command.name() === "report" && command.parent?.name() === "direct"));
+      const dash = value === "-" && (/\bstdin\b/.test(option.description) || csvOutput);
       if ((!value.length && name !== "value-base64") ||
           (value.startsWith("-") && !dash && !/^-\d/.test(value) && !argv.includes(`--${name}=${value}`))) {
         throw usageError(`--${name} requires a value. Use --${name}=VALUE for a value starting with a dash.`);

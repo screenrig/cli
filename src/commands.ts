@@ -16,7 +16,7 @@ import { WriteRecovery } from "./write-recovery.js";
 import { cacheProjectContexts, clearResultContext, contextFromProject, formatResultContext, projectName as validateDisplayName, resultContext, setResultContext, validateProjectContext } from "./project-context.js";
 import { projectConfigFor, withProjectConfig, assertProjectCredential } from "./project-state.js";
 import { instantInZone, normalizeInstant, assignmentLine, playlistInUseProblem, scheduleEntries, scheduleTableLines, screenControlProblem, takeoverForProblem, takeoverLine, takeoverReason, takeoverUntil, effectivePlaylistText } from "./screen-control.js";
-import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLAYS_SETTLE_MS, unusedPath, PLAYS_ALL_MAX_PAGES, PLAYS_LIMIT_MAX, playbackExportBudget, playsCursor, playsLimit, playsRange, requireCsvResponse, writeCsvFile, writeCsvStdout } from "./playback-export.js";
+import { AGGREGATE_MAX_DAYS, CsvStreamFailure, PLAYBACK_CSV_IDLE_TIMEOUT_MS, PLAYS_SETTLE_MS, unusedPath, PLAYS_ALL_MAX_PAGES, PLAYS_LIMIT_MAX, csvByteStream, csvRecord, isoUtc, playbackExportBudget, playsCursor, playsInstant, playsLimit, playsRange, requireCsvResponse, writeCsvFile, writeCsvStdout } from "./playback-export.js";
 import { wallCanvas, wallFromFlags, wallLine, wallProblem } from "./screen-wall.js";
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
@@ -2996,6 +2996,231 @@ export const handleAdsReportsDelivery = commandHandler(async (args, runtime, res
       ["gross_mcr", "fee_mcr", "net_mcr", "completed", "interrupted", "unbillable"],
       ["screen_id", "slot_id", "reservation_id", "gross_mcr", "fee_mcr", "net_mcr", "completed_at"]),
   };
+});
+
+const DIRECT_CAMPAIGNS = "/api/advertising/direct-campaigns";
+/** Fill statistics cover at most this many days of the seller's ad slots. */
+const FILL_MAX_RANGE_MS = 35 * 86_400_000;
+
+function directCampaignPath(args: ParsedArgs, command: string): string {
+  const id = args.positionals[3];
+  if (!id) throw usageError(`ads direct ${command} requires <campaign-id>.`);
+  return `${DIRECT_CAMPAIGNS}/${encodeURIComponent(id)}`;
+}
+
+/**
+ * Read one JSON document for the direct commands, `-` for stdin. The server
+ * validates every field, including the category list, goal and price; this only
+ * refuses what is not a JSON object or lacks the fields every draft needs.
+ */
+async function directDocument(file: string | undefined, runtime: CliRuntime, what: string): Promise<Record<string, unknown>> {
+  if (!file) throw usageError(`ads direct requires a ${what} JSON document.`);
+  let parsed: unknown;
+  try {
+    parsed = await readAuthoringJson(file, runtime);
+  } catch (error) {
+    throw usageError(`Cannot read the ${what} JSON: ${error instanceof Error ? error.message : "invalid JSON"}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw usageError(`A ${what} must be a JSON object.`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+async function directDraft(file: string | undefined, runtime: CliRuntime): Promise<Record<string, unknown>> {
+  const draft = await directDocument(file, runtime, "direct campaign draft");
+  const fail = (field: string, expectation: string): never => {
+    throw usageError(`Direct campaign draft field ${field} ${expectation}`);
+  };
+  for (const field of ["name", "advertiser", "flight_start", "flight_end"] as const) {
+    if (typeof draft[field] !== "string" || draft[field].trim().length === 0) {
+      fail(field, field === "name" || field === "advertiser" ? "must be a non-empty string." : "must be an RFC 3339 timestamp string.");
+    }
+  }
+  if (!Array.isArray(draft.media_ids) || draft.media_ids.length === 0 || draft.media_ids.some((item) => typeof item !== "string")) {
+    fail("media_ids", "must be a non-empty array of media identifiers.");
+  }
+  if (draft.goal_plays !== undefined && (typeof draft.goal_plays !== "number" || !Number.isSafeInteger(draft.goal_plays) || draft.goal_plays < 0)) {
+    fail("goal_plays", "must be a whole number of plays when present; 0 or omitted takes every eligible slot during the flight.");
+  }
+  if (draft.overbook !== undefined && typeof draft.overbook !== "boolean") {
+    fail("overbook", "must be true or false when present.");
+  }
+  return draft;
+}
+
+/** --from/--to of the direct reports: RFC 3339, now or an age such as 7d, sent as RFC 3339. Each is optional. */
+function adsWindow(args: ParsedArgs, runtime: CliRuntime, maxMs?: number): { from?: string; to?: string } {
+  requireFlagValue(args, "from", "7d");
+  requireFlagValue(args, "to", "now");
+  const now = runtime.now();
+  const from = flagString(args.flags, "from");
+  const to = flagString(args.flags, "to");
+  const fromMs = from === undefined ? undefined : playsInstant(from, "--from", now);
+  const toMs = to === undefined ? undefined : playsInstant(to, "--to", now);
+  if (fromMs !== undefined && toMs !== undefined) {
+    if (fromMs >= toMs) throw usageError("--from must be before --to.");
+    if (maxMs !== undefined && toMs - fromMs > maxMs) {
+      throw usageError(`--from to --to must span at most ${maxMs / 86_400_000} days.`);
+    }
+  }
+  return { ...(fromMs === undefined ? {} : { from: isoUtc(fromMs) }), ...(toMs === undefined ? {} : { to: isoUtc(toMs) }) };
+}
+
+export const handleAdsDirectList = commandHandler((args, runtime, resolved) =>
+  simpleGet(args, runtime, resolved, DIRECT_CAMPAIGNS, "Direct campaigns"));
+
+export const handleAdsDirectShow = commandHandler((args, runtime, resolved) =>
+  simpleGet(args, runtime, resolved, directCampaignPath(args, "show"), "Direct campaign"));
+
+export const handleAdsDirectCreate = commandHandler(async (args, runtime, resolved) =>
+  adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: DIRECT_CAMPAIGNS,
+    body: await directDraft(args.positionals[3], runtime),
+    human: "Direct campaign created. It fills this project's own ad slots before marketplace campaigns and moves no money through screenRIG: you bill the advertiser.",
+  }));
+
+export const handleAdsDirectUpdate = commandHandler(async (args, runtime, resolved) => {
+  const target = directCampaignPath(args, "update");
+  return adsMutation(args, runtime, resolved, {
+    method: "POST",
+    path: target,
+    body: await directDraft(args.positionals[4], runtime),
+    ifMatch: flagString(args.flags, "if-match"),
+    human: `Direct campaign ${args.positionals[3]} replaced from the draft. Every writable field now holds the draft's value.`,
+  });
+});
+
+const directTransition = (verb: "pause" | "resume" | "end", human: (id: string) => string) =>
+  commandHandler(async (args, runtime, resolved) => {
+    const target = directCampaignPath(args, verb);
+    return adsMutation(args, runtime, resolved, {
+      method: "POST",
+      path: `${target}/${verb}`,
+      ifMatch: flagString(args.flags, "if-match"),
+      human: human(args.positionals[3]!),
+    });
+  });
+
+export const handleAdsDirectPause = directTransition("pause", (id) => `Paused direct campaign ${id}. It stops taking ad slots until it is resumed.`);
+export const handleAdsDirectResume = directTransition("resume", (id) => `Resumed direct campaign ${id}. It takes eligible ad slots again within its flight.`);
+export const handleAdsDirectEnd = directTransition("end", (id) => `Ended direct campaign ${id}. Ending is final: create a new direct campaign to run it again. Its report stays readable.`);
+
+/** Availability is a read: the POST carries the query document and changes nothing. */
+export const handleAdsDirectAvailability = commandHandler(async (args, runtime, resolved) => {
+  const query = await directDocument(args.positionals[3], runtime, "availability query");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "POST", path: "/api/advertising/availability", body: query });
+  requirePrivateNoStore(response.headers, "Advertising availability response");
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: reportLines("Ad availability", response.body,
+      ["estimated_plays", "booked_plays", "available_plays", "screens", "observed_from", "observed_to", "flight_start", "flight_end"]),
+  };
+});
+
+const DIRECT_REPORT_ROW_FIELDS = ["day", "screen_id", "slot_id", "media_id", "plays", "played_ms"] as const;
+
+/** The money value of a report, `12.50 USD (cpm)`, or undefined when the campaign records no price. */
+function directValueLine(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const { amount, currency, model } = value as Record<string, unknown>;
+  return typeof amount === "string" ? `${amount}${typeof currency === "string" ? ` ${currency}` : ""}${typeof model === "string" ? ` (${model})` : ""}` : undefined;
+}
+
+export const handleAdsDirectReport = commandHandler(async (args, runtime, resolved) => {
+  const target = directCampaignPath(args, "report");
+  const id = args.positionals[3]!;
+  const format = playbackFormat(args, "ads direct report");
+  const window = adsWindow(args, runtime);
+  const toStdout = flagString(args.flags, "output") === "-";
+  const outputPath = format === "csv" && !toStdout
+    ? await resolveDownloadOutput(runtime.cwd(), `./direct-report-${id}.csv`, args.flags)
+    : undefined;
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: `${target}/report`, query: window });
+  requirePrivateNoStore(response.headers, "Advertising report response");
+  const report = response.body && typeof response.body === "object" && !Array.isArray(response.body) ? response.body as Record<string, unknown> : {};
+  const rows = (Array.isArray(report.rows) ? report.rows : []).filter((row): row is Record<string, unknown> =>
+    !!row && typeof row === "object" && !Array.isArray(row));
+  const truncated = report.truncated === true;
+  const truncation: Warning = { code: "direct_report_truncated", message: "The report holds only part of the rows for this period. Narrow --from and --to and run it again for the rest." };
+
+  if (format === "json") {
+    const envelope = jsonBody(response, client.requestId, undefined, truncated ? [truncation] : []);
+    const lines = humanLines("Direct campaign report", [
+      ["campaign_id", typeof report.campaign_id === "string" ? report.campaign_id : undefined],
+      ["name", typeof report.name === "string" ? report.name : undefined],
+      ["advertiser", typeof report.advertiser === "string" ? report.advertiser : undefined],
+      ["period", typeof report.from === "string" && typeof report.to === "string" ? `${report.from} to ${report.to}` : undefined],
+      ...(["goal_plays", "delivered_plays", "plays", "played_ms", "not_played"] as const).map((field): [string, string | undefined] =>
+        [field, typeof report[field] === "number" ? String(report[field]) : undefined]),
+      ["value", directValueLine(report.value)],
+    ]).split("\n");
+    if (rows.length > 0) {
+      lines.push("rows:");
+      for (const row of rows) lines.push(`  ${DIRECT_REPORT_ROW_FIELDS.map((field) => `${field}=${row[field] ?? ""}`).join(" ")}`);
+    }
+    if (truncated) lines.push(`warning: ${truncation.message}`);
+    return { envelope, exitCode: ExitCode.Success, human: lines.join("\n") };
+  }
+
+  const csv = [
+    csvRecord(DIRECT_REPORT_ROW_FIELDS),
+    ...rows.map((row) => csvRecord(DIRECT_REPORT_ROW_FIELDS.map((field) => row[field] as string | number | undefined))),
+  ].join("");
+  const what = "direct campaign report";
+  if (toStdout) {
+    if (formatResultContext(runtime)) runtime.stderr.write(`${formatResultContext(runtime)}\n`);
+    await writeCsvStdout(csvByteStream(csv), runtime.stdout, what, client.requestId);
+    if (truncated) runtime.stderr.write(`warning: ${truncation.message}\n`);
+    return { envelope: successEnvelope({}), exitCode: ExitCode.Success, human: "", output: "stream" };
+  }
+  const file = await writeCsvFile(csvByteStream(csv), outputPath!, what, client.requestId);
+  const data = {
+    path: file.path, bytes: file.bytes, rows: file.rows, sha256: file.sha256, content_type: "text/csv",
+    campaign_id: id,
+    ...(typeof report.from === "string" ? { from: report.from } : {}),
+    ...(typeof report.to === "string" ? { to: report.to } : {}),
+  };
+  return {
+    envelope: successEnvelope(data, { request_id: client.requestId, warnings: truncated ? [truncation] : [] }),
+    exitCode: ExitCode.Success,
+    human: [
+      humanLines("Direct campaign report exported", [
+        ["path", file.path], ["rows", String(file.rows)], ["bytes", String(file.bytes)], ["sha256", file.sha256],
+      ]),
+      ...(truncated ? [`warning: ${truncation.message}`] : []),
+    ].join("\n"),
+  };
+});
+
+export const handleAdsReportsFill = commandHandler(async (args, runtime, resolved) => {
+  const window = adsWindow(args, runtime, FILL_MAX_RANGE_MS);
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await client.call({ method: "GET", path: "/api/advertising/reports/fill", query: window });
+  requirePrivateNoStore(response.headers, "Advertising report response");
+  const report = response.body && typeof response.body === "object" && !Array.isArray(response.body) ? response.body as Record<string, unknown> : {};
+  const lines = humanLines("Ad slot fill", [
+    ["period", typeof report.from === "string" && typeof report.to === "string" ? `${report.from} to ${report.to}` : undefined],
+    ...(["occurrences", "direct", "marketplace", "vast", "unfilled", "fill_rate"] as const).map((field): [string, string | undefined] =>
+      [field, typeof report[field] === "number" ? String(report[field]) : undefined]),
+  ]).split("\n");
+  const reasons = report.unfilled_reasons;
+  if (reasons && typeof reasons === "object" && !Array.isArray(reasons)) {
+    lines.push(`unfilled_reasons: ${Object.entries(reasons).map(([reason, count]) => `${reason}=${count}`).join(" ")}`);
+  }
+  if (Array.isArray(report.days)) {
+    lines.push("days:");
+    for (const value of report.days) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const day = value as Record<string, unknown>;
+      lines.push(`  ${["day", "occurrences", "direct", "marketplace", "vast", "unfilled", "fill_rate"].map((field) => `${field}=${day[field] ?? ""}`).join(" ")}`);
+    }
+  }
+  return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: lines.join("\n") };
 });
 
 /**

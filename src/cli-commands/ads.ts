@@ -12,6 +12,15 @@ import {
   handleAdsCreativesCreate,
   handleAdsCreativesList,
   handleAdsCreativesShow,
+  handleAdsDirectAvailability,
+  handleAdsDirectCreate,
+  handleAdsDirectEnd,
+  handleAdsDirectList,
+  handleAdsDirectPause,
+  handleAdsDirectReport,
+  handleAdsDirectResume,
+  handleAdsDirectShow,
+  handleAdsDirectUpdate,
   handleAdsInventoryList,
   handleAdsInventoryUpdate,
   handleAdsMembershipsList,
@@ -23,6 +32,7 @@ import {
   handleAdsNetworkShow,
   handleAdsNetworksList,
   handleAdsReportsDelivery,
+  handleAdsReportsFill,
   handleAdsReportsSpend,
   handleAdsReviewsApprove,
   handleAdsReviewsList,
@@ -36,6 +46,7 @@ import {
 import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { decisionNoteOption, positiveInteger, revision, vastTagUrl } from "./options.js";
+import { playsInstantOption } from "../playback-export.js";
 
 /**
  * Advertising commands. Buyer operations act through invited memberships;
@@ -184,12 +195,59 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     .requiredOption("--expect-rev <REVISION>", "Campaign revision the fresh quote priced (required)", revision)
     .action(bind(handleAdsCampaignsAcceptRates));
   for (const command of [campaignCreate, campaignUpdate]) {
-    addCommandNotes(command, "The draft JSON needs name, daily_cap_mcr, lifetime_cap_mcr, flight_start and flight_end (RFC 3339), and networks: [{\"seller_project_id\", \"screen_ids\": [...], \"slot_ids\": [...], \"creative_ids\": [...]}], one per seller network this buyer was admitted to. A saved draft authorizes nothing: no credits are reserved and no ad can play until an accepted, unexpired quote activates it. The draft chooses the image display duration (`image_duration_ms`, 5000–30000 ms, ten seconds when omitted) and an optional per-play price ceiling (`max_play_price_mcr`, a decimal mcr string; omit it for no extra ceiling). Money fields are decimal mcr strings, never numbers.");
+    addCommandNotes(command, "The draft JSON needs name, daily_cap_mcr, lifetime_cap_mcr, flight_start and flight_end (RFC 3339), and networks: [{\"seller_project_id\", \"screen_ids\": [...], \"slot_ids\": [...], \"creative_ids\": [...]}], one per seller network this buyer was admitted to. A saved draft authorizes nothing: no credits are reserved and no ad can play until an accepted, unexpired quote activates it. The draft chooses the image display duration (`image_duration_ms`, 5000–30000 ms, ten seconds when omitted) and an optional per-play price ceiling (`max_play_price_mcr`, a decimal mcr string; omit it for no extra ceiling). Money fields are decimal mcr strings, never numbers. An optional `category` (the values are listed under ads direct create) keeps competitors apart: two ads of one category never play in the same ad break on a screen.");
   }
   addCommandNotes(campaignPreview, "Preview is the acceptance artifact: it prices the current inventory and rates and spends, reserves, and activates nothing. The quote is revision-checked against the campaign revision the CLI just read, or the one you pass with --expect-rev. Rates can change before activation: accept the quote you were shown, never a silent replacement.");
   addCommandNotes(campaignActivate, "Activation requires explicit acceptance of this exact quote. It atomically checks ownership, current invitation authority, quote expiry, and pricing revisions; no wallet debit or seller revenue happens just from accepting terms.");
   addCommandNotes(campaignAcceptRates, "Only the buyer's explicit acceptance resumes a campaign paused by a seller rate change. A top-up, price ceiling, schedule tick, or ordinary resume cannot supply that consent, and a stale quote is rejected rather than accepted at another price.");
   addCommandNotes(campaignPause, "Pausing stops new reservations. Already-started valid plays normally finish and settle at their reserved price.");
+
+  const direct = ads.command("direct").description("Run direct campaigns for outside advertisers on this project's own ad slots");
+  addCommandNotes(direct, "A direct campaign is this seller's own deal for an outside advertiser on the seller's own ad inventory. It moves no money through screenRIG: the seller bills the advertiser, and the recorded price (cpm per thousand plays, or a flat fee) only values the delivery report. Direct campaigns fill ad slots before marketplace campaigns. A campaign with goal_plays is paced evenly across its flight and plays first while it is behind pace; one without a goal takes every eligible slot during its flight. An optional category keeps competitors apart: two ads of one category never play in the same ad break on a screen.");
+  direct.command("list").description("List this seller project's direct campaigns")
+    .action(bind(handleAdsDirectList));
+  direct.command("show").description("Inspect one direct campaign, its state and pace")
+    .argument("<campaign-id>", "Direct campaign identifier")
+    .action(bind(handleAdsDirectShow));
+  const directCreate = direct.command("create").description("Create a direct campaign from a JSON document")
+    .argument("<file>", "Direct campaign draft JSON file, or - for stdin")
+    .action(bind(handleAdsDirectCreate));
+  const directUpdate = direct.command("update").description("Replace a direct campaign from a JSON document")
+    .argument("<campaign-id>", "Direct campaign identifier")
+    .argument("<file>", "Direct campaign draft JSON file, or - for stdin")
+    .requiredOption("--expect-rev <REVISION>", "Current campaign revision (required)", revision)
+    .action(bind(handleAdsDirectUpdate));
+  const directPause = direct.command("pause").description("Pause a direct campaign")
+    .argument("<campaign-id>", "Direct campaign identifier")
+    .requiredOption("--expect-rev <REVISION>", "Current campaign revision (required)", revision)
+    .action(bind(handleAdsDirectPause));
+  const directResume = direct.command("resume").description("Resume a paused direct campaign")
+    .argument("<campaign-id>", "Direct campaign identifier")
+    .requiredOption("--expect-rev <REVISION>", "Current campaign revision (required)", revision)
+    .action(bind(handleAdsDirectResume));
+  const directEnd = direct.command("end").description("End a direct campaign for good")
+    .argument("<campaign-id>", "Direct campaign identifier")
+    .requiredOption("--expect-rev <REVISION>", "Current campaign revision (required)", revision)
+    .action(bind(handleAdsDirectEnd));
+  const directReport = direct.command("report").description("Read a direct campaign's delivery and value, or export its rows as CSV")
+    .argument("<campaign-id>", "Direct campaign identifier")
+    .option("--from <TIME>", "Inclusive start: RFC 3339, now, or an age such as 7d, 12h, 30m (default: the start of the flight)", playsInstantOption("--from"))
+    .option("--to <TIME>", "Exclusive end: RFC 3339, now, or an age (default: the end of the flight)", playsInstantOption("--to"))
+    .addOption(new Option("--format <FORMAT>", "json (default) or csv").choices(["json", "csv"]))
+    .addOption(new Option("--output <FILE>", "CSV file to write (with --format csv; default ./direct-report-CAMPAIGN_ID.csv); - writes the CSV to stdout instead of the envelope"))
+    .action(bind(handleAdsDirectReport));
+  const directAvailability = direct.command("availability").description("Estimate the plays still available for a targeting and flight")
+    .argument("<file>", "Availability query JSON file, or - for stdin")
+    .action(bind(handleAdsDirectAvailability));
+  for (const command of [directCreate, directUpdate]) {
+    addCommandNotes(command, "Writes this project's own direct campaign. The draft JSON needs name, advertiser, flight_start and flight_end (RFC 3339) and media_ids (this project's ready images or videos); it may add category, goal_plays, price {\"model\": \"cpm\" | \"flat\", \"amount\": \"12.50\", \"currency\": \"USD\"}, image_duration_ms, screen_ids, slot_ids, venue_types, cities, tags, dayparts [{\"days\": [\"mon\"], \"start\": \"11:00\", \"end\": \"14:00\"}] and overbook. Targeting lists left empty match every screen and slot. category is one of: alcohol, apparel, automotive, beauty, cannabis, consumer_electronics, education, entertainment, financial_services, food_and_beverage, gambling, government, grocery, health_and_pharma, home_and_garden, insurance, jobs, legal, media, political, quick_service_restaurants, real_estate, restaurants, retail, sports_and_fitness, technology, telecom, tobacco_and_vaping, travel, utilities. Booking a goal_plays larger than the availability estimate is refused with problem goal_overbooked (HTTP 409) unless the draft sets \"overbook\": true; estimate first with ads direct availability.");
+  }
+  addCommandNotes(directUpdate, "The draft replaces every writable field, so send the whole document, not only the fields that change. The write is checked against --expect-rev.");
+  addCommandNotes(directPause, "Writes the campaign's state. A paused campaign takes no ad slots until it is resumed.");
+  addCommandNotes(directResume, "Writes the campaign's state. The campaign takes eligible ad slots again within its flight.");
+  addCommandNotes(directEnd, "Writes the campaign's state. Ending is final: an ended campaign cannot be resumed, and its report stays readable. Create a new direct campaign to run the ad again.");
+  addCommandNotes(directReport, "Reads delivery for one direct campaign: plays, played_ms, plays not played, pace, and value, the recorded price applied to the delivery for the seller to bill the advertiser. --format csv writes the rows as day,screen_id,slot_id,media_id,plays,played_ms. A report that holds only part of the rows carries the warning direct_report_truncated: narrow --from and --to for the rest.");
+  addCommandNotes(directAvailability, "Reads only; nothing is booked. The query JSON takes screen_ids, slot_ids, venue_types, cities, tags, dayparts, flight_start, flight_end and exclude_campaign_id (the campaign being edited, so its own bookings are not counted against it). The answer gives estimated_plays, booked_plays and available_plays for the selected screens.");
 
   const reviews = ads.command("reviews").description("Decide exact submitted creative versions");
   reviews.command("list").description("List creative versions awaiting this seller's decision")
@@ -221,6 +279,11 @@ export function registerAdsCommands(root: Command, bind: CommandActionBinder): v
     .requiredOption("--from <TIMESTAMP>", "Inclusive RFC 3339 start of the reporting period")
     .requiredOption("--to <TIMESTAMP>", "Exclusive RFC 3339 end of the reporting period")
     .action(bind(handleAdsReportsDelivery));
+  const reportFill = reports.command("fill").description("Read how this seller's ad slots were filled")
+    .option("--from <TIME>", "Inclusive start: RFC 3339, now, or an age such as 7d, 12h, 30m (default 7 days before --to)", playsInstantOption("--from"))
+    .option("--to <TIME>", "Exclusive end: RFC 3339, now, or an age (default now); at most 35 days after --from", playsInstantOption("--to"))
+    .action(bind(handleAdsReportsFill));
+  addCommandNotes(reportFill, "Fill statistics count this project's ad-slot occurrences over up to 35 days: how many were filled by direct campaigns, marketplace campaigns and the slot's VAST tag, how many stayed unfilled and why (no_demand, ineligible, separated, capped), the fill_rate, and the same by day.");
   addCommandNotes(reportSpend, "A buyer report shows this project's own debit and campaign evidence, never a seller's other income or project-wide usage. Money is reported as decimal mcr strings.");
   addCommandNotes(reportDelivery, "A seller report shows gross ad income, the serving-fee debit, and net credits for this project's own delivery, with one row per completed occurrence. Normal project costs consume the shared balance.");
 }

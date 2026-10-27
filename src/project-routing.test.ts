@@ -9,10 +9,10 @@ const id = "prj_SELECTED";
 const prefix = `/api/projects/${id}`;
 
 test("object-less writes and local names use project parents, while object IDs remain global", () => {
-  for (const [method, path] of [["POST", "/api/applications"], ["POST", "/api/playlists"], ["POST", "/api/cards"], ["POST", "/api/media/uploads"], ["POST", "/api/media/generations"], ["PUT", "/api/card-data/menu"], ["GET", "/api/feeds/weather"], ["GET", "/api/project"], ["POST", "/api/service-clients"]] as const) {
+  for (const [method, path] of [["POST", "/api/applications"], ["POST", "/api/playlists"], ["POST", "/api/cards"], ["POST", "/api/media/uploads"], ["POST", "/api/media/generations"], ["PUT", "/api/card-data/menu"], ["GET", "/api/feeds/weather"], ["GET", "/api/project"], ["POST", "/api/service-clients"], ["GET", "/api/advertising/direct-campaigns"], ["POST", "/api/advertising/direct-campaigns"], ["POST", "/api/advertising/availability"], ["GET", "/api/advertising/reports/fill"]] as const) {
     assert.equal(projectRequest({ method, path }, id).path, prefix + path.slice(4));
   }
-  for (const path of ["/api/cards/crd_CARD", "/api/cards/crd_CARD/data", "/api/screens/scr_SCREEN", "/api/applications/app_APP/kv/name", "/api/playlists/pl_PLAYLIST", "/api/operations/op_OPERATION", "/api/service-clients/scl_CLIENT/revoke", "/api/projects", "/api/organizations"]) {
+  for (const path of ["/api/cards/crd_CARD", "/api/cards/crd_CARD/data", "/api/screens/scr_SCREEN", "/api/applications/app_APP/kv/name", "/api/playlists/pl_PLAYLIST", "/api/operations/op_OPERATION", "/api/service-clients/scl_CLIENT/revoke", "/api/advertising/direct-campaigns/adc_CAMPAIGN", "/api/advertising/direct-campaigns/adc_CAMPAIGN/report", "/api/projects", "/api/organizations"]) {
     assert.equal(projectRequest({ method: "GET", path }, id).path, path);
   }
 });

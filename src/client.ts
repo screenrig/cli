@@ -16,6 +16,7 @@ import {
   timeoutError,
   unexpectedResponseError,
   usageError,
+  withOverbookingGuidance,
   withPaymentGuidance,
   withQuotaGuidance,
   withRetryAfter,
@@ -300,7 +301,9 @@ export class ApiClient {
       const wrapped = new CliError(
         withPaymentGuidance(
           withQuotaGuidance(
-            withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
+            withOverbookingGuidance(
+              withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
+            ),
           ),
         ),
         undefined,
@@ -398,7 +401,9 @@ export class ApiClient {
       const wrapped = new CliError(
         withPaymentGuidance(
           withQuotaGuidance(
-            withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
+            withOverbookingGuidance(
+              withRetryAfter(problem, parseRetryAfter(response.headers["retry-after"], Date.now())),
+            ),
           ),
         ),
         undefined,

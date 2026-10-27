@@ -59,6 +59,7 @@ test("a lone - is accepted wherever the help documents stdin, and only there", (
     [["media", "generate", "--prompt-file", "-"], "prompt-file"],
     [["comment", "set", "screen", "scr_TEST", "--file", "-"], "file"],
     [["playback", "plays", "--from", "7d", "--format", "csv", "--output", "-"], "output"],
+    [["ads", "direct", "report", "adc_TEST", "--format", "csv", "--output", "-"], "output"],
   ] as const) {
     const parsed = parseArgv([...argv]);
     assert.equal(parsed.flags[name], "-", JSON.stringify(argv));

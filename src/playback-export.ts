@@ -27,7 +27,7 @@ export const PLAYS_SETTLE_MS = 5_000;
 const RELATIVE = /^(\d{1,4})([dhm])$/;
 const UNIT_MS = { d: 86_400_000, h: 3_600_000, m: 60_000 } as const;
 
-function isoUtc(ms: number): string {
+export function isoUtc(ms: number): string {
   return new Date(ms).toISOString().replace(/\.000Z$/, "Z");
 }
 
@@ -99,6 +99,25 @@ export function csvCells(record: string): string[] {
   }
   cells.push(cell);
   return cells;
+}
+
+/** One CSV record with its CRLF line ending, quoting a cell that holds a comma, quote or line break. */
+export function csvRecord(cells: readonly (string | number | boolean | null | undefined)[]): string {
+  const text = (cell: string | number | boolean | null | undefined): string => {
+    const value = cell === null || cell === undefined ? "" : String(cell);
+    return /[",\r\n]/.test(value) ? `"${value.replaceAll("\"", "\"\"")}"` : value;
+  };
+  return `${cells.map(text).join(",")}\r\n`;
+}
+
+/** A CSV already in memory as a byte stream, so it goes through the same writers as a streamed export. */
+export function csvByteStream(csv: string): TransportByteStream {
+  const bytes = new TextEncoder().encode(csv);
+  return {
+    async *[Symbol.asyncIterator]() {
+      if (bytes.byteLength > 0) yield bytes;
+    },
+  };
 }
 
 /**
