@@ -3321,7 +3321,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Removes the screen's playlist schedule; the takeover, else the assigned playlist, becomes effective, with the same manifest signalling as PUT. A screen without a schedule answers 200 unchanged (no revision bump, no event).
+      description: Removes the screen's playlist schedule; the takeover, else a campaign that holds, else the assigned playlist, becomes effective, with the same manifest signalling as PUT. A screen without a schedule answers 200 unchanged (no revision bump, no event).
       security:
         - projectBearer: []
       parameters:
@@ -3386,7 +3386,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Takes over the screen with one playlist ahead of its playlist schedule and assigned playlist, until until (RFC 3339, strictly in the future and at most 7 days ahead) or, when until is null or omitted, until the takeover is cleared. reason is optional, at most 120 characters. The screen must have an assigned default playlist_id (invalid_request otherwise). A takeover replaces an earlier one (screen.takeover_ended with reason replaced, or expired when the earlier one had already ended). The playlist is validated as an assignment, including its format (a playlist with a format needs a screen whose wall has the same shape, else 409 playlist_format_mismatch). A takeover whose playlist later cannot be shown ends (screen.takeover_ended with reason playlist_deleted or playlist_unavailable). Appends screen.takeover_started and, when the effective playlist changes, screen.playlist_switched plus the Player's screen.manifest_changed. When until passes, the boundary worker ends the takeover within 60 seconds (screen.takeover_ended with reason expired). The screen revision is bumped (If-Match guards it). An archived screen answers screen_archived; unarchive re-resolves first, so a takeover that ended while archived ends then. The same screen-control rate limits as the schedule routes apply.
+      description: Takes over the screen with one playlist ahead of campaigns, its playlist schedule and assigned playlist, until until (RFC 3339, strictly in the future and at most 7 days ahead) or, when until is null or omitted, until the takeover is cleared. reason is optional, at most 120 characters. The screen must have an assigned default playlist_id (invalid_request otherwise). A takeover replaces an earlier one (screen.takeover_ended with reason replaced, or expired when the earlier one had already ended). The playlist is validated as an assignment, including its format (a playlist with a format needs a screen whose wall has the same shape, else 409 playlist_format_mismatch). A takeover whose playlist later cannot be shown ends (screen.takeover_ended with reason playlist_deleted or playlist_unavailable). Appends screen.takeover_started and, when the effective playlist changes, screen.playlist_switched plus the Player's screen.manifest_changed. When until passes, the boundary worker ends the takeover within 60 seconds (screen.takeover_ended with reason expired). The screen revision is bumped (If-Match guards it). An archived screen answers screen_archived; unarchive re-resolves first, so a takeover that ended while archived ends then. The same screen-control rate limits as the schedule routes apply.
       security:
         - projectBearer: []
       parameters:
@@ -3519,7 +3519,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Asks the screen''s Player to start one page of the playlist it is playing now, so a screenshot taken next shows that page without waiting out the rotation (docs/player-compatibility.md §6.3.1). The page must be a page of the screen''s effective playlist, the one its manifest is built from: an active takeover, else the current playlist schedule entry, else the assigned playlist. Otherwise 409 page_not_on_screen, whose detail names that playlist. The screen''s host hint must declare the play_page capability, else 409 play_page_unsupported and nothing is sent; update the Player. The screen must be active; an archived screen answers screen_archived and a pairing_pending one resource_conflict. Appends the per-screen runtime command player.play_page (details page_id, playlist_id, manifest_revision, expires_at sixty seconds later; never delivered after expires_at). The Player starts the page from its beginning as if the rotation had reached it and continues the rotation from there. The screen revision does not change. The Idempotency-Key is required, as for toast; an exact retry returns the original body for twenty-four hours. A refused request, a failed one, and an exact replay spend no rate-limit budget. Screen messages are exempt from the 1-credit API meter.'
+      description: 'Asks the screen''s Player to start one page of the playlist it is playing now, so a screenshot taken next shows that page without waiting out the rotation (docs/player-compatibility.md §6.3.1). The page must be a page of the screen''s effective playlist, the one its manifest is built from: an active takeover, else a campaign that holds, else the current playlist schedule entry, else the assigned playlist. Otherwise 409 page_not_on_screen, whose detail names that playlist. The screen''s host hint must declare the play_page capability, else 409 play_page_unsupported and nothing is sent; update the Player. The screen must be active; an archived screen answers screen_archived and a pairing_pending one resource_conflict. Appends the per-screen runtime command player.play_page (details page_id, playlist_id, manifest_revision, expires_at sixty seconds later; never delivered after expires_at). The Player starts the page from its beginning as if the rotation had reached it and continues the rotation from there. The screen revision does not change. The Idempotency-Key is required, as for toast; an exact retry returns the original body for twenty-four hours. A refused request, a failed one, and an exact replay spend no rate-limit budget. Screen messages are exempt from the 1-credit API meter.'
       security:
         - projectBearer: []
       parameters:
@@ -6364,6 +6364,43 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/playback/completeness:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: getPlaybackCompleteness
+      description: 'How many of the plays the screens made reached the backend, and where the missing ones were. Players number their media starts, so a start that never arrived leaves a hole in the numbering, for example when a screen stays offline past its 24 hour report queue or the queue drops reports. Over the inclusive UTC days day_from to day_to (day_to defaults to today, UTC, and day_from to 29 days before it; the window spans at most 92 days) the answer holds measured_plays, the numbered plays that arrived; missing_plays, the numbers the Players skipped; completeness, measured_plays over their sum, null when both are 0; days, the same three figures for each day that has any, oldest first, a hole counted on the UTC day of the play after it; and gaps, the holes newest first, each with its screen_id, its day, from and to (the start times of the plays on either side of it) and missing_plays. screen_id narrows days and gaps to one screen; limit (default 100, at most 500) caps gaps, and truncated is true when more exist. A switched-off screen makes no plays and leaves no gap. Plays without a number (older Players, starts stored before play numbers) are not measured: they are in play_count of GET /api/playback/totals and in none of these figures. Not rate limited. One metered API request.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/PlaybackCompletenessDayFrom'
+        - $ref: '#/components/parameters/PlaybackCompletenessDayTo'
+        - $ref: '#/components/parameters/PlaybackScreenID'
+        - $ref: '#/components/parameters/PlaybackCompletenessLimit'
+      responses:
+        '200':
+          description: The completeness of the window and its gaps.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybackCompleteness'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/screens/{id}/health/history:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -8633,7 +8670,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createFleetLink
-      description: 'Creates a fleet link: one Player URL (https://play.<domain>/player/#fleet=<secret>) that turns every device opening it into its own screen in this project, without a pairing code. Put it in a device manager, such as a Google Admin console kiosk app. Each new screen gets the link''s tags and playlist, and a label from the device (its administrator asset ID, then location), else the next default label. A Player that already holds a screen never makes another: its key stays the screen''s identity across reloads and relaunches. After a powerwash or reinstall, a device that reports the serial or DUID of a screen a fleet link of this project created recovers that screen (screen.recovered) instead of creating a new one, once the old key has been silent for ten minutes. The secret travels in the URL fragment, which browsers never send to a server. max_screens caps the screens the link creates; the project''s screen limit applies as for any screen. A project has at most 50 fleet links (fleet_link_limit_reached). Appends fleet_link.created. An exact retry with the same Idempotency-Key returns this same answer for twenty-four hours.'
+      description: 'Creates a fleet link: one Player URL (https://play.<domain>/player/#fleet=<secret>) that turns every device opening it into its own screen in this project, without a pairing code. Put it in a device manager, such as a Google Admin console kiosk app. Each new screen gets the link''s tags and playlist, and a label from the device (its administrator asset ID, then location), else the next default label. A Player that already holds a screen never makes another: its key stays the screen''s identity across reloads and relaunches. After a powerwash or reinstall, a device that reports the serial or DUID of a screen a fleet link of this project created recovers that screen (screen.recovered) instead of creating a new one, once the old key has been silent for ten minutes. The secret travels in the URL fragment, which browsers never send to a server. max_screens caps the screens the link creates and expires_at ends the link at that time, as disabling it does; the project''s screen limit applies as for any screen. A project has at most 50 fleet links (fleet_link_limit_reached). Appends fleet_link.created. An exact retry with the same Idempotency-Key returns this same answer for twenty-four hours.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -8704,7 +8741,7 @@ paths:
     patch:
       x-screenrig-access: write
       operationId: updateFleetLink
-      description: Changes any of label, enabled, tags, playlist_id and max_screens; null clears playlist_id or max_screens. A disabled link creates and recovers no screens; a device opening it shows its pairing code instead. Changes apply to screens the link creates from now on, never to screens it already created. Appends fleet_link.updated. If-Match guards the revision.
+      description: Changes any of label, enabled, tags, playlist_id, max_screens and expires_at; null clears playlist_id, max_screens or expires_at. A disabled or expired link creates and recovers no screens; a device opening it shows its pairing code instead. Changes apply to screens the link creates from now on, never to screens it already created. Appends fleet_link.updated. If-Match guards the revision.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -8807,7 +8844,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listWebhooks
-      description: Lists the project's webhooks, oldest first (at most 10). The signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs.
+      description: Lists the project's webhook notifications in the webhook shape, oldest first (at most 20); GET /api/notifications lists every channel. The signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -8823,7 +8860,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createWebhook
-      description: 'Creates a webhook that receives the project''s own durable events as signed HTTPS POSTs. url must be https on a public Internet host: an IP literal or every current DNS answer of the name must be public (private, loopback, link-local, CGNAT, IPv6 outside 2000::/3, documentation, and other reserved ranges are refused with webhook_url_rejected). The port must be 443 (the default) or 8443, else webhook_url_rejected. The host is resolved and checked again before every delivery and the connection is dialed to exactly the checked address, so a DNS answer that changes later cannot redirect deliveries. event_types lists exact event types (screen.online) or prefixes ending in .* (screen.*). A project has at most 10 webhooks (webhook_limit_reached). The server generates the signing secret and returns it only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Delivery starts with the first event after webhook.created.'
+      description: 'Creates a webhook that receives the project''s own durable events as signed HTTPS POSTs. url must be https on a public Internet host: an IP literal or every current DNS answer of the name must be public (private, loopback, link-local, CGNAT, IPv6 outside 2000::/3, documentation, and other reserved ranges are refused with webhook_url_rejected). The port must be 443 (the default) or 8443, else webhook_url_rejected. The host is resolved and checked again before every delivery and the connection is dialed to exactly the checked address, so a DNS answer that changes later cannot redirect deliveries. event_types lists exact event types (screen.online) or prefixes ending in .* (screen.*). A project has at most 20 notifications, email and webhook (webhook_limit_reached). The server generates the signing secret and returns it only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Delivery starts with the first event after notification.created.'
       security:
         - projectBearer: []
       parameters:
@@ -8891,7 +8928,7 @@ paths:
     patch:
       x-screenrig-access: write
       operationId: updateWebhook
-      description: Changes any of url, event_types, enabled, and description (an empty description clears it). A new url is checked like create. Setting enabled true on a disabled webhook clears its failure state and starts delivery at the event that records the change; events from while it was disabled are not replayed, and deliveries still pending from before the disable are failed with webhook_disabled. Setting enabled false fails its pending deliveries with webhook_disabled. Appends webhook.updated. If-Match guards the revision.
+      description: Changes any of url, event_types, enabled, and description (an empty description clears it). A new url is checked like create. Setting enabled true on a disabled webhook clears its failure state and starts delivery at the event that records the change; events from while it was disabled are not replayed, and deliveries still pending from before the disable are failed with webhook_disabled. Setting enabled false fails its pending deliveries with webhook_disabled. Appends notification.updated. If-Match guards the revision.
       security:
         - projectBearer: []
       parameters:
@@ -8931,7 +8968,7 @@ paths:
     delete:
       x-screenrig-access: write
       operationId: deleteWebhook
-      description: Deletes the webhook and appends webhook.deleted. Its pending deliveries are failed with webhook_deleted; its delivery log is no longer addressable and expires with event retention.
+      description: Deletes the webhook and appends notification.deleted. Its pending deliveries are failed with webhook_deleted; its delivery log is no longer addressable and expires with event retention.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -8965,7 +9002,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: rotateWebhookSecret
-      description: 'Replaces the signing secret and returns the new one; the old secret stops signing at once: every attempt that signs after this commits uses the new secret, and at most one attempt per webhook already in flight may still arrive signed with the old one, so accept both briefly. Appends webhook.updated with details.changed [secret]. An exact retry with the same Idempotency-Key returns the same new secret for twenty-four hours.'
+      description: 'Replaces the signing secret and returns the new one; the old secret stops signing at once: every attempt that signs after this commits uses the new secret, and at most one attempt per webhook already in flight may still arrive signed with the old one, so accept both briefly. Appends notification.updated with details.changed [secret]. An exact retry with the same Idempotency-Key returns the same new secret for twenty-four hours.'
       security:
         - projectBearer: []
       parameters:
@@ -9006,7 +9043,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Appends a webhook.test project event and queues one delivery of it to this webhook only (no other webhook receives webhook.test). It works on a disabled webhook, is attempted once without retries, is metered like any delivery, and never changes the webhook's failure state. Poll the deliveries log for its outcome.
+      description: Appends a notification.test project event and queues one delivery of it to this webhook only (no other webhook receives notification.test). It works on a disabled webhook, is attempted once without retries, is metered like any delivery, and never changes the webhook's failure state. Poll the deliveries log for its outcome.
       security:
         - projectBearer: []
       parameters:
@@ -9072,6 +9109,300 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WebhookDeliveryAttemptList'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/notifications:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listNotifications
+      description: Lists the project's notifications, email and webhook, oldest first (at most 20). A webhook's signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs and recipients.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The project's notifications.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createNotification
+      description: 'Creates a notification. channel email sends to recipients (owner, or user_ids of the project''s members); channel webhook POSTs, signed, to url, which follows the webhook URL rules (https on a public Internet host, port 443 or 8443, else webhook_url_rejected). conditions lists the screen state changes it fires on; an email notification needs at least one, a webhook needs conditions or event_types. screen_tags limits conditions to screens carrying any of those tags; empty means every screen. A condition notifies only after it has lasted hold_minutes (default 10), and a resolved notice follows when it clears after a notice went out. A project has at most 20 notifications (notification_limit_reached). A webhook''s signing secret is generated by the server and returned only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Notices start with the first event after notification.created.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationWrite'
+      responses:
+        '201':
+          description: Created. A webhook's secret is shown only here and on rotate-secret.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '400':
+          description: invalid_request or webhook_url_rejected.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: notification_limit_reached or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/notifications/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getNotification
+      description: Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes the receiver URL or recipients.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: One notification.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      x-screenrig-access: write
+      operationId: updateNotification
+      description: Changes any of description (empty clears it), conditions, screen_tags, hold_minutes, recipients (email), url and event_types (webhook), enabled and snoozed_until; channel never changes. A field of the other channel is invalid_request. A new url is checked like create. Setting enabled true on a disabled notification clears its failure state and starts at the event that records the change; nothing from while it was off is sent, and notices still pending from before the disable are failed with webhook_disabled. snoozed_until sends nothing until that instant (at most 30 days ahead; null ends the snooze); notices that fall due meanwhile are skipped (snoozed). Appends notification.updated. If-Match guards the revision.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationPatch'
+      responses:
+        '200':
+          description: Updated notification.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '400':
+          description: invalid_request or webhook_url_rejected.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteNotification
+      description: Deletes the notification and appends notification.deleted. Its pending notices are failed with webhook_deleted; its delivery log is no longer addressable and expires with event retention.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/notifications/{id}/rotate-secret:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: rotateNotificationSecret
+      description: 'Webhook notifications only (an email notification is invalid_request). Replaces the signing secret and returns the notification with the new one in secret; the old secret stops signing at once, and at most one attempt already in flight may still arrive signed with the old one, so accept both briefly. Appends notification.updated with details.changed [secret]. An exact retry with the same Idempotency-Key returns the same new secret for twenty-four hours.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The notification and its new secret.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '400':
+          description: invalid_request — the notification sends email.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/notifications/{id}/test:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: testNotification
+      x-rate-limit-policies:
+        - name: notification-test-project
+          quota: 20
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: Appends a notification.test project event and queues one delivery of it to this notification only (no other notification receives notification.test). A webhook receives the event as its body; an email notification sends a test email to its recipients. It works on a disabled or snoozed notification, is attempted once without retries, and never changes the notification's failure state. Poll the deliveries log for its outcome.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '202':
+          description: The queued test delivery.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationDelivery'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/notifications/{id}/deliveries:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: listNotificationDeliveries
+      description: The notification's delivery log, newest event first. One row per event, and per condition of that event for a screen notice; retries update the row and GET .../deliveries/{delivery_id}/attempts lists its most recent attempts. A notice that never needed sending is skipped with its reason. Rows are retained like events (the plan's event retention, at least the 24-hour retry window). Pass next_cursor back as before for the next page.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/NotificationDeliveriesBefore'
+        - $ref: '#/components/parameters/WebhookDeliveriesLimit'
+      responses:
+        '200':
+          description: One page of deliveries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationDeliveryList'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/notifications/{id}/deliveries/{delivery_id}/attempts:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/WebhookDeliveryID'
+    get:
+      x-screenrig-access: read
+      operationId: listNotificationDeliveryAttempts
+      description: One delivery's attempts, newest first, the most recent 20, kept with the delivery row and for as long. Each has its attempt number, when it finished, the receiver's HTTP status (null when none answered or for email), the error class (null on success) and its duration. A delivery that is not this notification's, or a notification of another project, is not_found.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The delivery's kept attempts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationDeliveryAttemptList'
         '404':
           $ref: '#/components/responses/Problem'
         default:
@@ -15239,6 +15570,43 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/playback/completeness:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: getPlaybackCompletenessInProject
+      description: 'How many of the plays the screens made reached the backend, and where the missing ones were. Players number their media starts, so a start that never arrived leaves a hole in the numbering, for example when a screen stays offline past its 24 hour report queue or the queue drops reports. Over the inclusive UTC days day_from to day_to (day_to defaults to today, UTC, and day_from to 29 days before it; the window spans at most 92 days) the answer holds measured_plays, the numbered plays that arrived; missing_plays, the numbers the Players skipped; completeness, measured_plays over their sum, null when both are 0; days, the same three figures for each day that has any, oldest first, a hole counted on the UTC day of the play after it; and gaps, the holes newest first, each with its screen_id, its day, from and to (the start times of the plays on either side of it) and missing_plays. screen_id narrows days and gaps to one screen; limit (default 100, at most 500) caps gaps, and truncated is true when more exist. A switched-off screen makes no plays and leaves no gap. Plays without a number (older Players, starts stored before play numbers) are not measured: they are in play_count of GET /api/playback/totals and in none of these figures. Not rate limited. One metered API request.'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/PlaybackCompletenessDayFrom'
+        - $ref: '#/components/parameters/PlaybackCompletenessDayTo'
+        - $ref: '#/components/parameters/PlaybackScreenID'
+        - $ref: '#/components/parameters/PlaybackCompletenessLimit'
+      responses:
+        '200':
+          description: The completeness of the window and its gaps.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybackCompleteness'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/health/trend:
     parameters:
       - name: project_id
@@ -15820,7 +16188,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createFleetLinkInProject
-      description: 'Creates a fleet link: one Player URL (https://play.<domain>/player/#fleet=<secret>) that turns every device opening it into its own screen in this project, without a pairing code. Put it in a device manager, such as a Google Admin console kiosk app. Each new screen gets the link''s tags and playlist, and a label from the device (its administrator asset ID, then location), else the next default label. A Player that already holds a screen never makes another: its key stays the screen''s identity across reloads and relaunches. After a powerwash or reinstall, a device that reports the serial or DUID of a screen a fleet link of this project created recovers that screen (screen.recovered) instead of creating a new one, once the old key has been silent for ten minutes. The secret travels in the URL fragment, which browsers never send to a server. max_screens caps the screens the link creates; the project''s screen limit applies as for any screen. A project has at most 50 fleet links (fleet_link_limit_reached). Appends fleet_link.created. An exact retry with the same Idempotency-Key returns this same answer for twenty-four hours.'
+      description: 'Creates a fleet link: one Player URL (https://play.<domain>/player/#fleet=<secret>) that turns every device opening it into its own screen in this project, without a pairing code. Put it in a device manager, such as a Google Admin console kiosk app. Each new screen gets the link''s tags and playlist, and a label from the device (its administrator asset ID, then location), else the next default label. A Player that already holds a screen never makes another: its key stays the screen''s identity across reloads and relaunches. After a powerwash or reinstall, a device that reports the serial or DUID of a screen a fleet link of this project created recovers that screen (screen.recovered) instead of creating a new one, once the old key has been silent for ten minutes. The secret travels in the URL fragment, which browsers never send to a server. max_screens caps the screens the link creates and expires_at ends the link at that time, as disabling it does; the project''s screen limit applies as for any screen. A project has at most 50 fleet links (fleet_link_limit_reached). Appends fleet_link.created. An exact retry with the same Idempotency-Key returns this same answer for twenty-four hours.'
       security:
         - projectBearer: []
       parameters:
@@ -15868,7 +16236,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listWebhooksInProject
-      description: Lists the project's webhooks, oldest first (at most 10). The signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs.
+      description: Lists the project's webhook notifications in the webhook shape, oldest first (at most 20); GET /api/notifications lists every channel. The signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs.
       security:
         - projectBearer: []
       responses:
@@ -15884,7 +16252,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createWebhookInProject
-      description: 'Creates a webhook that receives the project''s own durable events as signed HTTPS POSTs. url must be https on a public Internet host: an IP literal or every current DNS answer of the name must be public (private, loopback, link-local, CGNAT, IPv6 outside 2000::/3, documentation, and other reserved ranges are refused with webhook_url_rejected). The port must be 443 (the default) or 8443, else webhook_url_rejected. The host is resolved and checked again before every delivery and the connection is dialed to exactly the checked address, so a DNS answer that changes later cannot redirect deliveries. event_types lists exact event types (screen.online) or prefixes ending in .* (screen.*). A project has at most 10 webhooks (webhook_limit_reached). The server generates the signing secret and returns it only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Delivery starts with the first event after webhook.created.'
+      description: 'Creates a webhook that receives the project''s own durable events as signed HTTPS POSTs. url must be https on a public Internet host: an IP literal or every current DNS answer of the name must be public (private, loopback, link-local, CGNAT, IPv6 outside 2000::/3, documentation, and other reserved ranges are refused with webhook_url_rejected). The port must be 443 (the default) or 8443, else webhook_url_rejected. The host is resolved and checked again before every delivery and the connection is dialed to exactly the checked address, so a DNS answer that changes later cannot redirect deliveries. event_types lists exact event types (screen.online) or prefixes ending in .* (screen.*). A project has at most 20 notifications, email and webhook (webhook_limit_reached). The server generates the signing secret and returns it only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Delivery starts with the first event after notification.created.'
       security:
         - projectBearer: []
       parameters:
@@ -15916,6 +16284,69 @@ paths:
                 $ref: '#/components/schemas/Problem'
         '409':
           description: webhook_limit_reached or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/notifications:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listNotificationsInProject
+      description: Lists the project's notifications, email and webhook, oldest first (at most 20). A webhook's signing secret is never returned here. Requires the project capability; a reports-only credential is refused 403 forbidden, because the response includes receiver URLs and recipients.
+      security:
+        - projectBearer: []
+      responses:
+        '200':
+          description: The project's notifications.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createNotificationInProject
+      description: 'Creates a notification. channel email sends to recipients (owner, or user_ids of the project''s members); channel webhook POSTs, signed, to url, which follows the webhook URL rules (https on a public Internet host, port 443 or 8443, else webhook_url_rejected). conditions lists the screen state changes it fires on; an email notification needs at least one, a webhook needs conditions or event_types. screen_tags limits conditions to screens carrying any of those tags; empty means every screen. A condition notifies only after it has lasted hold_minutes (default 10), and a resolved notice follows when it clears after a notice went out. A project has at most 20 notifications (notification_limit_reached). A webhook''s signing secret is generated by the server and returned only in this answer and in rotate-secret; store it. An exact retry with the same Idempotency-Key returns this same answer, secret included, for twenty-four hours. Notices start with the first event after notification.created.'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationWrite'
+      responses:
+        '201':
+          description: Created. A webhook's secret is shown only here and on rotate-secret.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '400':
+          description: invalid_request or webhook_url_rejected.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: notification_limit_reached or idempotency_mismatch.
           content:
             application/problem+json:
               schema:
@@ -16425,6 +16856,7 @@ components:
     OptionalIdempotencyKey: {name: Idempotency-Key, in: header, required: false, schema: {type: string, minLength: 8, maxLength: 200}, description: "Omit for a fresh operation. Supply and reuse a key to deduplicate retries; the CLI manages keys automatically."}
     WebhookDeliveriesBefore: {name: before, in: query, required: false, schema: {type: string, pattern: "^whc1_[0-9a-z]{1,16}$"}, description: next_cursor of the previous deliveries page.}
     WebhookDeliveriesLimit: {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+    NotificationDeliveriesBefore: {name: before, in: query, required: false, schema: {type: string, pattern: "^whc[12]_[0-9a-z]{1,16}(_[a-z][a-z_]{0,39})?$"}, description: next_cursor of the previous deliveries page. A page that ends among the notices of one event names the last one's condition in its cursor.}
     ArchiveSHA256: {name: ScreenRig-Archive-SHA256, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{64}$"}}
     ExpandedBytes: {name: ScreenRig-Expanded-Bytes, in: header, required: true, schema: {type: integer, minimum: 1, maximum: 262144000}}
     FileCount: {name: ScreenRig-File-Count, in: header, required: true, schema: {type: integer, minimum: 1, maximum: 5000}}
@@ -16490,6 +16922,9 @@ components:
     PlaybackTotalsDayFrom: {name: day_from, in: query, required: false, schema: {type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "First UTC day, inclusive. Defaults to 29 days before day_to. A day series spans at most 366 days (92 when narrowed to a screen or media), a ranking at most 92."}
     PlaybackTotalsDayTo: {name: day_to, in: query, required: false, schema: {type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Last UTC day, inclusive. Defaults to today (UTC)."}
     PlaybackTotalsTop: {name: top, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 10}, description: "How many screens or media a ranking returns (at most 10 for by=screen_day). Refused with by=day."}
+    PlaybackCompletenessDayFrom: {name: day_from, in: query, required: false, schema: {type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "First UTC day, inclusive. Defaults to 29 days before day_to. With day_to spans at most 92 days."}
+    PlaybackCompletenessDayTo: {name: day_to, in: query, required: false, schema: {type: string, format: date, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, description: "Last UTC day, inclusive. Defaults to today (UTC)."}
+    PlaybackCompletenessLimit: {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 500, default: 100}, description: "The most gaps to list, newest first."}
     LastEventID: {name: Last-Event-ID, in: header, required: false, schema: {type: string}, description: Durable cursor used when after is absent.}
     Range: {name: Range, in: header, required: false, schema: {type: string, pattern: "^bytes=[0-9]*-[0-9]*$"}, description: V1 accepts one byte range only.}
     ScreenshotCaptureID: {name: capture_id, in: query, required: false, schema: {$ref: "#/components/schemas/ScreenshotCaptureID"}}
@@ -20588,7 +21023,7 @@ components:
       type: object
       additionalProperties: false
       required: [playlist_id, until, set_at]
-      description: The playlist that wins over the schedule and the assignment until until, or until cleared when until is null.
+      description: The playlist that wins over campaigns, the schedule and the assignment until until, or until cleared when until is null.
       properties:
         playlist_id: {type: string}
         until: {anyOf: [{type: string, format: date-time}, {type: "null"}]}
@@ -20625,7 +21060,7 @@ components:
         id: {type: string}
         public_id: {type: string}
         label: {type: string}
-        playlist_id: {type: string, description: "Assigned default playlist, required before a playlist schedule or takeover can be set. A takeover or a matching playlist schedule entry takes precedence; effective_playlist names what is shown."}
+        playlist_id: {type: string, description: "Assigned default playlist, required before a playlist schedule or takeover can be set. A takeover, a campaign that holds or a matching playlist schedule entry takes precedence; effective_playlist names what is shown."}
         playlist_schedule: {$ref: "#/components/schemas/ScreenPlaylistSchedule"}
         takeover: {$ref: "#/components/schemas/ScreenTakeover"}
         effective_playlist: {$ref: "#/components/schemas/ScreenEffectivePlaylist"}
@@ -20729,8 +21164,8 @@ components:
         model: {type: string, minLength: 1, maxLength: 80}
         firmware: {type: string, minLength: 1, maxLength: 80}
         manufacturer: {type: string, minLength: 1, maxLength: 80}
-        asset_id: {type: string, minLength: 1, maxLength: 120, description: "The asset ID the device's administrator gave it in its management console (ChromeOS annotated asset ID). Trimmed text of at most 120 UTF-8 bytes without control characters. Descriptive; never matched."}
-        location: {type: string, minLength: 1, maxLength: 120, description: "The location the device's administrator gave it in its management console (ChromeOS annotated location). Same limits as asset_id. Descriptive; never matched."}
+        asset_id: {type: string, minLength: 1, maxLength: 120, description: "The asset ID the device's administrator set in its device manager: a ChromeOS annotated asset ID, or Android or Apple managed configuration. Trimmed text of at most 120 UTF-8 bytes without control characters. Descriptive; never matched."}
+        location: {type: string, minLength: 1, maxLength: 120, description: "The location the device's administrator set in its device manager: a ChromeOS annotated location, or Android or Apple managed configuration. Same limits as asset_id. Descriptive; never matched."}
     RuntimeHostHint:
       type: object
       additionalProperties: true
@@ -20753,8 +21188,8 @@ components:
         model: {type: string, minLength: 1, maxLength: 80}
         firmware: {type: string, minLength: 1, maxLength: 80}
         manufacturer: {type: string, minLength: 1, maxLength: 80}
-        asset_id: {type: string, minLength: 1, maxLength: 120, description: "Administrator's asset ID for the device (ChromeOS annotated asset ID): trimmed, at most 120 UTF-8 bytes, no control characters."}
-        location: {type: string, minLength: 1, maxLength: 120, description: "Administrator's location for the device (ChromeOS annotated location): same limits as asset_id."}
+        asset_id: {type: string, minLength: 1, maxLength: 120, description: "The asset ID the device's administrator set in its device manager: a ChromeOS annotated asset ID, or Android or Apple managed configuration. Trimmed, at most 120 UTF-8 bytes, no control characters."}
+        location: {type: string, minLength: 1, maxLength: 120, description: "The location the device's administrator set in its device manager: a ChromeOS annotated location, or Android or Apple managed configuration. Same limits as asset_id."}
     ScreenActionRequest:
       type: object
       additionalProperties: false
@@ -21627,7 +22062,7 @@ components:
       uniqueItems: true
       items: {type: string, maxLength: 200, pattern: "^[a-z][a-z0-9_]{0,63}(\\.[a-z][a-z0-9_]{0,63})*(\\.\\*|\\.[a-z][a-z0-9_]{0,63})$"}
       description: >-
-        Exact event types such as screen.online, or prefixes ending in .* such as screen.* (every type starting with screen.). webhook.test is never fanned out by a subscription; it is sent only by POST /api/webhooks/{id}/test.
+        Exact event types such as screen.online, or prefixes ending in .* such as screen.* (every type starting with screen.). notification.test is never fanned out by a subscription; it is sent only by POST /api/webhooks/{id}/test.
     WebhookWrite:
       type: object
       additionalProperties: false
@@ -21651,7 +22086,7 @@ components:
       additionalProperties: false
       required: [id, url, event_types, enabled, revision, status, created_at, updated_at]
       description: >-
-        A project webhook. Player log records (runtime.reported) are not delivered. Each matching project event is POSTed to url as the same JSON object GET /api/events returns, with headers ScreenRig-Webhook-Id, ScreenRig-Event-Id (the event cursor, stable across retries), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; any other status, a redirect (never followed), a timeout, or a connection or TLS failure is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed. After three consecutive timeouts the attempt timeout drops to 5 seconds until a response arrives. A webhook has at most one attempt in flight and a project at most two, across all servers. Delivery is at least once and unordered; deduplicate on ScreenRig-Event-Id. Each attempt is metered like a listen-stream event (1 credit after the monthly 10,000 API/SSE allowance), and the same events that are free on the listen stream are free here: screen.*, runtime.*, application.event, playback.page_failed, and agent.command. An attempt refused before anything is sent (url_rejected, dns_failed) is not billed. payment_required and secret_unavailable back off but never count toward failing or auto-disable. status is failing while no delivery has succeeded since failing_since; after 72 hours of continuous failure the webhook is disabled (disabled_reason delivery_failures) and webhook.disabled is appended.
+        A project webhook. Player log records (runtime.reported) are not delivered. Each matching project event is POSTed to url as the same JSON object GET /api/events returns, with headers ScreenRig-Webhook-Id, ScreenRig-Event-Id (the event cursor, stable across retries), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; any other status, a redirect (never followed), a timeout, or a connection or TLS failure is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed. After three consecutive timeouts the attempt timeout drops to 5 seconds until a response arrives. A webhook has at most one attempt in flight and a project at most two, across all servers. Delivery is at least once and unordered; deduplicate on ScreenRig-Event-Id. Each attempt is metered like a listen-stream event (1 credit after the monthly 10,000 API/SSE allowance), and the same events that are free on the listen stream are free here: screen.*, runtime.*, application.event, playback.page_failed, and agent.command. An attempt refused before anything is sent (url_rejected, dns_failed) is not billed. payment_required and secret_unavailable back off but never count toward failing or auto-disable. status is failing while no delivery has succeeded since failing_since; after 72 hours of continuous failure the webhook is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
       properties:
         project_id: {type: string}
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?whk_[A-Za-z0-9_-]{16,24}$"}
@@ -21705,6 +22140,7 @@ components:
         tags: {$ref: "#/components/schemas/ScreenTags"}
         playlist_id: {type: string, description: Playlist assigned to each screen the link creates.}
         max_screens: {type: integer, minimum: 1, maximum: 10000, description: Most screens this link creates. Absent means only the project's screen limit applies.}
+        expires_at: {type: string, format: date-time, description: "When the link expires (RFC 3339). From then on it creates and recovers no screens, like a disabled link, and a device opening it shows its pairing code. Absent means it never expires."}
         screens_created: {type: integer, minimum: 0, description: Screens this link has created; recoveries are not counted.}
         last_used_at: {type: string, format: date-time, description: Last time the link created or recovered a screen.}
         revision: {type: integer, minimum: 1}
@@ -21721,6 +22157,7 @@ components:
         tags: {$ref: "#/components/schemas/ScreenTags"}
         playlist_id: {type: string}
         max_screens: {type: integer, minimum: 1, maximum: 10000}
+        expires_at: {type: string, format: date-time, description: "When the link expires (RFC 3339); a link past it creates and recovers no screens. Absent means it never expires. A time already past is accepted and expires the link at once."}
     FleetLinkPatch:
       type: object
       additionalProperties: false
@@ -21731,14 +22168,15 @@ components:
         tags: {$ref: "#/components/schemas/ScreenTags"}
         playlist_id: {type: string, nullable: true, description: null clears the playlist.}
         max_screens: {type: integer, nullable: true, minimum: 1, maximum: 10000, description: null removes the cap.}
+        expires_at: {type: string, format: date-time, nullable: true, description: null removes the expiry.}
     NativePairingFleetLink:
       type: object
       additionalProperties: true
       required: [status]
       description: What the presented fleet link did for this pairing session. claimed and recovered mean the screen is already chosen, and the Player completes pairing without showing its code. Any other status leaves the code on the glass for an ordinary claim.
       properties:
-        status: {type: string, enum: [claimed, recovered, invalid, disabled, limit_reached, screen_limit_reached], description: "claimed: a new screen was created for this device. recovered: the device's earlier screen was recovered onto its new key. invalid: no link has this secret (deleted or rotated). disabled: the link is turned off. limit_reached: the link created its max_screens. screen_limit_reached: the project is at its screen limit. Readers treat an unknown status like invalid."}
-    WebhookList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/Webhook"}}}}
+        status: {type: string, enum: [claimed, recovered, invalid, disabled, limit_reached, screen_limit_reached, expired], description: "claimed: a new screen was created for this device. recovered: the device's earlier screen was recovered onto its new key. invalid: no link has this secret (deleted or rotated). disabled: the link is turned off. limit_reached: the link created its max_screens. screen_limit_reached: the project is at its screen limit. expired: the link is past its expires_at. Readers treat an unknown status like invalid."}
+    WebhookList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/Webhook"}}}}
     WebhookDelivery:
       type: object
       additionalProperties: false
@@ -21779,6 +22217,138 @@ components:
           description: Why the attempt failed, as WebhookDelivery.last_error; null when it succeeded.
         duration_ms: {type: integer, minimum: 0}
     WebhookDeliveryAttemptList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/WebhookDeliveryAttempt"}}}}
+    NotificationCondition:
+      type: string
+      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, crashing]
+      description: >-
+        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. Readers treat an unknown value as absent.
+    NotificationConditions:
+      type: array
+      maxItems: 6
+      uniqueItems: true
+      items: {$ref: "#/components/schemas/NotificationCondition"}
+    NotificationRecipients:
+      type: array
+      minItems: 1
+      maxItems: 20
+      uniqueItems: true
+      items: {type: string, minLength: 1, maxLength: 200}
+      description: >-
+        Email only. owner (whoever owns the project when a notice sends) or the user_id of a person who is a member of the project; a user_id that is not a member is invalid_request. Each is emailed at their verified address. One who has since left the project or has no verified address is skipped.
+    NotificationEventTypes:
+      type: array
+      maxItems: 32
+      uniqueItems: true
+      items: {type: string, maxLength: 200, pattern: "^[a-z][a-z0-9_]{0,63}(\\.[a-z][a-z0-9_]{0,63})*(\\.\\*|\\.[a-z][a-z0-9_]{0,63})$"}
+      description: >-
+        Webhook only. Project events also POSTed as they happen, exactly as a webhook sends them: exact types such as screen.online, or prefixes ending in .* such as screen.*. notification.test is never fanned out.
+    NotificationWrite:
+      type: object
+      additionalProperties: false
+      required: [channel]
+      properties:
+        channel: {type: string, enum: [email, webhook]}
+        description: {type: string, maxLength: 200, description: A name for people.}
+        conditions: {$ref: "#/components/schemas/NotificationConditions"}
+        screen_tags: {$ref: "#/components/schemas/ScreenTags"}
+        hold_minutes: {type: integer, minimum: 0, maximum: 1440, default: 10, description: "How long a condition must last before it notifies. crashing is never held."}
+        recipients: {$ref: "#/components/schemas/NotificationRecipients"}
+        url: {type: string, maxLength: 2048, format: uri, description: "Webhook only: https URL on a public Internet host, port 443 (the default) or 8443. No userinfo or fragment."}
+        event_types: {$ref: "#/components/schemas/NotificationEventTypes"}
+        enabled: {type: boolean, default: true}
+    NotificationPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        description: {type: string, maxLength: 200, description: An empty string clears the description.}
+        conditions: {$ref: "#/components/schemas/NotificationConditions"}
+        screen_tags: {$ref: "#/components/schemas/ScreenTags"}
+        hold_minutes: {type: integer, minimum: 0, maximum: 1440}
+        recipients: {$ref: "#/components/schemas/NotificationRecipients"}
+        url: {type: string, maxLength: 2048, format: uri}
+        event_types: {$ref: "#/components/schemas/NotificationEventTypes"}
+        enabled: {type: boolean}
+        snoozed_until:
+          oneOf: [{type: string, format: date-time}, {type: "null"}]
+          description: Send nothing until this instant, at most 30 days ahead; null ends the snooze.
+    Notification:
+      type: object
+      additionalProperties: false
+      required: [id, channel, conditions, screen_tags, hold_minutes, enabled, revision, status, created_at, updated_at]
+      description: >-
+        A project notification. Each condition is tracked per screen: it opens when its event arrives for a screen in scope, and a notice goes out once it has lasted hold_minutes and the screen is still in that state; when it clears after a notice went out, a resolved notice follows. A condition that clears within the hold sends nothing. Email: one email per recipient for everything that falls due within about two minutes, listing each screen and condition, with links to the screen and to this notification in the dashboard; notification emails are free. Webhook: each notice is POSTed as JSON {type: alert.opened or alert.resolved, id, notification_id, project_id, condition, screen {id, name}, since, at, event_id}, where id is the delivery id, since is when the condition began, at is when it held long enough (opened) or cleared (resolved), and event_id is the cursor of the event behind it. event_types are POSTed as the same JSON object GET /api/events returns. Every POST carries ScreenRig-Webhook-Id (the notification id), ScreenRig-Event-Id (the delivery id for a notice, the event cursor for an event; stable across retries, deduplicate on it), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; anything else is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed; email failures retry the same way. Screen notices and screen.* events are free; other events are metered like a listen-stream event. status is failing while nothing has succeeded since failing_since; after 72 hours of continuous failure the notification is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
+      properties:
+        project_id: {type: string}
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?(?:whk|ntf)_[A-Za-z0-9_-]{16,24}$"}
+        channel: {type: string, description: "email or webhook. Readers treat another value as a channel they cannot edit."}
+        description: {type: string}
+        conditions: {type: array, items: {type: string}, description: NotificationCondition values.}
+        screen_tags: {type: array, items: {type: string}, description: Empty means every screen.}
+        hold_minutes: {type: integer, minimum: 0, maximum: 1440}
+        recipients: {type: array, items: {type: string}, description: Email only. owner or member user_ids.}
+        url: {type: string, description: "Webhook only. The receiver URL. Empty, with url_redacted true, below effective Manage."}
+        url_redacted: {type: boolean, description: "Present and true when url was withheld below effective Manage: a receiver URL is often its only credential."}
+        event_types: {type: array, items: {type: string}, description: Webhook only.}
+        enabled: {type: boolean}
+        snoozed_until: {type: string, format: date-time, description: Present while a snooze is set; nothing is sent before it.}
+        revision: {type: integer, minimum: 1}
+        status: {type: string, enum: [active, failing, disabled]}
+        disabled_reason: {type: string, enum: [delivery_failures]}
+        disabled_at: {type: string, format: date-time}
+        failing_since: {type: string, format: date-time}
+        last_success_at: {type: string, format: date-time}
+        last_failure_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        secret: {type: string, pattern: "^whsec_[A-Za-z0-9_-]{43}$", description: "Webhook only, and only in the create and rotate-secret answers: the signing secret. Store it; it is not shown again."}
+    NotificationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/Notification"}}}}
+    NotificationDelivery:
+      type: object
+      additionalProperties: false
+      required: [id, notification_id, event_id, event_type, state, attempts, created_at]
+      properties:
+        project_id: {type: string}
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?whd_[A-Za-z0-9_-]{16,24}$"}
+        notification_id: {type: string}
+        event_id: {type: string, description: The cursor of the event behind the delivery.}
+        event_type: {type: string}
+        test: {type: boolean, description: Present and true for a POST .../test delivery.}
+        condition: {type: string, description: "A screen notice's NotificationCondition; absent for an event delivery."}
+        phase: {type: string, enum: [opened, resolved], description: A screen notice's phase.}
+        screen_id: {type: string}
+        screen_name: {type: string}
+        since: {type: string, format: date-time, description: When the notice's condition began.}
+        sent_with: {type: string, description: "Email only: the delivery whose email carried this notice."}
+        emailed: {type: integer, minimum: 0, description: "Email only: how many people the email reached."}
+        state: {type: string, enum: [pending, succeeded, failed, skipped]}
+        attempts: {type: integer, minimum: 0}
+        next_attempt_at: {type: string, format: date-time, description: Present while pending.}
+        last_attempt_at: {type: string, format: date-time}
+        last_status: {type: integer, description: HTTP status of the last attempt when one was received.}
+        last_error:
+          type: string
+          description: >-
+            Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable, email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed, no_recipients (no recipient is a member with a verified address). Readers treat an unknown value as absent.
+        last_duration_ms: {type: integer, minimum: 0}
+        completed_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+    NotificationDeliveryList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/NotificationDelivery"}}, next_cursor: {anyOf: [{type: string}, {type: "null"}], description: Pass back as before for the next page; null at the end of the log.}}}
+    NotificationDeliveryAttempt:
+      type: object
+      additionalProperties: false
+      required: [attempt, at, status, error, duration_ms]
+      properties:
+        attempt: {type: integer, minimum: 1, description: "The attempt's number; the delivery's attempts counts them all."}
+        at: {type: string, format: date-time, description: When the attempt finished.}
+        status: {oneOf: [{type: integer}, {type: "null"}], description: "HTTP status the receiver answered; null when none answered, and for email."}
+        error:
+          oneOf:
+            - type: string
+            - type: "null"
+          description: Why the attempt failed, one of NotificationDelivery.last_error's failure classes; null when it succeeded.
+        duration_ms: {type: integer, minimum: 0}
+    NotificationDeliveryAttemptList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/NotificationDeliveryAttempt"}}}}
     NoteWrite:
       type: object
       additionalProperties: false
@@ -22155,7 +22725,7 @@ components:
         public_key: {$ref: "#/components/schemas/PlayerPublicKey"}
         signature: {type: string, minLength: 80, maxLength: 4096}
         host: {$ref: "#/components/schemas/RuntimeHostHint"}
-        fleet_link: {type: string, pattern: "^srfl_[A-Za-z0-9_-]{43}$", description: "Optional fleet link secret from the Player URL fragment (#fleet=). A valid, enabled link claims this pairing session for its project at once, or recovers the device's earlier screen; the answer's fleet_link reports which. Like host, it is read tolerantly: a malformed or unknown value never refuses the start."}
+        fleet_link: {type: string, pattern: "^srfl_[A-Za-z0-9_-]{43}$", description: "Optional fleet link secret from the Player URL fragment (#fleet=). A valid, enabled link that has not expired claims this pairing session for its project at once, or recovers the device's earlier screen; the answer's fleet_link reports which. Like host, it is read tolerantly: a malformed or unknown value never refuses the start."}
     NativePairingComplete:
       type: object
       additionalProperties: true
@@ -22875,7 +23445,7 @@ components:
     ManifestUpgradeReport: {type: object, additionalProperties: true, required: [severity, code, context], description: "One latest-wins manifest-upgrade lifecycle snapshot for the session screen. The server stores one slot per screen and derives the project read model Screen.manifest_upgrade from it; a stale, superseded, or post-activation pre-activation report is accepted with no change (202), never refused as a conflict, and no report ever promotes a grant. severity is envelope-only: the derived project event severity comes from state.", properties: {severity: {type: string, enum: [info, warning, error]}, code: {type: string, enum: [manifest.upgrade]}, context: {$ref: "#/components/schemas/ManifestUpgradeContext"}}}
     ManifestUpgradeContext: {type: object, additionalProperties: true, required: [manifest_revision, state], properties: {manifest_revision: {type: string, pattern: "^man_"}, state: {type: string, enum: [downloading, preparing, activating, retrying, failed, blocked, partial, current]}, code: {type: string, pattern: "^[a-z0-9_]{1,40}$", description: "Safe static code. Required for retrying, failed, blocked and partial; absent for downloading, preparing and activating; an optional warning such as persist_failed on current. Unknown syntax-valid codes are accepted and shown generically; raw exception strings, URLs, and private object keys are never sent."}, attempt: {type: integer, minimum: 1, maximum: 1000, description: "Optional process-local display counter, increased on actual retry preparation. The player clamps what it displays locally; the server refuses out-of-range values."}, retry_in_ms: {type: integer, minimum: 1000, maximum: 86400000, description: "Required only for retrying and forbidden otherwise: the actually scheduled candidate retry. Failed means no scheduled retry."}, missing_page_count: {type: integer, minimum: 0, maximum: 10000, description: "Only for partial: the count of excluded whole pages when measurable. Zero is valid; a partial can lose primitives or audio without losing a whole page."}}}
     PlaybackMediaStartedReport: {type: object, additionalProperties: true, required: [severity, code, context], description: "One visible start of an image or video primitive on a page. Players send this once per page appearance of the media, for images exactly as for videos; loops inside one appearance are not restarts. The sending screen is authenticated; media, page, primitive and manifest identities are observations without content or grant membership checks. Success acknowledges durable raw insertion; daily counts follow through a recoverable batched projection. Ordinary playback acknowledgments omit optional credit balance headers.", properties: {severity: {type: string, enum: [info]}, code: {type: string, enum: [playback.media_started]}, context: {$ref: "#/components/schemas/PlaybackMediaStartedContext"}}}
-    PlaybackMediaStartedContext: {type: object, additionalProperties: true, required: [media_id, manifest_revision, page_id, primitive], properties: {media_id: {type: string, pattern: "^med_"}, manifest_revision: {type: string, pattern: "^man_"}, page_id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [image, video], description: The primitive kind reported by the Player (image or video).}, primitive_id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$", description: "Optional. The page primitive that started, stored on the play record. A malformed value is ignored, not refused."}, started_at: {type: string, format: date-time, description: "Optional. Player-clock instant the media became visible, stored on the play record clamped to [received_at - 24h, received_at + 5m]. A malformed value is ignored, not refused."}, play_id: {type: string, pattern: "^[A-Za-z0-9_-]{1,64}$", description: "Optional idempotency key for this start (a UUID or ULID). A repeated (screen, play_id) is accepted with 202 and stores and counts nothing, so a retried report never double-counts. Reports without it are never deduplicated. A malformed value is ignored, not refused."}}}
+    PlaybackMediaStartedContext: {type: object, additionalProperties: true, required: [media_id, manifest_revision, page_id, primitive], properties: {media_id: {type: string, pattern: "^med_"}, manifest_revision: {type: string, pattern: "^man_"}, page_id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, primitive: {type: string, enum: [image, video], description: The primitive kind reported by the Player (image or video).}, primitive_id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$", description: "Optional. The page primitive that started, stored on the play record. A malformed value is ignored, not refused."}, started_at: {type: string, format: date-time, description: "Optional. Player-clock instant the media became visible, stored on the play record clamped to [received_at - 24h, received_at + 5m]. A malformed value is ignored, not refused."}, play_id: {type: string, pattern: "^[A-Za-z0-9_-]{1,64}$", description: "Optional idempotency key for this start (a UUID or ULID). A repeated (screen, play_id) is accepted with 202 and stores and counts nothing, so a retried report never double-counts. Reports without it are never deduplicated. A malformed value is ignored, not refused."}, play_seq: {type: integer, minimum: 1, maximum: 9007199254740991, description: "Optional, with play_seq_run. This start's number in its chain: the first media start of a play_seq_run is 1 and every later one, including a start whose report the Player's queue later drops, takes the next number, so a missing number shows a play that never arrived. A report keeps its number across retries and replays, with its play_id, and a number is never reused. The Player saves the counter with its durable report queue, in the same write that queues the report. Application starts and every other report carry neither member. When either member is missing or malformed both are ignored, not refused."}, play_seq_run: {type: string, pattern: "^[A-Za-z0-9_-]{1,64}$", description: "Optional, with play_seq. The random id (a UUID) of the chain play_seq counts in: one Player install's media starts on one screen. Start a new run, with a fresh id and play_seq back at 1, when the counter storage is first created or lost and when the paired screen differs from the one the run was started for."}}}
     PlaybackVideoStartedReport: {type: object, additionalProperties: true, required: [severity, code, context], description: "Report one visible video start. This uses the same daily aggregation as playback.media_started with primitive video. Send one report per start; sending both event types counts the start twice. Use playback.media_started when reporting both images and videos.", properties: {severity: {type: string, enum: [info]}, code: {type: string, enum: [playback.video_started]}, context: {$ref: "#/components/schemas/PlaybackVideoStartedContext"}}}
     PlaybackVideoStartedContext: {type: object, additionalProperties: true, required: [media_id, manifest_revision, page_id], properties: {media_id: {type: string, pattern: "^med_"}, manifest_revision: {type: string, pattern: "^man_"}, page_id: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}}}
     PlaybackApplicationStartedReport: {type: object, additionalProperties: true, required: [severity, code, context], description: "One visible start of an application primitive on a page: the application became visible on glass, reported once per page appearance by the Player controller — the application content never reports its own visibility, and a package download is never a start. The sending screen is authenticated; page, primitive, release and manifest identities are reported observations without content or grant membership checks. Stores one durable per-play record (GET /api/playback/plays). Project-owned release/application housekeeping timestamps follow through a recoverable batch projection. Ordinary playback acknowledgments omit optional credit balance headers. There is no daily aggregate row for application starts; the play records are the evidence.", properties: {severity: {type: string, enum: [info]}, code: {type: string, enum: [playback.application_started]}, context: {$ref: "#/components/schemas/PlaybackApplicationStartedContext"}}}
@@ -23156,6 +23726,43 @@ components:
         screens: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/PlaybackTotalsScreen"}}
         media: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/PlaybackTotalsMedia"}}
         screen_days: {type: array, maxItems: 920, items: {$ref: "#/components/schemas/PlaybackTotalsScreenDay"}}
+    PlaybackCompletenessShare: {anyOf: [{type: number, minimum: 0, maximum: 1}, {type: "null"}], description: "Plays that arrived over plays that arrived plus plays that went missing, from 0 to 1. null when there are neither, as for older Players that number no plays."}
+    PlaybackCompletenessDay:
+      type: object
+      additionalProperties: false
+      required: [day, measured_plays, missing_plays, completeness]
+      description: The play numbering of one UTC receipt day.
+      properties:
+        day: {type: string, format: date}
+        measured_plays: {type: integer, minimum: 0, description: Numbered plays received that day.}
+        missing_plays: {type: integer, minimum: 0, description: "Plays the Players numbered that never arrived, counted on the day the play after them arrived."}
+        completeness: {$ref: "#/components/schemas/PlaybackCompletenessShare"}
+    PlaybackGap:
+      type: object
+      additionalProperties: false
+      required: [screen_id, day, from, to, missing_plays]
+      description: One run of play numbers a Player skipped, so that many plays were made and never arrived.
+      properties:
+        screen_id: {type: string}
+        day: {type: string, format: date, description: "The UTC day the gap came to light: the receipt day of the play after it."}
+        from: {type: string, format: date-time, description: Start time of the play before the gap.}
+        to: {type: string, format: date-time, description: Start time of the play after the gap.}
+        missing_plays: {type: integer, minimum: 1, description: How many plays the gap holds.}
+    PlaybackCompleteness:
+      type: object
+      additionalProperties: false
+      required: [day_from, day_to, measured_plays, missing_plays, completeness, days, gaps, truncated]
+      description: >-
+        How many of the plays the screens made reached the backend, over the inclusive UTC days day_from to day_to. measured_plays and missing_plays are the sums of days, and completeness is measured_plays over their sum, null when both are 0. days lists, oldest first, only the days with a measured or a missing play. gaps lists the holes in the play numbering, newest first. Plays without a number (older Players, starts stored before play numbers) are in none of these figures.
+      properties:
+        day_from: {type: string, format: date}
+        day_to: {type: string, format: date}
+        measured_plays: {type: integer, minimum: 0, description: "Numbered plays received in the window."}
+        missing_plays: {type: integer, minimum: 0, description: "Plays the Players numbered that never arrived."}
+        completeness: {$ref: "#/components/schemas/PlaybackCompletenessShare"}
+        days: {type: array, maxItems: 92, items: {$ref: "#/components/schemas/PlaybackCompletenessDay"}}
+        gaps: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/PlaybackGap"}, description: Newest first by to.}
+        truncated: {type: boolean, description: "true when more gaps exist than limit."}
     ScreenHealthSample:
       type: object
       additionalProperties: false
@@ -23666,6 +24273,7 @@ x-problem-codes:
   - wall_unsupported
   - playlist_format_mismatch
   - webhook_limit_reached
+  - notification_limit_reached
   - fleet_link_limit_reached
   - webhook_url_rejected
   - note_contains_credential

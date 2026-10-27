@@ -201,13 +201,13 @@ test("webhook_url_rejected shows the server's reason, exits 8, and clears the re
 test("webhook_limit_reached is a definite conflict: exit 5, guidance, no saved key", async () => {
   const env = await enrolled();
   const transport = memoryBackend();
-  for (let index = 0; index < 10; index += 1) await create(transport, env, "--description", `hook ${index}`);
+  for (let index = 0; index < 20; index += 1) await create(transport, env, "--description", `hook ${index}`);
   const refused = await cli(["--json", "webhooks", "create", "--url", URL_OK, "--event-types", "screen.*"], transport, env);
   assert.equal(refused.code, ExitCode.Conflict, refused.stdout);
   assert.equal(refused.envelope.error!.code, "webhook_limit_reached");
-  assert.match(refused.envelope.error!.detail, /maximum of 10 webhooks/);
-  assert.equal(refused.envelope.error!.next!.command, "screenrig webhooks list");
-  assert.match(refused.envelope.error!.next!.reason, /webhooks delete ID/);
+  assert.match(refused.envelope.error!.detail, /maximum of 20 notifications, email and webhook together/);
+  assert.equal(refused.envelope.error!.next!.command, "screenrig notifications list");
+  assert.match(refused.envelope.error!.next!.reason, /notifications delete ID/);
   assert.equal(refused.envelope.warnings, undefined);
   assert.doesNotMatch(await readFile(env.configPath, "utf8"), /pending_writes/);
 });

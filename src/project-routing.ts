@@ -7,9 +7,9 @@ const PROJECT_ROUTES = new Set([
   "billing/balance", "billing/statement", "billing/usage", "advertising/network", "advertising/network/rate",
   "advertising/inventory", "advertising/slots", "advertising/memberships", "advertising/networks",
   "advertising/creatives", "advertising/campaigns", "advertising/reviews", "advertising/reports/spend",
-  "advertising/reports/delivery", "advertising/reports/fill", "advertising/direct-campaigns", "advertising/availability", "playback", "playback/plays", "playback/totals", "health/trend", "uptime/daily",
+  "advertising/reports/delivery", "advertising/reports/fill", "advertising/direct-campaigns", "advertising/availability", "playback", "playback/plays", "playback/totals", "playback/completeness", "health/trend", "uptime/daily",
   "card-types", "card-data", "cards", "media", "media/generations", "media-folders", "media/move", "media/uploads",
-  "selectors/preview", "feedback/bugs", "feedback/features", "service-clients", "fleet-links", "webhooks",
+  "selectors/preview", "feedback/bugs", "feedback/features", "service-clients", "fleet-links", "webhooks", "notifications",
   "notes", "support/status", "support/conversations", "reviews", "agents/self", "agents/self/disconnect",
 ]);
 const GLOBAL_LISTS = new Set(["screens", "applications", "playlists", "media", "cards", "media-folders", "notes"]);

@@ -44,7 +44,7 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
   command.on(`option:${option.name()}`, () => {
     const repeatable = (name === "capability" && ((command.name() === "connect" && command.parent?.name() === "agent")
       || (command.name() === "create" && command.parent?.name() === "service-client")))
-      || (name === "tag" && command.parent?.name() === "fleet-links" && ["create", "update"].includes(command.name()))
+      || (name === "tag" && ["fleet-links", "notifications"].includes(command.parent?.name() ?? "") && ["create", "update"].includes(command.name()))
       || (name === "screen-id" && command.parent?.name() === "triggers" && command.name() === "create")
       || (command.parent?.name() === "screen" && ((command.name() === "update" && (name === "field" || name === "unset-field")) || (command.name() === "list" && name === "field")))
       || (["tag", "any-tag", "screen-id", "window"].includes(name) && command.parent?.name() === "campaign" && ["create", "update"].includes(command.name()))

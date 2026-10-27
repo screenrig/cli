@@ -23,36 +23,40 @@ export function webhookId(value: string | undefined, command: string): string {
   return value;
 }
 
-/** Comma-separated exact types (screen.online) or prefixes ending in .* (screen.*), 1 to 32, unique. */
-export function webhookEventTypes(value: string): string[] {
+/**
+ * Comma-separated exact types (screen.online) or prefixes ending in .* (screen.*), 1 to 32, unique.
+ * `flag` names the option in the messages: --event-types here, --events on notifications.
+ */
+export function webhookEventTypes(value: string, flag = "--event-types"): string[] {
   const types = value.split(",").map((item) => item.trim());
-  if (types.some((item) => !item)) throw usageError("--event-types takes comma-separated event types with no empty entries.");
-  if (types.length > WEBHOOK_EVENT_TYPES_MAX) throw usageError(`--event-types takes at most ${WEBHOOK_EVENT_TYPES_MAX} event types.`);
+  if (types.some((item) => !item)) throw usageError(`${flag} takes comma-separated event types with no empty entries.`);
+  if (types.length > WEBHOOK_EVENT_TYPES_MAX) throw usageError(`${flag} takes at most ${WEBHOOK_EVENT_TYPES_MAX} event types.`);
   for (const type of types) {
     if (type.length > EVENT_TYPE_MAX_LENGTH || !EVENT_TYPE_PATTERN.test(type)) {
-      throw usageError("--event-types entries must be event types such as screen.online or prefixes such as screen.*.");
+      throw usageError(`${flag} entries must be event types such as screen.online or prefixes such as screen.*.`);
     }
   }
-  if (new Set(types).size !== types.length) throw usageError("--event-types must not repeat an event type.");
+  if (new Set(types).size !== types.length) throw usageError(`${flag} must not repeat an event type.`);
   return types;
 }
 
 /**
  * Only the scheme, userinfo, fragment, and length are checked locally. The server owns the port rule
  * and the public-address check (it resolves the host), and its reason is shown
- * verbatim on webhook_url_rejected.
+ * verbatim on webhook_url_rejected. `flag` names the option in the messages:
+ * --url here, --webhook on notifications create.
  */
-export function webhookUrl(value: string): string {
+export function webhookUrl(value: string, flag = "--url"): string {
   let parsed: URL;
   try {
     parsed = new URL(value);
   } catch {
-    throw usageError("--url must be an absolute https URL.");
+    throw usageError(`${flag} must be an absolute https URL.`);
   }
-  if (parsed.protocol !== "https:") throw usageError("--url must be an absolute https URL.");
-  if (parsed.username || parsed.password || /^https:\/\/[^/?#]*@/i.test(value)) throw usageError("--url must not carry credentials (user:password@).");
-  if (value.includes("#")) throw usageError("--url must not carry a fragment (#…).");
-  if (value.length > URL_MAX_LENGTH) throw usageError(`--url must be at most ${URL_MAX_LENGTH} characters.`);
+  if (parsed.protocol !== "https:") throw usageError(`${flag} must be an absolute https URL.`);
+  if (parsed.username || parsed.password || /^https:\/\/[^/?#]*@/i.test(value)) throw usageError(`${flag} must not carry credentials (user:password@).`);
+  if (value.includes("#")) throw usageError(`${flag} must not carry a fragment (#…).`);
+  if (value.length > URL_MAX_LENGTH) throw usageError(`${flag} must be at most ${URL_MAX_LENGTH} characters.`);
   return value;
 }
 
@@ -103,10 +107,10 @@ export function webhookProblem(error: unknown, id?: string): unknown {
   if (problem.code === "webhook_limit_reached") {
     return new CliError({
       ...problem,
-      detail: "This project already has the maximum of 10 webhooks. Nothing was created.",
+      detail: "This project already has the maximum of 20 notifications, email and webhook together. Nothing was created.",
       next: problem.next ?? {
-        command: "screenrig webhooks list",
-        reason: "Delete a webhook you no longer need with screenrig webhooks delete ID, then rerun create.",
+        command: "screenrig notifications list",
+        reason: "Delete a notification you no longer need with screenrig notifications delete ID, then rerun create.",
       },
     }, error.exitCode, error.warnings);
   }
@@ -148,7 +152,8 @@ export function webhookLines(webhook: Webhook | undefined): string[] {
   ];
 }
 
-function table(header: string[], rows: string[][]): string[] {
+/** Left-aligned columns padded to their widest cell, shared by the notification tables. */
+export function table(header: string[], rows: string[][]): string[] {
   const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => (row[index] ?? "").length)));
   const render = (row: string[]) => row.map((cell, index) => cell.padEnd(widths[index]!)).join("  ").trimEnd();
   return [render(header), ...rows.map(render)];

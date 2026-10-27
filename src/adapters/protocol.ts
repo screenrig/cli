@@ -1312,6 +1312,110 @@ export interface WebhookDeliveryList {
   next_cursor: string | null;
 }
 
+/** The screen state changes a notification fires on (NotificationCondition). */
+export type NotificationCondition = "screen_offline" | "display_disconnected" | "running_hot" | "storage_full" | "content_stuck" | "crashing";
+
+/**
+ * GET/PATCH /api/notifications/{id}: an email or webhook notification. The
+ * signing secret is never part of this shape. Readers treat a channel other
+ * than email or webhook as one they cannot edit.
+ */
+export interface Notification {
+  channel: string;
+  conditions: string[];
+  created_at: string;
+  description?: string;
+  disabled_at?: string;
+  disabled_reason?: "delivery_failures";
+  enabled: boolean;
+  /** Webhook only. */
+  event_types?: string[];
+  failing_since?: string;
+  hold_minutes: number;
+  id: string;
+  last_failure_at?: string;
+  last_success_at?: string;
+  /** Email only: owner, or the user ids of project members. */
+  recipients?: string[];
+  revision: number;
+  /** Empty means every screen. */
+  screen_tags: string[];
+  snoozed_until?: string;
+  status: "active" | "failing" | "disabled";
+  updated_at: string;
+  /** Webhook only; empty with url_redacted true below effective Manage. */
+  url?: string;
+  url_redacted?: boolean;
+}
+
+/** Returned for a webhook only by create and rotate-secret (and their exact idempotent replay for 24 hours). */
+export interface NotificationWithSecret extends Notification {
+  secret: string;
+}
+
+export interface NotificationList {
+  items: Notification[];
+}
+
+export interface NotificationWrite {
+  channel: "email" | "webhook";
+  conditions?: string[];
+  description?: string;
+  enabled?: boolean;
+  event_types?: string[];
+  hold_minutes?: number;
+  recipients?: string[];
+  screen_tags?: string[];
+  url?: string;
+}
+
+export interface NotificationPatch {
+  conditions?: string[];
+  /** An empty string clears the description. */
+  description?: string;
+  enabled?: boolean;
+  event_types?: string[];
+  hold_minutes?: number;
+  recipients?: string[];
+  screen_tags?: string[];
+  /** null ends the snooze. */
+  snoozed_until?: string | null;
+  url?: string;
+}
+
+export interface NotificationDelivery {
+  attempts: number;
+  completed_at?: string;
+  /** A screen notice's condition; absent for an event delivery. */
+  condition?: string;
+  created_at: string;
+  /** Email only: how many people the email reached. */
+  emailed?: number;
+  event_id: string;
+  event_type: string;
+  id: string;
+  last_attempt_at?: string;
+  last_duration_ms?: number;
+  /** A failure class, or why a skipped notice was not sent. */
+  last_error?: string;
+  last_status?: number;
+  next_attempt_at?: string;
+  notification_id: string;
+  phase?: "opened" | "resolved";
+  screen_id?: string;
+  screen_name?: string;
+  /** Email only: the delivery whose email carried this notice. */
+  sent_with?: string;
+  since?: string;
+  state: "pending" | "succeeded" | "failed" | "skipped";
+  test?: boolean;
+}
+
+export interface NotificationDeliveryList {
+  items: NotificationDelivery[];
+  next_cursor: string | null;
+}
+
 /**
  * GET/PATCH /api/fleet-links/{id}. url is a credential that creates screens;
  * a Read only credential receives it empty with url_redacted true.
