@@ -3,7 +3,7 @@ import type { TransportRequest } from "./transport/types.js";
 const PROJECT_ROUTES = new Set([
   "project", "project/deletion-preview", "project/owner", "project/move", "project/moves",
   "project/capabilities", "project/browser-links/claim", "invitations", "applications", "playlists",
-  "screens", "screens/pair", "screens/provision", "screens/actions", "triggers", "events",
+  "screens", "screens/pair", "screens/provision", "screens/actions", "triggers", "campaigns", "events",
   "billing/balance", "billing/statement", "billing/usage", "advertising/network", "advertising/network/rate",
   "advertising/inventory", "advertising/slots", "advertising/memberships", "advertising/networks",
   "advertising/creatives", "advertising/campaigns", "advertising/reviews", "advertising/reports/spend",
