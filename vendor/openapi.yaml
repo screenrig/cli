@@ -5656,6 +5656,310 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/advertising/direct-campaigns:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listAdvertisingDirectCampaigns
+      description: The calling seller's direct campaigns, newest first, with their pace.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Direct campaigns.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingDirectCampaignList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createAdvertisingDirectCampaign
+      description: Books a direct campaign, a deal the seller made with an outside advertiser, on the seller's own ad inventory. It moves no money; the seller bills the advertiser and the price is recorded for the report's value. It is active at once and fills before marketplace campaigns. A goal campaign is paced evenly over its flight and plays first while behind pace; a campaign without a goal takes every eligible slot during its flight. Two ads of one category never play in the same ad break on a screen. A goal above the availability estimate is refused with goal_overbooked unless overbook is true. The same key with the same body replays; a changed body is a conflict.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdvertisingDirectCampaignDraft'
+      responses:
+        '201':
+          description: Direct campaign.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingDirectCampaign'
+        '409':
+          description: goal_overbooked or resource_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/advertising/direct-campaigns/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: getAdvertisingDirectCampaign
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+      responses:
+        '200':
+          description: Direct campaign.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingDirectCampaign'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: updateAdvertisingDirectCampaign
+      description: Replaces the campaign's draft fields. If-Match carries the campaign revision. Delivered plays are kept. The plays still to deliver are checked against the availability estimate with the campaign's own booking left out, and overbook books them anyway.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdvertisingDirectCampaignDraft'
+      responses:
+        '200':
+          description: Updated direct campaign.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingDirectCampaign'
+        '409':
+          description: goal_overbooked or resource_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/advertising/direct-campaigns/{id}/pause:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: pauseAdvertisingDirectCampaign
+      description: Stops new plays for an active campaign. Delivered plays and the flight are kept. A paused or ended campaign is a resource_conflict.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Paused direct campaign.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingDirectCampaign'
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/advertising/direct-campaigns/{id}/resume:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: resumeAdvertisingDirectCampaign
+      description: Resumes a paused direct campaign. A goal campaign that fell behind pace while paused plays first until it is back on pace. An active or ended campaign is a resource_conflict.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Resumed direct campaign.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingDirectCampaign'
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/advertising/direct-campaigns/{id}/end:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: endAdvertisingDirectCampaign
+      description: Ends an active or paused campaign before its flight does. An ended campaign plays no more and keeps its report.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Ended direct campaign.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingDirectCampaign'
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/advertising/direct-campaigns/{id}/report:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: getAdvertisingDirectCampaignReport
+      description: One direct campaign's delivery for a window, with its pace, the recorded value of the delivered plays and rows by UTC day, screen, slot and media. Without from and to the window is the whole flight. When the window holds more rows than the report lists, the response sets truncated and the totals still cover every play.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Direct campaign report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingDirectReport'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/advertising/availability:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: read
+      operationId: estimateAdvertisingAvailability
+      description: Estimates the plays a direct goal can book on the given inventory and flight. It is a read and changes nothing. The estimate is the targeted screens' recent ad slot occurrences projected over the flight, less the goals other direct campaigns still need on the same screens.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdvertisingAvailabilityQuery'
+      responses:
+        '200':
+          description: Availability estimate.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingAvailability'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/advertising/reports/fill:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: getAdvertisingFillStats
+      description: The calling seller's ad slot supply for a window, per UTC day and in total. Each occurrence is filled by a direct campaign, a marketplace campaign or the VAST tag, or it is unfilled with the reason. The window is at most 35 days and defaults to the last 7.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Fill statistics.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdvertisingFillStats'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/playback:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -19162,6 +19466,7 @@ components:
       required: [name, daily_cap_mcr, lifetime_cap_mcr, flight_start, flight_end, networks]
       properties:
         name: {type: string, minLength: 1, maxLength: 120}
+        category: {$ref: "#/components/schemas/AdvertisingCategory"}
         daily_cap_mcr: {$ref: "#/components/schemas/McrString"}
         lifetime_cap_mcr: {$ref: "#/components/schemas/McrString"}
         image_duration_ms: {type: integer, minimum: 5000, maximum: 30000, default: 10000, description: "Campaign-wide image dwell time. Videos keep their server-verified duration."}
@@ -19201,6 +19506,7 @@ components:
         id: {type: string}
         revision: {type: integer}
         name: {type: string}
+        category: {$ref: "#/components/schemas/AdvertisingCategory"}
         state: {type: string, enum: [draft, pending_review, active, paused, ended]}
         pause_reasons: {type: array, items: {type: string, enum: [manual, price_change_pending, review_required, membership_revoked, budget]}}
         price_change_pending: {type: boolean, description: "Sticky: reverting a rate never clears it. Only an explicit buyer acceptance clears it."}
@@ -19293,6 +19599,185 @@ components:
         unbillable: {type: integer}
         rows: {type: array, items: {$ref: "#/components/schemas/AdvertisingDeliveryRow"}}
         truncated: {type: boolean, description: "Set when the window holds more than 5000 settlements. Totals and counts still cover every settlement; rows lists only the earliest 5000."}
+    AdvertisingCategory:
+      type: string
+      description: "The advertiser category. Two ads of one category never play in the same ad break on a screen; an ad without a category is never separated."
+      enum: [alcohol, apparel, automotive, beauty, cannabis, consumer_electronics, education, entertainment, financial_services, food_and_beverage, gambling, government, grocery, health_and_pharma, home_and_garden, insurance, jobs, legal, media, political, quick_service_restaurants, real_estate, restaurants, retail, sports_and_fitness, technology, telecom, tobacco_and_vaping, travel, utilities]
+    AdvertisingDirectPrice:
+      type: object
+      additionalProperties: false
+      required: [model, amount, currency]
+      description: "The deal price the seller recorded. screenRIG never charges it; it values the report."
+      properties:
+        model: {type: string, enum: [cpm, flat], description: "cpm prices every thousand delivered plays; flat is one fee for the campaign."}
+        amount: {type: string, pattern: "^[0-9]{1,12}(\\.[0-9]{1,4})?$", description: "A positive decimal with at most four decimal places."}
+        currency: {type: string, pattern: "^[A-Z]{3}$", description: "ISO 4217 code of the seller's billing currency."}
+    AdvertisingDirectValue:
+      type: object
+      additionalProperties: false
+      required: [model, amount, currency]
+      description: "The recorded price applied to the delivered plays: per thousand plays for cpm, the whole fee for flat."
+      properties:
+        model: {type: string, enum: [cpm, flat]}
+        amount: {type: string, description: "A decimal rounded to cents."}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+    AdvertisingDirectPace:
+      type: object
+      additionalProperties: false
+      required: [status, expected_plays]
+      description: "Delivery against the goal, which accrues evenly over the flight."
+      properties:
+        status: {type: string, enum: [no_goal, not_started, on_pace, behind, complete, ended], description: "on_pace is delivery within ten percent of expected_plays."}
+        expected_plays: {type: integer, minimum: 0, description: "The share of the goal the elapsed flight accounts for."}
+    AdvertisingDirectCampaignDraft:
+      type: object
+      additionalProperties: false
+      required: [name, advertiser, flight_start, flight_end, media_ids]
+      description: "A direct campaign: the seller's own deal for an outside advertiser on the seller's own ad inventory. It moves no money."
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        advertiser: {type: string, minLength: 1, maxLength: 200}
+        category: {$ref: "#/components/schemas/AdvertisingCategory"}
+        flight_start: {type: string, format: date-time}
+        flight_end: {type: string, format: date-time}
+        goal_plays: {type: integer, minimum: 0, maximum: 1000000000000, description: "The plays to deliver, paced evenly over the flight. Zero or omitted takes every eligible slot during the flight."}
+        price: {$ref: "#/components/schemas/AdvertisingDirectPrice"}
+        media_ids: {type: array, minItems: 1, maxItems: 20, items: {type: string}, description: "The seller's ready images and videos, each named once."}
+        image_duration_ms: {type: integer, minimum: 5000, maximum: 30000, default: 10000, description: "Campaign-wide image dwell time. Videos keep their server-verified duration."}
+        screen_ids: {type: array, items: {type: string}, description: "Empty means every opted-in screen."}
+        slot_ids: {type: array, items: {type: string}, description: "Empty means every enabled slot."}
+        venue_types: {type: array, items: {type: string}}
+        cities: {type: array, items: {type: string}}
+        tags: {type: array, items: {type: string}}
+        dayparts: {type: array, items: {$ref: "#/components/schemas/AdvertisingDaypart"}}
+        overbook: {type: boolean, default: false, description: "Books a goal above the availability estimate. Without it the request is refused with goal_overbooked."}
+    AdvertisingDirectCampaign:
+      type: object
+      additionalProperties: false
+      required: [id, revision, name, advertiser, state, flight_start, flight_end, reserved_plays, delivered_plays, media_ids, image_duration_ms, screen_ids, slot_ids, venue_types, cities, tags, dayparts, overbooked, pace, created_at, updated_at]
+      properties:
+        id: {type: string}
+        revision: {type: integer}
+        name: {type: string}
+        advertiser: {type: string}
+        category: {$ref: "#/components/schemas/AdvertisingCategory"}
+        state: {type: string, enum: [active, paused, ended]}
+        flight_start: {type: string, format: date-time}
+        flight_end: {type: string, format: date-time}
+        goal_plays: {type: integer, minimum: 1}
+        reserved_plays: {type: integer, minimum: 0, description: "Plays issued and not yet resolved."}
+        delivered_plays: {type: integer, minimum: 0, description: "Plays completed. Pause and edit keep them."}
+        price: {$ref: "#/components/schemas/AdvertisingDirectPrice"}
+        media_ids: {type: array, items: {type: string}}
+        image_duration_ms: {type: integer, minimum: 5000, maximum: 30000}
+        screen_ids: {type: array, items: {type: string}, description: "Empty means every opted-in screen."}
+        slot_ids: {type: array, items: {type: string}, description: "Empty means every enabled slot."}
+        venue_types: {type: array, items: {type: string}}
+        cities: {type: array, items: {type: string}}
+        tags: {type: array, items: {type: string}}
+        dayparts: {type: array, items: {$ref: "#/components/schemas/AdvertisingDaypart"}}
+        overbooked: {type: boolean, description: "True when the goal was booked above the availability estimate."}
+        pace: {$ref: "#/components/schemas/AdvertisingDirectPace"}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        ended_at: {type: string, format: date-time}
+    AdvertisingDirectCampaignList: {type: object, additionalProperties: false, required: [direct_campaigns], properties: {direct_campaigns: {type: array, items: {$ref: "#/components/schemas/AdvertisingDirectCampaign"}}}}
+    AdvertisingDirectReportRow:
+      type: object
+      additionalProperties: false
+      required: [day, screen_id, slot_id, media_id, plays, played_ms]
+      properties:
+        day: {type: string, format: date, description: "The UTC day."}
+        screen_id: {type: string}
+        slot_id: {type: string}
+        media_id: {type: string}
+        plays: {type: integer, minimum: 0}
+        played_ms: {type: integer, minimum: 0}
+    AdvertisingDirectReport:
+      type: object
+      additionalProperties: false
+      required: [campaign_id, name, advertiser, from, to, delivered_plays, reserved_plays, pace, plays, played_ms, not_played, rows]
+      properties:
+        campaign_id: {type: string}
+        name: {type: string}
+        advertiser: {type: string}
+        category: {$ref: "#/components/schemas/AdvertisingCategory"}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        goal_plays: {type: integer, minimum: 1}
+        delivered_plays: {type: integer, minimum: 0, description: "Plays the campaign has completed over its life."}
+        reserved_plays: {type: integer, minimum: 0, description: "Plays issued and not yet reported."}
+        pace: {$ref: "#/components/schemas/AdvertisingDirectPace"}
+        plays: {type: integer, minimum: 0, description: "Plays completed in the window."}
+        played_ms: {type: integer, minimum: 0, description: "Milliseconds played in the window."}
+        not_played: {type: integer, minimum: 0, description: "Plays issued in the window that did not play."}
+        value: {$ref: "#/components/schemas/AdvertisingDirectValue"}
+        rows: {type: array, maxItems: 5000, items: {$ref: "#/components/schemas/AdvertisingDirectReportRow"}, description: "Completed plays by UTC day, screen, slot and media, in that order, at most 5000 rows."}
+        truncated: {type: boolean, description: "Set when the window holds more than 5000 rows. The totals still cover every play."}
+    AdvertisingAvailabilityQuery:
+      type: object
+      additionalProperties: false
+      required: [flight_start, flight_end]
+      properties:
+        screen_ids: {type: array, items: {type: string}, description: "Empty means every opted-in screen."}
+        slot_ids: {type: array, items: {type: string}, description: "Empty means every enabled slot."}
+        venue_types: {type: array, items: {type: string}}
+        cities: {type: array, items: {type: string}}
+        tags: {type: array, items: {type: string}}
+        dayparts: {type: array, items: {$ref: "#/components/schemas/AdvertisingDaypart"}}
+        flight_start: {type: string, format: date-time}
+        flight_end: {type: string, format: date-time}
+        exclude_campaign_id: {type: string, description: "Leaves this direct campaign's own booking out of booked_plays, for an edit."}
+    AdvertisingAvailability:
+      type: object
+      additionalProperties: false
+      required: [estimated_plays, booked_plays, available_plays, screens, observed_from, observed_to, flight_start, flight_end]
+      description: "An estimate: the slot occurrences the targeted screens produced over the observed window, projected over the flight, less the plays other direct goals still need on the same screens."
+      properties:
+        estimated_plays: {type: integer, minimum: 0}
+        booked_plays: {type: integer, minimum: 0}
+        available_plays: {type: integer, minimum: 0}
+        screens: {type: integer, minimum: 0, description: "The screens the targeting selects."}
+        observed_from: {type: string, format: date-time}
+        observed_to: {type: string, format: date-time}
+        flight_start: {type: string, format: date-time}
+        flight_end: {type: string, format: date-time}
+    AdvertisingFillStatsDay:
+      type: object
+      additionalProperties: false
+      required: [day, occurrences, direct, marketplace, vast, unfilled, fill_rate]
+      properties:
+        day: {type: string, format: date, description: "The UTC day."}
+        occurrences: {type: integer, minimum: 0}
+        direct: {type: integer, minimum: 0}
+        marketplace: {type: integer, minimum: 0}
+        vast: {type: integer, minimum: 0}
+        unfilled: {type: integer, minimum: 0}
+        fill_rate: {type: number, minimum: 0, maximum: 1}
+    AdvertisingFillStats:
+      type: object
+      additionalProperties: false
+      required: [from, to, occurrences, direct, marketplace, vast, unfilled, fill_rate, unfilled_reasons, days]
+      description: "The seller's ad slot supply for a window of at most 35 days: occurrences asked for, fills by source, and the unfilled occurrences with the reason of the first ask."
+      properties:
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        occurrences: {type: integer, minimum: 0}
+        direct: {type: integer, minimum: 0}
+        marketplace: {type: integer, minimum: 0}
+        vast: {type: integer, minimum: 0}
+        unfilled: {type: integer, minimum: 0}
+        fill_rate: {type: number, minimum: 0, maximum: 1}
+        unfilled_reasons:
+          type: object
+          additionalProperties: false
+          required: [no_demand, ineligible, separated, capped]
+          properties:
+            no_demand: {type: integer, minimum: 0, description: "No direct or invited campaign targeted the screen and slot."}
+            ineligible: {type: integer, minimum: 0, description: "Campaigns targeted it, but none fit the slot's media and durations, the flight, the dayparts or the occurrence's window."}
+            separated: {type: integer, minimum: 0, description: "The only ads left shared a category with an ad already in the break."}
+            capped: {type: integer, minimum: 0, description: "A fitting campaign had no budget, credit, goal or pace room left, or the screen held its most open plays."}
+        days: {type: array, items: {$ref: "#/components/schemas/AdvertisingFillStatsDay"}}
     RuntimeAdslotCandidate:
       type: object
       additionalProperties: true
@@ -22811,6 +23296,7 @@ x-problem-codes:
   - quote_stale
   - insufficient_credits
   - self_deal
+  - goal_overbooked
   - invitation_invalid
   - invitation_expired
   - invitation_consumed
