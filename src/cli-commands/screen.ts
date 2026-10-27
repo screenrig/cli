@@ -192,7 +192,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--note <TEXT>", NOTE_HELP, reviewNoteOption)
     .action(bind(handleScreenScheduleClear));
 
-  const takeover = screen.command("takeover").description("Put a playlist ahead of the schedule and assignment, or clear it");
+  const takeover = screen.command("takeover").description("Put a playlist ahead of campaigns, the schedule and assignment, or clear it");
   takeover.command("set", { isDefault: true }).description("Take over a screen or a fleet with one playlist (default: screen takeover ID ...)")
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)

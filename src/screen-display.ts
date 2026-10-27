@@ -144,7 +144,7 @@ export function playPageProblem(error: unknown, id: string): unknown {
   if (error.problem.code === "page_not_on_screen") {
     return new CliError({
       ...error.problem,
-      next: { command: `screenrig screen show ${id}`, reason: "The page must belong to the playlist the screen is playing now (its takeover, else its schedule, else its assigned playlist). The detail names that playlist; use one of its page ids." },
+      next: { command: `screenrig screen show ${id}`, reason: "The page must belong to the playlist the screen is playing now (its takeover, else a campaign that holds, else its schedule, else its assigned playlist). The detail names that playlist; use one of its page ids." },
     }, error.exitCode, error.warnings);
   }
   if (error.problem.code === "play_page_unsupported") {

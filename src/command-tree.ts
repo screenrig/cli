@@ -46,6 +46,7 @@ function protectOption(command: Command, option: Option, argv: readonly string[]
       || (command.name() === "create" && command.parent?.name() === "service-client")))
       || (name === "tag" && command.parent?.name() === "fleet-links" && ["create", "update"].includes(command.name()))
       || (name === "screen-id" && command.parent?.name() === "triggers" && command.name() === "create")
+      || (["tag", "any-tag", "screen-id", "window"].includes(name) && command.parent?.name() === "campaign" && ["create", "update"].includes(command.name()))
       || (command.parent?.name() === "feeds" && command.name() === "get" && (FEED_REPEATABLE_FLAGS as readonly string[]).includes(name));
     if (seen.has(handlerOptionName(option)) && !repeatable) throw usageError(`--${name} may be supplied only once.`);
     seen.add(handlerOptionName(option));

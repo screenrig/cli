@@ -3950,6 +3950,206 @@ paths:
           $ref: '#/components/responses/RateLimitedProblem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/campaigns:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: listCampaigns
+      description: Lists the project's campaigns in precedence order (at most 100), the order resolution reads them.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The project's campaigns.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignList'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createCampaign
+      description: 'Creates a campaign: every screen in its audience switches to playlist_id while from, until and windows hold in the screen''s timezone (screenrig.schedule/v1; omit all three for always), and back when they stop holding. A screen resolves its playlist as its takeover, then the first campaign that applies in precedence order (priority, higher first, then the most recently created), then its playlist schedule, then its default playlist. A campaign applies only to a screen with a default playlist; one with from, until or windows needs the screen''s timezone. The playlist must exist and be approved (playlist_not_approved). Screens switch within a minute; GET /api/campaigns/{id}/screens shows each screen''s standing. A project has at most 100 campaigns (campaign_limit_reached). Appends campaign.created.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampaignWrite'
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '400':
+          description: invalid_request, including an audience rule, a window or a playlist_id the project does not have.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: campaign_limit_reached, playlist_not_approved or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/campaigns/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: getCampaign
+      description: One campaign.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: One campaign.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      x-screenrig-access: write
+      operationId: updateCampaign
+      description: Changes the members the body sets; null clears from, until or windows. paused true stops the campaign on every screen and false resumes it. Every screen of the old and the new audience re-resolves within a minute. Appends campaign.updated. If-Match guards the revision.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampaignPatch'
+      responses:
+        '200':
+          description: The updated campaign.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '409':
+          description: playlist_not_approved or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteCampaign
+      description: Deletes the campaign. Every screen showing it returns to what it would show without it within a minute. Appends campaign.deleted. If-Match guards the revision.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted.
+        '412':
+          description: revision_conflict.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/campaigns/{id}/screens:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: listCampaignScreens
+      description: The campaign's reach. counts covers every live screen in its audience (audience, then one count per status); items is one page of those screens in screen id order with the campaign's standing on each (see CampaignStatus).
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: next_cursor of the previous page.
+      responses:
+        '200':
+          description: The campaign's audience and standing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignScreens'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/screens/{id}/campaigns:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: explainScreenCampaigns
+      description: Why each campaign of the project plays on this screen or not, in precedence order, with the screen's effective playlist.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: Every campaign's standing on the screen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenCampaigns'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/triggers:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -13649,6 +13849,56 @@ paths:
           $ref: '#/components/responses/RateLimitedProblem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/projects/{project_id}/campaigns:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listCampaignsInProject
+      description: Lists the project's campaigns in precedence order (at most 100), the order resolution reads them.
+      security:
+        - projectBearer: []
+      responses:
+        '200':
+          description: The project's campaigns.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignList'
+        default:
+          $ref: '#/components/responses/Problem'
+      parameters: []
+    post:
+      x-screenrig-access: write
+      operationId: createCampaignInProject
+      description: createCampaign for the project named in the path.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampaignWrite'
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/projects/{project_id}/triggers:
     parameters:
       - name: project_id
@@ -19603,10 +19853,10 @@ components:
       additionalProperties: false
       required: [id, source]
       description: >-
-        The playlist the screen's runtime manifest is built from: the takeover, else the first matching playlist schedule entry (entry_id), else the assigned default. until is the next instant this is known to change (takeover end or the next schedule boundary within eight days), absent when nothing time-based changes it. The boundary worker applies a change at most 60 seconds late. A takeover or entry whose playlist cannot be shown is skipped. Absent when the screen shows no playlist.
+        The playlist the screen's runtime manifest is built from: the takeover, else the first campaign that applies (entry_id is the campaign id), else the first matching playlist schedule entry (entry_id), else the assigned default. until is the next instant this is known to change (takeover end or the next schedule boundary within eight days), absent when nothing time-based changes it. The boundary worker applies a change at most 60 seconds late. A takeover or entry whose playlist cannot be shown is skipped. Absent when the screen shows no playlist.
       properties:
         id: {type: string}
-        source: {type: string, enum: [takeover, schedule, default]}
+        source: {type: string, enum: [takeover, campaign, schedule, default]}
         entry_id: {type: string}
         until: {type: string, format: date-time}
     ScreenPlayerIdentity:
@@ -20842,6 +21092,95 @@ components:
         started_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
         ended_at: {type: string, format: date-time}
+    CampaignAudience:
+      type: object
+      minProperties: 1
+      maxProperties: 1
+      description: >-
+        Which screens a campaign targets: exactly one of all (every rule matches), any (at least one matches), tag (the screen carries the tag) or screen_id (that screen). Rules nest at most 3 deep and an audience has at most 500 rules. {"all": []} is every screen of the project; elsewhere all and any list at least one rule.
+      properties:
+        all: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/CampaignAudience"}}
+        any: {type: array, minItems: 1, maxItems: 500, items: {$ref: "#/components/schemas/CampaignAudience"}}
+        tag: {type: string, pattern: "^[A-Za-z0-9]{1,32}$"}
+        screen_id: {type: string, minLength: 1, maxLength: 200}
+    Campaign:
+      type: object
+      additionalProperties: false
+      required: [id, name, playlist_id, audience, priority, paused, revision, created_at, updated_at]
+      description: >-
+        A content campaign: every screen in audience shows playlist_id while from, until and windows hold in the screen's timezone. Absent from, until and windows mean always.
+      properties:
+        project_id: {type: string}
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?cmp_[A-Za-z0-9_-]+$"}
+        name: {type: string, minLength: 1, maxLength: 120}
+        playlist_id: {type: string}
+        audience: {$ref: "#/components/schemas/CampaignAudience"}
+        from: {type: string, description: "Civil YYYY-MM-DDTHH:MM in each screen's timezone, inclusive."}
+        until: {type: string, description: "Civil YYYY-MM-DDTHH:MM in each screen's timezone, exclusive."}
+        windows: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}}
+        priority: {type: integer, minimum: 0, maximum: 100, description: "Higher wins when two campaigns hold on one screen; on a tie the more recently created wins."}
+        paused: {type: boolean}
+        revision: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    CampaignList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/Campaign"}}}}
+    CampaignWrite:
+      type: object
+      additionalProperties: false
+      required: [name, playlist_id, audience]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        playlist_id: {type: string, minLength: 1}
+        audience: {$ref: "#/components/schemas/CampaignAudience"}
+        from: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$"}
+        until: {type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$", description: Later than from.}
+        windows: {type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}}
+        priority: {type: integer, minimum: 0, maximum: 100, default: 0}
+        paused: {type: boolean, default: false}
+    CampaignPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        playlist_id: {type: string, minLength: 1}
+        audience: {$ref: "#/components/schemas/CampaignAudience"}
+        from: {anyOf: [{type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$"}, {type: "null"}], description: null clears it.}
+        until: {anyOf: [{type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]$"}, {type: "null"}], description: null clears it.}
+        windows: {anyOf: [{type: array, minItems: 1, maxItems: 16, items: {$ref: "#/components/schemas/ScreenScheduleWindow"}}, {type: "null"}], description: null clears them.}
+        priority: {type: integer, minimum: 0, maximum: 100}
+        paused: {type: boolean}
+    CampaignStatus:
+      type: object
+      additionalProperties: false
+      required: [campaign_id, screen_id, status]
+      description: >-
+        One campaign's standing on one screen. playing: the screen shows it. pending: it should show and the switch lands within a minute. waiting: outside from, until or windows now (next_start, when it starts within eight days). ended: until has passed. outranked: it holds, but a screen takeover (reason takeover) or another campaign (reason campaign, by) wins. paused. blocked: it cannot show here (reason no_default_playlist, no_timezone, or playlist_unavailable: the playlist is missing, unapproved or does not fit the screen). not_in_audience.
+      properties:
+        campaign_id: {type: string}
+        screen_id: {type: string}
+        screen_name: {type: string}
+        status: {type: string, enum: [playing, pending, waiting, ended, outranked, paused, blocked, not_in_audience]}
+        reason: {type: string, enum: [takeover, campaign, no_default_playlist, no_timezone, playlist_unavailable]}
+        by: {type: string, description: The campaign that outranks this one.}
+        next_start: {type: string, format: date-time}
+    CampaignScreens:
+      type: object
+      additionalProperties: false
+      required: [campaign_id, counts, items]
+      properties:
+        campaign_id: {type: string}
+        counts: {type: object, additionalProperties: {type: integer, minimum: 0}, description: "audience, then one count per status present."}
+        items: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/CampaignStatus"}}
+        next_cursor: {type: string}
+    ScreenCampaigns:
+      type: object
+      additionalProperties: false
+      required: [screen_id, items]
+      properties:
+        screen_id: {type: string}
+        effective_playlist: {anyOf: [{$ref: "#/components/schemas/ScreenEffectivePlaylist"}, {type: "null"}]}
+        items: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/CampaignStatus"}}
     Trigger:
       type: object
       additionalProperties: false
@@ -22464,6 +22803,7 @@ x-problem-codes:
   - recovery_not_offered
   - invitation_limit_reached
   - trigger_limit_reached
+  - campaign_limit_reached
   - kv_webhook_limit_reached
   - organization_admin_limit
   - version_required
