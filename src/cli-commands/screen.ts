@@ -2,8 +2,9 @@ import { addValueAlias } from "./aliases.js";
 import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes.js";
 import { NOTE_HELP, positiveInteger, reviewNoteOption, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleScreenChanges, handleScreenRevert, handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory } from "../commands.js";
+import { handleScreenChanges, handleScreenRevert, handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel } from "../commands.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
+import { expiresInOption, identifyDurationOption, suspendMessageOption } from "../screen-commands.js";
 import { untilOption } from "../screen-display.js";
 import { WALL_ARRANGEMENTS, WALL_ROTATIONS, wallOutputsOption } from "../screen-wall.js";
 import { playsInstantOption } from "../playback-export.js";
@@ -129,6 +130,17 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleScreenUnarchive));
 
+  screen.command("suspend").description("Show a notice on a screen instead of its content, until screen resume")
+    .argument("<id>", "Screen identifier")
+    .requiredOption("--message <TEXT>", "Set the notice the screen shows, 1 to 280 characters; line feeds are kept (required)", suspendMessageOption)
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .action(bind(handleScreenSuspend));
+
+  screen.command("resume").description("End a screen's suspension so it shows its own content again")
+    .argument("<id>", "Screen identifier")
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .action(bind(handleScreenResume));
+
   screen.command("delete").description("Delete a screen")
     .argument("<id>", "Screen identifier")
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
@@ -146,9 +158,16 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   addCommandNotes(recover, "Recovery reconnects a display that lost its stored identity and now reports this screen's hardware identifiers while pairing. Nothing is rebound until this command confirms it: the screen keeps its label, playlist, timezone, schedules, and history; the display's new key replaces the previous one, which retires after a fifteen-minute grace window. screen show reports the offer as recovery_pending with its deadline and, when the server reports it, the platform, model, firmware, and manufacturer of the display asking to reconnect. Compare the reported model and firmware with the display you expect before confirming: a display's identifiers can be read by any application running on it, so the offer alone does not prove which display is asking. The service refuses offers while the screen's current player is still online and limits how many offers each screen receives. Recovery never crosses projects.");
   addCommandExamples(recover, "screenrig screen show scr_LOBBY", "screenrig screen recover scr_LOBBY");
 
+  screen.command("replace").description("Move the device paired as another screen onto this screen, keeping its settings and history")
+    .argument("<id>", "Screen to keep: it keeps its name, playlist, schedules and history")
+    .requiredOption("--with <ID>", "Screen whose paired device takes over this screen; it is archived (required)")
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision of the screen to keep", revision)
+    .action(bind(handleScreenReplace));
+
   screen.command("reload").description("Ask a screen's player, or a fleet's players, to reload")
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
+    .option("--expires-in <DURATION>", "How long the reload waits for an offline screen to come online: 60s to 24h, such as 30m or 2h (default 24h)", expiresInOption)
     .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
     .action(bind(handleScreenReload));
 
@@ -159,6 +178,11 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .addOption(new Option("--level <LEVEL>", "Set toast level").choices(["error", "alert", "info"]).default("info"))
     .option("--duration-ms <MS>", "Show the message for 2000–60000 milliseconds", toastDuration)
     .action(bind(handleScreenToast));
+
+  screen.command("identify").description("Show a screen's name over its content for a while, to find it on site")
+    .argument("<id>", "Screen identifier")
+    .option("--duration <DURATION>", "How long the overlay stays up: 2s to 10m, such as 30s or 1m30s (default 60s)", identifyDurationOption)
+    .action(bind(handleScreenIdentify));
 
   screen.command("play-page").description("Start a page of the playlist a screen is playing now, for checking that page with screen screenshot")
     .argument("<id>", "Screen identifier")
@@ -234,10 +258,18 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("[id...]", "Screen identifier; several ids target those screens in one fleet request")
     .option("--tag <TAG>", "Target every active screen carrying this tag", screenTagOption)
     .option("--yes", "Confirm a reboot of several screens or --tag (required for a fleet)")
+    .option("--expires-in <DURATION>", "How long the reboot waits for an offline screen to come online: 60s to 24h, such as 30m or 2h (default 24h)", expiresInOption)
     .option("--expect-rev <REVISION>", "Optionally require this screen revision (one screen id only)", revision)
     .action(bind(handleScreenReboot));
-  addCommandNotes(reboot, "Reboot:\n  The Player reboots the device, not just itself. Only a Player that declares\n  the reboot capability in its host report receives it; any other screen is\n  refused with reboot_unsupported (exit 5) and nothing is sent. The request\n  expires after ten minutes, and each screen accepts at most 2 reboots per 10\n  minutes; a refused or failed request and an exact replay spend none. A\n  fleet (several ids or --tag) requires --yes: the CLI never prompts.");
-  addCommandExamples(reboot, "screenrig screen reboot scr_LOBBY", "screenrig screen reboot --tag Lobby --yes");
+  addCommandNotes(reboot, "Reboot:\n  The Player reboots the device, not just itself. Only a Player that declares\n  the reboot capability in its host report receives it; any other screen is\n  refused with reboot_unsupported (exit 5) and nothing is sent. A screen that\n  is online is sent the request at once (state sent); an offline screen holds\n  it queued (state queued) and is sent it when it comes online, for 24 hours by\n  default; --expires-in changes that, from 60s to 24h. A newer reboot\n  supersedes one still queued. screen show lists the screen's commands (a sent\n  reboot is done once the device reports it booted), and screen command cancel\n  ID COMMAND_ID cancels one still queued. Each screen accepts at most 2 reboots\n  per 10 minutes; a refused or failed request and an exact replay spend none. A\n  fleet (several ids or --tag) requires --yes: the CLI never prompts.");
+  addCommandExamples(reboot, "screenrig screen reboot scr_LOBBY", "screenrig screen reboot scr_LOBBY --expires-in 2h", "screenrig screen reboot --tag Lobby --yes");
+
+  const commandGroup = screen.command("command").description("Manage the reboots and reloads asked of a screen");
+  commandGroup.command("cancel").description("Cancel a reboot or reload still queued for an offline screen")
+    .argument("<id>", "Screen identifier")
+    .argument("<command_id>", "Command id: an entry of commands in screen show, or the reboot_id or reload_id of the request's answer")
+    .option("--expect-rev <REVISION>", "Optionally require this resource revision", revision)
+    .action(bind(handleScreenCommandCancel));
 
   const displayGroup = screen.command("display").description("Turn a screen's display on or off now, or clear that override");
   const display = displayGroup.command("set", { isDefault: true }).description("Turn a screen's display, or a fleet's displays, on or off now (default: screen display ID --power on|off)")

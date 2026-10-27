@@ -5827,7 +5827,7 @@ test("screen list adds the reason column only when an archived screen reports on
 });
 
 test("screen reload posts the reload route with an idempotency key and returns reload_id", async () => {
-  const transport = memoryBackend();
+  const transport = memoryBackend({ now: () => new Date("2026-08-14T17:00:00.000Z") });
   const paired = await withAuthenticatedRuntime(["--json", "screen", "pair", "ABC234"], transport);
   assert.equal(paired.code, ExitCode.Success, paired.stdout);
   const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => paired.configDir, env: { XDG_CONFIG_HOME: paired.configDir } };
@@ -5854,10 +5854,12 @@ test("screen reload posts the reload route with an idempotency key and returns r
     assert.ok(post.headers?.["idempotency-key"], "a reload must carry an idempotency key");
     assert.equal(post.headers?.["if-match"], undefined, "If-Match is optional");
     assert.equal(post.body, undefined, "the reload route takes no body");
-    const envelope = JSON.parse(result.stdout) as { ok: boolean; data: { reload_id: string; expires_at: string } };
+    const envelope = JSON.parse(result.stdout) as { ok: boolean; data: { reload_id: string; expires_at: string; state: string } };
     assert.equal(envelope.ok, true);
     assert.match(envelope.data.reload_id, /^[A-Za-z0-9_-]{8,64}$/);
-    assert.equal(envelope.data.expires_at, "2026-08-14T17:10:00.000Z");
+    // A reload waits 24 hours by default, and this screen has never been online.
+    assert.equal(envelope.data.expires_at, "2026-08-15T17:00:00.000Z");
+    assert.equal(envelope.data.state, "queued");
 
     const guarded = await withRuntime(
       ["--human", "screen", "reload", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", String(archivedScreen.revision)],
@@ -5866,8 +5868,8 @@ test("screen reload posts the reload route with an idempotency key and returns r
     );
     assert.equal(guarded.code, ExitCode.Success, guarded.stdout);
     assert.equal(reloadCalls().at(-1)?.headers?.["if-match"], `"${archivedScreen.revision}"`);
-    assert.match(projectHumanBody(guarded.stdout), /^Reload accepted\nscreen_id: scr_PAIRINGAAAAAAAAAAAAAAAA\nreload_id: \S+\nexpires_at: 2026-08-14T17:10:00\.000Z\n/);
-    assert.match(guarded.stdout, /The Player reloads once/);
+    assert.match(projectHumanBody(guarded.stdout), /^Reload accepted\nscreen_id: scr_PAIRINGAAAAAAAAAAAAAAAA\nreload_id: \S+\nstate: queued\nexpires_at: 2026-08-15T17:00:00\.000Z\n/);
+    assert.match(guarded.stdout, /The screen is offline, so the reload waits: it is sent when the screen comes online before expires_at\. Cancel it with screen command cancel scr_PAIRINGAAAAAAAAAAAAAAAA rld_\S+\./);
 
     const stale = await withRuntime(
       ["--json", "screen", "reload", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", String(archivedScreen.revision - 1)],
@@ -5967,9 +5969,13 @@ test("screen help describes reload, archive recovery, and archive reasons", () =
   assert.match(reload, /--expect-rev/);
   assert.match(reload, /reload_id/);
   assert.match(reload, /ten minutes/);
+  assert.match(reload, /--expires-in <DURATION>\s+How long the reload waits for an offline screen to come online: 60s to\s+24h/);
+  assert.match(reload, /an offline screen holds it queued \(state queued\) and is sent it when it comes online, for 24 hours by default/);
+  assert.match(reload, /screen command cancel ID COMMAND_ID/);
   assert.match(reload, /archived screens/);
   assert.match(reload, /resource_conflict/);
   assert.match(reload, /screenrig screen reload scr_SCREEN/);
+  assert.match(reload, /screenrig screen reload scr_SCREEN --expires-in 2h/);
   const unarchive = commandHelp(["screen", "unarchive"]).usage;
   assert.match(unarchive, /device_reset/);
   assert.match(unarchive, /device_unpair/);

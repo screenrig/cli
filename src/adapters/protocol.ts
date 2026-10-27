@@ -583,9 +583,61 @@ export interface ScreenDisplayScheduleView {
   display?: ScreenDisplay;
 }
 
+/** sent: the screen was online and its Player was handed the command at once. queued: the screen was offline; the command is sent when it comes online before expires_at. */
+export type ScreenCommandDelivery = "queued" | "sent";
+
 export interface ScreenRebootAccepted {
   reboot_id: string;
   expires_at: string;
+  state: ScreenCommandDelivery;
+}
+
+/** The optional body of POST /api/screens/{id}/reboot and /reload: how long the command stays actionable, 60 to 86400 seconds (default 86400). */
+export interface ScreenCommandWrite {
+  expires_in_s?: number;
+}
+
+/**
+ * One reboot or reload asked of a screen, in Screen.commands (oldest first, at
+ * most 10). expired is derived by the server on read for a queued command past
+ * expires_at; a reload never reaches done.
+ */
+export interface ScreenCommand {
+  id: string;
+  type: "reboot" | "reload";
+  state: "queued" | "sent" | "done" | "expired" | "cancelled" | "superseded";
+  requested_at: string;
+  expires_at: string;
+  sent_at?: string;
+  done_at?: string;
+}
+
+/** Screen.suspension: present while the screen shows a notice instead of its content. */
+export interface ScreenSuspension {
+  message: string;
+  since: string;
+}
+
+/** Write body for POST /api/screens/{id}/identify; duration_ms is omitted so the server can default it (60000). */
+export interface ScreenIdentifyWrite {
+  duration_ms?: number;
+}
+
+/** Accepted POST /api/screens/{id}/identify. A Player acts on one identify_id at most once and ignores it after expires_at. */
+export interface ScreenIdentifyAccepted {
+  identify_id: string;
+  duration_ms: number;
+  expires_at: string;
+}
+
+/** Write body for POST /api/screens/{id}/suspend. */
+export interface ScreenSuspendWrite {
+  message: string;
+}
+
+/** Write body for POST /api/screens/{id}/replace: the screen whose paired device takes over the screen in the path. */
+export interface ScreenReplaceWrite {
+  with: string;
 }
 
 /** Write body for POST /api/screens/{id}/play-page. */
@@ -708,14 +760,21 @@ export interface Screen {
   recovery_pending?: ScreenRecoveryPending;
   /**
    * Present only while archived: what archived the screen. Known values are
-   * project, device_reset, and device_unpair; readers keep a value they do
-   * not know. Every reason keeps the device binding, so unarchive resumes the
-   * display with no re-pairing. Absent on screens archived before reasons
-   * were recorded. Read-only.
+   * project, device_reset, device_unpair, and replaced; readers keep a value
+   * they do not know. Every reason but replaced keeps the device binding, so
+   * unarchive resumes the display with no re-pairing; a replaced screen keeps
+   * none and is deleted, not restored. Absent on screens archived before
+   * reasons were recorded. Read-only.
    */
   archive_reason?: string;
   /** Present only while archived with archive_reason. Instant the screen was archived. Read-only. */
   archived_at?: string;
+  /** Present when archive_reason is replaced: the screen this screen's device moved to (screen replace). Read-only. */
+  replaced_by?: string;
+  /** The reboots and reloads asked of this screen, oldest first, at most 10. Absent when it has none. Read-only: screen reboot and reload add to it, screen command cancel cancels a queued entry. */
+  commands?: ScreenCommand[];
+  /** Present while the screen shows a notice instead of its content (screen suspend). Read-only. */
+  suspension?: ScreenSuspension;
   /**
    * Present while the paired Player cannot show the application or iframe
    * primitives its manifest carries. at is when the condition began. The
@@ -808,7 +867,7 @@ export type ScreenActionSelector =
 /** One fleet action, discriminated by type. New action types are additive. */
 export type ScreenAction =
   | { type: "assign"; playlist_id: string }
-  | { type: "reload" }
+  | ({ type: "reload" } & ScreenCommandWrite)
   | ({ type: "toast" } & ScreenToastWrite)
   | { type: "set_tags"; tags: ScreenTags }
   | { type: "add_tags"; tags: string[] }
@@ -817,7 +876,7 @@ export type ScreenAction =
   | { type: "takeover_clear" }
   | { type: "set_playlist_schedule"; entries: ScreenScheduleEntryWrite[] }
   | { type: "clear_playlist_schedule" }
-  | { type: "reboot" }
+  | ({ type: "reboot" } & ScreenCommandWrite)
   | { type: "display"; power: "on" | "off"; until?: string | null }
   | { type: "display_clear" }
   | { type: "set_display_schedule"; enabled: boolean; windows: ScreenScheduleWindow[] }
@@ -906,6 +965,7 @@ export interface ScreenToastAccepted {
 export interface ScreenReloadAccepted {
   reload_id: string;
   expires_at: string;
+  state: ScreenCommandDelivery;
 }
 
 /** shot_ plus 16 to 64 unpadded base64url characters. */

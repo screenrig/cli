@@ -376,7 +376,7 @@ async function main(): Promise<void> {
     backend.putScreen!({
       id: "scr_DISPLAYAAAAAAAAAAAAAAAA", public_id: "pub_display", label: "Display", state: "active", online: true, revision: 1,
       manifest_revision: 1, content_access_generation: 1, timezone: "America/Los_Angeles", tags: ["Hall"],
-      host: { platform: "android", capabilities: ["reboot", "display_power.cec"] },
+      host: { platform: "android", capabilities: ["reboot", "identify", "display_power.cec"] },
       created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
     } as unknown as Parameters<NonNullable<typeof backend.putScreen>>[0]);
     const bothScreens = await run("screen", "list");
@@ -403,7 +403,30 @@ async function main(): Promise<void> {
     await run("screen", "display-schedule", "set", "--tag", "Hall", "--file", hours);
     await run("screen", "display-schedule", "clear", "--tag", "Hall");
     await run("screen", "display-schedule", "clear", "scr_DISPLAYAAAAAAAAAAAAAAAA");
-    const deleted = await invoke(["screen", "delete", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", "5"]);
+    // Identify, suspend and resume on the online screen.
+    const identified = await run("screen", "identify", "scr_DISPLAYAAAAAAAAAAAAAAAA", "--duration", "30s");
+    assert.equal((identified.data as { duration_ms?: number }).duration_ms, 30000);
+    const noticed = await run("screen", "suspend", "scr_DISPLAYAAAAAAAAAAAAAAAA", "--message", "Closed for stocktake");
+    assert.equal((noticed.data as { suspension?: { message?: string } }).suspension?.message, "Closed for stocktake");
+    const resumed = await run("screen", "resume", "scr_DISPLAYAAAAAAAAAAAAAAAA");
+    assert.equal((resumed.data as { suspension?: unknown }).suspension, undefined);
+    // An offline screen holds a reboot queued until it is cancelled; replace then moves a device onto it.
+    const offline = (id: string, online: boolean, capabilities: string[]) => backend.putScreen!({
+      id, public_id: `pub_${id}`, label: id.slice(4, 11), state: "active", online, revision: 1, manifest_revision: 1, content_access_generation: 1,
+      host: { platform: "android", capabilities }, created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
+    } as unknown as Parameters<NonNullable<typeof backend.putScreen>>[0]);
+    offline("scr_OFFLINEAAAAAAAAAAAAAAAA", false, ["reboot"]);
+    const queued = await run("screen", "reboot", "scr_OFFLINEAAAAAAAAAAAAAAAA", "--expires-in", "2h");
+    assert.equal((queued.data as { state?: string }).state, "queued");
+    const cancelled = await run("screen", "command", "cancel", "scr_OFFLINEAAAAAAAAAAAAAAAA", String((queued.data as { reboot_id?: string }).reboot_id));
+    assert.equal((cancelled.data as { commands?: Array<{ state?: string }> }).commands?.[0]?.state, "cancelled");
+    offline("scr_NEWDEVICEAAAAAAAAAAAAAA", true, ["reboot", "identify"]);
+    const replaced = await run("screen", "replace", "scr_OFFLINEAAAAAAAAAAAAAAAA", "--with", "scr_NEWDEVICEAAAAAAAAAAAAAA");
+    assert.deepEqual((replaced.data as { host?: { capabilities?: string[] } }).host?.capabilities, ["reboot", "identify"]);
+    const left = await run("screen", "show", "scr_NEWDEVICEAAAAAAAAAAAAAA");
+    assert.equal((left.data as { archive_reason?: string; replaced_by?: string }).archive_reason, "replaced");
+    assert.equal((left.data as { replaced_by?: string }).replaced_by, "scr_OFFLINEAAAAAAAAAAAAAAAA");
+    const deleted =await invoke(["screen", "delete", "scr_PAIRINGAAAAAAAAAAAAAAAA", "--expect-rev", "5"]);
     assert.equal(deleted.code, 5, `screen delete must surface screen_archive_required: ${deleted.stderr || deleted.stdout}`);
     assert.equal((JSON.parse(deleted.stdout) as { error?: { code?: string } }).error?.code, "screen_archive_required");
     await run("playlist", "delete", "pl_AAAAAAAAAAAAAAAAAAAAAAAA", "--expect-rev", "2");

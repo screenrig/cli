@@ -20,6 +20,7 @@ import type {
   MediaUploadDeclaration,
   Operation,
   Screen,
+  ScreenCommand,
 } from "../adapters/protocol.js";
 import type {
   Transport,
@@ -1131,13 +1132,51 @@ export function memoryBackend(options: {
     if (!current?.schedule) return { screen };
     return { screen: { ...resolveDisplay(screen, undefined, current.override), revision: screen.revision + 1 } };
   };
-  const rebootOutcome = (screen: Screen): { accepted: { reboot_id: string; expires_at: string } } | { problem: ReturnType<typeof controlProblem> } => {
+  // Queued commands (docs/player-compatibility.md §6.3, §6.5): an online screen
+  // is sent a reboot or reload at once; an offline one holds it queued. The
+  // commands live on the screen record, newest last, at most ten, and a newer
+  // queued command of one type supersedes an older one. The screen revision
+  // does not change.
+  type CommandAnswer = { id: string; expires_at: string; state: "queued" | "sent" };
+  let commandSequence = 0;
+  const commandLifetime = (body: unknown): { seconds: number } | { problem: ReturnType<typeof controlProblem> } => {
+    const value = (body as { expires_in_s?: unknown } | undefined)?.expires_in_s;
+    if (value === undefined) return { seconds: 86_400 };
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 60 || value > 86_400) {
+      return { problem: controlProblem(400, "invalid_request", "expires_in_s: must be between 60 and 86400 seconds") };
+    }
+    return { seconds: value };
+  };
+  const issueCommand = (screen: Screen, type: "reboot" | "reload", seconds: number): CommandAnswer => {
+    const now = clock();
+    const state = screen.online ? "sent" : "queued";
+    const command: ScreenCommand = {
+      id: `${type === "reboot" ? "rbt" : "rld"}_${String(++commandSequence).padStart(8, "0")}`,
+      type, state, requested_at: now.toISOString(), expires_at: new Date(now.getTime() + seconds * 1000).toISOString(),
+      ...(state === "sent" ? { sent_at: now.toISOString() } : {}),
+    };
+    const kept = (screen.commands ?? []).map((item): ScreenCommand => (item.type === type && item.state === "queued" ? { ...item, state: "superseded" } : item));
+    screens.set(screen.id, { ...screen, commands: [...kept, command].slice(-10) });
+    return { id: command.id, expires_at: command.expires_at, state };
+  };
+  const rebootOutcome = (screen: Screen, body?: unknown): { accepted: { reboot_id: string; expires_at: string; state: "queued" | "sent" } } | { problem: ReturnType<typeof controlProblem> } => {
+    const lifetime = commandLifetime(body);
+    if ("problem" in lifetime) return lifetime;
     if (screen.state === "archived") return { problem: controlProblem(409, "screen_archived", "screen is archived") };
     if (screen.state !== "active") return { problem: controlProblem(409, "resource_conflict", "screen is not active") };
     if (!(screen.host?.capabilities ?? []).includes("reboot")) {
       return { problem: controlProblem(409, "reboot_unsupported", "The screen's Player does not declare the reboot capability.") };
     }
-    return { accepted: { reboot_id: `rbt_${screen.id.slice(-10).padStart(10, "0")}`, expires_at: new Date(clock().getTime() + 600_000).toISOString() } };
+    const issued = issueCommand(screen, "reboot", lifetime.seconds);
+    return { accepted: { reboot_id: issued.id, expires_at: issued.expires_at, state: issued.state } };
+  };
+  // A reload works on an archived screen; one still waiting to pair has no Player.
+  const reloadOutcome = (screen: Screen, body?: unknown): { accepted: { reload_id: string; expires_at: string; state: "queued" | "sent" } } | { problem: ReturnType<typeof controlProblem> } => {
+    const lifetime = commandLifetime(body);
+    if ("problem" in lifetime) return lifetime;
+    if (screen.state === "pairing_pending") return { problem: controlProblem(409, "resource_conflict", "The screen has no Player yet.") };
+    const issued = issueCommand(screen, "reload", lifetime.seconds);
+    return { accepted: { reload_id: issued.id, expires_at: issued.expires_at, state: issued.state } };
   };
   const screenOf = (req: TransportRequest) => screens.get(decodeURIComponent(req.path.split("/")[3] ?? ""));
   const displayRoute = (req: TransportRequest, change: DisplayChange): TransportResponse => {
@@ -1148,11 +1187,20 @@ export function memoryBackend(options: {
     screens.set(screen.id, outcome.screen);
     return { status: 200, headers: { etag: `"${outcome.screen.revision}"` }, body: outcome.screen };
   };
+  const commandReplays = new Map<string, unknown>();
   transport.on("POST", /^\/api\/screens\/[^/]+\/reboot$/, (req): TransportResponse => {
     const screen = screenOf(req);
     if (!screen) return { status: 404, headers: { "content-type": "application/problem+json" }, body: controlProblem(404, "not_found", "Resource was not found.") };
-    const outcome = rebootOutcome(screen);
+    const ifMatch = req.headers?.["if-match"];
+    if (ifMatch && ifMatch !== `"${screen.revision}"`) {
+      return { status: 412, headers: { "content-type": "application/problem+json" }, body: controlProblem(412, "revision_conflict", "The screen revision changed.") };
+    }
+    // An exact Idempotency-Key retry returns the original answer.
+    const key = req.headers?.["idempotency-key"] ? `reboot:${screen.id}:${req.headers["idempotency-key"]}` : undefined;
+    if (key && commandReplays.has(key)) return { status: 202, headers: { "cache-control": "no-store", etag: `"${screen.revision}"` }, body: commandReplays.get(key) };
+    const outcome = rebootOutcome(screen, req.body);
     if ("problem" in outcome) return { status: outcome.problem.status, headers: { "content-type": "application/problem+json" }, body: outcome.problem };
+    if (key) commandReplays.set(key, outcome.accepted);
     return { status: 202, headers: { "cache-control": "no-store", etag: `"${screen.revision}"` }, body: outcome.accepted };
   });
   transport.on("POST", /^\/api\/screens\/[^/]+\/play-page$/, (req): TransportResponse => {
@@ -1213,10 +1261,13 @@ export function memoryBackend(options: {
         return { screen_id: id, status: "failed", problem: { type: "https://screenrig.ai/problems/not-found", title: "Not found", status: 404, code: "not_found", detail: "Screen not found." } };
       }
       const action = body.action;
-      if (action.type === "reload") return { screen_id: id, status: "ok", reload: { reload_id: "rld_FLEET0001", expires_at: "2026-08-14T17:10:00.000Z" } };
+      if (action.type === "reload") {
+        const outcome = reloadOutcome(screen, action);
+        return "problem" in outcome ? { screen_id: id, status: "failed", problem: outcome.problem } : { screen_id: id, status: "ok", reload: outcome.accepted };
+      }
       if (action.type === "toast") return { screen_id: id, status: "ok", toast: { expires_at: "2026-08-14T17:00:10.000Z" } };
       if (action.type === "reboot") {
-        const outcome = rebootOutcome(screen);
+        const outcome = rebootOutcome(screen, action);
         return "problem" in outcome ? { screen_id: id, status: "failed", problem: outcome.problem } : { screen_id: id, status: "ok", reboot: outcome.accepted };
       }
       if (["display", "display_clear", "set_display_schedule", "clear_display_schedule"].includes(action.type)) {
@@ -1263,7 +1314,12 @@ export function memoryBackend(options: {
     ) && (tag === undefined || (screen.tags ?? []).includes(tag)));
     return listPage(req, items, pageSize(500));
   });
-  transport.on("GET", /^\/api\/screens\/[^/]+$/, (req) => ({ status: 200, headers: {}, body: screens.get(req.path.split("/").pop() ?? "") }));
+  transport.on("GET", /^\/api\/screens\/[^/]+$/, (req) => {
+    const screen = screens.get(req.path.split("/").pop() ?? "");
+    // The server derives expired on read for a queued command past expires_at.
+    const read = screen?.commands ? { ...screen, commands: screen.commands.map((item): ScreenCommand => ({ ...item, state: commandState(item) })) } : screen;
+    return { status: 200, headers: {}, body: read };
+  });
   transport.on("PATCH", /^\/api\/screens\/[^/]+$/, (req): TransportResponse => {
     const id = req.path.split("/").pop() ?? "";
     const body = req.body as { name?: string; playlist_id?: string; timezone?: string; tags?: string[] };
@@ -1354,7 +1410,6 @@ export function memoryBackend(options: {
     screens.set(id, item);
     return { status: 200, headers: { etag: `"${item.revision}"` }, body: item };
   });
-  const reloads = new Map<string, { reload_id: string; expires_at: string }>();
   transport.on("POST", /^\/api\/screens\/[^/]+\/reload$/, (req): TransportResponse => {
     const id = req.path.split("/")[3] ?? "";
     const current = screens.get(id);
@@ -1368,15 +1423,112 @@ export function memoryBackend(options: {
     if (ifMatch && ifMatch !== `"${current.revision}"`) {
       return { status: 412, headers: { "content-type": "application/problem+json" }, body: { type: "https://screenrig.ai/problems/revision-conflict", title: "Revision conflict", status: 412, code: "revision_conflict", detail: "The screen revision changed." } };
     }
+    const headers = { "cache-control": "no-store", etag: `"${current.revision}"`, "x-request-id": req.headers?.["x-request-id"] ?? "req_reload" };
     // An exact Idempotency-Key retry returns the original reload.
-    const key = req.headers?.["idempotency-key"] ?? "";
-    const accepted = reloads.get(key) ?? { reload_id: `rld_${String(reloads.size + 1).padStart(8, "0")}`, expires_at: "2026-08-14T17:10:00.000Z" };
-    if (key) reloads.set(key, accepted);
+    const key = req.headers?.["idempotency-key"] ? `reload:${id}:${req.headers["idempotency-key"]}` : undefined;
+    if (key && commandReplays.has(key)) return { status: 202, headers, body: commandReplays.get(key) };
+    const outcome = reloadOutcome(current, req.body);
+    if ("problem" in outcome) return { status: outcome.problem.status, headers: { "content-type": "application/problem+json" }, body: outcome.problem };
+    if (key) commandReplays.set(key, outcome.accepted);
+    return { status: 202, headers, body: outcome.accepted };
+  });
+
+  // Cancel, identify, suspend, resume and replace, simplified to the contract's
+  // refusals and read models (docs/player-compatibility.md §5.7, §6.3, §6.3.2, §6.9).
+  const refusal = (status: number, code: string, detail: string): TransportResponse => ({ status, headers: { "content-type": "application/problem+json" }, body: controlProblem(status, code, detail) });
+  const screenRevisionRefusal = (req: TransportRequest, screen: Screen): TransportResponse | undefined => {
+    const ifMatch = req.headers?.["if-match"];
+    return ifMatch && ifMatch !== `"${screen.revision}"` ? refusal(412, "revision_conflict", "The screen revision changed.") : undefined;
+  };
+  const screenAnswer = (screen: Screen): TransportResponse => ({ status: 200, headers: { etag: `"${screen.revision}"` }, body: screen });
+  /** A queued command past expires_at reads expired. */
+  const commandState = (command: ScreenCommand): ScreenCommand["state"] => (command.state === "queued" && Date.parse(command.expires_at) <= clock().getTime() ? "expired" : command.state);
+  transport.on("POST", /^\/api\/screens\/[^/]+\/commands\/[^/]+\/cancel$/, (req): TransportResponse => {
+    const screen = screenOf(req);
+    if (!screen) return refusal(404, "not_found", "The screen was not found in this project.");
+    const stale = screenRevisionRefusal(req, screen);
+    if (stale) return stale;
+    const commandId = decodeURIComponent(req.path.split("/")[5] ?? "");
+    const command = (screen.commands ?? []).find((item) => item.id === commandId);
+    if (!command) return refusal(404, "not_found", "The command was not found on this screen.");
+    const state = commandState(command);
+    if (state === "sent" || state === "done") return refusal(409, "resource_conflict", "The command was already sent.");
+    if (state !== "queued") return refusal(409, "resource_conflict", "The command is no longer queued.");
+    const next: Screen = { ...screen, commands: (screen.commands ?? []).map((item): ScreenCommand => (item.id === commandId ? { ...item, state: "cancelled" } : item)) };
+    screens.set(screen.id, next);
+    return screenAnswer(next);
+  });
+  let identifySequence = 0;
+  transport.on("POST", /^\/api\/screens\/[^/]+\/identify$/, (req): TransportResponse => {
+    const screen = screenOf(req);
+    if (!screen) return refusal(404, "not_found", "The screen was not found in this project.");
+    const duration = (req.body as { duration_ms?: unknown } | undefined)?.duration_ms;
+    if (duration !== undefined && (typeof duration !== "number" || !Number.isInteger(duration) || duration < 2_000 || duration > 600_000)) {
+      return refusal(400, "invalid_request", "duration_ms: must be between 2000 and 600000");
+    }
+    if (screen.state === "archived") return refusal(409, "screen_archived", "The screen is archived.");
+    if (screen.state !== "active") return refusal(409, "resource_conflict", "The screen has no paired Player yet.");
+    if (!(screen.host?.capabilities ?? []).includes("identify")) return refusal(409, "identify_unsupported", "The screen's Player did not declare the identify host capability.");
     return {
       status: 202,
-      headers: { "cache-control": "no-store", etag: `"${current.revision}"`, "x-request-id": req.headers?.["x-request-id"] ?? "req_reload" },
-      body: accepted,
+      headers: { "cache-control": "no-store" },
+      body: { identify_id: `idf_${String(++identifySequence).padStart(8, "0")}`, duration_ms: duration ?? 60_000, expires_at: new Date(clock().getTime() + 60_000).toISOString() },
     };
+  });
+  transport.on("POST", /^\/api\/screens\/[^/]+\/suspend$/, (req): TransportResponse => {
+    const screen = screenOf(req);
+    if (!screen) return refusal(404, "not_found", "The screen was not found in this project.");
+    const message = ((req.body as { message?: unknown } | undefined)?.message);
+    const trimmed = typeof message === "string" ? message.trim() : "";
+    if ([...trimmed].length < 1 || [...trimmed].length > 280 || /[^\P{Cc}\n]/u.test(trimmed)) {
+      return refusal(400, "invalid_request", "message: must be 1 to 280 characters, with line feed the only control character");
+    }
+    const stale = screenRevisionRefusal(req, screen);
+    if (stale) return stale;
+    if (screen.state === "archived") return refusal(409, "screen_archived", "The screen is archived.");
+    // Suspending a suspended screen replaces the message and keeps since.
+    const next: Screen = { ...screen, suspension: { message: trimmed, since: screen.suspension?.since ?? clock().toISOString() }, revision: screen.revision + 1 };
+    screens.set(screen.id, next);
+    return screenAnswer(next);
+  });
+  transport.on("POST", /^\/api\/screens\/[^/]+\/resume$/, (req): TransportResponse => {
+    const screen = screenOf(req);
+    if (!screen) return refusal(404, "not_found", "The screen was not found in this project.");
+    const stale = screenRevisionRefusal(req, screen);
+    if (stale) return stale;
+    if (screen.state === "archived") return refusal(409, "screen_archived", "The screen is archived.");
+    // A screen that is not suspended answers unchanged: no revision bump.
+    if (!screen.suspension) return screenAnswer(screen);
+    const { suspension: _ended, ...rest } = screen;
+    const next: Screen = { ...rest, revision: screen.revision + 1 };
+    screens.set(screen.id, next);
+    return screenAnswer(next);
+  });
+  // The device paired as `with` takes over the screen in the path, which keeps
+  // its settings and gets the device's host; `with` is archived as replaced.
+  const DEVICE_READ_MODELS = ["health", "health_state", "status", "storage", "storage_forecast", "storage_shortfall", "observation", "manifest_report", "last_page_failure", "ads_unsupported", "applications_unsupported", "recovery_pending", "commands"];
+  transport.on("POST", /^\/api\/screens\/[^/]+\/replace$/, (req): TransportResponse => {
+    const kept = screenOf(req);
+    const withId = (req.body as { with?: unknown } | undefined)?.with;
+    if (typeof withId !== "string" || !withId) return refusal(400, "invalid_request", "with: must be the id of the screen whose device takes over");
+    if (kept && withId === kept.id) return refusal(400, "invalid_request", "with: must name another screen");
+    const taker = screens.get(withId);
+    if (!kept || !taker) return refusal(404, "not_found", "The screen was not found in this project.");
+    const stale = screenRevisionRefusal(req, kept);
+    if (stale) return stale;
+    if (kept.state === "archived" || taker.state === "archived") return refusal(409, "screen_archived", "The screen is archived.");
+    if (kept.state !== "active" || taker.state !== "active") return refusal(409, "resource_conflict", "The screen has no paired Player yet.");
+    if (kept.wall && !(taker.host?.capabilities ?? []).includes("display.wall")) return refusal(409, "wall_unsupported", "The screen's Player did not declare the display.wall host capability.");
+    const next: Record<string, unknown> = { ...kept, revision: kept.revision + 1, content_access_generation: kept.content_access_generation + 1 };
+    for (const key of DEVICE_READ_MODELS) delete next[key];
+    if (taker.host) next.host = taker.host;
+    else delete next.host;
+    screens.set(kept.id, next as unknown as Screen);
+    screens.set(taker.id, {
+      ...taker, state: "archived", archive_reason: "replaced", replaced_by: kept.id, archived_at: clock().toISOString(),
+      revision: taker.revision + 1, content_access_generation: taker.content_access_generation + 1,
+    });
+    return screenAnswer(next as unknown as Screen);
   });
   transport.on("POST", /^\/api\/screens\/[^/]+\/toast$/, (req) => {
     const body = (req.body ?? {}) as { duration_ms?: number };

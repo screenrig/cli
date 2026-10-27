@@ -14,7 +14,7 @@ info:
 
     Public remaining is whole credits, never millicredits. Authenticated /api and /api/playlists JSON and problem responses to a project bearer include ScreenRig-Credits-Remaining, ScreenRig-Credits-Reset, ScreenRig-Credits-Included and ScreenRig-Credits-Low. Player runtime responses never carry them (a screen is never refused for its balance), and SSE, content and unauthenticated responses omit them. The ledger unit remains millicredits (1000 mcr = 1 credit); published remaining is floored.
 
-    Authenticated user or agent /api and /api/playlists requests cost 1 credit, debited immediately against this server request id, after the first 10,000 API or billed listen-stream taxes in the UTC month. On Standard, remaining below the intro floor of negative 1,000,000 credits (zero from 2027-01-01) is payment_required; that includes the /api/playlists routes. Premium, Enterprise, Staff and Promo are never refused for their balance: usage is charged in full and remaining may go negative. GET /api/project, POST /api/agents/self/disconnect and the GET /api/billing reads do not debit, so a zero-remaining project can recover. Reading project notes (GET /api/notes and GET /api/notes/{id}) does not debit either; writing them does. Screen messages are exempt from this meter: POST /api/screens/{id}/toast, POST /api/screens/{id}/play-page, POST /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot, and GET /api/screens/{id}/screenshot/status. Runtime, pairing, content, health, and unauthenticated routes are not this meter. Inbound media commit, application accept, and K/V put bytes, outbound runtime media/package/release and K/V get bytes are recorded, never charged: bandwidth is free on every plan. Stored bytes settle hourly against remaining, and only the bytes a payer stores above its free 1 GB (1,000,000,000 bytes) count. Public remaining stays whole credits.
+    Authenticated user or agent /api and /api/playlists requests cost 1 credit, debited immediately against this server request id, after the first 10,000 API or billed listen-stream taxes in the UTC month. On Standard, remaining below the intro floor of negative 1,000,000 credits (zero from 2027-01-01) is payment_required; that includes the /api/playlists routes. Premium, Enterprise, Staff and Promo are never refused for their balance: usage is charged in full and remaining may go negative. GET /api/project, POST /api/agents/self/disconnect and the GET /api/billing reads do not debit, so a zero-remaining project can recover. Reading project notes (GET /api/notes and GET /api/notes/{id}) does not debit either; writing them does. Screen messages are exempt from this meter: POST /api/screens/{id}/toast, POST /api/screens/{id}/play-page, POST /api/screens/{id}/identify, POST /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot, and GET /api/screens/{id}/screenshot/status. Runtime, pairing, content, health, and unauthenticated routes are not this meter. Inbound media commit, application accept, and K/V put bytes, outbound runtime media/package/release and K/V get bytes are recorded, never charged: bandwidth is free on every plan. Stored bytes settle hourly against remaining, and only the bytes a payer stores above its free 1 GB (1,000,000,000 bytes) count. Public remaining stays whole credits.
 
     Opening GET /stream/project costs 1 credit as the listen subscribe. Later billed events on that stream cost 1 credit each. Screen conversation events are exempt: screen.*, runtime.*, and application.event. Heartbeats and the retry preamble never charge. playlist.*, media.*, kv.*, application.published, operation.*, project.*, feedback.*, stream.cursor, and stream.resync_required are billed. GET /stream/project bills arriving events under this same per-event meter and the same exemption set; like every SSE response it omits the ScreenRig-Credits-* headers. A dashboard session reads the same whole-credit balance through GET /api/balance, which never debits and remains available at zero. SSE debit idempotency is sse-event:<project_id>:<sequence>; reconnect replay is free. An unpaid billed event is not written and the stream closes.
 
@@ -2953,6 +2953,48 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/screens/{id}/replace:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: replaceScreen
+      description: 'Moves the device paired as another screen of the project onto this one and archives that screen, so this screen keeps its name, tags, timezone, playlist, schedules, takeover, display schedule and override, video wall, comments and history on new hardware. The device''s public key (or browser credential) now opens this screen, which takes the replacement''s host and Player; its health, status, storage, observation and queued commands start over. The key this screen held retires with the recovery grace window: it may still mint for fifteen minutes, then is refused (key_retired). Nothing is unbound. The replaced screen is archived with archive_reason replaced and keeps no binding or host. Both screens advance content_access_generation, so every session either held ends; the device receives a player.reload addressed to the screen it left (details.reason replaced, valid for 24 hours) and mints again as this screen. Both screens must be active with a paired Player (a pairing_pending screen or an unpaired replacement is resource_conflict, an archived one screen_archived); with names another screen of the project (invalid_request; another project''s screen is not_found); a screen with a video wall needs a replacement Player that declared display.wall (wall_unsupported). If-Match is optional and checks this screen''s revision. Emits the project event screen.replaced (details.from_screen_id) and no screen.archived. An exact Idempotency-Key retry returns this same answer for twenty-four hours.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/OptionalIfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenReplaceWrite'
+      responses:
+        '200':
+          description: The device now opens this screen; the response is this screen with its new revision and the current ETag.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/screens/{id}/archive:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -3116,7 +3158,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Asks the Player of the named active or archived screen to reload (docs/player-compatibility.md §6.3). Appends the durable per-screen player.reload event with details.reason project, a new reload_id, spread_s 0, and expires_at ten minutes later. The runtime SSE stream relays it to every runtime session. A Player ignores a reload within ten minutes of the last one it acted on. A web Player reloads at its next page boundary; a native Player remints, refetches its manifest, and checks for an update. The screen revision does not change. If-Match and Idempotency-Key are optional, as on archive; an exact Idempotency-Key retry returns the original reload_id and expires_at for twenty-four hours. A pairing_pending screen has no Player yet and answers resource_conflict. Screen messages are exempt from the 1-credit API meter.
+      description: Asks the Player of the named active or archived screen to reload (docs/player-compatibility.md §6.3). The optional body sets expires_in_s, how long the reload stays actionable (60 to 86400 seconds, default 86400, 24 hours); a value out of range is invalid_request naming expires_in_s. A screen that is online is sent the durable per-screen player.reload event at once (details.reason project, a new reload_id, spread_s 0, expires_at) and the reload is recorded in Screen.commands as sent. A screen that is offline holds the reload as queued with no event; when the backend applies the screen's next online transition before expires_at the event is appended, with the same reload_id and expires_at, and the command becomes sent. A newer reload supersedes an older one still queued. A queued reload past expires_at reads expired, and POST /api/screens/{id}/commands/{command_id}/cancel cancels one still queued. The runtime SSE stream relays the event to every runtime session. A Player ignores a reload within ten minutes of the last one it acted on. A web Player reloads at its next page boundary; a native Player remints, refetches its manifest, and checks for an update. The screen revision does not change. If-Match and Idempotency-Key are optional, as on archive; an exact Idempotency-Key retry returns the original body for twenty-four hours. A pairing_pending screen has no Player yet and answers resource_conflict. Screen messages are exempt from the 1-credit API meter.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -3124,9 +3166,15 @@ paths:
         - $ref: '#/components/parameters/ResourceID'
         - $ref: '#/components/parameters/IfMatch'
         - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenCommandWrite'
       responses:
         '202':
-          description: Accepted. The reload is durable until expires_at. The ETag is the unchanged screen revision.
+          description: Accepted. state is sent when the reload went to the online screen's Player, queued when it waits for the screen to come online. The reload is actionable until expires_at. The ETag is the unchanged screen revision.
           headers:
             Cache-Control:
               schema:
@@ -3512,6 +3560,154 @@ paths:
           $ref: '#/components/responses/RateLimitedProblem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/screens/{id}/identify:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: identifyScreen
+      x-rate-limit-policies:
+        - name: identify-project
+          quota: 600
+          windowSeconds: 60
+        - name: identify-screen
+          quota: 20
+          windowSeconds: 60
+        - name: identify-ip
+          quota: 60
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: 'Asks the screen''s Player to show the screen''s name over its content for duration_ms (2000 to 600000, default 60000), so a person in front of several displays can tell which one a record is (docs/player-compatibility.md §6.3.2). Appends the per-screen runtime command player.identify (details identify_id, label, screen_id, duration_ms, at, expires_at sixty seconds after at; never delivered after expires_at). The Player draws a full-screen overlay above its content, the name very large and the screen id small below it, for duration_ms from receipt; playback continues underneath and a newer identify replaces the overlay. The screen''s host hint must declare the identify capability, else 409 identify_unsupported and nothing is sent; update the Player, or show the name with a toast. The screen must be active; an archived screen answers screen_archived and a pairing_pending one resource_conflict. The screen revision does not change. The body and the Idempotency-Key are optional; an exact retry returns the original body for twenty-four hours. A refused request, a failed one, and an exact replay spend no rate-limit budget. Screen messages are exempt from the 1-credit API meter.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenIdentifyWrite'
+      responses:
+        '202':
+          description: Accepted. The command is actionable until expires_at. An exact idempotent retry returns this same body.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScreenIdentifyAccepted'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/screens/{id}/suspend:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: suspendScreen
+      description: 'Suspends the screen: its Player shows message instead of its content (docs/player-compatibility.md §6.9). The message is 1 to 280 characters after trimming; line feed is the only accepted control character. Nothing else changes: the playlist, schedule, takeover, display control and every other setting stay and keep evolving, and resume shows what the screen would be showing now. Screen.suspension carries the message and since. Suspending a suspended screen replaces the message and keeps since. The runtime manifest of a suspended screen has pages [] and a suspension member, and a manifest revision of its own, with or without an assigned playlist; the Player is told to refetch it at once. Appends the project-only screen.suspended (details message). An archived screen answers screen_archived. If-Match and Idempotency-Key are optional, as on archive.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenSuspendWrite'
+      responses:
+        '200':
+          description: Screen suspended. The ETag is the new screen revision.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/screens/{id}/resume:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: resumeScreen
+      description: 'Ends the screen''s suspension: its Player shows the screen''s own content again, from the manifest the screen would be served now (docs/player-compatibility.md §6.9). The Player is told to refetch at once. Appends the project-only screen.resumed. Resuming a screen that is not suspended answers 200 with the screen unchanged: no revision bump and no event. An archived screen answers screen_archived. No body. If-Match and Idempotency-Key are optional, as on archive.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: Screen resumed, or not suspended. The ETag is the screen revision.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
   /api/screens/{id}/reboot:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -3531,7 +3727,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: Asks the screen's Player to reboot the device (docs/player-compatibility.md §6.5). Appends the per-screen runtime command player.reboot (details reboot_id, reason project, at, expires_at ten minutes later; never delivered after expires_at) and the project-only screen.reboot_requested. The screen must be active; an archived screen answers screen_archived and a pairing_pending one resource_conflict. The screen's host hint must declare the reboot capability, else 409 reboot_unsupported and nothing is sent. The screen revision does not change. If-Match and Idempotency-Key are optional; an exact retry returns the same reboot_id for twenty-four hours. At most 2 per screen per 10 minutes; a refused request (reboot_unsupported, not_found, a conflict), a failed one, and an exact Idempotency-Key replay spend nothing.
+      description: Asks the screen's Player to reboot the device (docs/player-compatibility.md §6.5). The optional body sets expires_in_s, how long the reboot stays actionable (60 to 86400 seconds, default 86400, 24 hours); a value out of range is invalid_request naming expires_in_s. Always appends the project-only screen.reboot_requested. A screen that is online is sent the per-screen runtime command player.reboot at once (details reboot_id, reason project, at, expires_at; never delivered after expires_at) and the reboot is recorded in Screen.commands as sent. A screen that is offline holds the reboot as queued with no event; when the backend applies the screen's next online transition before expires_at the event is appended, with the same reboot_id and expires_at, and the command becomes sent. A sent reboot becomes done when a health report carrying uptime_s puts the boot after it was sent. A newer reboot supersedes an older one still queued. A queued reboot past expires_at reads expired, and POST /api/screens/{id}/commands/{command_id}/cancel cancels one still queued. The screen must be active; an archived screen answers screen_archived and a pairing_pending one resource_conflict. The screen's host hint must declare the reboot capability, else 409 reboot_unsupported and nothing is recorded. The screen revision does not change. If-Match and Idempotency-Key are optional; an exact retry returns the same body for twenty-four hours. At most 2 per screen per 10 minutes; a refused request (reboot_unsupported, not_found, a conflict), a failed one, and an exact Idempotency-Key replay spend nothing.
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -3539,9 +3735,15 @@ paths:
         - $ref: '#/components/parameters/ResourceID'
         - $ref: '#/components/parameters/IfMatch'
         - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenCommandWrite'
       responses:
         '202':
-          description: Accepted. The reboot is actionable until expires_at. The ETag is the unchanged screen revision.
+          description: Accepted. state is sent when the reboot went to the online screen's Player, queued when it waits for the screen to come online. The reboot is actionable until expires_at. The ETag is the unchanged screen revision.
           headers:
             Cache-Control:
               schema:
@@ -3571,6 +3773,47 @@ paths:
           $ref: '#/components/responses/Problem'
         '429':
           $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/screens/{id}/commands/{command_id}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: write
+      operationId: cancelScreenCommand
+      description: Cancels a reboot or reload that is still queued for the screen, so it is never sent (docs/player-compatibility.md §6.3, §6.5). command_id is an id in Screen.commands, or the reboot_id or reload_id of the 202 answer. Only a command whose state is queued can be cancelled; it becomes cancelled. A command already sent (sent, done) answers 409 resource_conflict "The command was already sent."; one that is no longer queued (expired, cancelled, superseded) answers 409 resource_conflict "The command is no longer queued."; an id the screen does not list answers 404 not_found. The screen's list keeps its newest 10 commands. The screen revision does not change. If-Match and Idempotency-Key are optional; an exact retry returns the same screen for twenty-four hours.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - $ref: '#/components/parameters/CommandID'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The screen, with the command cancelled. The ETag is the unchanged screen revision.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
     servers:
@@ -9814,7 +10057,7 @@ paths:
         description: Trusted player/runtime origin
     get:
       operationId: getRuntimeManifest
-      description: The one runtime manifest route, for every session. schemaVersion is 3. Resolved player manifest; projection is fail-safe, and invalid pages and primitives are omitted and listed in diagnostics. Adslot pages are included only for a paired session granted adslot-v1; every other session, including an anonymous public-screen viewer, receives house content with no adslot page. The root keys stay camelCase; adslot page keys stay id, type, adslot_id and optional snake_case visibility. Compatibility rule 4 — 200 with pages [] and non-empty diagnostics is a degraded projection (player keeps last-known-good); 200 with pages [] and no diagnostics is an authored empty assignment (docs/player-compatibility.md §1.4). An archived screen returns problem screen_archived and must not refresh last-known-good.
+      description: The one runtime manifest route, for every session. schemaVersion is 3. Resolved player manifest; projection is fail-safe, and invalid pages and primitives are omitted and listed in diagnostics. Adslot pages are included only for a paired session granted adslot-v1; every other session, including an anonymous public-screen viewer, receives house content with no adslot page. The root keys stay camelCase; adslot page keys stay id, type, adslot_id and optional snake_case visibility. Compatibility rule 4 — 200 with pages [] and non-empty diagnostics is a degraded projection (player keeps last-known-good); 200 with pages [] and no diagnostics is an authored empty assignment (docs/player-compatibility.md §1.4). A suspended screen is served pages [] with no diagnostics, the suspension member and a manifest revision of its own, assigned a playlist or not (§6.9). An archived screen returns problem screen_archived and must not refresh last-known-good.
       security:
         - runtimeCookie: []
         - nativeSessionAuthorization: []
@@ -9852,7 +10095,7 @@ paths:
         - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
-          description: 'Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Served by the stream sidecar from Valkey (stream-valkey/v1); the stream carries no stream.cursor frames, and a cursor advances only with delivered events. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.archived and screen.unarchived are runtime audience events; they do not wipe credentials. screen.deleted is a runtime audience event delivered when signed identity reset tombstones the screen. No runtime event authorizes clearing local identity. Only successful signed reset initiated by a confirmed local player action permits local identity rotation. project.suspended and project.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive. The runtime audience is an allowlist (docs/player-compatibility.md §7.1): screen.content_changed, screen.manifest_changed, screen.toast, screen.screenshot_requested, screen.archived, screen.unarchived, screen.deleted, screen.device_credential_revoked, project.suspended, project.resumed, player.reload, which reaches every runtime session, the per-screen commands player.reboot and player.display (docs/player-compatibility.md §6.5) and player.play_page (§6.3.1), never delivered past details.expires_at, and screen.card_data_changed (resource {type: card_data, key}, details {revision} or {deleted: true}), addressed only to screens whose current content reads that card data or feed key. Every other type is never published to the stream. Players ignore unknown event types, including the default message type, and unknown field names, and advance the cursor from every id. The stream opens with its own retry, drawn per connection between 3000 and 15000 ms so that streams dropped together do not reconnect together; a draining host sends each stream its own retry between 1000 and 30000 ms. The in-band problem frame (event: problem) has no id; its data is {code, detail, action?}, where action is present when the registry defines one, and the stream then closes (payment_required sets retry: 60000). The fleet player.reload control frame has no id and never moves the cursor. No frame carries more than 64 KiB of data.'
+          description: 'Screen-scoped durable SSE. The query cursor takes precedence over Last-Event-ID; each event carries an id cursor suitable for reconnect. Served by the stream sidecar from Valkey (stream-valkey/v1); the stream carries no stream.cursor frames, and a cursor advances only with delivered events. Invalid, future, or pre-retention cursors receive stream.resync_required at the current head and close. screen.toast and screen.screenshot_requested are runtime audience events; scan never delivers either past details.expires_at. Screenshot image bytes are never on this stream. screen.archived and screen.unarchived are runtime audience events; they do not wipe credentials. screen.deleted is a runtime audience event delivered when signed identity reset tombstones the screen. No runtime event authorizes clearing local identity. Only successful signed reset initiated by a confirmed local player action permits local identity rotation. project.suspended and project.resumed are runtime audience hints when prepaid remaining hits zero or becomes positive. The runtime audience is an allowlist (docs/player-compatibility.md §7.1): screen.content_changed, screen.manifest_changed, screen.toast, screen.screenshot_requested, screen.archived, screen.unarchived, screen.deleted, screen.device_credential_revoked, project.suspended, project.resumed, player.reload, which reaches every runtime session, the per-screen commands player.reboot and player.display (docs/player-compatibility.md §6.5), player.play_page (§6.3.1) and player.identify (§6.3.2), never delivered past details.expires_at, and screen.card_data_changed (resource {type: card_data, key}, details {revision} or {deleted: true}), addressed only to screens whose current content reads that card data or feed key. Every other type is never published to the stream. Players ignore unknown event types, including the default message type, and unknown field names, and advance the cursor from every id. The stream opens with its own retry, drawn per connection between 3000 and 15000 ms so that streams dropped together do not reconnect together; a draining host sends each stream its own retry between 1000 and 30000 ms. The in-band problem frame (event: problem) has no id; its data is {code, detail, action?}, where action is present when the registry defines one, and the stream then closes (payment_required sets retry: 60000). The fleet player.reload control frame has no id and never moves the cursor. No frame carries more than 64 KiB of data.'
           headers:
             X-Accel-Buffering:
               schema:
@@ -16172,6 +16415,7 @@ components:
     ResourceID: {name: id, in: path, required: true, schema: {type: string}}
     NoteID: {name: note_id, in: path, required: true, schema: {type: string, pattern: "^(?:(?:stage|qa|development)_)?nte_[A-Za-z0-9_-]{16,24}$"}, description: The id of one of the agent's notes.}
     WebhookDeliveryID: {name: delivery_id, in: path, required: true, schema: {type: string}, description: The id of one of the webhook's deliveries.}
+    CommandID: {name: command_id, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9_-]{8,64}$"}, description: "The id of one of the screen's commands: the id in Screen.commands, the reboot_id or reload_id of the 202 answer."}
     PlaylistPageID: {name: page_id, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, description: Playlist page id string.}
     ApplicationID: {name: application_id, in: path, required: true, schema: {type: string}}
     KVWebhookID: {name: webhook_id, in: path, required: true, schema: {type: string, pattern: "^(?:(?:stage|qa|development)_)?kvw_[A-Za-z0-9_-]+$"}, description: The id of one of the application's key/value webhooks.}
@@ -20388,6 +20632,8 @@ components:
         player: {$ref: '#/components/schemas/ScreenPlayerIdentity'}
         health: {$ref: "#/components/schemas/ScreenHealth"}
         display: {$ref: "#/components/schemas/ScreenDisplay"}
+        commands: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/ScreenCommand"}, description: "The reboots and reloads asked of this screen, oldest first, newest last, at most 10 (the oldest that are no longer waiting drop first). Absent when the screen has none. Read-only: POST reboot and reload add to it, POST /api/screens/{id}/commands/{command_id}/cancel cancels a queued entry."}
+        suspension: {$ref: "#/components/schemas/ScreenSuspension"}
         timezone: {type: string, description: "IANA time zone identifier. Absent until it is set. Page visibility rules are evaluated in this zone."}
         effective_timezone: {type: string, description: "Effective card clock zone: explicit screen timezone, otherwise the device zone reported at mint. Absent when unknown."}
         timezone_source: {type: string, enum: [screen, device, unknown]}
@@ -20451,11 +20697,12 @@ components:
         archive_reason:
           type: string
           description: >-
-            Present only while state is archived: what archived the screen. Known values: project (a project or dashboard archive request), device_reset (a signed on-player native identity.reset of the key bound to this screen), and device_unpair (a cookie-paired browser's own POST /screen/unpair). Every reason has the same effect: the screen leaves the default list, its glass is dark, and its device binding is kept, so the device keeps minting and unarchive resumes it with no re-pairing (docs/player-compatibility.md §5.1). Absent on screens archived before reasons were recorded. Readers ignore a value they do not know. Read-only.
+            Present only while state is archived: what archived the screen. Known values: project (a project or dashboard archive request), device_reset (a signed on-player native identity.reset of the key bound to this screen), device_unpair (a cookie-paired browser's own POST /screen/unpair), and replaced (POST /api/screens/{id}/replace moved this screen's device onto another screen, so this screen keeps no binding). Every other reason has the same effect: the screen leaves the default list, its glass is dark, and its device binding is kept, so the device keeps minting and unarchive resumes it with no re-pairing (docs/player-compatibility.md §5.1). Absent on screens archived before reasons were recorded. Readers ignore a value they do not know. Read-only.
         archived_at:
           type: string
           format: date-time
           description: Present only while state is archived and archive_reason is present. Instant the screen was archived. Read-only.
+        replaced_by: {type: string, description: "Present when archive_reason is replaced: the screen this screen's device moved to. A browser that still opens this screen's public URL plays that screen. Read-only."}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
         last_seen_at: {type: string, format: date-time, description: "Server-maintained instant of the screen's most recent authenticated Player contact (session authentication, session mint, release-grant use, or device package fetch). Absent until first contact. Read-only; never authorization."}
@@ -20566,8 +20813,10 @@ components:
       type: object
       additionalProperties: false
       required: [type]
+      description: POST /api/screens/{id}/reload per screen. An offline screen holds the reload queued until it comes online (expires_in_s).
       properties:
         type: {type: string, enum: [reload]}
+        expires_in_s: {type: integer, minimum: 60, maximum: 86400, default: 86400}
     ScreenActionToast:
       type: object
       additionalProperties: false
@@ -20638,9 +20887,10 @@ components:
       type: object
       additionalProperties: false
       required: [type]
-      description: POST /api/screens/{id}/reboot per screen; a screen whose host did not declare reboot fails alone with reboot_unsupported.
+      description: POST /api/screens/{id}/reboot per screen; a screen whose host did not declare reboot fails alone with reboot_unsupported. An offline screen holds the reboot queued until it comes online (expires_in_s).
       properties:
         type: {type: string, enum: [reboot]}
+        expires_in_s: {type: integer, minimum: 60, maximum: 86400, default: 86400}
     ScreenActionDisplay:
       type: object
       additionalProperties: false
@@ -20965,13 +21215,40 @@ components:
         level: {type: string, enum: [error, alert, info], description: Closed severity token. Player chrome chooses the fill; the API never carries a colour.}
         text: {type: string, minLength: 1, maxLength: 120, description: "1 to 120 characters. Line feed is the only accepted line break. At most three lines; a Player shows the toast on one line, a line feed as a space. Other control characters and recognizable ScreenRig credential material are rejected."}
         duration_ms: {type: integer, minimum: 2000, maximum: 60000, default: 60000, description: Visible duration in milliseconds. Omitted values default to 60000.}
+    ScreenReplaceWrite:
+      type: object
+      additionalProperties: false
+      required: [with]
+      properties:
+        with: {type: string, minLength: 1, maxLength: 256, description: "The id of the screen, in the same project, whose paired device takes over the screen in the path. It must be another active screen with a paired Player; it is archived with archive_reason replaced."}
     ScreenReloadAccepted:
       type: object
       additionalProperties: false
-      required: [reload_id, expires_at]
+      required: [reload_id, expires_at, state]
       properties:
-        reload_id: {type: string, pattern: "^[A-Za-z0-9_-]{8,64}$", description: "details.reload_id of the player.reload event. A Player acts on one reload_id at most once."}
+        reload_id: {type: string, pattern: "^[A-Za-z0-9_-]{8,64}$", description: "details.reload_id of the player.reload event, and the id of the entry in Screen.commands. A Player acts on one reload_id at most once."}
         expires_at: {type: string, format: date-time, description: Instant after which runtime scan must not deliver the reload and a Player ignores it.}
+        state: {type: string, enum: [queued, sent], description: "sent: the screen was online and the event went to its Player at once. queued: the screen was offline; the event is appended when it comes online before expires_at."}
+    ScreenCommandWrite:
+      type: object
+      additionalProperties: false
+      description: The optional body of POST /api/screens/{id}/reboot and /reload. An empty body keeps the default.
+      properties:
+        expires_in_s: {type: integer, minimum: 60, maximum: 86400, default: 86400, description: "How long the command stays actionable, in seconds from the request. A queued command is sent only before it expires; a Player ignores one after expires_at."}
+    ScreenCommand:
+      type: object
+      additionalProperties: false
+      required: [id, type, state, requested_at, expires_at]
+      description: >-
+        One reboot or reload asked of a screen, in Screen.commands. A command sent to an online screen is stored sent. One asked of an offline screen is stored queued with no runtime event; the backend appends the event, with this id and expires_at, when it applies the screen's next online transition before expires_at, and the command becomes sent. Each command has exactly one runtime event, so a Player cannot see it twice. expired is derived on read for a queued command past expires_at. A newer command of the same type supersedes one still queued. A sent reboot becomes done when a health report with uptime_s puts the boot after sent_at; a reload never reaches done.
+      properties:
+        id: {type: string, pattern: "^[A-Za-z0-9_-]{8,64}$", description: "The reboot_id (rbt_) or reload_id (rld_) the 202 answer returned."}
+        type: {type: string, enum: [reboot, reload]}
+        state: {type: string, enum: [queued, sent, done, expired, cancelled, superseded]}
+        requested_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        sent_at: {type: string, format: date-time, description: "When the runtime event was appended. Absent while the command is queued, and on one cancelled, expired or superseded before it was sent."}
+        done_at: {type: string, format: date-time, description: "The boot time a health report proved. Present only on a done reboot."}
     ScreenPlayPageWrite:
       type: object
       additionalProperties: false
@@ -20998,6 +21275,45 @@ components:
         playlist_id: {type: string}
         manifest_revision: {type: string, pattern: "^man_[A-Za-z0-9_-]{1,80}$"}
         expires_at: {type: string, format: date-time}
+    ScreenIdentifyWrite:
+      type: object
+      additionalProperties: false
+      properties:
+        duration_ms: {type: integer, minimum: 2000, maximum: 600000, default: 60000, description: "How long the overlay stays up, in milliseconds from the Player's receipt. Omitted values default to 60000."}
+    ScreenIdentifyAccepted:
+      type: object
+      additionalProperties: false
+      required: [identify_id, duration_ms, expires_at]
+      properties:
+        identify_id: {type: string, pattern: "^idf_[A-Za-z0-9_-]{8,64}$", description: "details.identify_id of the player.identify event. A Player acts on one identify_id at most once."}
+        duration_ms: {type: integer, minimum: 2000, maximum: 600000}
+        expires_at: {type: string, format: date-time, description: Instant after which runtime scan does not deliver the command and a Player ignores it.}
+    ScreenIdentifyDetails:
+      type: object
+      additionalProperties: false
+      required: [identify_id, label, screen_id, duration_ms, at, expires_at]
+      description: details object on a durable player.identify event.
+      properties:
+        identify_id: {type: string}
+        label: {type: string, description: The screen's name when the command was requested.}
+        screen_id: {type: string}
+        duration_ms: {type: integer, minimum: 2000, maximum: 600000}
+        at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+    ScreenSuspendWrite:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        message: {type: string, minLength: 1, maxLength: 280, description: "The notice the screen shows, 1 to 280 characters after trimming. Line feed is the only accepted control character; a Player wraps the text and keeps line feeds."}
+    ScreenSuspension:
+      type: object
+      additionalProperties: false
+      required: [message, since]
+      description: Present while the screen is suspended (docs/player-compatibility.md §6.9). The runtime manifest carries the same object as its suspension member.
+      properties:
+        message: {type: string, minLength: 1, maxLength: 280}
+        since: {type: string, format: date-time, description: When the screen was first suspended. Replacing the message keeps it.}
     ScreenToastAccepted:
       type: object
       additionalProperties: false
@@ -22194,7 +22510,17 @@ components:
         audio: {$ref: "#/components/schemas/RuntimeAudio"}
         display: {$ref: "#/components/schemas/RuntimeDisplay"}
         wall: {$ref: "#/components/schemas/RuntimeWall", description: "Emitted when the screen has a wall."}
+        suspension: {$ref: "#/components/schemas/RuntimeSuspension"}
         diagnostics: {type: array, items: {$ref: "#/components/schemas/RuntimeManifestDiagnostic"}, description: "Page- and primitive-level projection omissions. Emitted when projection dropped a field, primitive, or page; a healthy manifest omits this key. A playlist format that is not the shape of the screen's wall (or a screen with no wall) projects pages [] plus a wall_format_mismatch diagnostic. Compatibility rule 4: HTTP 200 with pages [] and a non-empty diagnostics array is a degraded projection — the player keeps last-known-good, shows the offline chip, and does not persist. HTTP 200 with pages [] and no diagnostics is an authored empty assignment — the player replaces last-known-good and shows no-content."}
+    RuntimeSuspension:
+      type: object
+      additionalProperties: true
+      required: [message, since]
+      description: >-
+        Emitted while the screen is suspended (docs/player-compatibility.md §6.9): pages is [] with no diagnostics, and a Player shows message as a full-screen notice instead of the no-content surface. since is when the screen was first suspended. The manifest revision is the notice's own, never a playlist's, and the screen needs no assigned playlist.
+      properties:
+        message: {type: string, description: "1 to 280 characters. A Player wraps the text and keeps its line feeds."}
+        since: {type: string, format: date-time}
     RuntimeAdslotPage:
       type: object
       additionalProperties: true
@@ -22944,10 +23270,11 @@ components:
     ScreenRebootAccepted:
       type: object
       additionalProperties: false
-      required: [reboot_id, expires_at]
+      required: [reboot_id, expires_at, state]
       properties:
-        reboot_id: {type: string, pattern: "^rbt_[A-Za-z0-9_-]{8,64}$", description: details.reboot_id of the player.reboot event. A Player acts on one reboot_id at most once.}
+        reboot_id: {type: string, pattern: "^rbt_[A-Za-z0-9_-]{8,64}$", description: "details.reboot_id of the player.reboot event, and the id of the entry in Screen.commands. A Player acts on one reboot_id at most once."}
         expires_at: {type: string, format: date-time, description: Instant after which runtime scan does not deliver the reboot and a Player ignores it.}
+        state: {type: string, enum: [queued, sent], description: "sent: the screen was online and the event went to its Player at once. queued: the screen was offline; the event is appended when it comes online before expires_at."}
     ScreenDisplayWrite:
       type: object
       additionalProperties: false
@@ -23334,6 +23661,7 @@ x-problem-codes:
   - upgrade_required
   - reboot_unsupported
   - play_page_unsupported
+  - identify_unsupported
   - page_not_on_screen
   - wall_unsupported
   - playlist_format_mismatch
