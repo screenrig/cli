@@ -9,10 +9,10 @@ const id = "prj_SELECTED";
 const prefix = `/api/projects/${id}`;
 
 test("object-less writes and local names use project parents, while object IDs remain global", () => {
-  for (const [method, path] of [["POST", "/api/applications"], ["POST", "/api/playlists"], ["POST", "/api/cards"], ["POST", "/api/media/uploads"], ["POST", "/api/media/generations"], ["PUT", "/api/card-data/menu"], ["GET", "/api/feeds/weather"], ["GET", "/api/project"], ["POST", "/api/service-clients"]] as const) {
+  for (const [method, path] of [["POST", "/api/applications"], ["POST", "/api/playlists"], ["POST", "/api/cards"], ["POST", "/api/media/uploads"], ["POST", "/api/media/generations"], ["PUT", "/api/card-data/menu"], ["GET", "/api/feeds/weather"], ["GET", "/api/project"], ["POST", "/api/service-clients"], ["GET", "/api/notifications"], ["POST", "/api/notifications"]] as const) {
     assert.equal(projectRequest({ method, path }, id).path, prefix + path.slice(4));
   }
-  for (const path of ["/api/cards/crd_CARD", "/api/cards/crd_CARD/data", "/api/screens/scr_SCREEN", "/api/applications/app_APP/kv/name", "/api/playlists/pl_PLAYLIST", "/api/operations/op_OPERATION", "/api/service-clients/scl_CLIENT/revoke", "/api/projects", "/api/organizations"]) {
+  for (const path of ["/api/cards/crd_CARD", "/api/cards/crd_CARD/data", "/api/screens/scr_SCREEN", "/api/applications/app_APP/kv/name", "/api/playlists/pl_PLAYLIST", "/api/operations/op_OPERATION", "/api/service-clients/scl_CLIENT/revoke", "/api/projects", "/api/organizations", "/api/notifications/ntf_NOTIFICATION", "/api/notifications/ntf_NOTIFICATION/deliveries"]) {
     assert.equal(projectRequest({ method: "GET", path }, id).path, path);
   }
 });
@@ -34,6 +34,21 @@ test("subset clients route writes before recovery and never send an ambient proj
     return { status: 201, headers: {}, body: { id: "app_NEW" } };
   });
   await new ApiClient({ token, projectId: id, transport }).call({ method: "POST", path: "/api/applications", body: { name: "Menu" }, idempotent: true });
+});
+
+test("a subset client lists and creates notifications under its project and addresses one by id", async () => {
+  const token = fakeSessionJwt({ exp: 4102444800, projects: { [id]: ["content"] }, scope: "identity" });
+  const transport = new FakeTransport()
+    .on("GET", `${prefix}/notifications`, () => ({ status: 200, headers: {}, body: { items: [] } }))
+    .on("POST", `${prefix}/notifications`, () => ({ status: 201, headers: {}, body: { id: "ntf_NOTIFICATIONAAAAAA" } }))
+    .on("GET", "/api/notifications/ntf_NOTIFICATIONAAAAAA", () => ({ status: 200, headers: {}, body: { id: "ntf_NOTIFICATIONAAAAAA" } }));
+  const client = new ApiClient({ token, projectId: id, transport });
+  await client.call({ method: "GET", path: "/api/notifications" });
+  await client.call({ method: "POST", path: "/api/notifications", body: { channel: "email" }, idempotent: true });
+  await client.call({ method: "GET", path: "/api/notifications/ntf_NOTIFICATIONAAAAAA" });
+  assert.deepEqual(transport.calls.map((call) => `${call.method} ${call.path}`), [
+    `GET ${prefix}/notifications`, `POST ${prefix}/notifications`, "GET /api/notifications/ntf_NOTIFICATIONAAAAAA",
+  ]);
 });
 
 

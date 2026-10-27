@@ -88,6 +88,8 @@ export class FakeTransport implements Transport {
   putPlaylist?: (playlist: Record<string, unknown> & { id: string }) => void;
   /** memoryBackend hook: remaining playback-export requests before 429. */
   setPlaybackExportBudget?: (value: number) => void;
+  /** memoryBackend hook: add a delivery row (a screen notice, say) to a stored notification's log, newest first. */
+  putNotificationDelivery?: (notificationId: string, delivery: Record<string, unknown>) => void;
   /** Test hook: merged onto every `request` response (not SSE stream frames). */
   extraResponseHeaders?: Record<string, string>;
 
@@ -1639,10 +1641,12 @@ export function memoryBackend(options: {
     body: { items: feedback.get("feature") ?? [] },
   }));
 
-  // Customer webhooks: at most 10 per project, secret only on create and
-  // rotate-secret, and an exact Idempotency-Key replay returns the same answer
-  // (secret included), like the server's 24-hour idempotency record.
+  // Customer webhooks: at most 20 per project (email notifications count too),
+  // secret only on create and rotate-secret, and an exact Idempotency-Key
+  // replay returns the same answer (secret included), like the server's
+  // 24-hour idempotency record.
   const webhooks = new Map<string, Record<string, unknown>>();
+  const notifications = new Map<string, Record<string, unknown>>();
   const webhookDeliveries = new Map<string, Array<Record<string, unknown>>>();
   const webhookReplays = new Map<string, { request: string; response: TransportResponse }>();
   let webhookSequence = 0;
@@ -1681,7 +1685,7 @@ export function memoryBackend(options: {
     const body = (req.body ?? {}) as { url?: string; event_types?: string[]; enabled?: boolean; description?: string };
     const rejected = webhookUrlRejected(body.url);
     if (rejected) return rejectedUrl(rejected);
-    if (webhooks.size >= 10) return problem(409, "webhook_limit_reached", "The project already has the maximum of 10 webhooks.");
+    if (webhooks.size + notifications.size >= 20) return problem(409, "webhook_limit_reached", "The project already has the maximum of 20 notifications.");
     webhookSequence += 1;
     const webhook: Record<string, unknown> = {
       id: `whk_${String(webhookSequence).padStart(20, "A")}`,
@@ -1753,6 +1757,134 @@ export function memoryBackend(options: {
     const webhook = webhookFor(req);
     if (!webhook) return notFound("Resource was not found.");
     const rows = webhookDeliveries.get(webhook.id as string) ?? [];
+    const limit = Number(req.query?.limit ?? 50);
+    const start = typeof req.query?.before === "string" ? Number(req.query.before.slice(5)) : 0;
+    const items = rows.slice(start, start + limit);
+    const next = start + limit < rows.length ? `whc1_${start + limit}` : null;
+    return { status: 200, headers: {}, body: { items, next_cursor: next } };
+  });
+
+  // Notifications, email and webhook: ntf_ ids for email, whk_ ids for a
+  // webhook, the 20-per-project limit shared with the webhook routes above, a
+  // secret only on a webhook's create and rotate-secret.
+  const notificationDeliveries = new Map<string, Array<Record<string, unknown>>>();
+  transport.putNotificationDelivery = (id, delivery) => { notificationDeliveries.get(id)?.unshift(delivery); };
+  let notificationSequence = 0;
+  const conditionNames = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "crashing"];
+  const invalidRequest = (detail: string, field: string): TransportResponse => ({
+    status: 400,
+    headers: { "content-type": "application/problem+json" },
+    body: { status: 400, code: "invalid_request", title: "Invalid request", detail, errors: [{ field, code: "invalid", detail }] },
+  });
+  const notificationFor = (req: TransportRequest): Record<string, unknown> | undefined => notifications.get(decodeURIComponent(req.path.split("/")[3] ?? ""));
+  /** A refusal for what a notification of this channel cannot hold, or undefined when it is whole. */
+  const notificationRefusal = (notification: Record<string, unknown>): TransportResponse | undefined => {
+    const conditions = (notification.conditions ?? []) as string[];
+    const unknown = conditions.find((name) => !conditionNames.includes(name));
+    if (unknown !== undefined) return invalidRequest(`${unknown} is not a condition.`, "conditions");
+    if (notification.channel === "email") {
+      if (!((notification.recipients ?? []) as string[]).length) return invalidRequest("An email notification needs recipients.", "recipients");
+      if (!conditions.length) return invalidRequest("An email notification needs at least one condition.", "conditions");
+      return undefined;
+    }
+    if (!notification.url) return invalidRequest("A webhook needs a url.", "url");
+    const rejected = webhookUrlRejected(notification.url);
+    if (rejected) return rejectedUrl(rejected);
+    if (!conditions.length && !((notification.event_types ?? []) as string[]).length) return invalidRequest("A webhook needs conditions or event_types.", "conditions");
+    return undefined;
+  };
+  transport.on("GET", "/api/notifications", () => ({ status: 200, headers: {}, body: { items: [...notifications.values()] } }));
+  transport.on("POST", "/api/notifications", (req) => webhookReplay(req, () => {
+    const body = (req.body ?? {}) as Record<string, any>;
+    if (body.channel !== "email" && body.channel !== "webhook") return invalidRequest("channel must be email or webhook.", "channel");
+    const email = body.channel === "email";
+    const foreign = email ? ["url", "event_types"] : ["recipients"];
+    const wrong = foreign.find((field) => body[field] !== undefined);
+    if (wrong) return invalidRequest(`${wrong} is not a field of ${email ? "an email" : "a webhook"} notification.`, wrong);
+    notificationSequence += 1;
+    const notification: Record<string, unknown> = {
+      id: `${email ? "ntf" : "whk"}_${String(notificationSequence).padStart(20, "B")}`, channel: body.channel,
+      ...(body.description ? { description: body.description } : {}),
+      conditions: body.conditions ?? [], screen_tags: body.screen_tags ?? [], hold_minutes: body.hold_minutes ?? 10,
+      ...(email ? { recipients: body.recipients } : { url: body.url, event_types: body.event_types ?? [] }),
+      enabled: body.enabled ?? true, revision: 1, status: body.enabled === false ? "disabled" : "active",
+      created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
+    };
+    const refusal = notificationRefusal(notification);
+    if (refusal) return refusal;
+    if (webhooks.size + notifications.size >= 20) return problem(409, "notification_limit_reached", "The project already has the maximum of 20 notifications.");
+    notifications.set(notification.id as string, notification);
+    notificationDeliveries.set(notification.id as string, []);
+    return { status: 201, headers: { "cache-control": "no-store" }, body: email ? { ...notification } : { ...notification, secret: webhookSecret() } };
+  }));
+  transport.on("GET", /^\/api\/notifications\/[^/]+$/, (req) => {
+    const notification = notificationFor(req);
+    return notification ? { status: 200, headers: { etag: `"${notification.revision}"` }, body: notification } : notFound("Resource was not found.");
+  });
+  transport.on("PATCH", /^\/api\/notifications\/[^/]+$/, (req) => webhookReplay(req, () => {
+    const notification = notificationFor(req);
+    if (!notification) return notFound("Resource was not found.");
+    const stale = staleRevision(req, notification);
+    if (stale) return stale;
+    const body = (req.body ?? {}) as Record<string, any>;
+    const email = notification.channel === "email";
+    const wrong = (email ? ["url", "event_types"] : ["recipients"]).find((field) => body[field] !== undefined);
+    if (wrong) return invalidRequest(`${wrong} is not a field of ${email ? "an email" : "a webhook"} notification.`, wrong);
+    const next: Record<string, unknown> = { ...notification };
+    for (const field of ["conditions", "screen_tags", "hold_minutes", "recipients", "url", "event_types"]) {
+      if (body[field] !== undefined) next[field] = body[field];
+    }
+    if (body.description !== undefined) {
+      if (body.description) next.description = body.description;
+      else delete next.description;
+    }
+    if (body.enabled !== undefined) {
+      next.enabled = body.enabled;
+      next.status = body.enabled ? "active" : "disabled";
+    }
+    if (body.snoozed_until !== undefined) {
+      if (body.snoozed_until === null) delete next.snoozed_until;
+      else next.snoozed_until = body.snoozed_until;
+    }
+    const refusal = notificationRefusal(next);
+    if (refusal) return refusal;
+    next.revision = (notification.revision as number) + 1;
+    notifications.set(notification.id as string, next);
+    return { status: 200, headers: { etag: `"${next.revision}"` }, body: { ...next } };
+  }));
+  transport.on("DELETE", /^\/api\/notifications\/[^/]+$/, (req) => webhookReplay(req, () => {
+    const notification = notificationFor(req);
+    if (!notification) return notFound("Resource was not found.");
+    const stale = staleRevision(req, notification);
+    if (stale) return stale;
+    notifications.delete(notification.id as string);
+    return { status: 204, headers: { "cache-control": "no-store" }, body: undefined };
+  }));
+  transport.on("POST", /^\/api\/notifications\/[^/]+\/rotate-secret$/, (req) => webhookReplay(req, () => {
+    const notification = notificationFor(req);
+    if (!notification) return notFound("Resource was not found.");
+    if (notification.channel !== "webhook") return invalidRequest("rotate-secret is for a webhook notification.", "id");
+    const stale = staleRevision(req, notification);
+    if (stale) return stale;
+    notification.revision = (notification.revision as number) + 1;
+    return { status: 200, headers: { "cache-control": "no-store" }, body: { ...notification, secret: webhookSecret() } };
+  }));
+  transport.on("POST", /^\/api\/notifications\/[^/]+\/test$/, (req) => webhookReplay(req, () => {
+    const notification = notificationFor(req);
+    if (!notification) return notFound("Resource was not found.");
+    const rows = notificationDeliveries.get(notification.id as string)!;
+    const delivery = {
+      id: `whd_${String(rows.length + 1).padStart(20, "B")}`, notification_id: notification.id, event_id: `ev1_${rows.length + 100}`,
+      event_type: "notification.test", test: true, state: "pending", attempts: 0,
+      next_attempt_at: "2026-08-14T17:00:00.000Z", created_at: "2026-08-14T17:00:00.000Z",
+    };
+    rows.unshift(delivery);
+    return { status: 202, headers: {}, body: delivery };
+  }));
+  transport.on("GET", /^\/api\/notifications\/[^/]+\/deliveries$/, (req) => {
+    const notification = notificationFor(req);
+    if (!notification) return notFound("Resource was not found.");
+    const rows = notificationDeliveries.get(notification.id as string) ?? [];
     const limit = Number(req.query?.limit ?? 50);
     const start = typeof req.query?.before === "string" ? Number(req.query.before.slice(5)) : 0;
     const items = rows.slice(start, start + limit);

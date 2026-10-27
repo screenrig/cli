@@ -27,6 +27,7 @@ import { KV_WEBHOOK_ID_PATTERN, KV_WEBHOOK_SECRET_PATTERN, kvWebhookDescription,
 import { TRIGGER_ID_PATTERN, TRIGGER_PASSWORD_PATTERN, alertLines, triggerHoldSeconds, triggerId, triggerLines, triggerName, triggerPasswordWarning, triggerProblem, triggerScreenIds, triggerTableLines, triggerTag } from "./triggers.js";
 import { fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
+import { NOTIFICATION_ID_PATTERN, notificationConditions, notificationDeliveryTableLines, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationSecretWarning, notificationTableLines, snoozedUntil } from "./notifications.js";
 import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { memoryConfigFs } from "./memory-config.js";
@@ -105,6 +106,13 @@ import {
   type KVWebhookCreate,
   type KVWebhookList,
   type KVWebhookWithSecret,
+  type Notification,
+  type NotificationDelivery,
+  type NotificationDeliveryList,
+  type NotificationList,
+  type NotificationPatch,
+  type NotificationWithSecret,
+  type NotificationWrite,
   type Webhook,
   type WebhookDelivery,
   type WebhookDeliveryList,
@@ -797,7 +805,7 @@ function commandHandler(
         (group === "media" && ["update", "delete"].includes(action ?? "")) ||
         // A screenshot is an observation: every run requests a new capture.
         (group === "screen" && !["provision", "publish", "screenshot"].includes(action ?? "")) ||
-        group === "invitations" || group === "webhooks" || group === "fleet-links" || group === "triggers" || (group === "project" && ["rename", "create"].includes(action ?? ""))
+        group === "invitations" || group === "webhooks" || group === "notifications" || group === "fleet-links" || group === "triggers" || (group === "project" && ["rename", "create"].includes(action ?? ""))
       ));
     let recovery: WriteRecovery | undefined;
     try {
@@ -8462,6 +8470,223 @@ export const handleWebhooksDeliveries = commandHandler(async (args, runtime, res
       `Webhook ${id} deliveries (${items.length})`,
       ...deliveryTableLines(items),
       ...(next ? [`next: screenrig webhooks deliveries ${id} --before ${next}${limit ? ` --limit ${limit}` : ""}`] : []),
+    ].join("\n"),
+  };
+});
+
+// Notifications: /api/notifications, email and webhook channels. A webhook's
+// signing secret is printed once in data.secret (create, rotate-secret) and
+// never reaches config, logs, or the write-recovery ledger, as for webhooks; an
+// email notification has no secret. Both channels share the 20-per-project
+// limit and the revision guard (webhookRevisionHeaders).
+const NOTIFICATIONS_PATH = "/api/notifications";
+
+async function notificationCall(
+  client: ApiClient,
+  request: Parameters<ApiClient["call"]>[0],
+  id?: string,
+): Promise<Awaited<ReturnType<ApiClient["call"]>>> {
+  try {
+    return await client.call(request);
+  } catch (error) {
+    throw notificationProblem(error, id);
+  }
+}
+
+/**
+ * A 2xx without a secret is a completed write: a replay of the same key would
+ * return the same secretless answer, so clear the saved key and point at
+ * rotate-secret instead of suggesting a rerun.
+ */
+async function notificationWithSecret(body: unknown, action: "create" | "rotate", runtime: CliRuntime): Promise<NotificationWithSecret> {
+  const notification = body as NotificationWithSecret | undefined;
+  if (!notification || typeof notification.id !== "string" || typeof notification.secret !== "string" || !notification.secret) {
+    await writeRecoveries.get(runtime)?.finish();
+    const id = notification && typeof notification.id === "string" && NOTIFICATION_ID_PATTERN.test(notification.id) ? notification.id : undefined;
+    throw new CliError(makeProblem("unexpected_response", "Unexpected response", 502,
+      `The ${action === "create" ? "notifications create" : "rotate-secret"} request completed, but its answer did not carry a signing secret. Do not rerun it.`, {
+        next: id
+          ? { command: `screenrig notifications rotate-secret ${id}`, reason: "Issue a new signing secret; it is shown once in data.secret." }
+          : { command: "screenrig notifications list", reason: "Find the notification, then run screenrig notifications rotate-secret ID to receive a new signing secret." },
+      }), ExitCode.Unexpected);
+  }
+  return notification;
+}
+
+async function notificationSecretResult(response: Awaited<ReturnType<ApiClient["call"]>>, client: ApiClient, action: "create" | "rotate", runtime: CliRuntime): Promise<CommandResult> {
+  const notification = await notificationWithSecret(response.body, action, runtime);
+  const warning = notificationSecretWarning(notification.id, action);
+  return {
+    envelope: jsonBody(response, client.requestId, undefined, [warning]),
+    exitCode: ExitCode.Success,
+    human: [
+      action === "create" ? `Created notification ${notification.id}` : `Rotated the signing secret of notification ${notification.id}`,
+      ...notificationLines(notification),
+      `secret: ${notification.secret}`,
+      `warning: ${warning.message}`,
+    ].join("\n"),
+    keepRecoveryUntilOutput: true,
+  };
+}
+
+export const handleNotificationsCreate = commandHandler(async (args, runtime, resolved) => {
+  const email = flagString(args.flags, "email");
+  const webhook = flagString(args.flags, "webhook");
+  if ((email === undefined) === (webhook === undefined)) throw usageError("notifications create requires exactly one of --email or --webhook.");
+  const conditions = flagString(args.flags, "conditions");
+  const events = flagString(args.flags, "events");
+  const tags = flagString(args.flags, "tag");
+  const hold = flagString(args.flags, "hold");
+  const description = flagString(args.flags, "description");
+  const body: NotificationWrite = {
+    channel: email !== undefined ? "email" : "webhook",
+    ...(email !== undefined ? { recipients: notificationRecipients(email) } : { url: webhookUrl(webhook!, "--webhook") }),
+    ...(conditions !== undefined ? { conditions: notificationConditions(conditions) } : {}),
+    ...(events !== undefined ? { event_types: webhookEventTypes(events, "--events") } : {}),
+    ...(tags !== undefined ? { screen_tags: tags.split(",") } : {}),
+    ...(hold !== undefined ? { hold_minutes: Number(notificationHold(hold)) } : {}),
+    ...(description !== undefined ? { description: webhookDescription(description) } : {}),
+    ...(flagBool(args.flags, "disabled") ? { enabled: false } : {}),
+  };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await notificationCall(client, { method: "POST", path: NOTIFICATIONS_PATH, idempotent: true, body });
+  if (body.channel === "webhook") return notificationSecretResult(response, client, "create", runtime);
+  const created = response.body as Notification | undefined;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Created notification ${created?.id ?? ""}`.trimEnd(), ...notificationLines(created)].join("\n"),
+  };
+});
+
+export const handleNotificationsList = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await notificationCall(client, { method: "GET", path: NOTIFICATIONS_PATH });
+  const items = (response.body as NotificationList | undefined)?.items;
+  const list = Array.isArray(items) ? items : [];
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Notifications (${list.length})`, ...notificationTableLines(list)].join("\n"),
+  };
+});
+
+export const handleNotificationsShow = commandHandler(async (args, runtime, resolved) => {
+  const id = notificationId(args.positionals[2], "show");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await notificationCall(client, { method: "GET", path: `${NOTIFICATIONS_PATH}/${id}` }, id);
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: ["Notification", ...notificationLines(response.body as Notification | undefined)].join("\n"),
+  };
+});
+
+export const handleNotificationsUpdate = commandHandler(async (args, runtime, resolved) => {
+  const id = notificationId(args.positionals[2], "update");
+  const email = flagString(args.flags, "email");
+  const url = flagString(args.flags, "url");
+  const conditions = flagString(args.flags, "conditions");
+  const events = flagString(args.flags, "events");
+  const tags = flagString(args.flags, "tag");
+  const hold = flagString(args.flags, "hold");
+  const description = flagString(args.flags, "description");
+  const snooze = flagString(args.flags, "snooze");
+  const patch: NotificationPatch = {
+    ...(email !== undefined ? { recipients: notificationRecipients(email) } : {}),
+    ...(url !== undefined ? { url: webhookUrl(url) } : {}),
+    ...(conditions !== undefined ? { conditions: notificationConditions(conditions) } : {}),
+    ...(flagBool(args.flags, "clear-conditions") ? { conditions: [] } : {}),
+    ...(events !== undefined ? { event_types: webhookEventTypes(events, "--events") } : {}),
+    ...(flagBool(args.flags, "clear-events") ? { event_types: [] } : {}),
+    ...(tags !== undefined ? { screen_tags: tags.split(",") } : {}),
+    ...(flagBool(args.flags, "all-screens") ? { screen_tags: [] } : {}),
+    ...(hold !== undefined ? { hold_minutes: Number(notificationHold(hold)) } : {}),
+    ...(description !== undefined ? { description: webhookDescription(description) } : {}),
+    ...(flagBool(args.flags, "clear-description") ? { description: "" } : {}),
+    ...(flagBool(args.flags, "enable") ? { enabled: true } : {}),
+    ...(flagBool(args.flags, "disable") ? { enabled: false } : {}),
+    ...(snooze !== undefined ? { snoozed_until: snoozedUntil(snooze, runtime.now()) } : {}),
+  };
+  if (!Object.keys(patch).length) {
+    throw usageError("notifications update requires at least one change: --email, --url, --conditions, --clear-conditions, --events, --clear-events, --tag, --all-screens, --hold, --description, --clear-description, --enable, --disable, or --snooze.");
+  }
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  // --snooze derives its instant from the clock, so a rerun fingerprints
+  // differently; drop the obsolete saved key instead of leaving it behind.
+  const response = await notificationCall(client, {
+    method: "PATCH", path: `${NOTIFICATIONS_PATH}/${id}`, idempotent: true, body: patch, headers: webhookRevisionHeaders(args),
+    ...(snooze !== undefined ? { recoverySupersede: JSON.stringify(["notifications update --snooze", id]) } : {}),
+  }, id);
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Updated notification ${id}`, ...notificationLines(response.body as Notification | undefined)].join("\n"),
+  };
+});
+
+export const handleNotificationsDelete = commandHandler(async (args, runtime, resolved) => {
+  const id = notificationId(args.positionals[2], "delete");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await notificationCall(client, {
+    method: "DELETE", path: `${NOTIFICATIONS_PATH}/${id}`, idempotent: true, headers: webhookRevisionHeaders(args),
+  }, id);
+  return {
+    envelope: successEnvelope({ id, deleted: true }, { request_id: response.headers["x-request-id"] ?? client.requestId }),
+    exitCode: ExitCode.Success,
+    human: `Deleted notification ${id}. Its pending notices fail with webhook_deleted and its delivery log is no longer addressable.`,
+  };
+});
+
+export const handleNotificationsRotateSecret = commandHandler(async (args, runtime, resolved) => {
+  const id = notificationId(args.positionals[2], "rotate-secret");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await notificationCall(client, {
+    method: "POST", path: `${NOTIFICATIONS_PATH}/${id}/rotate-secret`, idempotent: true, headers: webhookRevisionHeaders(args),
+  }, id);
+  return notificationSecretResult(response, client, "rotate", runtime);
+});
+
+export const handleNotificationsTest = commandHandler(async (args, runtime, resolved) => {
+  const id = notificationId(args.positionals[2], "test");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await notificationCall(client, { method: "POST", path: `${NOTIFICATIONS_PATH}/${id}/test`, idempotent: true }, id);
+  const delivery = response.body as NotificationDelivery | undefined;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: humanLines(`Queued a test delivery to notification ${id}`, [
+      ["delivery_id", delivery?.id],
+      ["event_type", delivery?.event_type],
+      ["event_id", delivery?.event_id],
+      ["state", delivery?.state],
+      ["next", `screenrig notifications deliveries ${id} --limit 1 shows its outcome; a test is attempted once, without retries.`],
+    ]),
+  };
+});
+
+export const handleNotificationsDeliveries = commandHandler(async (args, runtime, resolved) => {
+  const id = notificationId(args.positionals[2], "deliveries");
+  const before = flagString(args.flags, "before");
+  const limit = flagString(args.flags, "limit");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await notificationCall(client, {
+    method: "GET", path: `${NOTIFICATIONS_PATH}/${id}/deliveries`,
+    query: {
+      ...(before !== undefined ? { before: webhookDeliveryCursor(before, "notifications") } : {}),
+      ...(limit !== undefined ? { limit: webhookDeliveriesLimit(limit) } : {}),
+    },
+  }, id);
+  const page = response.body as NotificationDeliveryList | undefined;
+  const items = Array.isArray(page?.items) ? page.items : [];
+  const next = typeof page?.next_cursor === "string" ? page.next_cursor : undefined;
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [
+      `Notification ${id} deliveries (${items.length})`,
+      ...notificationDeliveryTableLines(items),
+      ...(next ? [`next: screenrig notifications deliveries ${id} --before ${next}${limit ? ` --limit ${limit}` : ""}`] : []),
     ].join("\n"),
   };
 });

@@ -29,6 +29,7 @@ import { registerPlaybackCommands } from "./playback.js";
 import { registerFeedbackCommands } from "./feedback.js";
 import { registerSupportCommands } from "./support.js";
 import { registerWebhooksCommands } from "./webhooks.js";
+import { registerNotificationsCommands } from "./notifications.js";
 import { registerDoctorCommands } from "./doctor.js";
 import { registerVersionCommands } from "./version.js";
 import { registerStatusCommands } from "./status.js";
@@ -61,6 +62,7 @@ export function registerCommands(root: Command, bind: CommandActionBinder): void
   registerAgentNotesCommands(root, bind);
   registerPlaybackCommands(root, bind);
   registerWebhooksCommands(root, bind);
+  registerNotificationsCommands(root, bind);
   registerFeedbackCommands(root, bind);
   registerSupportCommands(root, bind);
   registerDoctorCommands(root, bind);

@@ -27,15 +27,15 @@ import type { OperationLogger } from "./log/types.js";
 
 /**
  * Bodies that must not reach the operation log even after redaction: an
- * invitation create can carry a one-time credential URL, a webhook answer can
- * carry its signing secret, and a webhook URL path may itself embed a
- * receiver token. A fleet link answer carries the URL that creates screens,
- * a trigger answer the password a CAP sender authenticates with, and a K/V
- * webhook answer the secret its sender authenticates with.
+ * invitation create can carry a one-time credential URL, a webhook or
+ * notification answer can carry its signing secret, and a webhook URL path may
+ * itself embed a receiver token. A fleet link answer carries the URL that
+ * creates screens, a trigger answer the password a CAP sender authenticates
+ * with, and a K/V webhook answer the secret its sender authenticates with.
  */
 function privateBodies(method: string, path: string): boolean {
   path = path.replace(/^\/api\/projects\/[^/]+\//, "/api/");
-  return (method === "POST" && path === "/api/invitations") || /^\/api\/(?:webhooks|fleet-links|triggers)(?:\/|$)/.test(path)
+  return (method === "POST" && path === "/api/invitations") || /^\/api\/(?:webhooks|notifications|fleet-links|triggers)(?:\/|$)/.test(path)
     || /^\/api\/applications\/[^/]+\/kv-webhooks(?:\/|$)/.test(path);
 }
 
