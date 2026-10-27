@@ -1363,6 +1363,8 @@ export interface NotificationDeliveryList {
 export interface FleetLink {
   created_at: string;
   enabled: boolean;
+  /** When the link expires (UTC RFC 3339); absent means never. From then it creates and recovers no screens. */
+  expires_at?: string;
   id: string;
   label: string;
   last_used_at?: string;
@@ -1388,6 +1390,7 @@ export interface FleetLinkWrite {
   tags?: ScreenTags;
   playlist_id?: string;
   max_screens?: number;
+  expires_at?: string;
 }
 
 export interface FleetLinkPatch {
@@ -1398,6 +1401,8 @@ export interface FleetLinkPatch {
   playlist_id?: string | null;
   /** null removes the cap. */
   max_screens?: number | null;
+  /** null removes the expiry. */
+  expires_at?: string | null;
 }
 
 /** Exactly one of tag and screen_ids. */

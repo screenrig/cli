@@ -6,7 +6,7 @@ import { test } from "node:test";
 import type { Screen } from "./adapters/protocol.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
-import { fleetLinkUrlProblem } from "./fleet-links.js";
+import { fleetLinkExpiresAt, fleetLinkUrlProblem } from "./fleet-links.js";
 import { createMemoryLogger } from "./log/logger.js";
 import type { OperationLogger } from "./log/types.js";
 import { run, type CliRuntime } from "./main.js";
@@ -402,6 +402,162 @@ test("fleet-links update sends only supplied fields, null clears, and the revisi
     assert.match(refused.envelope.error!.detail, message);
   }
   assert.equal(transport.calls.length, before);
+});
+
+test("--expires-at takes an RFC 3339 time with seconds and a zone and sends the UTC instant it names", () => {
+  assert.equal(fleetLinkExpiresAt("2026-12-31T23:59:59Z"), "2026-12-31T23:59:59Z");
+  assert.equal(fleetLinkExpiresAt("2026-12-31T18:59:59-05:00"), "2026-12-31T23:59:59Z");
+  assert.equal(fleetLinkExpiresAt("2027-01-01T08:00:00+09:00"), "2026-12-31T23:00:00Z");
+  assert.equal(fleetLinkExpiresAt("2026-12-31T23:59:59.5+00:00"), "2026-12-31T23:59:59.500Z");
+  assert.equal(fleetLinkExpiresAt("2020-01-01T00:00:00Z"), "2020-01-01T00:00:00Z", "a time already past is allowed");
+  for (const value of ["2026-12-31", "2026-12-31T23:59:59", "2026-12-31T23:59Z", "2026-12-31 23:59:59Z", "2026-02-30T00:00:00Z",
+    "2026-12-31T24:00:00Z", "2026-12-31T23:59:59+24:00", "2026-12-31T23:59:59z", "tomorrow", "1788307199", "none"]) {
+    assert.throws(() => fleetLinkExpiresAt(value), /--expires-at takes an RFC 3339 time with seconds and a zone/, value);
+  }
+});
+
+test("fleet-links create --expires-at sends the UTC instant, and the link prints it", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const created = await cli(["--json", "fleet-links", "create", "--name", "Trade show", "--expires-at", "2026-12-31T18:59:59-05:00"], transport, env);
+  assert.equal(created.code, 0, created.stdout);
+  assert.deepEqual(linkCalls(transport).at(-1)!.body, { label: "Trade show", expires_at: "2026-12-31T23:59:59Z" });
+  assert.equal(created.envelope.data.expires_at, "2026-12-31T23:59:59Z");
+
+  const human = await cli(["--human", "fleet-links", "create", "--name", "Kiosks", "--max-screens", "12", "--expires-at", "2026-12-31T23:59:59Z"], transport, env);
+  assert.equal(human.code, 0, human.stderr);
+  assert.match(human.stdout, /^screens_created: 0\nmax_screens: 12\nexpires_at: 2026-12-31T23:59:59Z$/m);
+  assert.doesNotMatch(human.stdout, /expired/);
+
+  const plain = await cli(["--json", "fleet-links", "create", "--name", "No expiry"], transport, env);
+  assert.deepEqual(linkCalls(transport).at(-1)!.body, { label: "No expiry" }, "no --expires-at sends no expires_at");
+  assert.equal(plain.envelope.data.expires_at, undefined);
+  const plainHuman = await cli(["--human", "fleet-links", "create", "--name", "Still none"], transport, env);
+  assert.doesNotMatch(plainHuman.stdout, /expires_at/);
+});
+
+test("fleet-links create refuses an --expires-at that is not an RFC 3339 time with a zone, before any request", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const cases: Array<[string, RegExp]> = [
+    ["2026-12-31", /RFC 3339 time with seconds and a zone/],
+    ["2026-12-31T23:59:59", /RFC 3339 time with seconds and a zone/],
+    ["2026-02-30T00:00:00Z", /RFC 3339 time with seconds and a zone/],
+    ["tomorrow", /RFC 3339 time with seconds and a zone/],
+    ["", /--expires-at requires a value/],
+  ];
+  for (const [value, message] of cases) {
+    const refused = await cli(["--json", "fleet-links", "create", "--name", "Lobby", "--expires-at", value], transport, env);
+    assert.equal(refused.code, ExitCode.Usage, `${value}: ${refused.stdout}`);
+    assert.match(refused.envelope.error!.detail, message, value);
+  }
+  const twice = await cli(["--json", "fleet-links", "create", "--name", "Lobby", "--expires-at", "2026-12-31T23:59:59Z", "--expires-at", "2027-01-31T23:59:59Z"], transport, env);
+  assert.equal(twice.code, ExitCode.Usage);
+  assert.match(twice.envelope.error!.detail, /only once/);
+  assert.equal(linkCalls(transport).length, 0, "invalid input never reaches the server");
+});
+
+test("fleet-links update sets, moves and clears the expiry", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const { id } = await create(transport, env, "--tag", "Lobby");
+
+  const set = await cli(["--json", "fleet-links", "update", id, "--expires-at", "2027-03-01T09:30:00+01:00", "--expect-rev", "1"], transport, env);
+  assert.equal(set.code, 0, set.stdout);
+  let call = linkCalls(transport).at(-1)!;
+  assert.equal(call.method, "PATCH");
+  assert.deepEqual(call.body, { expires_at: "2027-03-01T08:30:00Z" });
+  assert.equal(call.headers?.["if-match"], '"1"');
+  assert.equal(set.envelope.data.expires_at, "2027-03-01T08:30:00Z");
+
+  const moved = await cli(["--human", "fleet-links", "update", id, "--name", "Lobby displays", "--expires-at", "2027-04-01T00:00:00Z"], transport, env);
+  assert.equal(moved.code, 0, moved.stderr);
+  assert.deepEqual(linkCalls(transport).at(-1)!.body, { label: "Lobby displays", expires_at: "2027-04-01T00:00:00Z" });
+  assert.match(moved.stdout, /^expires_at: 2027-04-01T00:00:00Z$/m);
+  assert.doesNotMatch(moved.stdout, /srfl_|#fleet=/, "update does not print the url");
+
+  const cleared = await cli(["--json", "fleet-links", "update", id, "--clear-expires-at"], transport, env);
+  assert.equal(cleared.code, 0, cleared.stdout);
+  call = linkCalls(transport).at(-1)!;
+  assert.deepEqual(call.body, { expires_at: null });
+  assert.equal(call.headers?.["if-match"], undefined, "no --expect-rev sends no If-Match");
+  assert.equal(cleared.envelope.data.expires_at, undefined);
+  const shown = await cli(["--human", "fleet-links", "show", id], transport, env);
+  assert.doesNotMatch(shown.stdout, /expires_at/, "a link without an expiry prints none");
+
+  const together = await cli(["--json", "fleet-links", "update", id, "--disable", "--clear-expires-at", "--clear-max-screens"], transport, env);
+  assert.equal(together.code, 0, together.stdout);
+  assert.deepEqual(linkCalls(transport).at(-1)!.body, { enabled: false, max_screens: null, expires_at: null });
+
+  const before = transport.calls.length;
+  for (const [args, message] of [
+    [["--expires-at", "2027-04-01T00:00:00Z", "--clear-expires-at"], /--clear-expires-at cannot be used with --expires-at|--expires-at cannot be used with --clear-expires-at/],
+    [["--expires-at", "2027-04-01"], /RFC 3339 time with seconds and a zone/],
+    [["--expires-at", "2027-04-01T00:00:00"], /RFC 3339 time with seconds and a zone/],
+    [["--expires-at", "2027-04-01T00:00:00Z", "--expires-at", "2027-05-01T00:00:00Z"], /only once/],
+    [[], /at least one of --name or --enable or --disable or --tag or --clear-tags or --playlist-id or --clear-playlist or --max-screens or --clear-max-screens or --expires-at or --clear-expires-at/],
+  ] as Array<[string[], RegExp]>) {
+    const refused = await cli(["--json", "fleet-links", "update", id, ...args], transport, env);
+    assert.equal(refused.code, ExitCode.Usage, `${args.join(" ")}: ${refused.stdout}`);
+    assert.match(refused.envelope.error!.detail, message);
+  }
+  assert.equal(transport.calls.length, before, "refused input never reaches the server");
+});
+
+test("fleet-links list and show print expires_at and mark a link that has passed it", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const never = await create(transport, env);
+  const later = await create(transport, env, "--expires-at", "2026-12-31T23:59:59Z");
+  const past = await create(transport, env, "--expires-at", "2026-08-01T00:00:00Z");
+  const now = await create(transport, env, "--expires-at", "2026-08-14T17:00:00Z");
+
+  const table = await cli(["--human", "fleet-links", "list"], transport, env);
+  assert.match(table.stdout, /^ID\s+LABEL\s+ENABLED\s+SCREENS\s+EXPIRES\s+TAGS\s+LAST_USED$/m);
+  assert.match(table.stdout, new RegExp(`^${never.id}\\s+Lobby displays\\s+true\\s+0$`, "m"), "a link that never expires has an empty cell");
+  assert.match(table.stdout, new RegExp(`^${later.id}\\s+Lobby displays\\s+true\\s+0\\s+2026-12-31T23:59:59Z$`, "m"));
+  assert.match(table.stdout, new RegExp(`^${past.id}\\s+Lobby displays\\s+true\\s+0\\s+2026-08-01T00:00:00Z \\(expired\\)$`, "m"));
+  assert.match(table.stdout, new RegExp(`^${now.id}\\s+Lobby displays\\s+true\\s+0\\s+2026-08-14T17:00:00Z \\(expired\\)$`, "m"), "a link expires at its expires_at");
+  assert.equal(table.stdout.match(/\(expired\)/g)?.length, 2);
+
+  const listed = await cli(["--json", "fleet-links", "list"], transport, env);
+  assert.deepEqual(listed.envelope.data.items.map((item: { expires_at?: string }) => item.expires_at),
+    [undefined, "2026-12-31T23:59:59Z", "2026-08-01T00:00:00Z", "2026-08-14T17:00:00Z"], "JSON keeps expires_at as the server returned it");
+  assert.doesNotMatch(listed.stdout, /expired/, "JSON adds no derived field");
+
+  const expired = await cli(["--human", "fleet-links", "show", past.id], transport, env);
+  assert.match(expired.stdout, /^expires_at: 2026-08-01T00:00:00Z \(expired\)$/m);
+  const upcoming = await cli(["--human", "fleet-links", "show", later.id], transport, env);
+  assert.match(upcoming.stdout, /^expires_at: 2026-12-31T23:59:59Z$/m);
+  const never_ = await cli(["--human", "fleet-links", "show", never.id], transport, env);
+  assert.doesNotMatch(never_.stdout, /expires_at/);
+  const rotated = await cli(["--human", "fleet-links", "rotate", past.id], transport, env);
+  assert.match(rotated.stdout, /^expires_at: 2026-08-01T00:00:00Z \(expired\)$/m);
+
+  const plain = new FakeTransport().on("GET", "/api/fleet-links", () => ({ status: 200, headers: {}, body: { items: [link()] } }));
+  const noExpiry = await cli(["--human", "fleet-links", "list"], plain, env);
+  assert.match(noExpiry.stdout, /^ID\s+LABEL\s+ENABLED\s+SCREENS\s+TAGS\s+LAST_USED$/m, "no EXPIRES column while no link has an expiry");
+  const odd = new FakeTransport().on("GET", "/api/fleet-links", () => ({ status: 200, headers: {}, body: { items: [link({ expires_at: "soon" })] } }));
+  const unreadable = await cli(["--human", "fleet-links", "list"], odd, env);
+  assert.match(unreadable.stdout, /\s+soon\s/, "an unreadable expires_at prints as returned, unmarked");
+  assert.doesNotMatch(unreadable.stdout, /expired/);
+});
+
+test("fleet-links help names --expires-at and --clear-expires-at, and update counts both as a change", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  // The help wraps long descriptions; compare the text with its line breaks and indentation collapsed.
+  const flat = (text: string) => text.replace(/\s+/g, " ");
+  const createHelp = flat((await cli(["fleet-links", "create", "--help"], transport, env)).stdout);
+  assert.ok(createHelp.includes("--expires-at <TIME> Stop creating and recovering screens at this RFC 3339 time with a zone, such as 2026-12-31T23:59:59Z (default: never) --disabled"), createHelp);
+  const updateHelp = flat((await cli(["fleet-links", "update", "--help"], transport, env)).stdout);
+  assert.ok(updateHelp.includes("--expires-at <TIME> Stop creating and recovering screens at this RFC 3339 time with a zone, such as 2026-12-31T23:59:59Z --clear-expires-at Remove the expiry; the link never expires --expect-rev"), updateHelp);
+  assert.match(updateHelp, /Provide at least one of .* or --expires-at or --clear-expires-at\./);
+
+  const structured = await cli(["--json", "fleet-links", "update", "--help"], transport, env);
+  const options = (structured.envelope.data.options as Array<{ name: string; conflicts?: string[] }>).filter((option) => option.name.includes("expires-at"));
+  assert.deepEqual(options.map((option) => [option.name, option.conflicts]), [["--expires-at", ["--clear-expires-at"]], ["--clear-expires-at", ["--expires-at"]]]);
+  assert.equal(transport.calls.length, 0, "help makes no request");
 });
 
 test("fleet-links rotate replaces the url and prints the new one", async () => {

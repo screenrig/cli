@@ -1922,7 +1922,7 @@ export function memoryBackend(options: {
   };
   transport.on("GET", "/api/fleet-links", () => ({ status: 200, headers: { "cache-control": "no-store" }, body: { items: [...fleetLinks.values()].map((link) => ({ ...link })) } }));
   transport.on("POST", "/api/fleet-links", (req) => fleetLinkReplay(req, () => {
-    const body = (req.body ?? {}) as { label?: string; enabled?: boolean; tags?: string[]; playlist_id?: string; max_screens?: number };
+    const body = (req.body ?? {}) as { label?: string; enabled?: boolean; tags?: string[]; playlist_id?: string; max_screens?: number; expires_at?: string };
     const unknown = unknownPlaylist(body.playlist_id);
     if (unknown) return unknown;
     if (fleetLinks.size >= 50) return problem(409, "fleet_link_limit_reached", "The project has the maximum of 50 fleet links.");
@@ -1932,6 +1932,7 @@ export function memoryBackend(options: {
       label: body.label, enabled: body.enabled ?? true, url: fleetLinkUrl(), tags: body.tags ?? [],
       ...(body.playlist_id ? { playlist_id: body.playlist_id } : {}),
       ...(body.max_screens !== undefined ? { max_screens: body.max_screens } : {}),
+      ...(body.expires_at !== undefined ? { expires_at: body.expires_at } : {}),
       screens_created: 0, revision: 1,
       created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
     };
@@ -1947,7 +1948,7 @@ export function memoryBackend(options: {
     if (!link) return notFound("Resource was not found.");
     const stale = staleFleetLink(req, link);
     if (stale) return stale;
-    const body = (req.body ?? {}) as { label?: string; enabled?: boolean; tags?: string[]; playlist_id?: string | null; max_screens?: number | null };
+    const body = (req.body ?? {}) as { label?: string; enabled?: boolean; tags?: string[]; playlist_id?: string | null; max_screens?: number | null; expires_at?: string | null };
     const unknown = unknownPlaylist(body.playlist_id);
     if (unknown) return unknown;
     if (body.label !== undefined) link.label = body.label;
@@ -1957,6 +1958,8 @@ export function memoryBackend(options: {
     else if (body.playlist_id !== undefined) link.playlist_id = body.playlist_id;
     if (body.max_screens === null) delete link.max_screens;
     else if (body.max_screens !== undefined) link.max_screens = body.max_screens;
+    if (body.expires_at === null) delete link.expires_at;
+    else if (body.expires_at !== undefined) link.expires_at = body.expires_at;
     link.revision = (link.revision as number) + 1;
     return { status: 200, headers: { etag: `"${link.revision}"` }, body: { ...link } };
   }));
