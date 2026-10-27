@@ -4422,6 +4422,27 @@ export const handlePlaybackTotals = commandHandler(async (args, runtime, resolve
   });
 }, true);
 
+/**
+ * `playback completeness` binds GET /api/playback/completeness: how many of the
+ * plays Players numbered reached screenRIG, per UTC day and for the window, and
+ * the gaps where numbered plays went missing (newest first). A window spans at
+ * most 92 days; --limit caps the gaps listed.
+ */
+export const handlePlaybackCompleteness = commandHandler(async (args, runtime, resolved) => {
+  const { screenId } = playbackFilterFlags(args);
+  for (const [name, example] of [["day-from", "2026-09-01"], ["day-to", "2026-09-30"], ["limit", "100"]] as const) {
+    requireFlagValue(args, name, example);
+  }
+  const limit = flagString(args.flags, "limit");
+  if (limit !== undefined && (!/^\d+$/.test(limit) || Number(limit) < 1 || Number(limit) > 500)) {
+    throw usageError("--limit must be a whole number from 1 to 500.");
+  }
+  const days = aggregateDays(flagString(args.flags, "day-from"), flagString(args.flags, "day-to"), 92, "");
+  return simpleGet(args, runtime, resolved, "/api/playback/completeness", "Playback completeness", {
+    screen_id: screenId, limit, ...days,
+  });
+}, true);
+
 /** The id of `screen uptime|presence|health-history ID`, checked like the other screen reads. */
 function screenSeriesId(args: ParsedArgs, command: string): string {
   const id = args.positionals[2];

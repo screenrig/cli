@@ -84,7 +84,7 @@ async function refused(prefix: string, argvs: string[][]): Promise<void> {
 }
 
 test("the analytics read commands are in help", () => {
-  for (const name of ["playback totals", "screen uptime", "screen presence", "screen health-history", "project uptime", "project health-trend"]) {
+  for (const name of ["playback totals", "playback completeness", "screen uptime", "screen presence", "screen health-history", "project uptime", "project health-trend"]) {
     assert.match(commandHelp(name.split(" ")).synopsis[0]!, new RegExp(name));
   }
   assert.deepEqual(commandHelp(["playback", "totals"]).options.find((option) => option.name === "--by")?.choices, ["day", "screen", "media", "screen_day"]);
@@ -149,6 +149,42 @@ test("playback totals refuses what the API refuses before any request", async ()
     ["playback", "totals", "--screen-id", SCREEN, "--day-from", "2026-07-21", "--day-to", "2026-10-21"],
     ["playback", "totals", "--by", "screen", "--day-from", "2026-07-21", "--day-to", "2026-10-21"],
     ["playback", "totals", "--by", "screen_day", "--day-from", "2026-01-01", "--day-to", "2026-10-21"],
+  ]);
+});
+
+test("playback completeness sends the days, screen and gap limit it was given", async () => {
+  const configDir = await testTemp("completeness-");
+  await enrolled(configDir);
+  const body = {
+    day_from: "2026-09-22", day_to: "2026-10-21", measured_plays: 95, missing_plays: 5, completeness: 0.95,
+    days: [{ day: "2026-10-21", measured_plays: 95, missing_plays: 5, completeness: 0.95 }],
+    gaps: [{ screen_id: SCREEN, day: "2026-10-21", from: "2026-10-20T22:10:00Z", to: "2026-10-21T08:02:00Z", missing_plays: 5 }],
+    truncated: false,
+  };
+  const transport = new FakeTransport().on("GET", "/api/playback/completeness", () => json(body));
+  try {
+    const plain = await withRuntime(["--json", "playback", "completeness"], transport, configDir);
+    assert.equal(plain.code, ExitCode.Success, plain.stdout);
+    assert.deepEqual(query(transport.calls.at(-1)), {});
+    assert.deepEqual(data(plain.stdout), body);
+
+    const narrowed = await withRuntime(["--json", "playback", "completeness", "--day-from", "2026-07-22", "--day-to", "2026-10-21", "--screen-id", SCREEN, "--limit", "500"], transport, configDir);
+    assert.equal(narrowed.code, ExitCode.Success, narrowed.stdout);
+    assert.deepEqual(query(transport.calls.at(-1)), { day_from: "2026-07-22", day_to: "2026-10-21", screen_id: SCREEN, limit: "500" });
+    assert.equal(transport.calls.every((call) => call.method === "GET" && call.path === "/api/playback/completeness"), true);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("playback completeness refuses what the API refuses before any request", async () => {
+  await refused("completeness-usage", [
+    ["playback", "completeness", "--limit", "0"],
+    ["playback", "completeness", "--limit", "501"],
+    ["playback", "completeness", "--screen-id", "Lobby"],
+    ["playback", "completeness", "--media-id", MEDIA],
+    ["playback", "completeness", "--day-from", "2026-07-21", "--day-to", "2026-10-21"],
+    ["playback", "completeness", "--day-from", "2026-10-02", "--day-to", "2026-10-01"],
   ]);
 });
 

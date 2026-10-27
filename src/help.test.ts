@@ -230,6 +230,7 @@ test("root help is compact and every command is discoverable through immediate c
     "playback list",
     "playback plays",
     "playback totals",
+    "playback completeness",
     "screen uptime",
     "screen presence",
     "screen health-history",

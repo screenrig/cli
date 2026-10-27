@@ -2,7 +2,7 @@ import { type Command, Option } from "commander";
 import { addCommandNotes, requireOptionGroup } from "./notes.js";
 import { positiveInteger } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handlePlaybackList, handlePlaybackPlays, handlePlaybackTotals } from "../commands.js";
+import { handlePlaybackCompleteness, handlePlaybackList, handlePlaybackPlays, handlePlaybackTotals } from "../commands.js";
 import { playsCursor, playsInstantOption, playsLimit } from "../playback-export.js";
 
 const formatOption = () => new Option("--format <FORMAT>", "json (default) or csv").choices(["json", "csv"]);
@@ -45,4 +45,11 @@ export function registerPlaybackCommands(root: Command, bind: CommandActionBinde
     .action(bind(handlePlaybackTotals));
   requireOptionGroup(totals, "atMostOne", ["--screen-id", "--media-id"]);
   requireOptionGroup(totals, "requires", ["--top", "--by"]);
+
+  playback.command("completeness").description("How many numbered plays reached screenRIG per UTC day, and the gaps where plays went missing")
+    .option("--day-from <YYYY-MM-DD>", "First UTC day, inclusive (default 29 days before --day-to); at most 92 days")
+    .option("--day-to <YYYY-MM-DD>", "Last UTC day, inclusive (default today)")
+    .option("--screen-id <ID>", "Only this screen")
+    .option("--limit <N>", "Gaps to list, newest first, 1 to 500 (default 100)", positiveInteger("limit"))
+    .action(bind(handlePlaybackCompleteness));
 }
