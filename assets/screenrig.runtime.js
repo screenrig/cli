@@ -1662,7 +1662,7 @@
     const rules = [];
     const visit = (list) => {
       for (const rule of list) {
-        if (rule instanceof CSSFontFaceRule && families.has(rule.style.getPropertyValue("font-family").replaceAll(/["']/g, "").toLowerCase())) rules.push(rule);
+        if (rule instanceof CSSFontFaceRule && families.has(rule.style.getPropertyValue("font-family").replace(/["']/g, "").toLowerCase())) rules.push(rule);
         else if (rule instanceof CSSImportRule && rule.styleSheet) visit(rule.styleSheet.cssRules);
         else if ("cssRules" in rule) visit(rule.cssRules);
       }
@@ -1740,7 +1740,7 @@
     const visit = async (node) => {
       if (!visible(node)) return;
       const style = getComputedStyle(node);
-      for (const family of style.fontFamily.split(",")) families.add(family.trim().replaceAll(/["']/g, "").toLowerCase());
+      for (const family of style.fontFamily.split(",")) families.add(family.trim().replace(/["']/g, "").toLowerCase());
       if (style.mixBlendMode !== "normal" || style.backdropFilter && style.backdropFilter !== "none") throw new CaptureUnavailable();
       if (node instanceof HTMLVideoElement) {
         if (node.readyState < 2 || node.videoWidth < 1 || node.videoHeight < 1) throw new CaptureUnavailable("capture_failed");
