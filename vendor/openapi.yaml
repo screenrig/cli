@@ -10457,7 +10457,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createMediaSyncAccount
-      description: 'Stores the credentials of the project''s own Microsoft Entra app, so syncs can read a SharePoint or OneDrive for work folder. kind is microsoft365; config.tenant_id is the tenant''s directory id or primary domain (common, organizations and consumers are refused) and config.client_id the app''s application id; secret is the value of one of the app''s client secrets. The app needs the Microsoft Graph application permission Sites.Selected (granted on each site) or Files.Read.All, with admin consent. The secret is sealed at rest and never returned or logged. Appends media_sync_account.created. An exact retry with the same Idempotency- Key returns the same answer.'
+      description: 'Adds an account that syncs read through. kind microsoft365 stores the credentials of the project''s own Microsoft Entra app, so syncs can read a SharePoint or OneDrive for work folder: config.tenant_id is the tenant''s directory id or primary domain (common, organizations and consumers are refused), config.client_id the app''s application id, and secret the value of one of the app''s client secrets; the app needs the Microsoft Graph application permission Sites.Selected (granted on each site) or Files.Read.All, with admin consent. kind canva takes only a name: the account is pending_consent and the answer carries authorize_url, a one-time link (valid for authorize_expires_at) that the person who owns the Canva account opens, signed in to Canva, to connect it through screenRIG''s Canva integration. The grant belongs to the project, so its syncs outlive the person who connected it. A server without the Canva integration answers 409 canva_not_configured. A secret is sealed at rest and never returned or logged. Appends media_sync_account.created. An exact retry with the same Idempotency-Key returns the same account (a Canva retry gets a new link).'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -10471,7 +10471,7 @@ paths:
               $ref: '#/components/schemas/MediaSyncAccountWrite'
       responses:
         '201':
-          description: Created, with its secret masked.
+          description: Created, with its secret masked; a Canva account also carries authorize_url.
           headers:
             ETag:
               schema:
@@ -10484,7 +10484,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MediaSyncAccount'
+                $ref: '#/components/schemas/MediaSyncAccountConnect'
         '400':
           description: invalid_request.
           content:
@@ -10492,7 +10492,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '409':
-          description: resource_conflict (the account is used by syncs) or idempotency_mismatch.
+          description: canva_not_configured (this server has no Canva integration; kind canva only), resource_conflict or idempotency_mismatch.
           content:
             application/problem+json:
               schema:
@@ -10531,7 +10531,7 @@ paths:
     patch:
       x-screenrig-access: write
       operationId: updateMediaSyncAccount
-      description: 'Changes the name, tenant, client id or secret; an omitted secret keeps the stored one. A change of credentials discards the last test. Appends media_sync_account.updated. If-Match guards the revision.'
+      description: 'Changes the name, tenant, client id or secret; an omitted secret keeps the stored one. A change of credentials discards the last test. A Canva account takes only a name; media sync account connect renews its connection. Appends media_sync_account.updated. If-Match guards the revision.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -10577,7 +10577,7 @@ paths:
     delete:
       x-screenrig-access: write
       operationId: deleteMediaSyncAccount
-      description: 'Deletes the account. Refused 409 resource_conflict while a sync reads through it; the detail names those syncs. Appends media_sync_account.deleted. If-Match guards the revision.'
+      description: 'Deletes the account. Refused 409 resource_conflict while a sync reads through it; the detail names those syncs. Deleting a Canva account also revokes its tokens at Canva (a failure to revoke is logged and does not undo the delete). Appends media_sync_account.deleted. If-Match guards the revision.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -10608,7 +10608,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: testMediaSyncAccount
-      description: 'Signs in with the account''s app and reports what Microsoft granted it: whether the credentials work and which Graph application permissions the token carries (Sites.Selected, Files.Read.All and the like). Sites.Selected is reported with a warning, because each site needs a grant for the app. It does not judge a site''s grant, a folder, or consent beyond what the token carries. The result is stored as last_test. A failed check is ok false in the answer, not a problem.'
+      description: 'Signs in with the account''s app and reports what Microsoft granted it: whether the credentials work and which Graph application permissions the token carries (Sites.Selected, Files.Read.All and the like). Sites.Selected is reported with a warning, because each site needs a grant for the app. For a Canva account it reports whether Canva still accepts the connection. It does not judge a site''s grant, a folder or a design, or consent beyond what the token carries. The result is stored as last_test. A failed check is ok false in the answer, not a problem.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -10629,6 +10629,135 @@ paths:
                 $ref: '#/components/schemas/MediaSyncTest'
         default:
           $ref: '#/components/responses/Problem'
+  /api/media-sync-accounts/{id}/connect:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      x-screenrig-access: write
+      operationId: connectMediaSyncAccount
+      description: 'Makes a new one-time consent link (authorize_url, valid until authorize_expires_at) for a Canva account, to send to the person who owns the Canva account; they open it signed in to Canva and allow access. It replaces any earlier link. A connected account stays connected until the new consent completes, so this also renews a connection (state reconnect_required) or moves it to another Canva account. The link is a credential of the consent: send it to that person only. A server without the Canva integration answers 409 canva_not_configured.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '200':
+          description: The account with a new authorize_url.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSyncAccountConnect'
+        '400':
+          description: invalid_request — the account is not a Canva account.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: canva_not_configured — this server has no Canva integration.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/media-sync-accounts/{id}/designs:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      x-screenrig-access: read
+      operationId: listMediaSyncDesigns
+      description: 'Lists the Canva designs the connected person can see, most recently changed first (50 per page; continuation continues), optionally those matching query. Each shows its id, title, last change, page count and a view address. An account that is not connected is 409 canva_reconnect_required; a server without the Canva integration is 409 canva_not_configured.'
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      parameters:
+        - $ref: '#/components/parameters/MediaSyncDesignQuery'
+        - $ref: '#/components/parameters/MediaSyncDesignContinuation'
+      responses:
+        '200':
+          description: One page of designs.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaSyncDesignList'
+        '400':
+          description: invalid_request — the account is not a Canva account, or query or continuation is not valid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: canva_reconnect_required (the account is not connected, or Canva no longer honors the connection) or canva_not_configured (this server has no Canva integration).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/canva/callback:
+    get:
+      operationId: completeCanvaConsent
+      description: 'Where Canva sends the person after they allow (or refuse) access in a consent link. It carries no credential: the one-time state in the query finds the Canva account, must be unexpired and is used once, in the same write that stores the connection. screenRIG exchanges the code (PKCE, client authentication with the integration''s credentials), reads whose Canva account it is, seals the tokens and appends media_sync_account.connected. The answer is a short page naming the account and the project it was connected to; an error, an unknown, expired or used state, or a refused code renders the same page with the reason and changes nothing. Answers only on the API host.'
+      parameters:
+        - name: code
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: error
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The page that says the account is connected.
+          content:
+            text/html:
+              schema:
+                type: string
+        '400':
+          description: The page that says why nothing was connected.
+          content:
+            text/html:
+              schema:
+                type: string
+        '502':
+          description: Canva could not be reached; the same link works again.
+          content:
+            text/html:
+              schema:
+                type: string
+        '409':
+          description: Canva is not configured on this server.
+          content:
+            text/html:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Problem'
+      security: []
   /api/media-syncs:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -10661,7 +10790,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createMediaSync
-      description: 'Reads the folder''s address through the account (a SharePoint site address such as https://TENANT.sharepoint.com/sites/SITE/LIBRARY/FOLDER, or a sharing link; the app must be able to see it: Sites.Selected needs a grant on the site, a sharing link needs Files.Read.All) and stores the sync, due now. folder_id is the media folder the files land in; without it the sync creates one named after the source folder. Each run imports the images (png, jpeg, webp, gif), videos (mp4, webm) and audio (mp3) directly in the source folder, replaces the bytes of a file that changed under the same media id so playlists that use it update, and takes a file removed at the source out of play: its media is deleted, or, while screens still hold it, moved to a Removed subfolder and deleted later. Subfolders are ignored; other files are listed as skipped with the reason. every is the seconds between runs, 300 to 86400, default 900. A folder the provider refuses is 409 media_sync_source_refused and one it cannot reach is 500 media_sync_source_unavailable; nothing is stored. Appends media_sync.created.'
+      description: 'provider canva: reads the design (design is its id or its canva.com/design/ID/... address) through a connected Canva account, and stores the sync, due now. Each run asks Canva for the design''s last change and, when it moved, exports the pages (pages, default all; format png gives one image per page and mp4 one video) and imports them into the media folder, replacing the bytes of a page already imported under the same media id so the playlists that use it update; a page the design no longer has leaves play like a removed SharePoint file. A design Canva no longer shows stops the sync in state error (run error design_unavailable) and keeps the media. A design or page the account cannot see is 409 media_sync_source_refused. provider sharepoint: reads the folder''s address through the account (a SharePoint site address such as https://TENANT.sharepoint.com/sites/SITE/LIBRARY/FOLDER, or a sharing link; the app must be able to see it: Sites.Selected needs a grant on the site, a sharing link needs Files.Read.All) and stores the sync, due now. folder_id is the media folder the files land in; without it the sync creates one named after the source folder. Each run imports the images (png, jpeg, webp, gif), videos (mp4, webm) and audio (mp3) directly in the source folder, replaces the bytes of a file that changed under the same media id so playlists that use it update, and takes a file removed at the source out of play: its media is deleted, or, while screens still hold it, moved to a Removed subfolder and deleted later. Subfolders are ignored; other files are listed as skipped with the reason. every is the seconds between runs, 300 to 86400, default 900. A folder the provider refuses is 409 media_sync_source_refused and one it cannot reach is 500 media_sync_source_unavailable; nothing is stored. Appends media_sync.created.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -10812,12 +10941,13 @@ paths:
     post:
       x-screenrig-access: write
       operationId: runMediaSync
-      description: 'Makes the sync due now and answers 202; a worker runs it within about 30 seconds and the answer of GET /api/media-syncs/{id} shows its last_run. A sync an error stopped runs again; a paused sync is refused until it is resumed.'
+      description: 'Makes the sync due now and answers 202; a worker runs it within about 30 seconds and the answer of GET /api/media-syncs/{id} shows its last_run. A sync an error stopped runs again; a paused sync is refused until it is resumed. force=true makes a Canva sync export the design even when Canva reports it unchanged (a SharePoint sync is refused: it already downloads every changed file).'
       security:
         - projectBearer: []
         - dashboardSession: []
       parameters:
         - $ref: '#/components/parameters/OptionalIdempotencyKey'
+        - $ref: '#/components/parameters/MediaSyncForce'
       responses:
         '202':
           description: The sync, due now.
@@ -11322,7 +11452,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listAlerts
-      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
+      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled, blank or frozen screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -19056,7 +19186,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createMediaSyncAccountInProject
-      description: 'Stores the credentials of the project''s own Microsoft Entra app, so syncs can read a SharePoint or OneDrive for work folder. kind is microsoft365; config.tenant_id is the tenant''s directory id or primary domain (common, organizations and consumers are refused) and config.client_id the app''s application id; secret is the value of one of the app''s client secrets. The app needs the Microsoft Graph application permission Sites.Selected (granted on each site) or Files.Read.All, with admin consent. The secret is sealed at rest and never returned or logged. Appends media_sync_account.created. An exact retry with the same Idempotency- Key returns the same answer.'
+      description: 'Adds an account that syncs read through. kind microsoft365 stores the credentials of the project''s own Microsoft Entra app, so syncs can read a SharePoint or OneDrive for work folder: config.tenant_id is the tenant''s directory id or primary domain (common, organizations and consumers are refused), config.client_id the app''s application id, and secret the value of one of the app''s client secrets; the app needs the Microsoft Graph application permission Sites.Selected (granted on each site) or Files.Read.All, with admin consent. kind canva takes only a name: the account is pending_consent and the answer carries authorize_url, a one-time link (valid for authorize_expires_at) that the person who owns the Canva account opens, signed in to Canva, to connect it through screenRIG''s Canva integration. The grant belongs to the project, so its syncs outlive the person who connected it. A server without the Canva integration answers 409 canva_not_configured. A secret is sealed at rest and never returned or logged. Appends media_sync_account.created. An exact retry with the same Idempotency-Key returns the same account (a Canva retry gets a new link).'
       security:
         - projectBearer: []
       parameters:
@@ -19069,7 +19199,7 @@ paths:
               $ref: '#/components/schemas/MediaSyncAccountWrite'
       responses:
         '201':
-          description: Created, with its secret masked.
+          description: Created, with its secret masked; a Canva account also carries authorize_url.
           headers:
             ETag:
               schema:
@@ -19082,7 +19212,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MediaSyncAccount'
+                $ref: '#/components/schemas/MediaSyncAccountConnect'
         '400':
           description: invalid_request.
           content:
@@ -19090,7 +19220,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '409':
-          description: resource_conflict (the account is used by syncs) or idempotency_mismatch.
+          description: canva_not_configured (this server has no Canva integration; kind canva only), resource_conflict or idempotency_mismatch.
           content:
             application/problem+json:
               schema:
@@ -19132,7 +19262,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createMediaSyncInProject
-      description: 'Reads the folder''s address through the account (a SharePoint site address such as https://TENANT.sharepoint.com/sites/SITE/LIBRARY/FOLDER, or a sharing link; the app must be able to see it: Sites.Selected needs a grant on the site, a sharing link needs Files.Read.All) and stores the sync, due now. folder_id is the media folder the files land in; without it the sync creates one named after the source folder. Each run imports the images (png, jpeg, webp, gif), videos (mp4, webm) and audio (mp3) directly in the source folder, replaces the bytes of a file that changed under the same media id so playlists that use it update, and takes a file removed at the source out of play: its media is deleted, or, while screens still hold it, moved to a Removed subfolder and deleted later. Subfolders are ignored; other files are listed as skipped with the reason. every is the seconds between runs, 300 to 86400, default 900. A folder the provider refuses is 409 media_sync_source_refused and one it cannot reach is 500 media_sync_source_unavailable; nothing is stored. Appends media_sync.created.'
+      description: 'provider canva: reads the design (design is its id or its canva.com/design/ID/... address) through a connected Canva account, and stores the sync, due now. Each run asks Canva for the design''s last change and, when it moved, exports the pages (pages, default all; format png gives one image per page and mp4 one video) and imports them into the media folder, replacing the bytes of a page already imported under the same media id so the playlists that use it update; a page the design no longer has leaves play like a removed SharePoint file. A design Canva no longer shows stops the sync in state error (run error design_unavailable) and keeps the media. A design or page the account cannot see is 409 media_sync_source_refused. provider sharepoint: reads the folder''s address through the account (a SharePoint site address such as https://TENANT.sharepoint.com/sites/SITE/LIBRARY/FOLDER, or a sharing link; the app must be able to see it: Sites.Selected needs a grant on the site, a sharing link needs Files.Read.All) and stores the sync, due now. folder_id is the media folder the files land in; without it the sync creates one named after the source folder. Each run imports the images (png, jpeg, webp, gif), videos (mp4, webm) and audio (mp3) directly in the source folder, replaces the bytes of a file that changed under the same media id so playlists that use it update, and takes a file removed at the source out of play: its media is deleted, or, while screens still hold it, moved to a Removed subfolder and deleted later. Subfolders are ignored; other files are listed as skipped with the reason. every is the seconds between runs, 300 to 86400, default 900. A folder the provider refuses is 409 media_sync_source_refused and one it cannot reach is 500 media_sync_source_unavailable; nothing is stored. Appends media_sync.created.'
       security:
         - projectBearer: []
       parameters:
@@ -19323,7 +19453,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listAlertsInProject
-      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
+      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled, blank or frozen screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
       security:
         - projectBearer: []
       parameters:
@@ -19992,6 +20122,9 @@ components:
     MediaSyncCursor: {name: cursor, in: query, required: false, schema: {type: string}, description: "The next_cursor of the previous page."}
     MediaSyncAccountFilter: {name: account_id, in: query, required: false, schema: {type: string}, description: Lists only the syncs that read through this account.}
     MediaSyncStateFilter: {name: state, in: query, required: false, schema: {type: string, enum: [active, paused, error]}, description: Lists only the syncs in this state.}
+    MediaSyncDesignQuery: {name: query, in: query, required: false, schema: {type: string, maxLength: 255}, description: Lists only the designs whose title or text matches.}
+    MediaSyncDesignContinuation: {name: continuation, in: query, required: false, schema: {type: string, maxLength: 2000}, description: The continuation of the previous page.}
+    MediaSyncForce: {name: force, in: query, required: false, schema: {type: boolean, default: false}, description: A Canva sync exports the design even when Canva reports it unchanged.}
     IfMatch: {name: If-Match, in: header, required: false, schema: {type: string}, description: "Optional positive resource revision. Omit to write the current resource; a supplied stale revision is revision_conflict."}
     OptionalIfMatch: {name: If-Match, in: header, required: false, schema: {type: string}, description: "Optional positive resource revision. Omit to create or overwrite a key; a supplied stale revision is revision_conflict."}
     AfterCursor: {name: after, in: query, required: false, schema: {type: string}, description: "A cursor from a previous response: ev1_ for project events (and the event streams). The Player log (source=log) pages with lg1_ or ev1_ cursors by where the server keeps it; treat them as opaque and pass back the one a page returned. A cursor of another kind is refused with invalid_request."}
@@ -24772,21 +24905,31 @@ components:
             last_media_start_at: {type: string, format: date-time, description: Server receipt time of the latest media start the check had seen when it wrote the verdict. Not the Player clock.}
             threshold_s: {type: integer, minimum: 1, description: The silence in seconds the loop allowed before the screen counted as stalled. Present with a stalled verdict.}
             judged_at: {type: string, format: date-time, description: When the verdict was written.}
+        picture:
+          type: object
+          additionalProperties: false
+          required: [verdict, since, judged_at]
+          description: >-
+            The glass_blank and glass_frozen check. It reads the screenshots a screen's Player sends (screen screenshot, the dashboard, a wall, or the check's own captures): each is reduced to a 64 by 36 grid of brightness and a hash, and nothing else is kept. A flat frame, or one that is the same picture as one taken more than the longest page earlier, starts a suspicion. The check then asks for screenshots, less than the shortest page apart, until they span the loop plus its longest page, so that every page appeared in some frame; the verdict is blank when all of them were flat and frozen when all were the same picture, and a single frame that disagrees ends the suspicion without a trace. Two good frames in a row end a verdict (verified). A verdict is written only when it changes, so a screen that was never found blank or frozen has none. It does not judge a screen that is offline, whose display is off, standing by or disconnected, that is under a takeover or suspended, that is a video wall, or whose status is an error or whose content update is not current; a loop of one page, with a page that has nothing on it, with no image or card page that is always in it, with a page shorter than 6.25 seconds, with a page whose length the playlist does not fix (it plays to the end of its media, an application, an adslot break), or too long to cover with 30 captures; and a capture the Player reported as failed (a privacy frame).
+          properties:
+            verdict: {type: string, enum: [verified, blank, frozen, unjudged], description: "blank: every screenshot of a run that covers the loop was one flat tone. frozen: every one was the same picture. verified: a screen found blank or frozen showed two good screenshots in a row. unjudged: the screen was blank or frozen and then stopped meeting the conditions under which the check judges."}
+            since: {type: string, format: date-time, description: "When the verdict began: for blank and frozen, the first screenshot of the run that confirmed it; for verified, the second good screenshot; for unjudged, the moment the check stopped judging."}
+            judged_at: {type: string, format: date-time, description: When the verdict was written.}
     ScreenGlassChangedDetails:
       type: object
       additionalProperties: false
       required: [check, verdict, previous, since, evidence]
-      description: details object on a durable project-only screen.glass_changed event, appended when a glass check changes its verdict for a screen. It is not a runtime audience command and is not delivered on GET /screen/events. The loop_stalled condition opens on a playback verdict stalled and ends on any other.
+      description: details object on a durable project-only screen.glass_changed event, appended when a glass check changes its verdict for a screen. It is not a runtime audience command and is not delivered on GET /screen/events. The loop_stalled condition opens on a playback verdict stalled and ends on any other; glass_blank and glass_frozen open on a picture verdict blank or frozen and end on any other.
       properties:
-        check: {type: string, enum: [playback]}
-        verdict: {type: string, enum: [playing, stalled, unjudged]}
-        previous: {oneOf: [{type: string, enum: [playing, stalled, unjudged]}, {type: "null"}], description: "The verdict before; null when the check had none."}
+        check: {type: string, enum: [playback, picture]}
+        verdict: {type: string, enum: [playing, stalled, unjudged, verified, blank, frozen]}
+        previous: {oneOf: [{type: string, enum: [playing, stalled, unjudged, verified, blank, frozen]}, {type: "null"}], description: "The verdict before; null when the check had none."}
         since: {type: string, format: date-time}
         evidence:
           type: object
           additionalProperties: true
           description: >-
-            What the verdict rests on. stalled: last_media_start_at, threshold_s, expected_gap_s (the loop's longest run between media starts), page_id and play_seq of that start. playing: last_media_start_at, stalled_for_s, and late_reports (the number of starts the Player made that arrived after the stalled verdict, when its play numbers show them). unjudged: reason.
+            What the verdict rests on. stalled: last_media_start_at, threshold_s, expected_gap_s (the loop's longest run between media starts), page_id and play_seq of that start. playing: last_media_start_at, stalled_for_s, and late_reports (the number of starts the Player made that arrived after the stalled verdict, when its play numbers show them). unjudged: reason. picture blank or frozen: frames, run_s (the span of the run's screenshots), captures (system captures asked for), loop_s and shortest_page_s. picture verified: good_frames.
     ScreenStatusChangedDetails:
       type: object
       additionalProperties: false
@@ -25185,6 +25328,15 @@ components:
         bytes: {type: integer, minimum: 1, maximum: 2097152}
         sha256: {type: string, pattern: "^[a-f0-9]{64}$"}
         captured_at: {type: string, format: date-time}
+        frame:
+          type: object
+          additionalProperties: false
+          required: [flat, analyzed_at]
+          description: >-
+            What the backend read of this ready image: it describes one frame, not a verdict about the screen (Screen.glass.picture). Absent when the image could not be read, for instance when it is smaller than 64 by 36 pixels.
+          properties:
+            flat: {type: boolean, description: "True when the image is one flat tone: its 64 by 36 brightness cells span at most 12 of 255 and deviate by at most 4. A page that is black on purpose, or a transition between two pages, reads flat too."}
+            analyzed_at: {type: string, format: date-time}
     ScreenScreenshotRequestedDetails:
       type: object
       additionalProperties: false
@@ -25686,11 +25838,14 @@ components:
       properties:
         tenant_id: {type: string, description: "The organization's Entra tenant: its directory id (a GUID) or primary domain."}
         client_id: {type: string, description: "The app registration's application (client) id, a GUID."}
+        canva_user_id: {type: string, description: "A Canva account: the Canva user who connected it."}
+        team_id: {type: string, description: "A Canva account: the Canva team of that user."}
+        display_name: {type: string, description: "A Canva account: the name Canva shows for that user."}
     MediaSyncSecret:
       type: object
       additionalProperties: false
       required: [set, hint]
-      description: How an answer shows an account's client secret. The value is never returned.
+      description: How an answer shows an account's client secret, or a Canva account's tokens (set once connected, with no hint). The value is never returned.
       properties:
         set: {type: boolean}
         hint: {type: string, maxLength: 4, description: "The secret's last four characters; empty when it is too short to show any."}
@@ -25699,7 +25854,7 @@ components:
       additionalProperties: false
       required: [name, ok, detail]
       properties:
-        name: {type: string, enum: [credentials, permissions]}
+        name: {type: string, enum: [credentials, permissions, connection]}
         ok: {type: boolean}
         warn: {type: boolean, description: "A finding that does not fail the account but should be read."}
         detail: {type: string}
@@ -25715,29 +25870,37 @@ components:
       type: object
       additionalProperties: false
       required: [id, project_id, kind, name, config, secret, state, revision, created_at, updated_at]
-      description: The credentials of the project's own Microsoft Entra app, which syncs read through. The client secret is sealed and never returned.
+      description: "What syncs read through: the credentials of the project's own Microsoft Entra app (microsoft365), or one person's connection to Canva (canva). The client secret and the tokens are sealed and never returned."
       properties:
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?msa_[A-Za-z0-9_-]+$"}
         project_id: {type: string}
-        kind: {type: string, enum: [microsoft365]}
+        kind: {type: string, enum: [microsoft365, canva]}
         name: {type: string, minLength: 1, maxLength: 80}
         config: {$ref: "#/components/schemas/MediaSyncAccountConfig"}
         secret: {$ref: "#/components/schemas/MediaSyncSecret"}
-        state: {type: string, enum: [ready, pending_consent, reconnect_required]}
+        state: {type: string, enum: [ready, pending_consent, reconnect_required], description: "pending_consent: a Canva account no person has connected yet. reconnect_required: Canva no longer honors the connection; run media sync account connect."}
         last_test: {$ref: "#/components/schemas/MediaSyncTest"}
         revision: {type: integer, minimum: 1}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    MediaSyncAccountConnect:
+      description: "An account answered with its one-time consent link: what creating a Canva account and media sync account connect answer. The person who owns the Canva account opens authorize_url, signed in to Canva, before authorize_expires_at. It is the link of one consent: send it to that person only. Reads of the account never carry it."
+      allOf:
+        - $ref: "#/components/schemas/MediaSyncAccount"
+        - type: object
+          properties:
+            authorize_url: {type: string, description: "Present for a Canva account."}
+            authorize_expires_at: {type: string, format: date-time, description: "Present for a Canva account."}
     MediaSyncAccountList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/MediaSyncAccount"}}, next_cursor: {type: string, nullable: true}}}
     MediaSyncAccountWrite:
       type: object
       additionalProperties: false
-      required: [kind, name, config, secret]
+      required: [kind, name]
       properties:
-        kind: {type: string, enum: [microsoft365]}
+        kind: {type: string, enum: [microsoft365, canva]}
         name: {type: string, minLength: 1, maxLength: 80}
-        config: {type: object, additionalProperties: false, required: [tenant_id, client_id], properties: {tenant_id: {type: string}, client_id: {type: string}}}
-        secret: {type: string, minLength: 1, maxLength: 1024, description: "The value of one of the app's client secrets (not its id)."}
+        config: {type: object, additionalProperties: false, properties: {tenant_id: {type: string}, client_id: {type: string}}, description: "Required for microsoft365 (both members); not accepted for canva."}
+        secret: {type: string, minLength: 1, maxLength: 1024, description: "Required for microsoft365: the value of one of the app's client secrets (not its id). Not accepted for canva."}
     MediaSyncAccountPatch:
       type: object
       additionalProperties: false
@@ -25749,11 +25912,18 @@ components:
     MediaSyncSource:
       type: object
       additionalProperties: false
-      required: [web_url, drive_id, item_id]
+      required: [web_url]
+      description: The source a sync reads, resolved when the sync was created. A SharePoint folder has drive_id and item_id; a Canva design has design_id and the members after it.
       properties:
-        web_url: {type: string, description: "The source folder's address as SharePoint names it."}
+        web_url: {type: string, description: "The source's address as the provider names it: the SharePoint folder, or the Canva design's view address."}
         drive_id: {type: string}
         item_id: {type: string}
+        design_id: {type: string, description: The Canva design's id.}
+        title: {type: string, description: The Canva design's title when the sync was created or last exported.}
+        pages: {type: array, maxItems: 1000, items: {type: integer, minimum: 1}, description: "The pages synced; absent is every page."}
+        format: {type: string, enum: [png, mp4], description: "png: one image per page. mp4: one video."}
+        page_count: {type: integer, minimum: 1, description: The design's page count when last exported.}
+        design_updated_at: {type: string, format: date-time, description: "Canva's last-change time of the design version last exported. A run exports again when Canva reports a later one."}
     MediaSyncSkipped:
       type: object
       additionalProperties: false
@@ -25767,7 +25937,7 @@ components:
       additionalProperties: false
       required: [code, detail]
       properties:
-        code: {type: string, description: "source_refused, source_unavailable, source_missing, folder_missing, account_missing, account_unavailable or internal_error."}
+        code: {type: string, description: "source_refused, source_unavailable, source_missing, folder_missing, account_missing, account_unavailable or internal_error; for Canva also design_unavailable (Canva no longer shows the design; the sync is in state error and keeps its media), reconnect_required (run media sync account connect), canva_not_configured, export_failed, export_timeout or export_incomplete."}
         detail: {type: string}
     MediaSyncRun:
       type: object
@@ -25793,7 +25963,7 @@ components:
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?msy_[A-Za-z0-9_-]+$"}
         project_id: {type: string}
         account_id: {type: string}
-        provider: {type: string, enum: [sharepoint]}
+        provider: {type: string, enum: [sharepoint, canva]}
         name: {type: string, minLength: 1, maxLength: 80}
         folder_id: {type: string, description: The media folder the files land in; a folder selector on it plays them.}
         every_s: {type: integer, minimum: 300, maximum: 86400}
@@ -25804,15 +25974,37 @@ components:
         revision: {type: integer, minimum: 1}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    MediaSyncDesign:
+      type: object
+      additionalProperties: false
+      required: [id, title]
+      description: A Canva design the connected person can see.
+      properties:
+        id: {type: string}
+        title: {type: string}
+        updated_at: {type: string, format: date-time}
+        page_count: {type: integer, minimum: 1}
+        thumbnail_url: {type: string, description: "A short-lived https thumbnail address from Canva."}
+        view_url: {type: string, description: The design's view address in Canva.}
+    MediaSyncDesignList:
+      type: object
+      additionalProperties: false
+      required: [items, continuation]
+      properties:
+        items: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/MediaSyncDesign"}}
+        continuation: {type: string, nullable: true, description: "Pass it as continuation to read the next page; null at the end."}
     MediaSyncList: {type: object, additionalProperties: false, required: [items, next_cursor], properties: {items: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/MediaSync"}}, next_cursor: {type: string, nullable: true}}}
     MediaSyncWrite:
       type: object
       additionalProperties: false
-      required: [provider, account_id, url]
+      required: [provider, account_id]
       properties:
-        provider: {type: string, enum: [sharepoint]}
+        provider: {type: string, enum: [sharepoint, canva]}
         account_id: {type: string}
-        url: {type: string, maxLength: 4096, description: "The folder's SharePoint address or sharing link. It is read once to find the folder and is not stored."}
+        url: {type: string, maxLength: 4096, description: "sharepoint (required): the folder's SharePoint address or sharing link. It is read once to find the folder and is not stored."}
+        design: {type: string, maxLength: 2048, description: "canva (required): the design's id, or its canva.com/design/ID/... address."}
+        pages: {type: array, maxItems: 1000, items: {type: integer, minimum: 1}, description: "canva: the pages to sync; omit for every page. A design that later has fewer pages takes the missing ones out of play."}
+        format: {type: string, enum: [png, mp4], default: png, description: "canva: png gives one image per page; mp4 one video of the pages."}
         folder_id: {type: string, description: "The media folder the files land in. Omit it to create one named after the source folder."}
         every: {type: integer, minimum: 300, maximum: 86400, description: Seconds between runs; defaults to 900.}
         name: {type: string, minLength: 1, maxLength: 80, description: Defaults to the source folder's name.}
@@ -25922,12 +26114,12 @@ components:
     WebhookDeliveryAttemptList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/WebhookDeliveryAttempt"}}}}
     NotificationCondition:
       type: string
-      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, crashing]
+      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, glass_blank, glass_frozen, crashing]
       description: >-
-        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. loop_stalled: the Player reports nothing wrong and its content is current, yet no media start has reached the backend for longer than the screen's loop allows (screen.glass_changed with the playback verdict stalled; Screen.glass says when it judges and what it leaves alone); clears when a media start arrives or the screen stops being judged, for instance when it goes offline. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. Readers treat an unknown value as absent.
+        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. loop_stalled: the Player reports nothing wrong and its content is current, yet no media start has reached the backend for longer than the screen's loop allows (screen.glass_changed with the playback verdict stalled; Screen.glass says when it judges and what it leaves alone); clears when a media start arrives or the screen stops being judged, for instance when it goes offline. glass_blank and glass_frozen: the backend read the screen's screenshots over a run that covers its loop and every one was a flat tone (glass_blank) or the same picture (glass_frozen) (screen.glass_changed with the picture verdict blank or frozen; Screen.glass says when it judges and what it leaves alone); clears when two screenshots in a row show a moving picture or the screen stops being judged. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. Readers treat an unknown value as absent.
     NotificationConditions:
       type: array
-      maxItems: 8
+      maxItems: 10
       uniqueItems: true
       items: {$ref: "#/components/schemas/NotificationCondition"}
     NotificationRecipients:
@@ -28230,6 +28422,8 @@ x-problem-codes:
   - media_pending_review
   - media_sync_source_refused
   - media_sync_source_unavailable
+  - canva_not_configured
+  - canva_reconnect_required
   - not_found
   - method_not_allowed
   - idempotency_mismatch
