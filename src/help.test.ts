@@ -191,6 +191,7 @@ test("root help is compact and every command is discoverable through immediate c
     "campaign explain",
     "screen update",
     "screen list",
+    "screen live frame",
     "screen live start",
     "screen live status",
     "screen live stop",

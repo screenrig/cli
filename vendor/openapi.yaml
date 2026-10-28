@@ -14,7 +14,7 @@ info:
 
     Public remaining is whole credits, never millicredits. Authenticated /api and /api/playlists JSON and problem responses to a project bearer include ScreenRig-Credits-Remaining, ScreenRig-Credits-Reset, ScreenRig-Credits-Included and ScreenRig-Credits-Low. Player runtime responses never carry them (a screen is never refused for its balance), and SSE, content and unauthenticated responses omit them. The ledger unit remains millicredits (1000 mcr = 1 credit); published remaining is floored.
 
-    Authenticated user or agent /api and /api/playlists requests cost 1 credit, debited immediately against this server request id, after the first 10,000 API or billed listen-stream taxes in the UTC month. On Standard, remaining below the intro floor of negative 1,000,000 credits (zero from 2027-01-01) is payment_required; that includes the /api/playlists routes. Premium, Enterprise, Staff and Promo are never refused for their balance: usage is charged in full and remaining may go negative. GET /api/project, POST /api/agents/self/disconnect and the GET /api/billing reads do not debit, so a zero-remaining project can recover. Reading project notes (GET /api/notes and GET /api/notes/{id}) does not debit either; writing them does. Screen messages are exempt from this meter: POST /api/screens/{id}/toast, POST /api/screens/{id}/play-page, POST /api/screens/{id}/identify, POST /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot/status, and the live view routes under /api/screens/{id}/live. Runtime, pairing, content, health, and unauthenticated routes are not this meter. Inbound media commit, application accept, and K/V put bytes, outbound runtime media/package/release and K/V get bytes are recorded, never charged: bandwidth is free on every plan. Stored bytes settle hourly against remaining, and only the bytes a payer stores above its free 1 GB (1,000,000,000 bytes) count. Public remaining stays whole credits.
+    Authenticated user or agent /api and /api/playlists requests cost 1 credit, debited immediately against this server request id, after the first 10,000 API or billed listen-stream taxes in the UTC month. On Standard, remaining below the intro floor of negative 1,000,000 credits (zero from 2027-01-01) is payment_required; that includes the /api/playlists routes. Premium, Enterprise, Staff and Promo are never refused for their balance: usage is charged in full and remaining may go negative. GET /api/project, POST /api/agents/self/disconnect and the GET /api/billing reads do not debit, so a zero-remaining project can recover. Reading project notes (GET /api/notes and GET /api/notes/{id}) does not debit either; writing them does. Screen messages are exempt from this meter: POST /api/screens/{id}/toast, POST /api/screens/{id}/play-page, POST /api/screens/{id}/identify, POST /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot, GET /api/screens/{id}/screenshot/status, and the live view and live frame routes under /api/screens/{id}/live. Runtime, pairing, content, health, and unauthenticated routes are not this meter. Inbound media commit, application accept, and K/V put bytes, outbound runtime media/package/release and K/V get bytes are recorded, never charged: bandwidth is free on every plan. Stored bytes settle hourly against remaining, and only the bytes a payer stores above its free 1 GB (1,000,000,000 bytes) count. Public remaining stays whole credits.
 
     Opening GET /stream/project costs 1 credit as the listen subscribe. Later billed events on that stream cost 1 credit each. Screen conversation events are exempt: screen.*, runtime.*, alert_mute.*, and application.event. Heartbeats and the retry preamble never charge. playlist.*, media.*, kv.*, application.published, operation.*, project.*, feedback.*, stream.cursor, and stream.resync_required are billed. GET /stream/project bills arriving events under this same per-event meter and the same exemption set; like every SSE response it omits the ScreenRig-Credits-* headers. A dashboard session reads the same whole-credit balance through GET /api/balance, which never debits and remains available at zero. SSE debit idempotency is sse-event:<project_id>:<sequence>; reconnect replay is free. An unpaid billed event is not written and the stream closes.
 
@@ -2978,6 +2978,47 @@ paths:
                 $ref: '#/components/schemas/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /api/screens/{id}/playlist:
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: patchScreenPlaylist
+      description: >-
+        A signed-in person assigns the screen's playlist with updateScreen's assignment: the playlist must belong to the project and have an approved version (playlist_not_approved), and a playlist with a format needs a screen whose wall has the same shape (409 playlist_format_mismatch). The screen revision moves by one and the manifest is reissued from the new playlist; while a takeover, a campaign or a schedule entry is effective the playlist becomes the default behind it. Events carry the person as their actor. The write is live, so only the project owner or a member who can approve makes it (approver_required); a staff session needs its write lease. The body has no other member. If-Match carries the screen revision and is required (invalid_request when absent, revision_conflict when stale). The dashboard session only; agents use PATCH /api/screens/{id} (updateScreen).
+      security:
+        - dashboardSession: []
+      parameters:
+        - {name: If-Match, in: header, required: true, schema: {type: string}, description: "The screen's current revision, quoted or bare (the ETag of the last read). A stale revision is revision_conflict with current_revision."}
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreenPlaylistPatch'
+      responses:
+        '200':
+          description: The screen as stored now; ETag carries its revision.
+          headers:
+            ETag:
+              description: Quoted screen revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Screen'
+        '412':
+          description: revision_conflict — If-Match is stale; the error's current_revision carries the current revision.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/screens/{id}/public-id/rotate:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -5168,6 +5209,169 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/screens/{id}/live/frames:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    post:
+      x-screenrig-access: contribute
+      operationId: startScreenLiveFrames
+      x-rate-limit-policies:
+        - name: live-frames-project
+          quota: 600
+          windowSeconds: 60
+        - name: live-frames-screen
+          quota: 60
+          windowSeconds: 60
+        - name: live-frames-ip
+          quota: 120
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: 'Starts JPEG frames of the screen''s live session, for an agent that has HTTPS and no WebRTC: the media relay decodes the Player''s published video and delivers one JPEG about every second, and GET /api/screens/{id}/live/frame returns the latest. The session must be publishing (409 live_not_ready until then, 409 live_unavailable when there is none or it ended; start one with POST /api/screens/{id}/live). Frames are started once per session: asking again answers the same adapter''s progress, and a Player that reconnects ends its frames, so ask again. state is starting until the first frame arrives, streaming while frames arrive, and silent when the adapter is older than fifteen seconds and none has arrived in that time (last_frame_at, when present, says when frames last came). The frames end with the session. 404 feature_unavailable when the server has no media relay or no frames origin configured. Live frames are free and exempt from the 1-credit API meter, like a screenshot. They are what the Player''s encoder sent, scaled and lossy; they do not replace a screenshot as proof of layout.'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '202':
+          description: The frame adapter, and how far it has come.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveFrames'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/screens/{id}/live/frame:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+    get:
+      x-screenrig-access: read
+      operationId: getScreenLiveFrame
+      x-rate-limit-policies:
+        - name: live-frame-screen
+          quota: 240
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
+      description: 'Returns the latest JPEG frame of the screen''s live session. Without after it returns the latest frame there is; with after (the ScreenRig-Captured-At of the frame you already have) it returns the first frame captured later, waiting up to five seconds for one, so a loop that passes each answer''s ScreenRig-Captured-At back as after receives every new frame once. ScreenRig-Captured-At is when the backend received the frame. When no new frame comes in time the answer is 409 live_not_ready with Retry-After: 1; 409 resource_conflict answers a session whose frames were not started (POST /api/screens/{id}/live/frames first, and again after the Player reconnects); 409 live_unavailable answers a session that has ended or whose adapter is silent. Frames are relay-decoded JPEGs of the live stream, at most 1280 by 720: they show what the Player encoded and sent, not a screenshot. They end with the session (max_until at the latest). 404 feature_unavailable when the server has no media relay or no frames origin configured. Free and exempt from the 1-credit API meter.'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/ResourceID'
+        - name: after
+          in: query
+          required: false
+          description: Return a frame captured after this instant (RFC 3339, as in ScreenRig-Captured-At).
+          schema: {type: string, format: date-time}
+      responses:
+        '200':
+          description: The frame.
+          headers:
+            Content-Type:
+              schema:
+                type: string
+                enum:
+                  - image/jpeg
+            Content-Length:
+              schema:
+                type: integer
+            ETag:
+              description: The strong SHA-256 of the JPEG.
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+            ScreenRig-Live-Id:
+              schema:
+                type: string
+                pattern: "^lv_[a-z2-7]{26}$"
+            ScreenRig-Captured-At:
+              description: When the backend received the frame, RFC 3339 with nanoseconds. Pass it back as after.
+              schema:
+                type: string
+                format: date-time
+            ScreenRig-Frame-Width:
+              schema:
+                type: integer
+            ScreenRig-Frame-Height:
+              schema:
+                type: integer
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /live/frames:
+    servers:
+      - url: https://api.screenrig.ai
+        description: Control-plane origin
+    get:
+      operationId: connectLiveFrames
+      security: []
+      description: 'The media relay''s frame adapter connects here with a WebSocket upgrade; no client, agent or Player calls it. The token is the credential: POST /api/screens/{id}/live/frames hands it to the relay inside the adapter''s endpoint and stores only its SHA-256. Each binary message the relay sends is one protobuf Packet (field 1 sequenceNumber, field 2 timestamp, field 5 payload) whose payload is one whole JPEG of at most 2 MiB; anything else is skipped. The backend keeps the latest frame for fifteen seconds. One connection per token: a newer one replaces the older. The connection is closed with 1000 when the live session ends, and a token of an ended session is refused with 401 before the upgrade. 404 feature_unavailable when the server has no frames origin configured.'
+      parameters:
+        - name: token
+          in: query
+          required: true
+          description: The adapter's token, 43 characters.
+          schema: {type: string}
+      responses:
+        '101':
+          description: Switching Protocols to WebSocket.
+        '401':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /api/events:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -10087,7 +10291,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listAlerts
-      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
+      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -17750,7 +17954,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: listAlertsInProject
-      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
+      description: 'Lists the project''s screen alerts: one per screen and condition while it lasts (open), and those that ended within the plan''s event retention (resolved). An alert opens when its condition''s event arrives (screen.offline, a display_disconnected or temperature_high health change, screen.storage_shortfall, a stuck screen.manifest_upgrade, an error-level screen.status_changed, a stalled screen.glass_changed) and resolves on the clearing event; crashing is a notice, not an alert. counts.attention counts open alerts that are not acknowledged, snoozed or muted, the number the dashboard shows. Open alerts come first, newest first; pass next_cursor back as before for the next page.'
       security:
         - projectBearer: []
       parameters:
@@ -22592,6 +22796,14 @@ components:
         location:
           anyOf: [{$ref: "#/components/schemas/ScreenLocation"}, {type: "null"}]
           description: "Where the screen is: the object replaces the whole location and null clears it."
+    ScreenPlaylistPatch:
+      type: object
+      additionalProperties: false
+      required: [playlist_id]
+      description: >-
+        An assignment of a screen's playlist (patchScreenPlaylist). The body has no other member.
+      properties:
+        playlist_id: {type: string, minLength: 1, description: "The playlist the screen shows: its default, behind a takeover, a campaign that holds or a matching schedule entry."}
     PairScreen: {type: object, additionalProperties: false, required: [code], properties: {code: {type: string, pattern: "^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$"}, label: {type: string, minLength: 1, maxLength: 120}}}
     ProvisionScreen: {type: object, additionalProperties: false, properties: {label: {type: string, minLength: 1, maxLength: 120}}}
     ScreenProvisioning: {type: object, additionalProperties: false, required: [screen, public_url, provisioning_url, expires_at], properties: {screen: {$ref: "#/components/schemas/Screen"}, public_url: {type: string, format: uri}, provisioning_url: {type: string, pattern: "^https?://[^#]+/s/[^#]+#provision=[A-Za-z0-9_-]{43}$"}, expires_at: {type: string, format: date-time}}}
@@ -22718,6 +22930,7 @@ components:
         fleet_link_id: {type: string, description: "The fleet link that created this screen. Read-only; it stays after the link is deleted."}
         observation: {$ref: "#/components/schemas/ScreenObservation"}
         status: {$ref: "#/components/schemas/ScreenStatus"}
+        glass: {$ref: "#/components/schemas/ScreenGlass"}
         last_page_failure: {$ref: "#/components/schemas/PageFailure"}
         manifest_upgrade: {$ref: "#/components/schemas/ScreenManifestUpgrade"}
         comments: {type: object, additionalProperties: true, description: "Opaque agent JSON object, compact UTF-8 ≤ 1024 bytes. Absent when unset. ScreenRig never reads or uses it. ScreenPatch cannot write it. Not on the runtime manifest and never authorization."}
@@ -23154,6 +23367,39 @@ components:
         icon: {type: string, minLength: 1, description: "The chip's icon name in the catalogue (packages/overlay/icons). Absent when chip is null."}
         observed_at: {type: string, format: date-time, description: Player clock at the report. Last write wins; a report that changes nothing keeps the stored value.}
         received_at: {type: string, format: date-time, description: Server receipt time of the stored report. Not taken from the player clock.}
+    ScreenGlass:
+      type: object
+      additionalProperties: false
+      description: >-
+        What the backend concluded about the screen's picture from the reports it received, never from what the Player says about itself. A check that has nothing to say leaves its member absent. Read-only on the project API. Never authorization or admission. ScreenPatch cannot write it.
+      properties:
+        playback:
+          type: object
+          additionalProperties: false
+          required: [verdict, since, judged_at]
+          description: >-
+            The loop_stalled check. It judges a screen that is online, on schedule, showing a current multi-page playlist with media on it, and whose Player numbers its media starts (context.play_seq): when no media start has reached the backend for 1.5 times the loop's longest run between media starts (at least a minute) plus three minutes of reporting slack, the verdict is stalled. A verdict is written only when it changes, so a screen that was never found stalled has none. It does not judge a screen whose display is off, standing by or disconnected; one under a takeover or suspended; a video wall; a loop of one page, or with no page that always starts media, or with a page whose time on screen the playlist does not fix (an adslot break, an application-timed page); a Player that sends no play number; an offline screen, one whose status is an error or whose content update is not current; and it judges nothing while no screen at all has reported a media start in the last two minutes.
+          properties:
+            verdict: {type: string, enum: [playing, stalled, unjudged], description: "stalled: no media start arrived for longer than the loop allows. playing: a media start arrived after the screen was found stalled. unjudged: the screen was stalled and then stopped meeting the conditions under which the check judges."}
+            since: {type: string, format: date-time, description: "When the verdict began: for stalled, the instant the loop's allowance ran out; for playing, the receipt of the start that ended the stall; for unjudged, the sweep that stopped judging."}
+            last_media_start_at: {type: string, format: date-time, description: Server receipt time of the latest media start the check had seen when it wrote the verdict. Not the Player clock.}
+            threshold_s: {type: integer, minimum: 1, description: The silence in seconds the loop allowed before the screen counted as stalled. Present with a stalled verdict.}
+            judged_at: {type: string, format: date-time, description: When the verdict was written.}
+    ScreenGlassChangedDetails:
+      type: object
+      additionalProperties: false
+      required: [check, verdict, previous, since, evidence]
+      description: details object on a durable project-only screen.glass_changed event, appended when a glass check changes its verdict for a screen. It is not a runtime audience command and is not delivered on GET /screen/events. The loop_stalled condition opens on a playback verdict stalled and ends on any other.
+      properties:
+        check: {type: string, enum: [playback]}
+        verdict: {type: string, enum: [playing, stalled, unjudged]}
+        previous: {oneOf: [{type: string, enum: [playing, stalled, unjudged]}, {type: "null"}], description: "The verdict before; null when the check had none."}
+        since: {type: string, format: date-time}
+        evidence:
+          type: object
+          additionalProperties: true
+          description: >-
+            What the verdict rests on. stalled: last_media_start_at, threshold_s, expected_gap_s (the loop's longest run between media starts), page_id and play_seq of that start. playing: last_media_start_at, stalled_for_s, and late_reports (the number of starts the Player made that arrived after the stalled verdict, when its play numbers show them). unjudged: reason.
     ScreenStatusChangedDetails:
       type: object
       additionalProperties: false
@@ -23421,6 +23667,14 @@ components:
         ended_at: {type: string, format: date-time}
         ended_reason: {type: string, description: "Why it ended: stopped, expired, consent_denied, consent_timeout, capture_failed, connection_failed or player_stopped. An open enum."}
         viewer_url: {type: string, description: "The dashboard page that shows the live view of this screen."}
+    LiveFrames:
+      type: object
+      required: [live_id, state]
+      description: Progress of a live session's frame adapter. Open schema.
+      properties:
+        live_id: {type: string, pattern: "^lv_[a-z2-7]{26}$"}
+        state: {type: string, enum: [starting, streaming, silent], description: "starting: no frame yet. streaming: a frame arrived in the last fifteen seconds. silent: the adapter is older than fifteen seconds and none arrived in that time."}
+        last_frame_at: {type: string, format: date-time, description: "When a frame last arrived. Absent while starting."}
     LiveViewer:
       type: object
       required: [viewer_id, live_id, offer, ice_servers, expires_at]
@@ -24135,12 +24389,12 @@ components:
     WebhookDeliveryAttemptList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/WebhookDeliveryAttempt"}}}}
     NotificationCondition:
       type: string
-      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, crashing]
+      enum: [screen_offline, display_disconnected, running_hot, storage_full, content_stuck, not_playing, loop_stalled, crashing]
       description: >-
-        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. Readers treat an unknown value as absent.
+        An important screen state change. screen_offline: the Player lost its connection (screen.offline, written 60 seconds after its presence lapses); clears on screen.online. display_disconnected: the Player reports its display disconnected (screen.health_changed change display_disconnected); clears on display_reconnected. running_hot: the device reports a temperature at or above the hot threshold (temperature_high); clears on temperature_normal. storage_full: the Player's storage cannot hold its content (screen.storage_shortfall); clears on screen.storage_shortfall_cleared. content_stuck: the screen's content update is retrying, failed, blocked or partial (screen.manifest_upgrade); clears when a later state is none of those. not_playing: the Player shows an error-level status instead of its content (screen.status_changed with level error, other than storage_full); clears when its status is no longer an error. loop_stalled: the Player reports nothing wrong and its content is current, yet no media start has reached the backend for longer than the screen's loop allows (screen.glass_changed with the playback verdict stalled; Screen.glass says when it judges and what it leaves alone); clears when a media start arrives or the screen stops being judged, for instance when it goes offline. crashing: the Player crashed or restarted its renderer repeatedly (screen.health_changed change crash_spike or renderer_restart_spike); sent at once, never held or resolved. Readers treat an unknown value as absent.
     NotificationConditions:
       type: array
-      maxItems: 7
+      maxItems: 8
       uniqueItems: true
       items: {$ref: "#/components/schemas/NotificationCondition"}
     NotificationRecipients:

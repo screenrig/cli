@@ -2,10 +2,11 @@ import { addValueAlias } from "./aliases.js";
 import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes.js";
 import { NOTE_HELP, positiveInteger, reviewNoteOption, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleScreenChanges, handleScreenRevert, handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop } from "../commands.js";
+import { handleScreenChanges, handleScreenRevert, handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop, handleScreenLiveFrame } from "../commands.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
 import { expiresInOption, identifyDurationOption, suspendMessageOption } from "../screen-commands.js";
 import { liveDurationOption, liveWaitOption } from "../screen-live.js";
+import { liveFrameIntervalOption } from "../screen-live-frame.js";
 import { untilOption } from "../screen-display.js";
 import { WALL_ARRANGEMENTS, WALL_ROTATIONS, wallOutputsOption } from "../screen-wall.js";
 import { playsInstantOption } from "../playback-export.js";
@@ -202,6 +203,15 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   live.command("stop").description("End a screen's live view session")
     .argument("<id>", "Screen identifier")
     .action(bind(handleScreenLiveStop));
+  live.command("frame").description("Save JPEG frames of what a screen plays, from its live stream, to check playback and motion")
+    .argument("<id>", "Screen identifier")
+    .option("--output <PATH>", "Write one frame to this file, or the frames into this directory as frame-<captured_at>.jpg (default: the working directory)")
+    .option("--count <N>", "Save this many new frames (default 1)", positiveInteger("count"))
+    .option("--interval <DURATION>", "Pause between frames: 1s to 5m, or 0 to take each frame as it arrives (default 1s)", liveFrameIntervalOption)
+    .option("--duration <DURATION>", "Lease of the live session this command starts, at least long enough for the frames: 30s to 1h, such as 90s or 5m (default 2m)", liveDurationOption)
+    .option("--wait <DURATION>", "How long to wait for the Player to start publishing, and for each frame: 1s to 10m, or 0 to try once (default 30s)", liveWaitOption)
+    .option("--stop", "End the live session when done, also when a frame failed")
+    .action(bind(handleScreenLiveFrame));
 
   screen.command("screenshot").description("Capture and download screenshots from a screen or a fleet of screens")
     .argument("[id...]", "Screen identifier; several ids capture each screen")

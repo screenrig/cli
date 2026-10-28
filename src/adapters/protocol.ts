@@ -703,6 +703,16 @@ export interface LiveStartRequest {
   duration_s?: number;
 }
 
+export type LiveFramesState = "starting" | "streaming" | "silent";
+
+/** Accepted POST /api/screens/{id}/live/frames: how far the live session's frame adapter has come. Open schema. */
+export interface LiveFrames {
+  live_id: string;
+  state: LiveFramesState;
+  /** When a frame last arrived. Absent while starting. */
+  last_frame_at?: string;
+}
+
 /**
  * Nested playlist identity for the manifest upgrade read model. `name` is
  * resolved by playlist id; null when unknown. revision is >= 1 and is the

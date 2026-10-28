@@ -22,6 +22,7 @@ import { fieldMap, screenFactsLines, screenFactsPatch, screenFieldsCell, screenL
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
 import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines } from "./screen-commands.js";
 import { LIVE_WAIT_DEFAULT_MS, liveDurationSeconds, liveEndedError, liveHumanLines, liveNotReadyWarning, liveProblem, liveScreenId, liveSessionBody, liveWaitMs, settleLive } from "./screen-live.js";
+import { LIVE_FRAME_INTERVAL_DEFAULT_MS, captureLiveFrames, liveFrameIntervalMs, liveFrameLeaseSeconds, liveFramesHumanLines, resolveFrameOutput } from "./screen-live-frame.js";
 import type { LiveSession, LiveStartRequest } from "./adapters/protocol.js";
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
 import { outageLines } from "./screen-outage.js";
@@ -10119,6 +10120,30 @@ export const handleScreenLiveStop = commandHandler(async (args, runtime, resolve
   const session = liveSessionBody(response.body);
   if (!session) throw unexpectedResponseError("Screen live status response does not match the generated LiveSession contract.");
   return { envelope: jsonBody(response, client.requestId), exitCode: ExitCode.Success, human: liveHumanLines(session) };
+}, true);
+
+// Save JPEG frames of a screen's live stream: start the session, wait for the
+// Player to publish, start frames, then read each new frame once.
+export const handleScreenLiveFrame = commandHandler(async (args, runtime, resolved) => {
+  const id = liveScreenId(args.positionals[3], "frame");
+  const count = flagNumber(args.flags, "count") ?? 1;
+  if (!Number.isInteger(count) || count < 1) throw usageError("--count must be a whole number of at least 1.");
+  const interval = flagString(args.flags, "interval");
+  const intervalMs = interval === undefined ? LIVE_FRAME_INTERVAL_DEFAULT_MS : liveFrameIntervalMs(interval);
+  const duration = flagString(args.flags, "duration");
+  const wait = flagString(args.flags, "wait");
+  const plan = {
+    screenId: id,
+    count,
+    intervalMs,
+    leaseSeconds: liveFrameLeaseSeconds(duration === undefined ? undefined : liveDurationSeconds(duration), count, intervalMs),
+    waitMs: wait === undefined ? LIVE_WAIT_DEFAULT_MS : liveWaitMs(wait),
+    stop: flagBool(args.flags, "stop"),
+    output: await resolveFrameOutput(runtime.cwd(), flagString(args.flags, "output"), count),
+  };
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const result = await captureLiveFrames(plan, client, { now: () => runtime.now().getTime(), sleep: runtime.sleep });
+  return { envelope: successEnvelope(result, { request_id: client.requestId }), exitCode: ExitCode.Success, human: liveFramesHumanLines(result) };
 }, true);
 
 // Put a notice on a screen instead of its content. Single screen only.
