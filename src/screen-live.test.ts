@@ -19,17 +19,17 @@ const START = new Date("2026-10-28T12:00:00.000Z");
 
 function session(extra: Partial<LiveSession> = {}): LiveSession {
   return { state: "requested", screen_id: SCREEN, live_id: "lv_aaaaaaaaaaaaaaaaaaaaaaaaaa", created_at: "2026-10-28T12:00:00Z",
-    lease_until: "2026-10-28T12:05:00Z", max_until: "2026-10-28T13:00:00Z", viewer_url: VIEWER_URL, ...extra };
+    lease_until: "2026-10-28T12:05:00Z", max_until: "2026-10-28T12:05:00Z", viewer_url: VIEWER_URL, ...extra };
 }
 const connected = (): LiveSession => session({ state: "publishing", publisher: { connected: true, connection: "connected", reported_at: "2026-10-28T12:00:03Z", width: 1280, height: 720, fps: 15 } });
 const publishing = (): LiveSession => session({ state: "publishing", publisher: { connected: false, connection: "connecting", reported_at: "2026-10-28T12:00:03Z" } });
 const ended = (reason: string): LiveSession => session({ state: "ended", ended_at: "2026-10-28T12:00:05Z", ended_reason: reason });
 
 test("--duration and --wait are whole-unit durations inside the contract's bounds", () => {
-  for (const [text, seconds] of [["30s", 30], ["90s", 90], ["5m", 300], ["1h", 3600], [" 10m ", 600]] as const) {
+  for (const [text, seconds] of [["30s", 30], ["90s", 90], ["5m", 300], ["300s", 300], [" 2m ", 120]] as const) {
     assert.equal(liveDurationSeconds(text), seconds, text);
   }
-  for (const text of ["29s", "3601s", "2h", "0s", "5", "soon", "", "-5m", "1.5m"]) {
+  for (const text of ["29s", "301s", "6m", "1h", "3600s", "0s", "5", "soon", "", "-5m", "1.5m"]) {
     assert.throws(() => liveDurationSeconds(text), /--duration/, text);
   }
   for (const [text, ms] of [["0", 0], ["0s", 0], ["1s", 1000], ["30s", 30_000], ["1m", 60_000], ["10m", 600_000]] as const) {
@@ -183,9 +183,9 @@ test("screen live start asks for the session and reads it until the Player is co
 test("screen live start sends --duration as duration_s and honors --wait", async () => {
   const env = await enrolled();
   const transport = liveTransport(session(), [session()]);
-  const result = await cli(["--json", "screen", "live", "start", SCREEN, "--duration", "10m", "--wait", "3s"], transport, env);
+  const result = await cli(["--json", "screen", "live", "start", SCREEN, "--duration", "2m", "--wait", "3s"], transport, env);
   assert.equal(result.code, ExitCode.Success, result.stdout);
-  assert.deepEqual(calls(transport, "POST")[0]!.body, { duration_s: 600 });
+  assert.deepEqual(calls(transport, "POST")[0]!.body, { duration_s: 120 });
   assert.equal(calls(transport, "GET").length, 3);
   assert.deepEqual(result.slept, [1000, 1000, 1000]);
 });
@@ -236,6 +236,14 @@ test("a session that ended while waiting is live_unavailable naming ended_reason
   assert.equal(vanished.envelope.error?.code, "live_unavailable");
 });
 
+test("a session that reached its end by itself says it lasted five minutes", async () => {
+  const env = await enrolled();
+  const result = await cli(["--json", "screen", "live", "start", SCREEN], liveTransport(session(), [session(), ended("expired")]), env);
+  assert.equal(result.envelope.error?.code, "live_unavailable");
+  assert.match(result.envelope.error!.detail, /ended_reason expired/);
+  assert.match(result.envelope.error!.detail, /five minutes/);
+});
+
 test("the server's refusals come with the next step", async () => {
   const env = await enrolled();
   for (const [status, code, next, exit] of [
@@ -258,7 +266,8 @@ test("a bad value fails before any request", async () => {
   const transport = liveTransport(session());
   for (const argv of [
     ["screen", "live", "start", SCREEN, "--duration", "10s"],
-    ["screen", "live", "start", SCREEN, "--duration", "2h"],
+    ["screen", "live", "start", SCREEN, "--duration", "6m"],
+    ["screen", "live", "start", SCREEN, "--duration", "1h"],
     ["screen", "live", "start", SCREEN, "--wait", "11m"],
     ["screen", "live", "start", "pl_PLAYLIST"],
     ["screen", "live", "status", "nope"],
@@ -309,5 +318,7 @@ test("help names the subcommands and what they never carry", () => {
   assert.match(start.usage, /screen live start \[options\] <id>/);
   assert.deepEqual(start.options.map((option) => option.name).filter((option) => option !== "--help"), ["--duration", "--wait"]);
   assert.match(start.notes.join("\n"), /live_not_ready/);
+  assert.match(start.notes.join("\n"), /five minutes/);
+  assert.equal(start.options.find((option) => option.name === "--duration")?.description.includes("30s to 5m"), true);
   assert.ok(start.examples.some((example) => /screenrig screen live start scr_SCREEN/.test(example)));
 });

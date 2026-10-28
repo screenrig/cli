@@ -367,6 +367,11 @@ export function memoryBackend(options: {
         body: { status: 400, code: "invalid_request", title: "Invalid request", detail: "Supply exactly one of a contact email or an AgentID claim." },
       };
     }
+    // The schema pattern; a well-formed code the server does not know is ignored, never refused.
+    const setupCode = input?.setup_code;
+    if (setupCode !== undefined && !(typeof setupCode === "string" && /^[0-9A-Za-z]{4}-?[0-9A-Za-z]{4}$/.test(setupCode))) {
+      return problem(400, "invalid_request", "setup_code must be two groups of four letters and digits.");
+    }
     const claimOutcome = typeof claim === "string" ? options.agentidClaims?.[claim] ?? "valid" : undefined;
     if (claimOutcome === "invalid") return problem(400, "agentid_claim_invalid", "The AgentID claim is invalid, expired, or already redeemed.");
     if (claimOutcome === "already_enrolled") return problem(409, "agentid_already_enrolled", "This AgentID already has an enrolled agent.");

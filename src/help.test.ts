@@ -16,8 +16,8 @@ function invoke(args: string[]): { data: ReturnType<typeof commandHelp> & { vers
 test("root help is compact and every command is discoverable through immediate children", () => {
   const root = commandHelp();
   const commanderHelp = root.usage.split(/\n\nAll commands:\n/)[0]!;
-  // Service status, support, notes, fleet links, triggers, reviews, campaigns, notifications, alerts, migrate and sources add eleven immediate root groups.
-  assert.ok(commanderHelp.split("\n").length <= 60);
+  // Service status, support, notes, fleet links, triggers, reviews, campaigns, notifications, alerts, migrate, sources and bi add twelve immediate root groups.
+  assert.ok(commanderHelp.split("\n").length <= 61);
   assert.doesNotMatch(root.usage, /localhost|log_socket|--token/);
   const discovered: string[] = [];
   function visit(path: string[]): void {
@@ -308,6 +308,20 @@ test("root help is compact and every command is discoverable through immediate c
     "alerts mute",
     "alerts mutes",
     "alerts unmute",
+    "bi connection create grafana",
+    "bi connection create powerbi",
+    "bi connection list",
+    "bi connection show",
+    "bi connection update",
+    "bi connection test",
+    "bi connection browse",
+    "bi connection delete",
+    "bi view create",
+    "bi view list",
+    "bi view show",
+    "bi view update",
+    "bi view test",
+    "bi view delete",
     "source list",
     "source show",
     "source create",
@@ -431,6 +445,17 @@ test("agent enroll declares mutually exclusive credential sources", () => {
   assert.deepEqual(enroll.relationships, [{ kind: "atMostOne", options: ["--email", "--agentid-claim"] }]);
   assert.ok(enroll.options.some((option) => option.name === "--agentid-claim"));
   assert.equal(enroll.usage.split("Provide at most one").length, 2, "notes should appear only once");
+});
+
+test("agent enroll documents --setup-code as an optional addition to either credential source", () => {
+  const enroll = invoke(["agent", "enroll", "--help"]).data;
+  const option = enroll.options.find((candidate) => candidate.name === "--setup-code");
+  assert.equal(option?.description, "Link the new project to the website visit that showed this setup code, such as K7QX-2MPD");
+  assert.equal(option?.required, false);
+  assert.ok(enroll.relationships.every((relationship) => !relationship.options.includes("--setup-code")), "the code is never required or exclusive");
+  assert.ok(enroll.examples.includes('screenrig agent enroll --email operator@example.com --organization "Lobby" --setup-code K7QX-2MPD'));
+  assert.match(enroll.usage, /--setup-code CODE passes the setup code a person copied from the website[^.]*\(two groups of four letters and digits, case and hyphen ignored, sent as XXXX-XXXX\) and works with --email or --agentid-claim/);
+  assert.match(enroll.usage, /A pending enrollment keeps its original email or AgentID claim, name, purpose, and setup code\./);
 });
 
 

@@ -337,6 +337,119 @@ test("a pending AgentID claim enrollment rejects a different claim or an email s
   await rm(home, { recursive: true, force: true });
 });
 
+test("a website setup code is persisted with the pending enrollment, sent in the request state, and cleared on completion", async () => {
+  const home = await testTemp("enrollment-setup-code-");
+  const { fs, resolved } = fixture(home);
+  const seen: Array<{ idempotencyKey: string; email?: string; setupCode?: string }> = [];
+  const result = await ensureCredential({
+    resolved,
+    runtime: { fs, now: () => new Date("2026-08-14T20:00:00.000Z"), sleep: async () => undefined },
+    generateClientId: () => `cli_${"P".repeat(43)}`,
+    generateIdempotencyKey: () => "enroll-setup-code",
+    enrollmentEmail: "owner@example.com",
+    enrollmentSetupCode: "K7QX-2MPD",
+    verify: async (_token, projectId) => {
+      assert.equal(projectId, "prj_setup_code");
+      assert.deepEqual((await readConfigFile(resolved.configPath, fs))?.enrollment, {
+        client_id: `cli_${"P".repeat(43)}`,
+        idempotency_key: "enroll-setup-code",
+        credential_format: "oauth",
+        email: "owner@example.com",
+        setup_code: "K7QX-2MPD",
+      });
+    },
+    enroll: async (state) => {
+      seen.push(state);
+      assert.equal((await readConfigFile(resolved.configPath, fs))?.enrollment?.setup_code, "K7QX-2MPD");
+      return { token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_setup_code_secret", projectId: "prj_setup_code", oauth: OAUTH };
+    },
+  });
+  assert.deepEqual(seen, [{
+    clientId: `cli_${"P".repeat(43)}`,
+    idempotencyKey: "enroll-setup-code",
+    credentialFormat: "oauth",
+    email: "owner@example.com",
+    setupCode: "K7QX-2MPD",
+  }]);
+  assert.equal(result.token, "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_setup_code_secret");
+  assert.equal((await readConfigFile(resolved.configPath, fs))?.enrollment, undefined);
+  assert.equal(JSON.stringify(await readConfigFile(resolved.configPath, fs)).includes("K7QX-2MPD"), false);
+  await rm(home, { recursive: true, force: true });
+});
+
+test("an ambiguous retry replays the saved setup code, and a pending enrollment refuses a changed or added one", async () => {
+  const home = await testTemp("enrollment-setup-code-retry-");
+  const { fs, resolved } = fixture(home);
+  const runtime = { fs, now: () => new Date(), sleep: async () => undefined };
+  const seen: Array<{ clientId: string; idempotencyKey: string; setupCode?: string; agentidClaim?: string }> = [];
+  const claim = `agid_${"Q".repeat(43)}`;
+  await assert.rejects(ensureCredential({
+    resolved,
+    runtime,
+    generateClientId: () => `cli_${"Q".repeat(43)}`,
+    generateIdempotencyKey: () => "enroll-setup-code-retry",
+    enrollmentAgentIdClaim: claim,
+    enrollmentSetupCode: "K7QX-2MPD",
+    verify: async () => undefined,
+    enroll: async (state) => {
+      seen.push(state);
+      throw new Error("ambiguous transport failure");
+    },
+  }), /ambiguous transport failure/);
+  const pending = (await readConfigFile(resolved.configPath, fs))?.enrollment;
+  assert.deepEqual(pending, {
+    client_id: `cli_${"Q".repeat(43)}`,
+    idempotency_key: "enroll-setup-code-retry",
+    credential_format: "oauth",
+    agentid_claim: claim,
+    setup_code: "K7QX-2MPD",
+  });
+  // A different code would change the request behind the same idempotency key.
+  await assert.rejects(ensureCredential({
+    resolved,
+    runtime,
+    enrollmentSetupCode: "ABCD-EFGH",
+    enroll: async () => { throw new Error("must reject before sending another enrollment"); },
+    verify: async () => undefined,
+  }), (error: unknown) => error instanceof CliError && error.problem.code === "config_error" && /different setup code/.test(error.problem.detail ?? ""));
+  assert.deepEqual((await readConfigFile(resolved.configPath, fs))?.enrollment, pending);
+  // The same code resumes, with or without being repeated.
+  for (const repeated of [{ enrollmentSetupCode: "K7QX-2MPD" }, {}]) {
+    const resumed = await ensureCredential({
+      resolved,
+      runtime,
+      ...repeated,
+      generateClientId: () => { throw new Error("must reuse client id"); },
+      generateIdempotencyKey: () => { throw new Error("must reuse idempotency key"); },
+      enroll: async (state) => {
+        seen.push(state);
+        return { token: "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_setup_retry_secret", projectId: "prj_setup_retry", oauth: OAUTH };
+      },
+      verify: async () => undefined,
+    });
+    assert.equal(resumed.token, "eyJhbGciOiJub25lIn0.eyJ0ZXN0Ijp0cnVlfQ.signature_setup_retry_secret");
+    assert.deepEqual(seen.at(-1), seen[0]);
+    // Put the pending enrollment back for the next pass.
+    await writeConfigAtomic(resolved.configPath, { api_url: resolved.apiUrl, enrollment: pending }, fs);
+  }
+  assert.equal(seen.length, 3);
+
+  // A pending enrollment that started without a code does not take one later.
+  await writeConfigAtomic(resolved.configPath, {
+    api_url: resolved.apiUrl,
+    enrollment: { client_id: `cli_${"R".repeat(43)}`, idempotency_key: "enroll-no-setup-code", credential_format: "oauth", email: "owner@example.com" },
+  }, fs);
+  await assert.rejects(ensureCredential({
+    resolved,
+    runtime,
+    enrollmentSetupCode: "K7QX-2MPD",
+    enroll: async () => { throw new Error("must reject before sending another enrollment"); },
+    verify: async () => undefined,
+  }), (error: unknown) => error instanceof CliError && error.problem.code === "config_error" && /without a setup code/.test(error.problem.detail ?? ""));
+  assert.equal((await readConfigFile(resolved.configPath, fs))?.enrollment?.setup_code, undefined);
+  await rm(home, { recursive: true, force: true });
+});
+
 test("enrollment without a contact email or an AgentID claim is refused", async () => {
   const home = await testTemp("enrollment-no-source-");
   const { fs, resolved } = fixture(home);

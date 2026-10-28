@@ -52,6 +52,12 @@ import { isResourceID } from "./generated/resource-ids.js";
          */
         intent?: "advertising" | "signage";
         /**
+         * Website setup code (upper-case XXXX-XXXX) chosen once. A resumed
+         * enrollment sends it again so the same idempotency key carries the
+         * identical request body.
+         */
+        setup_code?: string;
+        /**
          * The credential format this enrollment asked for, fixed with its
          * idempotency key. A pending enrollment without it starts again under
          * a new key.

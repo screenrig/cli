@@ -415,6 +415,22 @@ function enrollmentPurpose(value: string | undefined): EnrollmentIntent | undefi
   return intent;
 }
 
+/**
+ * agent enroll --setup-code: the code the website shows with its setup prompt,
+ * two groups of four letters and digits. It only names a website visit and
+ * grants nothing, so any case and a missing hyphen are accepted and the server
+ * receives upper-case XXXX-XXXX. Errors name the shape, never the input.
+ */
+function enrollmentSetupCode(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const code = value.trim();
+  if (!/^[0-9A-Za-z]{4}-?[0-9A-Za-z]{4}$/.test(code)) {
+    throw usageError("agent enroll --setup-code must be a setup code: two groups of four letters and digits, such as K7QX-2MPD.");
+  }
+  const bare = code.replace("-", "").toUpperCase();
+  return `${bare.slice(0, 4)}-${bare.slice(4)}`;
+}
+
 /** Drawing commands load the native renderer here, so a failed first download names this command to rerun. */
 async function loadRenderer(runtime: CliRuntime): Promise<void> {
   await loadCanvas({ env: runtime.env, homedir: runtime.homedir, argv: runtime.argv });
@@ -1551,6 +1567,7 @@ async function agentEnroll(
   const name = flagString(args.flags, "name");
   if (name && name.length > 80) throw usageError("agent enroll --name is at most 80 characters.");
   const enrollIntent = enrollmentPurpose(flagString(args.flags, "intent"));
+  const setupCode = enrollmentSetupCode(flagString(args.flags, "setup-code"));
   let enrollmentConfig = resolved;
   // A stored credential the server no longer accepts has nothing left to lose:
   // with enrollment input, a new enrollment replaces it.
@@ -1575,6 +1592,7 @@ async function agentEnroll(
     const enrolled = await enrollForCommand(args, runtime, config, {
       ...(name ? { name } : {}),
       ...(enrollIntent ? { intent: enrollIntent } : {}),
+      ...(setupCode !== undefined ? { setupCode } : {}),
       explicit: true,
     });
     const token = requireToken(enrolled.token);
@@ -1974,7 +1992,7 @@ async function enrollForCommand(
   args: ParsedArgs,
   runtime: CliRuntime,
   resolved: Awaited<ReturnType<typeof resolveConfig>>,
-  options: { name?: string; explicit?: boolean; intent?: EnrollmentIntent } = {},
+  options: { name?: string; explicit?: boolean; intent?: EnrollmentIntent; setupCode?: string } = {},
 ): Promise<Awaited<ReturnType<typeof resolveConfig>>> {
   const suppliedEmail = flagString(args.flags, "email");
   const suppliedClaim = flagString(args.flags, "agentid-claim");
@@ -2018,6 +2036,7 @@ async function enrollForCommand(
       ...(projectName !== undefined && resolved.enrollment ? { enrollmentProjectName: projectName } : {}),
       ...(organization !== undefined ? { enrollmentOrganization: organization } : {}),
       ...(options.intent ? { enrollmentIntent: options.intent } : {}),
+      ...(options.setupCode !== undefined ? { enrollmentSetupCode: options.setupCode } : {}),
       runtime: {
         fs: { ...runtime.fs, env: runtime.env, homedir: runtime.homedir },
         now: runtime.now,
@@ -2033,6 +2052,7 @@ async function enrollForCommand(
           ...(state.projectName !== undefined ? { project_name: state.projectName } : {}),
           ...(state.organization !== undefined ? { organization: state.organization } : {}),
           ...(state.intent ? { intent: state.intent } : {}),
+          ...(state.setupCode !== undefined ? { setup_code: state.setupCode } : {}),
           ...(options.name ? { name: options.name } : {}),
           ...(options.explicit ? { agent_type: "cli", platform: agentPlatform(), version: CLI_VERSION } : {}),
         };
