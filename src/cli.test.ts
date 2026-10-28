@@ -400,6 +400,187 @@ test("agent enroll rejects both credential sources and a malformed AgentID claim
   await rm(malformed.configDir, { recursive: true, force: true });
 });
 
+test("agent enroll --setup-code sends upper-case XXXX-XXXX with an email or an AgentID claim", async () => {
+  const claim = `agid_${"S".repeat(43)}`;
+  for (const [spelling, credential] of [
+    ["K7QX-2MPD", { email: "owner@example.com" }],
+    ["k7qx-2mpd", { email: "owner@example.com" }],
+    ["k7qx2mpd", { agentid_claim: claim }],
+    [" K7QX2MPD ", { email: "owner@example.com" }],
+  ] as const) {
+    const transport = memoryBackend();
+    const flag = "email" in credential ? ["--email", credential.email] : ["--agentid-claim", credential.agentid_claim];
+    const result = await withRuntime(
+      ["--json", "agent", "enroll", ...flag, "--organization", "Example organization", "--setup-code", spelling],
+      transport,
+    );
+    assert.equal(result.code, 0, `${spelling}: ${result.stdout}`);
+    const enroll = transport.calls.find((call) => call.path === "/api/enrollments");
+    assert.deepEqual(enroll?.body, {
+      client_id: (enroll?.body as { client_id: string }).client_id,
+      credential_format: "oauth",
+      ...credential,
+      organization: "Example organization",
+      setup_code: "K7QX-2MPD",
+      agent_type: "cli",
+      platform: `${process.platform}/${process.arch}`,
+      version: CLI_VERSION,
+    }, spelling);
+    assert.ok(!result.stdout.includes(claim));
+    await rm(result.configDir, { recursive: true, force: true });
+  }
+});
+
+test("agent enroll rejects a malformed --setup-code before the network and leaves a pending enrollment as it was", async () => {
+  const configDir = await testTemp("enroll-setup-code-malformed-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const configPath = path.join(configDir, "screenrig", "config.json");
+  const pending = {
+    client_id: `cli_${"T".repeat(43)}`,
+    idempotency_key: "enroll-setup-code-malformed",
+    credential_format: "oauth" as const,
+    email: "owner@example.com",
+    setup_code: "K7QX-2MPD",
+  };
+  await writeConfigAtomic(configPath, { api_url: "https://api.screenrig.ai", enrollment: pending }, fsLike);
+  try {
+    // --force would discard the pending enrollment, so the check has to come first.
+    for (const malformed of ["K7QX-2MP", "K7QX-2MPDD", "K7Q-X2MPD", "K7QX_2MPD", "K7QX 2MPD", "K7QX-2MPD.", "KÄQX-2MPD", "   "]) {
+      const transport = new FakeTransport();
+      const result = await withRuntime(
+        ["--json", "agent", "enroll", "--force", "--email", "owner@example.com", "--organization", "Example organization", "--setup-code", malformed],
+        transport,
+        { fs: fsLike },
+      );
+      assert.equal(result.code, ExitCode.Usage, `${malformed}: ${result.stdout}`);
+      const error = (JSON.parse(result.stdout) as { error: { code: string; detail: string } }).error;
+      assert.equal(error.code, "usage_error");
+      assert.equal(error.detail, "agent enroll --setup-code must be a setup code: two groups of four letters and digits, such as K7QX-2MPD.");
+      assert.equal(transport.calls.length, 0, malformed);
+      assert.deepEqual((await readConfigFile(configPath, fsLike))?.enrollment, pending, malformed);
+    }
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+/** A backend that takes the first enrollment but loses its answer, so the CLI keeps the pending enrollment and its idempotency key. */
+function backendLosingFirstEnrollment(): FakeTransport {
+  const transport = memoryBackend();
+  const serve = transport.request.bind(transport);
+  let lost = false;
+  transport.request = async (req) => {
+    const response = await serve(req);
+    if (req.path === "/api/enrollments" && !lost) {
+      lost = true;
+      throw networkError("connection reset by peer");
+    }
+    return response;
+  };
+  return transport;
+}
+
+const ENROLL_BY_EMAIL = ["--json", "agent", "enroll", "--email", "owner@example.com", "--organization", "Example organization"];
+
+test("an interrupted enrollment replays the same setup code under the same idempotency key", async () => {
+  // The bare resume, the first command without the flag, and the flag in either spelling all send the first request again.
+  for (const resume of [
+    ["--json", "agent", "enroll"],
+    ENROLL_BY_EMAIL,
+    [...ENROLL_BY_EMAIL, "--setup-code", "K7QX-2MPD"],
+    [...ENROLL_BY_EMAIL, "--setup-code", "k7qx2mpd"],
+  ]) {
+    const configDir = await testTemp("enroll-setup-code-replay-");
+    const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+    const configPath = path.join(configDir, "screenrig", "config.json");
+    const transport = backendLosingFirstEnrollment();
+    try {
+      const failed = await withRuntime([...ENROLL_BY_EMAIL, "--setup-code", "k7qx2mpd"], transport, { fs: fsLike });
+      assert.equal(failed.code, ExitCode.Network, failed.stdout);
+      assert.equal((await readConfigFile(configPath, fsLike))?.enrollment?.setup_code, "K7QX-2MPD");
+
+      const resumed = await withRuntime(resume, transport, { fs: fsLike });
+      assert.equal(resumed.code, ExitCode.Success, `${resume.join(" ")}: ${resumed.stdout}`);
+      const sent = transport.calls.filter((call) => call.path === "/api/enrollments");
+      assert.equal(sent.length, 2);
+      assert.ok(sent[0]?.headers?.["idempotency-key"]);
+      assert.equal(sent[1]?.headers?.["idempotency-key"], sent[0]?.headers?.["idempotency-key"]);
+      assert.deepEqual(sent[1]?.body, sent[0]?.body);
+      assert.equal((sent[1]?.body as { setup_code?: string }).setup_code, "K7QX-2MPD");
+      const stored = await readConfigFile(configPath, fsLike);
+      assert.equal(stored?.enrollment, undefined);
+      assert.ok(stored?.token);
+      assert.equal(JSON.stringify(stored).includes("K7QX-2MPD"), false);
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("a pending enrollment refuses a different or added setup code before the network", async () => {
+  for (const [started, supplied, refusal] of [
+    [["--setup-code", "K7QX-2MPD"], "ABCD-EFGH", /different setup code/],
+    [[], "K7QX-2MPD", /started without a setup code/],
+  ] as const) {
+    const configDir = await testTemp("enroll-setup-code-refused-");
+    const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+    const configPath = path.join(configDir, "screenrig", "config.json");
+    const transport = backendLosingFirstEnrollment();
+    try {
+      const failed = await withRuntime([...ENROLL_BY_EMAIL, ...started], transport, { fs: fsLike });
+      assert.equal(failed.code, ExitCode.Network, failed.stdout);
+      const pending = (await readConfigFile(configPath, fsLike))?.enrollment;
+      assert.ok(pending);
+      // The saved key and body belong together; changing the body under that key would only be refused by the server.
+      const sentBefore = transport.calls.length;
+      const refused = await withRuntime([...ENROLL_BY_EMAIL, "--setup-code", supplied], transport, { fs: fsLike });
+      assert.equal(refused.code, ExitCode.Config, refused.stdout);
+      assert.match((JSON.parse(refused.stdout) as { error: { detail: string } }).error.detail, refusal);
+      assert.match((JSON.parse(refused.stdout) as { error: { detail: string } }).error.detail, /agent enroll --force/);
+      assert.equal(transport.calls.length, sentBefore);
+      assert.deepEqual((await readConfigFile(configPath, fsLike))?.enrollment, pending);
+    } finally {
+      await rm(configDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("agent enroll --force replaces a pending enrollment's setup code instead of carrying it over", async () => {
+  const configDir = await testTemp("enroll-setup-code-force-");
+  const fsLike = { mkdir, open, rename, rm, chmod, stat, homedir: () => configDir, env: { XDG_CONFIG_HOME: configDir } };
+  const configPath = path.join(configDir, "screenrig", "config.json");
+  const pending = {
+    api_url: "https://api.screenrig.ai",
+    enrollment: {
+      client_id: `cli_${"U".repeat(43)}`,
+      idempotency_key: "enroll-setup-code-force",
+      credential_format: "oauth" as const,
+      email: "owner@example.com",
+      organization: "Example organization",
+      setup_code: "K7QX-2MPD",
+    },
+  };
+  try {
+    for (const [extra, expected] of [[["--setup-code", "abcd-efgh"], "ABCD-EFGH"], [[], undefined]] as const) {
+      await writeConfigAtomic(configPath, pending, fsLike);
+      const transport = memoryBackend();
+      const result = await withRuntime(
+        ["--json", "agent", "enroll", "--force", "--email", "owner@example.com", "--organization", "Example organization", ...extra],
+        transport,
+        { fs: fsLike },
+      );
+      assert.equal(result.code, ExitCode.Success, result.stdout);
+      const body = transport.calls.find((call) => call.path === "/api/enrollments")?.body as Record<string, unknown>;
+      assert.equal(body.setup_code, expected);
+      assert.equal("setup_code" in body, expected !== undefined);
+      assert.notEqual(transport.calls.find((call) => call.path === "/api/enrollments")?.headers?.["idempotency-key"], "enroll-setup-code-force");
+      await rm(path.dirname(configPath), { recursive: true, force: true });
+    }
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
 test("agent enroll names the organization independently of its agent and reports the member invitation safely", async () => {
   const transport = memoryBackend();
   const result = await withRuntime(["--json", "agent", "enroll", "--email", " Owner@example.com ", "--organization", "Office Screens", "--name", "Office Codex"], transport);

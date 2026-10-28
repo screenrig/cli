@@ -153,6 +153,8 @@ function validCivil(value: string): boolean {
     date.getUTCHours() === hour && date.getUTCMinutes() === minute;
 }
 
+const SCREEN_WEATHER_KEY = "{screen.weather}";
+
 function validateVisibility(value: unknown, name: string): void {
   const visibility = record(value, name);
   exact(visibility, ["enabled", "from", "until", "windows", "data"], name);
@@ -161,8 +163,11 @@ function validateVisibility(value: unknown, name: string): void {
     const dataName = `${name}.data`;
     const data = record(visibility.data, dataName);
     exact(data, ["key", "path", "equals"], dataName);
-    const key = string(data, "key", dataName, 256, /^[A-Za-z0-9]/);
-    if (/[^A-Za-z0-9._:/-]/.test(key) || key.startsWith("feed:")) throw usageError(`${dataName}.key must name card data, not a feed.`);
+    // {screen.weather} is the one key template: each screen's manifest fills in the weather conditions of its own location.
+    if (data.key !== SCREEN_WEATHER_KEY) {
+      const key = string(data, "key", dataName, 256, /^[A-Za-z0-9]/);
+      if (/[^A-Za-z0-9._:/-]/.test(key) || key.startsWith("feed:")) throw usageError(`${dataName}.key must name card data, not a feed.`);
+    }
     if (data.path !== undefined && (typeof data.path !== "string" || Buffer.byteLength(data.path, "utf8") > 256 ||
       (data.path !== "" && !data.path.startsWith("/")) || /~(?:[^01]|$)/.test(data.path) || data.path.split("/").length > 17)) {
       throw usageError(`${dataName}.path must be an RFC 6901 pointer of at most 256 bytes and 16 segments.`);

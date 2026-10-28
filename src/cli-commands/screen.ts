@@ -194,7 +194,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
   const live = screen.command("live").description("Watch what a screen plays, live: start, read and stop a live view session");
   live.command("start").description("Start live view of a screen, or renew it, and print the dashboard page that shows it")
     .argument("<id>", "Screen identifier")
-    .option("--duration <DURATION>", "How long the session lasts unless renewed: 30s to 1h, such as 90s or 5m (default 5m)", liveDurationOption)
+    .option("--duration <DURATION>", "How long the session lasts unless renewed: 30s to 5m, such as 90s or 5m (default 5m); a session ends after five minutes at most", liveDurationOption)
     .option("--wait <DURATION>", "How long to wait for the Player to start publishing: 1s to 10m, or 0 to return at once (default 30s)", liveWaitOption)
     .action(bind(handleScreenLiveStart));
   live.command("status").description("Read a screen's live view session")
@@ -208,7 +208,7 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .option("--output <PATH>", "Write one frame to this file, or the frames into this directory as frame-<captured_at>.jpg (default: the working directory)")
     .option("--count <N>", "Save this many new frames (default 1)", positiveInteger("count"))
     .option("--interval <DURATION>", "Pause between frames: 1s to 5m, or 0 to take each frame as it arrives (default 1s)", liveFrameIntervalOption)
-    .option("--duration <DURATION>", "Lease of the live session this command starts, at least long enough for the frames: 30s to 1h, such as 90s or 5m (default 2m)", liveDurationOption)
+    .option("--duration <DURATION>", "Lease of the live session this command starts, at least long enough for the frames: 30s to 5m, such as 90s or 5m (default 2m)", liveDurationOption)
     .option("--wait <DURATION>", "How long to wait for the Player to start publishing, and for each frame: 1s to 10m, or 0 to try once (default 30s)", liveWaitOption)
     .option("--stop", "End the live session when done, also when a frame failed")
     .action(bind(handleScreenLiveFrame));

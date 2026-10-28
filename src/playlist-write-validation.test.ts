@@ -68,6 +68,25 @@ test("bundle predicates keep the backend's key, scalar and RFC 6901 limits", () 
   }
 });
 
+test("a page condition may read the weather of each screen's own location", () => {
+  for (const data of [{ key: "{screen.weather}", path: "/condition", equals: "rain" }, { key: "{screen.weather}", path: "/band", equals: "freezing" },
+    { key: "{screen.weather}", path: "/temperatureC", equals: 12 }, { key: "{screen.weather}", path: "/isDay", equals: false }, { key: "{screen.weather}" }]) {
+    for (const bounds of [{}, { from: "2026-10-27T09:00" }]) {
+      const value = playlistWithVisibility({ enabled: true, data, ...bounds });
+      const original = structuredClone(value);
+      assert.deepEqual(playlistIssues(value), [], JSON.stringify(data));
+      assert.deepEqual(validatePlaylistWrite(value, new Map()), new Set());
+      assert.deepEqual(value, original);
+    }
+  }
+  // Only the whole key is the token.
+  for (const key of ["{screen.weather}x", "weather-{screen.weather}", "{screen.name}", "{screen.field.store}", "{screen.weather", "feed.conditions.v1:49.25:-123.00 "]) {
+    const value = playlistWithVisibility({ enabled: true, data: { key, path: "/condition", equals: "rain" } });
+    assert.throws(() => validatePlaylistWrite(value, new Map()), CliError, key);
+    assert.notDeepEqual(playlistIssues(value), [], key);
+  }
+});
+
 function playlistWithTransition(transition: unknown) {
   const value = playlistWithPrimitives(TWO_IFRAMES);
   return { ...value, pages: value.pages.map((page) => ({ ...page, transition })) };
