@@ -91,6 +91,8 @@ export class FakeTransport implements Transport {
   setPlaybackExportBudget?: (value: number) => void;
   /** memoryBackend hook: add a delivery row (a screen notice, say) to a stored notification's log, newest first. */
   putNotificationDelivery?: (notificationId: string, delivery: Record<string, unknown>) => void;
+  /** memoryBackend hook: record the people who unsubscribed from a stored email notification, as its unsubscribe link does (the revision rises). */
+  putNotificationUnsubscribed?: (notificationId: string, userIds: string[]) => void;
   /** memoryBackend hook: seed or replace a screen alert (id, screen_id, condition, state and since are enough); muted and attention are derived on every read. */
   putAlert?: (alert: Record<string, unknown> & { id: string }) => void;
   /** Test hook: merged onto every `request` response (not SSE stream frames). */
@@ -1930,6 +1932,13 @@ export function memoryBackend(options: {
   // and never answered.
   const notificationDeliveries = new Map<string, Array<Record<string, unknown>>>();
   transport.putNotificationDelivery = (id, delivery) => { notificationDeliveries.get(id)?.unshift(delivery); };
+  transport.putNotificationUnsubscribed = (id, userIds) => {
+    const stored = notifications.get(id);
+    if (!stored) return;
+    const listed = ((stored.unsubscribed ?? []) as Array<{ user_id: string; at: string }>);
+    const added = userIds.filter((user) => !listed.some((person) => person.user_id === user)).map((user) => ({ user_id: user, at: "2026-08-14T17:00:00.000Z" }));
+    if (added.length) notifications.set(id, { ...stored, unsubscribed: [...listed, ...added], revision: (stored.revision as number) + 1 });
+  };
   let notificationSequence = 0;
   const conditionNames = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "loop_stalled", "glass_blank", "glass_frozen", "crashing"];
   const invalidRequest = (detail: string, field: string): TransportResponse => ({
@@ -2068,6 +2077,18 @@ export function memoryBackend(options: {
     notifications.delete(notification.id as string);
     return { status: 204, headers: { "cache-control": "no-store" }, body: undefined };
   }));
+  transport.on("DELETE", /^\/api\/notifications\/[^/]+\/unsubscribed\/[^/]+$/, (req) => {
+    const notification = notificationFor(req);
+    if (!notification || notification.channel !== "email") return notFound("Resource was not found.");
+    const user = decodeURIComponent(req.path.split("/")[5] ?? "");
+    const listed = ((notification.unsubscribed ?? []) as Array<{ user_id: string; at: string }>);
+    if (!listed.some((person) => person.user_id === user)) return { status: 200, headers: { etag: `"${notification.revision}"` }, body: { ...notification } };
+    const { unsubscribed: _listed, ...rest } = notification;
+    const kept = listed.filter((person) => person.user_id !== user);
+    const next: Record<string, unknown> = { ...rest, ...(kept.length ? { unsubscribed: kept } : {}), revision: (notification.revision as number) + 1 };
+    notifications.set(notification.id as string, next);
+    return { status: 200, headers: { etag: `"${next.revision}"` }, body: { ...next } };
+  });
   transport.on("POST", /^\/api\/notifications\/[^/]+\/rotate-secret$/, (req) => webhookReplay(req, () => {
     const notification = notificationFor(req);
     if (!notification) return notFound("Resource was not found.");

@@ -304,6 +304,7 @@ test("root help is compact and every command is discoverable through immediate c
     "notifications delete",
     "notifications rotate-secret",
     "notifications test",
+    "notifications resubscribe",
     "notifications deliveries",
     "alerts list",
     "alerts show",

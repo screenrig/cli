@@ -35,6 +35,16 @@ export function notificationDeliveryCursor(value: string): string {
   return value;
 }
 
+const USER_ID_MAX_LENGTH = 200;
+
+/** A person's user id for notifications resubscribe --user: the id that notifications show lists under unsubscribed. The server owns whether it names anyone. */
+export function notificationUserId(value: string): string {
+  if (!value || [...value].length > USER_ID_MAX_LENGTH || /\s/.test(value)) {
+    throw usageError(`--user takes a user id such as usr_…: no spaces, at most ${USER_ID_MAX_LENGTH} characters. notifications show lists the people who unsubscribed.`);
+  }
+  return value;
+}
+
 export function notificationId(value: string | undefined, command: string): string {
   if (!value) throw usageError(`notifications ${command} requires <id>.`);
   if (!NOTIFICATION_ID_PATTERN.test(value)) {
@@ -212,6 +222,7 @@ export function notificationLines(notification: Notification | undefined): strin
     `id: ${notification.id}`,
     `channel: ${notification.channel}`,
     ...(notification.recipients ? [`recipients: ${notification.recipients.join(", ")}`] : []),
+    ...(notification.unsubscribed?.length ? [`unsubscribed: ${notification.unsubscribed.length} (${notification.unsubscribed.map((person) => person.user_id).join(", ")}; notifications resubscribe ${notification.id} --user USER_ID mails one again)`] : []),
     ...(notification.destination_hint ? [`destination: ${notification.destination_hint} (the credential is sealed and never shown)`] : []),
     ...(notification.telegram_chat_id ? [`telegram_chat: ${notification.telegram_chat_id}`] : []),
     ...(notification.url !== undefined || notification.url_redacted ? [`url: ${withheld(notification) ? READ_ONLY_URL : notification.url ?? ""}`] : []),
@@ -238,19 +249,21 @@ function destination(notification: Notification): string {
   return withheld(notification) ? "(withheld)" : notification.url ?? "";
 }
 
-/** SNOOZED_UNTIL and EVENTS appear only when a listed notification has them. */
+/** SNOOZED_UNTIL, EVENTS and UNSUBSCRIBED appear only when a listed notification has them. */
 export function notificationTableLines(items: Notification[]): string[] {
   if (!items.length) return ["No notifications"];
   const snoozed = items.some((item) => item.snoozed_until);
   const events = items.some((item) => item.event_types?.length);
+  const unsubscribed = items.some((item) => item.unsubscribed?.length);
   const lines = table(
-    ["ID", "CHANNEL", "STATUS", "ENABLED", ...(snoozed ? ["SNOOZED_UNTIL"] : []), "CONDITIONS", ...(events ? ["EVENTS"] : []), "TO"],
+    ["ID", "CHANNEL", "STATUS", "ENABLED", ...(snoozed ? ["SNOOZED_UNTIL"] : []), "CONDITIONS", ...(events ? ["EVENTS"] : []), "TO", ...(unsubscribed ? ["UNSUBSCRIBED"] : [])],
     items.map((item) => [
       item.id ?? "", item.channel ?? "", item.status ?? "", String(item.enabled),
       ...(snoozed ? [item.snoozed_until ?? ""] : []),
       (item.conditions ?? []).join(","),
       ...(events ? [(item.event_types ?? []).join(",")] : []),
       destination(item),
+      ...(unsubscribed ? [String(item.unsubscribed?.length ?? 0)] : []),
     ]),
   );
   return items.some(withheld)

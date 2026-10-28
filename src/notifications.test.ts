@@ -938,3 +938,67 @@ test("notification lines and tables show the masked destination of a chat channe
   assert.match(table, /…Dsaw -> @opsroom/);
   assert.doesNotMatch(table, /withheld/);
 });
+
+test("notification lines and tables say who unsubscribed from an email notification", () => {
+  const base = { channel: "email", recipients: ["owner", "usr_ADA"], conditions: ["screen_offline"], screen_tags: [], hold_minutes: 10, enabled: true, revision: 2, status: "active", created_at: "2026-10-28T10:00:00Z", updated_at: "2026-10-28T10:00:00Z" };
+  const stopped = { ...base, id: "ntf_STOPPEDAAAAAAAAAAAAAA", unsubscribed: [{ user_id: "usr_ADA", at: "2026-10-28T11:00:00Z" }, { user_id: "usr_BOB", at: "2026-10-28T12:00:00Z" }] } as Notification;
+  const quiet = { ...base, id: "ntf_QUIETAAAAAAAAAAAAAAAA" } as Notification;
+  const lines = notificationLines(stopped);
+  assert.ok(lines.includes("unsubscribed: 2 (usr_ADA, usr_BOB; notifications resubscribe ntf_STOPPEDAAAAAAAAAAAAAA --user USER_ID mails one again)"), lines.join("\n"));
+  assert.ok(!notificationLines(quiet).some((line) => line.startsWith("unsubscribed")), "a notification nobody stopped says nothing");
+  const table = notificationTableLines([stopped, quiet]);
+  assert.match(table[0]!, /UNSUBSCRIBED$/);
+  assert.match(table[1]!, /ntf_STOPPED\S* +email .* 2$/);
+  assert.match(table[2]!, /ntf_QUIET\S* +email .* 0$/);
+  assert.doesNotMatch(notificationTableLines([quiet])[0]!, /UNSUBSCRIBED/);
+});
+
+test("notifications resubscribe mails an unsubscribed person again and reads the list from show", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const { id } = await createEmail(transport, env);
+  transport.putNotificationUnsubscribed!(id, ["usr_ADA", "usr_BOB"]);
+  const shown = await cli(["--json", "notifications", "show", id], transport, env);
+  assert.deepEqual(shown.envelope.data.unsubscribed.map((person: { user_id: string }) => person.user_id), ["usr_ADA", "usr_BOB"]);
+  assert.equal(shown.envelope.data.revision, 2);
+  const human = await cli(["--human", "notifications", "show", id], transport, env);
+  assert.match(human.stdout, /^unsubscribed: 2 \(usr_ADA, usr_BOB;/m);
+  const listed = await cli(["--human", "notifications", "list"], transport, env);
+  assert.match(listed.stdout, /UNSUBSCRIBED/);
+
+  const resubscribed = await cli(["--json", "notifications", "resubscribe", id, "--user", "usr_ADA"], transport, env);
+  assert.equal(resubscribed.code, 0, resubscribed.stdout);
+  const call = notificationCalls(transport).at(-1)!;
+  assert.equal(call.method, "DELETE");
+  assert.equal(call.path, `/api/notifications/${id}/unsubscribed/usr_ADA`);
+  assert.ok(call.headers?.["idempotency-key"]);
+  assert.deepEqual(resubscribed.envelope.data.unsubscribed.map((person: { user_id: string }) => person.user_id), ["usr_BOB"]);
+  assert.equal(resubscribed.envelope.data.revision, 3);
+
+  // Again changes nothing; the last person leaves the list and the member with it.
+  const same = await cli(["--json", "notifications", "resubscribe", id, "--user", "usr_ADA"], transport, env);
+  assert.equal(same.code, 0, same.stdout);
+  assert.equal(same.envelope.data.revision, 3);
+  const last = await cli(["--human", "notifications", "resubscribe", id, "--user", "usr_BOB"], transport, env);
+  assert.match(last.stdout, new RegExp(`^Notification ${id} emails usr_BOB again, if they had unsubscribed\\.`));
+  assert.doesNotMatch(last.stdout, /unsubscribed:/);
+  assert.equal(((await cli(["--json", "notifications", "show", id], transport, env)).envelope.data as Notification).unsubscribed, undefined);
+});
+
+test("notifications resubscribe needs a user, refuses a malformed one and finds only an email notification", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const { id } = await createEmail(transport, env);
+  const before = notificationCalls(transport).length;
+  for (const args of [["notifications", "resubscribe", id], ["notifications", "resubscribe", id, "--user", "has space"], ["notifications", "resubscribe", id, "--user", "u".repeat(201)], ["notifications", "resubscribe", "nope", "--user", "usr_ADA"]]) {
+    const refused = await cli(["--json", ...args], transport, env);
+    assert.equal(refused.code, ExitCode.Usage, `${args.join(" ")}: ${refused.stdout}`);
+  }
+  assert.equal(notificationCalls(transport).length, before, "a refused command sent nothing");
+  const hook = await createWebhook(transport, env);
+  const wrong = await cli(["--json", "notifications", "resubscribe", hook.id, "--user", "usr_ADA"], transport, env);
+  assert.equal(wrong.code, ExitCode.NotFound, wrong.stdout);
+  const odd = await cli(["--json", "notifications", "resubscribe", id, "--user", "usr/ADA?"], transport, env);
+  assert.equal(notificationCalls(transport).at(-1)!.path, `/api/notifications/${id}/unsubscribed/usr%2FADA%3F`);
+  assert.equal(odd.code, 0, "an id with reserved characters stays one path segment, and nobody by that id changes nothing");
+});

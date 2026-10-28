@@ -36,7 +36,7 @@ import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignAllScreensAudience, campaign
 import { androidProvisioning, fetchManagedArtifact, fleetLinkSecret, PROVISIONING_NOTICE, siteOrigin, unsupportedSiteError } from "./android-provisioning.js";
 import { fleetLinkExpiresAt, fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, fleetLinkUrlProblem, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
-import { NOTIFICATION_CHAT_CHANNELS, NOTIFICATION_ID_PATTERN, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationDestination, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationSecretWarning, notificationTableLines, snoozedUntil } from "./notifications.js";
+import { NOTIFICATION_CHAT_CHANNELS, NOTIFICATION_ID_PATTERN, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationDestination, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationUserId, notificationSecretWarning, notificationTableLines, snoozedUntil } from "./notifications.js";
 import { alertEnd, alertId, alertMuteId, alertMuteLines, alertMuteTableLines, alertNote, alertProblem, alertScreenId, alertsCursor, alertsLimit, screenAlertLines, screenAlertListLines } from "./alerts.js";
 import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -9142,6 +9142,20 @@ export const handleNotificationsTest = commandHandler(async (args, runtime, reso
       ["state", delivery?.state],
       ["next", `screenrig notifications deliveries ${id} --limit 1 shows its outcome; a test is attempted once, without retries.`],
     ]),
+  };
+});
+
+export const handleNotificationsResubscribe = commandHandler(async (args, runtime, resolved) => {
+  const id = notificationId(args.positionals[2], "resubscribe");
+  const user = notificationUserId(flagString(args.flags, "user") ?? "");
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const response = await notificationCall(client, {
+    method: "DELETE", path: `${NOTIFICATIONS_PATH}/${id}/unsubscribed/${encodeURIComponent(user)}`, idempotent: true,
+  }, id);
+  return {
+    envelope: jsonBody(response, client.requestId),
+    exitCode: ExitCode.Success,
+    human: [`Notification ${id} emails ${user} again, if they had unsubscribed.`, ...notificationLines(response.body as Notification | undefined)].join("\n"),
   };
 });
 

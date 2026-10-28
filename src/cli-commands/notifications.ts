@@ -4,9 +4,9 @@ import { revision } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
 import {
   handleNotificationsCreate, handleNotificationsDeliveries, handleNotificationsDelete, handleNotificationsList,
-  handleNotificationsRotateSecret, handleNotificationsShow, handleNotificationsTest, handleNotificationsUpdate,
+  handleNotificationsResubscribe, handleNotificationsRotateSecret, handleNotificationsShow, handleNotificationsTest, handleNotificationsUpdate,
 } from "../commands.js";
-import { NOTIFICATION_CONDITIONS, notificationTelegramChat, notificationConditions, notificationDeliveryCursor, notificationHold, notificationRecipients, notificationSnooze, notificationTags } from "../notifications.js";
+import { NOTIFICATION_CONDITIONS, notificationTelegramChat, notificationConditions, notificationDeliveryCursor, notificationHold, notificationRecipients, notificationSnooze, notificationTags, notificationUserId } from "../notifications.js";
 import { webhookDeliveriesLimit, webhookDescription, webhookEventTypes, webhookUrl } from "../webhooks.js";
 
 const conditionsOption = (value: string): string => { notificationConditions(value); return value; };
@@ -39,7 +39,11 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
     "  screen's alert is acknowledged or snoozed during the hold, or a mute covers the",
     "  screen (screenrig alerts). --tag limits a notification to screens carrying one",
     "  of those tags. Email goes to each recipient's verified address, one email per",
-    "  recipient for everything that falls due within about two minutes, and is free. A",
+    "  recipient for everything that falls due within about two minutes, and is free.",
+    "  Every email has an unsubscribe link for its recipient alone (the",
+    "  List-Unsubscribe button of mail apps, and the footer): it stops that",
+    "  notification's email to that person without a sign-in, and the page it opens",
+    "  can resubscribe; notifications show lists who unsubscribed. A",
     "  webhook is signed with ScreenRig-Signature t=<unix>,v1=<hex HMAC-SHA256 over",
     "  \"<t>.<raw body>\">; its secret is printed only by create and rotate-secret.",
     "  Slack, Teams, PagerDuty and Telegram post one message per outage and screen and",
@@ -116,6 +120,11 @@ export function registerNotificationsCommands(root: Command, bind: CommandAction
   notifications.command("test").description("Send one test email, signed test POST or chat message to this notification only")
     .argument("<id>", "Notification identifier")
     .action(bind(handleNotificationsTest));
+
+  notifications.command("resubscribe").description("Email a person again who unsubscribed from a notification's email")
+    .argument("<id>", "Notification identifier")
+    .addOption(new Option("--user <USER_ID>", "The person's user id, as notifications show lists it under unsubscribed").argParser(notificationUserId).makeOptionMandatory())
+    .action(bind(handleNotificationsResubscribe));
 
   notifications.command("deliveries").description("Read a notification's delivery log, newest first")
     .argument("<id>", "Notification identifier")
