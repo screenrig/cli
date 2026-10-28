@@ -36,6 +36,7 @@ import { registerDoctorCommands } from "./doctor.js";
 import { registerVersionCommands } from "./version.js";
 import { registerStatusCommands } from "./status.js";
 import { registerRecoveryCommands } from "./recovery.js";
+import { registerMigrateCommands } from "./migrate.js";
 
 export function registerCommands(root: Command, bind: CommandActionBinder): void {
   registerGlobalOptions(root);
@@ -73,5 +74,6 @@ export function registerCommands(root: Command, bind: CommandActionBinder): void
   registerVersionCommands(root, bind);
   registerStatusCommands(root, bind);
   registerRecoveryCommands(root, bind);
+  registerMigrateCommands(root, bind);
   registerGuidance(root);
 }

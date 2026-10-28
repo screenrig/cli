@@ -28,7 +28,8 @@ import { openTempFile, removeOnSignal, shellQuote, tempPathFor } from "./temp-fi
 import { KV_WEBHOOK_ID_PATTERN, KV_WEBHOOK_MAPPING_MAX_BYTES, KV_WEBHOOK_SECRET_PATTERN, KV_WEBHOOK_SIGNING_SECRET_PATTERN, type KvWebhookTarget, cardWebhookExample, cardWebhookLines, cardWebhookSigningWarning, cardWebhookTableLines, kvWebhookDeliveryTableLines, kvWebhookDescription, kvWebhookExample, kvWebhookId, kvWebhookKey, kvWebhookLines, kvWebhookMapping, kvWebhookProblem, kvWebhookSecretWarning, kvWebhookTableLines, kvWebhookTargetFlag, kvWebhooksPath } from "./kv-webhooks.js";
 import { TRIGGER_ID_PATTERN, TRIGGER_PASSWORD_PATTERN, alertLines, triggerHoldSeconds, triggerId, triggerLines, triggerName, triggerPasswordWarning, triggerProblem, triggerScreenIds, triggerTableLines, triggerTag } from "./triggers.js";
 import { CAMPAIGN_AUDIENCE_INPUT_MAX_BYTES, campaignAllScreensAudience, campaignAnyTagAudience, campaignAudienceJson, campaignBounds, campaignExplainLines, campaignId, campaignLines, campaignName, campaignPlaylistId, campaignProblem, campaignScreenAudience, campaignScreenId, campaignScreensLines, campaignTableLines, campaignTagAudience, campaignWindowList } from "./campaigns.js";
-import { fleetLinkExpiresAt, fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
+import { androidProvisioning, fetchManagedArtifact, fleetLinkSecret, PROVISIONING_NOTICE, siteOrigin, unsupportedSiteError } from "./android-provisioning.js";
+import { fleetLinkExpiresAt, fleetLinkId, fleetLinkLines, fleetLinkMaxScreens, fleetLinkName, fleetLinkPlaylistId, fleetLinkProblem, fleetLinkRedactedNote, fleetLinkTableLines, fleetLinkUrlLines, fleetLinkUrlProblem, guardFleetLink, guardFleetLinks } from "./fleet-links.js";
 import { WEBHOOK_ID_PATTERN, deliveryTableLines, webhookDeliveriesLimit, webhookDeliveryCursor, webhookDescription, webhookEventTypes, webhookId, webhookLines, webhookProblem, webhookSecretWarning, webhookTableLines, webhookUrl } from "./webhooks.js";
 import { NOTIFICATION_ID_PATTERN, notificationConditions, notificationDeliveryCursor, notificationDeliveryTableLines, notificationHold, notificationId, notificationLines, notificationProblem, notificationRecipients, notificationSecretWarning, notificationTableLines, snoozedUntil } from "./notifications.js";
 import { alertEnd, alertId, alertMuteId, alertMuteLines, alertMuteTableLines, alertNote, alertProblem, alertScreenId, alertsCursor, alertsLimit, screenAlertLines, screenAlertListLines } from "./alerts.js";
@@ -288,6 +289,13 @@ import {
 } from "./agent-notes.js";
 import { CLI_VERSION, cliDistribution } from "./version.js";
 import { cardId, cardUid, cardDataKey, cardProperties, cardDetailsHuman, validatePlaylistCards, feedQuery, type CardDetails, type CardSummary } from "./cards.js";
+import { runApply, ONLY_KINDS, type ApplyOptions, type OnlyKind } from "./migrate/apply.js";
+import { chooseDir, describeVendor, findVendor, sortedVendors, vendorHttpFor, vendorLines } from "./migrate/cli.js";
+import { loadCredentials } from "./migrate/credentials.js";
+import { openLocalFiles } from "./migrate/local-files.js";
+import { runPair } from "./migrate/pair.js";
+import { reportLines as migrationReportLines } from "./migrate/report.js";
+import { runScan } from "./migrate/scan.js";
 
 export { CLI_VERSION };
 
@@ -9296,10 +9304,43 @@ export const handleFleetLinksList = commandHandler(async (args, runtime, resolve
 
 export const handleFleetLinksShow = commandHandler(async (args, runtime, resolved) => {
   const id = fleetLinkId(args.positionals[2], "show");
+  const wantsProvisioning = flagBool(args.flags, "android-provisioning");
+  const origin = wantsProvisioning ? siteOrigin(resolved.apiUrl) : undefined;
+  if (wantsProvisioning && origin === undefined) throw unsupportedSiteError();
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
   const response = await fleetLinkCall(client, { method: "GET", path: `${FLEET_LINKS_PATH}/${id}` }, id);
-  return fleetLinkResult(response, client, "Fleet link", true, runtime.now());
+  if (origin === undefined) return fleetLinkResult(response, client, "Fleet link", true, runtime.now());
+  return fleetLinkAndroidProvisioning(response, client, origin, runtime);
 });
+
+/**
+ * `fleet-links show --android-provisioning`: the payload the dashboard's QR code
+ * encodes, from the link's secret and the site's `managed` Android build. The
+ * secret comes from the link as returned (a Read only credential gets none) and
+ * the payload is printed once, under a sensitive label, never logged.
+ */
+async function fleetLinkAndroidProvisioning(response: Awaited<ReturnType<ApiClient["call"]>>, client: ApiClient, origin: string, runtime: CliRuntime): Promise<CommandResult> {
+  const answered = response.body as FleetLink | undefined;
+  const secret = answered && typeof answered === "object" && !fleetLinkUrlProblem(answered.url) ? fleetLinkSecret(answered.url) : undefined;
+  if (secret === undefined) {
+    throw new CliError(makeProblem("fleet_link_secret_unavailable", "Fleet link secret unavailable", 403,
+      answered?.url_redacted === true
+        ? "A Read only credential receives no fleet link URL, so the provisioning payload cannot carry the link's secret."
+        : "The fleet link was returned without a usable URL, so the provisioning payload cannot carry its secret.",
+      { next: { command: "screenrig login --access manage", reason: "A Manage sign-in receives the fleet link URL." } }));
+  }
+  const artifact = await fetchManagedArtifact(origin, runtime.siteFetch ?? globalThis.fetch);
+  const provisioning = androidProvisioning(artifact, origin, secret);
+  if (provisioning === undefined) {
+    throw unexpectedResponseError(`The managed Android build lists a path outside ${origin}/android/, so no download location is built for it.`);
+  }
+  const id = String(answered?.id ?? "");
+  return {
+    envelope: successEnvelope({ id, provisioning }, { request_id: response.headers["x-request-id"] ?? client.requestId }),
+    exitCode: ExitCode.Success,
+    human: [`Android device owner provisioning for fleet link ${id}`, PROVISIONING_NOTICE, "", JSON.stringify(provisioning)].join("\n"),
+  };
+}
 
 export const handleFleetLinksUpdate = commandHandler(async (args, runtime, resolved) => {
   const id = fleetLinkId(args.positionals[2], "update");
@@ -10240,4 +10281,146 @@ export const handleScreenDisplayClear = commandHandler(async (args, runtime, res
     exitCode: ExitCode.Success,
     human: displayHuman(`Cleared the display override on ${id}`, response.body as Screen | undefined),
   };
+}, true);
+
+// ---- migrate: import from another signage system -------------------------------------------------
+
+export const handleMigrateVendors = commandHandler(async (args) => {
+  const id = args.positionals[2];
+  const vendors = id === undefined ? sortedVendors() : [findVendor(id)];
+  return {
+    envelope: successEnvelope({ vendors: vendors.map(describeVendor) }),
+    exitCode: ExitCode.Success,
+    human: vendors.flatMap((vendor) => vendorLines(vendor)).join("\n"),
+  };
+}, false);
+
+export const handleMigrateScan = commandHandler(async (args, runtime) => {
+  const adapter = findVendor(flagString(args.flags, "from") ?? "");
+  const resolvePath = (flag: string): string | undefined => {
+    const value = flagString(args.flags, flag);
+    return value === undefined ? undefined : path.resolve(runtime.cwd(), value);
+  };
+  const dir = await chooseDir(runtime, flagString(args.flags, "dir"), adapter.id);
+  const files = resolvePath("files");
+  const { report } = await runScan({
+    adapter,
+    flags: {
+      ...(flagString(args.flags, "url") !== undefined ? { url: flagString(args.flags, "url")! } : {}),
+      ...(flagString(args.flags, "region") !== undefined ? { region: flagString(args.flags, "region")! } : {}),
+      ...(flagString(args.flags, "timezone") !== undefined ? { timezone: flagString(args.flags, "timezone")! } : {}),
+      ...(files !== undefined ? { files } : {}),
+    },
+    ...(resolvePath("credentials") !== undefined ? { credentialsFile: resolvePath("credentials")! } : {}),
+    dir,
+    env: runtime.env,
+    now: runtime.now,
+    http: vendorHttpFor(runtime, adapter),
+  });
+  return {
+    envelope: successEnvelope({ ...report, dir: dir.dir, scan_file: dir.scanFile }),
+    exitCode: ExitCode.Success,
+    human: migrationReportLines(report, dir.dir).join("\n"),
+  };
+}, false);
+
+async function migrateProjectId(client: ApiClient, configured: string | undefined): Promise<string> {
+  if (configured) return configured;
+  const id = ((await client.call({ method: "GET", path: "/api/project" })).body as Project | undefined)?.id;
+  if (typeof id !== "string" || id.length === 0) throw usageError("The project id is unavailable, so the migration directory cannot be bound to it.");
+  return id;
+}
+
+export const handleMigrateApply = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const dir = await chooseDir(runtime, flagString(args.flags, "dir"));
+  const scan = await dir.readScan();
+  const adapter = findVendor(scan.vendor);
+  const concurrency = flagNumber(args.flags, "concurrency") ?? UPLOAD_BATCH_DEFAULT_CONCURRENCY;
+  if (!Number.isInteger(concurrency) || concurrency < UPLOAD_BATCH_MIN_CONCURRENCY || concurrency > UPLOAD_BATCH_MAX_CONCURRENCY) {
+    throw usageError(`--concurrency must be a whole number from ${UPLOAD_BATCH_MIN_CONCURRENCY} to ${UPLOAD_BATCH_MAX_CONCURRENCY}.`);
+  }
+  const canvasText = flagString(args.flags, "canvas");
+  const canvasMatch = canvasText === undefined ? undefined : /^(\d+)x(\d+)$/i.exec(canvasText);
+  const onlyText = flagString(args.flags, "only");
+  const only = new Set<OnlyKind>(onlyText === undefined ? ONLY_KINDS : (onlyText.split(",") as OnlyKind[]));
+  const credentialsFile = flagString(args.flags, "credentials") === undefined ? undefined : path.resolve(runtime.cwd(), flagString(args.flags, "credentials")!);
+  const folder = flagString(args.flags, "folder");
+  if (folder !== undefined) mediaFolderId(folder, "--folder");
+  const options: ApplyOptions = {
+    dryRun: flagBool(args.flags, "dry-run"),
+    only,
+    ...(folder !== undefined ? { folder } : {}),
+    canvas: canvasMatch ? { width: Number(canvasMatch[1]), height: Number(canvasMatch[2]) } : { width: 1920, height: 1080 },
+    concurrency,
+    noTranscode: flagBool(args.flags, "no-transcode"),
+    transcodeOptions: transcodeOptionsFromArgs(args),
+    timeoutMs: flagNumber(args.flags, "timeout") ?? 120_000,
+    pollMs: 1000,
+  };
+  const json = !flagBool(args.flags, "human");
+  const secrets: string[] = [];
+  const result = await runApply({
+    runtime,
+    client,
+    dir,
+    scan,
+    vendorName: adapter.name,
+    apiUrl: resolved.apiUrl.replace(/\/+$/, ""),
+    projectId: await migrateProjectId(client, resolved.projectId),
+    openSession: async () => {
+      const credentials = await loadCredentials(adapter, { ...(credentialsFile !== undefined ? { file: credentialsFile } : {}), env: runtime.env });
+      secrets.push(...Object.values(credentials));
+      const files = scan.inputs.files !== undefined ? await openLocalFiles(scan.inputs.files) : undefined;
+      return adapter.open({
+        ...(scan.inputs.url !== undefined ? { url: scan.inputs.url } : {}),
+        ...(scan.inputs.region !== undefined ? { region: scan.inputs.region } : {}),
+        ...(scan.inputs.timezone !== undefined ? { timezone: scan.inputs.timezone } : {}),
+        credentials,
+        http: vendorHttpFor(runtime, adapter),
+        ...(files ? { files } : {}),
+        now: runtime.now,
+      });
+    },
+    openFiles: async () => {
+      if (scan.inputs.files === undefined) throw usageError("This scan used no --files, so there are no local originals to import.");
+      return openLocalFiles(scan.inputs.files);
+    },
+    reporter: progressReporterFor(args, runtime),
+    rerun: shellQuote([
+      "screenrig", "migrate", "apply", "--dir", dir.dir,
+      ...(onlyText !== undefined ? ["--only", onlyText] : []),
+      ...(folder !== undefined ? ["--folder", folder] : []),
+      ...(canvasText !== undefined ? ["--canvas", canvasText] : []),
+      ...(credentialsFile !== undefined ? ["--credentials", credentialsFile] : []),
+      ...(flagString(args.flags, "concurrency") !== undefined ? ["--concurrency", String(concurrency)] : []),
+      ...(options.noTranscode ? ["--no-transcode"] : []),
+    ]),
+    progress: (event) => {
+      runtime.stderr.write(json ? `${JSON.stringify(event)}\n` : `screenrig: migrate ${String(event.phase)} ${String(event.done)}/${String(event.total)}\n`);
+    },
+    secrets,
+  }, options);
+  return {
+    envelope: successEnvelope(result.data, { request_id: client.requestId, warnings: result.warnings }),
+    exitCode: result.exitCode,
+    human: result.human,
+  };
+}, true);
+
+export const handleMigratePair = commandHandler(async (args, runtime, resolved) => {
+  const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  const rawCode = args.positionals.slice(2).join(" ");
+  if (!rawCode) throw usageError("migrate pair requires CODE.");
+  const code = canonicalPairingCode(rawCode, "migrate pair CODE");
+  const dir = await chooseDir(runtime, flagString(args.flags, "dir"));
+  const scan = await dir.readScan();
+  const result = await runPair({
+    runtime, client, dir, scan,
+    apiUrl: resolved.apiUrl.replace(/\/+$/, ""),
+    projectId: await migrateProjectId(client, resolved.projectId),
+    code,
+    screen: flagString(args.flags, "screen") ?? "",
+  });
+  return { envelope: successEnvelope(result.data, { request_id: client.requestId }), exitCode: ExitCode.Success, human: result.human };
 }, true);

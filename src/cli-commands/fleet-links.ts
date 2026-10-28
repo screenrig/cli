@@ -29,6 +29,7 @@ export function registerFleetLinksCommands(root: Command, bind: CommandActionBin
 
   links.command("show").description("Inspect a fleet link and print its Player URL")
     .argument("<id>", "Fleet link identifier")
+    .option("--android-provisioning", "Print the Android device owner provisioning JSON for this link instead of its details; encode it as a QR code for a factory-reset device (needs a Manage sign-in)")
     .action(bind(handleFleetLinksShow));
 
   const update = links.command("update").description("Change what a fleet link gives the screens it creates from now on")

@@ -2665,7 +2665,6 @@ export function memoryBackend(options: {
       const end = req.query?.to === undefined ? undefined : instantOf("to", req.query.to);
       if (end && "status" in end) return end;
       if (end && Date.parse(end.instant) <= Date.parse(start.instant)) return campaignInvalid("to", "must be after at");
-      if (end && Date.parse(end.instant) - Date.parse(start.instant) > 31 * 86_400_000) return campaignInvalid("to", "must be at most 31 days after at");
       const verdicts: Array<Record<string, unknown>> = [];
       if (screen.takeover) verdicts.push({ kind: "takeover", playlist_id: screen.takeover.playlist_id, verdict: "won", ...(screen.takeover.until ? { until: screen.takeover.until } : {}) });
       for (const item of items) {
