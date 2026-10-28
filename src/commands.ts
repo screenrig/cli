@@ -619,7 +619,7 @@ function requestIdsFor(runtime: CliRuntime, args: ParsedArgs): RequestIds {
   return ids;
 }
 
-function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?: string, recovery?: WriteRecovery): ApiClient {
+export function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?: string, recovery?: WriteRecovery): ApiClient {
   return new ApiClient({
     transport: transportFor(runtime, apiUrl, token),
     token,
@@ -634,7 +634,7 @@ function clientFor(runtime: CliRuntime, args: ParsedArgs, apiUrl: string, token?
   });
 }
 
-function jsonBody(
+export function jsonBody(
   response: { body: unknown; headers: Record<string, string> },
   requestId: string,
   extra?: Record<string, unknown>,
@@ -779,7 +779,7 @@ async function resolveProjectContext(args: ParsedArgs, runtime: CliRuntime, reso
 }
 
 /** Prepare configuration, logging and credential guidance once for a bound leaf. */
-function commandHandler(
+export function commandHandler(
   handler: (args: ParsedArgs, runtime: CliRuntime, resolved: ResolvedCommandConfig) => Promise<CommandResult>,
   authenticated = true,
 ): CommandHandler {

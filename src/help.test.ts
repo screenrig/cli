@@ -16,8 +16,8 @@ function invoke(args: string[]): { data: ReturnType<typeof commandHelp> & { vers
 test("root help is compact and every command is discoverable through immediate children", () => {
   const root = commandHelp();
   const commanderHelp = root.usage.split(/\n\nAll commands:\n/)[0]!;
-  // Service status, support, notes, fleet links, triggers, reviews, campaigns, notifications and alerts add nine immediate root groups.
-  assert.ok(commanderHelp.split("\n").length <= 58);
+  // Service status, support, notes, fleet links, triggers, reviews, campaigns, notifications, alerts and bi add ten immediate root groups.
+  assert.ok(commanderHelp.split("\n").length <= 59);
   assert.doesNotMatch(root.usage, /localhost|log_socket|--token/);
   const discovered: string[] = [];
   function visit(path: string[]): void {
@@ -286,6 +286,19 @@ test("root help is compact and every command is discoverable through immediate c
     "alerts mute",
     "alerts mutes",
     "alerts unmute",
+    "bi connection create grafana",
+    "bi connection list",
+    "bi connection show",
+    "bi connection update",
+    "bi connection test",
+    "bi connection browse",
+    "bi connection delete",
+    "bi view create",
+    "bi view list",
+    "bi view show",
+    "bi view update",
+    "bi view test",
+    "bi view delete",
     "doctor",
     "version",
     "status",
