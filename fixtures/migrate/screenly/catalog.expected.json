@@ -257,7 +257,9 @@
         ]
       },
       "priority": 0,
-      "notes": []
+      "notes": [
+        "In Screenly it played alongside the screen's other playlists during its hours; the campaign shows it instead of them."
+      ]
     },
     {
       "id": "01J9FX00000000000000000P03:01J9FX00000000000000000L01",
@@ -299,7 +301,8 @@
       },
       "priority": 0,
       "notes": [
-        "Its rule had several alternatives; each became its own campaign."
+        "Its rule had several alternatives; each became its own campaign.",
+        "In Screenly it played alongside the screen's other playlists during its hours; the campaign shows it instead of them."
       ]
     },
     {
@@ -318,7 +321,8 @@
       "end": "2026-01-02T00:00",
       "priority": 0,
       "notes": [
-        "Its rule had several alternatives; each became its own campaign."
+        "Its rule had several alternatives; each became its own campaign.",
+        "In Screenly it played alongside the screen's other playlists during its hours; the campaign shows it instead of them."
       ]
     },
     {
@@ -334,6 +338,7 @@
         "playlist_id": "01J9FX00000000000000000P06"
       },
       "start": "2026-10-28T00:00",
+      "end": "2026-10-29T00:00",
       "repeat": {
         "every": "week",
         "weekdays": [
@@ -346,7 +351,9 @@
         ]
       },
       "priority": 0,
-      "notes": []
+      "notes": [
+        "In Screenly it played alongside the screen's other playlists during its hours; the campaign shows it instead of them."
+      ]
     },
     {
       "id": "01J9FX00000000000000000P09:01J9FX00000000000000000L03",
@@ -366,7 +373,9 @@
         "every": "day"
       },
       "priority": 0,
-      "notes": []
+      "notes": [
+        "In Screenly it played alongside the screen's other playlists during its hours; the campaign shows it instead of them."
+      ]
     }
   ],
   "not_imported": [

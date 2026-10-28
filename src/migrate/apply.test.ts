@@ -687,3 +687,148 @@ test("originals the API cannot hand out come from --files by file name, with no 
     await w.cleanup();
   }
 });
+
+// ---- more than one import into one project ---------------------------------------------------------------------
+
+test("a second import of the same names into one project leaves the first import's screens alone", async () => {
+  const w = await world();
+  try {
+    await scanFiles(w);
+    await applyFiles(w);
+    const first = await readMap(w);
+    // A device opens the first import's link and is not finished yet.
+    const firstScreen = w.project.openLink(first.items["screen:Front desk"].fleet_link_id, "ASSET-001");
+    const writesBefore = w.project.writes().length;
+
+    // A second directory imports an account that has a screen of the same name (Anthias calls its only screen "device").
+    const scan = await w.h.invoke(["migrate", "scan", "--from", "files", "--files", SIGNAGE, "--dir", "mig2"]);
+    assert.equal(scan.code, 0, scan.stdout);
+    const second = await w.h.invoke(["migrate", "apply", "--dir", "mig2", "--no-transcode"]);
+    assert.equal(second.code, 0, second.stdout);
+
+    const stored = w.project.screens.get(firstScreen.id)!;
+    assert.equal(stored.label, "ASSET-001", "the first import's screen keeps the name its device gave it");
+    assert.equal(stored.timezone, undefined);
+    assert.ok(!w.project.writes().slice(writesBefore).some((write) => write === `PATCH /api/screens/${firstScreen.id}`), "nothing was written to the first import's screen");
+    assert.equal(w.project.links.has(first.items["screen:Front desk"].fleet_link_id), true, "the first import's link is still there");
+
+    const other = JSON.parse(await readFile(path.join(w.cwd, "mig2", "map.json"), "utf8"));
+    assert.notEqual(other.items["screen:Front desk"].fleet_link_id, first.items["screen:Front desk"].fleet_link_id);
+    assert.equal(other.items["screen:Front desk"].screen_id, undefined, "the second import's screen is still waiting");
+    assert.equal(other.items["screen:Front desk"].finished, undefined);
+    assert.deepEqual(second.json.data.placeholders.map((item: { source_id: string; state: string }) => [item.source_id, item.state]), [["Front desk", "linked"], ["Cafe wall", "linked"], ["Back office, east", "linked"]]);
+
+    // The second import's own device pairs through the second link; the first import finishes its screen later.
+    const secondScreen = w.project.openLink(other.items["screen:Front desk"].fleet_link_id, "ASSET-002");
+    assert.equal((await w.h.invoke(["migrate", "apply", "--dir", "mig2", "--no-transcode"])).code, 0);
+    assert.equal(w.project.screens.get(secondScreen.id)!.label, "Front desk");
+    assert.equal(w.project.screens.get(firstScreen.id)!.label, "ASSET-001", "still untouched by the second import");
+    assert.equal((await applyFiles(w)).code, 0);
+    assert.equal(w.project.screens.get(firstScreen.id)!.label, "Front desk");
+    assert.equal((await readMap(w)).items["screen:Front desk"].screen_id, firstScreen.id);
+  } finally {
+    await w.cleanup();
+  }
+});
+
+test("a second import never reuses a tag that another import's screens or links carry", async () => {
+  const w = await world();
+  try {
+    await scanFiles(w);
+    // Screens and links that another import made carry migrated_from, and still keep their tags.
+    w.project.addScreen("scr_other", { tags: ["Lobby"], fields: { migrated_from: "xibo:12" }, fleet_link_id: "flk_gone" });
+    w.project.links.set("flk_other", { id: "flk_other", label: "Waiting", tags: ["GroundFloor"], fields: { migrated_from: "xibo:13" } });
+    const dry = await w.h.invoke(["migrate", "apply", "--dir", "mig", "--dry-run"]);
+    assert.deepEqual(dry.json.data.tags, { "group:Lobby": "Lobby2", "group:Ground floor": "GroundFloor2" });
+
+    // The tags this import made stay its own on a rerun, even once its devices have paired with them.
+    await applyFiles(w);
+    const map = await readMap(w);
+    const screen = w.project.openLink(map.items["screen:Front desk"].fleet_link_id, "ASSET-001");
+    assert.deepEqual(screen.tags, ["Lobby2", "GroundFloor2"]);
+    await applyFiles(w);
+    assert.deepEqual((await readMap(w)).tags, { "group:Lobby": "Lobby2", "group:Ground floor": "GroundFloor2" });
+    const third = await w.h.invoke(["migrate", "scan", "--from", "files", "--files", SIGNAGE, "--dir", "mig3"]);
+    assert.equal(third.code, 0);
+    const later = await w.h.invoke(["migrate", "apply", "--dir", "mig3", "--dry-run"]);
+    assert.deepEqual(later.json.data.tags, { "group:Lobby": "Lobby3", "group:Ground floor": "GroundFloor3" }, "the first import's screens and links reserve their tags from a third");
+  } finally {
+    await w.cleanup();
+  }
+});
+
+// ---- a file that fails alone, and what ends the run -------------------------------------------------------------
+
+test("one file address that no longer works fails that media alone, with the way back; a rerun finishes it", async () => {
+  const w = await world();
+  try {
+    await scanFixture(w);
+    const result = await applyFixture(w, [], fixtureRouter({ downloadRedirect: ["2"], cdnStatus: 403 }));
+    assert.equal(result.code, 8, result.stdout);
+    assert.equal(result.json.data.stopped, undefined, "an expired address is not a refusal of the key");
+    assert.deepEqual(result.json.data.failed.map((item: { key: string; code: string }) => [item.key, item.code]), [["media:2", "vendor_file_gone"]]);
+    assert.match(result.json.data.failed[0].detail, /sent no key.*migrate scan again to refresh the file addresses/);
+    assert.equal(result.json.data.failed[0].next.command, "screenrig migrate scan --from fixture");
+    assert.equal(w.project.media.size, 2, "the other two files came over");
+    assert.ok(result.json.data.waiting.some((item: { key: string }) => item.key === "playlist:10"), "what needs the file waits");
+    assert.equal(result.json.data.applied.screens.create >= 1, true, "the run went on past the media: the screen with no playlist was made");
+    const resumed = await applyFixture(w);
+    assert.equal(resumed.code, 0, resumed.stdout);
+    assert.equal(w.project.media.size, 3);
+  } finally {
+    await w.cleanup();
+  }
+});
+
+test("an answer that is not a file fails that media alone", async () => {
+  const w = await world();
+  try {
+    await scanFixture(w);
+    const result = await applyFixture(w, [], fixtureRouter({ emptyDownloads: ["4"] }));
+    assert.equal(result.json.data.stopped, undefined);
+    assert.deepEqual(result.json.data.failed.map((item: { key: string; code: string }) => [item.key, item.code]), [["media:4", "vendor_bad_response"]]);
+    assert.equal(result.code, 9, "the exit code follows the failure");
+    assert.equal(w.project.media.size, 2);
+    assert.equal(result.json.data.applied.playlists.create >= 1, true, "the run went on past the media");
+  } finally {
+    await w.cleanup();
+  }
+});
+
+test("a lost network still ends the run, and a rerun continues", async () => {
+  const w = await world();
+  try {
+    await scanFixture(w);
+    const result = await applyFixture(w, ["--concurrency", "1"], fixtureRouter({ networkDown: ["2"] }));
+    assert.equal(result.json.data.stopped.code, "vendor_unavailable");
+    assert.match(result.json.data.stopped.detail, /\(ECONNREFUSED\)/);
+    assert.equal(result.code, 10);
+    assert.equal(w.project.playlists.size, 0, "nothing after the stop is written");
+    const resumed = await applyFixture(w);
+    assert.equal(resumed.code, 0, resumed.stdout);
+    assert.equal(w.project.media.size, 3);
+  } finally {
+    await w.cleanup();
+  }
+});
+
+// ---- the same original file for two media -------------------------------------------------------------------------
+
+test("two media that name the same original file upload together and leave the original untouched", async () => {
+  const w = await world();
+  try {
+    const scan = await w.h.invoke(["migrate", "scan", "--from", "fixture-shared", "--files", SIGNAGE, "--dir", "mig"]);
+    assert.equal(scan.code, 0, scan.stdout);
+    assert.equal(scan.json.data.importable.media, 2, JSON.stringify(scan.json.data.not_imported));
+    const original = path.join(SIGNAGE, "images", "welcome.png");
+    const before = await stat(original);
+    const result = await applyFiles(w, ["--concurrency", "2"]);
+    assert.equal(result.code, 0, result.stdout);
+    assert.deepEqual(result.json.data.failed, []);
+    assert.equal(w.project.media.size, 2);
+    const after = await stat(original);
+    assert.deepEqual([after.ctimeMs, after.mtimeMs, after.nlink], [before.ctimeMs, before.mtimeMs, before.nlink], "the original's inode was never linked, so its change time never moved");
+  } finally {
+    await w.cleanup();
+  }
+});

@@ -196,7 +196,11 @@ test("timing: dates alone are bounds, weekdays and hours are weekly windows, and
   assert.deepEqual(termTiming({ lo: 18 * HOUR }, today), { ok: true, schedule: { start: "2026-10-28T18:00", end: "2026-10-29T00:00", repeat: { every: "day" } }, notes: [] });
   assert.deepEqual(termTiming({ hi: 6 * HOUR }, today), { ok: true, schedule: { start: "2026-10-28T00:00", end: "2026-10-28T06:00", repeat: { every: "day" } }, notes: [] });
   assert.deepEqual(termTiming({ days: [5, 6], dlo: day("2026-11-07"), dhi: day("2026-12-20") }, today), {
-    ok: true, schedule: { start: "2026-11-07T00:00", repeat: { every: "week", weekdays: ["sat", "sun"], until: "2026-12-20" } }, notes: [],
+    ok: true, schedule: { start: "2026-11-07T00:00", end: "2026-11-08T00:00", repeat: { every: "week", weekdays: ["sat", "sun"], until: "2026-12-20" } }, notes: [],
+  });
+  // Weekdays alone run midnight to the next midnight on those days.
+  assert.deepEqual(termTiming({ days: [0, 1, 2, 3, 4] }, today), {
+    ok: true, schedule: { start: "2026-10-28T00:00", end: "2026-10-29T00:00", repeat: { every: "week", weekdays: ["mon", "tue", "wed", "thu", "fri"] } }, notes: [],
   });
   assert.deepEqual(termTiming({ lo: 22 * HOUR, hi: 7 * HOUR }, today), { ok: false, reason: "Its time window ends before it starts." });
   assert.deepEqual(termTiming({ lo: 9 * HOUR, hi: 9 * HOUR }, today), { ok: false, reason: "Its time window is shorter than a minute." });
@@ -228,7 +232,12 @@ test("migrate scan --from screenly prints what comes over and what does not, and
     assert.equal(report.importable.media, 3);
     assert.deepEqual(report.not_imported.map((entry: { name: string }) => entry.name), ["Lobby camera", "Weather app", "Still processing", "Handbook", "Night", "Switched off", "Odd rule"]);
     const lossy = report.lossy.map((entry: { name: string; change: string }) => `${entry.name}: ${entry.change}`);
-    assert.ok(lossy.includes("Not Tuesday: It had no end time; it now runs all day on its days."), lossy.join("\n"));
+    // A rule on weekdays alone is exactly a whole day on those days: the campaign changes nothing, so it says nothing.
+    assert.ok(!lossy.some((line: string) => /^Not Tuesday: .*(no end time|24 hours)/.test(line)), lossy.join("\n"));
+    const alongside = "In Screenly it played alongside the screen's other playlists during its hours; the campaign shows it instead of them.";
+    assert.ok(lossy.includes(`Not Tuesday: ${alongside}`), lossy.join("\n"));
+    assert.ok(lossy.includes(`Evening: ${alongside}`));
+    assert.ok(!lossy.some((line: string) => line.startsWith("Holiday") && line.includes("alongside")), "a priority playlist replaces the others, as a campaign does: no note");
     assert.ok(lossy.includes("Either or (1): Its rule had several alternatives; each became its own campaign."));
     assert.ok(lossy.includes("Cafe loop + Lobby loop: Screenly plays every active playlist of a screen one after another, in an order it does not publish; this one plays Cafe loop, Lobby loop in that order."));
     assert.ok(report.notes.some((note: string) => /No time zone was known for 1 screen/.test(note)));

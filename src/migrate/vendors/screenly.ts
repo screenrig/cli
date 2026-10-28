@@ -289,9 +289,10 @@ export function termTiming(term: Term, today: string): Timing {
     };
   }
   const weekdays = restrictsDays(term) ? term.days!.map((day) => DAYS[day]!) : undefined;
+  // A rule on days alone runs midnight to the next midnight on those days.
   let start = "00:00";
-  let end: string | undefined;
-  let endsNextDay = false;
+  let end = "00:00";
+  let endsNextDay = true;
   if (restrictsTime(term)) {
     const from = term.lo ?? 0;
     const to = Math.min(term.hi ?? END_OF_DAY, END_OF_DAY);
@@ -311,7 +312,7 @@ export function termTiming(term: Term, today: string): Timing {
     ok: true,
     schedule: {
       start: `${first}T${start}`,
-      ...(end !== undefined ? { end: `${endsNextDay ? addDays(first, 1) : first}T${end}` } : {}),
+      end: `${endsNextDay ? addDays(first, 1) : first}T${end}`,
       repeat: { every: weekdays ? "week" : "day", ...(weekdays ? { weekdays } : {}), ...(dhi ? { until: dhi } : {}) },
     },
     notes,
@@ -509,7 +510,12 @@ class ScreenlySession implements VendorSession {
             content: { playlist_id: playlist.id! },
             ...timing.schedule,
             priority,
-            notes: parsed.terms.length > 1 ? [...timing.notes, "Its rule had several alternatives; each became its own campaign."] : timing.notes,
+            notes: [
+              ...timing.notes,
+              ...(parsed.terms.length > 1 ? ["Its rule had several alternatives; each became its own campaign."] : []),
+              // A priority playlist replaces the others while its rule is true, as a campaign does; any other plays beside them.
+              ...(priority === 0 ? ["In Screenly it played alongside the screen's other playlists during its hours; the campaign shows it instead of them."] : []),
+            ],
           });
         }
       });

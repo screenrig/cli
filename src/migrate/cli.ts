@@ -96,12 +96,18 @@ export function vendorHttpFor(runtime: CliRuntime, adapter: VendorAdapter): Vend
     sleep: runtime.sleep,
     now: () => runtime.now().getTime(),
     log: (request) => {
-      logger.startLocal({
+      const span = logger.startLocal({
         op: "migrate.vendor.request",
         message: `${request.vendor} ${request.method} ${request.status}`,
-        params: { vendor: request.vendor, method: request.method, status: request.status, ms: request.ms },
+        params: { vendor: request.vendor, method: request.method, status: request.status, ms: request.ms, ...(request.cause !== undefined ? { cause: request.cause } : {}) },
         quiet: true,
-      }).finish();
+      });
+      // A request with no answer, or a refusal, is an error span; the rest finish quietly.
+      if (request.status === 0 || request.status >= 400) {
+        span.error(new Error(`${request.vendor} ${request.method} ${request.status === 0 ? `got no answer${request.cause ? ` (${request.cause})` : ""}` : `answered ${request.status}`}`));
+      } else {
+        span.finish();
+      }
     },
   });
 }

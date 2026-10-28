@@ -128,10 +128,17 @@ const STOP_CODES = new Set([
   "insufficient_access", "pending_review", "transport_error", "timeout", "not_enrolled", "unauthenticated", "session_ended", "credential_retired",
 ]);
 
+/**
+ * Vendor errors that belong to one file or one answer: the item fails and the run goes on.
+ * A refusal of the key, a rate limit and a lost connection repeat for every item and stay stops.
+ */
+const ITEM_CODES = new Set(["vendor_bad_response", "vendor_file_gone", "vendor_file_stalled"]);
+
 /** An error that will repeat for every item, so the run ends instead of failing each one. */
 export function isStop(error: unknown): error is CliError {
   if (!(error instanceof CliError)) return false;
   const { status, code } = error.problem;
+  if (ITEM_CODES.has(code)) return false;
   return STOP_CODES.has(code) || status === 401 || status === 402 || status === 403 || status === 429 || status >= 500;
 }
 
@@ -176,7 +183,7 @@ function exitForFailures(failed: readonly FailedItem[]): ExitCode {
   return ExitCode.Client;
 }
 
-/** `vendor:id`, the value of the migrated_from field that ties a screen to its placeholder. */
+/** `vendor:id`, the value of the migrated_from field: a label naming the source. It carries no account, so it never identifies a screen. */
 export function sourceRef(vendor: string, id: string): string {
   return `${vendor}:${id}`;
 }
@@ -359,9 +366,16 @@ export async function runApply(deps: ApplyDeps, options: ApplyOptions): Promise<
     }
 
     // ---- tags -------------------------------------------------------------------------------
+    // Only the screens and links this map made may share its tags. Every other one, including another
+    // import's, keeps its tags: a campaign on a shared tag would switch screens this import does not own.
+    const ownLinks = new Set(Object.values(state.items).flatMap((item) => (item.fleet_link_id !== undefined ? [item.fleet_link_id] : [])));
+    const ownScreens = new Set(Object.values(state.items).flatMap((item) => (item.screen_id !== undefined ? [item.screen_id] : [])));
     const taken: string[] = [];
-    for (const screen of snapshot.screens) if (screen.fields?.migrated_from === undefined) taken.push(...(screen.tags ?? []));
-    for (const link of snapshot.links.values()) if (link.fields?.migrated_from === undefined) taken.push(...(link.tags ?? []));
+    for (const screen of snapshot.screens) {
+      if (ownScreens.has(screen.id) || (screen.fleet_link_id !== undefined && ownLinks.has(screen.fleet_link_id))) continue;
+      taken.push(...(screen.tags ?? []));
+    }
+    for (const link of snapshot.links.values()) if (!ownLinks.has(link.id)) taken.push(...(link.tags ?? []));
     Object.assign(state.tags, allocateTags(classified.wants, taken, state.tags));
     await save();
 
@@ -571,11 +585,13 @@ export async function runApply(deps: ApplyDeps, options: ApplyOptions): Promise<
     const contentReady = (key: ContentKey): boolean => known.has(key) || planned.has(key);
 
     // ---- screens: fleet-link placeholders ------------------------------------------------------
-    /** The screen a device made by opening this placeholder's link: it carries the link's field. */
-    const findScreen = (source: SourceScreen): Screen | undefined => {
-      const ref = sourceRef(vendor, source.id);
-      return snapshot.screens.find((screen) => screen.fields?.migrated_from === ref);
-    };
+    /**
+     * The screen a device made by opening this placeholder's link. The link id is the identity: it is
+     * read-only on the screen and stays after the link is deleted. The migrated_from field names a source
+     * but not the account, so two imports of one vendor can share a value and it never identifies a screen.
+     */
+    const findScreen = (linkId: string | undefined): Screen | undefined =>
+      linkId === undefined ? undefined : snapshot.screens.find((screen) => screen.fleet_link_id === linkId);
     let linkSlots = FLEET_LINK_CAP - snapshot.links.size;
     let linkCapReached = false;
     const counts = { linked: 0, unlinked: 0, paired: 0, finished: 0 };
@@ -608,8 +624,8 @@ export async function runApply(deps: ApplyDeps, options: ApplyOptions): Promise<
           continue;
         }
         const body = placeholderFor(source, state.tags, classified);
-        const screen = entry?.screen_id === undefined ? findScreen(source) : undefined;
         const linkId = entry?.fleet_link_id;
+        const screen = entry?.screen_id === undefined ? findScreen(linkId) : undefined;
         if (entry?.screen_id !== undefined) {
           // A migrate pair claimed a code and stopped before it set the screen up: only migrate pair finishes that.
           note("screens", { key, action: "reuse", name: source.name });
