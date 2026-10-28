@@ -29,6 +29,8 @@ export interface CliRuntime {
   openPath?: OpenPath;
   runProcess?: RunProcess;
   isStderrTty?: () => boolean;
+  /** The fetch migrate uses for the vendor it reads; the global fetch when absent. Tests inject a fixture router. */
+  vendorFetch?: typeof fetch;
 }
 
 export interface SignedRawPutRequest {

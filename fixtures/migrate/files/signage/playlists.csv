@@ -1,0 +1,7 @@
+playlist,file,duration,order
+Lobby,images/welcome.png,12,1
+Lobby,intro.mp4,,2
+Lobby,images/menu.png,5,3
+Lobby,theme.mp3,,4
+Cafe,menu.png,,1
+Cafe,missing.png,,2
