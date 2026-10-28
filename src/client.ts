@@ -37,7 +37,7 @@ import type { OperationLogger } from "./log/types.js";
 function privateBodies(method: string, path: string): boolean {
   path = path.replace(/^\/api\/projects\/[^/]+\//, "/api/");
   return (method === "POST" && path === "/api/invitations") || /^\/api\/(?:webhooks|notifications|fleet-links|triggers)(?:\/|$)/.test(path)
-    || /^\/api\/applications\/[^/]+\/kv-webhooks(?:\/|$)/.test(path);
+    || /^\/api\/(?:applications|cards)\/[^/]+\/kv-webhooks(?:\/|$)/.test(path);
 }
 
 /** The error body as text, for a response that is not a problem document. Transports without raw text get the decoded body. */
