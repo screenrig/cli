@@ -22,6 +22,7 @@ import { fieldMap, screenFactsLines, screenFactsPatch, screenFieldsCell, screenL
 import { displayLines, displayPower, displayProblem, displayScheduleWrite, displayUntil, playPageProblem, rebootProblem } from "./screen-display.js";
 import { commandCancelProblem, commandLines, commandResultText, expiresInSeconds, identifyDurationMs, identifyProblem, replaceProblem, replacedByLines, suspendMessage, suspendProblem, suspensionLines } from "./screen-commands.js";
 import { healthChangesText, healthLines, screenHealthIssues } from "./screen-health.js";
+import { outageLines } from "./screen-outage.js";
 import { anyManifestUpgrade, manifestUpgradeCell, manifestUpgradeLines } from "./screen-manifest-upgrade.js";
 import { forecastStorageWarnings, isStorageFailureCode, screenStorageWarnings, storageFullWarning } from "./screen-storage.js";
 import { openTempFile, removeOnSignal, shellQuote, tempPathFor } from "./temp-file.js";
@@ -6017,6 +6018,7 @@ export const handleScreenShow = commandHandler(async (args, runtime, resolved) =
       ...manifestUpgradeLines(screen, runtime.now()),
       ...displayLines(screen?.display, screen?.timezone),
       ...healthLines(screen?.health),
+      ...outageLines(screen),
       ...commandLines(screen),
       ...notes.lines,
     ].join("\n"),

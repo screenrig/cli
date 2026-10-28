@@ -554,6 +554,22 @@ export interface ScreenHealth {
   renderer_restarts_24h?: number;
 }
 
+/**
+ * Screen.last_outage: the screen's latest presence outage and, once the first
+ * health report after it decided one, why the screen was gone. likely_cause is
+ * absent when unknown; a value this CLI does not know reads as unknown.
+ * evidence is open: device_uptime_s, app_uptime_s, report_at,
+ * crashes_24h_before and crashes_24h_after, reboot_command,
+ * stream_down_during_outage, observer_impaired.
+ */
+export interface ScreenOutage {
+  offline_since: string;
+  back_at?: string;
+  duration_s?: number;
+  likely_cause?: string;
+  evidence?: Record<string, unknown>;
+}
+
 export interface ScreenDisplaySchedule {
   enabled: boolean;
   windows: ScreenScheduleWindow[];
@@ -710,6 +726,7 @@ export interface Screen {
    * after the first connect. When offline, last time the screen was online.
    */
   last_online_at?: string;
+  last_outage?: ScreenOutage;
   last_page_failure?: PageFailure;
   manifest_revision: number;
   observation?: ScreenObservation;
