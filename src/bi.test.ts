@@ -230,6 +230,18 @@ test("connection list, show, test, browse, update and delete", async () => {
   assert.equal(patch.headers?.["if-match"], '"1"');
   assert.equal((await cli(["--json", "bi", "connection", "update", CONN], transport, env)).code, 2);
 
+  // The stored secret goes only to the address it was saved for: another origin needs the secret again.
+  const callsBefore = biCalls(transport).length;
+  for (const away of ["https://other.example.com/grafana", "http://grafana.example.com/grafana", "https://grafana.example.com:3000/grafana"]) {
+    const refused = await cli(["--json", "bi", "connection", "update", CONN, "--url", away], transport, env);
+    assert.equal(refused.code, 2, away);
+    assert.match(refused.stderr + refused.stdout, /needs the secret again.*--token-file FILE.*--secret-file FILE/s, away);
+  }
+  assert.ok(biCalls(transport).slice(callsBefore).every((call) => call.method === "GET"), "a refused update sends no PATCH");
+  const samePlace = await cli(["--json", "bi", "connection", "update", CONN, "--url", "https://GRAFANA.example.com/other"], transport, env);
+  assert.equal(samePlace.code, 0, samePlace.stdout);
+  assert.deepEqual(lastCall(transport).body, { config: { url: "https://GRAFANA.example.com/other" } });
+
   const removed = await cli(["--json", "bi", "connection", "delete", CONN], transport, env);
   assert.equal(removed.code, 0, removed.stdout);
   assert.deepEqual(removed.envelope.data, { id: CONN, deleted: true });

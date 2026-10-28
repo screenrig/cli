@@ -536,6 +536,14 @@ export const handleBiConnectionUpdate = commandHandler(async (args: Args, runtim
     ...(secretSource !== undefined ? { secret: await readToken(secretSource, runtime, secretFile !== undefined ? "client secret" : "token") } : {}),
   };
   const client = clientFor(runtime, args, resolved.apiUrl, requireToken(resolved.token));
+  if (url !== undefined && secretSource === undefined) {
+    // The stored secret is only sent to the address it was saved for, so an
+    // address on another origin needs the secret in the same request.
+    const current = await biCall(client, { method: "GET", path: `${CONNECTIONS_PATH}/${id}` }, id);
+    if (addressOriginChanged((current.body as BiConnection | undefined)?.config?.url, url)) {
+      throw usageError("Changing --url to another host, scheme or port needs the secret again: add --token-file FILE (Grafana) or --secret-file FILE (Tableau). The stored secret is only sent to the address it was saved for.");
+    }
+  }
   const response = await biCall(client, { method: "PATCH", path: `${CONNECTIONS_PATH}/${id}`, idempotent: true, body, headers: revisionHeader(args) }, id);
   return {
     envelope: jsonBody(response, client.requestId),
@@ -543,6 +551,16 @@ export const handleBiConnectionUpdate = commandHandler(async (args: Args, runtim
     human: [`Updated connection ${id}`, ...connectionLines(response.body as BiConnection | undefined)].join("\n"),
   };
 });
+
+/** True when two addresses name different origins (scheme, host or port). An address that does not parse is left to the server. */
+export function addressOriginChanged(current: string | undefined, next: string): boolean {
+  if (!current) return false;
+  try {
+    return new URL(current).origin !== new URL(next).origin;
+  } catch {
+    return false;
+  }
+}
 
 function revisionHeader(args: Args): Record<string, string> | undefined {
   const revision = flagString(args.flags, "if-match");
