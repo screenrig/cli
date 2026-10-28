@@ -271,7 +271,20 @@ export function notificationTableLines(items: Notification[]): string[] {
     : lines;
 }
 
-/** CONDITION, PHASE, SCREEN and EMAILED appear only when a listed delivery has them (screen notices, email). */
+/**
+ * The group of a delivery: the notice that said a group carries its id, how many screens and what they share
+ * ("ngr_…: 8 screens · network 203.0.113.7"); any other notice of the group, skipped as grouped, carries the id.
+ */
+export function deliveryGroupCell(item: NotificationDelivery): string | undefined {
+  const group = item.group;
+  if (group !== undefined) {
+    const screens = `${group.count} ${group.count === 1 ? "screen" : "screens"}`;
+    return `${group.id}: ${screens} · ${group.attribute === "many_networks" ? group.value : `${group.attribute} ${group.value}`}`;
+  }
+  return item.group_id === undefined || item.group_id === "" ? undefined : item.group_id;
+}
+
+/** CONDITION, PHASE, SCREEN, GROUP and EMAILED appear only when a listed delivery has them (screen notices, groups, email). */
 export function notificationDeliveryTableLines(items: NotificationDelivery[]): string[] {
   if (!items.length) return ["No deliveries"];
   const columns: Array<[string, (item: NotificationDelivery) => string | undefined, boolean]> = [
@@ -280,6 +293,7 @@ export function notificationDeliveryTableLines(items: NotificationDelivery[]): s
     ["CONDITION", (item) => item.condition, false],
     ["PHASE", (item) => item.phase, false],
     ["SCREEN", (item) => item.screen_name ?? item.screen_id, false],
+    ["GROUP", deliveryGroupCell, false],
     ["STATE", (item) => item.state ?? "", true],
     ["ATTEMPTS", (item) => String(item.attempts ?? 0), true],
     ["LAST_STATUS", (item) => (item.last_status === undefined ? "" : String(item.last_status)), true],

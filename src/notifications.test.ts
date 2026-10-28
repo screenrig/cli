@@ -11,7 +11,7 @@ import { run, type CliRuntime } from "./main.js";
 import { networkError } from "./problems.js";
 import { redactText } from "./redact.js";
 import { testTemp } from "./test-temp.js";
-import { notificationDeliveryTableLines, notificationLines, notificationTableLines, snoozedUntil } from "./notifications.js";
+import { deliveryGroupCell, notificationDeliveryTableLines, notificationLines, notificationTableLines, snoozedUntil } from "./notifications.js";
 import type { Notification, NotificationDelivery } from "./adapters/protocol.js";
 import { FakeTransport, memoryBackend } from "./transport/fake.js";
 import type { TransportRequest } from "./transport/types.js";
@@ -659,6 +659,32 @@ test("deliveries names the acknowledged and muted skip reasons as the server sen
   assert.match(human.stdout, /not_playing\s+opened\s+Lobby TV\s+skipped\s+0\s+acknowledged/);
   const help = await cli(["--human", "notifications", "deliveries", "--help"], transport, env);
   assert.match(help.stdout, /acknowledged \(someone acknowledged or snoozed the screen's alert during the hold\), muted \(a mute covers the screen\)/);
+});
+
+test("deliveries shows the group a notice said and the group a skipped screen belongs to", async () => {
+  const env = await enrolled();
+  const transport = memoryBackend();
+  const { id } = await createEmail(transport, env);
+  const group = "ngr_LEADERAAAAAAAAAAAAAAA";
+  transport.putNotificationDelivery!(id, {
+    id: "whd_LEADERAAAAAAAAAAAAAAA", notification_id: id, event_id: "ev1_8", event_type: "screen.offline", condition: "screen_offline", phase: "opened",
+    screen_id: "scr_LOBBYAAAAAAAAAAAAAAAA", screen_name: "Lobby TV", state: "succeeded", attempts: 1, emailed: 2, created_at: "2026-08-14T16:56:00.000Z",
+    group: { id: group, attribute: "network", value: "203.0.113.7", count: 8 },
+  });
+  transport.putNotificationDelivery!(id, {
+    id: "whd_MEMBERAAAAAAAAAAAAAAA", notification_id: id, event_id: "ev1_9", event_type: "screen.offline", condition: "screen_offline", phase: "opened",
+    screen_id: "scr_CAFEAAAAAAAAAAAAAAAAA", screen_name: "Cafe TV", state: "skipped", attempts: 0, last_error: "grouped", group_id: group, created_at: "2026-08-14T16:56:01.000Z",
+  });
+  const human = await cli(["--human", "notifications", "deliveries", id], transport, env);
+  assert.match(human.stdout, /SCREEN\s+GROUP\s+STATE/);
+  assert.match(human.stdout, new RegExp(`Lobby TV\\s+${group}: 8 screens · network 203\\.0\\.113\\.7\\s+succeeded`));
+  assert.match(human.stdout, new RegExp(`Cafe TV\\s+${group}\\s+skipped\\s+0\\s+grouped`));
+  const many: NotificationDelivery = { id: "whd_MANYAAAAAAAAAAAAAAAAA", notification_id: id, event_id: "ev1_1", event_type: "screen.offline", state: "succeeded", attempts: 1, created_at: "2026-08-14T16:00:00.000Z", group: { id: group, attribute: "many_networks", value: "6 networks", count: 6 } };
+  assert.equal(deliveryGroupCell(many), `${group}: 6 screens · 6 networks`);
+  assert.equal(deliveryGroupCell({ ...many, group: undefined }), undefined);
+  const help = await cli(["--human", "notifications", "deliveries", "--help"], transport, env);
+  assert.match(help.stdout, /grouped \(the screen fell into the condition with others/);
+  assert.match(help.stdout, /no_longer_judged/);
 });
 
 test("notification test rate limiting keeps the exit-7 convention", async () => {

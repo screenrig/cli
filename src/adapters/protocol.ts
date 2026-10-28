@@ -1578,6 +1578,10 @@ export interface NotificationDelivery {
   emailed?: number;
   event_id: string;
   event_type: string;
+  /** The group of screens this notice said: on the notice that opened it and the one that resolved it. */
+  group?: NotificationDeliveryGroup;
+  /** The group a notice belongs to, on every other notice of the group; those are skipped as grouped. */
+  group_id?: string;
   id: string;
   last_attempt_at?: string;
   last_duration_ms?: number;
@@ -1594,6 +1598,14 @@ export interface NotificationDelivery {
   since?: string;
   state: "pending" | "succeeded" | "failed" | "skipped";
   test?: boolean;
+}
+
+/** A group of screens one notice stands for. Readers treat an attribute they do not know as one they cannot name. */
+export interface NotificationDeliveryGroup {
+  attribute: string;
+  count: number;
+  id: string;
+  value: string;
 }
 
 export interface NotificationDeliveryList {
