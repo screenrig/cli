@@ -1510,10 +1510,19 @@ export interface Notification {
   status: "active" | "failing" | "disabled";
   /** Telegram only: the chat messages go to. */
   telegram_chat_id?: string;
+  /** Email only, and only while not empty: the people who stopped this notification's email with the unsubscribe link in it. They stay in recipients. */
+  unsubscribed?: NotificationUnsubscription[];
   updated_at: string;
   /** Webhook only; empty with url_redacted true below effective Manage. */
   url?: string;
   url_redacted?: boolean;
+}
+
+/** A person who stopped an email notification's mail with the unsubscribe link in it. */
+export interface NotificationUnsubscription {
+  /** When the person stopped the notification's mail. */
+  at: string;
+  user_id: string;
 }
 
 /** Returned for a webhook only by create and rotate-secret (and their exact idempotent replay for 24 hours). */

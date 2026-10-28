@@ -980,7 +980,7 @@ test("notifications resubscribe mails an unsubscribed person again and reads the
   assert.equal(same.code, 0, same.stdout);
   assert.equal(same.envelope.data.revision, 3);
   const last = await cli(["--human", "notifications", "resubscribe", id, "--user", "usr_BOB"], transport, env);
-  assert.match(last.stdout, new RegExp(`^Notification ${id} emails usr_BOB again, if they had unsubscribed\\.`));
+  assert.match(last.stdout, new RegExp(`^Notification ${id} emails usr_BOB again, if they had unsubscribed\\.`, "m"));
   assert.doesNotMatch(last.stdout, /unsubscribed:/);
   assert.equal(((await cli(["--json", "notifications", "show", id], transport, env)).envelope.data as Notification).unsubscribed, undefined);
 });

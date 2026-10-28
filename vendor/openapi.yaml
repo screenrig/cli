@@ -11913,6 +11913,111 @@ paths:
     servers:
       - url: https://screenrig.ai
         description: Backend-owned project dashboard origin
+  /api/notifications/{id}/unsubscribed/{user_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectTarget'
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/NotificationUnsubscribedUserID'
+    delete:
+      x-screenrig-access: write
+      operationId: resubscribeNotificationUser
+      description: >-
+        Mails an email notification's person again after they stopped it with the unsubscribe link in its mail (Notification.unsubscribed lists the people who did). Idempotent: a person who is not stopped changes nothing, and the answer is the notification as it is. A change bumps the revision and appends notification.updated with details change resubscribed, user_id and via api. A dashboard session may resubscribe any person of the project; an agent credential needs the project write capability. The person's own way back is the Resubscribe button on the page their unsubscribe link answers with.
+      security:
+        - projectBearer: []
+        - dashboardSession: []
+      responses:
+        '200':
+          description: The notification, without the person in unsubscribed.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    servers:
+      - url: https://screenrig.ai
+        description: Backend-owned project dashboard origin
+  /api/notifications/unsubscribe:
+    get:
+      operationId: showNotificationUnsubscribe
+      description: >-
+        The link in an alert mail's footer. It carries no session and no bearer; the token t, made by screenRIG for one notification n and one person u, is the whole authority, never expires, and verifies while the issuance key version it names is retained. The answer is a page that asks to stop that notification's mail to that person and changes nothing, so a mail scanner that opens the link stops nothing; its button posts to this path. A person already stopped sees a page whose button resubscribes. Any token, notification or person that does not match, and a notification that is gone or is not an email notification, answers the same 404 page. The page has no script and posts only to this origin. At most 30 requests a minute per address (rate_limited).
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/NotificationUnsubscribeNotification'
+        - $ref: '#/components/parameters/NotificationUnsubscribePerson'
+        - $ref: '#/components/parameters/NotificationUnsubscribeToken'
+      responses:
+        '200':
+          description: The page that asks to stop the alerts.
+          content:
+            text/html:
+              schema:
+                type: string
+        '404':
+          description: The link is not valid; the same page for every cause.
+          content:
+            text/html:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: unsubscribeFromNotification
+      description: >-
+        Stops an email notification's mail to the person the link is for. The query is the one of the GET link; the body is not read, so a mail provider's RFC 8058 one-click request (List-Unsubscribe=One-Click, from the List-Unsubscribe and List-Unsubscribe-Post headers every alert and test mail carries) and the page's button both work. Only that person is stopped, for that notification only; the others keep getting mail, and the person stays in recipients. It is idempotent. The first time it bumps the revision and appends notification.updated with details change unsubscribed, user_id and via email_link. The page it answers has a Resubscribe button (POST /api/notifications/resubscribe); a project member lists the people stopped in Notification.unsubscribed. When nobody is left to mail, a notice is skipped as no_recipients. Any link that does not match answers the 404 page of the GET. At most 30 requests a minute per address (rate_limited).
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/NotificationUnsubscribeNotification'
+        - $ref: '#/components/parameters/NotificationUnsubscribePerson'
+        - $ref: '#/components/parameters/NotificationUnsubscribeToken'
+      responses:
+        '200':
+          description: The page that says the alerts are stopped.
+          content:
+            text/html:
+              schema:
+                type: string
+        '404':
+          description: The link is not valid; the same page for every cause.
+          content:
+            text/html:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/notifications/resubscribe:
+    post:
+      operationId: resubscribeToNotification
+      description: >-
+        Undoes POST /api/notifications/unsubscribe for the person the link is for: the Resubscribe button of the page it answers. Same link, same authority and same 404 page; idempotent. A change bumps the revision and appends notification.updated with details change resubscribed, user_id and via email_link. At most 30 requests a minute per address (rate_limited).
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/NotificationUnsubscribeNotification'
+        - $ref: '#/components/parameters/NotificationUnsubscribePerson'
+        - $ref: '#/components/parameters/NotificationUnsubscribeToken'
+      responses:
+        '200':
+          description: The page that says the alerts are back on.
+          content:
+            text/html:
+              schema:
+                type: string
+        '404':
+          description: The link is not valid; the same page for every cause.
+          content:
+            text/html:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Problem'
   /api/notes:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -20090,6 +20195,10 @@ components:
     ResourceID: {name: id, in: path, required: true, schema: {type: string}}
     NoteID: {name: note_id, in: path, required: true, schema: {type: string, pattern: "^(?:(?:stage|qa|development)_)?nte_[A-Za-z0-9_-]{16,24}$"}, description: The id of one of the agent's notes.}
     WebhookDeliveryID: {name: delivery_id, in: path, required: true, schema: {type: string}, description: The id of one of the webhook's deliveries.}
+    NotificationUnsubscribedUserID: {name: user_id, in: path, required: true, schema: {type: string, maxLength: 200}, description: The user_id of a person in the notification's unsubscribed list.}
+    NotificationUnsubscribeNotification: {name: n, in: query, required: true, schema: {type: string, maxLength: 200}, description: The notification the link is for.}
+    NotificationUnsubscribePerson: {name: u, in: query, required: true, schema: {type: string, maxLength: 200}, description: The user_id of the person the link is for.}
+    NotificationUnsubscribeToken: {name: t, in: query, required: true, schema: {type: string, pattern: "^ust1\\.[1-9][0-9]{0,5}\\.[A-Za-z0-9_-]{43}$"}, description: The link's token.}
     CommandID: {name: command_id, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z0-9_-]{8,64}$"}, description: "The id of one of the screen's commands: the id in Screen.commands, the reboot_id or reload_id of the 202 answer."}
     PlaylistPageID: {name: page_id, in: path, required: true, schema: {type: string, pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$"}, description: Playlist page id string.}
     ApplicationID: {name: application_id, in: path, required: true, schema: {type: string}}
@@ -26189,7 +26298,7 @@ components:
       additionalProperties: false
       required: [id, channel, conditions, screen_tags, hold_minutes, enabled, revision, status, created_at, updated_at]
       description: >-
-        A project notification. Each condition is tracked per screen: it opens when its event arrives for a screen in scope, and a notice goes out once it has lasted hold_minutes and the screen is still in that state; when it clears after a notice went out, a resolved notice follows. A condition that clears within the hold sends nothing, and neither does one whose alert is acknowledged or snoozed during the hold, or one on a screen a mute covers. Email: one email per recipient for everything that falls due within about two minutes, listing each screen and condition, with links to the screen and to this notification in the dashboard; notification emails are free. Webhook: each notice is POSTed as JSON {type: alert.opened or alert.resolved, id, notification_id, project_id, condition, screen {id, name}, since, at, event_id}, where id is the delivery id, since is when the condition began, at is when it held long enough (opened) or cleared (resolved), and event_id is the cursor of the event behind it. alert.resolved for screen_offline also carries likely_cause, the cause of the outage that ended (ScreenOutage.likely_cause) or null when unknown; it waits up to two minutes after the screen comes back for the first health report to decide it, and an email names it too. Email and the chat channels say three or more screens that fall into one condition within five minutes and share a network, location, model, Player version or tag as one notice with one recovery (NotificationDeliveryGroup); the other screens' notices are skipped as grouped. A webhook still sends one notice per screen. event_types are POSTed as the same JSON object GET /api/events returns. Every POST carries ScreenRig-Webhook-Id (the notification id), ScreenRig-Event-Id (the delivery id for a notice, the event cursor for an event; stable across retries, deduplicate on it), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; anything else is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed; email failures retry the same way. Screen notices and screen.* events are free; other events are metered like a listen-stream event. status is failing while nothing has succeeded since failing_since; after 72 hours of continuous failure the notification is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
+        A project notification. Each condition is tracked per screen: it opens when its event arrives for a screen in scope, and a notice goes out once it has lasted hold_minutes and the screen is still in that state; when it clears after a notice went out, a resolved notice follows. A condition that clears within the hold sends nothing, and neither does one whose alert is acknowledged or snoozed during the hold, or one on a screen a mute covers. Email: one email per recipient for everything that falls due within about two minutes, listing each screen and condition, with links to the screen and to this notification in the dashboard; notification emails are free. Every alert and test email carries, for the person it is addressed to, an unsubscribe link (List-Unsubscribe and List-Unsubscribe-Post headers, and the footer) that stops this notification's mail to that person alone, without signing in; see unsubscribed. Webhook: each notice is POSTed as JSON {type: alert.opened or alert.resolved, id, notification_id, project_id, condition, screen {id, name}, since, at, event_id}, where id is the delivery id, since is when the condition began, at is when it held long enough (opened) or cleared (resolved), and event_id is the cursor of the event behind it. alert.resolved for screen_offline also carries likely_cause, the cause of the outage that ended (ScreenOutage.likely_cause) or null when unknown; it waits up to two minutes after the screen comes back for the first health report to decide it, and an email names it too. Email and the chat channels say three or more screens that fall into one condition within five minutes and share a network, location, model, Player version or tag as one notice with one recovery (NotificationDeliveryGroup); the other screens' notices are skipped as grouped. A webhook still sends one notice per screen. event_types are POSTed as the same JSON object GET /api/events returns. Every POST carries ScreenRig-Webhook-Id (the notification id), ScreenRig-Event-Id (the delivery id for a notice, the event cursor for an event; stable across retries, deduplicate on it), User-Agent, and ScreenRig-Signature t=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>" keyed with the secret string>. A 2xx answer within 10 seconds succeeds; anything else is retried with exponential backoff (30 seconds doubling to one hour, jittered) for 24 hours and then failed; email failures retry the same way. Screen notices and screen.* events are free; other events are metered like a listen-stream event. status is failing while nothing has succeeded since failing_since; after 72 hours of continuous failure the notification is disabled (disabled_reason delivery_failures) and notification.disabled is appended.
       properties:
         project_id: {type: string}
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?(?:whk|ntf)_[A-Za-z0-9_-]{16,24}$"}
@@ -26206,6 +26315,10 @@ components:
         telegram_chat_id: {type: string, description: Telegram only. The chat messages go to.}
         enabled: {type: boolean}
         snoozed_until: {type: string, format: date-time, description: Present while a snooze is set; nothing is sent before it.}
+        unsubscribed:
+          type: array
+          items: {$ref: "#/components/schemas/NotificationUnsubscription"}
+          description: "Email only, and only while it is not empty: the people who stopped this notification's mail with the unsubscribe link in it. They stay in recipients and get no mail from this notification until they resubscribe (the page of their link, or DELETE /api/notifications/{id}/unsubscribed/{user_id})."
         revision: {type: integer, minimum: 1}
         status: {type: string, enum: [active, failing, disabled]}
         disabled_reason: {type: string, enum: [delivery_failures]}
@@ -26217,6 +26330,7 @@ components:
         updated_at: {type: string, format: date-time}
         secret: {type: string, pattern: "^whsec_[A-Za-z0-9_-]{43}$", description: "Webhook only, and only in the create and rotate-secret answers: the signing secret. Store it; it is not shown again."}
     NotificationList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/Notification"}}}}
+    NotificationUnsubscription: {type: object, additionalProperties: false, required: [user_id, at], properties: {user_id: {type: string}, at: {type: string, format: date-time, description: When the person stopped the notification's mail.}}}
     NotificationDelivery:
       type: object
       additionalProperties: false
@@ -26245,7 +26359,7 @@ components:
         last_error:
           type: string
           description: >-
-            Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable, email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed (the notification is snoozed), acknowledged (someone acknowledged or snoozed the screen's alert during the hold), muted (a mute covers the screen), no_recipients (no recipient is a member with a verified address), grouped (the screen is part of a group whose one notice says it; group_id names the group). Readers treat an unknown value as absent.
+            Why the last attempt failed: http_status, timeout, connection_failed, tls_failed, dns_failed, url_rejected, payment_required, webhook_disabled, webhook_deleted, event_expired, secret_unavailable, email_failed, email_rejected. Or why a skipped notice was not sent: condition_cleared (the screen left the state before the hold ended), not_opened (no notice of that condition was sent to resolve), snoozed (the notification is snoozed), acknowledged (someone acknowledged or snoozed the screen's alert during the hold), muted (a mute covers the screen), no_recipients (no recipient is a member with a verified address who has not unsubscribed), grouped (the screen is part of a group whose one notice says it; group_id names the group). Readers treat an unknown value as absent.
         last_duration_ms: {type: integer, minimum: 0}
         completed_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
