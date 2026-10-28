@@ -4611,7 +4611,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createBIConnection
-      description: 'Adds a connection to a BI system the project owns. For Grafana: its address (http or https on a public host, with an optional path prefix) and a service-account token with the Viewer role. The token is sealed and never returned. Grafana renders dashboards for screens through its Image Renderer plugin or remote rendering service, so the customer installs one; run POST /api/bi-connections/{id}/test to check. For Power BI (kind powerbi): config.tenant_id and config.client_id of a Microsoft Entra app registration and its client secret value as secret. A Power BI admin must turn on the Developer settings Embed content in apps and Service principals can call Fabric public APIs for the app (admin portal, Tenant settings), the app must be a Member or Admin of each workspace it shows, and reports need an Embedded, Fabric or Premium capacity for production use. Appends bi_connection.created. An exact retry with the same Idempotency-Key returns this same answer.'
+      description: 'Adds a connection to a BI system the project owns. For Grafana: its address (http or https on a public host, with an optional path prefix) and a service-account token with the Viewer role. The token is sealed and never returned. Grafana renders dashboards for screens through its Image Renderer plugin or remote rendering service, so the customer installs one; run POST /api/bi-connections/{id}/test to check. For Power BI (kind powerbi): config.tenant_id and config.client_id of a Microsoft Entra app registration and its client secret value as secret. A Power BI admin must turn on the Developer settings Embed content in apps and Service principals can call Fabric public APIs for the app (admin portal, Tenant settings), the app must be a Member or Admin of each workspace it shows, and reports need an Embedded, Fabric or Premium capacity for production use. For Tableau (kind tableau): config.url (the https address of Tableau Server, or of your Tableau Cloud pod such as https://10ay.online.tableau.com), config.site (the site content URL, empty for the default site), config.client_id and config.secret_id of a connected app with direct trust, config.username (the Tableau user the screens views are shown as) and the secret value as secret. Add the answer embed_origin to the connected app domain allowlist and enable the secret. Anyone holding a screen ticket can embed any view that user can see, so use a user that sees only screen dashboards. Tableau Cloud, or Tableau Server 2023.3 or later. Appends bi_connection.created. An exact retry with the same Idempotency-Key returns this same answer.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -4774,7 +4774,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: testBIConnection
-      description: 'Calls the BI system with the connection''s secret and stores the answer as last_test. For Grafana the checks are token (GET /api/search accepts it) and image_renderer (the plugin is listed; a missing plugin is a warning because a remote rendering service does not show as one). It does not judge per-dashboard permissions, data-source health or the reachability of a remote renderer: test a view to render for real. A refusal from Grafana is a failed check, not an error. For Power BI the checks are token (Microsoft Entra accepts the app) and workspaces (the app can list workspaces; it counts them and none fails the check, naming the workspace access step). It does not judge capacity, row-level security or access to any one report: test a view, which generates a real embed token.'
+      description: 'Calls the BI system with the connection''s secret and stores the answer as last_test. For Grafana the checks are token (GET /api/search accepts it) and image_renderer (the plugin is listed; a missing plugin is a warning because a remote rendering service does not show as one). It does not judge per-dashboard permissions, data-source health or the reachability of a remote renderer: test a view to render for real. A refusal from Grafana is a failed check, not an error. For Power BI the checks are token (Microsoft Entra accepts the app) and workspaces (the app can list workspaces; it counts them and none fails the check, naming the workspace access step). It does not judge capacity, row-level security or access to any one report: test a view, which generates a real embed token. For Tableau the check is signin: Tableau accepts a content-read JWT signed with the connected app secret for the connection user, and the server signs out again. It does not judge the domain allowlist, which only a screen loading a view proves, or the permissions on any view: test a view, which looks the view up as the user.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -4811,7 +4811,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: browseBIConnection
-      description: 'Lists what the connection''s token can show. Grafana: its dashboards (query searches titles; next_cursor pages), or with dashboard set that dashboard''s panels (rows flattened) under dashboard. Power BI: the workspaces the app can see (id, name; query keeps names containing it), or with workspace set that workspace''s reports (id, name, embed_url) under workspace.'
+      description: 'Lists what the connection''s token can show. Grafana: its dashboards (query searches titles; next_cursor pages), or with dashboard set that dashboard''s panels (rows flattened) under dashboard. Power BI: the workspaces the app can see (id, name; query keeps names containing it), or with workspace set that workspace''s reports (id, name, embed_url) under workspace. Tableau: the views the connection user can see (path as Workbook/View, name), 100 per page read; query keeps views whose name or path contains it, reading up to ten pages to find them, and next_cursor is the next page to read.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -4909,7 +4909,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createBIView
-      description: 'Adds a view of a connection''s Grafana dashboard or one panel of it (url: a /d/{uid}/... address on the connection''s host, or target), or of a Grafana public dashboard link (kind grafana and target.public_url, no connection). Put the answer''s embed_url in an iframe primitive: the server renders the dashboard as a PNG through Grafana''s /render API, refreshed every refresh_s (30 to 86400, default 300) and shared by every screen of the same size; the screen never talks to Grafana. A public dashboard plays live from Grafana, which must allow embedding. The embed page shows only a ticket the screen''s manifest carries, so a view plays only on the screens of its own project. For Power BI (kind powerbi): a report of a workspace the connection''s app is a member of (url: an app.powerbi.com /groups/{workspace}/reports/{report} address, or target with workspace_id and report_id), with pages to show and rotate_s to rotate through them (pages listing two or more, or rotate_all_pages, need rotate_s of 10 to 3600; one report page needs none), and refresh_s of 0 (no refresh) or 60 to 86400 (default 300). The page asks the server for a short-lived view-only embed token (GenerateToken, App owns data) and renews it before it expires; the screen never holds the client secret. A Power BI Publish to web link is a view without a connection (kind powerbi, target.public_url https://app.powerbi.com/view?r=...), framed as it is. Appends bi_view.created.'
+      description: 'Adds a view of a connection''s Grafana dashboard or one panel of it (url: a /d/{uid}/... address on the connection''s host, or target), or of a Grafana public dashboard link (kind grafana and target.public_url, no connection). Put the answer''s embed_url in an iframe primitive: the server renders the dashboard as a PNG through Grafana''s /render API, refreshed every refresh_s (30 to 86400, default 300) and shared by every screen of the same size; the screen never talks to Grafana. A public dashboard plays live from Grafana, which must allow embedding. The embed page shows only a ticket the screen''s manifest carries, so a view plays only on the screens of its own project. For Power BI (kind powerbi): a report of a workspace the connection''s app is a member of (url: an app.powerbi.com /groups/{workspace}/reports/{report} address, or target with workspace_id and report_id), with pages to show and rotate_s to rotate through them (pages listing two or more, or rotate_all_pages, need rotate_s of 10 to 3600; one report page needs none), and refresh_s of 0 (no refresh) or 60 to 86400 (default 300). The page asks the server for a short-lived view-only embed token (GenerateToken, App owns data) and renews it before it expires; the screen never holds the client secret. A Power BI Publish to web link is a view without a connection (kind powerbi, target.public_url https://app.powerbi.com/view?r=...), framed as it is. For Tableau (kind tableau): a view of the connection site (url: an address copied from Tableau, such as https://HOST/t/SITE/views/WORKBOOK/VIEW or Tableau Cloud https://HOST/#/site/SITE/views/WORKBOOK/VIEW, or Workbook/View; or target.view), optionally with target.rotate_sheets and rotate_s of 10 to 3600 to turn the workbook published sheets (rotate_s and rotate_sheets go together; rotate_sheets may be given as the whole target beside url), and refresh_s of 0 (no refresh) or 60 to 86400 (default 300). The page asks the server for a five minute JWT with only the embed scope, signed with the connected app secret, and builds the Embedding API v3 tableau-viz from the Tableau host; the screen never holds the secret. A Tableau Public viz is a view without a connection (kind tableau, target.public_url, rebuilt as https://public.tableau.com/views/WORKBOOK/VIEW) and takes rotate_sheets too. Appends bi_view.created.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -5072,7 +5072,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: testBIView
-      description: 'Renders a connection view for real (1920x1080, outside the shared cache and without touching status), or fetches a public dashboard link and checks that its page may be framed by the view''s embed host (allow_embedding in Grafana). It does not judge what the picture shows. A Grafana failure is a failed check, not an error. A Power BI connection view generates a real embed token for its report (checks report and embed_token); it does not judge the pages it names, capacity or what the report shows, and a dataset with row-level security is refused by Power BI with its own message, shown in the check. A Power BI public link is fetched and its framing headers read.'
+      description: 'Renders a connection view for real (1920x1080, outside the shared cache and without touching status), or fetches a public dashboard link and checks that its page may be framed by the view''s embed host (allow_embedding in Grafana). It does not judge what the picture shows. A Grafana failure is a failed check, not an error. A Power BI connection view generates a real embed token for its report (checks report and embed_token); it does not judge the pages it names, capacity or what the report shows, and a dataset with row-level security is refused by Power BI with its own message, shown in the check. A Power BI public link is fetched and its framing headers read. A Tableau connection view signs in as the connection user and looks the view up (checks signin and view); it does not judge the domain allowlist, the embed permission or what the view shows. A Tableau Public view asks Tableau Public whether the workbook exists and does not judge the view name.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -5109,7 +5109,7 @@ paths:
     get:
       x-screenrig-access: read
       operationId: getBIViewImage
-      description: 'Draws a Grafana view now as a PNG (a Power BI view answers not_found), outside the shared cache, so a test shows exactly what Grafana renders at that size. The embed page itself uses the shared render.'
+      description: 'Draws a Grafana view now as a PNG (a Power BI or Tableau view answers not_found), outside the shared cache, so a test shows exactly what Grafana renders at that size. The embed page itself uses the shared render.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -17513,7 +17513,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createBIConnectionInProject
-      description: 'Adds a connection to a BI system the project owns. For Grafana: its address (http or https on a public host, with an optional path prefix) and a service-account token with the Viewer role. The token is sealed and never returned. Grafana renders dashboards for screens through its Image Renderer plugin or remote rendering service, so the customer installs one; run POST /api/bi-connections/{id}/test to check. For Power BI (kind powerbi): config.tenant_id and config.client_id of a Microsoft Entra app registration and its client secret value as secret. A Power BI admin must turn on the Developer settings Embed content in apps and Service principals can call Fabric public APIs for the app (admin portal, Tenant settings), the app must be a Member or Admin of each workspace it shows, and reports need an Embedded, Fabric or Premium capacity for production use. Appends bi_connection.created. An exact retry with the same Idempotency-Key returns this same answer.'
+      description: 'Adds a connection to a BI system the project owns. For Grafana: its address (http or https on a public host, with an optional path prefix) and a service-account token with the Viewer role. The token is sealed and never returned. Grafana renders dashboards for screens through its Image Renderer plugin or remote rendering service, so the customer installs one; run POST /api/bi-connections/{id}/test to check. For Power BI (kind powerbi): config.tenant_id and config.client_id of a Microsoft Entra app registration and its client secret value as secret. A Power BI admin must turn on the Developer settings Embed content in apps and Service principals can call Fabric public APIs for the app (admin portal, Tenant settings), the app must be a Member or Admin of each workspace it shows, and reports need an Embedded, Fabric or Premium capacity for production use. For Tableau (kind tableau): config.url (the https address of Tableau Server, or of your Tableau Cloud pod such as https://10ay.online.tableau.com), config.site (the site content URL, empty for the default site), config.client_id and config.secret_id of a connected app with direct trust, config.username (the Tableau user the screens views are shown as) and the secret value as secret. Add the answer embed_origin to the connected app domain allowlist and enable the secret. Anyone holding a screen ticket can embed any view that user can see, so use a user that sees only screen dashboards. Tableau Cloud, or Tableau Server 2023.3 or later. Appends bi_connection.created. An exact retry with the same Idempotency-Key returns this same answer.'
       security:
         - projectBearer: []
       parameters:
@@ -17601,7 +17601,7 @@ paths:
     post:
       x-screenrig-access: write
       operationId: createBIViewInProject
-      description: 'Adds a view of a connection''s Grafana dashboard or one panel of it (url: a /d/{uid}/... address on the connection''s host, or target), or of a Grafana public dashboard link (kind grafana and target.public_url, no connection). Put the answer''s embed_url in an iframe primitive: the server renders the dashboard as a PNG through Grafana''s /render API, refreshed every refresh_s (30 to 86400, default 300) and shared by every screen of the same size; the screen never talks to Grafana. A public dashboard plays live from Grafana, which must allow embedding. The embed page shows only a ticket the screen''s manifest carries, so a view plays only on the screens of its own project. For Power BI (kind powerbi): a report of a workspace the connection''s app is a member of (url: an app.powerbi.com /groups/{workspace}/reports/{report} address, or target with workspace_id and report_id), with pages to show and rotate_s to rotate through them (pages listing two or more, or rotate_all_pages, need rotate_s of 10 to 3600; one report page needs none), and refresh_s of 0 (no refresh) or 60 to 86400 (default 300). The page asks the server for a short-lived view-only embed token (GenerateToken, App owns data) and renews it before it expires; the screen never holds the client secret. A Power BI Publish to web link is a view without a connection (kind powerbi, target.public_url https://app.powerbi.com/view?r=...), framed as it is. Appends bi_view.created.'
+      description: 'Adds a view of a connection''s Grafana dashboard or one panel of it (url: a /d/{uid}/... address on the connection''s host, or target), or of a Grafana public dashboard link (kind grafana and target.public_url, no connection). Put the answer''s embed_url in an iframe primitive: the server renders the dashboard as a PNG through Grafana''s /render API, refreshed every refresh_s (30 to 86400, default 300) and shared by every screen of the same size; the screen never talks to Grafana. A public dashboard plays live from Grafana, which must allow embedding. The embed page shows only a ticket the screen''s manifest carries, so a view plays only on the screens of its own project. For Power BI (kind powerbi): a report of a workspace the connection''s app is a member of (url: an app.powerbi.com /groups/{workspace}/reports/{report} address, or target with workspace_id and report_id), with pages to show and rotate_s to rotate through them (pages listing two or more, or rotate_all_pages, need rotate_s of 10 to 3600; one report page needs none), and refresh_s of 0 (no refresh) or 60 to 86400 (default 300). The page asks the server for a short-lived view-only embed token (GenerateToken, App owns data) and renews it before it expires; the screen never holds the client secret. A Power BI Publish to web link is a view without a connection (kind powerbi, target.public_url https://app.powerbi.com/view?r=...), framed as it is. For Tableau (kind tableau): a view of the connection site (url: an address copied from Tableau, such as https://HOST/t/SITE/views/WORKBOOK/VIEW or Tableau Cloud https://HOST/#/site/SITE/views/WORKBOOK/VIEW, or Workbook/View; or target.view), optionally with target.rotate_sheets and rotate_s of 10 to 3600 to turn the workbook published sheets (rotate_s and rotate_sheets go together; rotate_sheets may be given as the whole target beside url), and refresh_s of 0 (no refresh) or 60 to 86400 (default 300). The page asks the server for a five minute JWT with only the embed scope, signed with the connected app secret, and builds the Embedding API v3 tableau-viz from the Tableau host; the screen never holds the secret. A Tableau Public viz is a view without a connection (kind tableau, target.public_url, rebuilt as https://public.tableau.com/views/WORKBOOK/VIEW) and takes rotate_sheets too. Appends bi_view.created.'
       security:
         - projectBearer: []
       parameters:
@@ -26423,10 +26423,13 @@ components:
       type: object
       additionalProperties: false
       properties:
-        url: {type: string, maxLength: 2048, description: "Grafana's address: http or https on a public Internet host, with an optional path prefix such as /grafana, and no query or fragment. The server calls it with the connection's token."}
+        url: {type: string, maxLength: 2048, description: "Grafana's address: http or https on a public Internet host, with an optional path prefix such as /grafana, and no query or fragment. The server calls it with the connection's token. Tableau: https only, the address of Tableau Server or of your Tableau Cloud pod such as https://10ay.online.tableau.com."}
         org_id: {type: integer, minimum: 1, default: 1, description: The Grafana organization the token belongs to.}
         tenant_id: {type: string, maxLength: 253, description: "Power BI: the Directory (tenant) ID of the Microsoft Entra tenant, a GUID, or its domain such as contoso.onmicrosoft.com. Not common, organizations or consumers."}
-        client_id: {type: string, maxLength: 36, description: "Power BI: the Application (client) ID of the Entra app registration, a GUID. The secret is its client secret value."}
+        client_id: {type: string, maxLength: 128, description: "Power BI: the Application (client) ID of the Entra app registration, a GUID. The secret is its client secret value. Tableau: the Client ID of the connected app."}
+        site: {type: string, maxLength: 255, description: "Tableau: the site content URL, the part after /site/ or /t/ in a view's address; empty for Tableau Server's default site."}
+        secret_id: {type: string, maxLength: 128, description: "Tableau: the Secret ID of a secret generated for the connected app. The secret is its secret value."}
+        username: {type: string, maxLength: 320, description: "Tableau: the user the screens' views are shown as (an email address on Tableau Cloud). Anyone holding a screen's ticket can embed any view this user can see."}
     BISecret:
       type: object
       additionalProperties: false
@@ -26440,7 +26443,7 @@ components:
       additionalProperties: false
       required: [name, ok]
       properties:
-        name: {type: string, description: "What was checked: token, image_renderer, render, public_link or framing (Grafana); token, workspaces, report, embed_token, public_link or framing (Power BI)."}
+        name: {type: string, description: "What was checked: token, image_renderer, render, public_link or framing (Grafana); token, workspaces, report, embed_token, public_link or framing (Power BI); signin, view or public_link (Tableau)."}
         ok: {type: boolean}
         warn: {type: boolean, description: "With ok true: something the check could not judge."}
         detail: {type: string}
@@ -26471,7 +26474,7 @@ components:
       properties:
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?bic_[A-Za-z0-9_-]+$"}
         project_id: {type: string}
-        kind: {type: string, enum: [grafana, powerbi]}
+        kind: {type: string, enum: [grafana, powerbi, tableau]}
         name: {type: string, minLength: 1, maxLength: 80}
         config: {$ref: "#/components/schemas/BIConnectionConfig"}
         embed_origin: {anyOf: [{type: string}, {type: "null"}], description: "The origin of the project's embed host, where its views' pages are served; null where this server has none."}
@@ -26487,9 +26490,9 @@ components:
       required: [name, kind, config, secret]
       properties:
         name: {type: string, minLength: 1, maxLength: 80}
-        kind: {type: string, enum: [grafana, powerbi]}
+        kind: {type: string, enum: [grafana, powerbi, tableau]}
         config: {$ref: "#/components/schemas/BIConnectionConfig"}
-        secret: {type: string, minLength: 1, maxLength: 4096, description: "The service-account token (Grafana) or the app's client secret value (Power BI). Sealed on arrival; the CLI reads it from a file or stdin, never an argument."}
+        secret: {type: string, minLength: 1, maxLength: 4096, description: "The service-account token (Grafana), the app's client secret value (Power BI) or the connected app's secret value (Tableau). Sealed on arrival; the CLI reads it from a file or stdin, never an argument."}
     BIConnectionPatch:
       type: object
       additionalProperties: false
@@ -26501,7 +26504,7 @@ components:
     BITarget:
       type: object
       additionalProperties: false
-      description: "What a view shows. Grafana with a connection: dashboard_uid (and optionally one panel). Power BI with a connection: workspace_id and report_id, with pages or rotate_all_pages. Without a connection: only public_url."
+      description: "What a view shows. Grafana with a connection: dashboard_uid (and optionally one panel). Power BI with a connection: workspace_id and report_id, with pages or rotate_all_pages. Tableau with a connection: view (Workbook/View), with rotate_sheets. Without a connection: only public_url (and rotate_sheets for Tableau)."
       properties:
         dashboard_uid: {type: string, maxLength: 128, description: "The part after /d/ in a dashboard's address."}
         panel_id: {type: integer, minimum: 0, description: Show this panel alone (d-solo) instead of the dashboard.}
@@ -26511,11 +26514,13 @@ components:
         vars: {type: object, maxProperties: 50, propertyNames: {pattern: "^var-[A-Za-z0-9_-]{1,64}$"}, additionalProperties: {type: string, maxLength: 200}, description: "Template variables, keyed var-name."}
         theme: {type: string, enum: [dark, light], default: dark}
         timezone: {type: string, maxLength: 64}
-        public_url: {type: string, maxLength: 2048, description: "A public link that needs no connection and plays live from its host: a Grafana public dashboard (Grafana must allow embedding), or for kind powerbi a Publish to web link https://app.powerbi.com/view?r=..."}
+        public_url: {type: string, maxLength: 2048, description: "A public link that needs no connection and plays live from its host: a Grafana public dashboard (Grafana must allow embedding), for kind powerbi a Publish to web link https://app.powerbi.com/view?r=..., or for kind tableau a Tableau Public viz address (the viz page, the views address or the embed address), stored as https://public.tableau.com/views/WORKBOOK/VIEW."}
         workspace_id: {type: string, maxLength: 36, description: "Power BI: the workspace id, the part after /groups/ in the report's address."}
         report_id: {type: string, maxLength: 36, description: "Power BI: the report id, the part after /reports/ in its address."}
         pages: {type: array, maxItems: 50, items: {type: string, minLength: 1, maxLength: 200}, description: "Power BI: page names (ReportSection...) or display names, shown in this order. Two or more need rotate_s on the view. Empty shows the report's own first page."}
         rotate_all_pages: {type: boolean, description: "Power BI: rotate through every visible page of the report (needs rotate_s). Not with pages."}
+        view: {type: string, maxLength: 401, description: "Tableau: the view as Workbook/View, the names after /views/ in its address."}
+        rotate_sheets: {type: boolean, description: "Tableau: turn the workbook's published sheets every rotate_s seconds (needs rotate_s). Also for a Tableau Public view."}
     BIViewError:
       type: object
       additionalProperties: false
@@ -26540,11 +26545,11 @@ components:
         id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?biv_[A-Za-z0-9_-]+$"}
         project_id: {type: string}
         connection_id: {type: string, description: Absent for a view of a public link.}
-        kind: {type: string, enum: [grafana, powerbi]}
+        kind: {type: string, enum: [grafana, powerbi, tableau]}
         name: {type: string, minLength: 1, maxLength: 80}
         target: {$ref: "#/components/schemas/BITarget"}
-        refresh_s: {type: integer, minimum: 0, maximum: 86400, description: "Grafana: how often the image is drawn again, 30 to 86400 (a public link reloads this often). Power BI: how often the report refreshes its data, 60 to 86400, or 0 for never (a DirectQuery report or one with automatic page refresh updates itself)."}
-        rotate_s: {type: integer, minimum: 0, maximum: 3600, description: "Power BI: how long each page shows when the target lists two or more pages or sets rotate_all_pages, 10 to 3600; 0 otherwise. Always 0 for Grafana and public links."}
+        refresh_s: {type: integer, minimum: 0, maximum: 86400, description: "Grafana: how often the image is drawn again, 30 to 86400 (a public link reloads this often). Power BI and Tableau: how often the report or view refreshes its data, 60 to 86400, or 0 for never (a DirectQuery report or one with automatic page refresh updates itself)."}
+        rotate_s: {type: integer, minimum: 0, maximum: 3600, description: "Power BI: how long each page shows when the target lists two or more pages or sets rotate_all_pages, 10 to 3600; 0 otherwise. Tableau: how long each sheet shows when the target sets rotate_sheets, 10 to 3600; 0 otherwise. Always 0 for Grafana and Power BI public links."}
         fit: {type: string, enum: [contain, cover, fill]}
         revision: {type: integer, minimum: 1}
         status: {$ref: "#/components/schemas/BIViewStatus"}
@@ -26556,15 +26561,15 @@ components:
       type: object
       additionalProperties: false
       required: [name]
-      description: "Set connection_id with exactly one of url and target, or kind (grafana or powerbi) with target.public_url alone."
+      description: "Set connection_id with exactly one of url and target (for Tableau, url may come with a target that holds only rotate_sheets), or kind (grafana, powerbi or tableau) with target.public_url alone."
       properties:
         connection_id: {type: string}
-        kind: {type: string, enum: [grafana], description: Required without a connection_id; otherwise it must match the connection.}
+        kind: {type: string, enum: [grafana, powerbi, tableau], description: Required without a connection_id; otherwise it must match the connection.}
         name: {type: string, minLength: 1, maxLength: 80}
-        url: {type: string, maxLength: 2048, description: "A /d/{uid}/... dashboard address on the connection's host. The server reads orgId, viewPanel (N or panel-N) or panelId, from, to, var-* and theme from it."}
+        url: {type: string, maxLength: 2048, description: "A /d/{uid}/... dashboard address on the connection's host. The server reads orgId, viewPanel (N or panel-N) or panelId, from, to, var-* and theme from it. Tableau: a view address on the connection's host (/views/W/V, /t/SITE/views/W/V, #/site/SITE/views/W/V) or Workbook/View."}
         target: {$ref: "#/components/schemas/BITarget"}
-        refresh_s: {type: integer, minimum: 0, maximum: 86400, default: 300, description: "Grafana 30 to 86400; Power BI 0 or 60 to 86400."}
-        rotate_s: {type: integer, minimum: 0, maximum: 3600, default: 0, description: "Power BI: 0 or 10 to 3600; required for a target that rotates pages."}
+        refresh_s: {type: integer, minimum: 0, maximum: 86400, default: 300, description: "Grafana 30 to 86400; Power BI and Tableau 0 or 60 to 86400."}
+        rotate_s: {type: integer, minimum: 0, maximum: 3600, default: 0, description: "Power BI and Tableau: 0 or 10 to 3600; required for a target that rotates pages or sheets."}
         fit: {type: string, enum: [contain, cover, fill], default: contain}
     BIViewPatch:
       type: object
@@ -26581,7 +26586,7 @@ components:
       type: object
       additionalProperties: false
       required: [items, next_cursor]
-      description: "Grafana: dashboards (uid, title, folder, tags), or with dashboard set that dashboard's panels (id, title, type) and the dashboard itself. Power BI: workspaces (id, name), or with workspace set that workspace's reports (id, name, embed_url) and the workspace itself."
+      description: "Grafana: dashboards (uid, title, folder, tags), or with dashboard set that dashboard's panels (id, title, type) and the dashboard itself. Power BI: workspaces (id, name), or with workspace set that workspace's reports (id, name, embed_url) and the workspace itself. Tableau: views (path as Workbook/View, name)."
       properties:
         dashboard: {type: object, additionalProperties: false, properties: {uid: {type: string}, title: {type: string}}}
         workspace: {type: object, additionalProperties: false, properties: {id: {type: string}}}
