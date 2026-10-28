@@ -1,0 +1,182 @@
+[
+  {
+    "data": {
+      "scheduleItems": {
+        "page": {
+          "edges": [
+            {
+              "cursor": "c-scheduleItems-0",
+              "node": {
+                "_id": "OPE00000000000001",
+                "name": "Morning promo",
+                "type": "PLAYLIST",
+                "assetId": null,
+                "playlistId": "OPP00000000000001",
+                "single": false,
+                "parentScheduleId": null,
+                "range": {
+                  "startDate": "2026-11-02T14:00:00.000Z",
+                  "endDate": "2026-11-02T16:00:00.000Z"
+                },
+                "repeatObject": {
+                  "rrule": "DTSTART:20261102T140000Z\nRRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;UNTIL=20261218T235959Z"
+                }
+              }
+            },
+            {
+              "cursor": "c-scheduleItems-1",
+              "node": {
+                "_id": "OPE00000000000002",
+                "name": "Christmas Eve",
+                "type": "ASSET",
+                "assetId": "OPA00000000000001",
+                "playlistId": null,
+                "single": false,
+                "parentScheduleId": null,
+                "range": {
+                  "startDate": "2026-12-24T15:00:00.000Z",
+                  "endDate": "2026-12-24T20:00:00.000Z"
+                },
+                "repeatObject": {
+                  "rrule": "FREQ=DAILY;COUNT=1"
+                }
+              }
+            },
+            {
+              "cursor": "c-scheduleItems-2",
+              "node": {
+                "_id": "OPE00000000000003",
+                "name": "Monthly report",
+                "type": "PLAYLIST",
+                "assetId": null,
+                "playlistId": "OPP00000000000002",
+                "single": false,
+                "parentScheduleId": null,
+                "range": {
+                  "startDate": "2026-11-01T15:00:00.000Z",
+                  "endDate": "2026-11-01T16:00:00.000Z"
+                },
+                "repeatObject": {
+                  "rrule": "FREQ=MONTHLY;BYMONTHDAY=1"
+                }
+              }
+            },
+            {
+              "cursor": "c-scheduleItems-3",
+              "node": {
+                "_id": "OPE00000000000004",
+                "name": "Holiday skips",
+                "type": "PLAYLIST",
+                "assetId": null,
+                "playlistId": "OPP00000000000002",
+                "single": false,
+                "parentScheduleId": null,
+                "range": {
+                  "startDate": "2026-11-03T15:00:00.000Z",
+                  "endDate": "2026-11-03T16:00:00.000Z"
+                },
+                "repeatObject": {
+                  "rrule": "DTSTART:20261103T150000Z\nRRULE:FREQ=DAILY\nEXDATE:20261125T150000Z"
+                }
+              }
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": true,
+            "endCursor": "cursor-items-1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "scheduleItems": {
+        "page": {
+          "edges": [
+            {
+              "cursor": "c-scheduleItems-0",
+              "node": {
+                "_id": "OPE00000000000005",
+                "name": "Exception",
+                "type": "PLAYLIST",
+                "assetId": null,
+                "playlistId": "OPP00000000000002",
+                "single": true,
+                "parentScheduleId": "OPE00000000000001",
+                "range": {
+                  "startDate": "2026-11-09T14:00:00.000Z",
+                  "endDate": "2026-11-09T16:00:00.000Z"
+                },
+                "repeatObject": {
+                  "rrule": "FREQ=DAILY;COUNT=1"
+                }
+              }
+            },
+            {
+              "cursor": "c-scheduleItems-1",
+              "node": {
+                "_id": "OPE00000000000006",
+                "name": "Every two weeks",
+                "type": "PLAYLIST",
+                "assetId": null,
+                "playlistId": "OPP00000000000002",
+                "single": false,
+                "parentScheduleId": null,
+                "range": {
+                  "startDate": "2026-11-07T15:00:00.000Z",
+                  "endDate": "2026-11-07T17:00:00.000Z"
+                },
+                "repeatObject": {
+                  "rrule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=SA"
+                }
+              }
+            },
+            {
+              "cursor": "c-scheduleItems-2",
+              "node": {
+                "_id": "OPE00000000000007",
+                "name": "Gone",
+                "type": "PLAYLIST",
+                "assetId": null,
+                "playlistId": "OPPmissing",
+                "single": false,
+                "parentScheduleId": null,
+                "range": {
+                  "startDate": "2026-11-04T15:00:00.000Z",
+                  "endDate": "2026-11-04T16:00:00.000Z"
+                },
+                "repeatObject": {
+                  "rrule": "FREQ=DAILY"
+                }
+              }
+            },
+            {
+              "cursor": "c-scheduleItems-3",
+              "node": {
+                "_id": "OPE00000000000008",
+                "name": "First Monday",
+                "type": "PLAYLIST",
+                "assetId": null,
+                "playlistId": "OPP00000000000002",
+                "single": false,
+                "parentScheduleId": null,
+                "range": {
+                  "startDate": "2026-11-02T15:00:00.000Z",
+                  "endDate": "2026-11-02T16:00:00.000Z"
+                },
+                "repeatObject": {
+                  "rrule": "FREQ=MONTHLY;BYDAY=1MO"
+                }
+              }
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+          }
+        }
+      }
+    }
+  }
+]

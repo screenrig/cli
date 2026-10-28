@@ -1,0 +1,233 @@
+[
+  {
+    "playlistId": 201,
+    "ownerId": 1,
+    "name": "Lobby loop",
+    "regionId": null,
+    "isDynamic": 0,
+    "duration": 100,
+    "tags": [],
+    "widgets": [
+      {
+        "widgetId": 5,
+        "playlistId": 201,
+        "ownerId": 1,
+        "type": "clock",
+        "duration": 10,
+        "displayOrder": 5,
+        "useDuration": 1,
+        "calculatedDuration": 10,
+        "fromDt": 0,
+        "toDt": 2147483647,
+        "schemaVersion": 2,
+        "widgetOptions": [
+          {
+            "widgetId": 5,
+            "type": "attrib",
+            "option": "name",
+            "value": "Wall clock"
+          }
+        ],
+        "mediaIds": [],
+        "audio": [],
+        "permissions": []
+      },
+      {
+        "widgetId": 2,
+        "playlistId": 201,
+        "ownerId": 1,
+        "type": "video",
+        "duration": 0,
+        "displayOrder": 2,
+        "useDuration": 0,
+        "calculatedDuration": 30,
+        "fromDt": 0,
+        "toDt": 2147483647,
+        "schemaVersion": 2,
+        "widgetOptions": [],
+        "mediaIds": [
+          102
+        ],
+        "audio": [],
+        "permissions": []
+      },
+      {
+        "widgetId": 1,
+        "playlistId": 201,
+        "ownerId": 1,
+        "type": "image",
+        "duration": 12,
+        "displayOrder": 1,
+        "useDuration": 1,
+        "calculatedDuration": 12,
+        "fromDt": 0,
+        "toDt": 2147483647,
+        "schemaVersion": 2,
+        "widgetOptions": [],
+        "mediaIds": [
+          101
+        ],
+        "audio": [],
+        "permissions": []
+      },
+      {
+        "widgetId": 3,
+        "playlistId": 201,
+        "ownerId": 1,
+        "type": "audio",
+        "duration": 0,
+        "displayOrder": 3,
+        "useDuration": 0,
+        "calculatedDuration": 60,
+        "fromDt": 0,
+        "toDt": 2147483647,
+        "schemaVersion": 2,
+        "widgetOptions": [],
+        "mediaIds": [
+          103
+        ],
+        "audio": [],
+        "permissions": []
+      },
+      {
+        "widgetId": 4,
+        "playlistId": 201,
+        "ownerId": 1,
+        "type": "webpage",
+        "duration": 20,
+        "displayOrder": 4,
+        "useDuration": 1,
+        "calculatedDuration": 20,
+        "fromDt": 0,
+        "toDt": 2147483647,
+        "schemaVersion": 2,
+        "widgetOptions": [
+          {
+            "widgetId": 4,
+            "type": "attrib",
+            "option": "uri",
+            "value": "https://example.com/board"
+          },
+          {
+            "widgetId": 4,
+            "type": "attrib",
+            "option": "modeid",
+            "value": "1"
+          }
+        ],
+        "mediaIds": [],
+        "audio": [],
+        "permissions": []
+      },
+      {
+        "widgetId": 6,
+        "playlistId": 201,
+        "ownerId": 1,
+        "type": "image",
+        "duration": 10,
+        "displayOrder": 6,
+        "useDuration": 1,
+        "calculatedDuration": 10,
+        "fromDt": 0,
+        "toDt": 1699999980,
+        "schemaVersion": 2,
+        "widgetOptions": [],
+        "mediaIds": [
+          101
+        ],
+        "audio": [],
+        "permissions": []
+      },
+      {
+        "widgetId": 7,
+        "playlistId": 201,
+        "ownerId": 1,
+        "type": "image",
+        "duration": 15,
+        "displayOrder": 7,
+        "useDuration": 1,
+        "calculatedDuration": 15,
+        "fromDt": 1800000000,
+        "toDt": 1999999980,
+        "schemaVersion": 2,
+        "widgetOptions": [],
+        "mediaIds": [
+          101
+        ],
+        "audio": [],
+        "permissions": []
+      },
+      {
+        "widgetId": 8,
+        "playlistId": 201,
+        "ownerId": 1,
+        "type": "webpage",
+        "duration": 10,
+        "displayOrder": 8,
+        "useDuration": 1,
+        "calculatedDuration": 10,
+        "fromDt": 0,
+        "toDt": 2147483647,
+        "schemaVersion": 2,
+        "widgetOptions": [
+          {
+            "widgetId": 8,
+            "type": "attrib",
+            "option": "uri",
+            "value": "javascript:void(0)"
+          }
+        ],
+        "mediaIds": [],
+        "audio": [],
+        "permissions": []
+      }
+    ],
+    "permissions": [],
+    "folderId": 1
+  },
+  {
+    "playlistId": 202,
+    "ownerId": 1,
+    "name": "Main region playlist",
+    "regionId": 31,
+    "isDynamic": 0,
+    "duration": 20,
+    "tags": [],
+    "widgets": [],
+    "permissions": [],
+    "folderId": 1
+  },
+  {
+    "playlistId": 203,
+    "ownerId": 1,
+    "name": "Dynamic promos",
+    "regionId": null,
+    "isDynamic": 1,
+    "filterMediaTags": "promo",
+    "duration": 10,
+    "tags": [],
+    "widgets": [
+      {
+        "widgetId": 9,
+        "playlistId": 203,
+        "ownerId": 1,
+        "type": "image",
+        "duration": 10,
+        "displayOrder": 1,
+        "useDuration": 1,
+        "calculatedDuration": 10,
+        "fromDt": 0,
+        "toDt": 2147483647,
+        "schemaVersion": 2,
+        "widgetOptions": [],
+        "mediaIds": [
+          101
+        ],
+        "audio": [],
+        "permissions": []
+      }
+    ],
+    "permissions": [],
+    "folderId": 1
+  }
+]

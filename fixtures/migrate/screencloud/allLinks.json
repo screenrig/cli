@@ -1,0 +1,19 @@
+[
+  {
+    "data": {
+      "allLinks": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": [
+          {
+            "id": "9a000000-0000-4000-8000-000000000001",
+            "name": "Status board",
+            "url": "https://status.example.com/"
+          }
+        ]
+      }
+    }
+  }
+]

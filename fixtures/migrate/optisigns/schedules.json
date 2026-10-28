@@ -1,0 +1,34 @@
+[
+  {
+    "data": {
+      "schedules": {
+        "page": {
+          "edges": [
+            {
+              "cursor": "c-schedules-0",
+              "node": {
+                "_id": "OPS00000000000001",
+                "accountId": "acct-fixture-0001",
+                "name": "Store hours",
+                "defaultAssetId": "OPP00000000000002"
+              }
+            },
+            {
+              "cursor": "c-schedules-1",
+              "node": {
+                "_id": "OPS00000000000002",
+                "accountId": "acct-fixture-0001",
+                "name": "Unused calendar",
+                "defaultAssetId": null
+              }
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+          }
+        }
+      }
+    }
+  }
+]

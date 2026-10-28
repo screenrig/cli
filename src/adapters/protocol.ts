@@ -554,6 +554,22 @@ export interface ScreenHealth {
   renderer_restarts_24h?: number;
 }
 
+/**
+ * Screen.last_outage: the screen's latest presence outage and, once the first
+ * health report after it decided one, why the screen was gone. likely_cause is
+ * absent when unknown; a value this CLI does not know reads as unknown.
+ * evidence is open: device_uptime_s, app_uptime_s, report_at,
+ * crashes_24h_before and crashes_24h_after, reboot_command,
+ * stream_down_during_outage, observer_impaired.
+ */
+export interface ScreenOutage {
+  offline_since: string;
+  back_at?: string;
+  duration_s?: number;
+  likely_cause?: string;
+  evidence?: Record<string, unknown>;
+}
+
 export interface ScreenDisplaySchedule {
   enabled: boolean;
   windows: ScreenScheduleWindow[];
@@ -710,6 +726,7 @@ export interface Screen {
    * after the first connect. When offline, last time the screen was online.
    */
   last_online_at?: string;
+  last_outage?: ScreenOutage;
   last_page_failure?: PageFailure;
   manifest_revision: number;
   observation?: ScreenObservation;
@@ -1167,6 +1184,64 @@ export interface KVWebhookList {
 export interface KVWebhookCreate {
   key: string;
   description?: string;
+}
+
+/**
+ * /api/cards/{id}/kv-webhooks: an incoming webhook that writes a card's data
+ * document. mapping is the template that builds the document from the posted
+ * body, or null when the posted object is the document. The secret and the
+ * signing secret are returned only by create, rotate-secret and the update that
+ * turns signing on.
+ */
+export interface CardKVWebhook {
+  id: string;
+  card_id: string;
+  description: string;
+  mapping: Record<string, unknown> | null;
+  enabled: boolean;
+  signing: boolean;
+  url: string;
+  created_at: string;
+  updated_at: string;
+  last_used_at?: string;
+}
+
+export interface CardKVWebhookWithSecrets extends CardKVWebhook {
+  secret?: string;
+  signing_secret?: string;
+}
+
+export interface CardKVWebhookList {
+  items: CardKVWebhook[];
+}
+
+export interface CardKVWebhookCreate {
+  description?: string;
+  mapping?: Record<string, unknown> | null;
+  signing?: boolean;
+}
+
+export interface CardKVWebhookUpdate {
+  description?: string;
+  mapping?: Record<string, unknown> | null;
+  enabled?: boolean;
+  signing?: boolean;
+}
+
+/** One post to a card webhook: how it ended and why, never what it carried. */
+export interface KVWebhookDelivery {
+  at: string;
+  outcome: "written" | "unchanged" | "refused" | "invalid";
+  reason?: "credentials" | "signature" | "disabled" | "body" | "mapping" | "card_data_invalid" | "rate_limited" | "payment_required" | "internal";
+  detail?: string;
+  status: number;
+  bytes: number;
+  revision?: number;
+  request_id: string;
+}
+
+export interface KVWebhookDeliveryList {
+  items: KVWebhookDelivery[];
 }
 
 export type FeedbackKind = "bug" | "feature";

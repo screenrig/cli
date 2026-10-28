@@ -1,0 +1,403 @@
+[
+  {
+    "id": 11,
+    "name": "Welcome",
+    "media_origin": {
+      "type": "image",
+      "source": "local",
+      "format": null
+    },
+    "description": "",
+    "default_duration": 10,
+    "tags": [],
+    "file_extension": "png",
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "last_uploaded": "2026-01-05T09:00:00Z",
+    "status": "finished",
+    "thumbnail_url": "https://thumbs.example.com/media/11/resized.jpg",
+    "availability_schedule": {
+      "enable": false,
+      "available_after": null,
+      "available_before": null,
+      "availability_slots": []
+    },
+    "arguments": {
+      "download_from_url": null
+    },
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "parent_folder": {
+      "id": 3,
+      "name": "Content"
+    }
+  },
+  {
+    "id": 12,
+    "name": "Promo",
+    "media_origin": {
+      "type": "video",
+      "source": "local",
+      "format": null
+    },
+    "description": "",
+    "default_duration": 30,
+    "tags": [],
+    "file_extension": "mp4",
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "last_uploaded": "2026-01-05T09:00:00Z",
+    "status": "finished",
+    "thumbnail_url": "https://thumbs.example.com/media/12/resized.jpg",
+    "availability_schedule": {
+      "enable": false,
+      "available_after": null,
+      "available_before": null,
+      "availability_slots": []
+    },
+    "arguments": {
+      "duration": 30,
+      "download_from_url": null,
+      "play_from_url": "https://cdn.example.com/yodeck/12/play.mp4",
+      "resolution": "highest",
+      "resolution_width": 1920,
+      "resolution_height": 1080,
+      "fps": "25",
+      "buffering": true,
+      "rotate": 0
+    },
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "parent_folder": {
+      "id": 3,
+      "name": "Content"
+    }
+  },
+  {
+    "id": 13,
+    "name": "Remote logo",
+    "media_origin": {
+      "type": "image",
+      "source": "url",
+      "format": null
+    },
+    "description": "",
+    "default_duration": 10,
+    "tags": [],
+    "file_extension": "png",
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "last_uploaded": "2026-01-05T09:00:00Z",
+    "status": "finished",
+    "thumbnail_url": "https://thumbs.example.com/media/13/resized.jpg",
+    "availability_schedule": {
+      "enable": false,
+      "available_after": null,
+      "available_before": null,
+      "availability_slots": []
+    },
+    "arguments": {
+      "download_from_url": "https://assets.example.com/logo.png"
+    },
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "parent_folder": {
+      "id": 3,
+      "name": "Content"
+    }
+  },
+  {
+    "id": 14,
+    "name": "Theme",
+    "media_origin": {
+      "type": "audio",
+      "source": "local",
+      "format": null
+    },
+    "description": "",
+    "default_duration": 10,
+    "tags": [],
+    "file_extension": "mp3",
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "last_uploaded": "2026-01-05T09:00:00Z",
+    "status": "finished",
+    "thumbnail_url": "https://thumbs.example.com/media/14/resized.jpg",
+    "availability_schedule": {
+      "enable": false,
+      "available_after": null,
+      "available_before": null,
+      "availability_slots": []
+    },
+    "arguments": {
+      "download_from_url": null,
+      "play_from_url": null
+    },
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "parent_folder": {
+      "id": 3,
+      "name": "Content"
+    }
+  },
+  {
+    "id": 15,
+    "name": "Board",
+    "media_origin": {
+      "type": "webpage",
+      "source": "url",
+      "format": null
+    },
+    "description": "",
+    "default_duration": 10,
+    "tags": [],
+    "file_extension": null,
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "last_uploaded": "2026-01-05T09:00:00Z",
+    "status": "finished",
+    "thumbnail_url": "https://thumbs.example.com/media/15/resized.jpg",
+    "availability_schedule": {
+      "enable": false,
+      "available_after": null,
+      "available_before": null,
+      "availability_slots": []
+    },
+    "arguments": {
+      "play_from_url": "https://example.com/board",
+      "refresh_rate": 60,
+      "zoom_factor": 100.0,
+      "auto_zoom_enable": false,
+      "disable_private_browsing": false
+    },
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "parent_folder": {
+      "id": 3,
+      "name": "Content"
+    }
+  },
+  {
+    "id": 16,
+    "name": "Menu PDF",
+    "media_origin": {
+      "type": "document",
+      "source": "local",
+      "format": null
+    },
+    "description": "",
+    "default_duration": 10,
+    "tags": [],
+    "file_extension": "pdf",
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "last_uploaded": "2026-01-05T09:00:00Z",
+    "status": "finished",
+    "thumbnail_url": "https://thumbs.example.com/media/16/resized.jpg",
+    "availability_schedule": {
+      "enable": false,
+      "available_after": null,
+      "available_before": null,
+      "availability_slots": []
+    },
+    "arguments": {
+      "download_from_url": null
+    },
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "parent_folder": {
+      "id": 3,
+      "name": "Content"
+    }
+  },
+  {
+    "id": 17,
+    "name": "Clock",
+    "media_origin": {
+      "type": "app",
+      "source": null,
+      "format": null
+    },
+    "description": "",
+    "default_duration": 10,
+    "tags": [],
+    "file_extension": null,
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "last_uploaded": "2026-01-05T09:00:00Z",
+    "status": "finished",
+    "thumbnail_url": "https://thumbs.example.com/media/17/resized.jpg",
+    "availability_schedule": {
+      "enable": false,
+      "available_after": null,
+      "available_before": null,
+      "availability_slots": []
+    },
+    "arguments": {},
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "parent_folder": {
+      "id": 3,
+      "name": "Content"
+    }
+  },
+  {
+    "id": 18,
+    "name": "Street cam",
+    "media_origin": {
+      "type": "video",
+      "source": "stream",
+      "format": null
+    },
+    "description": "",
+    "default_duration": 10,
+    "tags": [],
+    "file_extension": null,
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "last_uploaded": "2026-01-05T09:00:00Z",
+    "status": "finished",
+    "thumbnail_url": "https://thumbs.example.com/media/18/resized.jpg",
+    "availability_schedule": {
+      "enable": false,
+      "available_after": null,
+      "available_before": null,
+      "availability_slots": []
+    },
+    "arguments": {
+      "download_from_url": null,
+      "play_from_url": "https://streams.example.com/cam.m3u8"
+    },
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "parent_folder": {
+      "id": 3,
+      "name": "Content"
+    }
+  },
+  {
+    "id": 19,
+    "name": "Summer video",
+    "media_origin": {
+      "type": "video",
+      "source": "local",
+      "format": null
+    },
+    "description": "",
+    "default_duration": 10,
+    "tags": [],
+    "file_extension": "mp4",
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "last_uploaded": "2026-01-05T09:00:00Z",
+    "status": "encoding",
+    "thumbnail_url": "https://thumbs.example.com/media/19/resized.jpg",
+    "availability_schedule": {
+      "enable": false,
+      "available_after": null,
+      "available_before": null,
+      "availability_slots": []
+    },
+    "arguments": {
+      "duration": 12,
+      "play_from_url": "https://cdn.example.com/yodeck/19/play.mp4"
+    },
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "parent_folder": {
+      "id": 3,
+      "name": "Content"
+    }
+  },
+  {
+    "id": 20,
+    "name": "Promo clip",
+    "media_origin": {
+      "type": "video",
+      "source": "url",
+      "format": null
+    },
+    "description": "",
+    "default_duration": 10,
+    "tags": [],
+    "file_extension": "mp4",
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "last_uploaded": "2026-01-05T09:00:00Z",
+    "status": "finished",
+    "thumbnail_url": "https://thumbs.example.com/media/20/resized.jpg",
+    "availability_schedule": {
+      "enable": true,
+      "available_after": null,
+      "available_before": null,
+      "availability_slots": []
+    },
+    "arguments": {
+      "duration": 15,
+      "download_from_url": "https://assets.example.com/clip.mp4",
+      "play_from_url": null
+    },
+    "workspace": {
+      "id": 12,
+      "name": "Annex"
+    },
+    "parent_folder": {
+      "id": 3,
+      "name": "Content"
+    }
+  },
+  {
+    "id": 21,
+    "name": "Launch video",
+    "media_origin": {
+      "type": "video",
+      "source": "url",
+      "format": null
+    },
+    "description": "",
+    "default_duration": 10,
+    "tags": [],
+    "file_extension": null,
+    "created_at": "2026-01-05T09:00:00Z",
+    "last_modified": "2026-01-05T09:00:00Z",
+    "last_uploaded": "2026-01-05T09:00:00Z",
+    "status": "finished",
+    "thumbnail_url": "https://thumbs.example.com/media/21/resized.jpg",
+    "availability_schedule": {
+      "enable": false,
+      "available_after": null,
+      "available_before": null,
+      "availability_slots": []
+    },
+    "arguments": {
+      "download_from_url": null,
+      "play_from_url": "https://www.youtube.com/watch?v=fixture"
+    },
+    "workspace": {
+      "id": 7,
+      "name": "Main"
+    },
+    "parent_folder": {
+      "id": 3,
+      "name": "Content"
+    }
+  }
+]

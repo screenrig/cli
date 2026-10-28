@@ -1,0 +1,91 @@
+[
+  {
+    "data": {
+      "devices": {
+        "page": {
+          "edges": [
+            {
+              "cursor": "c-devices-0",
+              "node": {
+                "_id": "OPD00000000000001",
+                "accountId": "acct-fixture-0001",
+                "deviceName": "Reception",
+                "name": "Reception",
+                "tags": [
+                  "lobby"
+                ],
+                "currentType": "schedule",
+                "currentAssetId": null,
+                "currentPlaylistId": null,
+                "currentScheduleId": "OPS00000000000001"
+              }
+            },
+            {
+              "cursor": "c-devices-1",
+              "node": {
+                "_id": "OPD00000000000002",
+                "accountId": "acct-fixture-0001",
+                "deviceName": "Menu board",
+                "name": "Menu board",
+                "tags": [
+                  "Lobby",
+                  "menus"
+                ],
+                "currentType": "playlist",
+                "currentAssetId": null,
+                "currentPlaylistId": "OPP00000000000001",
+                "currentScheduleId": null
+              }
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": true,
+            "endCursor": "cursor-devices-1"
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "devices": {
+        "page": {
+          "edges": [
+            {
+              "cursor": "c-devices-0",
+              "node": {
+                "_id": "OPD00000000000003",
+                "accountId": "acct-fixture-0001",
+                "deviceName": "Entrance",
+                "name": "Entrance",
+                "tags": [],
+                "currentType": "asset",
+                "currentAssetId": "OPA00000000000001",
+                "currentPlaylistId": null,
+                "currentScheduleId": null
+              }
+            },
+            {
+              "cursor": "c-devices-1",
+              "node": {
+                "_id": "OPD00000000000004",
+                "accountId": "acct-fixture-0001",
+                "deviceName": "Spare",
+                "name": "Spare",
+                "tags": null,
+                "currentType": null,
+                "currentAssetId": null,
+                "currentPlaylistId": null,
+                "currentScheduleId": null
+              }
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+          }
+        }
+      }
+    }
+  }
+]
