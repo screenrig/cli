@@ -1,0 +1,122 @@
+[
+  {
+    "id": "01J9FX00000000000000000I01",
+    "playlist_id": "01J9FX00000000000000000P01",
+    "asset_id": "01J9FX00000000000000000A02",
+    "position": 2,
+    "duration": 20,
+    "effective_duration": 20
+  },
+  {
+    "id": "01J9FX00000000000000000I02",
+    "playlist_id": "01J9FX00000000000000000P01",
+    "asset_id": "01J9FX00000000000000000A01",
+    "position": 1,
+    "duration": 10,
+    "effective_duration": 10
+  },
+  {
+    "id": "01J9FX00000000000000000I03",
+    "playlist_id": "01J9FX00000000000000000P01",
+    "asset_id": "01J9FX00000000000000000A03",
+    "position": 3,
+    "duration": 15,
+    "effective_duration": 15
+  },
+  {
+    "id": "01J9FX00000000000000000I04",
+    "playlist_id": "01J9FX00000000000000000P01",
+    "asset_id": "01J9FX00000000000000000A04",
+    "position": 4,
+    "duration": 10,
+    "effective_duration": 10
+  },
+  {
+    "id": "01J9FX00000000000000000I05",
+    "playlist_id": "01J9FX00000000000000000P01",
+    "asset_id": "01J9FX00000000000000000A07",
+    "position": 5,
+    "duration": 95,
+    "effective_duration": 95
+  },
+  {
+    "id": "01J9FX00000000000000000I06",
+    "playlist_id": "01J9FX00000000000000000P02",
+    "asset_id": "01J9FX00000000000000000A01",
+    "position": 1,
+    "duration": 8,
+    "effective_duration": 8
+  },
+  {
+    "id": "01J9FX00000000000000000I07",
+    "playlist_id": "01J9FX00000000000000000P03",
+    "asset_id": "01J9FX00000000000000000A01",
+    "position": 1,
+    "duration": 8,
+    "effective_duration": 8
+  },
+  {
+    "id": "01J9FX00000000000000000I08",
+    "playlist_id": "01J9FX00000000000000000P10",
+    "asset_id": "01J9FX00000000000000000A01",
+    "position": 1,
+    "duration": 5,
+    "effective_duration": 5
+  },
+  {
+    "id": "01J9FX00000000000000000I09",
+    "playlist_id": "01J9FX00000000000000000P02",
+    "asset_id": "01J9FX00000000000000000A02",
+    "position": 2,
+    "duration": 12,
+    "effective_duration": 12
+  },
+  {
+    "id": "01J9FX00000000000000000I10",
+    "playlist_id": "01J9FX00000000000000000P04",
+    "asset_id": "01J9FX00000000000000000A01",
+    "position": 1,
+    "duration": 9,
+    "effective_duration": 9
+  },
+  {
+    "id": "01J9FX00000000000000000I11",
+    "playlist_id": "01J9FX00000000000000000P05",
+    "asset_id": "01J9FX00000000000000000A01",
+    "position": 1,
+    "duration": 9,
+    "effective_duration": 9
+  },
+  {
+    "id": "01J9FX00000000000000000I12",
+    "playlist_id": "01J9FX00000000000000000P06",
+    "asset_id": "01J9FX00000000000000000A01",
+    "position": 1,
+    "duration": 9,
+    "effective_duration": 9
+  },
+  {
+    "id": "01J9FX00000000000000000I13",
+    "playlist_id": "01J9FX00000000000000000P07",
+    "asset_id": "01J9FX00000000000000000A01",
+    "position": 1,
+    "duration": 9,
+    "effective_duration": 9
+  },
+  {
+    "id": "01J9FX00000000000000000I14",
+    "playlist_id": "01J9FX00000000000000000P08",
+    "asset_id": "01J9FX00000000000000000A01",
+    "position": 1,
+    "duration": 9,
+    "effective_duration": 9
+  },
+  {
+    "id": "01J9FX00000000000000000I15",
+    "playlist_id": "01J9FX00000000000000000P09",
+    "asset_id": "01J9FX00000000000000000A01",
+    "position": 1,
+    "duration": 9,
+    "effective_duration": 9
+  }
+]

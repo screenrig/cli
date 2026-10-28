@@ -5,11 +5,13 @@ import type {
   CampaignScreens,
   CampaignStatus,
   ScreenCampaigns,
+  ScreenExplainAt,
   ScreenScheduleDay,
+  ScreenVerdict,
   ScreenScheduleWindow,
 } from "./adapters/protocol.js";
 import { isResourceID } from "./generated/resource-ids.js";
-import { effectivePlaylistText, scheduleWindow } from "./screen-control.js";
+import { effectivePlaylistText, instantInZone, scheduleWindow } from "./screen-control.js";
 import { SCREEN_TAG_PATTERN } from "./screen-fleet.js";
 
 /** Backend Campaign.id shape (vendor/openapi.yaml). Advertising campaigns share the cmp_ prefix but are a different resource. */
@@ -282,6 +284,27 @@ export function campaignInstant(flag: "--from" | "--until"): (value: string) => 
   };
 }
 
+const EXPLAIN_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(?:\.\d+)?(?:Z|[+-]([01]\d|2[0-3]):[0-5]\d)$/;
+
+/**
+ * --at and --to of campaign explain: an instant with a zone (2026-03-08T09:30:00Z,
+ * 2026-03-08T01:30:00-08:00) or a time on the screen's own clock
+ * (2026-03-08T09:30, optionally :SS). The server reads the second form in the
+ * screen's timezone and refuses a time daylight saving skips or repeats.
+ */
+export function campaignExplainTime(flag: "--at" | "--to"): (value: string) => string {
+  return (value) => {
+    const match = EXPLAIN_INSTANT.exec(value) ?? /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/.exec(value);
+    const year = Number(match?.[1]);
+    const month = Number(match?.[2]);
+    const day = Number(match?.[3]);
+    if (!match || month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) {
+      throw usageError(`${flag} takes an instant with a zone, such as 2026-03-08T09:30:00Z or 2026-03-08T01:30:00-08:00, or a time on the screen's clock, such as 2026-03-08T09:30 (no zone).`);
+    }
+    return value;
+  };
+}
+
 /** until is exclusive and must come after from. Civil minutes compare as text. */
 export function campaignBounds(from: string | undefined, until: string | undefined): void {
   if (from !== undefined && until !== undefined && until <= from) throw usageError("--until must be later than --from.");
@@ -463,8 +486,68 @@ export function campaignScreensLines(id: string, page: CampaignScreens | undefin
   ];
 }
 
-/** campaign explain: what the screen plays and every campaign's standing on it, in precedence order. */
+/** What a verdict means, with the command that fixes an off candidate when the screen is known. */
+export function verdictDetail(verdict: ScreenVerdict, screenId: string, timezone: string | undefined): string {
+  const next = verdict.next_start ? instantInZone(verdict.next_start, timezone) : undefined;
+  switch (verdict.verdict) {
+    case "won": return "";
+    case "outranked": {
+      const by = verdict.by;
+      const who = !by ? "another candidate" : by.kind === "takeover" ? "the screen takeover" : by.kind === "campaign" ? `campaign ${by.id ?? ""}`.trim() : `schedule entry ${by.id ?? ""}`.trim();
+      return `${who} wins`;
+    }
+    case "not_started": return next ? `before its from; starts ${next}` : "before its from";
+    case "outside_hours": return next ? `outside its windows; holds again ${next}` : "outside its windows; no start within eight days";
+    case "ended":
+      return verdict.kind === "takeover" && verdict.until ? `ended ${instantInZone(verdict.until, timezone)}` : "until has passed";
+    case "off":
+      switch (verdict.reason) {
+        case "paused": return "the campaign is paused";
+        case "not_in_audience": return "the screen is not in the audience";
+        case "no_default_playlist": return `the screen has no default playlist: screenrig screen assign ${screenId} --playlist-id PLAYLIST_ID`;
+        case "no_timezone": return `the screen has no timezone: screenrig screen set-timezone ${screenId} --timezone ZONE`;
+        case "playlist_unavailable": return "the playlist is missing or unapproved";
+        default: return "does not apply";
+      }
+    default: return "";
+  }
+}
+
+function candidateText(verdict: ScreenVerdict): string {
+  return verdict.kind === "takeover" ? "takeover" : verdict.kind === "campaign" ? `campaign ${verdict.id ?? ""}`.trim() : `schedule entry ${verdict.id ?? ""}`.trim();
+}
+
+/** campaign explain --at: the playlist at that instant, a verdict per takeover, campaign and schedule entry, the switches to --to, and what is not judged. */
+function campaignExplainAtLines(screenId: string, at: ScreenExplainAt): string[] {
+  const zone = at.timezone || undefined;
+  const effective = effectivePlaylistText(at.effective_playlist ?? undefined, undefined, zone);
+  // The server's reading of the screen's clock is authoritative; the instant is shown beside it.
+  const clock = at.local && zone ? `${at.local.replace("T", " ")} ${zone}` : instantInZone(at.instant, zone);
+  const when = `${clock} (${at.instant})`;
+  const lines = [effective ? `Screen ${screenId} at ${when} plays ${effective}` : `Screen ${screenId} at ${when} plays no playlist`];
+  const verdicts = Array.isArray(at.verdicts) ? at.verdicts : [];
+  lines.push(...(verdicts.length
+    ? ["Takeover, campaigns and schedule entries, in the order the screen reads them", ...table(["CANDIDATE", "PLAYLIST", "VERDICT", "DETAIL"], verdicts.map((verdict) => [
+      candidateText(verdict), verdict.playlist_id ?? "", verdict.verdict ?? "", verdictDetail(verdict, screenId, zone),
+    ]))]
+    : ["No takeover, campaigns or schedule entries apply to this screen"]));
+  const timeline = Array.isArray(at.timeline) ? at.timeline : [];
+  if (timeline.length) {
+    const last = timeline[timeline.length - 1]!;
+    lines.push(`Switches from ${instantInZone(timeline[0]!.from, zone)} to ${instantInZone(last.to, zone)}${at.timeline_truncated ? ` (stopped early; ask again with --at ${last.to})` : ""}`,
+      ...table(["FROM", "TO", "PLAYS"], timeline.map((segment) => [
+        instantInZone(segment.from, zone), instantInZone(segment.to, zone),
+        segment.playlist_id ? `${segment.playlist_id} (${segment.source}${segment.entry_id ? ` ${segment.entry_id}` : ""})` : "no playlist",
+      ])));
+  }
+  const notJudged = Array.isArray(at.not_judged) ? at.not_judged : [];
+  if (notJudged.length) lines.push("Not judged", ...notJudged.map((item) => `  ${item.detail}`));
+  return lines;
+}
+
+/** campaign explain: what the screen plays and every campaign's standing on it, in precedence order; with --at, the same asked of another instant. */
 export function campaignExplainLines(screenId: string, view: ScreenCampaigns | undefined): string[] {
+  if (view?.at) return campaignExplainAtLines(screenId, view.at);
   const effective = effectivePlaylistText(view?.effective_playlist ?? undefined);
   const items = Array.isArray(view?.items) ? view.items : [];
   return [

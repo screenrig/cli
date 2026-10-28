@@ -2,9 +2,10 @@ import { addValueAlias } from "./aliases.js";
 import { addCommandExamples, addCommandNotes, requireOptionGroup } from "./notes.js";
 import { NOTE_HELP, positiveInteger, reviewNoteOption, revision, screenTagOption, screenTagListOption, toastDuration } from "./options.js";
 import type { CommandActionBinder } from "./types.js";
-import { handleScreenChanges, handleScreenRevert, handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel } from "../commands.js";
+import { handleScreenChanges, handleScreenRevert, handleScreenPublish, handleScreenPair, handleScreenProvision, handleScreenUpdate, handleScreenList, handleScreenShow, handleScreenStorageForecast, handleScreenAssign, handleScreenSetTimezone, handleScreenWallSet, handleScreenWallClear, handleScreenArchive, handleScreenUnarchive, handleScreenDelete, handleScreenRotatePublicId, handleScreenRecover, handleScreenReload, handleScreenToast, handleScreenPlayPage, handleScreenScreenshot, handleScreenTag, handleScreenScheduleShow, handleScreenScheduleSet, handleScreenScheduleClear, handleScreenTakeover, handleScreenTakeoverClear, handleScreenReboot, handleScreenDisplay, handleScreenDisplayClear, handleScreenDisplayScheduleShow, handleScreenDisplayScheduleSet, handleScreenDisplayScheduleClear, handleScreenUptime, handleScreenPresence, handleScreenHealthHistory, handleScreenIdentify, handleScreenSuspend, handleScreenResume, handleScreenReplace, handleScreenCommandCancel, handleScreenLiveStart, handleScreenLiveStatus, handleScreenLiveStop } from "../commands.js";
 import { durationOption, takeoverReason, takeoverUntilOption } from "../screen-control.js";
 import { expiresInOption, identifyDurationOption, suspendMessageOption } from "../screen-commands.js";
+import { liveDurationOption, liveWaitOption } from "../screen-live.js";
 import { untilOption } from "../screen-display.js";
 import { WALL_ARRANGEMENTS, WALL_ROTATIONS, wallOutputsOption } from "../screen-wall.js";
 import { playsInstantOption } from "../playback-export.js";
@@ -188,6 +189,19 @@ export function registerScreenCommands(root: Command, bind: CommandActionBinder)
     .argument("<id>", "Screen identifier")
     .requiredOption("--page-id <ID>", "Page of the playlist the screen is playing (required)")
     .action(bind(handleScreenPlayPage));
+
+  const live = screen.command("live").description("Watch what a screen plays, live: start, read and stop a live view session");
+  live.command("start").description("Start live view of a screen, or renew it, and print the dashboard page that shows it")
+    .argument("<id>", "Screen identifier")
+    .option("--duration <DURATION>", "How long the session lasts unless renewed: 30s to 1h, such as 90s or 5m (default 5m)", liveDurationOption)
+    .option("--wait <DURATION>", "How long to wait for the Player to start publishing: 1s to 10m, or 0 to return at once (default 30s)", liveWaitOption)
+    .action(bind(handleScreenLiveStart));
+  live.command("status").description("Read a screen's live view session")
+    .argument("<id>", "Screen identifier")
+    .action(bind(handleScreenLiveStatus));
+  live.command("stop").description("End a screen's live view session")
+    .argument("<id>", "Screen identifier")
+    .action(bind(handleScreenLiveStop));
 
   screen.command("screenshot").description("Capture and download screenshots from a screen or a fleet of screens")
     .argument("[id...]", "Screen identifier; several ids capture each screen")

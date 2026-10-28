@@ -1,0 +1,93 @@
+[
+  {
+    "campaignId": 501,
+    "ownerId": 1,
+    "type": "list",
+    "campaign": "Split",
+    "isLayoutSpecific": 1,
+    "numberLayouts": 0,
+    "tags": [],
+    "folderId": 1,
+    "cyclePlaybackEnabled": 0,
+    "layouts": []
+  },
+  {
+    "campaignId": 801,
+    "ownerId": 1,
+    "type": "list",
+    "campaign": "Morning set",
+    "isLayoutSpecific": 0,
+    "numberLayouts": 3,
+    "tags": [],
+    "folderId": 1,
+    "cyclePlaybackEnabled": 1,
+    "layouts": [
+      {
+        "lkCampaignLayoutId": 8012,
+        "campaignId": 801,
+        "layoutId": 304,
+        "displayOrder": 2,
+        "dayPartId": null,
+        "daysOfWeek": null,
+        "geoFence": null,
+        "layout": "Cafe menu",
+        "layoutCampaignId": 504,
+        "ownerId": 1,
+        "duration": 20
+      },
+      {
+        "lkCampaignLayoutId": 8011,
+        "campaignId": 801,
+        "layoutId": 301,
+        "displayOrder": 1,
+        "dayPartId": null,
+        "daysOfWeek": null,
+        "geoFence": null,
+        "layout": "Split",
+        "layoutCampaignId": 501,
+        "ownerId": 1,
+        "duration": 20
+      },
+      {
+        "lkCampaignLayoutId": 8013,
+        "campaignId": 801,
+        "layoutId": 303,
+        "displayOrder": 3,
+        "dayPartId": null,
+        "daysOfWeek": null,
+        "geoFence": null,
+        "layout": "Closed for the season",
+        "layoutCampaignId": 503,
+        "ownerId": 1,
+        "duration": 20
+      }
+    ],
+    "playCount": 2
+  },
+  {
+    "campaignId": 802,
+    "ownerId": 1,
+    "type": "ad",
+    "campaign": "Ad run",
+    "isLayoutSpecific": 0,
+    "numberLayouts": 0,
+    "tags": [],
+    "folderId": 1,
+    "cyclePlaybackEnabled": 0,
+    "layouts": [],
+    "targetType": "plays",
+    "target": 1000
+  },
+  {
+    "campaignId": 803,
+    "ownerId": 1,
+    "type": "media",
+    "campaign": "Fullscreen promo",
+    "isLayoutSpecific": 0,
+    "numberLayouts": 0,
+    "tags": [],
+    "folderId": 1,
+    "cyclePlaybackEnabled": 0,
+    "layouts": []
+  }
+]

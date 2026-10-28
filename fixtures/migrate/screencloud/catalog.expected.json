@@ -1,0 +1,395 @@
+{
+  "account": "0a000000-0000-4000-8000-000000000001",
+  "label": "ScreenCloud (EU)",
+  "media": [
+    {
+      "id": "f1000000-0000-4000-8000-000000000001",
+      "name": "Welcome.png",
+      "filename": "Welcome.png",
+      "kind": "image",
+      "bytes": 2048,
+      "fetch": {
+        "url": "https://files.example.com/screencloud/welcome.png"
+      },
+      "original": true
+    },
+    {
+      "id": "f1000000-0000-4000-8000-000000000002",
+      "name": "Promo.mp4",
+      "filename": "Promo.mp4",
+      "kind": "video",
+      "bytes": 900000,
+      "fetch": {
+        "url": "https://files.example.com/screencloud/promo.mp4"
+      },
+      "original": true
+    },
+    {
+      "id": "f1000000-0000-4000-8000-000000000003",
+      "name": "Theme.mp3",
+      "filename": "Theme.mp3",
+      "kind": "audio",
+      "bytes": 5000,
+      "fetch": {
+        "url": "https://files.example.com/screencloud/theme.mp3"
+      },
+      "original": true
+    },
+    {
+      "id": "f1000000-0000-4000-8000-000000000005",
+      "name": "Banner.jpg",
+      "filename": "Banner.jpg",
+      "kind": "image",
+      "fetch": {
+        "url": "https://cdn.example.com/screencloud/banner.jpg"
+      },
+      "original": false
+    }
+  ],
+  "playlists": [
+    {
+      "id": "b1000000-0000-4000-8000-000000000001",
+      "name": "Lobby loop",
+      "items": [
+        {
+          "media_id": "f1000000-0000-4000-8000-000000000001",
+          "duration_s": 10
+        },
+        {
+          "media_id": "f1000000-0000-4000-8000-000000000002"
+        },
+        {
+          "url": "https://status.example.com/",
+          "title": "Status board",
+          "duration_s": 60
+        },
+        {
+          "media_id": "f1000000-0000-4000-8000-000000000004"
+        },
+        {
+          "playlist_id": "b1000000-0000-4000-8000-000000000002"
+        },
+        {
+          "media_id": "f1000000-0000-4000-8000-000000000001",
+          "duration_s": 12
+        },
+        {
+          "media_id": "f1000000-0000-4000-8000-000000000003"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "b1000000-0000-4000-8000-000000000002",
+      "name": "Nested",
+      "items": [
+        {
+          "media_id": "f1000000-0000-4000-8000-000000000005",
+          "duration_s": 5
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "file:f1000000-0000-4000-8000-000000000001",
+      "name": "Welcome.png",
+      "items": [
+        {
+          "media_id": "f1000000-0000-4000-8000-000000000001"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "layouts": [
+    {
+      "id": "d1000000-0000-4000-8000-000000000001",
+      "name": "Lobby channel",
+      "width": 1920,
+      "height": 1080,
+      "zones": [
+        {
+          "id": "zone1",
+          "name": "Main Zone",
+          "x": 0,
+          "y": 0,
+          "width": 1344,
+          "height": 1080,
+          "z": 10,
+          "items": [
+            {
+              "media_id": "f1000000-0000-4000-8000-000000000001",
+              "duration_s": 10
+            },
+            {
+              "media_id": "f1000000-0000-4000-8000-000000000002"
+            }
+          ]
+        },
+        {
+          "id": "zone2",
+          "name": "Sidebar Zone",
+          "x": 1344,
+          "y": 0,
+          "width": 576,
+          "height": 1080,
+          "z": 10,
+          "items": [
+            {
+              "url": "https://status.example.com/",
+              "title": "Status board",
+              "duration_s": 30
+            },
+            {
+              "layout_id": "d1000000-0000-4000-8000-000000000002"
+            },
+            {
+              "media_id": "f1000000-0000-4000-8000-000000000001",
+              "duration_s": 4
+            }
+          ]
+        }
+      ],
+      "notes": [
+        "Its hidden zone held 1 item, which does not come over.",
+        "1 audio file is not played: audio comes over only as a playlist's soundtrack, not inside a layout."
+      ]
+    },
+    {
+      "id": "d1000000-0000-4000-8000-000000000002",
+      "name": "Fullscreen channel",
+      "width": 1920,
+      "height": 1080,
+      "zones": [
+        {
+          "id": "zone1",
+          "name": "Full",
+          "x": 0,
+          "y": 0,
+          "width": 1920,
+          "height": 1080,
+          "z": 10,
+          "items": [
+            {
+              "media_id": "f1000000-0000-4000-8000-000000000001",
+              "duration_s": 10
+            },
+            {
+              "media_id": "f1000000-0000-4000-8000-000000000002"
+            },
+            {
+              "url": "https://status.example.com/",
+              "title": "Status board",
+              "duration_s": 60
+            },
+            {
+              "media_id": "f1000000-0000-4000-8000-000000000004"
+            },
+            {
+              "media_id": "f1000000-0000-4000-8000-000000000005",
+              "duration_s": 5
+            },
+            {
+              "media_id": "f1000000-0000-4000-8000-000000000001",
+              "duration_s": 12
+            }
+          ]
+        }
+      ],
+      "notes": [
+        "1 audio file is not played: audio comes over only as a playlist's soundtrack, not inside a layout."
+      ]
+    },
+    {
+      "id": "d1000000-0000-4000-8000-000000000005",
+      "name": "Quarters",
+      "width": 1920,
+      "height": 1080,
+      "zones": [
+        {
+          "id": "zone1",
+          "name": "A",
+          "x": 0,
+          "y": 0,
+          "width": 960,
+          "height": 540,
+          "z": 10,
+          "items": [
+            {
+              "media_id": "f1000000-0000-4000-8000-000000000001"
+            }
+          ]
+        },
+        {
+          "id": "zone2",
+          "name": "B",
+          "x": 960,
+          "y": 540,
+          "width": 960,
+          "height": 540,
+          "z": 20,
+          "items": [
+            {
+              "media_id": "f1000000-0000-4000-8000-000000000005"
+            }
+          ]
+        }
+      ],
+      "notes": []
+    },
+    {
+      "id": "d1000000-0000-4000-8000-000000000006",
+      "name": "No layout",
+      "width": 1280,
+      "height": 720,
+      "zones": [
+        {
+          "id": "zone1",
+          "name": "zone1",
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 720,
+          "z": 0,
+          "items": [
+            {
+              "media_id": "f1000000-0000-4000-8000-000000000001"
+            }
+          ]
+        },
+        {
+          "id": "zone2",
+          "name": "zone2",
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 720,
+          "z": 0,
+          "items": [
+            {
+              "media_id": "f1000000-0000-4000-8000-000000000005"
+            }
+          ]
+        }
+      ],
+      "notes": [
+        "The position of zone1 could not be read from the layout, so it fills the screen.",
+        "The position of zone2 could not be read from the layout, so it fills the screen."
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "id": "g:a1000000-0000-4000-8000-000000000001",
+      "name": "Head office"
+    },
+    {
+      "id": "g:a1000000-0000-4000-8000-000000000002",
+      "name": "Cafe"
+    },
+    {
+      "id": "tag:lobby",
+      "name": "Lobby"
+    },
+    {
+      "id": "tag:entrance",
+      "name": "entrance"
+    }
+  ],
+  "screens": [
+    {
+      "id": "e1000000-0000-4000-8000-000000000001",
+      "name": "Front desk",
+      "group_ids": [
+        "g:a1000000-0000-4000-8000-000000000001",
+        "tag:lobby",
+        "tag:entrance"
+      ],
+      "content": {
+        "layout_id": "d1000000-0000-4000-8000-000000000001"
+      },
+      "timezone": "America/Toronto",
+      "notes": []
+    },
+    {
+      "id": "e1000000-0000-4000-8000-000000000002",
+      "name": "Cafe wall",
+      "group_ids": [
+        "g:a1000000-0000-4000-8000-000000000002",
+        "tag:lobby"
+      ],
+      "content": {
+        "playlist_id": "b1000000-0000-4000-8000-000000000001"
+      },
+      "timezone": "Europe/London",
+      "notes": []
+    },
+    {
+      "id": "e1000000-0000-4000-8000-000000000003",
+      "name": "Kiosk",
+      "group_ids": [
+        "g:a1000000-0000-4000-8000-000000000001"
+      ],
+      "content": {
+        "playlist_id": "file:f1000000-0000-4000-8000-000000000001"
+      },
+      "timezone": "Asia/Tokyo",
+      "notes": []
+    },
+    {
+      "id": "e1000000-0000-4000-8000-000000000004",
+      "name": "Hall",
+      "group_ids": [
+        "g:a1000000-0000-4000-8000-000000000002"
+      ],
+      "notes": [
+        "It showed an app, which does not come over."
+      ]
+    },
+    {
+      "id": "e1000000-0000-4000-8000-000000000005",
+      "name": "Spare",
+      "group_ids": [],
+      "notes": []
+    }
+  ],
+  "schedules": [],
+  "not_imported": [
+    {
+      "kind": "media",
+      "source_id": "f1000000-0000-4000-8000-000000000004",
+      "name": "Handbook.pdf",
+      "reason": "It is not an image, video or audio file."
+    },
+    {
+      "kind": "media",
+      "source_id": "f1000000-0000-4000-8000-000000000007",
+      "name": "NoAddress.png",
+      "reason": "ScreenCloud gave no address for the file."
+    },
+    {
+      "kind": "item",
+      "source_id": "playlist:b1000000-0000-4000-8000-000000000001:77000000-app",
+      "name": "Lobby loop: app 77000000",
+      "reason": "A ScreenCloud app is not media, a web link or a playlist.",
+      "next": "Rebuild it as a built-in card, an iframe page or a stream page in a playlist."
+    },
+    {
+      "kind": "schedule",
+      "source_id": "playlist:b1000000-0000-4000-8000-000000000001",
+      "name": "Lobby loop (1 item)",
+      "reason": "Its items carry time, weekday or date rules, which do not come over: they play whenever the playlist plays.",
+      "next": "After the screen is paired, make a campaign for those hours (campaign create), or set visibility on the playlist's pages."
+    },
+    {
+      "kind": "schedule",
+      "source_id": "channel:d1000000-0000-4000-8000-000000000001",
+      "name": "Lobby channel (1 item)",
+      "reason": "Its items carry time, weekday or date rules, which do not come over: they play whenever the channel plays.",
+      "next": "After the screen is paired, make a campaign for those hours (campaign create), or set visibility on the playlist's pages."
+    }
+  ],
+  "notes": [
+    "ScreenCloud's built-in blank and splash channels are not imported."
+  ]
+}

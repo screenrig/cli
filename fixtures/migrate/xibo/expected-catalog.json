@@ -1,0 +1,489 @@
+{
+  "account": "https://cms.example.com",
+  "label": "cms.example.com",
+  "media": [
+    {
+      "id": "101",
+      "name": "Welcome",
+      "filename": "welcome.png",
+      "kind": "image",
+      "bytes": 2048,
+      "fetch": {
+        "id": "101",
+        "type": "image"
+      },
+      "original": true
+    },
+    {
+      "id": "102",
+      "name": "Promo",
+      "filename": "promo.mp4",
+      "kind": "video",
+      "bytes": 40960,
+      "fetch": {
+        "id": "102",
+        "type": "video"
+      },
+      "original": true
+    },
+    {
+      "id": "103",
+      "name": "Theme",
+      "filename": "theme.mp3",
+      "kind": "audio",
+      "bytes": 8192,
+      "fetch": {
+        "id": "103",
+        "type": "audio"
+      },
+      "original": true
+    }
+  ],
+  "playlists": [
+    {
+      "id": "201",
+      "name": "Lobby loop",
+      "items": [
+        {
+          "media_id": "101",
+          "duration_s": 12
+        },
+        {
+          "media_id": "102"
+        },
+        {
+          "media_id": "103"
+        },
+        {
+          "url": "https://example.com/board",
+          "duration_s": 20
+        },
+        {
+          "media_id": "101",
+          "duration_s": 15
+        }
+      ],
+      "notes": [
+        "1 item was left out because its play dates had passed.",
+        "1 item had play dates; it now plays whenever the list does."
+      ]
+    },
+    {
+      "id": "203",
+      "name": "Dynamic promos",
+      "items": [
+        {
+          "media_id": "101",
+          "duration_s": 10
+        }
+      ],
+      "notes": [
+        "It was a dynamic playlist that picks its media by name or tag; it now holds only the media it listed at scan time."
+      ]
+    },
+    {
+      "id": "campaign:801",
+      "name": "Morning set",
+      "items": [
+        {
+          "layout_id": "301"
+        },
+        {
+          "layout_id": "301"
+        },
+        {
+          "layout_id": "304"
+        },
+        {
+          "layout_id": "304"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "layouts": [
+    {
+      "id": "301",
+      "name": "Split",
+      "width": 1920,
+      "height": 1080,
+      "zones": [
+        {
+          "id": "31",
+          "name": "Main",
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 1080,
+          "z": 1,
+          "items": [
+            {
+              "media_id": "101",
+              "duration_s": 8
+            },
+            {
+              "media_id": "102"
+            }
+          ]
+        },
+        {
+          "id": "32",
+          "name": "Side",
+          "x": 1280,
+          "y": 0,
+          "width": 640,
+          "height": 1080,
+          "z": 2,
+          "items": [
+            {
+              "url": "https://example.com/ticker",
+              "duration_s": 30
+            }
+          ]
+        }
+      ],
+      "notes": [
+        "The items in its drawer, which actions bring up, do not come over.",
+        "Its background image does not come over."
+      ]
+    },
+    {
+      "id": "304",
+      "name": "Cafe menu",
+      "width": 1920,
+      "height": 1080,
+      "zones": [
+        {
+          "id": "61",
+          "name": "Menu",
+          "x": 0,
+          "y": 0,
+          "width": 1920,
+          "height": 1080,
+          "z": 1,
+          "items": [
+            {
+              "media_id": "101",
+              "duration_s": 15
+            }
+          ]
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "groups": [
+    {
+      "id": "601",
+      "name": "Lobby screens"
+    },
+    {
+      "id": "602",
+      "name": "Café"
+    }
+  ],
+  "screens": [
+    {
+      "id": "1",
+      "name": "Front desk",
+      "group_ids": [
+        "601"
+      ],
+      "content": {
+        "layout_id": "301"
+      },
+      "timezone": "America/Toronto",
+      "notes": []
+    },
+    {
+      "id": "2",
+      "name": "Cafe wall",
+      "group_ids": [
+        "601",
+        "602"
+      ],
+      "content": {
+        "layout_id": "304"
+      },
+      "timezone": "America/Phoenix",
+      "notes": []
+    },
+    {
+      "id": "3",
+      "name": "Back office",
+      "group_ids": [],
+      "notes": []
+    }
+  ],
+  "schedules": [
+    {
+      "id": "1@America/Toronto",
+      "name": "Weekday mornings",
+      "targets": {
+        "group_ids": [],
+        "screen_ids": [
+          "1"
+        ]
+      },
+      "content": {
+        "layout_id": "301"
+      },
+      "start": "2026-11-02T07:00",
+      "end": "2026-11-02T11:00",
+      "timezone": "America/Toronto",
+      "repeat": {
+        "every": "week",
+        "weekdays": [
+          "mon",
+          "tue",
+          "wed",
+          "thu",
+          "fri"
+        ],
+        "until": "2026-12-18"
+      },
+      "priority": 10,
+      "notes": [
+        "It reached displays in several time zones, so it became one schedule per zone."
+      ]
+    },
+    {
+      "id": "1@America/Phoenix",
+      "name": "Weekday mornings",
+      "targets": {
+        "group_ids": [],
+        "screen_ids": [
+          "2"
+        ]
+      },
+      "content": {
+        "layout_id": "301"
+      },
+      "start": "2026-11-02T05:00",
+      "end": "2026-11-02T09:00",
+      "timezone": "America/Phoenix",
+      "repeat": {
+        "every": "week",
+        "weekdays": [
+          "mon",
+          "tue",
+          "wed",
+          "thu",
+          "fri"
+        ],
+        "until": "2026-12-18"
+      },
+      "priority": 10,
+      "notes": [
+        "It reached displays in several time zones, so it became one schedule per zone."
+      ]
+    },
+    {
+      "id": "2",
+      "name": "Holiday set",
+      "targets": {
+        "group_ids": [],
+        "screen_ids": [
+          "1"
+        ]
+      },
+      "content": {
+        "playlist_id": "campaign:801"
+      },
+      "start": "2026-12-24T09:00",
+      "end": "2026-12-26T09:00",
+      "priority": 20,
+      "notes": [
+        "It was limited to 4 plays an hour; it now has no limit."
+      ]
+    },
+    {
+      "id": "3",
+      "name": "Follows the clock",
+      "targets": {
+        "group_ids": [
+          "601"
+        ],
+        "screen_ids": []
+      },
+      "content": {
+        "layout_id": "304"
+      },
+      "start": "2026-11-03T09:00",
+      "end": "2026-11-03T10:00",
+      "repeat": {
+        "every": "day",
+        "interval": 2
+      },
+      "priority": 0,
+      "notes": []
+    },
+    {
+      "id": "4",
+      "name": "Cafe always",
+      "targets": {
+        "group_ids": [
+          "602"
+        ],
+        "screen_ids": []
+      },
+      "content": {
+        "layout_id": "304"
+      },
+      "always": true,
+      "priority": 0,
+      "notes": []
+    },
+    {
+      "id": "5",
+      "name": "Monthly report",
+      "targets": {
+        "group_ids": [],
+        "screen_ids": [
+          "2"
+        ]
+      },
+      "content": {
+        "layout_id": "304"
+      },
+      "start": "2026-11-01T09:00",
+      "end": "2026-11-01T10:00",
+      "repeat": {
+        "every": "month"
+      },
+      "priority": 0,
+      "notes": []
+    },
+    {
+      "id": "12",
+      "name": "Back office board",
+      "targets": {
+        "group_ids": [],
+        "screen_ids": [
+          "3"
+        ]
+      },
+      "content": {
+        "layout_id": "304"
+      },
+      "start": "2026-11-04T04:00",
+      "end": "2026-11-04T05:00",
+      "repeat": {
+        "every": "week"
+      },
+      "priority": 0,
+      "notes": [
+        "It used a Xibo daypart; its times were taken as the event stores them."
+      ]
+    },
+    {
+      "id": "14",
+      "name": "Always everywhere",
+      "targets": {
+        "group_ids": [
+          "601"
+        ],
+        "screen_ids": []
+      },
+      "content": {
+        "layout_id": "304"
+      },
+      "always": true,
+      "priority": 0,
+      "notes": []
+    }
+  ],
+  "not_imported": [
+    {
+      "kind": "media",
+      "source_id": "104",
+      "name": "Brand font",
+      "reason": "A font is not an image, video or audio file."
+    },
+    {
+      "kind": "media",
+      "source_id": "105",
+      "name": "Handbook",
+      "reason": "A PDF is not an image, video or audio file.",
+      "next": "Export its pages as images, or the deck as a video, and add them with media upload-batch."
+    },
+    {
+      "kind": "media",
+      "source_id": "106",
+      "name": "Old logo",
+      "reason": "It is retired in Xibo, so no screen plays it."
+    },
+    {
+      "kind": "item",
+      "source_id": "playlist 201 item 5",
+      "name": "Wall clock",
+      "reason": "Clock widgets are not images, video, audio or web pages.",
+      "next": "Rebuild it as a built-in card, or as a web page if it shows one."
+    },
+    {
+      "kind": "item",
+      "source_id": "playlist 201 item 8",
+      "name": "webpage widget",
+      "reason": "A web page widget whose address is not an http or https address."
+    },
+    {
+      "kind": "layout",
+      "source_id": "303",
+      "name": "Closed for the season",
+      "reason": "It is retired in Xibo, so no screen plays it."
+    },
+    {
+      "kind": "playlist",
+      "source_id": "campaign:802",
+      "name": "Ad run",
+      "reason": "It is an ad campaign, which Xibo schedules by a target of plays, spend or impressions."
+    },
+    {
+      "kind": "schedule",
+      "source_id": "6",
+      "name": "Emergency overlay",
+      "reason": "Overlay events draw a layout over the one that is playing.",
+      "next": "Recreate it with campaign create once the screens are paired, if you still need it."
+    },
+    {
+      "kind": "schedule",
+      "source_id": "7",
+      "name": "Near the door",
+      "reason": "It plays only inside a map area (geo-fencing), which campaigns cannot express."
+    },
+    {
+      "kind": "schedule",
+      "source_id": "8",
+      "name": "Spring sale",
+      "reason": "It has already ended."
+    },
+    {
+      "kind": "schedule",
+      "source_id": "9",
+      "name": "Fullscreen image",
+      "reason": "Media events show one library item full screen, and Xibo's API does not say which item.",
+      "next": "Recreate it with campaign create once the screens are paired, if you still need it."
+    },
+    {
+      "kind": "schedule",
+      "source_id": "10",
+      "name": "Closed",
+      "reason": "The layout it plays is retired in Xibo."
+    },
+    {
+      "kind": "schedule",
+      "source_id": "11",
+      "name": "When it rains",
+      "reason": "It plays only while a condition holds (schedule criteria), which campaigns cannot express."
+    },
+    {
+      "kind": "schedule",
+      "source_id": "13",
+      "name": "Ad",
+      "reason": "It plays an ad campaign, which Xibo schedules by a target of plays, spend or impressions."
+    }
+  ],
+  "notes": [
+    "1 display group picks its displays by name or tag; it came over with the displays held now."
+  ]
+}

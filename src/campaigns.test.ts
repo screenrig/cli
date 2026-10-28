@@ -3,9 +3,10 @@ import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:
 import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { test } from "node:test";
-import type { CampaignStatus, Screen } from "./adapters/protocol.js";
+import type { CampaignStatus, Screen, ScreenCampaigns, ScreenVerdict } from "./adapters/protocol.js";
 import {
-  campaignAudienceText, campaignCountsText, campaignInstant, campaignStandingDetail, campaignWhenText, campaignWindow, campaignWindowSpec,
+  campaignAudienceText, campaignCountsText, campaignExplainLines, campaignExplainTime, campaignInstant, campaignStandingDetail, campaignWhenText, campaignWindow, campaignWindowSpec,
+  verdictDetail,
 } from "./campaigns.js";
 import { writeConfigAtomic, type ConfigFs } from "./config.js";
 import { ExitCode } from "./exit-codes.js";
@@ -584,6 +585,117 @@ test("campaign explain with no campaigns says so", async () => {
   assert.match(human.stdout, /^No campaigns in this project$/m);
 });
 
+test("campaign explain --at asks about another time and shows a verdict per candidate", async () => {
+  const env = await enrolled();
+  const transport = backend();
+  transport.putScreen!(screen(A, { tags: ["Lobby", "North"] }));
+  transport.putScreen!(screen(B, { tags: ["Lobby"], timezone: undefined }));
+  const base = await create(transport, env, "--tag", "Lobby");
+  const urgent = await create(transport, env, "--tag", "North", "--priority", "40");
+  const paused = await create(transport, env, "--all-screens", "--paused");
+
+  const explained = await cli(["--json", "campaign", "explain", A, "--at", "2026-12-24T18:00", "--to", "2026-12-25T18:00"], transport, env);
+  assert.equal(explained.code, 0, explained.stdout);
+  const call = transport.calls.at(-1)!;
+  assert.equal(call.path, `/api/screens/${A}/campaigns`);
+  assert.deepEqual(call.query, { at: "2026-12-24T18:00", to: "2026-12-25T18:00" });
+  const at = explained.envelope.data.at;
+  assert.equal(at.local, "2026-12-24T18:00");
+  assert.equal(at.timezone, "America/Los_Angeles");
+  assert.deepEqual(at.effective_playlist, { id: PLAYLIST, source: "campaign", entry_id: urgent.id });
+  assert.deepEqual(at.verdicts.map((item: ScreenVerdict) => [item.kind, item.id, item.verdict, item.reason, item.by]), [
+    ["campaign", urgent.id, "won", undefined, undefined],
+    ["campaign", paused.id, "off", "paused", undefined],
+    ["campaign", base.id, "outranked", undefined, { kind: "campaign", id: urgent.id }],
+  ]);
+  assert.equal(at.timeline.length, 1);
+  assert.equal(at.not_judged[0].code, "configuration_history");
+  assert.equal(explained.envelope.data.items.length, 3, "items stay the state now");
+
+  const human = await cli(["--human", "campaign", "explain", A, "--at", "2026-12-24T18:00"], transport, env);
+  assert.equal(human.code, 0, human.stdout);
+  assert.match(human.stdout, new RegExp(`^Screen ${A} at 2026-12-24 18:00 America/Los_Angeles \\(2026-12-24T18:00:00.000Z\\) plays ${PLAYLIST} \\(campaign ${urgent.id}\\)$`, "m"));
+  assert.match(human.stdout, /^Takeover, campaigns and schedule entries, in the order the screen reads them$/m);
+  assert.match(human.stdout, /^CANDIDATE\s+PLAYLIST\s+VERDICT\s+DETAIL$/m);
+  assert.match(human.stdout, new RegExp(`^campaign ${urgent.id}\\s+${PLAYLIST}\\s+won$`, "m"));
+  assert.match(human.stdout, new RegExp(`^campaign ${paused.id}\\s+${PLAYLIST}\\s+off\\s+the campaign is paused$`, "m"));
+  assert.match(human.stdout, new RegExp(`^campaign ${base.id}\\s+${PLAYLIST}\\s+outranked\\s+campaign ${urgent.id} wins$`, "m"));
+  assert.match(human.stdout, /^Not judged$/m);
+  assert.doesNotMatch(human.stdout, /^Switches from/m);
+  const withTimeline = await cli(["--human", "campaign", "explain", A, "--at", "2026-12-24T18:00:00-08:00", "--to", "2026-12-25T18:00:00-08:00"], transport, env);
+  assert.deepEqual(transport.calls.at(-1)!.query, { at: "2026-12-24T18:00:00-08:00", to: "2026-12-25T18:00:00-08:00" });
+  assert.match(withTimeline.stdout, /^Switches from 2026-12-24 18:00 America\/Los_Angeles to 2026-12-25 18:00 America\/Los_Angeles$/m);
+  assert.match(withTimeline.stdout, /^FROM\s+TO\s+PLAYS$/m);
+
+  // --to alone starts now, and no span is too long to ask; a plain explain
+  // sends no query and has no at block.
+  const far = await cli(["--json", "campaign", "explain", A, "--to", "2099-01-01T00:00:00Z"], transport, env);
+  assert.equal(far.code, 0, far.stdout);
+  assert.deepEqual(transport.calls.at(-1)!.query, { to: "2099-01-01T00:00:00Z" });
+  const season = await cli(["--json", "campaign", "explain", A, "--at", "2026-11-01T00:00", "--to", "2027-01-06T00:00"], transport, env);
+  assert.equal(season.code, 0, season.stdout);
+  assert.deepEqual(transport.calls.at(-1)!.query, { at: "2026-11-01T00:00", to: "2027-01-06T00:00" });
+  const plain = await cli(["--json", "campaign", "explain", A], transport, env);
+  assert.equal(transport.calls.at(-1)!.query, undefined);
+  assert.equal(plain.envelope.data.at, undefined);
+
+  // The server's refusals reach the caller with the field named.
+  const reversed = await cli(["--json", "campaign", "explain", A, "--at", "2026-12-24T18:00", "--to", "2026-12-24T17:00"], transport, env);
+  assert.equal(reversed.code, ExitCode.Client, reversed.stdout);
+  assert.equal(reversed.envelope.error?.errors?.[0]?.field, "to");
+  const zoneless = await cli(["--json", "campaign", "explain", B, "--at", "2026-12-24T18:00"], transport, env);
+  assert.equal(zoneless.code, ExitCode.Client, "a screen with no timezone cannot read a time on its clock");
+  assert.equal(zoneless.envelope.error?.errors?.[0]?.field, "at");
+  const exact = await cli(["--json", "campaign", "explain", B, "--at", "2026-12-24T18:00:00Z"], transport, env);
+  assert.equal(exact.code, 0, exact.stdout);
+  assert.equal(exact.envelope.data.at.local, undefined);
+});
+
+test("campaign explain says when a long timeline stopped early and where to ask again", () => {
+  const view = {
+    screen_id: A, items: [],
+    at: {
+      instant: "2026-11-01T00:00:00Z", timezone: "Europe/London", local: "2026-11-01T00:00", effective_playlist: { id: PLAYLIST, source: "default" },
+      verdicts: [], not_judged: [],
+      timeline: [{ from: "2026-11-01T00:00:00Z", to: "2090-01-01T00:00:00Z", playlist_id: PLAYLIST, source: "default" }],
+      timeline_truncated: true,
+    },
+  } as unknown as ScreenCampaigns;
+  const lines = campaignExplainLines(A, view);
+  assert.match(lines.join("\n"), /^Switches from 2026-11-01 00:00 Europe\/London to 2090-01-01 00:00 Europe\/London \(stopped early; ask again with --at 2090-01-01T00:00:00Z\)$/m);
+  view.at!.timeline_truncated = false;
+  assert.doesNotMatch(campaignExplainLines(A, view).join("\n"), /stopped early/);
+});
+
+test("campaign explain checks --at and --to before any request", async () => {
+  const env = await enrolled();
+  const transport = backend();
+  transport.putScreen!(screen(A));
+  const before = transport.calls.length;
+  for (const bad of ["tomorrow", "2026-12-24", "2026-12-24T18", "2026-12-24T25:00", "2026-02-30T10:00", "2026-12-24T18:00Z", "2026-12-24T18:00:00+25:00", "18:00"]) {
+    for (const flag of ["--at", "--to"]) {
+      assert.equal((await cli(["--json", "campaign", "explain", A, flag, bad], transport, env)).code, ExitCode.Usage, `${flag} ${bad}`);
+    }
+  }
+  assert.equal(transport.calls.length, before);
+  for (const good of ["2026-12-24T18:00", "2026-12-24T18:00:30", "2026-12-24T18:00:00Z", "2026-12-24T18:00:00.5Z", "2026-12-24T18:00:00-08:00"]) {
+    assert.equal(campaignExplainTime("--at")(good), good);
+  }
+});
+
+test("verdicts read as short details with the fix when the screen is known", () => {
+  const verdict = (fields: Partial<ScreenVerdict>): ScreenVerdict => ({ kind: "campaign", id: "cmp_X", playlist_id: PLAYLIST, verdict: "won", ...fields });
+  assert.equal(verdictDetail(verdict({}), A, "UTC"), "");
+  assert.equal(verdictDetail(verdict({ verdict: "outranked", by: { kind: "takeover" } }), A, "UTC"), "the screen takeover wins");
+  assert.equal(verdictDetail(verdict({ verdict: "outranked", by: { kind: "schedule", id: "office" } }), A, "UTC"), "schedule entry office wins");
+  assert.equal(verdictDetail(verdict({ verdict: "not_started", next_start: "2026-12-24T18:00:00Z" }), A, "UTC"), "before its from; starts 2026-12-24 18:00 UTC");
+  assert.equal(verdictDetail(verdict({ verdict: "outside_hours" }), A, "UTC"), "outside its windows; no start within eight days");
+  assert.equal(verdictDetail(verdict({ kind: "takeover", verdict: "ended", until: "2026-12-24T18:00:00Z" }), A, "America/Los_Angeles"), "ended 2026-12-24 10:00 America/Los_Angeles");
+  assert.equal(verdictDetail(verdict({ verdict: "ended" }), A, "UTC"), "until has passed");
+  assert.equal(verdictDetail(verdict({ verdict: "off", reason: "no_timezone" }), A, "UTC"), `the screen has no timezone: screenrig screen set-timezone ${A} --timezone ZONE`);
+  assert.equal(verdictDetail(verdict({ verdict: "off", reason: "playlist_unavailable" }), A, "UTC"), "the playlist is missing or unapproved");
+});
+
 test("campaign standings read as short details with the fix when the screen is known", () => {
   const status = (fields: Partial<CampaignStatus>): CampaignStatus => ({ campaign_id: "cmp_X", screen_id: A, status: "playing", ...fields });
   assert.equal(campaignStandingDetail(status({})), "");
@@ -723,6 +835,10 @@ test("campaign help names the audience flags, the screens it schedules and how t
   }
   assert.match(commandHelp(["campaign", "screens"]).usage, /pass data\.next_cursor back as --cursor/);
   assert.match(commandHelp(["campaign", "explain"]).usage, /Read only\./);
+  const explain = commandHelp(["campaign", "explain"]);
+  assert.deepEqual(explain.options.filter((option) => option.name === "--at" || option.name === "--to").map((option) => option.name), ["--at", "--to"]);
+  assert.match(explain.usage, /--at TIME asks what the screen shows at another time/);
+  assert.match(explain.usage, /won \(the one shown\), outranked/);
   assert.match(commandHelp(["campaign", "pause"]).usage, /within a minute/);
   assert.match(commandHelp(["campaign", "delete"]).usage, /within a minute/);
 

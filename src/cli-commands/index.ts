@@ -22,6 +22,7 @@ import { registerFleetLinksCommands } from "./fleet-links.js";
 import { registerTriggersCommands } from "./triggers.js";
 import { registerKvCommands } from "./kv.js";
 import { registerCardsCommands } from "./cards.js";
+import { registerSourceCommands } from "./sources.js";
 import { registerCommentCommands } from "./comment.js";
 import { registerOperationsCommands } from "./operations.js";
 import { registerEventsCommands } from "./events.js";
@@ -36,6 +37,7 @@ import { registerDoctorCommands } from "./doctor.js";
 import { registerVersionCommands } from "./version.js";
 import { registerStatusCommands } from "./status.js";
 import { registerRecoveryCommands } from "./recovery.js";
+import { registerMigrateCommands } from "./migrate.js";
 
 export function registerCommands(root: Command, bind: CommandActionBinder): void {
   registerGlobalOptions(root);
@@ -59,6 +61,7 @@ export function registerCommands(root: Command, bind: CommandActionBinder): void
   registerTriggersCommands(root, bind);
   registerKvCommands(root, bind);
   registerCardsCommands(root, bind);
+  registerSourceCommands(root, bind);
   registerCommentCommands(root, bind);
   registerOperationsCommands(root, bind);
   registerEventsCommands(root, bind);
@@ -73,5 +76,6 @@ export function registerCommands(root: Command, bind: CommandActionBinder): void
   registerVersionCommands(root, bind);
   registerStatusCommands(root, bind);
   registerRecoveryCommands(root, bind);
+  registerMigrateCommands(root, bind);
   registerGuidance(root);
 }

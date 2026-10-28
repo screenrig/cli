@@ -1,0 +1,30 @@
+[
+  {
+    "id": "01J9FX00000000000000000L01",
+    "name": "all-screens",
+    "human_name": "All screens",
+    "team_id": "01J9FX0000000000000000T001",
+    "type": "all-screens"
+  },
+  {
+    "id": "01J9FX00000000000000000L02",
+    "name": "Front desk",
+    "human_name": "Front desk",
+    "team_id": "01J9FX0000000000000000T001",
+    "type": "screen"
+  },
+  {
+    "id": "01J9FX00000000000000000L03",
+    "name": "Cafe wall",
+    "human_name": "Cafe wall",
+    "team_id": "01J9FX0000000000000000T001",
+    "type": "screen"
+  },
+  {
+    "id": "01J9FX00000000000000000L04",
+    "name": "lobby",
+    "human_name": "Lobby screens",
+    "team_id": "01J9FX0000000000000000T001",
+    "type": "manual"
+  }
+]

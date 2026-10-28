@@ -1,0 +1,52 @@
+[
+  {
+    "id": "01J9FX00000000000000000S01",
+    "name": "Front desk",
+    "team_id": "01J9FX0000000000000000T001",
+    "type": "hardware",
+    "is_enabled": true,
+    "hostname": "srly-fixture01",
+    "created_at": "2026-09-01T09:00:00+00:00",
+    "ws_open": true,
+    "description": "",
+    "location": "",
+    "coords": [
+      59.329504,
+      18.069532
+    ],
+    "timezone": "Europe/Stockholm"
+  },
+  {
+    "id": "01J9FX00000000000000000S02",
+    "name": "Cafe wall",
+    "team_id": "01J9FX0000000000000000T001",
+    "type": "hardware",
+    "is_enabled": true,
+    "hostname": "srly-fixture02",
+    "created_at": "2026-09-01T09:00:00+00:00",
+    "ws_open": true,
+    "description": "",
+    "location": "",
+    "coords": [
+      59.329504,
+      18.069532
+    ],
+    "timezone": "America/Toronto"
+  },
+  {
+    "id": "01J9FX00000000000000000S03",
+    "name": "Back office",
+    "team_id": "01J9FX0000000000000000T001",
+    "type": "hardware",
+    "is_enabled": false,
+    "hostname": "srly-fixture03",
+    "created_at": "2026-09-01T09:00:00+00:00",
+    "ws_open": true,
+    "description": "",
+    "location": "",
+    "coords": [
+      59.329504,
+      18.069532
+    ]
+  }
+]
