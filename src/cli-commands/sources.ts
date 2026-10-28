@@ -40,6 +40,10 @@ export function registerSourceCommands(root: Command, bind: CommandActionBinder)
     "  publish it to the web. A token or API key for a csv or json address goes as",
     "  --secret token=@FILE and is sent only to the address's own origin. Preview a",
     "  mapping with source test before source create.",
+    "  A microsoft365 or google_calendar source reads meeting-room calendars into a room",
+    "  or room-board card with your own Microsoft Entra app (--secret client_secret=@FILE)",
+    "  or Google service account (--secret service_account_key=@FILE, the JSON key file).",
+    "  They only read: source test shows the bookings and per-room counts it read.",
     "  The settings of each kind, the status codes and the privacy rules are at",
     "  https://screenrig.ai/docs/sources.",
   ].join("\n"));
