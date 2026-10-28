@@ -237,6 +237,49 @@ test("screen screenshot downloads when status is ready and matching", async () =
   }
 });
 
+test("screen screenshot reports the frame and the screen's picture verdict beside the saved image", async () => {
+  const configDir = await testTemp("screenshot-frame-");
+  const cwdDir = await testTemp("screenshot-frame-cwd-");
+  const fsLike = await enrolledFs(configDir);
+  const frame = { flat: true, analyzed_at: "2026-08-14T17:00:02.000Z" };
+  const blank = { verdict: "blank", since: "2026-08-14T16:58:00Z", judged_at: "2026-08-14T16:58:40Z" };
+  try {
+    // A flat frame on a screen with no verdict: the image row and the caution.
+    const flat = screenshotTransport({ statuses: [{ ...readyStatus(), frame }] });
+    flat.on("GET", `/api/screens/${SCREEN_ID}`, () => ({ status: 200, headers: {}, body: { id: SCREEN_ID, label: "Lobby", state: "active", online: true } }));
+    const json = await withRuntime(["--json", "screen", "screenshot", SCREEN_ID, "--poll-ms", "1"], flat, { fs: fsLike, configDir, cwdDir });
+    assert.equal(json.code, 0, json.stdout);
+    const data = (JSON.parse(json.stdout) as { data: Record<string, unknown> }).data;
+    assert.deepEqual(data.frame, frame);
+    assert.equal("picture" in data, false);
+    const human = await withRuntime(["--human", "screen", "screenshot", SCREEN_ID, "--poll-ms", "1"], flat, { fs: fsLike, configDir, cwdDir: await testTemp("screenshot-frame-cwd2-") });
+    assert.equal(human.code, 0, human.stdout);
+    assert.match(human.stdout, /\nframe: flat \(one tone\)\n/);
+    assert.match(human.stdout, /This image is one flat tone\. That alone is no verdict/);
+    assert.doesNotMatch(human.stdout, /Blank screen/);
+
+    // A screen found blank: the verdict is in the data and in the lines.
+    const found = screenshotTransport({ statuses: [{ ...readyStatus(), frame }] });
+    found.on("GET", `/api/screens/${SCREEN_ID}`, () => ({ status: 200, headers: {}, body: { id: SCREEN_ID, label: "Lobby", state: "active", online: true, glass: { picture: blank } } }));
+    const withVerdict = await withRuntime(["--json", "screen", "screenshot", SCREEN_ID, "--poll-ms", "1"], found, { fs: fsLike, configDir, cwdDir: await testTemp("screenshot-frame-cwd3-") });
+    assert.deepEqual((JSON.parse(withVerdict.stdout) as { data: Record<string, unknown> }).data.picture, blank);
+    const humanVerdict = await withRuntime(["--human", "screen", "screenshot", SCREEN_ID, "--poll-ms", "1"], found, { fs: fsLike, configDir, cwdDir: await testTemp("screenshot-frame-cwd4-") });
+    assert.match(humanVerdict.stdout, /\nBlank screen since 2026-08-14T16:58:00Z: every screenshot ScreenRig took over a run that covers the whole loop was one flat tone/);
+    assert.doesNotMatch(humanVerdict.stdout, /one flat tone\. That alone/);
+
+    // An image the backend could not read has no frame row; a screen that cannot
+    // be read afterwards prints without a verdict, and the screenshot still saved.
+    const plain = screenshotTransport({ statuses: [readyStatus()] });
+    const unread = await withRuntime(["--human", "screen", "screenshot", SCREEN_ID, "--poll-ms", "1"], plain, { fs: fsLike, configDir, cwdDir: await testTemp("screenshot-frame-cwd5-") });
+    assert.equal(unread.code, 0, unread.stdout);
+    assert.doesNotMatch(unread.stdout, /frame:/);
+    assert.match(unread.stdout, /path:/);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+    await rm(cwdDir, { recursive: true, force: true });
+  }
+});
+
 test("screen screenshot surfaces screenshot_unavailable when status is timed_out", async () => {
   const configDir = await testTemp("screenshot-timeout-");
   const cwdDir = await testTemp("screenshot-timeout-cwd-");

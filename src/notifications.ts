@@ -18,7 +18,7 @@ export const NOTIFICATION_CHAT_CHANNELS = [
 /** The credential reads at most this many bytes from stdin. */
 const DESTINATION_STDIN_MAX_BYTES = 4096;
 /** NotificationCondition (vendor/openapi.yaml): the screen state changes a notification fires on. */
-export const NOTIFICATION_CONDITIONS = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "loop_stalled", "crashing"] as const;
+export const NOTIFICATION_CONDITIONS = ["screen_offline", "display_disconnected", "running_hot", "storage_full", "content_stuck", "not_playing", "loop_stalled", "glass_blank", "glass_frozen", "crashing"] as const;
 export const NOTIFICATION_RECIPIENTS_MAX = 20;
 const RECIPIENT_MAX_LENGTH = 200;
 export const NOTIFICATION_HOLD_MAX = 1440;
