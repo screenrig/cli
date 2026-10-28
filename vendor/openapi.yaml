@@ -5611,7 +5611,7 @@ paths:
       x-rate-limit-admitted-response-headers:
         - RateLimit-Policy
         - RateLimit
-      description: 'Starts live view of the named screen, or renews the one it has (docs/player-compatibility.md §6.10): sub-second video of what the screen plays, from the Player through a media relay to the dashboard. A screen has one live session, shared by every viewer. Its lease runs duration_s from now (30 to 3600, default 300) and a start or renewal sets lease_until to the later of its current end and that instant, never past max_until, the hour after the session began. The session ends when the lease passes with no renewal, at max_until, on DELETE, or when the Player ends it; the Player stops publishing within about 20 seconds of the lease ending. A new session appends the per-screen runtime command player.live_publish (details live_id, at, expires_at sixty seconds later, max_until; never delivered after expires_at); a renewal sends it again only when the Player never joined and the last command expired. The screen must be active and online and its host hint must declare the live_view capability: 409 live_unsupported (update the Player, or use a screenshot), 409 live_unavailable (offline), screen_archived. 404 feature_unavailable when the server has no media relay configured. 201 is a new session, 200 a renewed one; both return the LiveSession with a viewer_url that opens the dashboard viewer. State requested lasts until the Player publishes: poll GET until publisher.connected. Live view is free and exempt from the 1-credit API meter, like a screenshot.'
+      description: 'Starts live view of the named screen, or renews the one it has (docs/player-compatibility.md §6.10): sub-second video of what the screen plays, from the Player through a media relay to the dashboard. A screen has one live session, shared by every viewer. Its lease runs duration_s from now (30 to 300, default 300) and a start or renewal sets lease_until to the later of its current end and that instant, never past max_until, five minutes after the session began. The session ends by itself at the latest then: nothing renews or restarts it, and a new session needs a new start. It ends earlier when the lease passes with no renewal, on DELETE, or when the Player ends it; the Player stops publishing within about 20 seconds of the lease ending. With live_id the request only renews that session: when it is not the screen''s live session (it ended, or the screen started another) the answer is 409 live_unavailable naming ended_reason, and no session starts or is extended. A new session appends the per-screen runtime command player.live_publish (details live_id, at, expires_at sixty seconds later, max_until; never delivered after expires_at); a renewal sends it again only when the Player never joined and the last command expired. The screen must be active and online and its host hint must declare the live_view capability: 409 live_unsupported (update the Player, or use a screenshot), 409 live_unavailable (offline), screen_archived. 404 feature_unavailable when the server has no media relay configured. 201 is a new session, 200 a renewed one; both return the LiveSession with a viewer_url that opens the dashboard viewer. State requested lasts until the Player publishes: poll GET until publisher.connected. Live view is free and exempt from the 1-credit API meter, like a screenshot.'
       security:
         - projectBearer: []
         - dashboardSession: []
@@ -25013,7 +25013,8 @@ components:
       type: object
       additionalProperties: false
       properties:
-        duration_s: {type: integer, minimum: 30, maximum: 3600, default: 300, description: "How long the lease runs from now, in seconds."}
+        duration_s: {type: integer, minimum: 30, maximum: 300, default: 300, description: "How long the lease runs from now, in seconds. A session lasts five minutes at most, whatever the lease."}
+        live_id: {type: string, pattern: "^lv_[a-z2-7]{26}$", description: "Renew this session only. When it is not the screen's live session, the answer is live_unavailable (the detail names ended_reason) and nothing starts or is extended. Without it, a start begins a session when the screen has none."}
     SessionDescription:
       type: object
       additionalProperties: false
@@ -25039,7 +25040,7 @@ components:
         live_id: {type: string, pattern: "^lv_[a-z2-7]{26}$", description: "Absent while idle."}
         created_at: {type: string, format: date-time}
         lease_until: {type: string, format: date-time, description: "The session ends at this instant unless a viewer renews it."}
-        max_until: {type: string, format: date-time, description: "The hard end of the session: an hour after it began."}
+        max_until: {type: string, format: date-time, description: "The hard end of the session: five minutes after it began. No renewal moves it."}
         publisher:
           type: object
           required: [connected, connection, reported_at]
