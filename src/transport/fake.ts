@@ -2386,6 +2386,99 @@ export function memoryBackend(options: {
     return { status: 200, headers: { "cache-control": "no-store" }, body: { ...webhook, secret: kvWebhookSecret() } };
   }));
 
+  // Card webhooks: /api/cards/{id}/kv-webhooks write a card's data document.
+  // At most 20 per card; the secret and the signing secret are returned only
+  // by the request that issued them. A card id starting crd_MISSING is not in
+  // the project.
+  const cardWebhooks = new Map<string, Record<string, unknown>>();
+  let cardWebhookSigningSequence = 0;
+  const cardWebhookSigningSecret = () => `whsec_${String(++cardWebhookSigningSequence).padStart(43, "S")}`;
+  const cardWebhookCard = (req: TransportRequest): string | undefined => {
+    const cardId = decodeURIComponent(req.path.split("/")[3] ?? "");
+    return cardId.startsWith("crd_MISSING") ? undefined : cardId;
+  };
+  const cardWebhookFor = (req: TransportRequest): Record<string, unknown> | undefined => {
+    const webhook = cardWebhooks.get(decodeURIComponent(req.path.split("/")[5] ?? ""));
+    return webhook && webhook.card_id === cardWebhookCard(req) ? webhook : undefined;
+  };
+  const cardMissing = () => problem(404, "card_not_found", "Card was not found.");
+  const cardWebhookMissing = () => notFound("The key/value webhook was not found on this card.");
+  const cardWebhookView = (webhook: Record<string, unknown>) => ({ ...webhook });
+  const mappingProblem = (mapping: unknown): TransportResponse | undefined =>
+    mapping === undefined || mapping === null || (typeof mapping === "object" && !Array.isArray(mapping)) ? undefined
+      : problem(400, "invalid_request", "mapping must be a JSON object that becomes the card's data document.");
+  transport.on("GET", /^\/api\/cards\/[^/]+\/kv-webhooks$/, (req) => {
+    const cardId = cardWebhookCard(req);
+    if (!cardId) return cardMissing();
+    return { status: 200, headers: {}, body: { items: [...cardWebhooks.values()].filter((webhook) => webhook.card_id === cardId).map(cardWebhookView) } };
+  });
+  transport.on("POST", /^\/api\/cards\/[^/]+\/kv-webhooks$/, (req) => kvWebhookReplay(req, () => {
+    const cardId = cardWebhookCard(req);
+    if (!cardId) return cardMissing();
+    const body = (req.body ?? {}) as { description?: string; mapping?: unknown; signing?: boolean };
+    const invalid = mappingProblem(body.mapping);
+    if (invalid) return invalid;
+    if ([...cardWebhooks.values()].filter((webhook) => webhook.card_id === cardId).length >= 20) {
+      return problem(409, "kv_webhook_limit_reached", "The card already has the maximum of 20 key/value webhooks.");
+    }
+    kvWebhookSequence += 1;
+    const id = `kvw_${String(kvWebhookSequence).padStart(22, "A")}`;
+    const webhook: Record<string, unknown> = {
+      id, card_id: cardId, description: body.description ?? "", mapping: body.mapping ?? null, enabled: true, signing: body.signing === true,
+      url: `https://api.screenrig.ai/api/cards/${cardId}/kv-webhooks/${id}/write`,
+      created_at: "2026-08-14T17:00:00.000Z", updated_at: "2026-08-14T17:00:00.000Z",
+    };
+    cardWebhooks.set(id, webhook);
+    return {
+      status: 201, headers: { "cache-control": "no-store" },
+      body: { ...webhook, secret: kvWebhookSecret(), ...(webhook.signing ? { signing_secret: cardWebhookSigningSecret() } : {}) },
+    };
+  }));
+  transport.on("PATCH", /^\/api\/cards\/[^/]+\/kv-webhooks\/[^/]+$/, (req) => kvWebhookReplay(req, () => {
+    if (!cardWebhookCard(req)) return cardMissing();
+    const webhook = cardWebhookFor(req);
+    if (!webhook) return cardWebhookMissing();
+    const body = (req.body ?? {}) as { description?: string; mapping?: unknown; enabled?: boolean; signing?: boolean };
+    const invalid = mappingProblem(body.mapping);
+    if (invalid) return invalid;
+    if (body.description !== undefined) webhook.description = body.description;
+    if (body.mapping !== undefined) webhook.mapping = body.mapping;
+    if (body.enabled !== undefined) webhook.enabled = body.enabled;
+    let signingSecret: string | undefined;
+    if (body.signing !== undefined) {
+      if (body.signing && !webhook.signing) signingSecret = cardWebhookSigningSecret();
+      webhook.signing = body.signing;
+    }
+    return { status: 200, headers: { "cache-control": "no-store" }, body: { ...cardWebhookView(webhook), ...(signingSecret ? { signing_secret: signingSecret } : {}) } };
+  }));
+  transport.on("DELETE", /^\/api\/cards\/[^/]+\/kv-webhooks\/[^/]+$/, (req) => kvWebhookReplay(req, () => {
+    if (!cardWebhookCard(req)) return cardMissing();
+    const webhook = cardWebhookFor(req);
+    if (!webhook) return cardWebhookMissing();
+    cardWebhooks.delete(webhook.id as string);
+    return { status: 204, headers: {}, body: undefined };
+  }));
+  transport.on("POST", /^\/api\/cards\/[^/]+\/kv-webhooks\/[^/]+\/rotate-secret$/, (req) => kvWebhookReplay(req, () => {
+    if (!cardWebhookCard(req)) return cardMissing();
+    const webhook = cardWebhookFor(req);
+    if (!webhook) return cardWebhookMissing();
+    if ((req.body as { signing?: boolean } | undefined)?.signing) {
+      if (!webhook.signing) return problem(400, "invalid_request", "This webhook does not sign, so it has no signing secret to rotate.");
+      return { status: 200, headers: { "cache-control": "no-store" }, body: { ...cardWebhookView(webhook), signing_secret: cardWebhookSigningSecret() } };
+    }
+    return { status: 200, headers: { "cache-control": "no-store" }, body: { ...cardWebhookView(webhook), secret: kvWebhookSecret() } };
+  }));
+  transport.on("GET", /^\/api\/cards\/[^/]+\/kv-webhooks\/[^/]+\/deliveries$/, (req) => {
+    if (!cardWebhookCard(req)) return cardMissing();
+    if (!cardWebhookFor(req)) return cardWebhookMissing();
+    const limit = Number(req.query?.limit ?? 100);
+    const items = [
+      { at: "2026-08-14T17:00:02.000Z", outcome: "invalid", reason: "card_data_invalid", detail: "document.title: must be at most 120 characters", status: 409, bytes: 311, request_id: "req_two" },
+      { at: "2026-08-14T17:00:01.000Z", outcome: "written", status: 200, bytes: 98, revision: 3, request_id: "req_one" },
+    ];
+    return { status: 200, headers: {}, body: { items: items.slice(0, limit) } };
+  });
+
   // Content campaigns: at most 100 per project, listed in precedence order
   // (priority, then newest). A write bumps the revision, If-Match guards it,
   // and an exact Idempotency-Key replay returns the same answer. A playlist id

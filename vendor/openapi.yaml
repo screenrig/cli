@@ -4474,15 +4474,19 @@ paths:
           required: false
           schema:
             type: string
-            format: date-time
-          description: The instant to explain, RFC 3339 with a zone (2026-03-08T09:30:00Z or 2026-03-08T01:30:00-08:00). Defaults to now when only to is given.
+            anyOf:
+              - format: date-time
+              - pattern: ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?$
+          description: The instant to explain, either RFC 3339 with a zone (2026-03-08T09:30:00Z or 2026-03-08T01:30:00-08:00) or a time on the screen's own clock (2026-03-08T09:30, optionally with seconds). A clock time that daylight saving skips or repeats is refused with invalid_request naming at, and a repeated one names the two instants to choose from. Defaults to now when only to is given.
         - name: to
           in: query
           required: false
           schema:
             type: string
-            format: date-time
-          description: End of the timeline of switches that starts at at. Later than at and at most 31 days after it.
+            anyOf:
+              - format: date-time
+              - pattern: ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?$
+          description: End of the timeline of switches that starts at at, in the same two forms as at. Later than at, with no limit on how far; one answer lists at most 500 spans, a stretch of eight days with no change counting as one, and timeline_truncated says it stopped before reaching to.
       responses:
         '200':
           description: Every campaign's standing on the screen.
@@ -7253,6 +7257,332 @@ paths:
           in: header
           schema:
             type: string
+  /api/cards/{id}/kv-webhooks:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      x-screenrig-access: read
+      operationId: listCardKVWebhooks
+      description: Lists the card's incoming webhooks, oldest first (at most 20). Secrets are never returned here.
+      security:
+        - projectBearer: []
+      responses:
+        '200':
+          description: The card's webhooks.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardKVWebhookList'
+        '404':
+          description: card_not_found — the card is not in this project.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      x-screenrig-access: write
+      operationId: createCardKVWebhook
+      description: 'Creates a webhook that writes this card''s data document: an outside system posts a JSON or form body to its url (POST /api/cards/{id}/kv-webhooks/{webhook_id}/write). Without a mapping the posted object is the document; a mapping template builds it from the body and is checked when saved. signing true also requires a ScreenRig-Signature header. The answer is the only place the secret and the signing secret appear (with rotate-secret and the update that turns signing on): store them in the sending system at once. A card has at most 20 webhooks (kv_webhook_limit_reached). Appends kv_webhook.created. An exact retry with the same Idempotency-Key returns the same answer, secrets included, for twenty-four hours.'
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CardKVWebhookCreate'
+      responses:
+        '201':
+          description: Created, with its url, secret and, when it signs, its signing secret.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardKVWebhookWithSecrets'
+        '400':
+          description: invalid_request, including a mapping that does not compile (errors[0].field names the place in it).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: card_not_found — the card is not in this project.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: kv_webhook_limit_reached or idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/cards/{id}/kv-webhooks/{webhook_id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/KVWebhookID'
+    patch:
+      x-screenrig-access: write
+      operationId: updateCardKVWebhook
+      description: Changes description, mapping (null removes it), enabled and signing. Turning signing on answers the new signing_secret once; false turns it off. A disabled webhook answers every post like a wrong secret. Appends kv_webhook.updated.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CardKVWebhookUpdate'
+      responses:
+        '200':
+          description: The webhook, with signing_secret when this request turned signing on.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardKVWebhookWithSecrets'
+        '400':
+          description: invalid_request, including a mapping that does not compile.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: card_not_found, or not_found — the webhook is not on this card.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: idempotency_mismatch.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      x-screenrig-access: write
+      operationId: deleteCardKVWebhook
+      description: Deletes the webhook. Its url stops working at once; the card keeps its document. Appends kv_webhook.deleted.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      responses:
+        '204':
+          description: Deleted.
+        '404':
+          description: card_not_found, or not_found — the webhook is not on this card.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/cards/{id}/kv-webhooks/{webhook_id}/rotate-secret:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/KVWebhookID'
+    post:
+      x-screenrig-access: write
+      operationId: rotateCardKVWebhookSecret
+      description: Replaces the webhook's secret and returns the new one once; with signing true it replaces the signing secret instead. The old one stops working at once. Appends kv_webhook.secret_rotated.
+      security:
+        - projectBearer: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CardKVWebhookRotate'
+      responses:
+        '200':
+          description: The webhook with its new secret, or its new signing secret.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardKVWebhookWithSecrets'
+        '400':
+          description: invalid_request — signing true on a webhook that does not sign.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: card_not_found, or not_found — the webhook is not on this card.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/cards/{id}/kv-webhooks/{webhook_id}/deliveries:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/KVWebhookID'
+    get:
+      x-screenrig-access: read
+      operationId: listCardKVWebhookDeliveries
+      description: The webhook's delivery log, newest first, at most 100, kept for seven days. Each post that named this webhook is a row with its time, outcome, reason, a short detail such as the card data path that failed, the answer's status and the body size. No body, header or credential is stored. This is where a project sees why a post got the 404 every refusal shares.
+      security:
+        - projectBearer: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+      responses:
+        '200':
+          description: The deliveries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KVWebhookDeliveryList'
+        '404':
+          description: card_not_found, or not_found — the webhook is not on this card.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /api/cards/{id}/kv-webhooks/{webhook_id}/write:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/KVWebhookID'
+    post:
+      operationId: receiveCardKVWebhook
+      description: 'The url an outside system posts a card''s data document to. It authenticates with the webhook''s own secret in the Authorization header: Bearer <secret>, or HTTP Basic with the webhook id as the username. When the webhook signs, ScreenRig-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" under the signing secret> is also required, and t must be within five minutes of the server''s clock. An unknown card or webhook, a wrong or missing secret, a disabled webhook, a bad signature and every GET answer the same 404 not_found; the project sees the reason in the delivery log. The body, at most 1 MiB, is JSON or application/x-www-form-urlencoded (a repeated name is an array). With no mapping the object is the document; with one, the template builds it from body and query. The document is checked as the card''s data (card_data_invalid names the path), and one equal to the current document is not written (status unchanged). An accepted post is one billed API request and appends the card data events. Idempotency-Key (8 to 200 characters) deduplicates a sender''s retries for twenty-four hours. At most 120 posts per minute per webhook.'
+      security:
+        - kvWebhookBearer: []
+        - kvWebhookBasic: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalIdempotencyKey'
+        - name: ScreenRig-Signature
+          in: header
+          required: false
+          description: 't=<unix seconds>,v1=<hex HMAC-SHA256 over "<t>.<raw body>">; required when the webhook signs.'
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties:
+                oneOf:
+                  - type: string
+                  - type: array
+                    items:
+                      type: string
+      responses:
+        '200':
+          description: Whether the card's document changed.
+          headers:
+            RateLimit-Policy:
+              $ref: '#/components/headers/RateLimitPolicy'
+            RateLimit:
+              $ref: '#/components/headers/RateLimit'
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                  - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardKVWebhookWriteResult'
+        '400':
+          description: invalid_request — the body is too large, empty, not JSON or a form, or the mapping failed on it.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '402':
+          description: payment_required — the project has no credit left.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: not_found — the one answer to every refused post and every GET.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: idempotency_mismatch, or card_data_invalid — the card refused the document; errors[0].field names the path.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          $ref: '#/components/responses/RateLimitedProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+      x-rate-limit-policies:
+        - name: kv-webhook-write
+          quota: 120
+          windowSeconds: 60
+      x-rate-limit-admitted-response-headers:
+        - RateLimit-Policy
+        - RateLimit
   /api/card-data:
     parameters:
       - $ref: '#/components/parameters/ProjectTarget'
@@ -17363,8 +17693,8 @@ components:
     revocableAgentBearer: {type: http, scheme: bearer, bearerFormat: JWT, description: "Agent access JWT, or the same cryptographically verified revoked bearer for an idempotent self-disconnect replay."}
     agentIdentityBearer: {type: http, scheme: bearer, bearerFormat: JWT, description: "Agent access JWT with identity scope. Project authority is carried by projects grants; ScreenRig-Project is a deprecated narrowing selector and never expands those grants. It grants no arbitrary organization permissions. Identity self-revocation accepts its same verified revoked credential for an exact replay. The identity-wide routes (GET and POST /api/projects, GET /api/organizations, PATCH /api/organizations/{org_id}) also accept an agent access JWT carrying the identity scope: listing needs identity access Read only, Propose or Manage, a change needs access:manage (else 403 insufficient_access), and its grant is rechecked inside the action. Under a JWT the project list holds only the projects the grant was approved for, and a created project joins the grant instead of delivering a project token; refresh with its project_id for a token. A JWT without the identity scope is 403 forbidden."}
     projectBearer: {type: http, scheme: bearer, bearerFormat: JWT, description: "Short-lived agent or service JWT. projects maps global project IDs to access scopes and capabilities, checked in memory after signature and Valkey revocation checks. Flat object-less operations default only for a one-project token; object IDs select their own project; lists accept project= to narrow. Refresh uses the opaque refresh token and current database memberships. Legacy opaque API bearers remain retired on this branch."}
-    kvWebhookBearer: {type: http, scheme: bearer, bearerFormat: srkw, description: "A key/value webhook's own secret, the srkw_ secret create or rotate-secret returned. Accepted only by POST /api/applications/{application_id}/kv-webhooks/{webhook_id}/write; never a project credential."}
-    kvWebhookBasic: {type: http, scheme: basic, description: "A key/value webhook's own credentials: username is the webhook id, password its srkw_ secret. Accepted only by POST /api/applications/{application_id}/kv-webhooks/{webhook_id}/write; never a project credential."}
+    kvWebhookBearer: {type: http, scheme: bearer, bearerFormat: srkw, description: "A key/value webhook's own secret, the srkw_ secret create or rotate-secret returned. Accepted only by POST /api/applications/{application_id}/kv-webhooks/{webhook_id}/write and POST /api/cards/{id}/kv-webhooks/{webhook_id}/write; never a project credential."}
+    kvWebhookBasic: {type: http, scheme: basic, description: "A key/value webhook's own credentials: username is the webhook id, password its srkw_ secret. Accepted only by POST /api/applications/{application_id}/kv-webhooks/{webhook_id}/write and POST /api/cards/{id}/kv-webhooks/{webhook_id}/write; never a project credential."}
     triggerBasic: {type: http, scheme: basic, description: "A CAP trigger's own credentials: username is the trigger id, password the srtg_ password create or rotate-secret returned. Accepted only by POST /api/triggers/{id}/cap; never a project credential."}
     nativePairingAuthorization:
       type: http
@@ -20316,10 +20646,26 @@ components:
         checkout_url:
           type: string
           description: Short-lived hosted payment capability. Never log or cache it.
+    BillingPlanSubscription:
+      type: object
+      required: [subscription_id, plan, status, entitlement, cancel_at_period_end]
+      properties:
+        subscription_id: {type: string}
+        plan: {type: string, enum: [premium, enterprise]}
+        status: {type: string}
+        entitlement: {type: string, enum: [awaiting_payment, pending_application, accepted, refused]}
+        invoice_id: {type: string}
+        invoice_status: {type: string}
+        current_period_start: {type: string, format: date-time}
+        current_period_end: {type: string, format: date-time}
+        cancel_at_period_end: {type: boolean}
     OrganizationPayments:
       type: object
       required: [organization_id, available, local_simulation, purchases]
       properties:
+        plan:
+          allOf: [{$ref: '#/components/schemas/BillingPlanSubscription'}]
+          nullable: true
         billing_account: {type: boolean}
         payment_method:
           allOf: [{$ref: '#/components/schemas/BillingPaymentMethod'}]
@@ -22461,6 +22807,76 @@ components:
         sha256: {type: string, pattern: "^[a-f0-9]{64}$"}
         content_type: {type: string}
         updated_at: {type: string, format: date-time}
+    CardKVWebhook:
+      type: object
+      additionalProperties: false
+      required: [id, card_id, description, mapping, enabled, signing, url, created_at, updated_at]
+      description: An incoming webhook that writes a card's data document.
+      properties:
+        id: {type: string, pattern: "^(?:(?:stage|qa|development)_)?kvw_[A-Za-z0-9_-]+$"}
+        card_id: {type: string}
+        description: {type: string, maxLength: 200}
+        mapping:
+          anyOf:
+            - {type: object, additionalProperties: true}
+            - {type: "null"}
+          description: "The template that builds the document from the body and query, or null when the posted object is the document. Strings hold {{body.path}} placeholders; the objects $each, $group, $number, $bool and $text map arrays and shape values."
+        enabled: {type: boolean}
+        signing: {type: boolean}
+        url: {type: string, description: "Where the outside system posts the document. Not a credential: the secret is."}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        last_used_at: {type: string, format: date-time}
+    CardKVWebhookWithSecrets:
+      allOf:
+        - $ref: "#/components/schemas/CardKVWebhook"
+        - type: object
+          properties:
+            secret: {type: string, pattern: "^srkw_[A-Za-z0-9_-]{43}$", description: "The webhook secret, present when this request issued one."}
+            signing_secret: {type: string, pattern: "^whsec_[A-Za-z0-9_-]{43}$", description: "The signing secret, present when this request issued one."}
+    CardKVWebhookList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/CardKVWebhook"}}}}
+    CardKVWebhookCreate:
+      type: object
+      additionalProperties: false
+      properties:
+        description: {type: string, maxLength: 200}
+        mapping: {anyOf: [{type: object, additionalProperties: true}, {type: "null"}], description: "The template, at most 64 KiB, checked when saved."}
+        signing: {type: boolean, default: false}
+    CardKVWebhookUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        description: {type: string, maxLength: 200}
+        mapping: {anyOf: [{type: object, additionalProperties: true}, {type: "null"}], description: "Replaces the template; null removes it."}
+        enabled: {type: boolean}
+        signing: {type: boolean}
+    CardKVWebhookRotate:
+      type: object
+      additionalProperties: false
+      properties:
+        signing: {type: boolean, default: false}
+    CardKVWebhookWriteResult:
+      type: object
+      additionalProperties: false
+      required: [status, revision, sha256]
+      properties:
+        status: {type: string, enum: [written, unchanged]}
+        revision: {type: integer, minimum: 1}
+        sha256: {type: string, pattern: "^[a-f0-9]{64}$"}
+    KVWebhookDelivery:
+      type: object
+      additionalProperties: false
+      required: [at, outcome, status, bytes, request_id]
+      properties:
+        at: {type: string, format: date-time}
+        outcome: {type: string, enum: [written, unchanged, refused, invalid]}
+        reason: {type: string, enum: [credentials, signature, disabled, body, mapping, card_data_invalid, rate_limited, payment_required, internal]}
+        detail: {type: string, maxLength: 200}
+        status: {type: integer}
+        bytes: {type: integer, minimum: 0}
+        revision: {type: integer, minimum: 1}
+        request_id: {type: string}
+    KVWebhookDeliveryList: {type: object, additionalProperties: false, required: [items], properties: {items: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/KVWebhookDelivery"}}}}
     RuntimeKVWrite: {type: object, additionalProperties: true, required: [value_base64], properties: {value_base64: {type: string, contentEncoding: base64, maxLength: 1398104}, content_type: {type: string, minLength: 1, maxLength: 127, default: application/octet-stream}}}
     RuntimeKVEntry: {type: object, additionalProperties: true, required: [application_id, key, value_base64, content_type, bytes, sha256, revision], properties: {application_id: {type: string}, key: {type: string}, value_base64: {type: string, contentEncoding: base64}, content_type: {type: string}, bytes: {type: integer}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, revision: {type: integer}}}
     RuntimeKVSummary: {type: object, additionalProperties: true, required: [application_id, key, content_type, bytes, sha256, revision], properties: {application_id: {type: string}, key: {type: string}, content_type: {type: string}, bytes: {type: integer}, sha256: {type: string, pattern: "^[a-f0-9]{64}$"}, revision: {type: integer}, created_at: {type: string}, updated_at: {type: string}}}
@@ -23157,7 +23573,7 @@ components:
         effective_playlist: {anyOf: [{$ref: "#/components/schemas/ScreenEffectivePlaylist"}, {type: "null"}], description: "The playlist at instant; until is the next instant it changes."}
         verdicts: {type: array, maxItems: 200, items: {$ref: "#/components/schemas/ScreenVerdict"}, description: "The takeover, then every campaign in precedence order, then every playlist schedule entry in order."}
         timeline: {type: array, maxItems: 500, items: {$ref: "#/components/schemas/ScreenTimelineSegment"}, description: "With to: the spans from instant to to in which the playlist does not change."}
-        timeline_truncated: {type: boolean, description: "True when the timeline stopped at 500 spans before reaching to."}
+        timeline_truncated: {type: boolean, description: "True when the timeline stopped before reaching to: one answer lists at most 500 spans, and each eight days with no change counts as one. Ask again from the last span's to."}
         not_judged: {type: array, items: {$ref: "#/components/schemas/ScreenNotJudged"}}
     ScreenVerdict:
       type: object

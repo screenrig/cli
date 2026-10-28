@@ -1169,6 +1169,64 @@ export interface KVWebhookCreate {
   description?: string;
 }
 
+/**
+ * /api/cards/{id}/kv-webhooks: an incoming webhook that writes a card's data
+ * document. mapping is the template that builds the document from the posted
+ * body, or null when the posted object is the document. The secret and the
+ * signing secret are returned only by create, rotate-secret and the update that
+ * turns signing on.
+ */
+export interface CardKVWebhook {
+  id: string;
+  card_id: string;
+  description: string;
+  mapping: Record<string, unknown> | null;
+  enabled: boolean;
+  signing: boolean;
+  url: string;
+  created_at: string;
+  updated_at: string;
+  last_used_at?: string;
+}
+
+export interface CardKVWebhookWithSecrets extends CardKVWebhook {
+  secret?: string;
+  signing_secret?: string;
+}
+
+export interface CardKVWebhookList {
+  items: CardKVWebhook[];
+}
+
+export interface CardKVWebhookCreate {
+  description?: string;
+  mapping?: Record<string, unknown> | null;
+  signing?: boolean;
+}
+
+export interface CardKVWebhookUpdate {
+  description?: string;
+  mapping?: Record<string, unknown> | null;
+  enabled?: boolean;
+  signing?: boolean;
+}
+
+/** One post to a card webhook: how it ended and why, never what it carried. */
+export interface KVWebhookDelivery {
+  at: string;
+  outcome: "written" | "unchanged" | "refused" | "invalid";
+  reason?: "credentials" | "signature" | "disabled" | "body" | "mapping" | "card_data_invalid" | "rate_limited" | "payment_required" | "internal";
+  detail?: string;
+  status: number;
+  bytes: number;
+  revision?: number;
+  request_id: string;
+}
+
+export interface KVWebhookDeliveryList {
+  items: KVWebhookDelivery[];
+}
+
 export type FeedbackKind = "bug" | "feature";
 
 /**
